@@ -9,11 +9,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
-import {
-  ChevronRightIcon,
-  PlusIcon,
-  Cross2Icon,
-} from '@radix-ui/react-icons';
+import { ChevronRightIcon, PlusIcon, Cross2Icon } from '@radix-ui/react-icons';
 import { type ExecutionHistoryItem, type SessionSnapshot } from '../../store/execution';
 import { useSettingsStore } from '../../store/settings';
 import { useSkillMemoryStore } from '../../store/skillMemory';
@@ -97,7 +93,7 @@ interface DirectoryGroup {
 /** Match a path against pinned directories, returning the matching normalized path or null */
 function matchPinnedDirectory(
   sessionPath: string | null,
-  normalizedPinned: { normalizedPath: string }[]
+  normalizedPinned: { normalizedPath: string }[],
 ): string | null {
   if (!sessionPath) return null;
   for (const pin of normalizedPinned) {
@@ -111,8 +107,12 @@ function matchPinnedDirectory(
 function groupSessionsByDirectories(
   history: ExecutionHistoryItem[],
   pinnedDirectories: string[],
-  backgroundSessions: Record<string, SessionSnapshot> = {}
-): { directories: DirectoryGroup[]; other: ExecutionHistoryItem[]; unmatchedBgSessions: Record<string, SessionSnapshot> } {
+  backgroundSessions: Record<string, SessionSnapshot> = {},
+): {
+  directories: DirectoryGroup[];
+  other: ExecutionHistoryItem[];
+  unmatchedBgSessions: Record<string, SessionSnapshot>;
+} {
   const normalizedPinned = pinnedDirectories.map((p) => ({
     path: p,
     normalizedPath: p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase(),
@@ -153,9 +153,7 @@ function groupSessionsByDirectories(
     }
   }
 
-  const directories = normalizedPinned
-    .map((pin) => dirMap.get(pin.normalizedPath)!)
-    .filter(Boolean);
+  const directories = normalizedPinned.map((pin) => dirMap.get(pin.normalizedPath)!).filter(Boolean);
 
   return { directories, other, unmatchedBgSessions };
 }
@@ -196,7 +194,7 @@ function SidebarToolbar({
         className={clsx(
           'w-full px-3 py-2 rounded-lg text-xs font-medium transition-colors',
           'bg-primary-600 text-white hover:bg-primary-700',
-          'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1'
+          'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1',
         )}
       >
         {t('sidebar.newTask')}
@@ -208,7 +206,7 @@ function SidebarToolbar({
           className={clsx(
             'flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-xs transition-colors',
             'text-gray-600 dark:text-gray-400',
-            'hover:bg-gray-100 dark:hover:bg-gray-800'
+            'hover:bg-gray-100 dark:hover:bg-gray-800',
           )}
           title={t('sidebar.addDirectory')}
         >
@@ -222,7 +220,7 @@ function SidebarToolbar({
           className={clsx(
             'flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-xs transition-colors',
             'text-gray-600 dark:text-gray-400',
-            'hover:bg-gray-100 dark:hover:bg-gray-800'
+            'hover:bg-gray-100 dark:hover:bg-gray-800',
           )}
           title={t('sidebar.skills')}
         >
@@ -240,7 +238,7 @@ function SidebarToolbar({
           className={clsx(
             'flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-xs transition-colors',
             'text-gray-600 dark:text-gray-400',
-            'hover:bg-gray-100 dark:hover:bg-gray-800'
+            'hover:bg-gray-100 dark:hover:bg-gray-800',
           )}
           title={t('sidebar.plugins')}
         >
@@ -260,7 +258,7 @@ function SidebarToolbar({
           className={clsx(
             'flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-xs transition-colors',
             'text-gray-600 dark:text-gray-400',
-            'hover:bg-gray-100 dark:hover:bg-gray-800'
+            'hover:bg-gray-100 dark:hover:bg-gray-800',
           )}
           title={t('sidebar.agents', { defaultValue: 'Agents' })}
         >
@@ -278,7 +276,7 @@ function SidebarToolbar({
           className={clsx(
             'flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-xs transition-colors',
             'text-gray-600 dark:text-gray-400',
-            'hover:bg-gray-100 dark:hover:bg-gray-800'
+            'hover:bg-gray-100 dark:hover:bg-gray-800',
           )}
           title={t('sidebar.prompts', { defaultValue: 'Prompts' })}
         >
@@ -321,7 +319,7 @@ function SessionItem({
       if (next === null) return;
       onRename(session.id, next);
     },
-    [session, onRename]
+    [session, onRename],
   );
 
   const handleDelete = useCallback(
@@ -329,14 +327,14 @@ function SessionItem({
       e.stopPropagation();
       onDelete(session.id);
     },
-    [session.id, onDelete]
+    [session.id, onDelete],
   );
 
   return (
     <div
       className={clsx(
         'group flex items-start gap-2 py-1.5 pr-2 rounded-md cursor-pointer transition-colors',
-        'hover:bg-gray-50 dark:hover:bg-gray-800'
+        'hover:bg-gray-50 dark:hover:bg-gray-800',
       )}
       style={{ paddingLeft: `${depth * 12 + 8}px` }}
       onClick={() => onRestore(session.id)}
@@ -350,21 +348,15 @@ function SessionItem({
       <span
         className={clsx(
           'mt-1.5 w-2 h-2 rounded-full shrink-0',
-          session.success
-            ? 'bg-green-500 dark:bg-green-400'
-            : 'bg-red-500 dark:bg-red-400'
+          session.success ? 'bg-green-500 dark:bg-green-400' : 'bg-red-500 dark:bg-red-400',
         )}
         title={session.success ? 'Success' : 'Failed'}
       />
 
       {/* Content */}
       <div className="flex-1 min-w-0">
-        <p className="text-xs text-gray-900 dark:text-white line-clamp-1">
-          {session.title || session.taskDescription}
-        </p>
-        <p className="text-2xs text-gray-500 dark:text-gray-400 mt-0.5">
-          {timeAgo(session.startedAt)}
-        </p>
+        <p className="text-xs text-gray-900 dark:text-white line-clamp-1">{session.title || session.taskDescription}</p>
+        <p className="text-2xs text-gray-500 dark:text-gray-400 mt-0.5">{timeAgo(session.startedAt)}</p>
       </div>
 
       {/* Hover actions */}
@@ -430,7 +422,7 @@ function DirectoryNode({
       e.stopPropagation();
       onUnpin();
     },
-    [onUnpin]
+    [onUnpin],
   );
 
   const handleNewTask = useCallback(
@@ -438,14 +430,11 @@ function DirectoryNode({
       e.stopPropagation();
       onNewTaskInDir();
     },
-    [onNewTaskInDir]
+    [onNewTaskInDir],
   );
 
   // Build tree of background sessions for this directory
-  const bgTree = useMemo(
-    () => buildSessionTree(group.backgroundSessions),
-    [group.backgroundSessions]
-  );
+  const bgTree = useMemo(() => buildSessionTree(group.backgroundSessions), [group.backgroundSessions]);
 
   const bgCount = Object.keys(group.backgroundSessions).length;
   const totalCount = group.sessions.length + bgCount;
@@ -456,9 +445,7 @@ function DirectoryNode({
       <div
         className={clsx(
           'group flex items-center gap-1 px-2 py-1.5 rounded-md cursor-pointer transition-colors',
-          isActive
-            ? 'bg-primary-50 dark:bg-primary-900/20'
-            : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+          isActive ? 'bg-primary-50 dark:bg-primary-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-800',
         )}
         onClick={onToggle}
         role="button"
@@ -468,14 +455,15 @@ function DirectoryNode({
         }}
       >
         {/* Expand/collapse chevron */}
-        <ChevronRightIcon className={clsx('w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform duration-200', isExpanded && 'rotate-90')} />
+        <ChevronRightIcon
+          className={clsx(
+            'w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform duration-200',
+            isExpanded && 'rotate-90',
+          )}
+        />
 
         {/* Folder icon */}
-        <svg
-          className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0"
-          fill="currentColor"
-          viewBox="0 0 20 20"
-        >
+        <svg className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
           <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
         </svg>
 
@@ -515,18 +503,20 @@ function DirectoryNode({
         <Collapsible open={isExpanded}>
           <div className="mt-0.5">
             {/* Background sessions with fork hierarchy */}
-            {onSwitchSession && onRemoveSession && bgTree.map((node) => (
-              <BackgroundSessionTreeItem
-                key={node.id}
-                node={node}
-                depth={2}
-                onSwitch={onSwitchSession}
-                onRemove={onRemoveSession}
-                foregroundParentSessionId={foregroundParentSessionId}
-                foregroundBgId={foregroundBgId}
-                currentSessionDescription={currentSessionDescription}
-              />
-            ))}
+            {onSwitchSession &&
+              onRemoveSession &&
+              bgTree.map((node) => (
+                <BackgroundSessionTreeItem
+                  key={node.id}
+                  node={node}
+                  depth={2}
+                  onSwitch={onSwitchSession}
+                  onRemove={onRemoveSession}
+                  foregroundParentSessionId={foregroundParentSessionId}
+                  foregroundBgId={foregroundBgId}
+                  currentSessionDescription={currentSessionDescription}
+                />
+              ))}
 
             {/* History sessions */}
             {group.sessions.map((session) => (
@@ -575,7 +565,7 @@ function OtherSessionsGroup({
       <div
         className={clsx(
           'flex items-center gap-1 px-2 py-1.5 rounded-md cursor-pointer transition-colors',
-          'hover:bg-gray-50 dark:hover:bg-gray-800'
+          'hover:bg-gray-50 dark:hover:bg-gray-800',
         )}
         onClick={onToggle}
         role="button"
@@ -584,7 +574,12 @@ function OtherSessionsGroup({
           if (e.key === 'Enter' || e.key === ' ') onToggle();
         }}
       >
-        <ChevronRightIcon className={clsx('w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform duration-200', isExpanded && 'rotate-90')} />
+        <ChevronRightIcon
+          className={clsx(
+            'w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform duration-200',
+            isExpanded && 'rotate-90',
+          )}
+        />
 
         <span className="flex-1 min-w-0 text-xs font-medium text-gray-500 dark:text-gray-400">
           {t('sidebar.otherSessions')}
@@ -624,9 +619,7 @@ interface SessionTreeNode {
   children: SessionTreeNode[];
 }
 
-function buildSessionTree(
-  sessions: Record<string, SessionSnapshot>
-): SessionTreeNode[] {
+function buildSessionTree(sessions: Record<string, SessionSnapshot>): SessionTreeNode[] {
   const nodeMap = new Map<string, SessionTreeNode>();
 
   // Create nodes for all sessions
@@ -701,27 +694,25 @@ function BackgroundSessionTreeItem({
 
   const isGhost = foregroundBgId === node.id;
 
-  const label = isGhost && currentSessionDescription
-    ? truncateLabel(currentSessionDescription)
-    : node.snapshot.taskDescription
-      ? truncateLabel(node.snapshot.taskDescription)
-      : 'Untitled Session';
+  const label =
+    isGhost && currentSessionDescription
+      ? truncateLabel(currentSessionDescription)
+      : node.snapshot.taskDescription
+        ? truncateLabel(node.snapshot.taskDescription)
+        : 'Untitled Session';
 
   const handleRemove = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
       onRemove(node.id);
     },
-    [node.id, onRemove]
+    [node.id, onRemove],
   );
 
-  const handleToggle = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      setExpanded((prev) => !prev);
-    },
-    []
-  );
+  const handleToggle = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpanded((prev) => !prev);
+  }, []);
 
   // With ghost, the ghost node itself represents the foreground — no separate (current) child indicator
   const showCurrentFork = !foregroundBgId && foregroundParentSessionId === node.id;
@@ -735,24 +726,24 @@ function BackgroundSessionTreeItem({
           'group flex items-start gap-1 py-1.5 pr-2 rounded-md transition-colors',
           isGhost
             ? 'bg-primary-50 dark:bg-primary-900/20 cursor-default'
-            : 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800'
+            : 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800',
         )}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={isGhost ? undefined : () => onSwitch(node.id)}
         role="button"
         tabIndex={isGhost ? -1 : 0}
-        onKeyDown={isGhost ? undefined : (e) => {
-          if (e.key === 'Enter' || e.key === ' ') onSwitch(node.id);
-        }}
+        onKeyDown={
+          isGhost
+            ? undefined
+            : (e) => {
+                if (e.key === 'Enter' || e.key === ' ') onSwitch(node.id);
+              }
+        }
         title={isGhost ? undefined : t('sidebar.switchSession')}
       >
         {/* Expand/collapse chevron */}
         {hasChildren ? (
-          <button
-            className="p-0.5 shrink-0 text-gray-400"
-            onClick={handleToggle}
-            tabIndex={-1}
-          >
+          <button className="p-0.5 shrink-0 text-gray-400" onClick={handleToggle} tabIndex={-1}>
             <ChevronRightIcon className={clsx('w-3 h-3 transition-transform duration-200', expanded && 'rotate-90')} />
           </button>
         ) : (
@@ -764,26 +755,22 @@ function BackgroundSessionTreeItem({
           data-testid={`bg-status-dot-${node.id}`}
           className={clsx(
             'mt-1 w-2 h-2 rounded-full shrink-0',
-            isGhost
-              ? 'bg-primary-500 dark:bg-primary-400'
-              : getStatusDotClasses(node.snapshot.status)
+            isGhost ? 'bg-primary-500 dark:bg-primary-400' : getStatusDotClasses(node.snapshot.status),
           )}
         />
 
         {/* Content */}
         <div className="flex-1 min-w-0">
-          <p className={clsx(
-            'text-xs line-clamp-1',
-            isGhost
-              ? 'text-primary-700 dark:text-primary-300 font-medium'
-              : 'text-gray-900 dark:text-white'
-          )}>
+          <p
+            className={clsx(
+              'text-xs line-clamp-1',
+              isGhost ? 'text-primary-700 dark:text-primary-300 font-medium' : 'text-gray-900 dark:text-white',
+            )}
+          >
             {label}
           </p>
           {isGhost ? (
-            <p className="text-[10px] text-primary-500 dark:text-primary-400">
-              {t('sidebar.currentFork')}
-            </p>
+            <p className="text-[10px] text-primary-500 dark:text-primary-400">{t('sidebar.currentFork')}</p>
           ) : (
             (node.snapshot.llmModel || node.snapshot.llmBackend) && (
               <p className="text-[10px] text-gray-400 dark:text-gray-500 line-clamp-1">
@@ -819,9 +806,7 @@ function BackgroundSessionTreeItem({
               <span className="w-4 shrink-0" />
               <span className="mt-0.5 w-2 h-2 rounded-full shrink-0 bg-primary-500 dark:bg-primary-400" />
               <span className="text-xs text-primary-600 dark:text-primary-400 font-medium line-clamp-1">
-                {currentSessionDescription
-                  ? truncateLabel(currentSessionDescription)
-                  : t('sidebar.currentFork')}
+                {currentSessionDescription ? truncateLabel(currentSessionDescription) : t('sidebar.currentFork')}
               </span>
               <span className="text-[10px] text-primary-500 dark:text-primary-400 shrink-0">
                 {t('sidebar.currentFork')}
@@ -869,15 +854,9 @@ function BackgroundSessionsSection({
 }) {
   const { t } = useTranslation('simpleMode');
 
-  const entries = useMemo(
-    () => Object.entries(backgroundSessions),
-    [backgroundSessions]
-  );
+  const entries = useMemo(() => Object.entries(backgroundSessions), [backgroundSessions]);
 
-  const tree = useMemo(
-    () => buildSessionTree(backgroundSessions),
-    [backgroundSessions]
-  );
+  const tree = useMemo(() => buildSessionTree(backgroundSessions), [backgroundSessions]);
 
   if (entries.length === 0) return null;
 
@@ -946,16 +925,10 @@ export function WorkspaceTreeSidebar({
   const togglePromptPanel = usePromptsStore((s) => s.togglePanel);
 
   // Count of detected/enabled skills for badge
-  const detectedSkillCount = useMemo(
-    () => skills.filter((s) => s.detected || s.enabled).length,
-    [skills]
-  );
+  const detectedSkillCount = useMemo(() => skills.filter((s) => s.detected || s.enabled).length, [skills]);
 
   // Count of plugins for badge
-  const pluginCount = useMemo(
-    () => plugins.length,
-    [plugins]
-  );
+  const pluginCount = useMemo(() => plugins.length, [plugins]);
 
   // Expand/collapse state for directory paths and "other" group
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set());
@@ -996,23 +969,19 @@ export function WorkspaceTreeSidebar({
       }
     }
     if (activeOriginHistoryIds.size === 0 && activeSessionIds.size === 0) return history;
-    return history.filter((item) => (
-      !activeOriginHistoryIds.has(item.id)
-      && !(item.sessionId && activeSessionIds.has(item.sessionId))
-    ));
+    return history.filter(
+      (item) => !activeOriginHistoryIds.has(item.id) && !(item.sessionId && activeSessionIds.has(item.sessionId)),
+    );
   }, [history, backgroundSessions]);
 
   // Group sessions (history + background) by pinned directories
   const { directories, other, unmatchedBgSessions } = useMemo(
     () => groupSessionsByDirectories(visibleHistory, pinnedDirectories, backgroundSessions),
-    [visibleHistory, pinnedDirectories, backgroundSessions]
+    [visibleHistory, pinnedDirectories, backgroundSessions],
   );
 
   // Compute active normalized path for highlighting
-  const activeNormalized = useMemo(
-    () => normalizeWorkspacePath(workspacePath),
-    [workspacePath]
-  );
+  const activeNormalized = useMemo(() => normalizeWorkspacePath(workspacePath), [workspacePath]);
 
   // Toggle expand/collapse for a directory
   const toggleDirectory = useCallback((normalizedPath: string) => {
@@ -1054,7 +1023,7 @@ export function WorkspaceTreeSidebar({
     (path: string) => {
       removePinnedDirectory(path);
     },
-    [removePinnedDirectory]
+    [removePinnedDirectory],
   );
 
   // New task in a specific directory
@@ -1063,7 +1032,7 @@ export function WorkspaceTreeSidebar({
       setWorkspacePath(dirPath);
       onNewTask();
     },
-    [setWorkspacePath, onNewTask]
+    [setWorkspacePath, onNewTask],
   );
 
   // Restore session and set workspace path to match
@@ -1075,7 +1044,7 @@ export function WorkspaceTreeSidebar({
       }
       onRestore(id);
     },
-    [history, setWorkspacePath, onRestore]
+    [history, setWorkspacePath, onRestore],
   );
 
   const hasBgSessions = Object.keys(backgroundSessions).length > 0;
@@ -1121,28 +1090,19 @@ export function WorkspaceTreeSidebar({
 
         {isEmpty ? (
           <div className="h-full flex flex-col items-center justify-center text-center px-4 py-8">
-            <svg
-              className="w-8 h-8 text-gray-300 dark:text-gray-600 mb-2"
-              fill="currentColor"
-              viewBox="0 0 20 20"
-            >
+            <svg className="w-8 h-8 text-gray-300 dark:text-gray-600 mb-2" fill="currentColor" viewBox="0 0 20 20">
               <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
             </svg>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              {t('sidebar.noDirectories')}
-            </p>
-            <p className="text-2xs text-gray-400 dark:text-gray-500 mt-1">
-              {t('sidebar.noDirectoriesHint')}
-            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">{t('sidebar.noDirectories')}</p>
+            <p className="text-2xs text-gray-400 dark:text-gray-500 mt-1">{t('sidebar.noDirectoriesHint')}</p>
           </div>
         ) : (
           <>
             {/* Pinned directory nodes */}
             {directories.map((group) => {
-              const isActive = activeNormalized !== null && (
-                activeNormalized === group.normalizedPath ||
-                activeNormalized.startsWith(group.normalizedPath + '/')
-              );
+              const isActive =
+                activeNormalized !== null &&
+                (activeNormalized === group.normalizedPath || activeNormalized.startsWith(group.normalizedPath + '/'));
               return (
                 <DirectoryNode
                   key={group.normalizedPath}
@@ -1197,7 +1157,7 @@ export function WorkspaceTreeSidebar({
             className={clsx(
               'w-full text-xs px-2 py-1.5 rounded-md transition-colors',
               'text-red-600 dark:text-red-400',
-              'hover:bg-red-50 dark:hover:bg-red-900/20'
+              'hover:bg-red-50 dark:hover:bg-red-900/20',
             )}
           >
             {t('sidebar.clearAll')}

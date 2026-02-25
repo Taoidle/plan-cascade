@@ -101,9 +101,7 @@ export function parseUnifiedDiff(rawDiff: string): FileDiff[] {
   // Process each file section
   for (let idx = 0; idx < fileStartIndices.length; idx++) {
     const start = fileStartIndices[idx];
-    const end = idx + 1 < fileStartIndices.length
-      ? fileStartIndices[idx + 1]
-      : lines.length;
+    const end = idx + 1 < fileStartIndices.length ? fileStartIndices[idx + 1] : lines.length;
 
     const fileSection = lines.slice(start, end);
     const fileDiff = parseFileSection(fileSection);

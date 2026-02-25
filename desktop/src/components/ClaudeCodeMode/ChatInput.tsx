@@ -12,19 +12,10 @@
 import { useState, useRef, useEffect, useCallback, KeyboardEvent } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import {
-  PaperPlaneIcon,
-  StopIcon,
-  KeyboardIcon,
-  PlusIcon,
-} from '@radix-ui/react-icons';
+import { PaperPlaneIcon, StopIcon, KeyboardIcon, PlusIcon } from '@radix-ui/react-icons';
 import { useClaudeCodeStore, FileAttachment as FileAttachmentData, FileReference } from '../../store/claudeCode';
 import { useSettingsStore } from '../../store/settings';
-import {
-  FileAttachmentDropZone,
-  FileReferenceAutocomplete,
-  useFileReferences,
-} from './FileAttachment';
+import { FileAttachmentDropZone, FileReferenceAutocomplete, useFileReferences } from './FileAttachment';
 import { InlineSessionControl } from './SessionControl';
 import { useChatShortcuts, KeyboardShortcutHint } from './KeyboardShortcuts';
 
@@ -38,11 +29,7 @@ interface ChatInputProps {
   onOpenCommandPalette?: () => void;
 }
 
-export function ChatInput({
-  onSend,
-  disabled = false,
-  onOpenCommandPalette,
-}: ChatInputProps) {
+export function ChatInput({ onSend, disabled = false, onOpenCommandPalette }: ChatInputProps) {
   const { t } = useTranslation('claudeCode');
   const {
     sendMessage,
@@ -160,7 +147,7 @@ export function ChatInput({
       enabled: true,
       inputEmpty: value.trim().length === 0,
       isStreaming,
-    }
+    },
   );
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -216,7 +203,7 @@ export function ChatInput({
         setValue(newValue);
       }
     },
-    [handleSelectFile, value]
+    [handleSelectFile, value],
   );
 
   return (
@@ -311,7 +298,7 @@ export function ChatInput({
             'bg-gray-100 dark:bg-gray-800',
             'text-gray-500 dark:text-gray-400',
             'hover:bg-gray-200 dark:hover:bg-gray-700',
-            'disabled:opacity-50 disabled:cursor-not-allowed'
+            'disabled:opacity-50 disabled:cursor-not-allowed',
           )}
           title={t('input.attachFile')}
         >
@@ -335,7 +322,7 @@ export function ChatInput({
               'placeholder-gray-400 dark:placeholder-gray-500',
               'text-gray-900 dark:text-white',
               'disabled:opacity-50 disabled:cursor-not-allowed',
-              'transition-colors'
+              'transition-colors',
             )}
             style={{ minHeight: '48px', maxHeight: '200px' }}
           />
@@ -350,7 +337,7 @@ export function ChatInput({
               'p-3 rounded-lg transition-colors',
               showShortcuts
                 ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-600 dark:text-primary-400'
-                : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700',
             )}
             title={t('shortcuts.title')}
           >
@@ -368,10 +355,7 @@ export function ChatInput({
           ) : isStreaming || isSending ? (
             <button
               onClick={handleCancel}
-              className={clsx(
-                'p-3 rounded-lg transition-colors',
-                'bg-red-500 text-white hover:bg-red-600'
-              )}
+              className={clsx('p-3 rounded-lg transition-colors', 'bg-red-500 text-white hover:bg-red-600')}
               title={t('actions.cancel')}
             >
               <StopIcon className="w-5 h-5" />
@@ -384,7 +368,7 @@ export function ChatInput({
                 'p-3 rounded-lg transition-colors',
                 canSend
                   ? 'bg-primary-600 text-white hover:bg-primary-700'
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed',
               )}
               title={t('input.sendTitle')}
             >

@@ -10,13 +10,7 @@
 
 import React, { useEffect, useRef, useState, useCallback, useMemo, memo } from 'react';
 import { clsx } from 'clsx';
-import {
-  ArrowDownIcon,
-  Cross2Icon,
-  GearIcon,
-  CheckCircledIcon,
-  CrossCircledIcon,
-} from '@radix-ui/react-icons';
+import { ArrowDownIcon, Cross2Icon, GearIcon, CheckCircledIcon, CrossCircledIcon } from '@radix-ui/react-icons';
 import { useTranslation } from 'react-i18next';
 import { useExecutionStore, StreamLine, StreamLineType } from '../../store/execution';
 import { useModeStore } from '../../store/mode';
@@ -103,7 +97,8 @@ export function StreamingOutput({
   // MarkdownRenderer re-parses on every text delta.
   const { historicalBlocks, activeBlock } = useMemo(() => {
     const blocks = buildDisplayBlocks(streamingOutput, isSimpleMode);
-    if (blocks.length === 0) return { historicalBlocks: [] as DisplayBlock[], activeBlock: null as DisplayBlock | null };
+    if (blocks.length === 0)
+      return { historicalBlocks: [] as DisplayBlock[], activeBlock: null as DisplayBlock | null };
     const last = blocks[blocks.length - 1];
     if (last.kind === 'line' && (last.line.type === 'text' || last.line.type === 'thinking')) {
       return { historicalBlocks: blocks.slice(0, -1), activeBlock: last };
@@ -116,9 +111,7 @@ export function StreamingOutput({
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
-  const [exportNotice, setExportNotice] = useState<{ type: 'ok' | 'error'; text: string } | null>(
-    null
-  );
+  const [exportNotice, setExportNotice] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
   // Track content changes for auto-scroll (length alone won't change when
@@ -138,7 +131,7 @@ export function StreamingOutput({
         setIsAutoScroll(visible);
         setShowScrollButton(!visible && streamingOutput.length > 0);
       },
-      { threshold: 0.1 }
+      { threshold: 0.1 },
     );
     observer.observe(el);
     return () => observer.disconnect();
@@ -177,10 +170,7 @@ export function StreamingOutput({
       setExportNotice((current) => (current?.text === text ? null : current));
     }, 3000);
   }, []);
-  const assistantReplies = useMemo(
-    () => collectAssistantReplies(streamingOutput),
-    [streamingOutput]
-  );
+  const assistantReplies = useMemo(() => collectAssistantReplies(streamingOutput), [streamingOutput]);
 
   const exportMarkdown = useCallback(async () => {
     try {
@@ -191,10 +181,16 @@ export function StreamingOutput({
       }
       const stamp = localTimestampForFilename();
       const saved = await saveTextWithDialog(`conversation-${stamp}.md`, content);
-      if (!saved) { notifyExport('error', t('export.canceled')); return; }
+      if (!saved) {
+        notifyExport('error', t('export.canceled'));
+        return;
+      }
       notifyExport('ok', t('export.markdownExported'));
     } catch (error) {
-      notifyExport('error', t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }));
+      notifyExport(
+        'error',
+        t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }),
+      );
     }
   }, [notifyExport, streamingOutput, t]);
 
@@ -207,10 +203,16 @@ export function StreamingOutput({
       }
       const stamp = localTimestampForFilename();
       const saved = await saveTextWithDialog(`conversation-${stamp}.txt`, content);
-      if (!saved) { notifyExport('error', t('export.canceled')); return; }
+      if (!saved) {
+        notifyExport('error', t('export.canceled'));
+        return;
+      }
       notifyExport('ok', t('export.transcriptExported'));
     } catch (error) {
-      notifyExport('error', t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }));
+      notifyExport(
+        'error',
+        t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }),
+      );
     }
   }, [notifyExport, streamingOutput, t]);
 
@@ -223,10 +225,16 @@ export function StreamingOutput({
       }
       const stamp = localTimestampForFilename();
       const saved = await saveTextWithDialog(`output-raw-${stamp}.txt`, content);
-      if (!saved) { notifyExport('error', t('export.canceled')); return; }
+      if (!saved) {
+        notifyExport('error', t('export.canceled'));
+        return;
+      }
       notifyExport('ok', t('export.rawExported'));
     } catch (error) {
-      notifyExport('error', t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }));
+      notifyExport(
+        'error',
+        t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }),
+      );
     }
   }, [notifyExport, streamingOutput, t]);
 
@@ -239,10 +247,16 @@ export function StreamingOutput({
       }
       const stamp = localTimestampForFilename();
       const saved = await saveTextWithDialog(`ai-reply-latest-${stamp}.md`, latest.content);
-      if (!saved) { notifyExport('error', t('export.canceled')); return; }
+      if (!saved) {
+        notifyExport('error', t('export.canceled'));
+        return;
+      }
       notifyExport('ok', t('export.latestReplyExported'));
     } catch (error) {
-      notifyExport('error', t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }));
+      notifyExport(
+        'error',
+        t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }),
+      );
     }
   }, [assistantReplies, notifyExport, t]);
 
@@ -254,7 +268,7 @@ export function StreamingOutput({
       }
       const raw = window.prompt(
         t('export.chooseReplyPrompt', { max: assistantReplies.length }),
-        String(assistantReplies.length)
+        String(assistantReplies.length),
       );
       if (!raw) return;
       const selected = Number(raw);
@@ -270,10 +284,16 @@ export function StreamingOutput({
       const reply = assistantReplies[index];
       const stamp = localTimestampForFilename();
       const saved = await saveTextWithDialog(`ai-reply-${index + 1}-${stamp}.md`, reply.content);
-      if (!saved) { notifyExport('error', t('export.canceled')); return; }
+      if (!saved) {
+        notifyExport('error', t('export.canceled'));
+        return;
+      }
       notifyExport('ok', t('export.replyExported', { number: index + 1 }));
     } catch (error) {
-      notifyExport('error', t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }));
+      notifyExport(
+        'error',
+        t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }),
+      );
     }
   }, [assistantReplies, notifyExport, t]);
 
@@ -286,10 +306,16 @@ export function StreamingOutput({
       const b64 = await blobToBase64(blob);
       const stamp = localTimestampForFilename();
       const saved = await saveBinaryWithDialog(`output-${stamp}.png`, b64);
-      if (!saved) { notifyExport('error', t('export.canceled')); return; }
+      if (!saved) {
+        notifyExport('error', t('export.canceled'));
+        return;
+      }
       notifyExport('ok', t('export.pngExported'));
     } catch (error) {
-      notifyExport('error', t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }));
+      notifyExport(
+        'error',
+        t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }),
+      );
     } finally {
       setIsCapturing(false);
     }
@@ -304,10 +330,16 @@ export function StreamingOutput({
       const b64 = await blobToBase64(blob);
       const stamp = localTimestampForFilename();
       const saved = await saveBinaryWithDialog(`output-${stamp}.jpg`, b64);
-      if (!saved) { notifyExport('error', t('export.canceled')); return; }
+      if (!saved) {
+        notifyExport('error', t('export.canceled'));
+        return;
+      }
       notifyExport('ok', t('export.jpgExported'));
     } catch (error) {
-      notifyExport('error', t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }));
+      notifyExport(
+        'error',
+        t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }),
+      );
     } finally {
       setIsCapturing(false);
     }
@@ -322,15 +354,20 @@ export function StreamingOutput({
       const b64 = await blobToBase64(blob);
       const stamp = localTimestampForFilename();
       const saved = await saveBinaryWithDialog(`output-${stamp}.pdf`, b64);
-      if (!saved) { notifyExport('error', t('export.canceled')); return; }
+      if (!saved) {
+        notifyExport('error', t('export.canceled'));
+        return;
+      }
       notifyExport('ok', t('export.pdfExported'));
     } catch (error) {
-      notifyExport('error', t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }));
+      notifyExport(
+        'error',
+        t('export.exportFailed', { error: error instanceof Error ? error.message : 'unknown error' }),
+      );
     } finally {
       setIsCapturing(false);
     }
   }, [notifyExport, t]);
-
 
   if (streamingOutput.length === 0) {
     return (
@@ -340,7 +377,7 @@ export function StreamingOutput({
           'bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800',
           'flex items-center justify-center gap-3',
           compact ? 'p-4' : 'p-6',
-          className
+          className,
         )}
         style={{ minHeight: compact ? '120px' : '200px' }}
       >
@@ -363,7 +400,7 @@ export function StreamingOutput({
         className={clsx(
           'flex items-center justify-between rounded-t-lg border border-b-0',
           'border-gray-200 dark:border-gray-800',
-          'bg-gray-50 dark:bg-gray-900 px-3 py-1.5'
+          'bg-gray-50 dark:bg-gray-900 px-3 py-1.5',
         )}
       >
         <div className="flex items-center gap-2">
@@ -400,7 +437,7 @@ export function StreamingOutput({
               <span
                 className={clsx(
                   'text-2xs font-mono',
-                  exportNotice.type === 'ok' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                  exportNotice.type === 'ok' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400',
                 )}
               >
                 {exportNotice.text}
@@ -418,37 +455,54 @@ export function StreamingOutput({
               {showExportMenu && (
                 <div className="absolute right-0 mt-1 w-52 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg z-20 p-1 animate-fade-in">
                   {/* Text formats */}
-                  <div className="px-2 py-0.5 text-2xs font-mono text-gray-500 uppercase tracking-wider">{t('export.textFormats')}</div>
+                  <div className="px-2 py-0.5 text-2xs font-mono text-gray-500 uppercase tracking-wider">
+                    {t('export.textFormats')}
+                  </div>
                   <button
-                    onClick={() => { setShowExportMenu(false); void exportMarkdown(); }}
+                    onClick={() => {
+                      setShowExportMenu(false);
+                      void exportMarkdown();
+                    }}
                     disabled={streamingOutput.length === 0}
                     className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {t('export.markdown')}
                   </button>
                   <button
-                    onClick={() => { setShowExportMenu(false); void exportAll(); }}
+                    onClick={() => {
+                      setShowExportMenu(false);
+                      void exportAll();
+                    }}
                     disabled={streamingOutput.length === 0}
                     className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {t('export.conversationTranscript')}
                   </button>
                   <button
-                    onClick={() => { setShowExportMenu(false); void exportLatestReply(); }}
+                    onClick={() => {
+                      setShowExportMenu(false);
+                      void exportLatestReply();
+                    }}
                     disabled={assistantReplies.length === 0}
                     className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {t('export.latestReply')}
                   </button>
                   <button
-                    onClick={() => { setShowExportMenu(false); void exportReplyByNumber(); }}
+                    onClick={() => {
+                      setShowExportMenu(false);
+                      void exportReplyByNumber();
+                    }}
                     disabled={assistantReplies.length === 0}
                     className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {t('export.chooseReply')}
                   </button>
                   <button
-                    onClick={() => { setShowExportMenu(false); void exportRaw(); }}
+                    onClick={() => {
+                      setShowExportMenu(false);
+                      void exportRaw();
+                    }}
                     disabled={streamingOutput.length === 0}
                     className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
@@ -457,23 +511,34 @@ export function StreamingOutput({
                   {/* Divider */}
                   <div className="my-1 border-t border-gray-200 dark:border-gray-700/60" />
                   {/* Visual formats */}
-                  <div className="px-2 py-0.5 text-2xs font-mono text-gray-500 uppercase tracking-wider">{t('export.visualFormats')}</div>
+                  <div className="px-2 py-0.5 text-2xs font-mono text-gray-500 uppercase tracking-wider">
+                    {t('export.visualFormats')}
+                  </div>
                   <button
-                    onClick={() => { setShowExportMenu(false); void exportPdf(); }}
+                    onClick={() => {
+                      setShowExportMenu(false);
+                      void exportPdf();
+                    }}
                     disabled={streamingOutput.length === 0 || status === 'running'}
                     className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {t('export.pdf')}
                   </button>
                   <button
-                    onClick={() => { setShowExportMenu(false); void exportPng(); }}
+                    onClick={() => {
+                      setShowExportMenu(false);
+                      void exportPng();
+                    }}
                     disabled={streamingOutput.length === 0 || status === 'running'}
                     className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {t('export.png')}
                   </button>
                   <button
-                    onClick={() => { setShowExportMenu(false); void exportJpg(); }}
+                    onClick={() => {
+                      setShowExportMenu(false);
+                      void exportJpg();
+                    }}
                     disabled={streamingOutput.length === 0 || status === 'running'}
                     className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
@@ -500,7 +565,7 @@ export function StreamingOutput({
           'rounded-b-lg overflow-y-auto overflow-x-hidden',
           'bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800',
           compact ? 'text-2xs p-2' : 'text-xs p-3',
-          isFillHeight && 'flex-1 min-h-0'
+          isFillHeight && 'flex-1 min-h-0',
         )}
         style={isFillHeight ? undefined : { maxHeight }}
       >
@@ -508,38 +573,44 @@ export function StreamingOutput({
         <HistoricalBlockList blocks={historicalBlocks} compact={compact} />
 
         {/* Active streaming block — lightweight renderer during streaming */}
-        {activeBlock && activeBlock.kind === 'line' && (() => {
-          const line = activeBlock.line;
-          if (line.type === 'text') {
-            // During streaming: use lightweight <pre> to avoid full markdown re-parse
-            // After completion: use full MarkdownRenderer for final formatting
-            if (status === 'running') {
+        {activeBlock &&
+          activeBlock.kind === 'line' &&
+          (() => {
+            const line = activeBlock.line;
+            if (line.type === 'text') {
+              // During streaming: use lightweight <pre> to avoid full markdown re-parse
+              // After completion: use full MarkdownRenderer for final formatting
+              if (status === 'running') {
+                return (
+                  <div key={`active-${line.id}`} className="text-gray-800 dark:text-gray-200">
+                    <pre className={clsx('whitespace-pre-wrap break-words font-sans', compact ? 'text-xs' : 'text-sm')}>
+                      {line.content}
+                    </pre>
+                  </div>
+                );
+              }
               return (
-                <div key={`active-${line.id}`} className="text-gray-800 dark:text-gray-200">
-                  <pre className={clsx('whitespace-pre-wrap break-words font-sans', compact ? 'text-xs' : 'text-sm')}>
-                    {line.content}
-                  </pre>
+                <div key={line.id} className="text-gray-800 dark:text-gray-200">
+                  <MarkdownRenderer content={line.content} className={compact ? 'text-xs' : 'text-sm'} />
                 </div>
               );
             }
-            return (
-              <div key={line.id} className="text-gray-800 dark:text-gray-200">
-                <MarkdownRenderer content={line.content} className={compact ? 'text-xs' : 'text-sm'} />
-              </div>
-            );
-          }
-          if (line.type === 'thinking') {
-            return (
-              <div key={line.id} className="text-gray-500 italic font-mono text-xs whitespace-pre-wrap">
-                {line.content}
-              </div>
-            );
-          }
-          return null;
-        })()}
+            if (line.type === 'thinking') {
+              return (
+                <div key={line.id} className="text-gray-500 italic font-mono text-xs whitespace-pre-wrap">
+                  {line.content}
+                </div>
+              );
+            }
+            return null;
+          })()}
 
         {/* Working indicator — visible while AI is processing */}
-        {status === 'running' && <div data-export-exclude="true"><WorkingIndicator /></div>}
+        {status === 'running' && (
+          <div data-export-exclude="true">
+            <WorkingIndicator />
+          </div>
+        )}
 
         {/* Bottom anchor for auto-scroll */}
         <div ref={bottomRef} />
@@ -557,7 +628,7 @@ export function StreamingOutput({
             'border border-gray-200 dark:border-gray-700',
             'hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors',
             'shadow-lg backdrop-blur-sm',
-            'animate-fade-in'
+            'animate-fade-in',
           )}
         >
           <ArrowDownIcon className="w-3 h-3" />
@@ -592,10 +663,7 @@ function classifyGroupKind(line: StreamLine): 'tool_activity' | 'analysis_activi
     return 'tool_activity';
   }
   if (line.type === 'analysis') {
-    if (
-      line.content.startsWith('[analysis:evidence:') ||
-      line.content.startsWith('[analysis:phase_progress:')
-    ) {
+    if (line.content.startsWith('[analysis:evidence:') || line.content.startsWith('[analysis:phase_progress:')) {
       return 'analysis_activity';
     }
   }
@@ -697,7 +765,7 @@ function renderLineBlock(line: StreamLine, compact: boolean): React.ReactNode {
           className={clsx(
             'max-w-[80%] px-4 py-2 rounded-2xl rounded-br-sm',
             'bg-primary-600 text-white',
-            compact ? 'text-xs' : 'text-sm'
+            compact ? 'text-xs' : 'text-sm',
           )}
         >
           {line.content}
@@ -758,14 +826,9 @@ function renderLineBlock(line: StreamLine, compact: boolean): React.ReactNode {
   return (
     <div
       key={line.id}
-      className={clsx(
-        'leading-5 whitespace-pre-wrap break-all font-mono',
-        LINE_TYPE_COLORS[line.type]
-      )}
+      className={clsx('leading-5 whitespace-pre-wrap break-all font-mono', LINE_TYPE_COLORS[line.type])}
     >
-      {prefix && (
-        <span className="text-gray-600 select-none">{prefix}</span>
-      )}
+      {prefix && <span className="text-gray-600 select-none">{prefix}</span>}
       {line.content}
     </div>
   );
@@ -844,20 +907,20 @@ export function EventGroupLine({
         kind === 'tool_activity'
           ? 'border-purple-200 bg-purple-50 dark:border-purple-800/40 dark:bg-purple-950/20'
           : 'border-sky-200 bg-sky-50 dark:border-sky-800/40 dark:bg-sky-950/20',
-        compact ? 'px-2 py-1' : 'px-3 py-1.5'
+        compact ? 'px-2 py-1' : 'px-3 py-1.5',
       )}
     >
       <div className="flex items-center gap-2">
         <GearIcon
           className={clsx(
             'w-3 h-3 flex-shrink-0',
-            kind === 'tool_activity' ? 'text-purple-500 dark:text-purple-300' : 'text-sky-600 dark:text-sky-300'
+            kind === 'tool_activity' ? 'text-purple-500 dark:text-purple-300' : 'text-sky-600 dark:text-sky-300',
           )}
         />
         <span
           className={clsx(
             'font-mono text-xs font-semibold',
-            kind === 'tool_activity' ? 'text-purple-700 dark:text-purple-300' : 'text-sky-700 dark:text-sky-300'
+            kind === 'tool_activity' ? 'text-purple-700 dark:text-purple-300' : 'text-sky-700 dark:text-sky-300',
           )}
         >
           {title}
@@ -865,7 +928,7 @@ export function EventGroupLine({
         <span
           className={clsx(
             'font-mono text-xs truncate',
-            kind === 'tool_activity' ? 'text-purple-500 dark:text-purple-400/80' : 'text-sky-600 dark:text-sky-400/80'
+            kind === 'tool_activity' ? 'text-purple-500 dark:text-purple-400/80' : 'text-sky-600 dark:text-sky-400/80',
           )}
         >
           {summary}
@@ -883,10 +946,7 @@ export function EventGroupLine({
           {lines.map((line) => (
             <div
               key={`${groupId}-${line.id}`}
-              className={clsx(
-                'font-mono text-xs whitespace-pre-wrap break-all',
-                LINE_TYPE_COLORS[line.type]
-              )}
+              className={clsx('font-mono text-xs whitespace-pre-wrap break-all', LINE_TYPE_COLORS[line.type])}
             >
               {LINE_TYPE_PREFIX[line.type]}
               {line.content}
@@ -941,11 +1001,7 @@ export function SubAgentGroupPanel({
 
   return (
     <div
-      className={clsx(
-        'my-1 rounded border',
-        borderClass,
-        compact ? 'px-2 py-1' : 'px-3 py-1.5',
-      )}
+      className={clsx('my-1 rounded border', borderClass, compact ? 'px-2 py-1' : 'px-3 py-1.5')}
       style={{ marginLeft: depth > 0 ? `${depth * 12}px` : undefined }}
     >
       <div className="flex items-center gap-2">
@@ -959,7 +1015,16 @@ export function SubAgentGroupPanel({
         <span className={clsx('font-mono text-xs font-semibold uppercase tracking-wide', labelClass)}>
           {t('output.subAgent')}
         </span>
-        <span className={clsx('font-mono text-xs truncate', isFailed ? 'text-red-600 dark:text-red-400/80' : isComplete ? 'text-green-600 dark:text-green-400/80' : 'text-amber-600 dark:text-amber-400/80')}>
+        <span
+          className={clsx(
+            'font-mono text-xs truncate',
+            isFailed
+              ? 'text-red-600 dark:text-red-400/80'
+              : isComplete
+                ? 'text-green-600 dark:text-green-400/80'
+                : 'text-amber-600 dark:text-amber-400/80',
+          )}
+        >
           {promptPreview}
         </span>
         <span className="font-mono text-2xs text-gray-500 ml-auto flex-shrink-0">
@@ -978,10 +1043,7 @@ export function SubAgentGroupPanel({
           {lines.map((line) => (
             <div
               key={`sa-${subAgentId}-${line.id}`}
-              className={clsx(
-                'font-mono text-xs whitespace-pre-wrap break-all',
-                LINE_TYPE_COLORS[line.type]
-              )}
+              className={clsx('font-mono text-xs whitespace-pre-wrap break-all', LINE_TYPE_COLORS[line.type])}
             >
               {LINE_TYPE_PREFIX[line.type]}
               {line.content}
@@ -1028,14 +1090,8 @@ export const ToolCallLine = memo(function ToolCallLine({ content, compact }: { c
     >
       <div className="flex items-center gap-2">
         <GearIcon className="w-3 h-3 text-purple-500 dark:text-purple-400 animate-spin" />
-        <span className="font-mono text-purple-700 dark:text-purple-300 font-semibold text-xs">
-          {toolName}
-        </span>
-        {args && (
-          <span className="font-mono text-purple-500 dark:text-purple-400/70 text-xs truncate">
-            {args}
-          </span>
-        )}
+        <span className="font-mono text-purple-700 dark:text-purple-300 font-semibold text-xs">{toolName}</span>
+        {args && <span className="font-mono text-purple-500 dark:text-purple-400/70 text-xs truncate">{args}</span>}
       </div>
     </div>
   );
@@ -1100,7 +1156,11 @@ export const SubAgentLine = memo(function SubAgentLine({ content, compact }: { c
         <span
           className={clsx(
             'font-mono text-xs font-semibold uppercase tracking-wide',
-            isEndSuccess ? 'text-green-700 dark:text-green-300' : isEndFail ? 'text-red-700 dark:text-red-300' : 'text-amber-700 dark:text-amber-300'
+            isEndSuccess
+              ? 'text-green-700 dark:text-green-300'
+              : isEndFail
+                ? 'text-red-700 dark:text-red-300'
+                : 'text-amber-700 dark:text-amber-300',
           )}
         >
           {t('output.subAgent')}
@@ -1108,7 +1168,11 @@ export const SubAgentLine = memo(function SubAgentLine({ content, compact }: { c
         <span
           className={clsx(
             'font-mono text-xs truncate',
-            isEndSuccess ? 'text-green-600 dark:text-green-400/80' : isEndFail ? 'text-red-600 dark:text-red-400/80' : 'text-amber-600 dark:text-amber-400/80'
+            isEndSuccess
+              ? 'text-green-600 dark:text-green-400/80'
+              : isEndFail
+                ? 'text-red-600 dark:text-red-400/80'
+                : 'text-amber-600 dark:text-amber-400/80',
           )}
         >
           {parsed.details}
@@ -1173,21 +1237,11 @@ export const AnalysisLine = memo(function AnalysisLine({ content, compact }: { c
       ? 'text-green-600 dark:text-green-400/80'
       : 'text-sky-600 dark:text-sky-400/80';
 
-  const label = parsed.kind === 'evidence'
-    ? 'Evidence'
-    : parsed.kind === 'validation'
-      ? 'Validation'
-      : 'Analysis';
+  const label = parsed.kind === 'evidence' ? 'Evidence' : parsed.kind === 'validation' ? 'Validation' : 'Analysis';
   const phaseLabel = parsed.phase ? ` ${parsed.phase}` : '';
 
   return (
-    <div
-      className={clsx(
-        'my-1 rounded border',
-        borderClass,
-        compact ? 'px-2 py-1' : 'px-3 py-1.5',
-      )}
-    >
+    <div className={clsx('my-1 rounded border', borderClass, compact ? 'px-2 py-1' : 'px-3 py-1.5')}>
       <div className="flex items-center gap-2">
         {isDone ? (
           <CheckCircledIcon className="w-3 h-3 text-green-600 dark:text-green-400 flex-shrink-0" />
@@ -1197,11 +1251,10 @@ export const AnalysisLine = memo(function AnalysisLine({ content, compact }: { c
           <GearIcon className="w-3 h-3 text-sky-600 dark:text-sky-400" />
         )}
         <span className={clsx('font-mono text-xs font-semibold uppercase tracking-wide', textClass)}>
-          {label}{phaseLabel}
+          {label}
+          {phaseLabel}
         </span>
-        <span className={clsx('font-mono text-xs truncate', detailClass)}>
-          {parsed.details}
-        </span>
+        <span className={clsx('font-mono text-xs truncate', detailClass)}>{parsed.details}</span>
       </div>
     </div>
   );
@@ -1220,7 +1273,13 @@ function parseToolResultContent(content: string): { toolId: string; result: stri
   return { toolId: '', result: content, isError: false };
 }
 
-export const ToolResultLine = memo(function ToolResultLine({ content, compact }: { content: string; compact: boolean }) {
+export const ToolResultLine = memo(function ToolResultLine({
+  content,
+  compact,
+}: {
+  content: string;
+  compact: boolean;
+}) {
   const { t } = useTranslation('simpleMode');
   const { result, isError } = parseToolResultContent(content);
   const [expanded, setExpanded] = useState(false);
@@ -1243,7 +1302,12 @@ export const ToolResultLine = memo(function ToolResultLine({ content, compact }:
         ) : (
           <CheckCircledIcon className="w-3 h-3 text-cyan-600 dark:text-cyan-400 flex-shrink-0" />
         )}
-        <span className={clsx('font-mono text-xs font-semibold', isError ? 'text-red-700 dark:text-red-300' : 'text-cyan-700 dark:text-cyan-300')}>
+        <span
+          className={clsx(
+            'font-mono text-xs font-semibold',
+            isError ? 'text-red-700 dark:text-red-300' : 'text-cyan-700 dark:text-cyan-300',
+          )}
+        >
           {isError ? t('output.error') : t('output.result')}
         </span>
         {isLong && (

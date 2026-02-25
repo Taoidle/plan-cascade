@@ -33,9 +33,7 @@ export function AddMemoryForm({ onSave, onCancel }: AddMemoryFormProps) {
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-        <span className="text-sm font-semibold text-gray-900 dark:text-white">
-          {t('skillPanel.addMemory')}
-        </span>
+        <span className="text-sm font-semibold text-gray-900 dark:text-white">{t('skillPanel.addMemory')}</span>
       </div>
 
       {/* Form */}
@@ -53,7 +51,7 @@ export function AddMemoryForm({ onSave, onCancel }: AddMemoryFormProps) {
               'bg-white dark:bg-gray-800',
               'border border-gray-300 dark:border-gray-600',
               'text-gray-700 dark:text-gray-300',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500'
+              'focus:outline-none focus:ring-2 focus:ring-primary-500',
             )}
           >
             {MEMORY_CATEGORIES.map((cat) => (
@@ -122,7 +120,7 @@ export function AddMemoryForm({ onSave, onCancel }: AddMemoryFormProps) {
               'border border-gray-300 dark:border-gray-600',
               'text-gray-700 dark:text-gray-300',
               'placeholder:text-gray-400 dark:placeholder:text-gray-500',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500'
+              'focus:outline-none focus:ring-2 focus:ring-primary-500',
             )}
           />
         </div>
@@ -142,7 +140,7 @@ export function AddMemoryForm({ onSave, onCancel }: AddMemoryFormProps) {
               'border border-gray-300 dark:border-gray-600',
               'text-gray-700 dark:text-gray-300',
               'focus:outline-none focus:ring-2 focus:ring-primary-500',
-              'resize-none'
+              'resize-none',
             )}
           />
         </div>
@@ -156,7 +154,7 @@ export function AddMemoryForm({ onSave, onCancel }: AddMemoryFormProps) {
               'px-3 py-1.5 rounded-md text-xs font-medium',
               content.trim()
                 ? 'bg-primary-600 text-white hover:bg-primary-700'
-                : 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
+                : 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed',
             )}
           >
             {t('skillPanel.save')}
@@ -166,7 +164,7 @@ export function AddMemoryForm({ onSave, onCancel }: AddMemoryFormProps) {
             className={clsx(
               'px-3 py-1.5 rounded-md text-xs font-medium',
               'text-gray-600 dark:text-gray-400',
-              'hover:bg-gray-100 dark:hover:bg-gray-800'
+              'hover:bg-gray-100 dark:hover:bg-gray-800',
             )}
           >
             {t('skillPanel.cancel')}

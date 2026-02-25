@@ -21,9 +21,7 @@ export function ExecutionUpdateCard({ data }: { data: ExecutionUpdateCardData })
             {formatEventType(data.eventType, t)}
           </span>
           {data.storyTitle && (
-            <span className="text-xs text-blue-600/80 dark:text-blue-400/80 truncate max-w-48">
-              {data.storyTitle}
-            </span>
+            <span className="text-xs text-blue-600/80 dark:text-blue-400/80 truncate max-w-48">{data.storyTitle}</span>
           )}
           {data.agent && (
             <span className="text-2xs px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-500 dark:text-blue-400">
@@ -41,9 +39,7 @@ export function ExecutionUpdateCard({ data }: { data: ExecutionUpdateCardData })
         <div
           className={clsx(
             'h-full rounded-full transition-all duration-300',
-            data.eventType === 'story_failed'
-              ? 'bg-red-500'
-              : 'bg-blue-500'
+            data.eventType === 'story_failed' ? 'bg-red-500' : 'bg-blue-500',
           )}
           style={{ width: `${progressPct}%` }}
         />
@@ -84,7 +80,12 @@ function EventIcon({ eventType }: { eventType: ExecutionUpdateCardData['eventTyp
     case 'batch_complete':
       return (
         <svg className={clsx(cls, 'text-green-500')} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+          />
         </svg>
       );
     default:
@@ -94,11 +95,17 @@ function EventIcon({ eventType }: { eventType: ExecutionUpdateCardData['eventTyp
 
 function formatEventType(type: ExecutionUpdateCardData['eventType'], t: (key: string) => string): string {
   switch (type) {
-    case 'batch_start': return t('workflow.execution.batchStarted');
-    case 'story_start': return t('workflow.execution.storyStarted');
-    case 'story_complete': return t('workflow.execution.storyCompleted');
-    case 'story_failed': return t('workflow.execution.storyFailed');
-    case 'batch_complete': return t('workflow.execution.batchComplete');
-    default: return type;
+    case 'batch_start':
+      return t('workflow.execution.batchStarted');
+    case 'story_start':
+      return t('workflow.execution.storyStarted');
+    case 'story_complete':
+      return t('workflow.execution.storyCompleted');
+    case 'story_failed':
+      return t('workflow.execution.storyFailed');
+    case 'batch_complete':
+      return t('workflow.execution.batchComplete');
+    default:
+      return type;
   }
 }

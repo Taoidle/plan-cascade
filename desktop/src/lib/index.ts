@@ -20,17 +20,8 @@ export type {
 } from './api';
 
 // Deprecated WebSocket (kept for backwards compatibility)
-export {
-  WebSocketManager,
-  getWebSocketManager,
-  initWebSocket,
-  closeWebSocket,
-} from './websocket';
-export type {
-  ConnectionStatus,
-  ServerEventType,
-  EventHandler,
-} from './websocket';
+export { WebSocketManager, getWebSocketManager, initWebSocket, closeWebSocket } from './websocket';
+export type { ConnectionStatus, ServerEventType, EventHandler } from './websocket';
 
 // New v5.0 Tauri-based Claude Code client
 export {
@@ -69,10 +60,7 @@ export {
   parseImportedSettings,
   isTauriAvailable,
 } from './settingsApi';
-export type {
-  AppConfig,
-  SettingsUpdate,
-} from './settingsApi';
+export type { AppConfig, SettingsUpdate } from './settingsApi';
 
 // Embedding API (v5.0)
 export {
@@ -84,7 +72,4 @@ export {
 } from './embeddingApi';
 
 // Tauri utilities
-export {
-  getHealth,
-  isTauri,
-} from './tauri';
+export { getHealth, isTauri } from './tauri';

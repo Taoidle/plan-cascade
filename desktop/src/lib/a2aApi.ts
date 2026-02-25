@@ -86,10 +86,7 @@ export async function listA2aAgents(): Promise<RegisteredRemoteAgent[]> {
  *
  * If an agent with the same URL already exists, it is updated.
  */
-export async function registerA2aAgent(
-  baseUrl: string,
-  agentCard: AgentCard
-): Promise<RegisteredRemoteAgent> {
+export async function registerA2aAgent(baseUrl: string, agentCard: AgentCard): Promise<RegisteredRemoteAgent> {
   const response = await invoke<CommandResponse<RegisteredRemoteAgent>>('register_a2a_agent', {
     baseUrl,
     agentCard,

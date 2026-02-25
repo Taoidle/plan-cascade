@@ -31,20 +31,11 @@ import { DraftManager } from './DraftManager';
 import { PRDPreviewPanel } from './DependencyGraph';
 import { SpecInterviewPanel } from './SpecInterviewPanel';
 import { DesignDocPanel } from './DesignDocPanel';
-import {
-  StreamingOutput,
-  GlobalProgressBar,
-  QualityGateBadge,
-  ErrorState,
-} from '../shared';
+import { StreamingOutput, GlobalProgressBar, QualityGateBadge, ErrorState } from '../shared';
 import { AgentComposer } from '../AgentComposer';
 import { GraphWorkflowEditor } from '../GraphWorkflow';
 import { EvaluationDashboard } from '../Evaluation';
-import {
-  PlayIcon,
-  ResetIcon,
-  GearIcon,
-} from '@radix-ui/react-icons';
+import { PlayIcon, ResetIcon, GearIcon } from '@radix-ui/react-icons';
 
 // Check if dnd-kit is available (for graceful degradation)
 let hasDndKit = true;
@@ -96,16 +87,14 @@ export function ExpertMode() {
 
   return (
     <div className="h-full flex flex-col">
-      <Tabs.Root
-        value={activeTab}
-        onValueChange={setActiveTab}
-        className="flex-1 flex flex-col"
-      >
+      <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
         {/* Tab Navigation */}
-        <div className={clsx(
-          'flex items-center justify-between px-4 pt-2',
-          'border-b border-gray-200 dark:border-gray-700'
-        )}>
+        <div
+          className={clsx(
+            'flex items-center justify-between px-4 pt-2',
+            'border-b border-gray-200 dark:border-gray-700',
+          )}
+        >
           <Tabs.List className="flex gap-1">
             <TabTrigger value="generate">{t('tabs.generate')}</TabTrigger>
             <TabTrigger value="interview">{t('tabs.interview')}</TabTrigger>
@@ -122,15 +111,9 @@ export function ExpertMode() {
             <TabTrigger value="logs" disabled={logs.length === 0}>
               {t('tabs.logs')}
             </TabTrigger>
-            <TabTrigger value="composer">
-              {t('tabs.composer')}
-            </TabTrigger>
-            <TabTrigger value="graph-workflows">
-              {t('tabs.graphWorkflows')}
-            </TabTrigger>
-            <TabTrigger value="model-evaluation">
-              {t('tabs.modelEvaluation')}
-            </TabTrigger>
+            <TabTrigger value="composer">{t('tabs.composer')}</TabTrigger>
+            <TabTrigger value="graph-workflows">{t('tabs.graphWorkflows')}</TabTrigger>
+            <TabTrigger value="model-evaluation">{t('tabs.modelEvaluation')}</TabTrigger>
           </Tabs.List>
 
           {/* Actions */}
@@ -146,7 +129,7 @@ export function ExpertMode() {
                       ? 'bg-primary-100 dark:bg-primary-900 text-primary-600 dark:text-primary-400'
                       : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400',
                     'hover:bg-gray-200 dark:hover:bg-gray-600',
-                    'transition-colors'
+                    'transition-colors',
                   )}
                   title={t('settings.title')}
                 >
@@ -161,7 +144,7 @@ export function ExpertMode() {
                     'text-gray-700 dark:text-gray-300',
                     'hover:bg-gray-200 dark:hover:bg-gray-600',
                     'disabled:opacity-50 disabled:cursor-not-allowed',
-                    'transition-colors'
+                    'transition-colors',
                   )}
                   title={t('actions.resetTitle')}
                 >
@@ -176,7 +159,7 @@ export function ExpertMode() {
                     'bg-primary-600 text-white',
                     'hover:bg-primary-700',
                     'disabled:opacity-50 disabled:cursor-not-allowed',
-                    'transition-colors'
+                    'transition-colors',
                   )}
                 >
                   <PlayIcon className="w-4 h-4" />
@@ -190,19 +173,12 @@ export function ExpertMode() {
         {/* Tab Content */}
         <div className="flex-1 overflow-hidden flex">
           {/* Main content area */}
-          <div className={clsx(
-            'flex-1 overflow-auto',
-            showSettings && hasStories ? 'w-2/3' : 'w-full'
-          )}>
+          <div className={clsx('flex-1 overflow-auto', showSettings && hasStories ? 'w-2/3' : 'w-full')}>
             <Tabs.Content value="generate" className="h-full p-6 3xl:p-8">
               <div className="max-w-2xl 3xl:max-w-3xl mx-auto">
                 <div className="mb-6">
-                  <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-                    {t('generate.title')}
-                  </h2>
-                  <p className="text-gray-600 dark:text-gray-400">
-                    {t('generate.description')}
-                  </p>
+                  <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">{t('generate.title')}</h2>
+                  <p className="text-gray-600 dark:text-gray-400">{t('generate.description')}</p>
                 </div>
                 <PRDGenerationForm />
               </div>
@@ -220,12 +196,8 @@ export function ExpertMode() {
               <div className="max-w-3xl 3xl:max-w-4xl mx-auto">
                 <div className="mb-6 flex items-center justify-between">
                   <div>
-                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-1">
-                      {t('prdEditor.title')}
-                    </h2>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {t('prdEditor.description')}
-                    </p>
+                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-1">{t('prdEditor.title')}</h2>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{t('prdEditor.description')}</p>
                   </div>
                 </div>
 
@@ -261,14 +233,14 @@ export function ExpertMode() {
 
           {/* Settings sidebar */}
           {showSettings && hasStories && (
-            <div className={clsx(
-              'w-1/3 min-w-[300px] max-w-[400px] p-6 overflow-auto',
-              'border-l border-gray-200 dark:border-gray-700',
-              'bg-gray-50 dark:bg-gray-900'
-            )}>
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-6">
-                {t('settings.title')}
-              </h3>
+            <div
+              className={clsx(
+                'w-1/3 min-w-[300px] max-w-[400px] p-6 overflow-auto',
+                'border-l border-gray-200 dark:border-gray-700',
+                'bg-gray-50 dark:bg-gray-900',
+              )}
+            >
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-6">{t('settings.title')}</h3>
 
               <div className="space-y-6">
                 <StrategySelector />
@@ -301,7 +273,7 @@ function TabTrigger({ value, children, disabled = false }: TabTriggerProps) {
         'hover:text-gray-900 dark:hover:text-white',
         'data-[state=active]:text-primary-600 dark:data-[state=active]:text-primary-400',
         'data-[state=active]:bg-gray-100 dark:data-[state=active]:bg-gray-800',
-        'disabled:opacity-50 disabled:cursor-not-allowed'
+        'disabled:opacity-50 disabled:cursor-not-allowed',
       )}
     >
       {children}
@@ -333,9 +305,7 @@ function ExecutionView() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left column: Stories with inline quality gate badges */}
         <div className="space-y-2">
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-            Stories
-          </h3>
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Stories</h3>
           {stories.map((story, index) => {
             const storyGates = qualityGateResults.filter((r) => r.storyId === story.id);
 
@@ -347,30 +317,30 @@ function ExecutionView() {
                   story.id === currentStoryId
                     ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 ring-1 ring-primary-300 dark:ring-primary-700'
                     : story.status === 'completed'
-                    ? 'border-success-300 dark:border-success-700 bg-success-50 dark:bg-success-950'
-                    : story.status === 'failed'
-                    ? 'border-error-300 dark:border-error-700 bg-error-50 dark:bg-error-950'
-                    : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
+                      ? 'border-success-300 dark:border-success-700 bg-success-50 dark:bg-success-950'
+                      : story.status === 'failed'
+                        ? 'border-error-300 dark:border-error-700 bg-error-50 dark:bg-error-950'
+                        : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800',
                 )}
               >
                 <div className="flex items-center gap-3">
-                  <span className={clsx(
-                    'flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium shrink-0',
-                    story.status === 'completed' && 'bg-success-100 dark:bg-success-900 text-success-700 dark:text-success-300',
-                    story.status === 'failed' && 'bg-error-100 dark:bg-error-900 text-error-700 dark:text-error-300',
-                    story.status === 'in_progress' && 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300',
-                    story.status === 'pending' && 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
-                  )}>
+                  <span
+                    className={clsx(
+                      'flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium shrink-0',
+                      story.status === 'completed' &&
+                        'bg-success-100 dark:bg-success-900 text-success-700 dark:text-success-300',
+                      story.status === 'failed' && 'bg-error-100 dark:bg-error-900 text-error-700 dark:text-error-300',
+                      story.status === 'in_progress' &&
+                        'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300',
+                      story.status === 'pending' && 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400',
+                    )}
+                  >
                     {index + 1}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-gray-900 dark:text-white truncate">
-                      {story.title}
-                    </p>
+                    <p className="font-medium text-gray-900 dark:text-white truncate">{story.title}</p>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
-                      {story.status === 'in_progress'
-                        ? `${story.progress}% complete`
-                        : story.status.replace('_', ' ')}
+                      {story.status === 'in_progress' ? `${story.progress}% complete` : story.status.replace('_', ' ')}
                     </p>
                   </div>
                   {story.status === 'in_progress' && (
@@ -403,13 +373,8 @@ function ExecutionView() {
 
         {/* Right column: Streaming output */}
         <div>
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-            Live Output
-          </h3>
-          <StreamingOutput
-            maxHeight="600px"
-            showClear
-          />
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Live Output</h3>
+          <StreamingOutput maxHeight="600px" showClear />
         </div>
       </div>
     </div>
@@ -423,47 +388,29 @@ function LogsView() {
   return (
     <div className="h-full flex flex-col">
       <div className="flex justify-between items-center mb-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-          {t('logs.title')}
-        </h2>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t('logs.title')}</h2>
         <span className="text-sm text-gray-500 dark:text-gray-400">
           {t('logs.entries', { count: logs.length })}
-          {streamingOutput.length > 0 && (
-            <span className="ml-2">
-              | {streamingOutput.length} stream events
-            </span>
-          )}
+          {streamingOutput.length > 0 && <span className="ml-2">| {streamingOutput.length} stream events</span>}
         </span>
       </div>
 
       {/* Streaming output (primary display) */}
       {streamingOutput.length > 0 && (
         <div className="mb-4">
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Streaming Output
-          </h3>
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Streaming Output</h3>
           <StreamingOutput maxHeight="400px" showClear />
         </div>
       )}
 
       {/* Traditional log entries */}
       <div className="flex-1 min-h-0">
-        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Event Log
-        </h3>
-        <div
-          className={clsx(
-            'h-full p-4 rounded-lg font-mono text-sm',
-            'bg-gray-900 text-gray-100',
-            'overflow-auto'
-          )}
-        >
+        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Event Log</h3>
+        <div className={clsx('h-full p-4 rounded-lg font-mono text-sm', 'bg-gray-900 text-gray-100', 'overflow-auto')}>
           {logs.length === 0 ? (
             <span className="text-gray-500">{t('logs.empty')}</span>
           ) : (
-            <pre className="whitespace-pre-wrap">
-              {logs.join('\n')}
-            </pre>
+            <pre className="whitespace-pre-wrap">{logs.join('\n')}</pre>
           )}
         </div>
       </div>

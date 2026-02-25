@@ -166,10 +166,7 @@ describe('providers module', () => {
       });
 
       it('normalizes provider names', () => {
-        localStorage.setItem(
-          LOCAL_PROVIDER_API_KEY_CACHE_STORAGE_KEY,
-          JSON.stringify({ Claude: 'sk-test' })
-        );
+        localStorage.setItem(LOCAL_PROVIDER_API_KEY_CACHE_STORAGE_KEY, JSON.stringify({ Claude: 'sk-test' }));
         const cache = readLocalProviderApiKeyCache();
         expect(cache['anthropic']).toBe('sk-test');
       });
@@ -177,7 +174,7 @@ describe('providers module', () => {
       it('ignores non-string values', () => {
         localStorage.setItem(
           LOCAL_PROVIDER_API_KEY_CACHE_STORAGE_KEY,
-          JSON.stringify({ openai: 'sk-valid', deepseek: 123 })
+          JSON.stringify({ openai: 'sk-valid', deepseek: 123 }),
         );
         const cache = readLocalProviderApiKeyCache();
         expect(cache['openai']).toBe('sk-valid');
@@ -187,7 +184,7 @@ describe('providers module', () => {
       it('ignores empty/whitespace-only values', () => {
         localStorage.setItem(
           LOCAL_PROVIDER_API_KEY_CACHE_STORAGE_KEY,
-          JSON.stringify({ openai: '  ', deepseek: 'sk-ok' })
+          JSON.stringify({ openai: '  ', deepseek: 'sk-ok' }),
         );
         const cache = readLocalProviderApiKeyCache();
         expect(cache['openai']).toBeUndefined();
@@ -270,10 +267,7 @@ describe('providers module', () => {
       });
 
       it('normalizes provider keys', () => {
-        localStorage.setItem(
-          CUSTOM_MODELS_STORAGE_KEY,
-          JSON.stringify({ Claude: ['my-model'] })
-        );
+        localStorage.setItem(CUSTOM_MODELS_STORAGE_KEY, JSON.stringify({ Claude: ['my-model'] }));
         const result = getCustomModelsByProvider();
         expect(result['anthropic']).toEqual(['my-model']);
       });
@@ -281,7 +275,7 @@ describe('providers module', () => {
       it('deduplicates models', () => {
         localStorage.setItem(
           CUSTOM_MODELS_STORAGE_KEY,
-          JSON.stringify({ openai: ['gpt-custom', 'gpt-custom', 'gpt-other'] })
+          JSON.stringify({ openai: ['gpt-custom', 'gpt-custom', 'gpt-other'] }),
         );
         const result = getCustomModelsByProvider();
         expect(result['openai']).toEqual(['gpt-custom', 'gpt-other']);

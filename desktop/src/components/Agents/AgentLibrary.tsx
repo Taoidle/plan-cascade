@@ -99,9 +99,7 @@ export function AgentLibrary() {
       {/* Header */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            {t('title')}
-          </h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t('title')}</h2>
 
           <div className="flex items-center gap-2">
             {/* Refresh */}
@@ -113,7 +111,7 @@ export function AgentLibrary() {
                 'bg-gray-100 dark:bg-gray-800',
                 'hover:bg-gray-200 dark:hover:bg-gray-700',
                 'disabled:opacity-50',
-                'transition-colors'
+                'transition-colors',
               )}
               title={t('common:refresh')}
             >
@@ -130,7 +128,7 @@ export function AgentLibrary() {
                 'hover:bg-gray-200 dark:hover:bg-gray-700',
                 'text-sm font-medium',
                 'disabled:opacity-50',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               <DownloadIcon className="w-4 h-4" />
@@ -145,7 +143,7 @@ export function AgentLibrary() {
                 'bg-gray-100 dark:bg-gray-800',
                 'hover:bg-gray-200 dark:hover:bg-gray-700',
                 'text-sm font-medium',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               <UploadIcon className="w-4 h-4" />
@@ -159,7 +157,7 @@ export function AgentLibrary() {
                 'flex items-center gap-1.5 px-3 py-1.5 rounded-md',
                 'bg-primary-600 hover:bg-primary-700',
                 'text-white text-sm font-medium',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               <PlusIcon className="w-4 h-4" />
@@ -182,14 +180,12 @@ export function AgentLibrary() {
               'bg-white dark:bg-gray-800',
               'text-gray-900 dark:text-white',
               'placeholder-gray-400 dark:placeholder-gray-500',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent'
+              'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent',
             )}
           />
         </div>
 
-        <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-          {t('description')}
-        </p>
+        <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{t('description')}</p>
       </div>
 
       {/* Error */}
@@ -197,10 +193,7 @@ export function AgentLibrary() {
         <div className="mx-4 mt-4 p-3 rounded-md bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400">
           <div className="flex items-center justify-between">
             <span className="text-sm">{error}</span>
-            <button
-              onClick={clearError}
-              className="text-sm underline hover:no-underline"
-            >
+            <button onClick={clearError} className="text-sm underline hover:no-underline">
               {t('common:dismiss')}
             </button>
           </div>
@@ -226,9 +219,7 @@ export function AgentLibrary() {
               {searchQuery ? t('noResults') : t('noAgents')}
             </h3>
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-              {searchQuery
-                ? t('noResultsDescription')
-                : t('noAgentsDescription')}
+              {searchQuery ? t('noResultsDescription') : t('noAgentsDescription')}
             </p>
             {!searchQuery && (
               <button
@@ -237,7 +228,7 @@ export function AgentLibrary() {
                   'inline-flex items-center gap-1.5 px-4 py-2 rounded-md',
                   'bg-primary-600 hover:bg-primary-700',
                   'text-white text-sm font-medium',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 <PlusIcon className="w-4 h-4" />
@@ -274,11 +265,7 @@ export function AgentLibrary() {
       />
 
       {/* Runner Dialog */}
-      <AgentRunner
-        agent={runningAgent}
-        open={runnerOpen}
-        onOpenChange={setRunnerOpen}
-      />
+      <AgentRunner agent={runningAgent} open={runnerOpen} onOpenChange={setRunnerOpen} />
     </div>
   );
 }

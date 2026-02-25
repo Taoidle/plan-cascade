@@ -12,13 +12,7 @@ import { ProgressChart } from '../ProgressChart';
 import { DiffViewer } from '../DiffViewer';
 import { ActionGroup } from '../ActionGroup';
 import { MarkdownFallback } from '../MarkdownFallback';
-import type {
-  RichContentEvent,
-  TableData,
-  ChartData,
-  DiffData,
-  ActionButtonsData,
-} from '../../../types/richContent';
+import type { RichContentEvent, TableData, ChartData, DiffData, ActionButtonsData } from '../../../types/richContent';
 
 // ============================================================================
 // DataTable Tests
@@ -200,9 +194,7 @@ describe('ActionGroup', () => {
 
   it('renders disabled buttons', () => {
     const disabledData: ActionButtonsData = {
-      actions: [
-        { id: 'save', label: 'Save', variant: 'primary', disabled: true },
-      ],
+      actions: [{ id: 'save', label: 'Save', variant: 'primary', disabled: true }],
     };
     render(<ActionGroup data={disabledData} />);
     const btn = screen.getByText('Save');

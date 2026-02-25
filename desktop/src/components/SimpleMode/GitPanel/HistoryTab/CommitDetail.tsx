@@ -129,12 +129,7 @@ function SummarySkeleton() {
 // CommitDetail Component
 // ---------------------------------------------------------------------------
 
-export function CommitDetail({
-  commit,
-  diff,
-  repoPath,
-  onClose,
-}: CommitDetailProps) {
+export function CommitDetail({ commit, diff, repoPath, onClose }: CommitDetailProps) {
   const { t } = useTranslation('git');
   const [expandedFile, setExpandedFile] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -236,9 +231,7 @@ export function CommitDetail({
       {/* Header */}
       <div className="sticky top-0 z-10 flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-800/80 border-b border-gray-200 dark:border-gray-700 backdrop-blur-sm">
         <div className="flex items-center gap-2">
-          <h4 className="text-xs font-medium text-gray-800 dark:text-gray-200">
-            {t('commitDetail.title')}
-          </h4>
+          <h4 className="text-xs font-medium text-gray-800 dark:text-gray-200">{t('commitDetail.title')}</h4>
           {isMerge && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium">
               {t('commitDetail.merge')}
@@ -268,7 +261,7 @@ export function CommitDetail({
               'bg-gray-100 dark:bg-gray-800',
               'text-gray-700 dark:text-gray-300',
               'hover:bg-gray-200 dark:hover:bg-gray-700',
-              'transition-colors'
+              'transition-colors',
             )}
             title={t('commitDetail.copySha')}
           >
@@ -279,7 +272,12 @@ export function CommitDetail({
               </svg>
             ) : (
               <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                />
               </svg>
             )}
           </button>
@@ -288,20 +286,14 @@ export function CommitDetail({
         {/* Author */}
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">{t('commitDetail.author')}</span>
-          <span className="text-xs text-gray-800 dark:text-gray-200">
-            {commit.author_name}
-          </span>
-          <span className="text-xs text-gray-500 dark:text-gray-400">
-            &lt;{commit.author_email}&gt;
-          </span>
+          <span className="text-xs text-gray-800 dark:text-gray-200">{commit.author_name}</span>
+          <span className="text-xs text-gray-500 dark:text-gray-400">&lt;{commit.author_email}&gt;</span>
         </div>
 
         {/* Date */}
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">{t('commitDetail.date')}</span>
-          <span className="text-xs text-gray-700 dark:text-gray-300">
-            {formatFullDate(commit.date)}
-          </span>
+          <span className="text-xs text-gray-700 dark:text-gray-300">{formatFullDate(commit.date)}</span>
         </div>
 
         {/* Parents */}
@@ -340,7 +332,7 @@ export function CommitDetail({
                 'flex items-center gap-1.5 px-2 py-1 text-xs rounded-md transition-colors',
                 canSummarize
                   ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/30 border border-purple-200 dark:border-purple-700'
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-60'
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-60',
               )}
               title={
                 !isAvailable
@@ -408,12 +400,8 @@ export function CommitDetail({
               {t('commitDetail.filesChanged', { count: diff.files.length })}
             </span>
             <div className="flex items-center gap-2 text-xs">
-              <span className="text-green-600 dark:text-green-400">
-                +{diff.total_additions}
-              </span>
-              <span className="text-red-600 dark:text-red-400">
-                -{diff.total_deletions}
-              </span>
+              <span className="text-green-600 dark:text-green-400">+{diff.total_additions}</span>
+              <span className="text-red-600 dark:text-red-400">-{diff.total_deletions}</span>
             </div>
           </div>
 
@@ -426,31 +414,21 @@ export function CommitDetail({
               return (
                 <div key={file.path}>
                   <button
-                    onClick={() =>
-                      setExpandedFile(isExpanded ? null : file.path)
-                    }
+                    onClick={() => setExpandedFile(isExpanded ? null : file.path)}
                     className={clsx(
                       'w-full flex items-center gap-2 px-3 py-1.5',
                       'hover:bg-gray-50 dark:hover:bg-gray-800/50',
-                      'transition-colors text-left'
+                      'transition-colors text-left',
                     )}
                   >
                     {/* Expand chevron */}
                     <svg
-                      className={clsx(
-                        'w-3 h-3 text-gray-400 transition-transform shrink-0',
-                        isExpanded && 'rotate-90'
-                      )}
+                      className={clsx('w-3 h-3 text-gray-400 transition-transform shrink-0', isExpanded && 'rotate-90')}
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
                     >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9 5l7 7-7 7"
-                      />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                     </svg>
 
                     {/* Status badge */}
@@ -458,22 +436,16 @@ export function CommitDetail({
 
                     {/* File path */}
                     <code className="flex-1 text-xs text-gray-700 dark:text-gray-300 truncate">
-                      {file.is_renamed && file.old_path
-                        ? `${file.old_path} -> ${file.path}`
-                        : file.path}
+                      {file.is_renamed && file.old_path ? `${file.old_path} -> ${file.path}` : file.path}
                     </code>
 
                     {/* +/- stats */}
                     <div className="shrink-0 flex items-center gap-1.5 text-[10px]">
                       {stats.additions > 0 && (
-                        <span className="text-green-600 dark:text-green-400">
-                          +{stats.additions}
-                        </span>
+                        <span className="text-green-600 dark:text-green-400">+{stats.additions}</span>
                       )}
                       {stats.deletions > 0 && (
-                        <span className="text-red-600 dark:text-red-400">
-                          -{stats.deletions}
-                        </span>
+                        <span className="text-red-600 dark:text-red-400">-{stats.deletions}</span>
                       )}
                     </div>
                   </button>

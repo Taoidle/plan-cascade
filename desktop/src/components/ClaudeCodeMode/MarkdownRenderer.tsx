@@ -104,35 +104,150 @@ function normalizeLanguage(lang: string | undefined): string {
 // XML-like tags (e.g. <settingsstate>, <bool>, <mcpmanager>).
 const RECOGNIZED_HTML_TAGS = new Set([
   // HTML elements
-  'a', 'abbr', 'address', 'area', 'article', 'aside', 'audio',
-  'b', 'base', 'bdi', 'bdo', 'blockquote', 'body', 'br', 'button',
-  'canvas', 'caption', 'cite', 'code', 'col', 'colgroup',
-  'data', 'datalist', 'dd', 'del', 'details', 'dfn', 'dialog', 'div', 'dl', 'dt',
-  'em', 'embed',
-  'fieldset', 'figcaption', 'figure', 'footer', 'form',
-  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup', 'hr', 'html',
-  'i', 'iframe', 'img', 'input', 'ins',
+  'a',
+  'abbr',
+  'address',
+  'area',
+  'article',
+  'aside',
+  'audio',
+  'b',
+  'base',
+  'bdi',
+  'bdo',
+  'blockquote',
+  'body',
+  'br',
+  'button',
+  'canvas',
+  'caption',
+  'cite',
+  'code',
+  'col',
+  'colgroup',
+  'data',
+  'datalist',
+  'dd',
+  'del',
+  'details',
+  'dfn',
+  'dialog',
+  'div',
+  'dl',
+  'dt',
+  'em',
+  'embed',
+  'fieldset',
+  'figcaption',
+  'figure',
+  'footer',
+  'form',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'head',
+  'header',
+  'hgroup',
+  'hr',
+  'html',
+  'i',
+  'iframe',
+  'img',
+  'input',
+  'ins',
   'kbd',
-  'label', 'legend', 'li', 'link',
-  'main', 'map', 'mark', 'math', 'menu', 'meta', 'meter',
-  'nav', 'noscript',
-  'object', 'ol', 'optgroup', 'option', 'output',
-  'p', 'param', 'picture', 'pre', 'progress',
+  'label',
+  'legend',
+  'li',
+  'link',
+  'main',
+  'map',
+  'mark',
+  'math',
+  'menu',
+  'meta',
+  'meter',
+  'nav',
+  'noscript',
+  'object',
+  'ol',
+  'optgroup',
+  'option',
+  'output',
+  'p',
+  'param',
+  'picture',
+  'pre',
+  'progress',
   'q',
-  'rb', 'rp', 'rt', 'rtc', 'ruby',
-  's', 'samp', 'script', 'search', 'section', 'select', 'slot', 'small', 'source',
-  'span', 'strong', 'style', 'sub', 'summary', 'sup', 'svg',
-  'table', 'tbody', 'td', 'template', 'textarea', 'tfoot', 'th', 'thead', 'time',
-  'title', 'tr', 'track',
-  'u', 'ul',
-  'var', 'video',
+  'rb',
+  'rp',
+  'rt',
+  'rtc',
+  'ruby',
+  's',
+  'samp',
+  'script',
+  'search',
+  'section',
+  'select',
+  'slot',
+  'small',
+  'source',
+  'span',
+  'strong',
+  'style',
+  'sub',
+  'summary',
+  'sup',
+  'svg',
+  'table',
+  'tbody',
+  'td',
+  'template',
+  'textarea',
+  'tfoot',
+  'th',
+  'thead',
+  'time',
+  'title',
+  'tr',
+  'track',
+  'u',
+  'ul',
+  'var',
+  'video',
   'wbr',
   // SVG elements
-  'circle', 'clippath', 'defs', 'ellipse', 'g', 'image', 'line',
-  'lineargradient', 'mask', 'path', 'pattern', 'polygon', 'polyline',
-  'radialgradient', 'rect', 'stop', 'text', 'tspan', 'use',
+  'circle',
+  'clippath',
+  'defs',
+  'ellipse',
+  'g',
+  'image',
+  'line',
+  'lineargradient',
+  'mask',
+  'path',
+  'pattern',
+  'polygon',
+  'polyline',
+  'radialgradient',
+  'rect',
+  'stop',
+  'text',
+  'tspan',
+  'use',
   // Deprecated but still recognized by browsers
-  'big', 'center', 'font', 'nobr', 'strike', 'tt',
+  'big',
+  'center',
+  'font',
+  'nobr',
+  'strike',
+  'tt',
 ]);
 
 /**
@@ -184,7 +299,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
               className={clsx(
                 'px-1.5 py-0.5 rounded text-sm font-mono',
                 'bg-gray-100 dark:bg-gray-700',
-                'text-gray-800 dark:text-gray-200'
+                'text-gray-800 dark:text-gray-200',
               )}
               {...props}
             >
@@ -195,13 +310,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
         const code = String(children).replace(/\n$/, '');
 
-        return (
-          <CodeBlock
-            code={code}
-            language={language}
-            isDarkMode={isDarkMode}
-          />
-        );
+        return <CodeBlock code={code} language={language} isDarkMode={isDarkMode} />;
       },
 
       // Links open in external browser
@@ -222,10 +331,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
           <a
             href={href}
             onClick={handleClick}
-            className={clsx(
-              'text-primary-600 dark:text-primary-400',
-              'hover:underline cursor-pointer'
-            )}
+            className={clsx('text-primary-600 dark:text-primary-400', 'hover:underline cursor-pointer')}
             {...props}
           >
             {children}
@@ -236,13 +342,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       // Images with lazy loading
       img({ src, alt, ...props }) {
         return (
-          <img
-            src={src}
-            alt={alt || ''}
-            loading="lazy"
-            className="max-w-full h-auto rounded-lg my-2"
-            {...props}
-          />
+          <img src={src} alt={alt || ''} loading="lazy" className="max-w-full h-auto rounded-lg my-2" {...props} />
         );
       },
 
@@ -251,10 +351,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         return (
           <div className="overflow-x-auto my-4">
             <table
-              className={clsx(
-                'min-w-full border-collapse',
-                'border border-gray-200 dark:border-gray-700'
-              )}
+              className={clsx('min-w-full border-collapse', 'border border-gray-200 dark:border-gray-700')}
               {...props}
             >
               {children}
@@ -265,10 +362,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
       thead({ children, ...props }) {
         return (
-          <thead
-            className="bg-gray-50 dark:bg-gray-800"
-            {...props}
-          >
+          <thead className="bg-gray-50 dark:bg-gray-800" {...props}>
             {children}
           </thead>
         );
@@ -280,7 +374,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
             className={clsx(
               'px-4 py-2 text-left text-sm font-semibold',
               'border border-gray-200 dark:border-gray-700',
-              'text-gray-700 dark:text-gray-300'
+              'text-gray-700 dark:text-gray-300',
             )}
             {...props}
           >
@@ -295,7 +389,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
             className={clsx(
               'px-4 py-2 text-sm',
               'border border-gray-200 dark:border-gray-700',
-              'text-gray-600 dark:text-gray-400'
+              'text-gray-600 dark:text-gray-400',
             )}
             {...props}
           >
@@ -310,10 +404,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         const className = (props as { className?: string }).className;
         if (className?.includes('task-list-item')) {
           return (
-            <li
-              className="flex items-start gap-2 list-none"
-              {...props}
-            >
+            <li className="flex items-start gap-2 list-none" {...props}>
               {children}
             </li>
           );
@@ -337,7 +428,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
               className={clsx(
                 'w-4 h-4 mt-1 rounded',
                 'border-gray-300 dark:border-gray-600',
-                'text-primary-600 dark:text-primary-400'
+                'text-primary-600 dark:text-primary-400',
               )}
               {...props}
             />
@@ -353,7 +444,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
             className={clsx(
               'border-l-4 border-gray-300 dark:border-gray-600',
               'pl-4 py-1 my-4',
-              'text-gray-600 dark:text-gray-400 italic'
+              'text-gray-600 dark:text-gray-400 italic',
             )}
             {...props}
           >
@@ -364,21 +455,13 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
       // Horizontal rule
       hr({ ...props }) {
-        return (
-          <hr
-            className="my-6 border-gray-200 dark:border-gray-700"
-            {...props}
-          />
-        );
+        return <hr className="my-6 border-gray-200 dark:border-gray-700" {...props} />;
       },
 
       // Headers with proper styling
       h1({ children, ...props }) {
         return (
-          <h1
-            className="text-2xl font-bold mt-6 mb-4 text-gray-900 dark:text-white"
-            {...props}
-          >
+          <h1 className="text-2xl font-bold mt-6 mb-4 text-gray-900 dark:text-white" {...props}>
             {children}
           </h1>
         );
@@ -386,10 +469,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
       h2({ children, ...props }) {
         return (
-          <h2
-            className="text-xl font-semibold mt-5 mb-3 text-gray-900 dark:text-white"
-            {...props}
-          >
+          <h2 className="text-xl font-semibold mt-5 mb-3 text-gray-900 dark:text-white" {...props}>
             {children}
           </h2>
         );
@@ -397,10 +477,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
       h3({ children, ...props }) {
         return (
-          <h3
-            className="text-lg font-semibold mt-4 mb-2 text-gray-900 dark:text-white"
-            {...props}
-          >
+          <h3 className="text-lg font-semibold mt-4 mb-2 text-gray-900 dark:text-white" {...props}>
             {children}
           </h3>
         );
@@ -408,10 +485,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
       h4({ children, ...props }) {
         return (
-          <h4
-            className="text-base font-semibold mt-3 mb-2 text-gray-800 dark:text-gray-100"
-            {...props}
-          >
+          <h4 className="text-base font-semibold mt-3 mb-2 text-gray-800 dark:text-gray-100" {...props}>
             {children}
           </h4>
         );
@@ -420,10 +494,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       // Paragraphs
       p({ children, ...props }) {
         return (
-          <p
-            className="my-2 text-gray-700 dark:text-gray-300 leading-relaxed"
-            {...props}
-          >
+          <p className="my-2 text-gray-700 dark:text-gray-300 leading-relaxed" {...props}>
             {children}
           </p>
         );
@@ -487,7 +558,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         return <>{children}</>;
       },
     }),
-    [isDarkMode, onLinkClick]
+    [isDarkMode, onLinkClick],
   );
 
   // Escape tags that rehype-raw would try to render as unrecognized DOM elements.
@@ -496,7 +567,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   const safeContent = useMemo(() => {
     return content.replace(
       /<(\/?)(?:svg|path|circle|rect|line|polyline|polygon|ellipse|g|tool_call|tool_result|arg_key|arg_value|ls|cwd|search_results?)\b/gi,
-      (_, slash) => `&lt;${slash || ''}`
+      (_, slash) => `&lt;${slash || ''}`,
     );
   }, [content]);
 

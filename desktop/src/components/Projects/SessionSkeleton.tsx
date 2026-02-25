@@ -12,7 +12,7 @@ export function SessionSkeleton() {
       className={clsx(
         'w-full p-4 rounded-lg animate-pulse',
         'bg-white dark:bg-gray-800',
-        'border border-gray-200 dark:border-gray-700'
+        'border border-gray-200 dark:border-gray-700',
       )}
     >
       {/* Preview skeleton */}

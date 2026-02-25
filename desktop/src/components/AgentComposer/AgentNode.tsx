@@ -25,27 +25,14 @@ export function AgentNode({ step, index, onUpdate, onRemove }: AgentNodeProps) {
   const typeColor = getStepTypeColor(step.step_type);
 
   return (
-    <div
-      className={clsx(
-        'rounded-lg border-2 p-4 transition-all',
-        typeColor,
-        'bg-white dark:bg-gray-800'
-      )}
-    >
+    <div className={clsx('rounded-lg border-2 p-4 transition-all', typeColor, 'bg-white dark:bg-gray-800')}>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span
-            className={clsx(
-              'px-2 py-0.5 rounded text-xs font-medium',
-              getStepTypeBadgeColor(step.step_type)
-            )}
-          >
+          <span className={clsx('px-2 py-0.5 rounded text-xs font-medium', getStepTypeBadgeColor(step.step_type))}>
             {typeLabel}
           </span>
-          <span className="font-medium text-gray-900 dark:text-white text-sm">
-            {step.name}
-          </span>
+          <span className="font-medium text-gray-900 dark:text-white text-sm">{step.name}</span>
         </div>
         <div className="flex items-center gap-1">
           <button
@@ -76,21 +63,13 @@ export function AgentNode({ step, index, onUpdate, onRemove }: AgentNodeProps) {
             <input
               type="text"
               value={step.name}
-              onChange={(e) =>
-                onUpdate(index, { ...step, name: e.target.value })
-              }
+              onChange={(e) => onUpdate(index, { ...step, name: e.target.value })}
               className="w-full px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
             />
           </div>
 
           {/* LLM-specific fields */}
-          {step.step_type === 'llm_step' && (
-            <LlmStepFields
-              step={step}
-              index={index}
-              onUpdate={onUpdate}
-            />
-          )}
+          {step.step_type === 'llm_step' && <LlmStepFields step={step} index={index} onUpdate={onUpdate} />}
 
           {/* Sequential/Parallel sub-steps indicator */}
           {(step.step_type === 'sequential_step' || step.step_type === 'parallel_step') && (
@@ -102,7 +81,8 @@ export function AgentNode({ step, index, onUpdate, onRemove }: AgentNodeProps) {
           {/* Conditional branches indicator */}
           {step.step_type === 'conditional_step' && (
             <div className="text-xs text-gray-500 dark:text-gray-400">
-              {t('agentComposer.node.conditionKey')} {step.condition_key} | {Object.keys(step.branches).length} {t('agentComposer.node.branches')}
+              {t('agentComposer.node.conditionKey')} {step.condition_key} | {Object.keys(step.branches).length}{' '}
+              {t('agentComposer.node.branches')}
             </div>
           )}
         </div>
@@ -146,9 +126,7 @@ function LlmStepFields({ step, index, onUpdate }: LlmStepFieldsProps) {
         <input
           type="text"
           value={step.model ?? ''}
-          onChange={(e) =>
-            onUpdate(index, { ...step, model: e.target.value || null })
-          }
+          onChange={(e) => onUpdate(index, { ...step, model: e.target.value || null })}
           className="w-full px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
           placeholder={t('agentComposer.node.modelPlaceholder')}
         />
@@ -162,7 +140,10 @@ function LlmStepFields({ step, index, onUpdate }: LlmStepFieldsProps) {
           value={step.tools?.join(', ') ?? ''}
           onChange={(e) => {
             const tools = e.target.value
-              ? e.target.value.split(',').map((t) => t.trim()).filter(Boolean)
+              ? e.target.value
+                  .split(',')
+                  .map((t) => t.trim())
+                  .filter(Boolean)
               : null;
             onUpdate(index, { ...step, tools });
           }}
@@ -219,31 +200,46 @@ function LlmStepFields({ step, index, onUpdate }: LlmStepFieldsProps) {
 
 function getStepTypeLabel(type_: string, t: (key: string) => string): string {
   switch (type_) {
-    case 'llm_step': return t('agentComposer.node.typeLlm');
-    case 'sequential_step': return t('agentComposer.node.typeSequential');
-    case 'parallel_step': return t('agentComposer.node.typeParallel');
-    case 'conditional_step': return t('agentComposer.node.typeConditional');
-    default: return type_;
+    case 'llm_step':
+      return t('agentComposer.node.typeLlm');
+    case 'sequential_step':
+      return t('agentComposer.node.typeSequential');
+    case 'parallel_step':
+      return t('agentComposer.node.typeParallel');
+    case 'conditional_step':
+      return t('agentComposer.node.typeConditional');
+    default:
+      return type_;
   }
 }
 
 function getStepTypeColor(type_: string): string {
   switch (type_) {
-    case 'llm_step': return 'border-blue-300 dark:border-blue-700';
-    case 'sequential_step': return 'border-green-300 dark:border-green-700';
-    case 'parallel_step': return 'border-purple-300 dark:border-purple-700';
-    case 'conditional_step': return 'border-amber-300 dark:border-amber-700';
-    default: return 'border-gray-300 dark:border-gray-700';
+    case 'llm_step':
+      return 'border-blue-300 dark:border-blue-700';
+    case 'sequential_step':
+      return 'border-green-300 dark:border-green-700';
+    case 'parallel_step':
+      return 'border-purple-300 dark:border-purple-700';
+    case 'conditional_step':
+      return 'border-amber-300 dark:border-amber-700';
+    default:
+      return 'border-gray-300 dark:border-gray-700';
   }
 }
 
 function getStepTypeBadgeColor(type_: string): string {
   switch (type_) {
-    case 'llm_step': return 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300';
-    case 'sequential_step': return 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300';
-    case 'parallel_step': return 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300';
-    case 'conditional_step': return 'bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300';
-    default: return 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300';
+    case 'llm_step':
+      return 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300';
+    case 'sequential_step':
+      return 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300';
+    case 'parallel_step':
+      return 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300';
+    case 'conditional_step':
+      return 'bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300';
+    default:
+      return 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300';
   }
 }
 

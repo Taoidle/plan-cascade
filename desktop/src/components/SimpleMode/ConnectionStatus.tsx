@@ -49,15 +49,8 @@ export function ConnectionStatus({ status }: ConnectionStatusProps) {
 
   return (
     <div className="flex items-center gap-2">
-      <div
-        className={clsx(
-          'w-2 h-2 rounded-full',
-          color
-        )}
-      />
-      <span className={clsx('text-xs font-medium', textColor)}>
-        {text}
-      </span>
+      <div className={clsx('w-2 h-2 rounded-full', color)} />
+      <span className={clsx('text-xs font-medium', textColor)}>{text}</span>
     </div>
   );
 }

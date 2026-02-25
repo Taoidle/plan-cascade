@@ -10,25 +10,14 @@
 import { useCallback } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import {
-  RocketIcon,
-  Cross2Icon,
-  LightningBoltIcon,
-  ChatBubbleIcon,
-} from '@radix-ui/react-icons';
+import { RocketIcon, Cross2Icon, LightningBoltIcon, ChatBubbleIcon } from '@radix-ui/react-icons';
 import { useTaskModeStore } from '../../store/taskMode';
 
 export function TaskModeSwitcher() {
   const { t } = useTranslation('taskMode');
 
-  const {
-    strategyAnalysis,
-    suggestionDismissed,
-    isTaskMode,
-    isLoading,
-    enterTaskMode,
-    dismissSuggestion,
-  } = useTaskModeStore();
+  const { strategyAnalysis, suggestionDismissed, isTaskMode, isLoading, enterTaskMode, dismissSuggestion } =
+    useTaskModeStore();
 
   const handleAccept = useCallback(() => {
     if (strategyAnalysis) {
@@ -59,7 +48,7 @@ export function TaskModeSwitcher() {
         'bg-blue-50 dark:bg-blue-900/30',
         'border border-blue-200 dark:border-blue-700',
         'text-sm',
-        'animate-in fade-in slide-in-from-bottom-2 duration-200'
+        'animate-in fade-in slide-in-from-bottom-2 duration-200',
       )}
       data-testid="task-mode-switcher"
     >
@@ -69,16 +58,12 @@ export function TaskModeSwitcher() {
       {/* Content */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className="font-medium text-blue-800 dark:text-blue-200">
-            {t('switcher.suggested')}
-          </span>
+          <span className="font-medium text-blue-800 dark:text-blue-200">{t('switcher.suggested')}</span>
           <span className="text-blue-600 dark:text-blue-400 text-xs">
             {t('switcher.confidence', { confidence: confidencePercent })}
           </span>
         </div>
-        <p className="text-xs text-blue-600 dark:text-blue-400 truncate mt-0.5">
-          {strategyAnalysis.reasoning}
-        </p>
+        <p className="text-xs text-blue-600 dark:text-blue-400 truncate mt-0.5">{strategyAnalysis.reasoning}</p>
       </div>
 
       {/* Mode indicators */}
@@ -97,7 +82,7 @@ export function TaskModeSwitcher() {
             'px-2.5 py-1 rounded-md text-xs font-medium',
             'bg-blue-600 hover:bg-blue-700 text-white',
             'disabled:opacity-50 disabled:cursor-not-allowed',
-            'transition-colors'
+            'transition-colors',
           )}
           data-testid="task-mode-accept"
         >
@@ -109,7 +94,7 @@ export function TaskModeSwitcher() {
             'p-1 rounded-md',
             'text-gray-500 dark:text-gray-400',
             'hover:bg-gray-200 dark:hover:bg-gray-700',
-            'transition-colors'
+            'transition-colors',
           )}
           aria-label={t('switcher.dismiss')}
           data-testid="task-mode-dismiss"

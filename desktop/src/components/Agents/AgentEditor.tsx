@@ -128,17 +128,11 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
   };
 
   const toggleTool = (toolName: string) => {
-    setAllowedTools((prev) =>
-      prev.includes(toolName)
-        ? prev.filter((t) => t !== toolName)
-        : [...prev, toolName]
-    );
+    setAllowedTools((prev) => (prev.includes(toolName) ? prev.filter((t) => t !== toolName) : [...prev, toolName]));
   };
 
   const toggleCategory = (category: string) => {
-    const categoryTools: string[] = AVAILABLE_TOOLS.filter((t) => t.category === category).map(
-      (t) => t.name
-    );
+    const categoryTools: string[] = AVAILABLE_TOOLS.filter((t) => t.category === category).map((t) => t.name);
     const allSelected = categoryTools.every((t) => allowedTools.includes(t));
 
     if (allSelected) {
@@ -159,7 +153,7 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
             'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
             'w-full max-w-2xl max-h-[85vh] overflow-y-auto',
             'bg-white dark:bg-gray-900 rounded-lg shadow-xl z-50',
-            'p-6'
+            'p-6',
           )}
         >
           {/* Header */}
@@ -181,9 +175,7 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
           <div className="space-y-4">
             {/* Name */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                {t('name')} *
-              </label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('name')} *</label>
               <input
                 type="text"
                 value={name}
@@ -196,12 +188,10 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
                     : 'border-gray-300 dark:border-gray-600 focus:ring-primary-500',
                   'bg-white dark:bg-gray-800',
                   'text-gray-900 dark:text-white',
-                  'focus:outline-none focus:ring-2'
+                  'focus:outline-none focus:ring-2',
                 )}
               />
-              {errors.name && (
-                <p className="mt-1 text-sm text-red-500">{errors.name}</p>
-              )}
+              {errors.name && <p className="mt-1 text-sm text-red-500">{errors.name}</p>}
             </div>
 
             {/* Description */}
@@ -219,16 +209,14 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
                   'border-gray-300 dark:border-gray-600 focus:ring-primary-500',
                   'bg-white dark:bg-gray-800',
                   'text-gray-900 dark:text-white',
-                  'focus:outline-none focus:ring-2'
+                  'focus:outline-none focus:ring-2',
                 )}
               />
             </div>
 
             {/* Model */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                {t('model')} *
-              </label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('model')} *</label>
               <select
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
@@ -239,7 +227,7 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
                     : 'border-gray-300 dark:border-gray-600 focus:ring-primary-500',
                   'bg-white dark:bg-gray-800',
                   'text-gray-900 dark:text-white',
-                  'focus:outline-none focus:ring-2'
+                  'focus:outline-none focus:ring-2',
                 )}
               >
                 {CLAUDE_MODELS.map((m) => (
@@ -248,9 +236,7 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
                   </option>
                 ))}
               </select>
-              {errors.model && (
-                <p className="mt-1 text-sm text-red-500">{errors.model}</p>
-              )}
+              {errors.model && <p className="mt-1 text-sm text-red-500">{errors.model}</p>}
             </div>
 
             {/* System Prompt */}
@@ -270,12 +256,10 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
                     : 'border-gray-300 dark:border-gray-600 focus:ring-primary-500',
                   'bg-white dark:bg-gray-800',
                   'text-gray-900 dark:text-white',
-                  'focus:outline-none focus:ring-2'
+                  'focus:outline-none focus:ring-2',
                 )}
               />
-              {errors.systemPrompt && (
-                <p className="mt-1 text-sm text-red-500">{errors.systemPrompt}</p>
-              )}
+              {errors.systemPrompt && <p className="mt-1 text-sm text-red-500">{errors.systemPrompt}</p>}
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 {systemPrompt.length.toLocaleString()} / 100,000 {t('characters')}
               </p>
@@ -286,17 +270,17 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 {t('allowedTools')}
                 <span className="ml-2 text-xs text-gray-500">
-                  ({allowedTools.length === 0
+                  (
+                  {allowedTools.length === 0
                     ? t('allToolsAllowed')
-                    : t('toolsSelected', { count: allowedTools.length })})
+                    : t('toolsSelected', { count: allowedTools.length })}
+                  )
                 </span>
               </label>
 
               <div className="space-y-3 max-h-48 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-md p-3">
                 {Object.entries(toolsByCategory).map(([category, tools]) => {
-                  const categorySelected = tools.filter((t) =>
-                    allowedTools.includes(t.name)
-                  ).length;
+                  const categorySelected = tools.filter((t) => allowedTools.includes(t.name)).length;
                   const allSelected = categorySelected === tools.length;
                   const someSelected = categorySelected > 0 && !allSelected;
 
@@ -309,7 +293,7 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
                         className={clsx(
                           'flex items-center gap-2 w-full text-left',
                           'text-sm font-medium text-gray-700 dark:text-gray-300',
-                          'hover:text-gray-900 dark:hover:text-white'
+                          'hover:text-gray-900 dark:hover:text-white',
                         )}
                       >
                         <span
@@ -318,13 +302,11 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
                             allSelected
                               ? 'bg-primary-600 text-white'
                               : someSelected
-                              ? 'bg-primary-200 dark:bg-primary-800'
-                              : 'border border-gray-300 dark:border-gray-600'
+                                ? 'bg-primary-200 dark:bg-primary-800'
+                                : 'border border-gray-300 dark:border-gray-600',
                           )}
                         >
-                          {(allSelected || someSelected) && (
-                            <CheckIcon className="w-3 h-3" />
-                          )}
+                          {(allSelected || someSelected) && <CheckIcon className="w-3 h-3" />}
                         </span>
                         {category}
                       </button>
@@ -332,22 +314,15 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
                       {/* Tools in Category */}
                       <div className="ml-6 mt-1 space-y-1">
                         {tools.map((tool) => (
-                          <label
-                            key={tool.name}
-                            className="flex items-center gap-2 text-sm cursor-pointer"
-                          >
+                          <label key={tool.name} className="flex items-center gap-2 text-sm cursor-pointer">
                             <input
                               type="checkbox"
                               checked={allowedTools.includes(tool.name)}
                               onChange={() => toggleTool(tool.name)}
                               className="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500"
                             />
-                            <span className="text-gray-600 dark:text-gray-400">
-                              {tool.name}
-                            </span>
-                            <span className="text-xs text-gray-400 dark:text-gray-500">
-                              - {tool.description}
-                            </span>
+                            <span className="text-gray-600 dark:text-gray-400">{tool.name}</span>
+                            <span className="text-xs text-gray-400 dark:text-gray-500">- {tool.description}</span>
                           </label>
                         ))}
                       </div>
@@ -370,7 +345,7 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
                   'text-red-700 dark:text-red-300',
                   'hover:bg-red-200 dark:hover:bg-red-800',
                   'disabled:opacity-50',
-                  'text-sm font-medium transition-colors'
+                  'text-sm font-medium transition-colors',
                 )}
               >
                 <TrashIcon className="w-4 h-4" />
@@ -388,7 +363,7 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
                     'bg-gray-100 dark:bg-gray-800',
                     'text-gray-700 dark:text-gray-300',
                     'hover:bg-gray-200 dark:hover:bg-gray-700',
-                    'text-sm font-medium transition-colors'
+                    'text-sm font-medium transition-colors',
                   )}
                 >
                   {t('common:cancel')}
@@ -403,14 +378,14 @@ export function AgentEditor({ agent, open, onOpenChange, onSaved }: AgentEditorP
                   'bg-primary-600 hover:bg-primary-700',
                   'text-white text-sm font-medium',
                   'disabled:opacity-50',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 {loading.creating || loading.updating
                   ? t('common:saving')
                   : isEditMode
-                  ? t('common:save')
-                  : t('common:create')}
+                    ? t('common:save')
+                    : t('common:create')}
               </button>
             </div>
           </div>

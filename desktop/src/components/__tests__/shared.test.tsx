@@ -151,8 +151,12 @@ describe('SkeletonGroup', () => {
   it('renders the correct number of children', () => {
     render(
       <SkeletonGroup count={5}>
-        {(i) => <div key={i} data-testid={`item-${i}`}>Item {i}</div>}
-      </SkeletonGroup>
+        {(i) => (
+          <div key={i} data-testid={`item-${i}`}>
+            Item {i}
+          </div>
+        )}
+      </SkeletonGroup>,
     );
 
     for (let i = 0; i < 5; i++) {
@@ -164,18 +168,14 @@ describe('SkeletonGroup', () => {
     const { container } = render(
       <SkeletonGroup count={2} className="gap-4">
         {(i) => <div key={i}>Item</div>}
-      </SkeletonGroup>
+      </SkeletonGroup>,
     );
 
     expect(container.firstChild).toHaveClass('gap-4');
   });
 
   it('is hidden from assistive technology', () => {
-    const { container } = render(
-      <SkeletonGroup count={1}>
-        {(i) => <div key={i}>Item</div>}
-      </SkeletonGroup>
-    );
+    const { container } = render(<SkeletonGroup count={1}>{(i) => <div key={i}>Item</div>}</SkeletonGroup>);
 
     expect(container.firstChild).toHaveAttribute('aria-hidden', 'true');
   });
@@ -246,5 +246,4 @@ describe('ShortcutOverlay', () => {
 
     expect(container.querySelector('[role="dialog"]')).not.toBeInTheDocument();
   });
-
 });

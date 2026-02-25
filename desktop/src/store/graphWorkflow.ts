@@ -6,13 +6,7 @@
  */
 
 import { create } from 'zustand';
-import type {
-  GraphWorkflow,
-  GraphWorkflowInfo,
-  GraphNode,
-  Edge,
-  GraphWorkflowEvent,
-} from '../types/graphWorkflow';
+import type { GraphWorkflow, GraphWorkflowInfo, GraphNode, Edge, GraphWorkflowEvent } from '../types/graphWorkflow';
 import { createEmptyGraphWorkflow } from '../types/graphWorkflow';
 import {
   listGraphWorkflows,

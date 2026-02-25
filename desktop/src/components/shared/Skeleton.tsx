@@ -100,11 +100,7 @@ function SkeletonBase({
 }) {
   return (
     <div
-      className={clsx(
-        'bg-gray-200 dark:bg-gray-700',
-        animate && 'animate-skeleton',
-        className
-      )}
+      className={clsx('bg-gray-200 dark:bg-gray-700', animate && 'animate-skeleton', className)}
       style={style}
       aria-hidden="true"
     />
@@ -131,11 +127,7 @@ export function Skeleton(props: SkeletonProps) {
     }
 
     case 'text': {
-      const {
-        lines = 3,
-        gap = '0.5rem',
-        lastLineWidth = '60%',
-      } = props as SkeletonTextProps;
+      const { lines = 3, gap = '0.5rem', lastLineWidth = '60%' } = props as SkeletonTextProps;
       return (
         <div
           className={clsx('w-full', className)}
@@ -160,18 +152,10 @@ export function Skeleton(props: SkeletonProps) {
       const { showImage = false, lines = 2 } = props as SkeletonCardProps;
       return (
         <div
-          className={clsx(
-            'rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden',
-            className
-          )}
+          className={clsx('rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden', className)}
           aria-hidden="true"
         >
-          {showImage && (
-            <SkeletonBase
-              className="w-full h-40"
-              animate={animate}
-            />
-          )}
+          {showImage && <SkeletonBase className="w-full h-40" animate={animate} />}
           <div className="p-4 space-y-3">
             <SkeletonBase className="h-5 w-2/3 rounded" animate={animate} />
             {Array.from({ length: lines }).map((_, i) => (
@@ -194,12 +178,7 @@ export function Skeleton(props: SkeletonProps) {
         md: 'h-10 w-24',
         lg: 'h-12 w-32',
       };
-      return (
-        <SkeletonBase
-          className={clsx('rounded-lg', sizeClasses[size], className)}
-          animate={animate}
-        />
-      );
+      return <SkeletonBase className={clsx('rounded-lg', sizeClasses[size], className)} animate={animate} />;
     }
 
     case 'avatar': {
@@ -219,21 +198,12 @@ export function Skeleton(props: SkeletonProps) {
     }
 
     case 'badge': {
-      return (
-        <SkeletonBase
-          className={clsx('h-5 w-16 rounded-full', className)}
-          animate={animate}
-        />
-      );
+      return <SkeletonBase className={clsx('h-5 w-16 rounded-full', className)} animate={animate} />;
     }
 
     case 'rect':
     default: {
-      const {
-        width = '100%',
-        height = '1rem',
-        rounded = 'md',
-      } = props as SkeletonRectProps;
+      const { width = '100%', height = '1rem', rounded = 'md' } = props as SkeletonRectProps;
       const roundedClasses = {
         none: '',
         sm: 'rounded-sm',
@@ -332,10 +302,7 @@ export function TableSkeleton({ rows = 5, cols = 4 }: { rows?: number; cols?: nu
 /** Skeleton for the MCP server card */
 export function MCPServerSkeleton() {
   return (
-    <div
-      className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 animate-pulse"
-      aria-hidden="true"
-    >
+    <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 animate-pulse" aria-hidden="true">
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-3">
           <div className="w-2.5 h-2.5 rounded-full bg-gray-200 dark:bg-gray-700" />

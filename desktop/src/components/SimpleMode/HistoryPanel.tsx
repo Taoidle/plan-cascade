@@ -40,9 +40,7 @@ export function HistoryPanel({ onClose }: HistoryPanelProps) {
     <div className="max-w-2xl 3xl:max-w-3xl 5xl:max-w-4xl mx-auto w-full animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-          {t('history.title')}
-        </h2>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t('history.title')}</h2>
         <div className="flex items-center gap-2">
           {history.length > 0 && (
             <button
@@ -51,7 +49,7 @@ export function HistoryPanel({ onClose }: HistoryPanelProps) {
                 'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm',
                 'text-red-600 dark:text-red-400',
                 'hover:bg-red-50 dark:hover:bg-red-900/20',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               <TrashIcon className="w-4 h-4" />
@@ -64,7 +62,7 @@ export function HistoryPanel({ onClose }: HistoryPanelProps) {
               'p-1.5 rounded-lg',
               'text-gray-500 dark:text-gray-400',
               'hover:bg-gray-100 dark:hover:bg-gray-800',
-              'transition-colors'
+              'transition-colors',
             )}
           >
             <Cross1Icon className="w-4 h-4" />
@@ -76,12 +74,8 @@ export function HistoryPanel({ onClose }: HistoryPanelProps) {
       {history.length === 0 ? (
         <div className="text-center py-12">
           <ClockIcon className="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600 mb-3" />
-          <p className="text-gray-500 dark:text-gray-400">
-            {t('history.empty.title')}
-          </p>
-          <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-            {t('history.empty.subtitle')}
-          </p>
+          <p className="text-gray-500 dark:text-gray-400">{t('history.empty.title')}</p>
+          <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">{t('history.empty.subtitle')}</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -90,9 +84,7 @@ export function HistoryPanel({ onClose }: HistoryPanelProps) {
               key={item.id}
               item={item}
               isExpanded={expandedId === item.id}
-              onToggleExpand={() =>
-                setExpandedId(expandedId === item.id ? null : item.id)
-              }
+              onToggleExpand={() => setExpandedId(expandedId === item.id ? null : item.id)}
               onRestore={item.conversationContent ? () => handleRestore(item.id) : undefined}
             />
           ))}
@@ -192,16 +184,14 @@ function HistoryItem({ item, isExpanded, onToggleExpand, onRestore }: HistoryIte
         'bg-white dark:bg-gray-800',
         'border border-gray-200 dark:border-gray-700',
         'hover:border-gray-300 dark:hover:border-gray-600',
-        'transition-colors'
+        'transition-colors',
       )}
     >
       <div className="flex items-start gap-3">
         {getStatusIcon()}
 
         <div className="flex-1 min-w-0">
-          <p className="font-medium text-gray-900 dark:text-white truncate">
-            {item.taskDescription}
-          </p>
+          <p className="font-medium text-gray-900 dark:text-white truncate">{item.taskDescription}</p>
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-sm text-gray-500 dark:text-gray-400">
             <span>{formatDate(item.startedAt)}</span>
@@ -224,11 +214,7 @@ function HistoryItem({ item, isExpanded, onToggleExpand, onRestore }: HistoryIte
           </div>
 
           {/* Error preview */}
-          {item.error && (
-            <p className="mt-2 text-sm text-red-500 dark:text-red-400 truncate">
-              {item.error}
-            </p>
-          )}
+          {item.error && <p className="mt-2 text-sm text-red-500 dark:text-red-400 truncate">{item.error}</p>}
 
           {/* Action buttons */}
           {hasContent && (
@@ -239,10 +225,12 @@ function HistoryItem({ item, isExpanded, onToggleExpand, onRestore }: HistoryIte
                   'flex items-center gap-1 px-2 py-1 rounded text-xs',
                   'text-gray-500 dark:text-gray-400',
                   'hover:bg-gray-100 dark:hover:bg-gray-700',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
-                <ChevronRightIcon className={clsx('w-3 h-3 transition-transform duration-200', isExpanded && 'rotate-90')} />
+                <ChevronRightIcon
+                  className={clsx('w-3 h-3 transition-transform duration-200', isExpanded && 'rotate-90')}
+                />
                 {isExpanded ? 'Collapse' : 'View conversation'}
               </button>
 
@@ -253,7 +241,7 @@ function HistoryItem({ item, isExpanded, onToggleExpand, onRestore }: HistoryIte
                     'flex items-center gap-1 px-2 py-1 rounded text-xs',
                     'text-primary-600 dark:text-primary-400',
                     'hover:bg-primary-50 dark:hover:bg-primary-900/20',
-                    'transition-colors'
+                    'transition-colors',
                   )}
                 >
                   <ResetIcon className="w-3 h-3" />
@@ -270,7 +258,7 @@ function HistoryItem({ item, isExpanded, onToggleExpand, onRestore }: HistoryIte
                 className={clsx(
                   'mt-3 p-3 rounded-lg max-h-64 overflow-y-auto',
                   'bg-gray-950 border border-gray-800',
-                  'font-mono text-xs text-gray-300 whitespace-pre-wrap'
+                  'font-mono text-xs text-gray-300 whitespace-pre-wrap',
                 )}
               >
                 {item.conversationContent}

@@ -9,14 +9,7 @@
 
 import { useState, useCallback, memo, useRef, useEffect } from 'react';
 import { clsx } from 'clsx';
-import {
-  CopyIcon,
-  ReloadIcon,
-  Pencil1Icon,
-  CheckIcon,
-  Cross2Icon,
-  Share1Icon,
-} from '@radix-ui/react-icons';
+import { CopyIcon, ReloadIcon, Pencil1Icon, CheckIcon, Cross2Icon, Share1Icon } from '@radix-ui/react-icons';
 import { useTranslation } from 'react-i18next';
 import { Message } from '../../store/claudeCode';
 
@@ -106,7 +99,7 @@ export const MessageActions = memo(function MessageActions({
         }
       }
     },
-    [onEdit]
+    [onEdit],
   );
 
   const handleEditCancel = useCallback(() => {
@@ -114,13 +107,7 @@ export const MessageActions = memo(function MessageActions({
   }, []);
 
   if (isEditing && isUser) {
-    return (
-      <EditMode
-        content={message.content}
-        onSave={handleEditSave}
-        onCancel={handleEditCancel}
-      />
-    );
+    return <EditMode content={message.content} onSave={handleEditSave} onCancel={handleEditCancel} />;
   }
 
   return (
@@ -129,7 +116,7 @@ export const MessageActions = memo(function MessageActions({
         'flex items-center gap-1',
         'opacity-0 group-hover:opacity-100',
         'transition-opacity duration-150',
-        className
+        className,
       )}
       role="toolbar"
       aria-label="Message actions"
@@ -154,29 +141,13 @@ export const MessageActions = memo(function MessageActions({
       )}
 
       {/* Edit button - for user messages */}
-      {isUser && onEdit && (
-        <ActionButton
-          icon={Pencil1Icon}
-          label={t('messageActions.edit')}
-          onClick={handleEdit}
-        />
-      )}
+      {isUser && onEdit && <ActionButton icon={Pencil1Icon} label={t('messageActions.edit')} onClick={handleEdit} />}
 
       {/* Fork/Branch button */}
-      {onFork && (
-        <ActionButton
-          icon={Share1Icon}
-          label={t('messageActions.fork')}
-          onClick={onFork}
-        />
-      )}
+      {onFork && <ActionButton icon={Share1Icon} label={t('messageActions.fork')} onClick={onFork} />}
 
       {/* Action feedback */}
-      {actionFeedback && (
-        <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
-          {actionFeedback}
-        </span>
-      )}
+      {actionFeedback && <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">{actionFeedback}</span>}
     </div>
   );
 });
@@ -213,17 +184,12 @@ const ActionButton = memo(function ActionButton({
           ? 'bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-400'
           : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400',
         !disabled && !isSuccess && 'hover:bg-gray-200 dark:hover:bg-gray-700',
-        disabled && 'opacity-50 cursor-not-allowed'
+        disabled && 'opacity-50 cursor-not-allowed',
       )}
       title={label}
       aria-label={label}
     >
-      <Icon
-        className={clsx(
-          'w-4 h-4',
-          isLoading && 'animate-spin'
-        )}
-      />
+      <Icon className={clsx('w-4 h-4', isLoading && 'animate-spin')} />
     </button>
   );
 });
@@ -232,11 +198,7 @@ const ActionButton = memo(function ActionButton({
 // EditMode Component
 // ============================================================================
 
-const EditMode = memo(function EditMode({
-  content,
-  onSave,
-  onCancel,
-}: EditModeProps) {
+const EditMode = memo(function EditMode({ content, onSave, onCancel }: EditModeProps) {
   const { t } = useTranslation('claudeCode');
   const [editedContent, setEditedContent] = useState(content);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -260,7 +222,7 @@ const EditMode = memo(function EditMode({
         onSave(editedContent);
       }
     },
-    [editedContent, onSave, onCancel]
+    [editedContent, onSave, onCancel],
   );
 
   const hasChanges = editedContent !== content;
@@ -278,15 +240,13 @@ const EditMode = memo(function EditMode({
           'border border-primary-300 dark:border-primary-700',
           'focus:border-primary-500 focus:ring-1 focus:ring-primary-500',
           'text-gray-900 dark:text-white',
-          'text-sm'
+          'text-sm',
         )}
         rows={Math.min(10, editedContent.split('\n').length + 1)}
       />
 
       <div className="flex items-center justify-end gap-2">
-        <span className="text-xs text-gray-500 dark:text-gray-400 mr-auto">
-          {t('messageActions.editHint')}
-        </span>
+        <span className="text-xs text-gray-500 dark:text-gray-400 mr-auto">{t('messageActions.editHint')}</span>
 
         <button
           onClick={onCancel}
@@ -296,7 +256,7 @@ const EditMode = memo(function EditMode({
             'bg-gray-100 dark:bg-gray-800',
             'text-gray-700 dark:text-gray-300',
             'hover:bg-gray-200 dark:hover:bg-gray-700',
-            'transition-colors'
+            'transition-colors',
           )}
         >
           <Cross2Icon className="w-4 h-4" />
@@ -312,7 +272,7 @@ const EditMode = memo(function EditMode({
             hasChanges
               ? 'bg-primary-600 text-white hover:bg-primary-700'
               : 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed',
-            'transition-colors'
+            'transition-colors',
           )}
         >
           <CheckIcon className="w-4 h-4" />
@@ -339,7 +299,7 @@ export interface UseMessageActionsResult {
 export function useMessageActions(
   messages: Message[],
   onSendMessage: (content: string) => Promise<void>,
-  updateMessages: (messages: Message[]) => void
+  updateMessages: (messages: Message[]) => void,
 ): UseMessageActionsResult {
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [regeneratingMessageId, setRegeneratingMessageId] = useState<string | null>(null);
@@ -378,7 +338,7 @@ export function useMessageActions(
         setRegeneratingMessageId(null);
       }
     },
-    [messages, onSendMessage, updateMessages]
+    [messages, onSendMessage, updateMessages],
   );
 
   const editMessage = useCallback(
@@ -388,9 +348,9 @@ export function useMessageActions(
 
       // Keep messages up to and including the edited message
       // but replace the content
-      const newMessages = messages.slice(0, messageIndex + 1).map((m) =>
-        m.id === messageId ? { ...m, content: newContent } : m
-      );
+      const newMessages = messages
+        .slice(0, messageIndex + 1)
+        .map((m) => (m.id === messageId ? { ...m, content: newContent } : m));
 
       // Remove all messages after the edited one
       updateMessages(newMessages);
@@ -398,7 +358,7 @@ export function useMessageActions(
       // Resend to get new response
       await onSendMessage(newContent);
     },
-    [messages, onSendMessage, updateMessages]
+    [messages, onSendMessage, updateMessages],
   );
 
   const forkConversation = useCallback(
@@ -413,7 +373,7 @@ export function useMessageActions(
       // TODO: Implement conversation branching in store
       console.log('Fork conversation at message:', messageId, branchMessages);
     },
-    [messages]
+    [messages],
   );
 
   return {

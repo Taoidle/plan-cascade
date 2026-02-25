@@ -12,11 +12,7 @@
 // ============================================================================
 
 /** Component types supported by DynamicRenderer */
-export type RichContentComponentType =
-  | 'table'
-  | 'chart'
-  | 'diff'
-  | 'action_buttons';
+export type RichContentComponentType = 'table' | 'chart' | 'diff' | 'action_buttons';
 
 /** RichContent event payload from agent stream */
 export interface RichContentEvent {

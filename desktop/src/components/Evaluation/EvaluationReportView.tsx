@@ -14,14 +14,7 @@ import { useEvaluationStore } from '../../store/evaluation';
 
 export function EvaluationReportView() {
   const { t } = useTranslation('expertMode');
-  const {
-    selectedRunId,
-    reports,
-    runs,
-    loading,
-    selectRun,
-    setActiveTab,
-  } = useEvaluationStore();
+  const { selectedRunId, reports, runs, loading, selectRun, setActiveTab } = useEvaluationStore();
 
   if (loading.reports) {
     return (
@@ -34,22 +27,16 @@ export function EvaluationReportView() {
   if (!selectedRunId || reports.length === 0) {
     return (
       <div className="p-6 max-w-4xl mx-auto">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-          {t('evaluation.reports.title')}
-        </h2>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t('evaluation.reports.title')}</h2>
 
         {runs.filter((r) => r.status === 'completed').length === 0 ? (
           <div className="text-center py-12 text-gray-500 dark:text-gray-400">
             <p className="text-sm">{t('evaluation.reports.empty')}</p>
-            <p className="text-xs mt-1">
-              {t('evaluation.reports.emptyHint')}
-            </p>
+            <p className="text-xs mt-1">{t('evaluation.reports.emptyHint')}</p>
           </div>
         ) : (
           <div className="space-y-2">
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-              {t('evaluation.reports.selectRun')}
-            </p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{t('evaluation.reports.selectRun')}</p>
             {runs
               .filter((r) => r.status === 'completed')
               .map((run) => (
@@ -60,14 +47,15 @@ export function EvaluationReportView() {
                     'w-full text-left p-3 rounded-lg border transition-colors',
                     'border-gray-200 dark:border-gray-700',
                     'hover:border-primary-300 dark:hover:border-primary-700',
-                    'bg-white dark:bg-gray-800'
+                    'bg-white dark:bg-gray-800',
                   )}
                 >
                   <div className="text-sm font-medium text-gray-900 dark:text-white">
                     {t('evaluation.reports.runLabel')} {run.id.slice(0, 8)}
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    {run.model_count} {t('evaluation.reports.models')} | {run.case_count} {t('evaluation.reports.cases')} | {new Date(run.created_at).toLocaleDateString()}
+                    {run.model_count} {t('evaluation.reports.models')} | {run.case_count}{' '}
+                    {t('evaluation.reports.cases')} | {new Date(run.created_at).toLocaleDateString()}
                   </div>
                 </button>
               ))}
@@ -94,11 +82,10 @@ export function EvaluationReportView() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            {t('evaluation.reports.title')}
-          </h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t('evaluation.reports.title')}</h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            {t('evaluation.reports.runLabel')} {selectedRunId.slice(0, 8)} | {reports.length} {reports.length !== 1 ? t('evaluation.reports.models') : t('evaluation.reports.model')} compared
+            {t('evaluation.reports.runLabel')} {selectedRunId.slice(0, 8)} | {reports.length}{' '}
+            {reports.length !== 1 ? t('evaluation.reports.models') : t('evaluation.reports.model')} compared
           </p>
         </div>
         <button
@@ -124,7 +111,7 @@ export function EvaluationReportView() {
                 'flex items-center gap-4 p-3 rounded-lg border',
                 rank === 0
                   ? 'border-yellow-300 dark:border-yellow-700 bg-yellow-50 dark:bg-yellow-900/10'
-                  : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
+                  : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800',
               )}
             >
               <span
@@ -132,7 +119,7 @@ export function EvaluationReportView() {
                   'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0',
                   rank === 0
                     ? 'bg-yellow-200 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200'
-                    : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400',
                 )}
               >
                 {rank + 1}
@@ -142,18 +129,21 @@ export function EvaluationReportView() {
                   {report.provider}/{report.model}
                 </div>
                 <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  {report.results.filter((r) => r.passed).length}/{report.results.length} {t('evaluation.reports.passed')}
+                  {report.results.filter((r) => r.passed).length}/{report.results.length}{' '}
+                  {t('evaluation.reports.passed')}
                 </div>
               </div>
               <div className="text-right shrink-0">
-                <div className={clsx(
-                  'text-lg font-bold',
-                  report.overall_score >= 0.8
-                    ? 'text-green-600 dark:text-green-400'
-                    : report.overall_score >= 0.5
-                    ? 'text-yellow-600 dark:text-yellow-400'
-                    : 'text-red-600 dark:text-red-400'
-                )}>
+                <div
+                  className={clsx(
+                    'text-lg font-bold',
+                    report.overall_score >= 0.8
+                      ? 'text-green-600 dark:text-green-400'
+                      : report.overall_score >= 0.5
+                        ? 'text-yellow-600 dark:text-yellow-400'
+                        : 'text-red-600 dark:text-red-400',
+                  )}
+                >
                   {(report.overall_score * 100).toFixed(1)}%
                 </div>
               </div>
@@ -176,10 +166,7 @@ export function EvaluationReportView() {
                     {t('evaluation.reports.model')}
                   </th>
                   {caseIds.map((caseId) => (
-                    <th
-                      key={caseId}
-                      className="text-center py-2 px-2 text-gray-500 dark:text-gray-400 font-medium"
-                    >
+                    <th key={caseId} className="text-center py-2 px-2 text-gray-500 dark:text-gray-400 font-medium">
                       {caseId.slice(0, 12)}
                     </th>
                   ))}
@@ -194,9 +181,7 @@ export function EvaluationReportView() {
                     key={`${report.provider}-${report.model}`}
                     className="border-b border-gray-100 dark:border-gray-800"
                   >
-                    <td className="py-2 px-2 font-mono text-gray-900 dark:text-white">
-                      {report.model}
-                    </td>
+                    <td className="py-2 px-2 font-mono text-gray-900 dark:text-white">{report.model}</td>
                     {caseIds.map((caseId) => {
                       const result = report.results.find((r) => r.case_id === caseId);
                       return (
@@ -207,7 +192,7 @@ export function EvaluationReportView() {
                                 'inline-block px-1.5 py-0.5 rounded',
                                 result.passed
                                   ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-                                  : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+                                  : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
                               )}
                             >
                               {(result.score * 100).toFixed(0)}%
@@ -224,8 +209,8 @@ export function EvaluationReportView() {
                           report.overall_score >= 0.8
                             ? 'text-green-600 dark:text-green-400'
                             : report.overall_score >= 0.5
-                            ? 'text-yellow-600 dark:text-yellow-400'
-                            : 'text-red-600 dark:text-red-400'
+                              ? 'text-yellow-600 dark:text-yellow-400'
+                              : 'text-red-600 dark:text-red-400',
                         )}
                       >
                         {(report.overall_score * 100).toFixed(1)}%
@@ -254,18 +239,13 @@ export function EvaluationReportView() {
               return (
                 <div key={`dur-${report.provider}-${report.model}`}>
                   <div className="flex justify-between text-xs mb-0.5">
-                    <span className="font-mono text-gray-700 dark:text-gray-300 truncate">
-                      {report.model}
-                    </span>
+                    <span className="font-mono text-gray-700 dark:text-gray-300 truncate">{report.model}</span>
                     <span className="text-gray-500 dark:text-gray-400 shrink-0 ml-2">
                       {(report.duration_ms / 1000).toFixed(1)}s
                     </span>
                   </div>
                   <div className="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-blue-500 rounded-full"
-                      style={{ width: `${pct}%` }}
-                    />
+                    <div className="h-full bg-blue-500 rounded-full" style={{ width: `${pct}%` }} />
                   </div>
                 </div>
               );
@@ -286,18 +266,14 @@ export function EvaluationReportView() {
               return (
                 <div key={`cost-${report.provider}-${report.model}`}>
                   <div className="flex justify-between text-xs mb-0.5">
-                    <span className="font-mono text-gray-700 dark:text-gray-300 truncate">
-                      {report.model}
-                    </span>
+                    <span className="font-mono text-gray-700 dark:text-gray-300 truncate">{report.model}</span>
                     <span className="text-gray-500 dark:text-gray-400 shrink-0 ml-2">
-                      ${report.estimated_cost.toFixed(4)} | {report.total_tokens.toLocaleString()} {t('evaluation.reports.tokens')}
+                      ${report.estimated_cost.toFixed(4)} | {report.total_tokens.toLocaleString()}{' '}
+                      {t('evaluation.reports.tokens')}
                     </span>
                   </div>
                   <div className="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-amber-500 rounded-full"
-                      style={{ width: `${pct}%` }}
-                    />
+                    <div className="h-full bg-amber-500 rounded-full" style={{ width: `${pct}%` }} />
                   </div>
                 </div>
               );

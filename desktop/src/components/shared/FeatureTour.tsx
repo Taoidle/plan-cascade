@@ -14,12 +14,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  Cross2Icon,
-  CheckCircledIcon,
-} from '@radix-ui/react-icons';
+import { ChevronLeftIcon, ChevronRightIcon, Cross2Icon, CheckCircledIcon } from '@radix-ui/react-icons';
 import { useSettingsStore } from '../../store/settings';
 import { useModeStore, type Mode } from '../../store/mode';
 
@@ -296,14 +291,7 @@ export function FeatureTour({ active, onFinish }: FeatureTourProps) {
           <mask id="tour-mask">
             <rect x="0" y="0" width="100%" height="100%" fill="white" />
             {cutout && (
-              <rect
-                x={cutout.left}
-                y={cutout.top}
-                width={cutout.width}
-                height={cutout.height}
-                rx="8"
-                fill="black"
-              />
+              <rect x={cutout.left} y={cutout.top} width={cutout.width} height={cutout.height} rx="8" fill="black" />
             )}
           </mask>
         </defs>
@@ -338,7 +326,7 @@ export function FeatureTour({ active, onFinish }: FeatureTourProps) {
         ref={tooltipRef}
         className={clsx(
           'absolute z-10 transition-all duration-300',
-          isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
+          isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-95',
         )}
         style={{
           top: tooltipPos.top,
@@ -355,7 +343,7 @@ export function FeatureTour({ active, onFinish }: FeatureTourProps) {
             tooltipPos.arrowSide === 'top' && 'top-[-7px] left-1/2 -translate-x-1/2 border-b-0 border-r-0',
             tooltipPos.arrowSide === 'bottom' && 'bottom-[-7px] left-1/2 -translate-x-1/2 border-t-0 border-l-0',
             tooltipPos.arrowSide === 'left' && 'left-[-7px] top-1/2 -translate-y-1/2 border-t-0 border-r-0',
-            tooltipPos.arrowSide === 'right' && 'right-[-7px] top-1/2 -translate-y-1/2 border-b-0 border-l-0'
+            tooltipPos.arrowSide === 'right' && 'right-[-7px] top-1/2 -translate-y-1/2 border-b-0 border-l-0',
           )}
         />
 
@@ -364,7 +352,7 @@ export function FeatureTour({ active, onFinish }: FeatureTourProps) {
           className={clsx(
             'rounded-xl shadow-xl border border-[var(--border-default)]',
             'bg-[var(--surface)] overflow-hidden',
-            'max-h-[calc(100vh-32px)]'
+            'max-h-[calc(100vh-32px)]',
           )}
         >
           {/* Header with step counter */}
@@ -378,7 +366,7 @@ export function FeatureTour({ active, onFinish }: FeatureTourProps) {
                 'p-1 rounded-md',
                 'hover:bg-[var(--bg-subtle)]',
                 'text-[var(--text-muted)]',
-                'transition-colors'
+                'transition-colors',
               )}
               aria-label="Close tour"
             >
@@ -406,8 +394,8 @@ export function FeatureTour({ active, onFinish }: FeatureTourProps) {
                   i === currentIndex
                     ? 'bg-[var(--color-primary)] w-4'
                     : i < currentIndex
-                    ? 'bg-[var(--color-primary)] opacity-40'
-                    : 'bg-[var(--bg-muted)]'
+                      ? 'bg-[var(--color-primary)] opacity-40'
+                      : 'bg-[var(--bg-muted)]',
                 )}
               />
             ))}
@@ -430,7 +418,7 @@ export function FeatureTour({ active, onFinish }: FeatureTourProps) {
                     'inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm',
                     'bg-[var(--bg-subtle)] hover:bg-[var(--bg-muted)]',
                     'text-[var(--text-secondary)]',
-                    'transition-colors'
+                    'transition-colors',
                   )}
                 >
                   <ChevronLeftIcon className="w-3.5 h-3.5" />
@@ -444,7 +432,7 @@ export function FeatureTour({ active, onFinish }: FeatureTourProps) {
                   'inline-flex items-center gap-1 px-4 py-1.5 rounded-lg text-sm font-medium',
                   'bg-[var(--color-primary)] text-[var(--text-inverted)]',
                   'hover:bg-[var(--color-primary-hover)]',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 {isLastStop ? (

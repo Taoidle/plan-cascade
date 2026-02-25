@@ -9,12 +9,7 @@
 
 import { useMemo } from 'react';
 import { clsx } from 'clsx';
-import {
-  CheckIcon,
-  Cross2Icon,
-  UpdateIcon,
-  ClockIcon,
-} from '@radix-ui/react-icons';
+import { CheckIcon, Cross2Icon, UpdateIcon, ClockIcon } from '@radix-ui/react-icons';
 import { useExecutionStore } from '../../store/execution';
 
 // ============================================================================
@@ -84,30 +79,12 @@ function StoryStatusIcon({ status }: { status: string }) {
 // GlobalProgressBar Component
 // ============================================================================
 
-export function GlobalProgressBar({
-  className,
-  showStoryLabels = true,
-  compact = false,
-}: GlobalProgressBarProps) {
-  const {
-    stories,
-    batches,
-    currentBatch,
-    progress,
-    status,
-    startedAt,
-    estimatedTimeRemaining,
-  } = useExecutionStore();
+export function GlobalProgressBar({ className, showStoryLabels = true, compact = false }: GlobalProgressBarProps) {
+  const { stories, batches, currentBatch, progress, status, startedAt, estimatedTimeRemaining } = useExecutionStore();
 
-  const completedCount = useMemo(
-    () => stories.filter((s) => s.status === 'completed').length,
-    [stories]
-  );
+  const completedCount = useMemo(() => stories.filter((s) => s.status === 'completed').length, [stories]);
 
-  const failedCount = useMemo(
-    () => stories.filter((s) => s.status === 'failed').length,
-    [stories]
-  );
+  const failedCount = useMemo(() => stories.filter((s) => s.status === 'failed').length, [stories]);
 
   const totalCount = stories.length;
 
@@ -156,19 +133,12 @@ export function GlobalProgressBar({
   return (
     <div className={clsx('w-full', className)}>
       {/* Header stats */}
-      <div className={clsx(
-        'flex items-center justify-between mb-2',
-        compact ? 'text-xs' : 'text-sm'
-      )}>
+      <div className={clsx('flex items-center justify-between mb-2', compact ? 'text-xs' : 'text-sm')}>
         <div className="flex items-center gap-3">
           <span className="font-semibold text-gray-900 dark:text-white">
             {completedCount}/{totalCount} stories
           </span>
-          {failedCount > 0 && (
-            <span className="text-error-500 font-medium">
-              ({failedCount} failed)
-            </span>
-          )}
+          {failedCount > 0 && <span className="text-error-500 font-medium">({failedCount} failed)</span>}
           {batches.length > 1 && (
             <span className="text-gray-500 dark:text-gray-400">
               Batch {currentBatch}/{totalBatches}
@@ -187,36 +157,39 @@ export function GlobalProgressBar({
 
           {/* Estimated time remaining */}
           {isRunning && estimatedTimeRemaining !== null && estimatedTimeRemaining > 0 && (
-            <span className="text-gray-500 dark:text-gray-400">
-              ETA: {formatTimeRemaining(estimatedTimeRemaining)}
-            </span>
+            <span className="text-gray-500 dark:text-gray-400">ETA: {formatTimeRemaining(estimatedTimeRemaining)}</span>
           )}
 
           {/* Percentage */}
-          <span className={clsx(
-            'font-bold',
-            isComplete ? 'text-success-600 dark:text-success-400' :
-            isFailed ? 'text-error-600 dark:text-error-400' :
-            'text-primary-600 dark:text-primary-400'
-          )}>
+          <span
+            className={clsx(
+              'font-bold',
+              isComplete
+                ? 'text-success-600 dark:text-success-400'
+                : isFailed
+                  ? 'text-error-600 dark:text-error-400'
+                  : 'text-primary-600 dark:text-primary-400',
+            )}
+          >
             {percentage}%
           </span>
         </div>
       </div>
 
       {/* Progress bar with batch segments */}
-      <div className={clsx(
-        'w-full rounded-full overflow-hidden',
-        'bg-gray-200 dark:bg-gray-700',
-        compact ? 'h-2' : 'h-3'
-      )}>
+      <div
+        className={clsx('w-full rounded-full overflow-hidden', 'bg-gray-200 dark:bg-gray-700', compact ? 'h-2' : 'h-3')}
+      >
         <div className="flex h-full" style={{ width: `${Math.min(progress, 100)}%` }}>
           {batchSegments.map((segment) => {
             const segColor =
-              segment.status === 'completed' ? 'bg-success-500' :
-              segment.status === 'failed' ? 'bg-error-500' :
-              segment.status === 'in_progress' ? 'bg-primary-500' :
-              'bg-gray-400 dark:bg-gray-500';
+              segment.status === 'completed'
+                ? 'bg-success-500'
+                : segment.status === 'failed'
+                  ? 'bg-error-500'
+                  : segment.status === 'in_progress'
+                    ? 'bg-primary-500'
+                    : 'bg-gray-400 dark:bg-gray-500';
 
             return (
               <div
@@ -224,7 +197,7 @@ export function GlobalProgressBar({
                 className={clsx(
                   'h-full transition-all duration-500 ease-out',
                   segColor,
-                  segment.status === 'in_progress' && isRunning && 'animate-pulse'
+                  segment.status === 'in_progress' && isRunning && 'animate-pulse',
                 )}
                 style={{
                   width: `${segment.width}%`,
@@ -246,8 +219,9 @@ export function GlobalProgressBar({
                 'w-2 h-2 rounded-full transition-all duration-300',
                 segment.status === 'completed' && 'bg-success-500',
                 segment.status === 'failed' && 'bg-error-500',
-                segment.status === 'in_progress' && 'bg-primary-500 animate-pulse ring-2 ring-primary-300 dark:ring-primary-700',
-                segment.status === 'pending' && 'bg-gray-300 dark:bg-gray-600'
+                segment.status === 'in_progress' &&
+                  'bg-primary-500 animate-pulse ring-2 ring-primary-300 dark:ring-primary-700',
+                segment.status === 'pending' && 'bg-gray-300 dark:bg-gray-600',
               )}
               title={`Batch ${segment.batchNum}: ${segment.status}`}
             />
@@ -257,30 +231,31 @@ export function GlobalProgressBar({
 
       {/* Story labels below the bar */}
       {showStoryLabels && !compact && stories.length <= 12 && (
-        <div className={clsx(
-          'flex flex-wrap gap-2 mt-3',
-          stories.length > 6 ? 'text-2xs' : 'text-xs'
-        )}>
+        <div className={clsx('flex flex-wrap gap-2 mt-3', stories.length > 6 ? 'text-2xs' : 'text-xs')}>
           {stories.map((story) => (
             <div
               key={story.id}
               className={clsx(
                 'flex items-center gap-1 px-2 py-0.5 rounded-full',
                 'border transition-all duration-200',
-                story.status === 'completed' && 'bg-success-50 dark:bg-success-950 border-success-200 dark:border-success-800',
+                story.status === 'completed' &&
+                  'bg-success-50 dark:bg-success-950 border-success-200 dark:border-success-800',
                 story.status === 'failed' && 'bg-error-50 dark:bg-error-950 border-error-200 dark:border-error-800',
-                story.status === 'in_progress' && 'bg-primary-50 dark:bg-primary-950 border-primary-200 dark:border-primary-800 ring-1 ring-primary-300 dark:ring-primary-700',
-                story.status === 'pending' && 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700'
+                story.status === 'in_progress' &&
+                  'bg-primary-50 dark:bg-primary-950 border-primary-200 dark:border-primary-800 ring-1 ring-primary-300 dark:ring-primary-700',
+                story.status === 'pending' && 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700',
               )}
             >
               <StoryStatusIcon status={story.status} />
-              <span className={clsx(
-                'truncate max-w-[120px]',
-                story.status === 'completed' && 'text-success-700 dark:text-success-300',
-                story.status === 'failed' && 'text-error-700 dark:text-error-300',
-                story.status === 'in_progress' && 'text-primary-700 dark:text-primary-300',
-                story.status === 'pending' && 'text-gray-500 dark:text-gray-400'
-              )}>
+              <span
+                className={clsx(
+                  'truncate max-w-[120px]',
+                  story.status === 'completed' && 'text-success-700 dark:text-success-300',
+                  story.status === 'failed' && 'text-error-700 dark:text-error-300',
+                  story.status === 'in_progress' && 'text-primary-700 dark:text-primary-300',
+                  story.status === 'pending' && 'text-gray-500 dark:text-gray-400',
+                )}
+              >
                 {story.title}
               </span>
             </div>

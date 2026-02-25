@@ -100,11 +100,7 @@ function formatFileSize(bytes: number): string {
 function getFileTypeFromMime(mimeType: string): FileAttachmentData['type'] {
   if (mimeType.startsWith('image/')) return 'image';
   if (mimeType === 'application/pdf') return 'pdf';
-  if (
-    mimeType.startsWith('text/') ||
-    mimeType === 'application/json' ||
-    mimeType === 'application/xml'
-  ) {
+  if (mimeType.startsWith('text/') || mimeType === 'application/json' || mimeType === 'application/xml') {
     return 'text';
   }
   return 'unknown';
@@ -123,21 +119,24 @@ export interface InputBoxHandle {
   pickFile: () => Promise<void>;
 }
 
-export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function InputBox({
-  value,
-  onChange,
-  onSubmit,
-  disabled = false,
-  placeholder,
-  isLoading = false,
-  attachments = [],
-  onAttach,
-  onRemoveAttachment,
-  workspacePath,
-  activeAgentName,
-  onClearAgent,
-  enterSubmits = false,
-}, ref) {
+export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function InputBox(
+  {
+    value,
+    onChange,
+    onSubmit,
+    disabled = false,
+    placeholder,
+    isLoading = false,
+    attachments = [],
+    onAttach,
+    onRemoveAttachment,
+    workspacePath,
+    activeAgentName,
+    onClearAgent,
+    enterSubmits = false,
+  },
+  ref,
+) {
   const { t } = useTranslation('simpleMode');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
@@ -196,10 +195,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     if (!isAutocompleteOpen) return;
 
     const handleClickOutside = (e: MouseEvent) => {
-      if (
-        autocompleteRef.current &&
-        !autocompleteRef.current.contains(e.target as Node)
-      ) {
+      if (autocompleteRef.current && !autocompleteRef.current.contains(e.target as Node)) {
         closeAutocomplete();
       }
     };
@@ -219,13 +215,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       setFileError(null);
 
       try {
-        const result = await invoke<CommandResponse<FileContentResult>>(
-          'read_file_for_attachment',
-          { path: filePath }
-        );
+        const result = await invoke<CommandResponse<FileContentResult>>('read_file_for_attachment', { path: filePath });
 
         if (!result.success || !result.data) {
-          const errMsg = result.error || t('simpleMode.attachment.unsupportedType', { defaultValue: 'Unsupported file type' });
+          const errMsg =
+            result.error || t('simpleMode.attachment.unsupportedType', { defaultValue: 'Unsupported file type' });
           setFileError(errMsg);
           return;
         }
@@ -251,14 +245,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
 
         onAttach(attachment);
       } catch (err) {
-        const errMsg =
-          err instanceof Error ? err.message : 'Failed to read file';
+        const errMsg = err instanceof Error ? err.message : 'Failed to read file';
         setFileError(errMsg);
       } finally {
         setIsReadingFile(false);
       }
     },
-    [onAttach, t]
+    [onAttach, t],
   );
 
   // ============================================================================
@@ -273,31 +266,22 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         setIsDragging(true);
       }
     },
-    [disabled, onAttach]
+    [disabled, onAttach],
   );
 
-  const handleDragLeave = useCallback(
-    (e: DragEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      e.stopPropagation();
-      // Only unflag if leaving the drop zone entirely
-      if (
-        dropZoneRef.current &&
-        !dropZoneRef.current.contains(e.relatedTarget as Node)
-      ) {
-        setIsDragging(false);
-      }
-    },
-    []
-  );
+  const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Only unflag if leaving the drop zone entirely
+    if (dropZoneRef.current && !dropZoneRef.current.contains(e.relatedTarget as Node)) {
+      setIsDragging(false);
+    }
+  }, []);
 
-  const handleDragOver = useCallback(
-    (e: DragEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      e.stopPropagation();
-    },
-    []
-  );
+  const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
 
   const handleDrop = useCallback(
     async (e: DragEvent<HTMLDivElement>) => {
@@ -335,7 +319,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         }
       }
     },
-    [disabled, onAttach, readFileAndAttach]
+    [disabled, onAttach, readFileAndAttach],
   );
 
   // ============================================================================
@@ -390,9 +374,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   }, [disabled, onAttach, readFileAndAttach, t]);
 
   // Expose pickFile via ref for external components (e.g. ChatToolbar)
-  useImperativeHandle(ref, () => ({
-    pickFile: handleFilePick,
-  }), [handleFilePick]);
+  useImperativeHandle(
+    ref,
+    () => ({
+      pickFile: handleFilePick,
+    }),
+    [handleFilePick],
+  );
 
   // ============================================================================
   // @ Autocomplete
@@ -406,14 +394,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       }
 
       try {
-        const result = await invoke<CommandResponse<WorkspaceFileResult[]>>(
-          'list_workspace_files',
-          {
-            path: workspacePath,
-            query: query || null,
-            maxResults: 20,
-          }
-        );
+        const result = await invoke<CommandResponse<WorkspaceFileResult[]>>('list_workspace_files', {
+          path: workspacePath,
+          query: query || null,
+          maxResults: 20,
+        });
 
         if (result.success && result.data) {
           setAutocompleteFiles(result.data);
@@ -424,7 +409,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         setAutocompleteFiles([]);
       }
     },
-    [workspacePath]
+    [workspacePath],
   );
 
   const closeAutocomplete = useCallback(() => {
@@ -441,33 +426,20 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
 
       // Replace @query text in the textarea with the file reference
       const beforeAt = value.substring(0, atTriggerPos);
-      const afterQuery = value.substring(
-        atTriggerPos + 1 + autocompleteQuery.length
-      );
+      const afterQuery = value.substring(atTriggerPos + 1 + autocompleteQuery.length);
       const newValue = `${beforeAt}@${file.name} ${afterQuery}`;
       onChange(newValue);
 
       closeAutocomplete();
 
       // Read the file and add as attachment
-      const fullPath = file.path.startsWith('/')
-        ? file.path
-        : `${workspacePath}/${file.path}`;
+      const fullPath = file.path.startsWith('/') ? file.path : `${workspacePath}/${file.path}`;
 
       if (!file.is_dir) {
         await readFileAndAttach(fullPath);
       }
     },
-    [
-      onAttach,
-      workspacePath,
-      value,
-      atTriggerPos,
-      autocompleteQuery,
-      onChange,
-      closeAutocomplete,
-      readFileAndAttach,
-    ]
+    [onAttach, workspacePath, value, atTriggerPos, autocompleteQuery, onChange, closeAutocomplete, readFileAndAttach],
   );
 
   // Detect @ and / triggers when text changes
@@ -496,30 +468,30 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       if (!workspacePath || !onAttach) return;
 
       {
-      const textarea2 = textareaRef.current;
-      if (!textarea2) return;
-      const cursorPos = textarea2.selectionStart;
+        const textarea2 = textareaRef.current;
+        if (!textarea2) return;
+        const cursorPos = textarea2.selectionStart;
 
-      // Find the last @ before cursor
-      const beforeCursor = newValue.substring(0, cursorPos);
-      const lastAtIndex = beforeCursor.lastIndexOf('@');
+        // Find the last @ before cursor
+        const beforeCursor = newValue.substring(0, cursorPos);
+        const lastAtIndex = beforeCursor.lastIndexOf('@');
 
-      if (lastAtIndex >= 0) {
-        const afterAt = beforeCursor.substring(lastAtIndex + 1);
-        // Only trigger if no spaces in the query (typing a filename)
-        if (!afterAt.includes(' ') && !afterAt.includes('\n')) {
-          setAtTriggerPos(lastAtIndex);
-          setAutocompleteQuery(afterAt);
-          setIsAutocompleteOpen(true);
-          setAutocompleteIndex(0);
-          fetchWorkspaceFiles(afterAt);
-          return;
+        if (lastAtIndex >= 0) {
+          const afterAt = beforeCursor.substring(lastAtIndex + 1);
+          // Only trigger if no spaces in the query (typing a filename)
+          if (!afterAt.includes(' ') && !afterAt.includes('\n')) {
+            setAtTriggerPos(lastAtIndex);
+            setAutocompleteQuery(afterAt);
+            setIsAutocompleteOpen(true);
+            setAutocompleteIndex(0);
+            fetchWorkspaceFiles(afterAt);
+            return;
+          }
         }
-      }
 
-      if (isAutocompleteOpen) {
-        closeAutocomplete();
-      }
+        if (isAutocompleteOpen) {
+          closeAutocomplete();
+        }
       }
     },
     [
@@ -530,7 +502,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       isAutocompleteOpen,
       fetchWorkspaceFiles,
       closeAutocomplete,
-    ]
+    ],
   );
 
   // Auto-resize textarea
@@ -565,9 +537,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     if (isAutocompleteOpen && autocompleteFiles.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setAutocompleteIndex((prev) =>
-          prev < autocompleteFiles.length - 1 ? prev + 1 : prev
-        );
+        setAutocompleteIndex((prev) => (prev < autocompleteFiles.length - 1 ? prev + 1 : prev));
         return;
       }
       if (e.key === 'ArrowUp') {
@@ -630,7 +600,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
             : 'border-gray-200 dark:border-gray-700',
         'focus-within:border-primary-500 dark:focus-within:border-primary-500',
         'shadow-sm',
-        disabled && 'opacity-60 cursor-not-allowed'
+        disabled && 'opacity-60 cursor-not-allowed',
       )}
     >
       {/* Drag overlay */}
@@ -649,7 +619,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
           <PersonIcon className="w-3.5 h-3.5 text-primary-600 dark:text-primary-400" />
           <span className="text-primary-700 dark:text-primary-300 font-medium">{activeAgentName}</span>
           {onClearAgent && (
-            <button onClick={onClearAgent} className="ml-auto p-0.5 rounded hover:bg-primary-100 dark:hover:bg-primary-800">
+            <button
+              onClick={onClearAgent}
+              className="ml-auto p-0.5 rounded hover:bg-primary-100 dark:hover:bg-primary-800"
+            >
               <Cross2Icon className="w-3 h-3 text-primary-500" />
             </button>
           )}
@@ -670,11 +643,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       )}
 
       {/* Error message */}
-      {fileError && (
-        <div className="px-4 py-1.5 text-xs text-red-600 dark:text-red-400">
-          {fileError}
-        </div>
-      )}
+      {fileError && <div className="px-4 py-1.5 text-xs text-red-600 dark:text-red-400">{fileError}</div>}
 
       {/* Loading indicator for file reading */}
       {isReadingFile && (
@@ -690,11 +659,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
           /* Markdown preview */
           <div
             data-testid="markdown-preview"
-            className={clsx(
-              'flex-1 overflow-auto',
-              'text-base leading-relaxed',
-              'min-h-[1.5em] max-h-[400px]'
-            )}
+            className={clsx('flex-1 overflow-auto', 'text-base leading-relaxed', 'min-h-[1.5em] max-h-[400px]')}
           >
             <MarkdownRenderer content={value} />
           </div>
@@ -720,7 +685,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                 'placeholder-gray-400 dark:placeholder-gray-500',
                 'focus:outline-none',
                 'text-base leading-relaxed',
-                disabled && 'cursor-not-allowed'
+                disabled && 'cursor-not-allowed',
               )}
             />
 
@@ -747,14 +712,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                   'bg-white dark:bg-gray-800',
                   'border border-gray-200 dark:border-gray-700',
                   'rounded-lg shadow-lg',
-                  'bottom-full mb-2'
+                  'bottom-full mb-2',
                 )}
               >
                 <div className="sticky top-0 px-3 py-1.5 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
                   <span className="text-xs text-gray-500 dark:text-gray-400">
-                    {autocompleteQuery
-                      ? `Files matching "${autocompleteQuery}"`
-                      : 'Workspace files'}
+                    {autocompleteQuery ? `Files matching "${autocompleteQuery}"` : 'Workspace files'}
                   </span>
                 </div>
                 <div className="py-1">
@@ -766,7 +729,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                         'w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors',
                         index === autocompleteIndex
                           ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-900 dark:text-primary-100'
-                          : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                          : 'hover:bg-gray-100 dark:hover:bg-gray-700',
                       )}
                     >
                       {file.is_dir ? (
@@ -775,16 +738,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
                         <FileTextIcon className="w-3.5 h-3.5 flex-shrink-0 text-gray-400" />
                       )}
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium truncate">
-                          {file.name}
-                        </div>
+                        <div className="text-sm font-medium truncate">{file.name}</div>
                         <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
                           {file.path}
-                          {!file.is_dir && file.size > 0 && (
-                            <span className="ml-1">
-                              ({formatFileSize(file.size)})
-                            </span>
-                          )}
+                          {!file.is_dir && file.size > 0 && <span className="ml-1">({formatFileSize(file.size)})</span>}
                         </div>
                       </div>
                     </button>
@@ -806,16 +763,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
               'hover:bg-gray-100 dark:hover:bg-gray-700',
               'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
               'dark:focus:ring-offset-gray-800',
-              'transition-colors'
+              'transition-colors',
             )}
             title={isPreview ? t('input.switchToEdit') : t('input.previewMarkdown')}
             data-testid="preview-toggle"
           >
-            {isPreview ? (
-              <Pencil1Icon className="w-5 h-5" />
-            ) : (
-              <EyeOpenIcon className="w-5 h-5" />
-            )}
+            {isPreview ? <Pencil1Icon className="w-5 h-5" /> : <EyeOpenIcon className="w-5 h-5" />}
           </button>
         )}
 
@@ -831,15 +784,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
             'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
             'dark:focus:ring-offset-gray-900',
             'disabled:opacity-50 disabled:cursor-not-allowed',
-            'transition-colors'
+            'transition-colors',
           )}
           title={t('input.submitTitle')}
         >
-          {isLoading ? (
-            <UpdateIcon className="w-5 h-5 animate-spin" />
-          ) : (
-            <PaperPlaneIcon className="w-5 h-5" />
-          )}
+          {isLoading ? <UpdateIcon className="w-5 h-5 animate-spin" /> : <PaperPlaneIcon className="w-5 h-5" />}
         </button>
       </div>
     </div>
@@ -850,28 +799,16 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
 // FileChip Component
 // ============================================================================
 
-function FileChip({
-  file,
-  onRemove,
-}: {
-  file: FileAttachmentData;
-  onRemove?: () => void;
-}) {
+function FileChip({ file, onRemove }: { file: FileAttachmentData; onRemove?: () => void }) {
   const chipStyles = {
     text: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800',
     image:
       'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 border-green-200 dark:border-green-800',
     pdf: 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-800',
-    unknown:
-      'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700',
+    unknown: 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700',
   };
 
-  const TypeIcon =
-    file.type === 'image'
-      ? ImageIcon
-      : file.type === 'text'
-        ? FileTextIcon
-        : FileIcon;
+  const TypeIcon = file.type === 'image' ? ImageIcon : file.type === 'text' ? FileTextIcon : FileIcon;
 
   return (
     <div
@@ -879,7 +816,7 @@ function FileChip({
         'inline-flex items-center gap-1.5 px-2 py-1 rounded-md',
         'text-xs font-medium border',
         'transition-colors',
-        chipStyles[file.type]
+        chipStyles[file.type],
       )}
       title={file.path}
     >

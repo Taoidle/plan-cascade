@@ -73,7 +73,9 @@ export function WorkflowCardRenderer({ payload }: { payload: CardPayload }) {
     case 'requirement_analysis_card':
       return <RequirementAnalysisCard data={payload.data as RequirementAnalysisCardData} />;
     case 'architecture_review_card':
-      return <ArchitectureReviewCard data={payload.data as ArchitectureReviewCardData} interactive={payload.interactive} />;
+      return (
+        <ArchitectureReviewCard data={payload.data as ArchitectureReviewCardData} interactive={payload.interactive} />
+      );
     case 'persona_indicator':
       return <PersonaIndicatorCard data={payload.data as PersonaIndicatorData} />;
     default:
@@ -84,15 +86,13 @@ export function WorkflowCardRenderer({ payload }: { payload: CardPayload }) {
 function WorkflowInfoCard({ data }: { data: WorkflowInfoData }) {
   const colors = {
     info: 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300',
-    success: 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300',
-    warning: 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300',
+    success:
+      'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300',
+    warning:
+      'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300',
   };
 
-  return (
-    <div className={`text-xs px-3 py-2 rounded-lg border ${colors[data.level]}`}>
-      {data.message}
-    </div>
-  );
+  return <div className={`text-xs px-3 py-2 rounded-lg border ${colors[data.level]}`}>{data.message}</div>;
 }
 
 function WorkflowErrorCard({ data }: { data: WorkflowErrorData }) {
@@ -101,9 +101,7 @@ function WorkflowErrorCard({ data }: { data: WorkflowErrorData }) {
       <p className="text-sm font-medium text-red-700 dark:text-red-300">{data.title}</p>
       <p className="text-xs text-red-600 dark:text-red-400 mt-1">{data.description}</p>
       {data.suggestedFix && (
-        <p className="text-xs text-red-500 dark:text-red-400 mt-1 italic">
-          Suggestion: {data.suggestedFix}
-        </p>
+        <p className="text-xs text-red-500 dark:text-red-400 mt-1 italic">Suggestion: {data.suggestedFix}</p>
       )}
     </div>
   );

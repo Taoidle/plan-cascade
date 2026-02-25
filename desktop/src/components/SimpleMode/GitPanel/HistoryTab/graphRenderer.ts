@@ -125,9 +125,7 @@ export function edgePath(edge: GraphEdge): string {
  * Same-lane edges use their own lane color.
  */
 export function edgeColor(edge: GraphEdge): string {
-  return getLaneColor(
-    edge.from_lane === edge.to_lane ? edge.from_lane : edge.to_lane,
-  );
+  return getLaneColor(edge.from_lane === edge.to_lane ? edge.from_lane : edge.to_lane);
 }
 
 // ---------------------------------------------------------------------------
@@ -146,11 +144,7 @@ export interface NodeRenderData {
 /**
  * Compute render data for a graph node.
  */
-export function nodeRenderData(
-  node: GraphNode,
-  isMerge: boolean,
-  isHead: boolean,
-): NodeRenderData {
+export function nodeRenderData(node: GraphNode, isMerge: boolean, isHead: boolean): NodeRenderData {
   const cx = laneX(node.lane);
   const cy = rowY(node.row);
   const color = getLaneColor(node.lane);
@@ -186,11 +180,7 @@ export interface RenderedNode {
 /**
  * Pre-compute edges that are at least partially visible in the row range.
  */
-export function renderEdgesForRange(
-  edges: GraphEdge[],
-  startRow: number,
-  endRow: number,
-): RenderedEdge[] {
+export function renderEdgesForRange(edges: GraphEdge[], startRow: number, endRow: number): RenderedEdge[] {
   return edges
     .filter((edge) => {
       const minRow = Math.min(edge.from_row, edge.to_row);
@@ -218,10 +208,6 @@ export function renderNodesForRange(
     .filter((node) => node.row >= startRow && node.row <= endRow)
     .map((node) => ({
       key: node.sha,
-      data: nodeRenderData(
-        node,
-        (commitParentCounts.get(node.sha) ?? 0) > 1,
-        node.sha === headSha,
-      ),
+      data: nodeRenderData(node, (commitParentCounts.get(node.sha) ?? 0) > 1, node.sha === headSha),
     }));
 }

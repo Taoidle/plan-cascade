@@ -50,18 +50,13 @@ export function PromptDialog() {
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(
-        (p) =>
-          p.title.toLowerCase().includes(q) ||
-          (p.description && p.description.toLowerCase().includes(q))
+        (p) => p.title.toLowerCase().includes(q) || (p.description && p.description.toLowerCase().includes(q)),
       );
     }
     return result;
   }, [prompts, categoryFilter, searchQuery]);
 
-  const detectedVariables = useMemo(
-    () => extractVariables(formContent),
-    [formContent]
-  );
+  const detectedVariables = useMemo(() => extractVariables(formContent), [formContent]);
 
   // Load prompts when dialog opens
   useEffect(() => {
@@ -101,7 +96,7 @@ export function PromptDialog() {
       populateForm(prompt);
       setIsNew(false);
     },
-    [populateForm]
+    [populateForm],
   );
 
   const handleNewPrompt = useCallback(() => {
@@ -178,10 +173,7 @@ export function PromptDialog() {
     }
   }, [selectedId, prompts, createPrompt, populateForm]);
 
-  const selectedPromptObj = useMemo(
-    () => prompts.find((p) => p.id === selectedId),
-    [prompts, selectedId]
-  );
+  const selectedPromptObj = useMemo(() => prompts.find((p) => p.id === selectedId), [prompts, selectedId]);
 
   return (
     <Dialog.Root open={dialogOpen} onOpenChange={(open) => !open && closeDialog()}>
@@ -193,7 +185,7 @@ export function PromptDialog() {
             'w-[720px] h-[580px] z-50',
             'bg-white dark:bg-gray-900 rounded-xl shadow-xl',
             'flex flex-col overflow-hidden',
-            'focus:outline-none'
+            'focus:outline-none',
           )}
         >
           {/* Header */}
@@ -222,7 +214,7 @@ export function PromptDialog() {
                       'px-1.5 py-0.5 text-2xs rounded-md transition-colors',
                       categoryFilter === cat.id
                         ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                        : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                        : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
                     )}
                   >
                     {cat.label}
@@ -247,7 +239,7 @@ export function PromptDialog() {
                     'w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs',
                     'text-primary-600 dark:text-primary-400',
                     'hover:bg-primary-50 dark:hover:bg-primary-900/20',
-                    'transition-colors'
+                    'transition-colors',
                   )}
                 >
                   <PlusIcon className="w-3.5 h-3.5" />
@@ -264,7 +256,7 @@ export function PromptDialog() {
                       'w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors',
                       selectedId === prompt.id
                         ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-900 dark:text-primary-100'
-                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800',
                     )}
                   >
                     <div className="flex items-center gap-1">
@@ -283,7 +275,7 @@ export function PromptDialog() {
 
             {/* Right: Edit form */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {(!selectedId && !isNew) ? (
+              {!selectedId && !isNew ? (
                 <div className="h-full flex items-center justify-center text-xs text-gray-400">
                   {t('promptDialog.selectOrCreate', { defaultValue: 'Select or create a prompt' })}
                 </div>
@@ -330,7 +322,9 @@ export function PromptDialog() {
                       type="text"
                       value={formDescription}
                       onChange={(e) => setFormDescription(e.target.value)}
-                      placeholder={t('promptDialog.descriptionPlaceholder', { defaultValue: 'Brief description (optional)' })}
+                      placeholder={t('promptDialog.descriptionPlaceholder', {
+                        defaultValue: 'Brief description (optional)',
+                      })}
                       className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-primary-500"
                     />
                   </div>
@@ -343,7 +337,9 @@ export function PromptDialog() {
                     <textarea
                       value={formContent}
                       onChange={(e) => setFormContent(e.target.value)}
-                      placeholder={t('promptDialog.contentPlaceholder', { defaultValue: 'Write your prompt template...' })}
+                      placeholder={t('promptDialog.contentPlaceholder', {
+                        defaultValue: 'Write your prompt template...',
+                      })}
                       rows={8}
                       className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-primary-500 resize-none min-h-[200px] font-mono"
                     />
@@ -393,7 +389,7 @@ export function PromptDialog() {
                       className={clsx(
                         'px-4 py-1.5 text-xs font-medium rounded-md transition-colors',
                         'bg-primary-600 text-white hover:bg-primary-700',
-                        'disabled:opacity-50 disabled:cursor-not-allowed'
+                        'disabled:opacity-50 disabled:cursor-not-allowed',
                       )}
                     >
                       {t('promptDialog.save', { defaultValue: 'Save' })}
@@ -405,7 +401,7 @@ export function PromptDialog() {
                             onClick={handleDuplicate}
                             className={clsx(
                               'px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
-                              'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                              'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
                             )}
                           >
                             <CopyIcon className="w-3.5 h-3.5 inline mr-1" />
@@ -416,7 +412,7 @@ export function PromptDialog() {
                             onClick={handleDelete}
                             className={clsx(
                               'px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
-                              'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
+                              'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',
                             )}
                           >
                             <TrashIcon className="w-3.5 h-3.5 inline mr-1" />

@@ -67,7 +67,7 @@ export function PeriodSelector({ onChange }: PeriodSelectorProps) {
             'border border-gray-300 dark:border-gray-700',
             'text-sm text-gray-900 dark:text-white',
             'hover:bg-gray-50 dark:hover:bg-gray-700',
-            'focus:outline-none focus:ring-2 focus:ring-primary-500'
+            'focus:outline-none focus:ring-2 focus:ring-primary-500',
           )}
         >
           <Select.Value />
@@ -84,7 +84,7 @@ export function PeriodSelector({ onChange }: PeriodSelectorProps) {
               'overflow-hidden rounded-lg',
               'bg-white dark:bg-gray-800',
               'border border-gray-200 dark:border-gray-700',
-              'shadow-lg'
+              'shadow-lg',
             )}
           >
             <Select.Viewport className="p-1">
@@ -98,7 +98,7 @@ export function PeriodSelector({ onChange }: PeriodSelectorProps) {
                     'rounded cursor-pointer',
                     'hover:bg-gray-100 dark:hover:bg-gray-700',
                     'focus:outline-none focus:bg-gray-100 dark:focus:bg-gray-700',
-                    'data-[state=checked]:bg-primary-50 dark:data-[state=checked]:bg-primary-900/30'
+                    'data-[state=checked]:bg-primary-50 dark:data-[state=checked]:bg-primary-900/30',
                   )}
                 >
                   <Select.ItemText>{option.label}</Select.ItemText>
@@ -128,7 +128,7 @@ export function PeriodSelector({ onChange }: PeriodSelectorProps) {
             'border border-gray-300 dark:border-gray-700',
             'text-sm text-gray-900 dark:text-white',
             'hover:bg-gray-50 dark:hover:bg-gray-700',
-            'focus:outline-none focus:ring-2 focus:ring-primary-500'
+            'focus:outline-none focus:ring-2 focus:ring-primary-500',
           )}
         >
           <Select.Value />
@@ -145,7 +145,7 @@ export function PeriodSelector({ onChange }: PeriodSelectorProps) {
               'overflow-hidden rounded-lg',
               'bg-white dark:bg-gray-800',
               'border border-gray-200 dark:border-gray-700',
-              'shadow-lg'
+              'shadow-lg',
             )}
           >
             <Select.Viewport className="p-1">
@@ -159,7 +159,7 @@ export function PeriodSelector({ onChange }: PeriodSelectorProps) {
                     'rounded cursor-pointer',
                     'hover:bg-gray-100 dark:hover:bg-gray-700',
                     'focus:outline-none focus:bg-gray-100 dark:focus:bg-gray-700',
-                    'data-[state=checked]:bg-primary-50 dark:data-[state=checked]:bg-primary-900/30'
+                    'data-[state=checked]:bg-primary-50 dark:data-[state=checked]:bg-primary-900/30',
                   )}
                 >
                   <Select.ItemText>{option.label}</Select.ItemText>
@@ -181,10 +181,7 @@ export function PeriodSelector({ onChange }: PeriodSelectorProps) {
 
       {/* Custom Date Range Modal */}
       {showCustomRange && (
-        <CustomDateRangeModal
-          onSubmit={handleCustomRangeSubmit}
-          onClose={() => setShowCustomRange(false)}
-        />
+        <CustomDateRangeModal onSubmit={handleCustomRangeSubmit} onClose={() => setShowCustomRange(false)} />
       )}
     </div>
   );
@@ -215,7 +212,7 @@ function CustomDateRangeModal({ onSubmit, onClose }: CustomDateRangeModalProps) 
           'relative z-10 p-6 rounded-xl',
           'bg-white dark:bg-gray-900',
           'border border-gray-200 dark:border-gray-800',
-          'shadow-xl'
+          'shadow-xl',
         )}
       >
         <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
@@ -236,7 +233,7 @@ function CustomDateRangeModal({ onSubmit, onClose }: CustomDateRangeModalProps) 
                 'bg-white dark:bg-gray-800',
                 'border border-gray-300 dark:border-gray-700',
                 'text-gray-900 dark:text-white',
-                'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                'focus:outline-none focus:ring-2 focus:ring-primary-500',
               )}
               required
             />
@@ -255,7 +252,7 @@ function CustomDateRangeModal({ onSubmit, onClose }: CustomDateRangeModalProps) 
                 'bg-white dark:bg-gray-800',
                 'border border-gray-300 dark:border-gray-700',
                 'text-gray-900 dark:text-white',
-                'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                'focus:outline-none focus:ring-2 focus:ring-primary-500',
               )}
               required
             />
@@ -269,18 +266,14 @@ function CustomDateRangeModal({ onSubmit, onClose }: CustomDateRangeModalProps) 
                 'px-4 py-2 rounded-lg',
                 'bg-gray-100 dark:bg-gray-800',
                 'text-gray-700 dark:text-gray-300',
-                'hover:bg-gray-200 dark:hover:bg-gray-700'
+                'hover:bg-gray-200 dark:hover:bg-gray-700',
               )}
             >
               {t('customRange.cancel', 'Cancel')}
             </button>
             <button
               type="submit"
-              className={clsx(
-                'px-4 py-2 rounded-lg',
-                'bg-primary-600 text-white',
-                'hover:bg-primary-700'
-              )}
+              className={clsx('px-4 py-2 rounded-lg', 'bg-primary-600 text-white', 'hover:bg-primary-700')}
             >
               {t('customRange.apply', 'Apply')}
             </button>

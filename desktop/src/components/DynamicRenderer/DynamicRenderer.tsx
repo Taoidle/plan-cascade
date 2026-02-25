@@ -16,7 +16,14 @@
  */
 
 import { useCallback, useMemo, useRef, useState } from 'react';
-import type { RichContentEvent, SurfaceMap, TableData, ChartData, DiffData, ActionButtonsData } from '../../types/richContent';
+import type {
+  RichContentEvent,
+  SurfaceMap,
+  TableData,
+  ChartData,
+  DiffData,
+  ActionButtonsData,
+} from '../../types/richContent';
 import { DataTable } from './DataTable';
 import { ProgressChart } from './ProgressChart';
 import { DiffViewer } from './DiffViewer';
@@ -77,25 +84,17 @@ export function DynamicRenderer({ events, onAction }: DynamicRendererProps) {
           return <ActionGroup key={key} data={event.data as ActionButtonsData} onAction={onAction} />;
 
         default:
-          return (
-            <MarkdownFallback
-              key={key}
-              componentType={event.componentType}
-              data={event.data}
-            />
-          );
+          return <MarkdownFallback key={key} componentType={event.componentType} data={event.data} />;
       }
     },
-    [onAction]
+    [onAction],
   );
 
   if (surfaceMap.size === 0) return null;
 
   return (
     <div className="space-y-4" data-testid="dynamic-renderer">
-      {Array.from(surfaceMap.entries()).map(([key, event]) =>
-        renderEvent(event, key)
-      )}
+      {Array.from(surfaceMap.entries()).map(([key, event]) => renderEvent(event, key))}
     </div>
   );
 }

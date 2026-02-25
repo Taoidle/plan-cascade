@@ -10,12 +10,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { clsx } from 'clsx';
-import {
-  useRecoveryStore,
-  EXECUTION_MODE_LABELS,
-  type IncompleteTask,
-  type ExecutionMode,
-} from '../../store/recovery';
+import { useRecoveryStore, EXECUTION_MODE_LABELS, type IncompleteTask, type ExecutionMode } from '../../store/recovery';
 
 // ============================================================================
 // Helper Functions
@@ -97,7 +92,7 @@ function TaskCard({ task, isResuming, resumingTaskId, onResume, onDiscard }: Tas
         'bg-white dark:bg-gray-800',
         'border-gray-200 dark:border-gray-700',
         'transition-all duration-200',
-        isThisResuming && 'opacity-75'
+        isThisResuming && 'opacity-75',
       )}
     >
       {/* Header: Name + Mode Badge */}
@@ -106,14 +101,12 @@ function TaskCard({ task, isResuming, resumingTaskId, onResume, onDiscard }: Tas
           <h4 className="text-sm font-medium text-gray-900 dark:text-white truncate">
             {task.name || 'Untitled execution'}
           </h4>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
-            {task.project_path}
-          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">{task.project_path}</p>
         </div>
         <span
           className={clsx(
             'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium shrink-0',
-            getModeColor(task.execution_mode)
+            getModeColor(task.execution_mode),
           )}
         >
           {EXECUTION_MODE_LABELS[task.execution_mode] || task.execution_mode}
@@ -158,9 +151,7 @@ function TaskCard({ task, isResuming, resumingTaskId, onResume, onDiscard }: Tas
 
       {/* Recovery note */}
       {task.recovery_note && (
-        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 italic">
-          {task.recovery_note}
-        </p>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 italic">{task.recovery_note}</p>
       )}
 
       {/* Actions */}
@@ -173,7 +164,7 @@ function TaskCard({ task, isResuming, resumingTaskId, onResume, onDiscard }: Tas
             'transition-colors duration-150',
             task.recoverable && !isResuming
               ? 'bg-primary-600 text-white hover:bg-primary-700 active:bg-primary-800'
-              : 'bg-gray-200 text-gray-400 dark:bg-gray-700 dark:text-gray-500 cursor-not-allowed'
+              : 'bg-gray-200 text-gray-400 dark:bg-gray-700 dark:text-gray-500 cursor-not-allowed',
           )}
         >
           {isThisResuming ? (
@@ -194,7 +185,7 @@ function TaskCard({ task, isResuming, resumingTaskId, onResume, onDiscard }: Tas
             confirmDiscard
               ? 'bg-red-600 text-white hover:bg-red-700'
               : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600',
-            isResuming && 'opacity-50 cursor-not-allowed'
+            isResuming && 'opacity-50 cursor-not-allowed',
           )}
         >
           {confirmDiscard ? 'Confirm Discard' : 'Discard'}
@@ -239,7 +230,7 @@ export function RecoveryPrompt() {
       clearError();
       await resumeTask(taskId);
     },
-    [resumeTask, clearError]
+    [resumeTask, clearError],
   );
 
   const handleDiscard = useCallback(
@@ -247,7 +238,7 @@ export function RecoveryPrompt() {
       clearError();
       await discardTask(taskId);
     },
-    [discardTask, clearError]
+    [discardTask, clearError],
   );
 
   const handleDismiss = useCallback(() => {
@@ -266,7 +257,7 @@ export function RecoveryPrompt() {
       className={clsx(
         'fixed top-0 left-0 right-0 z-50',
         'transform transition-transform duration-300 ease-out',
-        isVisible ? 'translate-y-0' : '-translate-y-full'
+        isVisible ? 'translate-y-0' : '-translate-y-full',
       )}
     >
       {/* Backdrop */}
@@ -275,7 +266,7 @@ export function RecoveryPrompt() {
           'absolute inset-0 h-screen',
           'bg-black/20 dark:bg-black/40',
           'transition-opacity duration-300',
-          isVisible ? 'opacity-100' : 'opacity-0'
+          isVisible ? 'opacity-100' : 'opacity-0',
         )}
         onClick={handleDismiss}
       />
@@ -287,7 +278,7 @@ export function RecoveryPrompt() {
           'bg-white dark:bg-gray-900',
           'rounded-xl shadow-2xl',
           'border border-gray-200 dark:border-gray-700',
-          'overflow-hidden'
+          'overflow-hidden',
         )}
       >
         {/* Header */}
@@ -334,8 +325,8 @@ export function RecoveryPrompt() {
         {/* Footer */}
         <div className="px-5 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
           <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
-            These executions were interrupted during a previous session. You can resume them from
-            their last checkpoint or discard them.
+            These executions were interrupted during a previous session. You can resume them from their last checkpoint
+            or discard them.
           </p>
         </div>
       </div>
@@ -350,7 +341,11 @@ export function RecoveryPrompt() {
 function RecoveryIcon() {
   return (
     <svg className="w-5 h-5 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+      />
     </svg>
   );
 }
@@ -382,7 +377,11 @@ function CheckpointIcon() {
 function ErrorIcon() {
   return (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+      />
     </svg>
   );
 }
@@ -391,7 +390,11 @@ function SpinnerIcon() {
   return (
     <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+      />
     </svg>
   );
 }

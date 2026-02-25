@@ -36,22 +36,9 @@ interface FileChangesState {
     beforeHash: string | null,
     afterHash: string,
   ) => Promise<string | null>;
-  restoreToTurn: (
-    sessionId: string,
-    projectRoot: string,
-    turnIndex: number,
-  ) => Promise<RestoredFile[] | null>;
-  restoreSingleFile: (
-    sessionId: string,
-    projectRoot: string,
-    filePath: string,
-    hash: string,
-  ) => Promise<boolean>;
-  truncateFromTurn: (
-    sessionId: string,
-    projectRoot: string,
-    turnIndex: number,
-  ) => Promise<void>;
+  restoreToTurn: (sessionId: string, projectRoot: string, turnIndex: number) => Promise<RestoredFile[] | null>;
+  restoreSingleFile: (sessionId: string, projectRoot: string, filePath: string, hash: string) => Promise<boolean>;
+  truncateFromTurn: (sessionId: string, projectRoot: string, turnIndex: number) => Promise<void>;
   selectTurn: (turnIndex: number | null) => void;
   toggleExpanded: (changeId: string) => void;
   prefillDiffCache: (changeId: string, diff: string) => void;
@@ -73,10 +60,7 @@ export const useFileChangesStore = create<FileChangesState>((set, get) => ({
   fetchChanges: async (sessionId, projectRoot) => {
     set({ loading: true, error: null });
     try {
-      const resp = await invoke<CommandResponse<TurnChanges[]>>(
-        'get_file_changes_by_turn',
-        { sessionId, projectRoot },
-      );
+      const resp = await invoke<CommandResponse<TurnChanges[]>>('get_file_changes_by_turn', { sessionId, projectRoot });
       if (resp.success && resp.data) {
         set({ turnChanges: resp.data, loading: false });
       } else {
@@ -93,10 +77,12 @@ export const useFileChangesStore = create<FileChangesState>((set, get) => ({
     if (cached !== undefined) return cached;
 
     try {
-      const resp = await invoke<CommandResponse<string>>(
-        'get_file_change_diff',
-        { sessionId, projectRoot, beforeHash, afterHash },
-      );
+      const resp = await invoke<CommandResponse<string>>('get_file_change_diff', {
+        sessionId,
+        projectRoot,
+        beforeHash,
+        afterHash,
+      });
       if (resp.success && resp.data !== null && resp.data !== undefined) {
         const newCache = new Map(get().diffCache);
         newCache.set(changeId, resp.data);
@@ -111,10 +97,11 @@ export const useFileChangesStore = create<FileChangesState>((set, get) => ({
 
   restoreToTurn: async (sessionId, projectRoot, turnIndex) => {
     try {
-      const resp = await invoke<CommandResponse<RestoredFile[]>>(
-        'restore_files_to_turn',
-        { sessionId, projectRoot, turnIndex },
-      );
+      const resp = await invoke<CommandResponse<RestoredFile[]>>('restore_files_to_turn', {
+        sessionId,
+        projectRoot,
+        turnIndex,
+      });
       if (resp.success && resp.data) {
         return resp.data;
       }
@@ -128,10 +115,12 @@ export const useFileChangesStore = create<FileChangesState>((set, get) => ({
 
   restoreSingleFile: async (sessionId, projectRoot, filePath, hash) => {
     try {
-      const resp = await invoke<CommandResponse<boolean>>(
-        'restore_single_file',
-        { sessionId, projectRoot, filePath, targetHash: hash },
-      );
+      const resp = await invoke<CommandResponse<boolean>>('restore_single_file', {
+        sessionId,
+        projectRoot,
+        filePath,
+        targetHash: hash,
+      });
       return resp.success && resp.data === true;
     } catch {
       return false;
@@ -140,10 +129,7 @@ export const useFileChangesStore = create<FileChangesState>((set, get) => ({
 
   truncateFromTurn: async (sessionId, projectRoot, turnIndex) => {
     try {
-      await invoke<CommandResponse<boolean>>(
-        'truncate_changes_from_turn',
-        { sessionId, projectRoot, turnIndex },
-      );
+      await invoke<CommandResponse<boolean>>('truncate_changes_from_turn', { sessionId, projectRoot, turnIndex });
     } catch {
       // Best-effort cleanup
     }

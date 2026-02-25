@@ -27,10 +27,7 @@ export function ImportanceBar({ value, className, showLabel = false }: Importanc
   const widthPercent = Math.round(clamped * 100);
 
   return (
-    <div
-      data-testid="importance-bar"
-      className={clsx('flex items-center gap-1.5', className)}
-    >
+    <div data-testid="importance-bar" className={clsx('flex items-center gap-1.5', className)}>
       <div className="flex-1 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden min-w-[3rem]">
         <div
           className={clsx('h-full rounded-full transition-all', getBarColor(clamped))}

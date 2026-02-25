@@ -12,7 +12,7 @@ export function ProjectSkeleton() {
       className={clsx(
         'w-full p-4 rounded-lg',
         'bg-white dark:bg-gray-800',
-        'border border-gray-200 dark:border-gray-700'
+        'border border-gray-200 dark:border-gray-700',
       )}
       aria-hidden="true"
     >

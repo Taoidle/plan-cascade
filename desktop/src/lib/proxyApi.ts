@@ -76,9 +76,7 @@ export async function getProxyConfig(): Promise<CommandResponse<ProxySettingsRes
 /**
  * Set or clear the global proxy configuration.
  */
-export async function setProxyConfig(
-  request: SetProxyConfigRequest,
-): Promise<CommandResponse<boolean>> {
+export async function setProxyConfig(request: SetProxyConfigRequest): Promise<CommandResponse<boolean>> {
   try {
     return await invoke<CommandResponse<boolean>>('set_proxy_config', { request });
   } catch (error) {
@@ -93,9 +91,7 @@ export async function setProxyConfig(
 /**
  * Get the proxy strategy for a specific provider.
  */
-export async function getProviderProxyStrategy(
-  provider: string,
-): Promise<CommandResponse<ProxyStrategy>> {
+export async function getProviderProxyStrategy(provider: string): Promise<CommandResponse<ProxyStrategy>> {
   try {
     return await invoke<CommandResponse<ProxyStrategy>>('get_provider_proxy_strategy', {
       provider,
@@ -112,9 +108,7 @@ export async function getProviderProxyStrategy(
 /**
  * Set the proxy strategy (and optional custom config) for a specific provider.
  */
-export async function setProviderProxyStrategy(
-  request: SetProviderProxyRequest,
-): Promise<CommandResponse<boolean>> {
+export async function setProviderProxyStrategy(request: SetProviderProxyRequest): Promise<CommandResponse<boolean>> {
   try {
     return await invoke<CommandResponse<boolean>>('set_provider_proxy_strategy', { request });
   } catch (error) {
@@ -129,9 +123,7 @@ export async function setProviderProxyStrategy(
 /**
  * Test proxy connectivity.
  */
-export async function testProxy(
-  request: TestProxyRequest,
-): Promise<CommandResponse<ProxyTestResult>> {
+export async function testProxy(request: TestProxyRequest): Promise<CommandResponse<ProxyTestResult>> {
   try {
     return await invoke<CommandResponse<ProxyTestResult>>('test_proxy', { request });
   } catch (error) {

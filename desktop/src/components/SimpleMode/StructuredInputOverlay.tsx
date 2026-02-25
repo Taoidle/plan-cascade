@@ -18,52 +18,21 @@ interface StructuredInputOverlayProps {
   loading: boolean;
 }
 
-export function StructuredInputOverlay({
-  question,
-  onSubmit,
-  onSkip,
-  loading,
-}: StructuredInputOverlayProps) {
+export function StructuredInputOverlay({ question, onSubmit, onSkip, loading }: StructuredInputOverlayProps) {
   switch (question.inputType) {
     case 'boolean':
-      return (
-        <BooleanInput
-          question={question}
-          onSubmit={onSubmit}
-          onSkip={onSkip}
-          loading={loading}
-        />
-      );
+      return <BooleanInput question={question} onSubmit={onSubmit} onSkip={onSkip} loading={loading} />;
     case 'single_select':
-      return (
-        <SingleSelectInput
-          question={question}
-          onSubmit={onSubmit}
-          onSkip={onSkip}
-          loading={loading}
-        />
-      );
+      return <SingleSelectInput question={question} onSubmit={onSubmit} onSkip={onSkip} loading={loading} />;
     case 'multi_select':
-      return (
-        <MultiSelectInput
-          question={question}
-          onSubmit={onSubmit}
-          onSkip={onSkip}
-          loading={loading}
-        />
-      );
+      return <MultiSelectInput question={question} onSubmit={onSubmit} onSkip={onSkip} loading={loading} />;
     default:
       // text / textarea — falls through to normal InputBox (handled by parent)
       return null;
   }
 }
 
-function BooleanInput({
-  question,
-  onSubmit,
-  onSkip,
-  loading,
-}: StructuredInputOverlayProps) {
+function BooleanInput({ question, onSubmit, onSkip, loading }: StructuredInputOverlayProps) {
   const { t } = useTranslation('simpleMode');
   return (
     <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700">
@@ -78,7 +47,7 @@ function BooleanInput({
             'flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
             'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300',
             'hover:bg-green-200 dark:hover:bg-green-900/50',
-            'disabled:opacity-50 disabled:cursor-not-allowed'
+            'disabled:opacity-50 disabled:cursor-not-allowed',
           )}
         >
           {t('workflow.interview.yes')}
@@ -90,7 +59,7 @@ function BooleanInput({
             'flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
             'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
             'hover:bg-red-200 dark:hover:bg-red-900/50',
-            'disabled:opacity-50 disabled:cursor-not-allowed'
+            'disabled:opacity-50 disabled:cursor-not-allowed',
           )}
         >
           {t('workflow.interview.no')}
@@ -109,12 +78,7 @@ function BooleanInput({
   );
 }
 
-function SingleSelectInput({
-  question,
-  onSubmit,
-  onSkip,
-  loading,
-}: StructuredInputOverlayProps) {
+function SingleSelectInput({ question, onSubmit, onSkip, loading }: StructuredInputOverlayProps) {
   const { t } = useTranslation('simpleMode');
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -136,7 +100,7 @@ function SingleSelectInput({
               'w-full text-left px-3 py-1.5 rounded-lg text-xs transition-colors',
               selected === opt
                 ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 ring-1 ring-violet-400 dark:ring-violet-600'
-                : 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                : 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700',
             )}
           >
             {opt}
@@ -165,12 +129,7 @@ function SingleSelectInput({
   );
 }
 
-function MultiSelectInput({
-  question,
-  onSubmit,
-  onSkip,
-  loading,
-}: StructuredInputOverlayProps) {
+function MultiSelectInput({ question, onSubmit, onSkip, loading }: StructuredInputOverlayProps) {
   const { t } = useTranslation('simpleMode');
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
@@ -206,15 +165,13 @@ function MultiSelectInput({
               'w-full text-left px-3 py-1.5 rounded-lg text-xs transition-colors flex items-center gap-2',
               selected.has(opt)
                 ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300'
-                : 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                : 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700',
             )}
           >
             <span
               className={clsx(
                 'w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0',
-                selected.has(opt)
-                  ? 'border-violet-500 bg-violet-500'
-                  : 'border-gray-300 dark:border-gray-600'
+                selected.has(opt) ? 'border-violet-500 bg-violet-500' : 'border-gray-300 dark:border-gray-600',
               )}
             >
               {selected.has(opt) && (

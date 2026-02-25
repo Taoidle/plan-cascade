@@ -6,11 +6,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import type {
-  AgentPipeline,
-  AgentPipelineInfo,
-  CommandResponse,
-} from '../types/agentComposer';
+import type { AgentPipeline, AgentPipelineInfo, CommandResponse } from '../types/agentComposer';
 
 /**
  * List all saved agent pipelines (summary info only).

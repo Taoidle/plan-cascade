@@ -34,21 +34,18 @@ interface DataTableProps {
 export function DataTable({ data }: DataTableProps) {
   const [sort, setSort] = useState<SortState>({ column: null, direction: null });
 
-  const handleSort = useCallback(
-    (column: TableColumn) => {
-      if (!column.sortable) return;
+  const handleSort = useCallback((column: TableColumn) => {
+    if (!column.sortable) return;
 
-      setSort((prev) => {
-        if (prev.column === column.key) {
-          // Cycle: asc -> desc -> null
-          if (prev.direction === 'asc') return { column: column.key, direction: 'desc' };
-          if (prev.direction === 'desc') return { column: null, direction: null };
-        }
-        return { column: column.key, direction: 'asc' };
-      });
-    },
-    []
-  );
+    setSort((prev) => {
+      if (prev.column === column.key) {
+        // Cycle: asc -> desc -> null
+        if (prev.direction === 'asc') return { column: column.key, direction: 'desc' };
+        if (prev.direction === 'desc') return { column: null, direction: null };
+      }
+      return { column: column.key, direction: 'asc' };
+    });
+  }, []);
 
   const sortedRows = useMemo(() => {
     if (!sort.column || !sort.direction) return data.rows;
@@ -82,11 +79,7 @@ export function DataTable({ data }: DataTableProps) {
 
   return (
     <div className="overflow-x-auto" data-testid="data-table">
-      {data.title && (
-        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          {data.title}
-        </h4>
-      )}
+      {data.title && <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{data.title}</h4>}
       <table className="w-full text-xs border-collapse">
         <thead>
           <tr className="border-b border-gray-200 dark:border-gray-700">
@@ -95,7 +88,7 @@ export function DataTable({ data }: DataTableProps) {
                 key={col.key}
                 className={clsx(
                   'px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400',
-                  col.sortable && 'cursor-pointer hover:text-gray-700 dark:hover:text-gray-200'
+                  col.sortable && 'cursor-pointer hover:text-gray-700 dark:hover:text-gray-200',
                 )}
                 style={col.width ? { width: col.width } : undefined}
                 onClick={() => handleSort(col)}
@@ -115,14 +108,11 @@ export function DataTable({ data }: DataTableProps) {
               className={clsx(
                 'border-b border-gray-100 dark:border-gray-800',
                 'hover:bg-gray-50 dark:hover:bg-gray-800/50',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               {data.columns.map((col) => (
-                <td
-                  key={col.key}
-                  className="px-3 py-2 text-gray-700 dark:text-gray-300"
-                >
+                <td key={col.key} className="px-3 py-2 text-gray-700 dark:text-gray-300">
                   {row[col.key] != null ? String(row[col.key]) : ''}
                 </td>
               ))}
@@ -130,11 +120,7 @@ export function DataTable({ data }: DataTableProps) {
           ))}
         </tbody>
       </table>
-      {sortedRows.length === 0 && (
-        <p className="text-center text-xs text-gray-400 dark:text-gray-500 py-4">
-          No data
-        </p>
-      )}
+      {sortedRows.length === 0 && <p className="text-center text-xs text-gray-400 dark:text-gray-500 py-4">No data</p>}
     </div>
   );
 }

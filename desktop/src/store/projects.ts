@@ -7,14 +7,7 @@
 
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import type {
-  Project,
-  Session,
-  SessionDetails,
-  ResumeResult,
-  ProjectSortBy,
-  CommandResponse,
-} from '../types/project';
+import type { Project, Session, SessionDetails, ResumeResult, ProjectSortBy, CommandResponse } from '../types/project';
 
 interface ProjectsState {
   /** List of all projects */

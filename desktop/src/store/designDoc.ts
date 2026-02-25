@@ -214,10 +214,10 @@ export const useDesignDocStore = create<DesignDocState>((set) => ({
     }));
 
     try {
-      const response = await invoke<CommandResponse<GenerateResult>>(
-        'generate_design_doc',
-        { prdPath, options: options || null }
-      );
+      const response = await invoke<CommandResponse<GenerateResult>>('generate_design_doc', {
+        prdPath,
+        options: options || null,
+      });
 
       if (response.success && response.data) {
         set((state) => ({
@@ -250,10 +250,10 @@ export const useDesignDocStore = create<DesignDocState>((set) => ({
     }));
 
     try {
-      const response = await invoke<CommandResponse<ImportResult>>(
-        'import_design_doc',
-        { filePath, format: format || null }
-      );
+      const response = await invoke<CommandResponse<ImportResult>>('import_design_doc', {
+        filePath,
+        format: format || null,
+      });
 
       if (response.success && response.data) {
         set((state) => ({
@@ -285,10 +285,7 @@ export const useDesignDocStore = create<DesignDocState>((set) => ({
     }));
 
     try {
-      const response = await invoke<CommandResponse<DesignDoc>>(
-        'get_design_doc',
-        { projectPath: projectPath || null }
-      );
+      const response = await invoke<CommandResponse<DesignDoc>>('get_design_doc', { projectPath: projectPath || null });
 
       if (response.success && response.data) {
         set((state) => ({

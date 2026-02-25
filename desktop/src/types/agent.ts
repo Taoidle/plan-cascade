@@ -163,8 +163,8 @@ export const AVAILABLE_TOOLS = [
 ] as const;
 
 /** Get tools grouped by category */
-export function getToolsByCategory(): Record<string, typeof AVAILABLE_TOOLS[number][]> {
-  const grouped: Record<string, typeof AVAILABLE_TOOLS[number][]> = {};
+export function getToolsByCategory(): Record<string, (typeof AVAILABLE_TOOLS)[number][]> {
+  const grouped: Record<string, (typeof AVAILABLE_TOOLS)[number][]> = {};
 
   for (const tool of AVAILABLE_TOOLS) {
     if (!grouped[tool.category]) {

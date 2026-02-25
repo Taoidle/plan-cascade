@@ -35,25 +35,23 @@ export function PromptPanel() {
     }
   }, [panelOpen, prompts.length, fetchPrompts]);
 
-  const pinnedPrompts = useMemo(
-    () => prompts.filter((p) => p.is_pinned),
-    [prompts]
-  );
+  const pinnedPrompts = useMemo(() => prompts.filter((p) => p.is_pinned), [prompts]);
 
   const recentPrompts = useMemo(
-    () => prompts
-      .filter((p) => !p.is_pinned && p.use_count > 0)
-      .sort((a, b) => b.use_count - a.use_count)
-      .slice(0, 5),
-    [prompts]
+    () =>
+      prompts
+        .filter((p) => !p.is_pinned && p.use_count > 0)
+        .sort((a, b) => b.use_count - a.use_count)
+        .slice(0, 5),
+    [prompts],
   );
 
   const handleInsert = useCallback(
-    (prompt: typeof prompts[0]) => {
+    (prompt: (typeof prompts)[0]) => {
       recordUse(prompt.id);
       setPendingInsert(prompt.content);
     },
-    [recordUse, setPendingInsert]
+    [recordUse, setPendingInsert],
   );
 
   const handleManageAll = useCallback(() => {
@@ -69,80 +67,63 @@ export function PromptPanel() {
 
   return (
     <Collapsible open={panelOpen}>
-    <div
-      data-testid="prompt-panel"
-      className="border-t border-gray-200 dark:border-gray-700"
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2">
-        <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
-          {t('promptPanel.title', { defaultValue: 'Prompts' })}
-        </span>
-        <button
-          onClick={handleManageAll}
-          className={clsx(
-            'p-1 rounded-md transition-colors',
-            'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
-            'hover:bg-gray-100 dark:hover:bg-gray-800'
-          )}
-          title={t('promptPanel.manageAll', { defaultValue: 'Manage All...' })}
-        >
-          <GearIcon className="w-3.5 h-3.5" />
-        </button>
-      </div>
-
-      {/* Content */}
-      <div className="px-2 pb-2 space-y-1 max-h-[300px] overflow-y-auto">
-        {/* Loading state */}
-        {loading && prompts.length === 0 && (
-          <div className="text-center py-4">
-            <span className="text-xs text-gray-400 dark:text-gray-500">
-              {t('promptPanel.loading', { defaultValue: 'Loading prompts...' })}
-            </span>
-          </div>
-        )}
-
-        {/* Empty state */}
-        {!loading && prompts.length === 0 && (
-          <div className="text-center py-4">
-            <span className="text-xs text-gray-400 dark:text-gray-500">
-              {t('promptPanel.noPrompts', { defaultValue: 'No prompts yet' })}
-            </span>
-          </div>
-        )}
-
-        {/* Pinned section */}
-        {pinnedPrompts.length > 0 && (
-          <>
-            {pinnedPrompts.map((prompt) => (
-              <PromptRow
-                key={prompt.id}
-                prompt={prompt}
-                categoryBadgeColor={categoryBadgeColor}
-                onInsert={() => handleInsert(prompt)}
-                onTogglePin={() => togglePin(prompt.id)}
-              />
-            ))}
-            {recentPrompts.length > 0 && (
-              <div className="border-t border-gray-100 dark:border-gray-800 my-1" />
+      <div data-testid="prompt-panel" className="border-t border-gray-200 dark:border-gray-700">
+        {/* Header */}
+        <div className="flex items-center justify-between px-3 py-2">
+          <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+            {t('promptPanel.title', { defaultValue: 'Prompts' })}
+          </span>
+          <button
+            onClick={handleManageAll}
+            className={clsx(
+              'p-1 rounded-md transition-colors',
+              'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
+              'hover:bg-gray-100 dark:hover:bg-gray-800',
             )}
-          </>
-        )}
+            title={t('promptPanel.manageAll', { defaultValue: 'Manage All...' })}
+          >
+            <GearIcon className="w-3.5 h-3.5" />
+          </button>
+        </div>
 
-        {/* Recent section */}
-        {recentPrompts.map((prompt) => (
-          <PromptRow
-            key={prompt.id}
-            prompt={prompt}
-            categoryBadgeColor={categoryBadgeColor}
-            onInsert={() => handleInsert(prompt)}
-            onTogglePin={() => togglePin(prompt.id)}
-          />
-        ))}
+        {/* Content */}
+        <div className="px-2 pb-2 space-y-1 max-h-[300px] overflow-y-auto">
+          {/* Loading state */}
+          {loading && prompts.length === 0 && (
+            <div className="text-center py-4">
+              <span className="text-xs text-gray-400 dark:text-gray-500">
+                {t('promptPanel.loading', { defaultValue: 'Loading prompts...' })}
+              </span>
+            </div>
+          )}
 
-        {/* Show all if no pinned and no recent but have prompts */}
-        {pinnedPrompts.length === 0 && recentPrompts.length === 0 && prompts.length > 0 && (
-          prompts.slice(0, 8).map((prompt) => (
+          {/* Empty state */}
+          {!loading && prompts.length === 0 && (
+            <div className="text-center py-4">
+              <span className="text-xs text-gray-400 dark:text-gray-500">
+                {t('promptPanel.noPrompts', { defaultValue: 'No prompts yet' })}
+              </span>
+            </div>
+          )}
+
+          {/* Pinned section */}
+          {pinnedPrompts.length > 0 && (
+            <>
+              {pinnedPrompts.map((prompt) => (
+                <PromptRow
+                  key={prompt.id}
+                  prompt={prompt}
+                  categoryBadgeColor={categoryBadgeColor}
+                  onInsert={() => handleInsert(prompt)}
+                  onTogglePin={() => togglePin(prompt.id)}
+                />
+              ))}
+              {recentPrompts.length > 0 && <div className="border-t border-gray-100 dark:border-gray-800 my-1" />}
+            </>
+          )}
+
+          {/* Recent section */}
+          {recentPrompts.map((prompt) => (
             <PromptRow
               key={prompt.id}
               prompt={prompt}
@@ -150,25 +131,40 @@ export function PromptPanel() {
               onInsert={() => handleInsert(prompt)}
               onTogglePin={() => togglePin(prompt.id)}
             />
-          ))
-        )}
-      </div>
+          ))}
 
-      {/* Manage All button */}
-      <div className="px-3 pb-2">
-        <button
-          onClick={handleManageAll}
-          className={clsx(
-            'w-full px-2 py-1.5 rounded-md text-xs font-medium transition-colors',
-            'text-primary-600 dark:text-primary-400',
-            'hover:bg-primary-50 dark:hover:bg-primary-900/20',
-            'border border-primary-200 dark:border-primary-800'
-          )}
-        >
-          {t('promptPanel.manageAll', { defaultValue: 'Manage All...' })}
-        </button>
+          {/* Show all if no pinned and no recent but have prompts */}
+          {pinnedPrompts.length === 0 &&
+            recentPrompts.length === 0 &&
+            prompts.length > 0 &&
+            prompts
+              .slice(0, 8)
+              .map((prompt) => (
+                <PromptRow
+                  key={prompt.id}
+                  prompt={prompt}
+                  categoryBadgeColor={categoryBadgeColor}
+                  onInsert={() => handleInsert(prompt)}
+                  onTogglePin={() => togglePin(prompt.id)}
+                />
+              ))}
+        </div>
+
+        {/* Manage All button */}
+        <div className="px-3 pb-2">
+          <button
+            onClick={handleManageAll}
+            className={clsx(
+              'w-full px-2 py-1.5 rounded-md text-xs font-medium transition-colors',
+              'text-primary-600 dark:text-primary-400',
+              'hover:bg-primary-50 dark:hover:bg-primary-900/20',
+              'border border-primary-200 dark:border-primary-800',
+            )}
+          >
+            {t('promptPanel.manageAll', { defaultValue: 'Manage All...' })}
+          </button>
+        </div>
       </div>
-    </div>
     </Collapsible>
   );
 }
@@ -195,19 +191,17 @@ function PromptRow({
       className={clsx(
         'flex items-center gap-2 px-2 py-1.5 rounded-md',
         'hover:bg-gray-50 dark:hover:bg-gray-800',
-        'transition-colors group'
+        'transition-colors group',
       )}
     >
       {/* Info */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1">
-          <span className="text-xs text-gray-900 dark:text-white truncate">
-            {prompt.title}
-          </span>
+          <span className="text-xs text-gray-900 dark:text-white truncate">{prompt.title}</span>
           <span
             className={clsx(
               'text-2xs px-1 py-0.5 rounded shrink-0',
-              categoryBadgeColor[prompt.category] || categoryBadgeColor.custom
+              categoryBadgeColor[prompt.category] || categoryBadgeColor.custom,
             )}
           >
             {prompt.category}
@@ -223,7 +217,7 @@ function PromptRow({
             'px-1.5 py-0.5 text-2xs rounded-md transition-colors',
             'text-primary-600 dark:text-primary-400',
             'hover:bg-primary-50 dark:hover:bg-primary-900/20',
-            'opacity-0 group-hover:opacity-100'
+            'opacity-0 group-hover:opacity-100',
           )}
         >
           {t('promptPanel.insert', { defaultValue: 'Insert' })}
@@ -232,17 +226,11 @@ function PromptRow({
           onClick={onTogglePin}
           className={clsx(
             'p-0.5 rounded-md transition-colors',
-            prompt.is_pinned
-              ? 'text-amber-500'
-              : 'text-gray-300 dark:text-gray-600 opacity-0 group-hover:opacity-100',
-            'hover:bg-gray-100 dark:hover:bg-gray-800'
+            prompt.is_pinned ? 'text-amber-500' : 'text-gray-300 dark:text-gray-600 opacity-0 group-hover:opacity-100',
+            'hover:bg-gray-100 dark:hover:bg-gray-800',
           )}
         >
-          {prompt.is_pinned ? (
-            <DrawingPinFilledIcon className="w-3 h-3" />
-          ) : (
-            <DrawingPinIcon className="w-3 h-3" />
-          )}
+          {prompt.is_pinned ? <DrawingPinFilledIcon className="w-3 h-3" /> : <DrawingPinIcon className="w-3 h-3" />}
         </button>
       </div>
     </div>

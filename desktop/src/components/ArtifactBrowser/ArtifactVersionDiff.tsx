@@ -34,26 +34,26 @@ export function ArtifactVersionDiff({ artifact, projectId, versions }: ArtifactV
   }, [versions]);
 
   // Load text content when versions change
-  const loadVersionText = useCallback(async (version: number): Promise<string | null> => {
-    const result = await artifactLoad(artifact.name, projectId, null, null, version);
-    if (result.success && result.data) {
-      try {
-        const decoder = new TextDecoder('utf-8');
-        return decoder.decode(new Uint8Array(result.data));
-      } catch {
-        return null;
+  const loadVersionText = useCallback(
+    async (version: number): Promise<string | null> => {
+      const result = await artifactLoad(artifact.name, projectId, null, null, version);
+      if (result.success && result.data) {
+        try {
+          const decoder = new TextDecoder('utf-8');
+          return decoder.decode(new Uint8Array(result.data));
+        } catch {
+          return null;
+        }
       }
-    }
-    return null;
-  }, [artifact.name, projectId]);
+      return null;
+    },
+    [artifact.name, projectId],
+  );
 
   useEffect(() => {
     if (leftVersion === null || rightVersion === null) return;
     setIsLoading(true);
-    Promise.all([
-      loadVersionText(leftVersion),
-      loadVersionText(rightVersion),
-    ]).then(([left, right]) => {
+    Promise.all([loadVersionText(leftVersion), loadVersionText(rightVersion)]).then(([left, right]) => {
       setLeftText(left);
       setRightText(right);
       setIsLoading(false);
@@ -100,9 +100,7 @@ export function ArtifactVersionDiff({ artifact, projectId, versions }: ArtifactV
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-        {t('diff.title')}
-      </h4>
+      <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">{t('diff.title')}</h4>
 
       {/* Version selectors */}
       <div className="flex items-center gap-4 mb-4">
@@ -115,11 +113,13 @@ export function ArtifactVersionDiff({ artifact, projectId, versions }: ArtifactV
               'px-2 py-1 rounded-md text-sm',
               'border border-gray-300 dark:border-gray-600',
               'bg-white dark:bg-gray-800',
-              'text-gray-900 dark:text-white'
+              'text-gray-900 dark:text-white',
             )}
           >
             {versions.map((v) => (
-              <option key={v.version} value={v.version}>v{v.version}</option>
+              <option key={v.version} value={v.version}>
+                v{v.version}
+              </option>
             ))}
           </select>
         </div>
@@ -133,11 +133,13 @@ export function ArtifactVersionDiff({ artifact, projectId, versions }: ArtifactV
               'px-2 py-1 rounded-md text-sm',
               'border border-gray-300 dark:border-gray-600',
               'bg-white dark:bg-gray-800',
-              'text-gray-900 dark:text-white'
+              'text-gray-900 dark:text-white',
             )}
           >
             {versions.map((v) => (
-              <option key={v.version} value={v.version}>v{v.version}</option>
+              <option key={v.version} value={v.version}>
+                v{v.version}
+              </option>
             ))}
           </select>
         </div>
@@ -146,26 +148,30 @@ export function ArtifactVersionDiff({ artifact, projectId, versions }: ArtifactV
       {/* Diff stats */}
       {diffLines && (
         <div className="flex items-center gap-4 mb-3 text-xs">
-          <span className="text-green-600 dark:text-green-400">+{stats.added} {t('diff.added')}</span>
-          <span className="text-red-600 dark:text-red-400">-{stats.removed} {t('diff.removed')}</span>
-          <span className="text-yellow-600 dark:text-yellow-400">~{stats.modified} {t('diff.modified')}</span>
+          <span className="text-green-600 dark:text-green-400">
+            +{stats.added} {t('diff.added')}
+          </span>
+          <span className="text-red-600 dark:text-red-400">
+            -{stats.removed} {t('diff.removed')}
+          </span>
+          <span className="text-yellow-600 dark:text-yellow-400">
+            ~{stats.modified} {t('diff.modified')}
+          </span>
         </div>
       )}
 
       {/* Diff content */}
       {isLoading ? (
-        <div className="animate-pulse text-sm text-gray-500 py-4 text-center">
-          {t('diff.loading')}
-        </div>
+        <div className="animate-pulse text-sm text-gray-500 py-4 text-center">{t('diff.loading')}</div>
       ) : !leftText || !rightText ? (
-        <div className="text-sm text-gray-500 py-4 text-center">
-          {t('diff.binaryNotSupported')}
-        </div>
+        <div className="text-sm text-gray-500 py-4 text-center">{t('diff.binaryNotSupported')}</div>
       ) : diffLines ? (
-        <div className={clsx(
-          'rounded-lg border border-gray-200 dark:border-gray-700',
-          'overflow-x-auto max-h-80 font-mono text-xs'
-        )}>
+        <div
+          className={clsx(
+            'rounded-lg border border-gray-200 dark:border-gray-700',
+            'overflow-x-auto max-h-80 font-mono text-xs',
+          )}
+        >
           <table className="w-full">
             <tbody>
               {diffLines.map((line, i) => (
@@ -175,27 +181,31 @@ export function ArtifactVersionDiff({ artifact, projectId, versions }: ArtifactV
                     line.type === 'same' && '',
                     line.type === 'added' && 'bg-green-50 dark:bg-green-900/20',
                     line.type === 'removed' && 'bg-red-50 dark:bg-red-900/20',
-                    line.type === 'modified' && 'bg-yellow-50 dark:bg-yellow-900/20'
+                    line.type === 'modified' && 'bg-yellow-50 dark:bg-yellow-900/20',
                   )}
                 >
                   <td className="px-2 py-0.5 text-gray-400 select-none text-right w-8 border-r border-gray-200 dark:border-gray-700">
                     {line.lineNum}
                   </td>
                   <td className="px-2 py-0.5 w-1/2 border-r border-gray-200 dark:border-gray-700">
-                    <span className={clsx(
-                      line.type === 'removed' && 'text-red-700 dark:text-red-300',
-                      line.type === 'modified' && 'text-yellow-700 dark:text-yellow-300',
-                      line.type === 'same' && 'text-gray-700 dark:text-gray-300'
-                    )}>
+                    <span
+                      className={clsx(
+                        line.type === 'removed' && 'text-red-700 dark:text-red-300',
+                        line.type === 'modified' && 'text-yellow-700 dark:text-yellow-300',
+                        line.type === 'same' && 'text-gray-700 dark:text-gray-300',
+                      )}
+                    >
                       {line.left}
                     </span>
                   </td>
                   <td className="px-2 py-0.5 w-1/2">
-                    <span className={clsx(
-                      line.type === 'added' && 'text-green-700 dark:text-green-300',
-                      line.type === 'modified' && 'text-yellow-700 dark:text-yellow-300',
-                      line.type === 'same' && 'text-gray-700 dark:text-gray-300'
-                    )}>
+                    <span
+                      className={clsx(
+                        line.type === 'added' && 'text-green-700 dark:text-green-300',
+                        line.type === 'modified' && 'text-yellow-700 dark:text-yellow-300',
+                        line.type === 'same' && 'text-gray-700 dark:text-gray-300',
+                      )}
+                    >
                       {line.right}
                     </span>
                   </td>

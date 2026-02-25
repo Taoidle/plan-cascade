@@ -94,9 +94,7 @@ export const useGuardrailsStore = create<GuardrailsState>()((set) => ({
       if (result.success) {
         // Optimistically update the local state
         set((state) => ({
-          guardrails: state.guardrails.map((g) =>
-            g.name === name ? { ...g, enabled } : g,
-          ),
+          guardrails: state.guardrails.map((g) => (g.name === name ? { ...g, enabled } : g)),
           isTogglingGuardrail: false,
         }));
       } else {

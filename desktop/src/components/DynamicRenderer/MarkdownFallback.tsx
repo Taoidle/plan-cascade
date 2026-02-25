@@ -23,9 +23,7 @@ export function MarkdownFallback({ componentType, data }: MarkdownFallbackProps)
         <span className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-medium">
           {componentType}
         </span>
-        <span className="text-gray-400 dark:text-gray-500">
-          (unknown component type)
-        </span>
+        <span className="text-gray-400 dark:text-gray-500">(unknown component type)</span>
       </div>
       <pre
         className={clsx(
@@ -33,7 +31,7 @@ export function MarkdownFallback({ componentType, data }: MarkdownFallbackProps)
           'bg-gray-50 dark:bg-gray-900',
           'border border-gray-200 dark:border-gray-700',
           'text-gray-700 dark:text-gray-300',
-          'font-mono'
+          'font-mono',
         )}
       >
         {jsonStr}

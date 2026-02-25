@@ -56,12 +56,7 @@ function truncateArgs(args: string, maxLines = 4): { text: string; truncated: bo
   }
 }
 
-export function ToolPermissionOverlay({
-  request,
-  onRespond,
-  loading,
-  queueSize,
-}: ToolPermissionOverlayProps) {
+export function ToolPermissionOverlay({ request, onRespond, loading, queueSize }: ToolPermissionOverlayProps) {
   const { t } = useTranslation('simpleMode');
   const [expanded, setExpanded] = useState(false);
   const riskStyle = RISK_STYLE[request.risk] ?? RISK_STYLE.Dangerous;
@@ -87,16 +82,8 @@ export function ToolPermissionOverlay({
         <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
           {t('permission.toolRequiresApproval')}
         </span>
-        <span className="text-xs font-semibold text-gray-900 dark:text-gray-100">
-          {request.toolName}
-        </span>
-        <span
-          className={clsx(
-            'px-1.5 py-0.5 rounded text-[10px] font-medium',
-            riskStyle.bg,
-            riskStyle.color
-          )}
-        >
+        <span className="text-xs font-semibold text-gray-900 dark:text-gray-100">{request.toolName}</span>
+        <span className={clsx('px-1.5 py-0.5 rounded text-[10px] font-medium', riskStyle.bg, riskStyle.color)}>
           {t(riskKey)}
         </span>
         {queueSize > 0 && (
@@ -131,7 +118,7 @@ export function ToolPermissionOverlay({
           className={clsx(
             'px-4 py-1.5 rounded-lg text-xs font-medium transition-colors',
             'bg-green-600 text-white hover:bg-green-700',
-            'disabled:opacity-50 disabled:cursor-not-allowed'
+            'disabled:opacity-50 disabled:cursor-not-allowed',
           )}
         >
           {t('permission.allow')}
@@ -142,7 +129,7 @@ export function ToolPermissionOverlay({
           className={clsx(
             'px-4 py-1.5 rounded-lg text-xs font-medium transition-colors',
             'bg-red-600 text-white hover:bg-red-700',
-            'disabled:opacity-50 disabled:cursor-not-allowed'
+            'disabled:opacity-50 disabled:cursor-not-allowed',
           )}
         >
           {t('permission.deny')}

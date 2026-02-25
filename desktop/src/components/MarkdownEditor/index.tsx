@@ -50,7 +50,7 @@ function ViewModeButton({ mode, currentMode, icon, label, onClick }: ViewModeBut
         'transition-colors',
         mode === currentMode
           ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-600 dark:text-primary-400'
-          : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+          : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700',
       )}
     >
       {icon}
@@ -150,7 +150,7 @@ export function MarkdownEditor({ rootPath, isDark = false }: MarkdownEditorProps
         setContent(templateContent);
       }
     },
-    [content, setContent]
+    [content, setContent],
   );
 
   // Handle refresh
@@ -163,9 +163,7 @@ export function MarkdownEditor({ rootPath, isDark = false }: MarkdownEditorProps
       {/* Top Bar */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
         <div className="flex items-center gap-3">
-          <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
-            {t('markdownEditor.title')}
-          </h2>
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-white">{t('markdownEditor.title')}</h2>
 
           {/* Template Selector */}
           <TemplateSelector onSelect={handleTemplateInsert} disabled={!selectedFile} />
@@ -206,10 +204,7 @@ export function MarkdownEditor({ rootPath, isDark = false }: MarkdownEditorProps
       {error && (
         <div className="px-4 py-2 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800 flex items-center justify-between">
           <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-          <button
-            onClick={clearError}
-            className="text-sm text-red-600 dark:text-red-400 hover:underline"
-          >
+          <button onClick={clearError} className="text-sm text-red-600 dark:text-red-400 hover:underline">
             {t('common.cancel')}
           </button>
         </div>
@@ -237,7 +232,7 @@ export function MarkdownEditor({ rootPath, isDark = false }: MarkdownEditorProps
                 <div
                   className={clsx(
                     'flex-1 min-w-0',
-                    viewMode === 'split' && 'border-r border-gray-200 dark:border-gray-700'
+                    viewMode === 'split' && 'border-r border-gray-200 dark:border-gray-700',
                   )}
                 >
                   {loading.content ? (
@@ -268,9 +263,7 @@ export function MarkdownEditor({ rootPath, isDark = false }: MarkdownEditorProps
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center">
                 <Pencil1Icon className="w-12 h-12 mx-auto mb-3 text-gray-300 dark:text-gray-600" />
-                <p className="text-gray-500 dark:text-gray-400">
-                  {t('markdownEditor.editor.placeholder')}
-                </p>
+                <p className="text-gray-500 dark:text-gray-400">{t('markdownEditor.editor.placeholder')}</p>
               </div>
             </div>
           )}

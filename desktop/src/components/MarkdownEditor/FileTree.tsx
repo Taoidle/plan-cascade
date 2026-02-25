@@ -8,13 +8,7 @@
 import { useMemo, useState, useCallback, useEffect } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import {
-  FileTextIcon,
-  ReloadIcon,
-  ChevronRightIcon,
-  ChevronDownIcon,
-  PlusIcon,
-} from '@radix-ui/react-icons';
+import { FileTextIcon, ReloadIcon, ChevronRightIcon, ChevronDownIcon, PlusIcon } from '@radix-ui/react-icons';
 import type { ClaudeMdFile } from '../../types/markdown';
 
 interface FileTreeProps {
@@ -117,7 +111,7 @@ function TreeNodeComponent({
             'w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md',
             'text-sm text-gray-700 dark:text-gray-300',
             'hover:bg-gray-100 dark:hover:bg-gray-700',
-            'transition-colors'
+            'transition-colors',
           )}
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
         >
@@ -156,7 +150,7 @@ function TreeNodeComponent({
         'text-sm transition-colors',
         isSelected
           ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300'
-          : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+          : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700',
       )}
       style={{ paddingLeft: `${depth * 12 + 8}px` }}
     >
@@ -171,15 +165,11 @@ function FileTreeSkeleton() {
   return (
     <div className="space-y-2 p-2">
       {[1, 2, 3, 4, 5].map((i) => (
-        <div
-          key={i}
-          className="flex items-center gap-2 px-2 py-1.5"
-          style={{ paddingLeft: `${(i % 3) * 12 + 8}px` }}
-        >
+        <div key={i} className="flex items-center gap-2 px-2 py-1.5" style={{ paddingLeft: `${(i % 3) * 12 + 8}px` }}>
           <div className="w-3.5 h-3.5 bg-gray-200 dark:bg-gray-700 rounded animate-pulse" />
           <div
             className="h-4 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"
-            style={{ width: `${60 + (i * 20) % 60}px` }}
+            style={{ width: `${60 + ((i * 20) % 60)}px` }}
           />
         </div>
       ))}
@@ -187,14 +177,7 @@ function FileTreeSkeleton() {
   );
 }
 
-export function FileTree({
-  files,
-  selectedFile,
-  loading,
-  onSelectFile,
-  onRefresh,
-  onCreateFile,
-}: FileTreeProps) {
+export function FileTree({ files, selectedFile, loading, onSelectFile, onRefresh, onCreateFile }: FileTreeProps) {
   const { t } = useTranslation();
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
 
@@ -243,9 +226,7 @@ export function FileTree({
       {/* Header */}
       <div className="p-3 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-            {t('markdownEditor.fileTree.title')}
-          </h3>
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{t('markdownEditor.fileTree.title')}</h3>
           <div className="flex items-center gap-1">
             {onCreateFile && (
               <button
@@ -255,7 +236,7 @@ export function FileTree({
                   'text-gray-500 dark:text-gray-400',
                   'hover:bg-gray-100 dark:hover:bg-gray-700',
                   'hover:text-gray-700 dark:hover:text-gray-300',
-                  'transition-colors'
+                  'transition-colors',
                 )}
                 title={t('markdownEditor.fileTree.createNew')}
               >
@@ -272,7 +253,7 @@ export function FileTree({
                 'hover:text-gray-700 dark:hover:text-gray-300',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
                 'transition-colors',
-                loading && 'animate-spin'
+                loading && 'animate-spin',
               )}
               title={t('markdownEditor.fileTree.refresh')}
             >
@@ -292,12 +273,8 @@ export function FileTree({
         ) : files.length === 0 ? (
           <div className="p-4 text-center">
             <FileTextIcon className="w-8 h-8 mx-auto mb-2 text-gray-400" />
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              {t('markdownEditor.fileTree.noFiles')}
-            </p>
-            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-              {t('markdownEditor.fileTree.noFilesHint')}
-            </p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">{t('markdownEditor.fileTree.noFiles')}</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{t('markdownEditor.fileTree.noFilesHint')}</p>
           </div>
         ) : (
           <div className="py-1">

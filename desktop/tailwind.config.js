@@ -1,10 +1,7 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: 'class',
-  content: [
-    './index.html',
-    './src/**/*.{js,ts,jsx,tsx}',
-  ],
+  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
       // ================================================================
@@ -112,16 +109,16 @@ export default {
         // Extending with additional values on 4px grid
         // 0.5 = 2px, 1 = 4px, 1.5 = 6px, 2 = 8px ... (default Tailwind)
         // Adding explicit semantic aliases
-        '4.5': '1.125rem',  // 18px
-        '13': '3.25rem',    // 52px
-        '15': '3.75rem',    // 60px
-        '18': '4.5rem',     // 72px
-        '22': '5.5rem',     // 88px
-        '26': '6.5rem',     // 104px
-        '30': '7.5rem',     // 120px
-        '34': '8.5rem',     // 136px
-        '38': '9.5rem',     // 152px
-        '42': '10.5rem',    // 168px
+        4.5: '1.125rem', // 18px
+        13: '3.25rem', // 52px
+        15: '3.75rem', // 60px
+        18: '4.5rem', // 72px
+        22: '5.5rem', // 88px
+        26: '6.5rem', // 104px
+        30: '7.5rem', // 120px
+        34: '8.5rem', // 136px
+        38: '9.5rem', // 152px
+        42: '10.5rem', // 168px
       },
 
       // ================================================================
@@ -133,40 +130,40 @@ export default {
       },
       fontSize: {
         // Standardized type scale
-        '2xs': ['0.625rem', { lineHeight: '0.875rem' }],   // 10px
-        'xs': ['0.75rem', { lineHeight: '1rem' }],          // 12px
-        'sm': ['0.875rem', { lineHeight: '1.25rem' }],      // 14px
-        'base': ['1rem', { lineHeight: '1.5rem' }],         // 16px
-        'lg': ['1.125rem', { lineHeight: '1.75rem' }],      // 18px
-        'xl': ['1.25rem', { lineHeight: '1.75rem' }],       // 20px
-        '2xl': ['1.5rem', { lineHeight: '2rem' }],          // 24px
-        '3xl': ['1.875rem', { lineHeight: '2.25rem' }],     // 30px
-        '4xl': ['2.25rem', { lineHeight: '2.5rem' }],       // 36px
+        '2xs': ['0.625rem', { lineHeight: '0.875rem' }], // 10px
+        xs: ['0.75rem', { lineHeight: '1rem' }], // 12px
+        sm: ['0.875rem', { lineHeight: '1.25rem' }], // 14px
+        base: ['1rem', { lineHeight: '1.5rem' }], // 16px
+        lg: ['1.125rem', { lineHeight: '1.75rem' }], // 18px
+        xl: ['1.25rem', { lineHeight: '1.75rem' }], // 20px
+        '2xl': ['1.5rem', { lineHeight: '2rem' }], // 24px
+        '3xl': ['1.875rem', { lineHeight: '2.25rem' }], // 30px
+        '4xl': ['2.25rem', { lineHeight: '2.5rem' }], // 36px
       },
 
       // ================================================================
       // Design Tokens - Border Radius
       // ================================================================
       borderRadius: {
-        'sm': '0.25rem',    // 4px
-        'md': '0.375rem',   // 6px
-        'DEFAULT': '0.5rem',// 8px
-        'lg': '0.75rem',    // 12px
-        'xl': '1rem',       // 16px
-        '2xl': '1.5rem',    // 24px
-        'full': '9999px',
+        sm: '0.25rem', // 4px
+        md: '0.375rem', // 6px
+        DEFAULT: '0.5rem', // 8px
+        lg: '0.75rem', // 12px
+        xl: '1rem', // 16px
+        '2xl': '1.5rem', // 24px
+        full: '9999px',
       },
 
       // ================================================================
       // Design Tokens - Shadows
       // ================================================================
       boxShadow: {
-        'xs': '0 1px 2px 0 rgb(0 0 0 / 0.05)',
-        'sm': '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)',
-        'DEFAULT': '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
-        'md': '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
-        'lg': '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
-        'xl': '0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)',
+        xs: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+        sm: '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)',
+        DEFAULT: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
+        md: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
+        lg: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
+        xl: '0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)',
         // Dark mode shadows
         'dark-sm': '0 1px 3px 0 rgb(0 0 0 / 0.3), 0 1px 2px -1px rgb(0 0 0 / 0.3)',
         'dark-md': '0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3)',
@@ -177,38 +174,38 @@ export default {
       // Design Tokens - Transitions
       // ================================================================
       transitionDuration: {
-        'fast': '100ms',
-        'DEFAULT': '200ms',
-        'slow': '300ms',
-        'slower': '500ms',
+        fast: '100ms',
+        DEFAULT: '200ms',
+        slow: '300ms',
+        slower: '500ms',
       },
 
       // ================================================================
       // Responsive breakpoints (extended for large displays)
       // ================================================================
       screens: {
-        'xs': '480px',
+        xs: '480px',
         // sm: 640px (default)
         // md: 768px (default)
         // lg: 1024px (default)
         // xl: 1280px (default)
         '2xl': '1536px',
-        '3xl': '1920px',     // Full HD
-        '4xl': '2560px',     // QHD / 2K
-        '5xl': '3840px',     // 4K UHD
+        '3xl': '1920px', // Full HD
+        '4xl': '2560px', // QHD / 2K
+        '5xl': '3840px', // 4K UHD
       },
 
       // ================================================================
       // Animations
       // ================================================================
       keyframes: {
-        'shimmer': {
+        shimmer: {
           '0%': { backgroundPosition: '200% 0' },
           '100%': { backgroundPosition: '-200% 0' },
         },
       },
       animation: {
-        'shimmer': 'shimmer 1.5s ease-in-out infinite',
+        shimmer: 'shimmer 1.5s ease-in-out infinite',
       },
     },
   },

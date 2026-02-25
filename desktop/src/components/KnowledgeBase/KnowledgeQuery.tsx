@@ -17,15 +17,8 @@ interface KnowledgeQueryProps {
 
 export function KnowledgeQuery({ projectId, collectionName }: KnowledgeQueryProps) {
   const { t } = useTranslation('knowledge');
-  const {
-    queryResults,
-    totalSearched,
-    searchQuery,
-    isQuerying,
-    queryCollection,
-    setSearchQuery,
-    clearQueryResults,
-  } = useKnowledgeStore();
+  const { queryResults, totalSearched, searchQuery, isQuerying, queryCollection, setSearchQuery, clearQueryResults } =
+    useKnowledgeStore();
 
   const [topK, setTopK] = useState(10);
 
@@ -34,11 +27,14 @@ export function KnowledgeQuery({ projectId, collectionName }: KnowledgeQueryProp
     await queryCollection(projectId, collectionName, searchQuery.trim(), topK);
   }, [projectId, collectionName, searchQuery, topK, queryCollection]);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleSearch();
-    }
-  }, [handleSearch]);
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        handleSearch();
+      }
+    },
+    [handleSearch],
+  );
 
   const formatScore = (score: number): string => {
     return (score * 100).toFixed(1) + '%';
@@ -53,12 +49,8 @@ export function KnowledgeQuery({ projectId, collectionName }: KnowledgeQueryProp
   return (
     <div className="p-6 space-y-6">
       <div>
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-          {t('query.title')}
-        </h3>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          {t('query.subtitle')}
-        </p>
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{t('query.title')}</h3>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('query.subtitle')}</p>
       </div>
 
       {/* Search input */}
@@ -76,7 +68,7 @@ export function KnowledgeQuery({ projectId, collectionName }: KnowledgeQueryProp
               'bg-white dark:bg-gray-800',
               'text-gray-900 dark:text-white',
               'focus:ring-2 focus:ring-primary-500 focus:border-transparent',
-              'text-sm placeholder:text-gray-400'
+              'text-sm placeholder:text-gray-400',
             )}
           />
           <button
@@ -87,7 +79,7 @@ export function KnowledgeQuery({ projectId, collectionName }: KnowledgeQueryProp
               'bg-primary-600 hover:bg-primary-700',
               'text-white',
               'disabled:opacity-50 disabled:cursor-not-allowed',
-              'transition-colors shrink-0'
+              'transition-colors shrink-0',
             )}
           >
             {isQuerying ? t('query.searching') : t('query.search')}
@@ -105,11 +97,13 @@ export function KnowledgeQuery({ projectId, collectionName }: KnowledgeQueryProp
                 'px-2 py-1 rounded-md text-sm',
                 'border border-gray-300 dark:border-gray-600',
                 'bg-white dark:bg-gray-800',
-                'text-gray-900 dark:text-white'
+                'text-gray-900 dark:text-white',
               )}
             >
               {[5, 10, 20, 50].map((k) => (
-                <option key={k} value={k}>{k}</option>
+                <option key={k} value={k}>
+                  {k}
+                </option>
               ))}
             </select>
           </label>
@@ -144,24 +138,17 @@ export function KnowledgeQuery({ projectId, collectionName }: KnowledgeQueryProp
               className={clsx(
                 'rounded-lg border border-gray-200 dark:border-gray-700',
                 'bg-white dark:bg-gray-900',
-                'overflow-hidden'
+                'overflow-hidden',
               )}
             >
               {/* Result header */}
               <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100 dark:border-gray-800">
                 <div className="flex items-center gap-3">
                   <span className="text-xs font-mono text-gray-400">#{index + 1}</span>
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    {result.document_id}
-                  </span>
-                  <span className="text-xs text-gray-400 dark:text-gray-500">
-                    {result.collection_name}
-                  </span>
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{result.document_id}</span>
+                  <span className="text-xs text-gray-400 dark:text-gray-500">{result.collection_name}</span>
                 </div>
-                <span className={clsx(
-                  'text-xs font-medium px-2 py-0.5 rounded-full',
-                  getScoreColor(result.score)
-                )}>
+                <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', getScoreColor(result.score))}>
                   {formatScore(result.score)}
                 </span>
               </div>
@@ -177,9 +164,7 @@ export function KnowledgeQuery({ projectId, collectionName }: KnowledgeQueryProp
         </div>
       ) : searchQuery && !isQuerying ? (
         <div className="text-center py-8">
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            {t('query.noResults')}
-          </p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t('query.noResults')}</p>
         </div>
       ) : null}
     </div>

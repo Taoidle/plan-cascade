@@ -167,9 +167,7 @@ export const usePRDStore = create<PRDState>()(
         set((state) => ({
           prd: {
             ...state.prd,
-            stories: state.prd.stories.map((s) =>
-              s.id === id ? { ...s, ...updates } : s
-            ),
+            stories: state.prd.stories.map((s) => (s.id === id ? { ...s, ...updates } : s)),
           },
         }));
       },
@@ -215,7 +213,7 @@ export const usePRDStore = create<PRDState>()(
             stories: state.prd.stories.map((s) =>
               s.id === storyId && !s.dependencies.includes(dependsOnId)
                 ? { ...s, dependencies: [...s.dependencies, dependsOnId] }
-                : s
+                : s,
             ),
           },
         }));
@@ -226,9 +224,7 @@ export const usePRDStore = create<PRDState>()(
           prd: {
             ...state.prd,
             stories: state.prd.stories.map((s) =>
-              s.id === storyId
-                ? { ...s, dependencies: s.dependencies.filter((d) => d !== dependsOnId) }
-                : s
+              s.id === storyId ? { ...s, dependencies: s.dependencies.filter((d) => d !== dependsOnId) } : s,
             ),
           },
         }));
@@ -257,9 +253,7 @@ export const usePRDStore = create<PRDState>()(
         set((state) => ({
           prd: {
             ...state.prd,
-            stories: state.prd.stories.map((s) =>
-              s.id === storyId ? { ...s, agent } : s
-            ),
+            stories: state.prd.stories.map((s) => (s.id === storyId ? { ...s, agent } : s)),
           },
         }));
       },
@@ -284,9 +278,7 @@ export const usePRDStore = create<PRDState>()(
         set((state) => ({
           prd: {
             ...state.prd,
-            qualityGates: state.prd.qualityGates.map((g) =>
-              g.id === gateId ? { ...g, enabled } : g
-            ),
+            qualityGates: state.prd.qualityGates.map((g) => (g.id === gateId ? { ...g, enabled } : g)),
           },
         }));
       },
@@ -382,9 +374,7 @@ export const usePRDStore = create<PRDState>()(
             // Update existing auto-save
             set((state) => ({
               drafts: state.drafts.map((d) =>
-                d.id === autoSaveDraft.id
-                  ? { ...d, timestamp: now, prd: JSON.parse(JSON.stringify(get().prd)) }
-                  : d
+                d.id === autoSaveDraft.id ? { ...d, timestamp: now, prd: JSON.parse(JSON.stringify(get().prd)) } : d,
               ),
               lastAutoSave: now,
             }));
@@ -467,8 +457,8 @@ export const usePRDStore = create<PRDState>()(
         prd: state.prd,
         drafts: state.drafts,
       }),
-    }
-  )
+    },
+  ),
 );
 
 export default usePRDStore;

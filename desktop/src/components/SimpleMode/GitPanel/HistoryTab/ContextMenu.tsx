@@ -54,13 +54,7 @@ type DialogState =
 // ContextMenu Component
 // ---------------------------------------------------------------------------
 
-export function ContextMenu({
-  state,
-  repoPath,
-  commit,
-  onClose,
-  onRefresh,
-}: ContextMenuProps) {
+export function ContextMenu({ state, repoPath, commit, onClose, onRefresh }: ContextMenuProps) {
   const { t } = useTranslation('git');
   const [dialogState, setDialogState] = useState<DialogState>({ type: 'none' });
   const menuRef = useRef<HTMLDivElement>(null);
@@ -115,34 +109,37 @@ export function ContextMenu({
     }
   }, [commit, onClose]);
 
-  const handleCreateBranch = useCallback(async (name: string) => {
-    if (!repoPath || !commit || !name.trim()) return;
+  const handleCreateBranch = useCallback(
+    async (name: string) => {
+      if (!repoPath || !commit || !name.trim()) return;
 
-    setDialogState({ type: 'loading', action: t('contextMenu.creatingBranch') });
+      setDialogState({ type: 'loading', action: t('contextMenu.creatingBranch') });
 
-    try {
-      const result = await invoke<CommandResponse<void>>('git_create_branch', {
-        repoPath,
-        name: name.trim(),
-        base: commit.sha,
-      });
+      try {
+        const result = await invoke<CommandResponse<void>>('git_create_branch', {
+          repoPath,
+          name: name.trim(),
+          base: commit.sha,
+        });
 
-      if (result.success) {
-        setDialogState({ type: 'success', message: t('contextMenu.branchCreated', { name: name.trim() }) });
-        setTimeout(() => {
-          onRefresh();
-          onClose();
-        }, 800);
-      } else {
-        setDialogState({ type: 'error', message: result.error || t('contextMenu.createBranchFailed') });
+        if (result.success) {
+          setDialogState({ type: 'success', message: t('contextMenu.branchCreated', { name: name.trim() }) });
+          setTimeout(() => {
+            onRefresh();
+            onClose();
+          }, 800);
+        } else {
+          setDialogState({ type: 'error', message: result.error || t('contextMenu.createBranchFailed') });
+        }
+      } catch (err) {
+        setDialogState({
+          type: 'error',
+          message: err instanceof Error ? err.message : t('contextMenu.createBranchFailed'),
+        });
       }
-    } catch (err) {
-      setDialogState({
-        type: 'error',
-        message: err instanceof Error ? err.message : t('contextMenu.createBranchFailed'),
-      });
-    }
-  }, [repoPath, commit, onRefresh, onClose]);
+    },
+    [repoPath, commit, onRefresh, onClose],
+  );
 
   const handleCherryPick = useCallback(async () => {
     if (!repoPath || !commit) return;
@@ -235,7 +232,7 @@ export function ContextMenu({
           'border border-gray-200 dark:border-gray-700',
           'rounded-lg shadow-lg',
           'py-1',
-          'animate-fade-in'
+          'animate-fade-in',
         )}
         style={{ left: position.x, top: position.y }}
         onClick={(e) => e.stopPropagation()}
@@ -249,12 +246,15 @@ export function ContextMenu({
               className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
             >
               <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                />
               </svg>
               {t('contextMenu.copySha')}
-              <span className="ml-auto text-[10px] text-gray-400 font-mono">
-                {commit.short_sha}
-              </span>
+              <span className="ml-auto text-[10px] text-gray-400 font-mono">{commit.short_sha}</span>
             </button>
 
             {/* Separator */}
@@ -277,7 +277,12 @@ export function ContextMenu({
               className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
             >
               <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
+                />
               </svg>
               {t('contextMenu.cherryPick')}
             </button>
@@ -288,7 +293,12 @@ export function ContextMenu({
               className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                />
               </svg>
               {t('contextMenu.revert')}
             </button>
@@ -305,9 +315,7 @@ export function ContextMenu({
               ref={branchInputRef}
               type="text"
               value={dialogState.branchName}
-              onChange={(e) =>
-                setDialogState({ type: 'create-branch', branchName: e.target.value })
-              }
+              onChange={(e) => setDialogState({ type: 'create-branch', branchName: e.target.value })}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && dialogState.branchName.trim()) {
                   handleCreateBranch(dialogState.branchName);
@@ -341,7 +349,7 @@ export function ContextMenu({
                   'bg-blue-500 text-white',
                   'hover:bg-blue-600',
                   'disabled:opacity-50 disabled:cursor-not-allowed',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 {t('contextMenu.create')}
@@ -356,9 +364,7 @@ export function ContextMenu({
             <p className="text-xs text-gray-700 dark:text-gray-300">
               {t('contextMenu.cherryPickConfirm', { sha: commit.short_sha })}
             </p>
-            <p className="text-[10px] text-gray-500 dark:text-gray-400">
-              {t('contextMenu.cherryPickWarning')}
-            </p>
+            <p className="text-[10px] text-gray-500 dark:text-gray-400">{t('contextMenu.cherryPickWarning')}</p>
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setDialogState({ type: 'none' })}
@@ -382,9 +388,7 @@ export function ContextMenu({
             <p className="text-xs text-gray-700 dark:text-gray-300">
               {t('contextMenu.revertConfirm', { sha: commit.short_sha })}
             </p>
-            <p className="text-[10px] text-gray-500 dark:text-gray-400">
-              {t('contextMenu.revertWarning')}
-            </p>
+            <p className="text-[10px] text-gray-500 dark:text-gray-400">{t('contextMenu.revertWarning')}</p>
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setDialogState({ type: 'none' })}

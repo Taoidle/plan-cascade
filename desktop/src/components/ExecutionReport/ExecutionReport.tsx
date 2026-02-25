@@ -58,9 +58,7 @@ export function ExecutionReport() {
     <div className="space-y-4" data-testid="execution-report">
       {/* Header with export buttons */}
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-          Execution Report
-        </h3>
+        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Execution Report</h3>
         <div className="flex items-center gap-2">
           <button
             onClick={handleExportJson}
@@ -69,7 +67,7 @@ export function ExecutionReport() {
               'border border-gray-300 dark:border-gray-600',
               'text-gray-600 dark:text-gray-400',
               'hover:bg-gray-100 dark:hover:bg-gray-700',
-              'transition-colors'
+              'transition-colors',
             )}
             title="Export as JSON"
           >
@@ -83,7 +81,7 @@ export function ExecutionReport() {
               'border border-gray-300 dark:border-gray-600',
               'text-gray-600 dark:text-gray-400',
               'hover:bg-gray-100 dark:hover:bg-gray-700',
-              'transition-colors'
+              'transition-colors',
             )}
             title="Export as Markdown"
           >
@@ -99,11 +97,7 @@ export function ExecutionReport() {
       {/* Quality Radar Chart */}
       {report.radarDimensions.length > 0 && (
         <div
-          className={clsx(
-            'p-4 rounded-lg',
-            'border border-gray-200 dark:border-gray-700',
-            'bg-white dark:bg-gray-800'
-          )}
+          className={clsx('p-4 rounded-lg', 'border border-gray-200 dark:border-gray-700', 'bg-white dark:bg-gray-800')}
         >
           <QualityRadarChart dimensions={report.radarDimensions} />
         </div>
@@ -112,27 +106,16 @@ export function ExecutionReport() {
       {/* Timeline Waterfall */}
       {report.timeline.length > 0 && (
         <div
-          className={clsx(
-            'p-4 rounded-lg',
-            'border border-gray-200 dark:border-gray-700',
-            'bg-white dark:bg-gray-800'
-          )}
+          className={clsx('p-4 rounded-lg', 'border border-gray-200 dark:border-gray-700', 'bg-white dark:bg-gray-800')}
         >
-          <TimelineWaterfall
-            entries={report.timeline}
-            totalDurationMs={report.summary.totalTimeMs}
-          />
+          <TimelineWaterfall entries={report.timeline} totalDurationMs={report.summary.totalTimeMs} />
         </div>
       )}
 
       {/* Agent Performance */}
       {report.agentPerformance.length > 0 && (
         <div
-          className={clsx(
-            'p-4 rounded-lg',
-            'border border-gray-200 dark:border-gray-700',
-            'bg-white dark:bg-gray-800'
-          )}
+          className={clsx('p-4 rounded-lg', 'border border-gray-200 dark:border-gray-700', 'bg-white dark:bg-gray-800')}
         >
           <AgentPerformanceTable agents={report.agentPerformance} />
         </div>

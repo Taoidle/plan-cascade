@@ -45,7 +45,7 @@ export function AddMarketplaceDialog() {
             'w-[480px] max-w-[90vw]',
             'bg-white dark:bg-gray-900 rounded-xl shadow-2xl',
             'border border-gray-200 dark:border-gray-700',
-            'animate-[contentShow_0.2s]'
+            'animate-[contentShow_0.2s]',
           )}
         >
           {/* Header */}
@@ -60,7 +60,7 @@ export function AddMarketplaceDialog() {
                   'p-1.5 rounded-md',
                   'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
                   'hover:bg-gray-100 dark:hover:bg-gray-800',
-                  'disabled:opacity-50'
+                  'disabled:opacity-50',
                 )}
               >
                 <Cross2Icon className="w-4 h-4" />
@@ -70,9 +70,7 @@ export function AddMarketplaceDialog() {
 
           {/* Body */}
           <div className="p-4 space-y-4">
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              {t('plugins.addMarketplaceDesc')}
-            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">{t('plugins.addMarketplaceDesc')}</p>
 
             {/* Source input */}
             <div>
@@ -94,7 +92,7 @@ export function AddMarketplaceDialog() {
                   'text-gray-700 dark:text-gray-300',
                   'placeholder:text-gray-400 dark:placeholder:text-gray-500',
                   'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent',
-                  'disabled:opacity-50'
+                  'disabled:opacity-50',
                 )}
               />
             </div>
@@ -103,9 +101,7 @@ export function AddMarketplaceDialog() {
             {addingMarketplace && (
               <div className="flex items-center gap-2">
                 <ReloadIcon className="w-3.5 h-3.5 animate-spin text-primary-600" />
-                <span className="text-xs text-gray-600 dark:text-gray-300">
-                  {t('plugins.fetchingMarketplace')}
-                </span>
+                <span className="text-xs text-gray-600 dark:text-gray-300">{t('plugins.fetchingMarketplace')}</span>
               </div>
             )}
           </div>
@@ -121,7 +117,7 @@ export function AddMarketplaceDialog() {
                 'text-gray-700 dark:text-gray-300',
                 'hover:bg-gray-200 dark:hover:bg-gray-700',
                 'disabled:opacity-50',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               {t('plugins.cancel')}
@@ -133,7 +129,7 @@ export function AddMarketplaceDialog() {
                 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium',
                 'bg-primary-600 hover:bg-primary-700 text-white',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               {addingMarketplace ? (

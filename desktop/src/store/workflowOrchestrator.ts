@@ -99,9 +99,15 @@ interface WorkflowOrchestratorState {
   submitInterviewAnswer: (answer: string) => Promise<void>;
   skipInterviewQuestion: () => Promise<void>;
   approvePrd: (editedPrd?: TaskPrd) => Promise<void>;
-  updateEditableStory: (storyId: string, updates: Partial<{ title: string; description: string; priority: string; acceptanceCriteria: string[] }>) => void;
+  updateEditableStory: (
+    storyId: string,
+    updates: Partial<{ title: string; description: string; priority: string; acceptanceCriteria: string[] }>,
+  ) => void;
   addPrdFeedback: (feedback: string) => void;
-  approveArchitecture: (acceptAsIs: boolean, selectedModifications: Array<{ storyId: string; action: string; reason: string }>) => Promise<void>;
+  approveArchitecture: (
+    acceptAsIs: boolean,
+    selectedModifications: Array<{ storyId: string; action: string; reason: string }>,
+  ) => Promise<void>;
   cancelWorkflow: () => Promise<void>;
   resetWorkflow: () => void;
   clearConversationHistory: () => void;
@@ -152,11 +158,7 @@ function nextCardId(): string {
 }
 
 /** Inject a card message into the chat transcript */
-function injectCard<T extends CardPayload['cardType']>(
-  cardType: T,
-  data: CardPayload['data'],
-  interactive = false
-) {
+function injectCard<T extends CardPayload['cardType']>(cardType: T, data: CardPayload['data'], interactive = false) {
   const payload: CardPayload = {
     cardType,
     cardId: nextCardId(),
@@ -180,7 +182,7 @@ function injectError(title: string, description: string, suggestedFix: string | 
 function mapInterviewQuestion(
   q: InterviewQuestion,
   questionNumber: number,
-  totalQuestions: number
+  totalQuestions: number,
 ): InterviewQuestionCardData {
   let inputType: InterviewQuestionCardData['inputType'];
   switch (q.input_type) {
@@ -292,9 +294,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
           const settings = useSettingsStore.getState();
           const { resolveProviderBaseUrl } = await import('../lib/providers');
-          const baseUrl = settings.provider
-            ? resolveProviderBaseUrl(settings.provider, settings)
-            : undefined;
+          const baseUrl = settings.provider ? resolveProviderBaseUrl(settings.provider, settings) : undefined;
 
           const enhanced = await invoke<{ success: boolean; data: StrategyAnalysis | null; error: string | null }>(
             'enhance_strategy_with_llm',
@@ -305,7 +305,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
               model: settings.model || null,
               apiKey: null,
               baseUrl: baseUrl || null,
-            }
+            },
           );
 
           if (enhanced.success && enhanced.data) {
@@ -338,10 +338,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
           config.maxParallel = 2;
         }
         // Enable interview for high-risk or high-story-count tasks in standard/full flow
-        if (
-          config.flowLevel !== 'quick' &&
-          (analysis.riskLevel === 'high' || analysis.estimatedStories > 8)
-        ) {
+        if (config.flowLevel !== 'quick' && (analysis.riskLevel === 'high' || analysis.estimatedStories > 8)) {
           config.specInterviewEnabled = true;
         }
       }
@@ -373,7 +370,11 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       if (config.specInterviewEnabled) {
         // Start interview flow (BA now has exploration context)
         set({ phase: 'interviewing' });
-        injectCard('persona_indicator', { role: 'BusinessAnalyst', displayName: 'Business Analyst', phase: 'interviewing' });
+        injectCard('persona_indicator', {
+          role: 'BusinessAnalyst',
+          displayName: 'Business Analyst',
+          phase: 'interviewing',
+        });
         injectInfo(i18n.t('workflow.orchestrator.startingInterview', { ns: 'simpleMode' }), 'info');
 
         const workspacePath = useSettingsStore.getState().workspacePath;
@@ -401,7 +402,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
           const questionData = mapInterviewQuestion(
             session.current_question,
             session.question_cursor + 1,
-            session.max_questions
+            session.max_questions,
           );
           set({ pendingQuestion: questionData });
           injectCard('interview_question', questionData, true);
@@ -474,7 +475,15 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
     if (Object.keys(updates).length > 0) {
       set((state) => ({ config: { ...state.config, ...updates } }));
-      injectInfo(i18n.t('workflow.orchestrator.configUpdated', { ns: 'simpleMode', details: Object.entries(updates).map(([k, v]) => `${k}=${v}`).join(', ') }), 'success');
+      injectInfo(
+        i18n.t('workflow.orchestrator.configUpdated', {
+          ns: 'simpleMode',
+          details: Object.entries(updates)
+            .map(([k, v]) => `${k}=${v}`)
+            .join(', '),
+        }),
+        'success',
+      );
     }
   },
 
@@ -534,7 +543,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       const questionData = mapInterviewQuestion(
         updatedSession.current_question,
         updatedSession.question_cursor + 1,
-        updatedSession.max_questions
+        updatedSession.max_questions,
       );
       set({ pendingQuestion: questionData });
       injectCard('interview_question', questionData, true);
@@ -586,7 +595,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       const questionData = mapInterviewQuestion(
         updatedSession.current_question,
         updatedSession.question_cursor + 1,
-        updatedSession.max_questions
+        updatedSession.max_questions,
       );
       set({ pendingQuestion: questionData });
       injectCard('interview_question', questionData, true);
@@ -600,9 +609,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     set({
       editablePrd: {
         ...editablePrd,
-        stories: editablePrd.stories.map((s) =>
-          s.id === storyId ? { ...s, ...updates } : s
-        ),
+        stories: editablePrd.stories.map((s) => (s.id === storyId ? { ...s, ...updates } : s)),
       },
     });
   },
@@ -641,13 +648,22 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   },
 
   /** Approve or request changes to the architecture review */
-  approveArchitecture: async (acceptAsIs: boolean, selectedModifications: Array<{ storyId: string; action: string; reason: string }>) => {
+  approveArchitecture: async (
+    acceptAsIs: boolean,
+    selectedModifications: Array<{ storyId: string; action: string; reason: string }>,
+  ) => {
     const { phase, editablePrd } = get();
     if (phase !== 'architecture_review') return;
 
     if (acceptAsIs || selectedModifications.length === 0) {
       // Accept architecture as-is — proceed to design doc + execution
-      injectInfo(i18n.t('workflow.orchestrator.architectureApproved', { ns: 'simpleMode', defaultValue: 'Architecture review accepted. Generating design document...' }), 'success');
+      injectInfo(
+        i18n.t('workflow.orchestrator.architectureApproved', {
+          ns: 'simpleMode',
+          defaultValue: 'Architecture review accepted. Generating design document...',
+        }),
+        'success',
+      );
 
       const prd = editablePrd;
       if (!prd) return;
@@ -662,7 +678,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
             count: selectedModifications.length,
             defaultValue: 'Applying {{count}} architectural suggestions. Returning to PRD review...',
           }),
-          'warning'
+          'warning',
         );
       }
       set({ phase: 'reviewing_prd' });
@@ -733,7 +749,11 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 // Internal Phase Transitions
 // ============================================================================
 
-type SetFn = (partial: Partial<WorkflowOrchestratorState> | ((state: WorkflowOrchestratorState) => Partial<WorkflowOrchestratorState>)) => void;
+type SetFn = (
+  partial:
+    | Partial<WorkflowOrchestratorState>
+    | ((state: WorkflowOrchestratorState) => Partial<WorkflowOrchestratorState>),
+) => void;
 type GetFn = () => WorkflowOrchestratorState;
 
 /**
@@ -755,9 +775,7 @@ async function explorePhase(set: SetFn, get: GetFn) {
   try {
     const settings = useSettingsStore.getState();
     const { resolveProviderBaseUrl } = await import('../lib/providers');
-    const baseUrl = settings.provider
-      ? resolveProviderBaseUrl(settings.provider, settings)
-      : undefined;
+    const baseUrl = settings.provider ? resolveProviderBaseUrl(settings.provider, settings) : undefined;
 
     const result = await invoke<{
       success: boolean;
@@ -777,16 +795,10 @@ async function explorePhase(set: SetFn, get: GetFn) {
       set({ explorationResult: result.data });
       injectCard('exploration_card', result.data);
     } else {
-      injectInfo(
-        i18n.t('workflow.orchestrator.explorationFailed', { ns: 'simpleMode' }),
-        'warning'
-      );
+      injectInfo(i18n.t('workflow.orchestrator.explorationFailed', { ns: 'simpleMode' }), 'warning');
     }
   } catch {
-    injectInfo(
-      i18n.t('workflow.orchestrator.explorationFailed', { ns: 'simpleMode' }),
-      'warning'
-    );
+    injectInfo(i18n.t('workflow.orchestrator.explorationFailed', { ns: 'simpleMode' }), 'warning');
   }
 }
 
@@ -803,26 +815,30 @@ async function requirementAnalysisPhase(set: SetFn, get: GetFn) {
   if (config.flowLevel === 'quick') return;
 
   set({ phase: 'requirement_analysis' });
-  injectCard('persona_indicator', { role: 'ProductManager', displayName: 'Product Manager', phase: 'requirement_analysis' });
-  injectInfo(i18n.t('workflow.orchestrator.analyzingRequirements', { ns: 'simpleMode', defaultValue: 'Analyzing requirements...' }), 'info');
+  injectCard('persona_indicator', {
+    role: 'ProductManager',
+    displayName: 'Product Manager',
+    phase: 'requirement_analysis',
+  });
+  injectInfo(
+    i18n.t('workflow.orchestrator.analyzingRequirements', {
+      ns: 'simpleMode',
+      defaultValue: 'Analyzing requirements...',
+    }),
+    'info',
+  );
 
   try {
     const settings = useSettingsStore.getState();
     const { resolveProviderBaseUrl } = await import('../lib/providers');
-    const baseUrl = settings.provider
-      ? resolveProviderBaseUrl(settings.provider, settings)
-      : undefined;
+    const baseUrl = settings.provider ? resolveProviderBaseUrl(settings.provider, settings) : undefined;
 
     // Build exploration context string for the backend
-    const explorationContext = explorationResult
-      ? JSON.stringify(explorationResult)
-      : null;
+    const explorationContext = explorationResult ? JSON.stringify(explorationResult) : null;
 
     // Get compiled spec from interview (if any)
     const specStore = useSpecInterviewStore.getState();
-    const interviewResult = specStore.compiledSpec
-      ? JSON.stringify(specStore.compiledSpec)
-      : null;
+    const interviewResult = specStore.compiledSpec ? JSON.stringify(specStore.compiledSpec) : null;
 
     const result = await invoke<{
       success: boolean;
@@ -849,7 +865,7 @@ async function requirementAnalysisPhase(set: SetFn, get: GetFn) {
           ns: 'simpleMode',
           defaultValue: 'Requirement analysis could not be completed. Continuing...',
         }),
-        'warning'
+        'warning',
       );
     }
   } catch {
@@ -858,7 +874,7 @@ async function requirementAnalysisPhase(set: SetFn, get: GetFn) {
         ns: 'simpleMode',
         defaultValue: 'Requirement analysis could not be completed. Continuing...',
       }),
-      'warning'
+      'warning',
     );
   }
 }
@@ -879,25 +895,31 @@ async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd) {
         ns: 'simpleMode',
         defaultValue: 'Architecture review limit reached (3 rounds). Proceeding with current PRD.',
       }),
-      'warning'
+      'warning',
     );
     return;
   }
 
   set({ phase: 'architecture_review', architectureReviewRound: architectureReviewRound + 1 });
-  injectCard('persona_indicator', { role: 'SoftwareArchitect', displayName: 'Software Architect', phase: 'architecture_review' });
-  injectInfo(i18n.t('workflow.orchestrator.reviewingArchitecture', { ns: 'simpleMode', defaultValue: 'Reviewing architecture...' }), 'info');
+  injectCard('persona_indicator', {
+    role: 'SoftwareArchitect',
+    displayName: 'Software Architect',
+    phase: 'architecture_review',
+  });
+  injectInfo(
+    i18n.t('workflow.orchestrator.reviewingArchitecture', {
+      ns: 'simpleMode',
+      defaultValue: 'Reviewing architecture...',
+    }),
+    'info',
+  );
 
   try {
     const settings = useSettingsStore.getState();
     const { resolveProviderBaseUrl } = await import('../lib/providers');
-    const baseUrl = settings.provider
-      ? resolveProviderBaseUrl(settings.provider, settings)
-      : undefined;
+    const baseUrl = settings.provider ? resolveProviderBaseUrl(settings.provider, settings) : undefined;
 
-    const explorationContext = explorationResult
-      ? JSON.stringify(explorationResult)
-      : null;
+    const explorationContext = explorationResult ? JSON.stringify(explorationResult) : null;
 
     const result = await invoke<{
       success: boolean;
@@ -925,7 +947,7 @@ async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd) {
           ns: 'simpleMode',
           defaultValue: 'Architecture review could not be completed. Continuing...',
         }),
-        'warning'
+        'warning',
       );
       // Continue to design doc + execution
       await designDocAndExecutePhase(set, get, prd);
@@ -936,7 +958,7 @@ async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd) {
         ns: 'simpleMode',
         defaultValue: 'Architecture review could not be completed. Continuing...',
       }),
-      'warning'
+      'warning',
     );
     await designDocAndExecutePhase(set, get, prd);
   }
@@ -954,10 +976,20 @@ async function designDocAndExecutePhase(set: SetFn, get: GetFn, prd: TaskPrd) {
 
   try {
     const projectPath = useSettingsStore.getState().workspacePath || null;
-    const designResult = await invoke<{ success: boolean; data?: { design_doc: { overview: { title: string; summary: string }; architecture: { components: { name: string }[]; patterns: { name: string }[] }; decisions: unknown[]; feature_mappings: Record<string, unknown> }; saved_path: string | null; generation_info: unknown }; error?: string }>(
-      'prepare_design_doc_for_task',
-      { prd, projectPath }
-    );
+    const designResult = await invoke<{
+      success: boolean;
+      data?: {
+        design_doc: {
+          overview: { title: string; summary: string };
+          architecture: { components: { name: string }[]; patterns: { name: string }[] };
+          decisions: unknown[];
+          feature_mappings: Record<string, unknown>;
+        };
+        saved_path: string | null;
+        generation_info: unknown;
+      };
+      error?: string;
+    }>('prepare_design_doc_for_task', { prd, projectPath });
     if (designResult.success && designResult.data) {
       const doc = designResult.data.design_doc;
       const cardData: DesignDocCardData = {
@@ -1099,7 +1131,7 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn) {
 
       // Resolve story title from editablePrd
       const storyTitle = payload.storyId
-        ? state.editablePrd?.stories.find((s) => s.id === payload.storyId)?.title ?? payload.storyId
+        ? (state.editablePrd?.stories.find((s) => s.id === payload.storyId)?.title ?? payload.storyId)
         : null;
 
       switch (payload.eventType) {
@@ -1110,7 +1142,11 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn) {
             totalBatches: payload.totalBatches,
             storyId: null,
             storyTitle: null,
-            status: i18n.t('workflow.execution.batchLabel', { ns: 'simpleMode', current: payload.currentBatch + 1, total: payload.totalBatches }),
+            status: i18n.t('workflow.execution.batchLabel', {
+              ns: 'simpleMode',
+              current: payload.currentBatch + 1,
+              total: payload.totalBatches,
+            }),
             agent: null,
             progressPct: payload.progressPct,
           } as ExecutionUpdateCardData);
@@ -1202,19 +1238,22 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn) {
           synthesizeExecutionTurn(completedCount, totalStories, success);
 
           // Fetch full report for duration/agent data
-          useTaskModeStore.getState().fetchReport().then(() => {
-            const report = useTaskModeStore.getState().report;
-            if (report) {
-              injectCard('completion_report', {
-                success: report.success,
-                totalStories: report.totalStories,
-                completed: report.storiesCompleted,
-                failed: report.storiesFailed,
-                duration: report.totalDurationMs,
-                agentAssignments: report.agentAssignments,
-              } as CompletionReportCardData);
-            }
-          });
+          useTaskModeStore
+            .getState()
+            .fetchReport()
+            .then(() => {
+              const report = useTaskModeStore.getState().report;
+              if (report) {
+                injectCard('completion_report', {
+                  success: report.success,
+                  totalStories: report.totalStories,
+                  completed: report.storiesCompleted,
+                  failed: report.storiesFailed,
+                  duration: report.totalDurationMs,
+                  agentAssignments: report.agentAssignments,
+                } as CompletionReportCardData);
+              }
+            });
           break;
         }
 

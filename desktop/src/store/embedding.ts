@@ -6,11 +6,7 @@
  */
 
 import { create } from 'zustand';
-import type {
-  EmbeddingProviderCapability,
-  EmbeddingConfigResponse,
-  EmbeddingHealthResponse,
-} from '../types/embedding';
+import type { EmbeddingProviderCapability, EmbeddingConfigResponse, EmbeddingHealthResponse } from '../types/embedding';
 import {
   getEmbeddingConfig,
   setEmbeddingConfig,
@@ -134,9 +130,7 @@ export const useEmbeddingStore = create<EmbeddingState>()((set, get) => ({
 
   setProvider: (provider: string) => {
     // When switching providers, apply provider defaults
-    const capability = get().providers.find(
-      (p) => p.provider_type === provider,
-    );
+    const capability = get().providers.find((p) => p.provider_type === provider);
     if (capability) {
       set({
         provider,
@@ -151,8 +145,8 @@ export const useEmbeddingStore = create<EmbeddingState>()((set, get) => ({
   },
 
   setModel: (model: string) => {
-    const capability = get().providers.find(p => p.provider_type === get().provider);
-    const preset = capability?.models?.find(m => m.model_id === model);
+    const capability = get().providers.find((p) => p.provider_type === get().provider);
+    const preset = capability?.models?.find((m) => m.model_id === model);
     if (preset) {
       set({
         model,

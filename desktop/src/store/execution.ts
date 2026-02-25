@@ -704,7 +704,7 @@ function inferProviderFromModel(model: string | null | undefined): string | null
 function resolveStandaloneProvider(
   rawBackend: string | null | undefined,
   rawProvider: string | null | undefined,
-  rawModel: string | null | undefined
+  rawModel: string | null | undefined,
 ): string {
   const backendCandidate = normalizeProviderName(rawBackend);
   const providerCandidate = normalizeProviderName(rawProvider);
@@ -798,11 +798,13 @@ function trimStandaloneTurns(turns: StandaloneTurn[], limit: number): Standalone
   return turns.slice(-limit);
 }
 
-function buildStandaloneConversationMessage(turns: StandaloneTurn[], userInput: string, contextTurnsLimit: number): string {
+function buildStandaloneConversationMessage(
+  turns: StandaloneTurn[],
+  userInput: string,
+  contextTurnsLimit: number,
+): string {
   const recent = trimStandaloneTurns(turns, contextTurnsLimit);
-  const history = recent
-    .map((turn) => `User: ${turn.user}\nAssistant: ${turn.assistant}`)
-    .join('\n\n');
+  const history = recent.map((turn) => `User: ${turn.user}\nAssistant: ${turn.assistant}`).join('\n\n');
 
   return [
     'Continue the same conversation. Keep consistency with previous context.',
@@ -925,9 +927,7 @@ function createSessionSnapshotFromForeground(
     workspacePath: settings.workspacePath || undefined,
     originHistoryId: state.foregroundOriginHistoryId || undefined,
     originSessionId:
-      state.foregroundOriginSessionId
-      || buildHistorySessionId(state.taskId, state.standaloneSessionId)
-      || undefined,
+      state.foregroundOriginSessionId || buildHistorySessionId(state.taskId, state.standaloneSessionId) || undefined,
     updatedAt: Date.now(),
   };
 }
@@ -966,8 +966,7 @@ function buildPersistedForegroundSnapshot(state: ExecutionState): PersistedForeg
     foregroundBgId: state.foregroundBgId,
     foregroundOriginHistoryId: state.foregroundOriginHistoryId,
     foregroundOriginSessionId:
-      state.foregroundOriginSessionId
-      || buildHistorySessionId(state.taskId, state.standaloneSessionId),
+      state.foregroundOriginSessionId || buildHistorySessionId(state.taskId, state.standaloneSessionId),
     foregroundDirty: state.foregroundDirty,
     workspacePath: settings.workspacePath || undefined,
   };
@@ -980,10 +979,7 @@ function persistSessionStateSnapshot(state: ExecutionState): void {
       version: 1,
       activeSessionId: state.activeSessionId,
       backgroundSessions: Object.fromEntries(
-        Object.entries(state.backgroundSessions).map(([id, snapshot]) => [
-          id,
-          toPersistedSessionSnapshot(snapshot),
-        ])
+        Object.entries(state.backgroundSessions).map(([id, snapshot]) => [id, toPersistedSessionSnapshot(snapshot)]),
       ),
       foreground: buildPersistedForegroundSnapshot(state),
     };
@@ -1011,7 +1007,7 @@ function loadPersistedSessionState(): PersistedSessionRestoreResult | null {
       Object.entries(parsed.backgroundSessions || {}).map(([id, snapshot]) => [
         id,
         fromPersistedSessionSnapshot(snapshot),
-      ])
+      ]),
     );
 
     if (!parsed.foreground) {
@@ -1071,22 +1067,12 @@ function schedulePersistSessionState(state: ExecutionState): void {
 }
 
 function hasAssistantTextLineSince(lines: StreamLine[], minExclusiveLineId: number): boolean {
-  return lines.some(
-    (line) =>
-      line.id > minExclusiveLineId &&
-      line.type === 'text' &&
-      line.content.trim().length > 0
-  );
+  return lines.some((line) => line.id > minExclusiveLineId && line.type === 'text' && line.content.trim().length > 0);
 }
 
 function collectAssistantTextSince(lines: StreamLine[], minExclusiveLineId: number): string {
   return lines
-    .filter(
-      (line) =>
-        line.id > minExclusiveLineId &&
-        line.type === 'text' &&
-        line.content.trim().length > 0
-    )
+    .filter((line) => line.id > minExclusiveLineId && line.type === 'text' && line.content.trim().length > 0)
     .map((line) => line.content)
     .join('')
     .trim();
@@ -1096,7 +1082,7 @@ function appendTextWithTypewriter(
   append: (content: string, type: StreamLineType) => void,
   content: string,
   chunkSize = 28,
-  delayMs = 14
+  delayMs = 14,
 ): Promise<void> {
   const text = content.trim();
   if (!text) return Promise.resolve();
@@ -1167,7 +1153,12 @@ function isLegacyTaskStartData(data: unknown): data is LegacyTaskStartData {
 function isBackendStandaloneExecutionResult(data: unknown): data is BackendStandaloneExecutionResult {
   if (typeof data !== 'object' || data === null) return false;
   const value = data as { iterations?: unknown; success?: unknown; usage?: unknown };
-  return typeof value.iterations === 'number' && typeof value.success === 'boolean' && typeof value.usage === 'object' && value.usage !== null;
+  return (
+    typeof value.iterations === 'number' &&
+    typeof value.success === 'boolean' &&
+    typeof value.usage === 'object' &&
+    value.usage !== null
+  );
 }
 
 function restoreSessionLlmSettings(settings: SessionLlmSettings): void {
@@ -1214,9 +1205,7 @@ async function triggerMemoryExtraction(state: ExecutionState): Promise<void> {
       if (!meaningfulTypes.has(line.type) || line.content.trim().length === 0) continue;
 
       const trimmed = line.content.trim();
-      const truncated = trimmed.length > MAX_LINE_CHARS
-        ? trimmed.slice(0, MAX_LINE_CHARS) + '...'
-        : trimmed;
+      const truncated = trimmed.length > MAX_LINE_CHARS ? trimmed.slice(0, MAX_LINE_CHARS) + '...' : trimmed;
 
       if (totalChars + truncated.length + 1 > TOTAL_CHAR_BUDGET) break;
       lines.unshift(truncated);
@@ -1351,10 +1340,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
     const isClaudeBackend = isClaudeCodeBackend(backendSnapshot);
     const existingStandaloneTurns = get().standaloneTurns;
     const existingStandaloneSessionId = get().standaloneSessionId;
-    const preserveSimpleConversation =
-      mode === 'simple' &&
-      get().streamingOutput.length > 0 &&
-      !isClaudeBackend;
+    const preserveSimpleConversation = mode === 'simple' && get().streamingOutput.length > 0 && !isClaudeBackend;
     const nextStandaloneSessionId =
       mode === 'simple' && !isClaudeBackend
         ? preserveSimpleConversation && existingStandaloneSessionId
@@ -1437,9 +1423,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
         // Enrich prompt with file attachments if any
         const claudeAttachments = get().attachments;
-        const claudePrompt = claudeAttachments.length > 0
-          ? buildPromptWithAttachments(description, claudeAttachments)
-          : description;
+        const claudePrompt =
+          claudeAttachments.length > 0 ? buildPromptWithAttachments(description, claudeAttachments) : description;
         get().clearAttachments();
 
         // Send the message to the session
@@ -1449,7 +1434,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       } else {
         // Use standalone LLM execution
         const provider = resolveStandaloneProvider(backendValue, providerValue, modelValue);
-        const effectiveModel = activeAgent?.model || settings.model || DEFAULT_MODEL_BY_PROVIDER[provider] || 'claude-sonnet-4-20250514';
+        const effectiveModel =
+          activeAgent?.model || settings.model || DEFAULT_MODEL_BY_PROVIDER[provider] || 'claude-sonnet-4-20250514';
         const model = effectiveModel;
         const providerApiKey = getLocalProviderApiKey(provider);
         const isSimpleStandalone = mode === 'simple';
@@ -1463,7 +1449,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
             ? buildStandaloneConversationMessage(existingStandaloneTurns, description, contextTurnsLimit)
             : description;
         get().addLog(
-          `Resolved provider: ${provider} (backend=${backendValue || 'empty'}, setting=${providerValue || 'empty'}, model=${modelValue || 'empty'})`
+          `Resolved provider: ${provider} (backend=${backendValue || 'empty'}, setting=${providerValue || 'empty'}, model=${modelValue || 'empty'})`,
         );
         if (isSimpleStandalone && recentStandaloneTurns.length > 0) {
           const contextLabel =
@@ -1473,9 +1459,10 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
         // Enrich prompt with file attachments if any
         const standaloneAttachments = get().attachments;
-        const enrichedMessage = standaloneAttachments.length > 0
-          ? buildPromptWithAttachments(messageToSend, standaloneAttachments)
-          : messageToSend;
+        const enrichedMessage =
+          standaloneAttachments.length > 0
+            ? buildPromptWithAttachments(messageToSend, standaloneAttachments)
+            : messageToSend;
         get().clearAttachments();
 
         // Resolve provider-specific base URL override (e.g. GLM Coding endpoint)
@@ -1529,18 +1516,21 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
               // Update standaloneTurns for conversation continuity
               if (mode === 'simple') {
                 const bgAssistantResponse = execution.response?.trim() || '';
-                const bgStreamedText = collectAssistantTextSince(
-                  bgMatch.snapshot.streamingOutput, turnStartLineId
-                );
+                const bgStreamedText = collectAssistantTextSince(bgMatch.snapshot.streamingOutput, turnStartLineId);
                 const bgAssistantText = bgAssistantResponse || bgStreamedText;
                 if (bgAssistantText) {
                   const retentionLimit = getStandaloneContextTurnsLimit();
-                  set(updateBackgroundSessionByTaskId(get(), standaloneSessionId, (snap) => ({
-                    standaloneTurns: trimStandaloneTurns(
-                      [...snap.standaloneTurns, { user: description, assistant: bgAssistantText, createdAt: Date.now() }],
-                      retentionLimit
-                    ),
-                  })));
+                  set(
+                    updateBackgroundSessionByTaskId(get(), standaloneSessionId, (snap) => ({
+                      standaloneTurns: trimStandaloneTurns(
+                        [
+                          ...snap.standaloneTurns,
+                          { user: description, assistant: bgAssistantText, createdAt: Date.now() },
+                        ],
+                        retentionLimit,
+                      ),
+                    })),
+                  );
                 }
               }
 
@@ -1549,19 +1539,25 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
               if (bgAfter && bgAfter.snapshot.status === 'running') {
                 const succeeded = execution.success;
                 const duration = Date.now() - (bgAfter.snapshot.startedAt || Date.now());
-                const durationStr = duration >= 60000
-                  ? `${Math.floor(duration / 60000)}m ${Math.round((duration % 60000) / 1000)}s`
-                  : `${Math.round(duration / 1000)}s`;
-                set(appendToBackgroundSession(
-                  get(), standaloneSessionId,
-                  succeeded
-                    ? `Completed (${durationStr})`
-                    : `Execution finished with failures.${execution.error ? ` ${execution.error}` : ''}`,
-                  succeeded ? 'success' : 'error'
-                ));
-                set(updateBackgroundSessionByTaskId(get(), standaloneSessionId, () => ({
-                  status: (succeeded ? 'completed' : 'failed') as ExecutionStatus,
-                })));
+                const durationStr =
+                  duration >= 60000
+                    ? `${Math.floor(duration / 60000)}m ${Math.round((duration % 60000) / 1000)}s`
+                    : `${Math.round(duration / 1000)}s`;
+                set(
+                  appendToBackgroundSession(
+                    get(),
+                    standaloneSessionId,
+                    succeeded
+                      ? `Completed (${durationStr})`
+                      : `Execution finished with failures.${execution.error ? ` ${execution.error}` : ''}`,
+                    succeeded ? 'success' : 'error',
+                  ),
+                );
+                set(
+                  updateBackgroundSessionByTaskId(get(), standaloneSessionId, () => ({
+                    status: (succeeded ? 'completed' : 'failed') as ExecutionStatus,
+                  })),
+                );
               }
             }
             return;
@@ -1584,7 +1580,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
                     createdAt: Date.now(),
                   },
                 ],
-                retentionLimit
+                retentionLimit,
               ),
             }));
           }
@@ -1596,10 +1592,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           const ensureAssistantResponseVisible = async () => {
             if (ensuredAssistantOutput) return;
 
-            const hasStreamedAssistantText = hasAssistantTextLineSince(
-              get().streamingOutput,
-              turnStartLineId
-            );
+            const hasStreamedAssistantText = hasAssistantTextLineSince(get().streamingOutput, turnStartLineId);
             if (hasStreamedAssistantText) {
               ensuredAssistantOutput = true;
               return;
@@ -1607,19 +1600,13 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
             if (assistantTurnText) {
               ensuredAssistantOutput = true;
-              await appendTextWithTypewriter(
-                (chunk, type) => get().appendStreamLine(chunk, type),
-                assistantTurnText
-              );
+              await appendTextWithTypewriter((chunk, type) => get().appendStreamLine(chunk, type), assistantTurnText);
               return;
             }
 
             // Check if thinking lines exist — don't show "no response" if the model did reason
             const hasThinkingLines = get().streamingOutput.some(
-              (line) =>
-                line.id > turnStartLineId &&
-                line.type === 'thinking' &&
-                line.content.trim().length > 0
+              (line) => line.id > turnStartLineId && line.type === 'thinking' && line.content.trim().length > 0,
             );
             if (hasThinkingLines) {
               ensuredAssistantOutput = true;
@@ -1662,16 +1649,17 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
             await ensureAssistantResponseVisible();
 
             const duration = Date.now() - (get().startedAt || Date.now());
-            const durationStr = duration >= 60000
-              ? `${Math.floor(duration / 60000)}m ${Math.round((duration % 60000) / 1000)}s`
-              : `${Math.round(duration / 1000)}s`;
+            const durationStr =
+              duration >= 60000
+                ? `${Math.floor(duration / 60000)}m ${Math.round((duration % 60000) / 1000)}s`
+                : `${Math.round(duration / 1000)}s`;
 
             set({
               taskId: null,
               status: succeeded ? 'completed' : 'failed',
               progress: succeeded ? 100 : get().progress,
               estimatedTimeRemaining: 0,
-              apiError: succeeded ? null : (execution.error || 'Execution failed'),
+              apiError: succeeded ? null : execution.error || 'Execution failed',
               result: {
                 success: succeeded,
                 message: succeeded ? 'Execution completed' : 'Execution failed',
@@ -1688,7 +1676,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
             } else {
               get().appendStreamLine(
                 `Execution finished with failures.${execution.error ? ` ${execution.error}` : ''}`,
-                'error'
+                'error',
               );
             }
             if (!succeeded && execution.error) {
@@ -1703,7 +1691,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
             get().addLog(
               succeeded
                 ? `Execution completed (iterations: ${execution.iterations})`
-                : `Execution failed: ${execution.error || 'Unknown error'}`
+                : `Execution failed: ${execution.error || 'Unknown error'}`,
             );
             get().saveToHistory();
             if (succeeded) void triggerMemoryExtraction(get());
@@ -1738,9 +1726,11 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         get().startedAt !== capturedStartedAt;
       if (errSessionGone && nextStandaloneSessionId) {
         set(appendToBackgroundSession(get(), nextStandaloneSessionId, `Error: ${errorMessage}`, 'error'));
-        set(updateBackgroundSessionByTaskId(get(), nextStandaloneSessionId, () => ({
-          status: 'failed' as ExecutionStatus,
-        })));
+        set(
+          updateBackgroundSessionByTaskId(get(), nextStandaloneSessionId, () => ({
+            status: 'failed' as ExecutionStatus,
+          })),
+        );
         return;
       }
 
@@ -1796,9 +1786,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
     // Enrich prompt with file attachments if any
     const followUpAttachments = get().attachments;
-    const enrichedPrompt = followUpAttachments.length > 0
-      ? buildPromptWithAttachments(basePrompt, followUpAttachments)
-      : basePrompt;
+    const enrichedPrompt =
+      followUpAttachments.length > 0 ? buildPromptWithAttachments(basePrompt, followUpAttachments) : basePrompt;
     get().clearAttachments();
 
     get().addLog(`Follow-up: ${prompt}`);
@@ -1902,8 +1891,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
     const state = get();
 
     // Auto-background running/paused session so backend events continue routing
-    if ((state.status === 'running' || state.status === 'paused')
-        && (state.taskId || state.standaloneSessionId)) {
+    if ((state.status === 'running' || state.status === 'paused') && (state.taskId || state.standaloneSessionId)) {
       get().backgroundCurrentSession();
       // backgroundCurrentSession already resets foreground to idle;
       // now apply remaining reset fields
@@ -1962,9 +1950,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
   updateStory: (storyId, updates) => {
     set((state) => ({
-      stories: state.stories.map((s) =>
-        s.id === storyId ? { ...s, ...updates } : s
-      ),
+      stories: state.stories.map((s) => (s.id === storyId ? { ...s, ...updates } : s)),
     }));
 
     // Recalculate progress
@@ -2037,9 +2023,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         : undefined;
     const conversationContent =
       state.streamingOutput.length > 0
-        ? state.streamingOutput
-            .map((line) => `${TYPE_PREFIX[line.type]}${line.content}`)
-            .join('\n')
+        ? state.streamingOutput.map((line) => `${TYPE_PREFIX[line.type]}${line.content}`).join('\n')
         : undefined;
 
     const baseItem: Omit<ExecutionHistoryItem, 'id'> = {
@@ -2135,7 +2119,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
               ...item,
               title: trimmed.length > 0 ? trimmed : undefined,
             }
-          : item
+          : item,
       );
       try {
         localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
@@ -2208,10 +2192,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
     const restoredSessionId = item.sessionId || null;
     const claudePrefix = 'claude:';
     const standalonePrefix = 'standalone:';
-    const isClaudeSession =
-      restoredSessionId !== null && restoredSessionId.startsWith(claudePrefix);
-    const isStandaloneSession =
-      restoredSessionId !== null && restoredSessionId.startsWith(standalonePrefix);
+    const isClaudeSession = restoredSessionId !== null && restoredSessionId.startsWith(claudePrefix);
+    const isStandaloneSession = restoredSessionId !== null && restoredSessionId.startsWith(standalonePrefix);
 
     const restoredStandaloneTurns: StandaloneTurn[] = [];
     if (isStandaloneSession) {
@@ -2246,11 +2228,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
     let bgSessions = currentState.backgroundSessions;
     if (currentState.foregroundBgId && bgSessions[currentState.foregroundBgId]) {
       const curSettings = useSettingsStore.getState();
-      const updatedGhost = createSessionSnapshotFromForeground(
-        currentState,
-        curSettings,
-        currentState.foregroundBgId
-      );
+      const updatedGhost = createSessionSnapshotFromForeground(currentState, curSettings, currentState.foregroundBgId);
       bgSessions = { ...bgSessions, [currentState.foregroundBgId]: updatedGhost };
     }
 
@@ -2269,9 +2247,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       streamLineCounter: counter,
       isChatSession: isClaudeSession,
       taskId: isClaudeSession ? restoredSessionId!.slice(claudePrefix.length) : null,
-      standaloneSessionId: isStandaloneSession
-        ? restoredSessionId!.slice(standalonePrefix.length)
-        : null,
+      standaloneSessionId: isStandaloneSession ? restoredSessionId!.slice(standalonePrefix.length) : null,
       standaloneTurns: isStandaloneSession
         ? trimStandaloneTurns(restoredStandaloneTurns, getStandaloneContextTurnsLimit())
         : [],
@@ -2305,7 +2281,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           strategy: analysis.strategy as Strategy,
         });
         get().addLog(
-          `Strategy recommendation: ${analysis.strategy} (confidence: ${(analysis.confidence * 100).toFixed(0)}%)`
+          `Strategy recommendation: ${analysis.strategy} (confidence: ${(analysis.confidence * 100).toFixed(0)}%)`,
         );
         return analysis;
       } else {
@@ -2344,12 +2320,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
       // For text and thinking deltas, concatenate to the last line of the same type
       // AND the same subAgentId — prevents different sub-agents' text from mixing
-      if (
-        (type === 'text' || type === 'thinking') &&
-        last &&
-        last.type === type &&
-        last.subAgentId === subAgentId
-      ) {
+      if ((type === 'text' || type === 'thinking') && last && last.type === type && last.subAgentId === subAgentId) {
         const updated = { ...last, content: last.content + content };
         const newLines = lines.slice();
         newLines[newLines.length - 1] = updated;
@@ -2384,7 +2355,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
   updateQualityGate: (result) => {
     set((state) => {
       const existing = state.qualityGateResults.findIndex(
-        (r) => r.gateId === result.gateId && r.storyId === result.storyId
+        (r) => r.gateId === result.gateId && r.storyId === result.storyId,
       );
       if (existing >= 0) {
         const updated = [...state.qualityGateResults];
@@ -2410,9 +2381,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
   dismissError: (errorId) => {
     set((state) => ({
-      executionErrors: state.executionErrors.map((e) =>
-        e.id === errorId ? { ...e, dismissed: true } : e
-      ),
+      executionErrors: state.executionErrors.map((e) => (e.id === errorId ? { ...e, dismissed: true } : e)),
     }));
   },
 
@@ -2479,9 +2448,10 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       const hasForegroundContent = hasMeaningfulForegroundContent(state);
 
       if (hasForegroundContent) {
-        const sessionId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-          ? `bg-${crypto.randomUUID()}`
-          : `bg-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+        const sessionId =
+          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? `bg-${crypto.randomUUID()}`
+            : `bg-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
 
         const snapshot = createSessionSnapshotFromForeground(state, settingsState, sessionId);
 
@@ -2564,7 +2534,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       newBackgroundSessions[state.foregroundBgId] = createSessionSnapshotFromForeground(
         state,
         currentSettings,
-        state.foregroundBgId
+        state.foregroundBgId,
       );
     } else {
       // No ghost — persist current foreground only when there is meaningful state.
@@ -2575,34 +2545,34 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         // a distinct background snapshot so the tree lineage is preserved.
         const canMergeByOrigin = !state.foregroundParentSessionId;
         const existingOriginMatch = canMergeByOrigin
-          ? Object.values(newBackgroundSessions).find((snap) => (
-            (!!state.foregroundOriginHistoryId && snap.originHistoryId === state.foregroundOriginHistoryId)
-            || (
-              !!state.foregroundOriginSessionId
-              && (snap.originSessionId || buildHistorySessionId(snap.taskId, snap.standaloneSessionId))
-                === state.foregroundOriginSessionId
+          ? Object.values(newBackgroundSessions).find(
+              (snap) =>
+                (!!state.foregroundOriginHistoryId && snap.originHistoryId === state.foregroundOriginHistoryId) ||
+                (!!state.foregroundOriginSessionId &&
+                  (snap.originSessionId || buildHistorySessionId(snap.taskId, snap.standaloneSessionId)) ===
+                    state.foregroundOriginSessionId),
             )
-          ))
           : undefined;
         const pristineRestoredHistory =
-          !state.foregroundDirty
-          && !state.taskId
-          && state.status !== 'running'
-          && state.status !== 'paused'
-          && !!(state.foregroundOriginHistoryId || state.foregroundOriginSessionId);
+          !state.foregroundDirty &&
+          !state.taskId &&
+          state.status !== 'running' &&
+          state.status !== 'paused' &&
+          !!(state.foregroundOriginHistoryId || state.foregroundOriginSessionId);
 
         if (existingOriginMatch) {
           if (state.foregroundDirty || state.status === 'running' || state.status === 'paused') {
             newBackgroundSessions[existingOriginMatch.id] = createSessionSnapshotFromForeground(
               state,
               currentSettings,
-              existingOriginMatch.id
+              existingOriginMatch.id,
             );
           }
         } else if (!pristineRestoredHistory) {
-          const newBgId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-            ? `bg-${crypto.randomUUID()}`
-            : `bg-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+          const newBgId =
+            typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+              ? `bg-${crypto.randomUUID()}`
+              : `bg-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
           newBackgroundSessions[newBgId] = createSessionSnapshotFromForeground(state, currentSettings, newBgId);
         }
       }
@@ -2612,15 +2582,16 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
     // Restore the target snapshot into the foreground
     set({
       backgroundSessions: newBackgroundSessions,
-      activeSessionId: state.foregroundBgId || Object.keys(newBackgroundSessions).find(
-        (k) => k !== id && newBackgroundSessions[k].taskId === state.taskId
-      ) || state.activeSessionId,
+      activeSessionId:
+        state.foregroundBgId ||
+        Object.keys(newBackgroundSessions).find((k) => k !== id && newBackgroundSessions[k].taskId === state.taskId) ||
+        state.activeSessionId,
       foregroundParentSessionId: targetSnapshot.parentSessionId || null,
       foregroundBgId: id,
       foregroundOriginHistoryId: targetSnapshot.originHistoryId || null,
       foregroundOriginSessionId:
-        targetSnapshot.originSessionId
-        || buildHistorySessionId(targetSnapshot.taskId, targetSnapshot.standaloneSessionId),
+        targetSnapshot.originSessionId ||
+        buildHistorySessionId(targetSnapshot.taskId, targetSnapshot.standaloneSessionId),
       foregroundDirty: false,
       taskDescription: targetSnapshot.taskDescription,
       status: targetSnapshot.status,
@@ -2671,16 +2642,11 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         backgroundSessions: reparented,
         // If the foreground's parent was the removed session, re-parent it too
         foregroundParentSessionId:
-          state.foregroundParentSessionId === id
-            ? (_removed.parentSessionId || null)
-            : state.foregroundParentSessionId,
+          state.foregroundParentSessionId === id ? _removed.parentSessionId || null : state.foregroundParentSessionId,
         // Clear ghost if the removed session was the ghost
-        foregroundBgId:
-          state.foregroundBgId === id ? null : state.foregroundBgId,
-        foregroundOriginHistoryId:
-          state.foregroundBgId === id ? null : state.foregroundOriginHistoryId,
-        foregroundOriginSessionId:
-          state.foregroundBgId === id ? null : state.foregroundOriginSessionId,
+        foregroundBgId: state.foregroundBgId === id ? null : state.foregroundBgId,
+        foregroundOriginHistoryId: state.foregroundBgId === id ? null : state.foregroundOriginHistoryId,
+        foregroundOriginSessionId: state.foregroundBgId === id ? null : state.foregroundOriginSessionId,
       };
     });
   },
@@ -2796,14 +2762,15 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       newBackgroundSessions[state.foregroundBgId] = createSessionSnapshotFromForeground(
         state,
         settingsState,
-        state.foregroundBgId
+        state.foregroundBgId,
       );
       parentId = state.foregroundBgId;
     } else {
       // No ghost — create new bg entry as parent (original behavior)
-      const sessionId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? `bg-${crypto.randomUUID()}`
-        : `bg-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+      const sessionId =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? `bg-${crypto.randomUUID()}`
+          : `bg-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
 
       newBackgroundSessions[sessionId] = createSessionSnapshotFromForeground(state, settingsState, sessionId);
       parentId = sessionId;
@@ -2995,7 +2962,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
                     createdAt: Date.now(),
                   },
                 ],
-                retentionLimit
+                retentionLimit,
               ),
             }));
           }
@@ -3003,16 +2970,13 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           // Ensure assistant response is visible
           const hasStreamedText = hasAssistantTextLineSince(get().streamingOutput, turnStartLineId);
           if (!hasStreamedText && assistantTurnText) {
-            await appendTextWithTypewriter(
-              (chunk, type) => get().appendStreamLine(chunk, type),
-              assistantTurnText
-            );
+            await appendTextWithTypewriter((chunk, type) => get().appendStreamLine(chunk, type), assistantTurnText);
           }
 
           if (get().status === 'running') {
             set({
               status: execution.success ? 'completed' : 'failed',
-              apiError: execution.success ? null : (execution.error || 'Regeneration failed'),
+              apiError: execution.success ? null : execution.error || 'Regeneration failed',
             });
           }
         }
@@ -3183,7 +3147,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
                     createdAt: Date.now(),
                   },
                 ],
-                retentionLimit
+                retentionLimit,
               ),
             }));
           }
@@ -3191,16 +3155,13 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           // Ensure assistant response is visible
           const hasStreamedText = hasAssistantTextLineSince(get().streamingOutput, turnStartLineId);
           if (!hasStreamedText && assistantTurnText) {
-            await appendTextWithTypewriter(
-              (chunk, type) => get().appendStreamLine(chunk, type),
-              assistantTurnText
-            );
+            await appendTextWithTypewriter((chunk, type) => get().appendStreamLine(chunk, type), assistantTurnText);
           }
 
           if (get().status === 'running') {
             set({
               status: execution.success ? 'completed' : 'failed',
-              apiError: execution.success ? null : (execution.error || 'Edit and resend failed'),
+              apiError: execution.success ? null : execution.error || 'Edit and resend failed',
             });
           }
         }
@@ -3217,10 +3178,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
   appendStandaloneTurn: (turn: StandaloneTurn) => {
     const limit = getStandaloneContextTurnsLimit();
     set({
-      standaloneTurns: trimStandaloneTurns(
-        [...get().standaloneTurns, turn],
-        limit
-      ),
+      standaloneTurns: trimStandaloneTurns([...get().standaloneTurns, turn], limit),
     });
   },
 
@@ -3303,10 +3261,7 @@ function parseOptionalNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-function parseMetricNumber(
-  source: Record<string, unknown> | undefined,
-  key: string
-): number | undefined {
+function parseMetricNumber(source: Record<string, unknown> | undefined, key: string): number | undefined {
   if (!source) return undefined;
   return parseOptionalNumber(source[key]);
 }
@@ -3378,7 +3333,7 @@ function toShortText(value: unknown, fallback = ''): string {
 function handleUnifiedExecutionEvent(
   payload: UnifiedEventPayload,
   get: () => ExecutionState,
-  set: (partial: Partial<ExecutionState>) => void
+  set: (partial: Partial<ExecutionState>) => void,
 ) {
   // Session isolation: route events from non-foreground sessions to
   // their background snapshot instead of the foreground UI.
@@ -3406,19 +3361,24 @@ function handleUnifiedExecutionEvent(
         break;
       case 'tool_result': {
         const isErr = !!payload.error;
-        set(appendToBackgroundSession(
-          get(), bgSessionId,
-          `[tool] ${payload.tool_id || ''} ${isErr ? 'failed' : 'completed'}`,
-          isErr ? 'error' : 'success'
-        ));
+        set(
+          appendToBackgroundSession(
+            get(),
+            bgSessionId,
+            `[tool] ${payload.tool_id || ''} ${isErr ? 'failed' : 'completed'}`,
+            isErr ? 'error' : 'success',
+          ),
+        );
         break;
       }
       case 'error':
         if (payload.message) {
           set(appendToBackgroundSession(get(), bgSessionId, payload.message, 'error'));
-          set(updateBackgroundSessionByTaskId(get(), bgSessionId, () => ({
-            status: 'failed' as ExecutionStatus,
-          })));
+          set(
+            updateBackgroundSessionByTaskId(get(), bgSessionId, () => ({
+              status: 'failed' as ExecutionStatus,
+            })),
+          );
         }
         break;
       case 'complete': {
@@ -3434,9 +3394,11 @@ function handleUnifiedExecutionEvent(
         const bgFoundAfter = findBackgroundSessionByTaskId(get(), bgSessionId);
         if (bgFoundAfter) {
           const nextStatus: ExecutionStatus = bgFoundAfter.snapshot.isChatSession ? 'idle' : 'completed';
-          set(updateBackgroundSessionByTaskId(get(), bgSessionId, () => ({
-            status: nextStatus,
-          })));
+          set(
+            updateBackgroundSessionByTaskId(get(), bgSessionId, () => ({
+              status: nextStatus,
+            })),
+          );
         }
         break;
       }
@@ -3493,7 +3455,7 @@ function handleUnifiedExecutionEvent(
       if (showAnalysisDetails) {
         get().appendStreamLine(
           `[analysis:phase_plan:${phaseId}] ${title} | workers=${workerCount}, layers=${layers}`,
-          'analysis'
+          'analysis',
         );
       } else {
         get().appendStreamLine(`[analysis] planning ${title}`, 'analysis');
@@ -3508,10 +3470,7 @@ function handleUnifiedExecutionEvent(
         const role = toShortText(payload.role, 'worker');
         const objective = toShortText(payload.objective);
         const suffix = objective ? ` | ${objective}` : '';
-        get().appendStreamLine(
-          `[analysis:subagent_plan:${phaseId}] ${subAgentId} (${role})${suffix}`,
-          'analysis'
-        );
+        get().appendStreamLine(`[analysis:subagent_plan:${phaseId}] ${subAgentId} (${role})${suffix}`, 'analysis');
       }
       break;
     }
@@ -3524,7 +3483,7 @@ function handleUnifiedExecutionEvent(
       if (showAnalysisDetails) {
         get().appendStreamLine(
           `[analysis:subagent:${phaseId}:${subAgentId}] ${status}${details ? ` | ${details}` : ''}`,
-          'analysis'
+          'analysis',
         );
       }
       break;
@@ -3608,9 +3567,7 @@ function handleUnifiedExecutionEvent(
       if (payload.error) {
         get().appendStreamLine(`[tool_error:${payload.tool_id || ''}] ${payload.error}`, 'error');
       } else if (payload.result) {
-        const preview = payload.result.length > 500
-          ? payload.result.substring(0, 500) + '...'
-          : payload.result;
+        const preview = payload.result.length > 500 ? payload.result.substring(0, 500) + '...' : payload.result;
         get().appendStreamLine(`[tool_result:${payload.tool_id || ''}] ${preview}`, 'tool_result');
       }
       break;
@@ -3652,26 +3609,27 @@ function handleUnifiedExecutionEvent(
           flushPendingDeltas(get);
           const argsPreview = formatToolArgs(
             (innerData.tool_name as string) || '',
-            (innerData.arguments as string) || ''
+            (innerData.arguments as string) || '',
           );
-          get().appendStreamLine(
-            `[tool:${innerData.tool_name}] ${argsPreview}`,
-            'tool', subAgentId, depth
-          );
+          get().appendStreamLine(`[tool:${innerData.tool_name}] ${argsPreview}`, 'tool', subAgentId, depth);
           break;
         }
         case 'tool_result': {
           if (innerData.error) {
             get().appendStreamLine(
               `[tool_error:${innerData.tool_id || ''}] ${innerData.error}`,
-              'error', subAgentId, depth
+              'error',
+              subAgentId,
+              depth,
             );
           } else if (innerData.result) {
             const result = innerData.result as string;
             const preview = result.length > 500 ? result.substring(0, 500) + '...' : result;
             get().appendStreamLine(
               `[tool_result:${innerData.tool_id || ''}] ${preview}`,
-              'tool_result', subAgentId, depth
+              'tool_result',
+              subAgentId,
+              depth,
             );
           }
           break;
@@ -3701,7 +3659,9 @@ function handleUnifiedExecutionEvent(
         const usage = formatSubAgentUsage(payload.usage);
         get().appendStreamLine(
           `[sub_agent:end] ${payload.success ? 'completed' : 'failed'}${usage}`,
-          'sub_agent', payload.sub_agent_id, payload.depth
+          'sub_agent',
+          payload.sub_agent_id,
+          payload.depth,
         );
       }
       break;
@@ -3725,13 +3685,11 @@ function handleUnifiedExecutionEvent(
         const phaseId = toShortText(payload.phase_id, 'phase');
         const attempt = typeof payload.attempt === 'number' ? payload.attempt : 0;
         const maxAttempts = typeof payload.max_attempts === 'number' ? payload.max_attempts : 0;
-        const requiredTools = Array.isArray(payload.required_tools)
-          ? payload.required_tools.join(', ')
-          : '';
+        const requiredTools = Array.isArray(payload.required_tools) ? payload.required_tools.join(', ') : '';
         const suffix = requiredTools ? ` | required: ${requiredTools}` : '';
         get().appendStreamLine(
           `[analysis:attempt_start:${phaseId}] attempt ${attempt}/${maxAttempts}${suffix}`,
-          'analysis'
+          'analysis',
         );
       }
       break;
@@ -3755,10 +3713,7 @@ function handleUnifiedExecutionEvent(
         const filePath = toShortText(payload.file_path);
         const suffix = filePath ? ` (${filePath})` : '';
         const state = payload.success === false ? 'error' : 'ok';
-        get().appendStreamLine(
-          `[analysis:evidence:${phaseId}:${state}] ${toolName}: ${summary}${suffix}`,
-          'analysis'
-        );
+        get().appendStreamLine(`[analysis:evidence:${phaseId}:${state}] ${toolName}: ${summary}${suffix}`, 'analysis');
       }
       break;
     }
@@ -3770,13 +3725,13 @@ function handleUnifiedExecutionEvent(
         const metrics = formatAnalysisMetrics(payload.metrics);
         get().appendStreamLine(
           `[analysis:phase_end:${phaseId}] ${payload.success ? 'completed' : 'failed'}${usage}${metrics}`,
-          'analysis'
+          'analysis',
         );
       } else if (isSimpleMode) {
         const phaseId = toShortText(payload.phase_id, 'phase');
         get().appendStreamLine(
           `[analysis] ${phaseId} ${payload.success ? 'completed' : 'completed (partial)'}`,
-          'analysis'
+          'analysis',
         );
       }
       break;
@@ -3788,11 +3743,10 @@ function handleUnifiedExecutionEvent(
         const attempt = typeof payload.attempt === 'number' ? payload.attempt : 0;
         const metrics = formatAnalysisMetrics(payload.metrics);
         const gateFailures = Array.isArray(payload.gate_failures) ? payload.gate_failures : [];
-        const failurePreview =
-          gateFailures.length > 0 ? ` | ${gateFailures.slice(0, 2).join(' ; ')}` : '';
+        const failurePreview = gateFailures.length > 0 ? ` | ${gateFailures.slice(0, 2).join(' ; ')}` : '';
         get().appendStreamLine(
           `[analysis:attempt_end:${phaseId}] attempt ${attempt} ${payload.success ? 'passed' : 'failed'}${metrics}${failurePreview}`,
-          'analysis'
+          'analysis',
         );
       }
       break;
@@ -3804,10 +3758,7 @@ function handleUnifiedExecutionEvent(
       const reasons = Array.isArray(payload.reasons) ? payload.reasons : [];
       const reasonText = reasons.length > 0 ? reasons.slice(0, 3).join(' ; ') : 'unknown';
       if (showAnalysisDetails) {
-        get().appendStreamLine(
-          `[analysis:gate_failure:${phaseId}] attempt ${attempt} | ${reasonText}`,
-          'analysis'
-        );
+        get().appendStreamLine(`[analysis:gate_failure:${phaseId}] attempt ${attempt} | ${reasonText}`, 'analysis');
       } else {
         get().appendStreamLine(`[analysis] ${phaseId} adjusted: ${reasonText}`, 'analysis');
       }
@@ -3819,21 +3770,17 @@ function handleUnifiedExecutionEvent(
       const attempt = typeof payload.attempt === 'number' ? payload.attempt : 0;
       const reasons = Array.isArray(payload.reasons) ? payload.reasons : [];
       const reasonText = reasons.length > 0 ? reasons.slice(0, 2).join(' ; ') : 'budget gate';
-      get().appendStreamLine(
-        `[analysis] ${phaseId} degraded at attempt ${attempt}: ${reasonText}`,
-        'analysis'
-      );
+      get().appendStreamLine(`[analysis] ${phaseId} degraded at attempt ${attempt}: ${reasonText}`, 'analysis');
       break;
     }
 
     case 'analysis_validation': {
       const validationStatus = toShortText(payload.status, 'unknown');
       const issues = Array.isArray(payload.issues) ? payload.issues : [];
-      const issuePreview =
-        issues.length > 0 ? ` | ${issues.slice(0, 3).join(' ; ')}` : '';
+      const issuePreview = issues.length > 0 ? ` | ${issues.slice(0, 3).join(' ; ')}` : '';
       get().appendStreamLine(
         `[analysis:validation:${validationStatus}] ${issues.length} issue(s)${issuePreview}`,
-        'analysis'
+        'analysis',
       );
 
       if (validationStatus === 'warning' && issues.length > 0) {
@@ -3859,59 +3806,38 @@ function handleUnifiedExecutionEvent(
 
     case 'analysis_run_summary': {
       const phaseResults = Array.isArray(payload.phase_results) ? payload.phase_results : [];
-      const metrics = payload.total_metrics && typeof payload.total_metrics === 'object'
-        ? JSON.stringify(payload.total_metrics)
-        : '';
-      const summary =
-        phaseResults.length > 0 ? phaseResults.join(' | ') : 'no phase results';
+      const metrics =
+        payload.total_metrics && typeof payload.total_metrics === 'object' ? JSON.stringify(payload.total_metrics) : '';
+      const summary = phaseResults.length > 0 ? phaseResults.join(' | ') : 'no phase results';
       const suffix = metrics ? ` | ${metrics}` : '';
       get().appendStreamLine(
         `[analysis:run_summary:${payload.success ? 'success' : 'failed'}] ${summary}${suffix}`,
-        'analysis'
+        'analysis',
       );
       const parsedPhaseMetrics = parsePhaseResultMetrics(phaseResults);
       const totalMetrics =
-        payload.total_metrics && typeof payload.total_metrics === 'object'
-          ? payload.total_metrics
-          : undefined;
+        payload.total_metrics && typeof payload.total_metrics === 'object' ? payload.total_metrics : undefined;
       const current = get().analysisCoverage;
       const next: AnalysisCoverageSnapshot = {
         runId: current?.runId || toShortText(payload.run_id) || undefined,
         status: payload.success === false ? 'failed' : 'completed',
-        successfulPhases:
-          parseMetricNumber(parsedPhaseMetrics, 'successful_phases') ??
-          current?.successfulPhases ??
-          0,
-        partialPhases:
-          parseMetricNumber(parsedPhaseMetrics, 'partial_phases') ??
-          current?.partialPhases ??
-          0,
-        failedPhases:
-          parseMetricNumber(parsedPhaseMetrics, 'failed_phases') ??
-          current?.failedPhases ??
-          0,
+        successfulPhases: parseMetricNumber(parsedPhaseMetrics, 'successful_phases') ?? current?.successfulPhases ?? 0,
+        partialPhases: parseMetricNumber(parsedPhaseMetrics, 'partial_phases') ?? current?.partialPhases ?? 0,
+        failedPhases: parseMetricNumber(parsedPhaseMetrics, 'failed_phases') ?? current?.failedPhases ?? 0,
         observedPaths:
           parseMetricNumber(parsedPhaseMetrics, 'observed_paths') ??
           parseMetricNumber(totalMetrics, 'observed_paths') ??
           current?.observedPaths ??
           0,
         inventoryTotalFiles:
-          parseMetricNumber(totalMetrics, 'inventory_total_files') ??
-          current?.inventoryTotalFiles ??
-          0,
+          parseMetricNumber(totalMetrics, 'inventory_total_files') ?? current?.inventoryTotalFiles ?? 0,
         sampledReadFiles:
           parseMetricNumber(parsedPhaseMetrics, 'sampled_read_files') ??
           parseMetricNumber(totalMetrics, 'sampled_read_files') ??
           current?.sampledReadFiles ??
           0,
-        testFilesTotal:
-          parseMetricNumber(totalMetrics, 'test_files_total') ??
-          current?.testFilesTotal ??
-          0,
-        testFilesRead:
-          parseMetricNumber(totalMetrics, 'test_files_read') ??
-          current?.testFilesRead ??
-          0,
+        testFilesTotal: parseMetricNumber(totalMetrics, 'test_files_total') ?? current?.testFilesTotal ?? 0,
+        testFilesRead: parseMetricNumber(totalMetrics, 'test_files_read') ?? current?.testFilesRead ?? 0,
         coverageRatio:
           parseMetricNumber(parsedPhaseMetrics, 'coverage_ratio') ??
           parseMetricNumber(totalMetrics, 'coverage_ratio') ??
@@ -3928,9 +3854,7 @@ function handleUnifiedExecutionEvent(
           current?.testCoverageRatio ??
           0,
         observedTestCoverageRatio:
-          parseMetricNumber(totalMetrics, 'observed_test_coverage_ratio') ??
-          current?.observedTestCoverageRatio ??
-          0,
+          parseMetricNumber(totalMetrics, 'observed_test_coverage_ratio') ?? current?.observedTestCoverageRatio ?? 0,
         coverageTargetRatio:
           parseMetricNumber(parsedPhaseMetrics, 'coverage_target_ratio') ??
           parseMetricNumber(totalMetrics, 'coverage_target_ratio') ??
@@ -3953,9 +3877,7 @@ function handleUnifiedExecutionEvent(
     }
 
     case 'analysis_coverage_updated': {
-      const metrics = payload.metrics && typeof payload.metrics === 'object'
-        ? payload.metrics
-        : undefined;
+      const metrics = payload.metrics && typeof payload.metrics === 'object' ? payload.metrics : undefined;
       const summary = metrics ? formatAnalysisMetrics(metrics) : '';
       if (metrics) {
         const current = get().analysisCoverage;
@@ -3963,63 +3885,25 @@ function handleUnifiedExecutionEvent(
           analysisCoverage: {
             runId: current?.runId || toShortText(payload.run_id) || undefined,
             status: current?.status || 'running',
-            successfulPhases:
-              parseMetricNumber(metrics, 'successful_phases') ??
-              current?.successfulPhases ??
-              0,
-            partialPhases:
-              parseMetricNumber(metrics, 'partial_phases') ??
-              current?.partialPhases ??
-              0,
-            failedPhases:
-              parseMetricNumber(metrics, 'failed_phases') ??
-              current?.failedPhases ??
-              0,
-            observedPaths:
-              parseMetricNumber(metrics, 'observed_paths') ??
-              current?.observedPaths ??
-              0,
+            successfulPhases: parseMetricNumber(metrics, 'successful_phases') ?? current?.successfulPhases ?? 0,
+            partialPhases: parseMetricNumber(metrics, 'partial_phases') ?? current?.partialPhases ?? 0,
+            failedPhases: parseMetricNumber(metrics, 'failed_phases') ?? current?.failedPhases ?? 0,
+            observedPaths: parseMetricNumber(metrics, 'observed_paths') ?? current?.observedPaths ?? 0,
             inventoryTotalFiles:
-              parseMetricNumber(metrics, 'inventory_total_files') ??
-              current?.inventoryTotalFiles ??
-              0,
-            sampledReadFiles:
-              parseMetricNumber(metrics, 'sampled_read_files') ??
-              current?.sampledReadFiles ??
-              0,
-            testFilesTotal:
-              parseMetricNumber(metrics, 'test_files_total') ??
-              current?.testFilesTotal ??
-              0,
-            testFilesRead:
-              parseMetricNumber(metrics, 'test_files_read') ??
-              current?.testFilesRead ??
-              0,
-            coverageRatio:
-              parseMetricNumber(metrics, 'coverage_ratio') ??
-              current?.coverageRatio ??
-              0,
-            sampledReadRatio:
-              parseMetricNumber(metrics, 'sampled_read_ratio') ??
-              current?.sampledReadRatio ??
-              0,
-            testCoverageRatio:
-              parseMetricNumber(metrics, 'test_coverage_ratio') ??
-              current?.testCoverageRatio ??
-              0,
+              parseMetricNumber(metrics, 'inventory_total_files') ?? current?.inventoryTotalFiles ?? 0,
+            sampledReadFiles: parseMetricNumber(metrics, 'sampled_read_files') ?? current?.sampledReadFiles ?? 0,
+            testFilesTotal: parseMetricNumber(metrics, 'test_files_total') ?? current?.testFilesTotal ?? 0,
+            testFilesRead: parseMetricNumber(metrics, 'test_files_read') ?? current?.testFilesRead ?? 0,
+            coverageRatio: parseMetricNumber(metrics, 'coverage_ratio') ?? current?.coverageRatio ?? 0,
+            sampledReadRatio: parseMetricNumber(metrics, 'sampled_read_ratio') ?? current?.sampledReadRatio ?? 0,
+            testCoverageRatio: parseMetricNumber(metrics, 'test_coverage_ratio') ?? current?.testCoverageRatio ?? 0,
             observedTestCoverageRatio:
-              parseMetricNumber(metrics, 'observed_test_coverage_ratio') ??
-              current?.observedTestCoverageRatio ??
-              0,
-            coverageTargetRatio:
-              parseMetricNumber(metrics, 'coverage_target_ratio') ??
-              current?.coverageTargetRatio,
+              parseMetricNumber(metrics, 'observed_test_coverage_ratio') ?? current?.observedTestCoverageRatio ?? 0,
+            coverageTargetRatio: parseMetricNumber(metrics, 'coverage_target_ratio') ?? current?.coverageTargetRatio,
             sampledReadTargetRatio:
-              parseMetricNumber(metrics, 'sampled_read_target_ratio') ??
-              current?.sampledReadTargetRatio,
+              parseMetricNumber(metrics, 'sampled_read_target_ratio') ?? current?.sampledReadTargetRatio,
             testCoverageTargetRatio:
-              parseMetricNumber(metrics, 'test_coverage_target_ratio') ??
-              current?.testCoverageTargetRatio,
+              parseMetricNumber(metrics, 'test_coverage_target_ratio') ?? current?.testCoverageTargetRatio,
             validationIssues: current?.validationIssues || [],
             manifestPath: current?.manifestPath,
             reportPath: current?.reportPath,
@@ -4028,10 +3912,7 @@ function handleUnifiedExecutionEvent(
         });
       }
       if (showAnalysisDetails) {
-        get().appendStreamLine(
-          `[analysis:coverage] updated${summary}`,
-          'analysis'
-        );
+        get().appendStreamLine(`[analysis:coverage] updated${summary}`, 'analysis');
       }
       break;
     }
@@ -4045,7 +3926,7 @@ function handleUnifiedExecutionEvent(
       const suffix = parts.length > 0 ? ` | ${parts.join(' | ')}` : '';
       get().appendStreamLine(
         `[analysis] run ${status} (${runId})${suffix}`,
-        payload.success === false ? 'warning' : 'success'
+        payload.success === false ? 'warning' : 'success',
       );
       const currentCoverage = get().analysisCoverage;
       if (currentCoverage) {
@@ -4070,7 +3951,7 @@ function handleUnifiedExecutionEvent(
       const reason = toShortText(payload.reason, 'partial evidence mode');
       get().appendStreamLine(
         `[analysis:partial] passed=${passed}, partial=${partial}, failed=${failed} | ${reason}`,
-        'analysis'
+        'analysis',
       );
       break;
     }
@@ -4081,16 +3962,11 @@ function handleUnifiedExecutionEvent(
         const usage: BackendUsageStats = {
           input_tokens: payload.input_tokens,
           output_tokens: payload.output_tokens,
-          thinking_tokens:
-            typeof payload.thinking_tokens === 'number' ? payload.thinking_tokens : null,
+          thinking_tokens: typeof payload.thinking_tokens === 'number' ? payload.thinking_tokens : null,
           cache_read_tokens:
-            typeof payloadRecord.cache_read_tokens === 'number'
-              ? payloadRecord.cache_read_tokens
-              : null,
+            typeof payloadRecord.cache_read_tokens === 'number' ? payloadRecord.cache_read_tokens : null,
           cache_creation_tokens:
-            typeof payloadRecord.cache_creation_tokens === 'number'
-              ? payloadRecord.cache_creation_tokens
-              : null,
+            typeof payloadRecord.cache_creation_tokens === 'number' ? payloadRecord.cache_creation_tokens : null,
         };
         const prev = get().sessionUsageTotals;
         const nextTotals: BackendUsageStats = {
@@ -4098,8 +3974,7 @@ function handleUnifiedExecutionEvent(
           output_tokens: (prev?.output_tokens || 0) + usage.output_tokens,
           thinking_tokens: (prev?.thinking_tokens || 0) + (usage.thinking_tokens || 0),
           cache_read_tokens: (prev?.cache_read_tokens || 0) + (usage.cache_read_tokens || 0),
-          cache_creation_tokens:
-            (prev?.cache_creation_tokens || 0) + (usage.cache_creation_tokens || 0),
+          cache_creation_tokens: (prev?.cache_creation_tokens || 0) + (usage.cache_creation_tokens || 0),
         };
         const prevTurn = get().turnUsageTotals;
         const nextTurnTotals: BackendUsageStats = {
@@ -4107,8 +3982,7 @@ function handleUnifiedExecutionEvent(
           output_tokens: (prevTurn?.output_tokens || 0) + usage.output_tokens,
           thinking_tokens: (prevTurn?.thinking_tokens || 0) + (usage.thinking_tokens || 0),
           cache_read_tokens: (prevTurn?.cache_read_tokens || 0) + (usage.cache_read_tokens || 0),
-          cache_creation_tokens:
-            (prevTurn?.cache_creation_tokens || 0) + (usage.cache_creation_tokens || 0),
+          cache_creation_tokens: (prevTurn?.cache_creation_tokens || 0) + (usage.cache_creation_tokens || 0),
         };
         set({
           latestUsage: usage,
@@ -4116,7 +3990,7 @@ function handleUnifiedExecutionEvent(
           turnUsageTotals: nextTurnTotals,
         });
         get().addLog(
-          `Usage: in=${payload.input_tokens}, out=${payload.output_tokens}${typeof payload.thinking_tokens === 'number' ? `, thinking=${payload.thinking_tokens}` : ''}`
+          `Usage: in=${payload.input_tokens}, out=${payload.output_tokens}${typeof payload.thinking_tokens === 'number' ? `, thinking=${payload.thinking_tokens}` : ''}`,
         );
       }
       break;
@@ -4145,9 +4019,10 @@ function handleUnifiedExecutionEvent(
         const completedStories = get().stories.filter((s) => s.status === 'completed').length;
         const totalStories = get().stories.length || 1;
         const duration = Date.now() - (get().startedAt || Date.now());
-        const durationStr = duration >= 60000
-          ? `${Math.floor(duration / 60000)}m ${Math.round((duration % 60000) / 1000)}s`
-          : `${Math.round(duration / 1000)}s`;
+        const durationStr =
+          duration >= 60000
+            ? `${Math.floor(duration / 60000)}m ${Math.round((duration % 60000) / 1000)}s`
+            : `${Math.round(duration / 1000)}s`;
 
         set({
           status: 'completed',
@@ -4171,7 +4046,7 @@ function handleUnifiedExecutionEvent(
       if (payload.story_id && payload.story_title) {
         get().appendStreamLine(
           `Starting story ${(payload.story_index || 0) + 1}/${payload.total_stories || '?'}: ${payload.story_title}`,
-          'info'
+          'info',
         );
         get().updateStory(payload.story_id, {
           status: 'in_progress',
@@ -4202,7 +4077,7 @@ function handleUnifiedExecutionEvent(
         });
         get().appendStreamLine(
           `Story ${success ? 'completed' : 'failed'}: ${payload.story_id}${payload.error ? ' - ' + payload.error : ''}`,
-          success ? 'success' : 'error'
+          success ? 'success' : 'error',
         );
 
         if (!success && payload.error) {
@@ -4238,7 +4113,7 @@ function handleUnifiedExecutionEvent(
 
         get().appendStreamLine(
           `Quality gates ${passed ? 'passed' : 'failed'} for story: ${payload.story_id}`,
-          passed ? 'success' : 'warning'
+          passed ? 'success' : 'warning',
         );
       }
       break;
@@ -4249,7 +4124,7 @@ function handleUnifiedExecutionEvent(
       const tokens = (payload as unknown as { compaction_tokens?: number }).compaction_tokens || 0;
       get().appendStreamLine(
         `[context compaction] ${compacted} messages summarized, ${preserved} preserved (${tokens} tokens)`,
-        'info'
+        'info',
       );
       get().addLog(`Context compaction: ${compacted} messages compacted, ${preserved} preserved`);
       break;
@@ -4258,7 +4133,7 @@ function handleUnifiedExecutionEvent(
     case 'session_complete':
       if (payload.success !== undefined) {
         const completedStories = payload.success
-          ? (payload.total_stories || get().stories.length)
+          ? payload.total_stories || get().stories.length
           : get().stories.filter((s) => s.status === 'completed').length;
         const totalStories = payload.total_stories || get().stories.length;
 
@@ -4276,7 +4151,7 @@ function handleUnifiedExecutionEvent(
         });
         get().appendStreamLine(
           payload.success ? 'All stories completed successfully.' : 'Execution finished with failures.',
-          payload.success ? 'success' : 'error'
+          payload.success ? 'success' : 'error',
         );
         get().saveToHistory();
       }
@@ -4295,7 +4170,7 @@ function handleUnifiedExecutionEvent(
  */
 function findBackgroundSessionByTaskId(
   state: ExecutionState,
-  sessionId: string
+  sessionId: string,
 ): { key: string; snapshot: SessionSnapshot } | undefined {
   for (const [key, snapshot] of Object.entries(state.backgroundSessions)) {
     if (snapshot.taskId === sessionId || snapshot.standaloneSessionId === sessionId) {
@@ -4317,7 +4192,7 @@ function findBackgroundSessionByTaskId(
 function updateBackgroundSessionByTaskId(
   state: ExecutionState,
   sessionId: string,
-  updater: (snapshot: SessionSnapshot) => Partial<SessionSnapshot>
+  updater: (snapshot: SessionSnapshot) => Partial<SessionSnapshot>,
 ): Partial<ExecutionState> {
   const found = findBackgroundSessionByTaskId(state, sessionId);
   if (!found) return {};
@@ -4340,7 +4215,7 @@ function appendToBackgroundSession(
   state: ExecutionState,
   sessionId: string,
   content: string,
-  type: StreamLineType
+  type: StreamLineType,
 ): Partial<ExecutionState> {
   return updateBackgroundSessionByTaskId(state, sessionId, (snapshot) => {
     const nextId = snapshot.streamLineCounter + 1;
@@ -4364,16 +4239,13 @@ function appendToBackgroundSession(
  * by the normal foreground code path.
  */
 function isForegroundSession(state: ExecutionState, sessionId: string | undefined): boolean {
-  if (!sessionId) return true;           // no session_id → treat as foreground
+  if (!sessionId) return true; // no session_id → treat as foreground
   const fg = state.taskId || state.standaloneSessionId;
-  if (!fg) return false;                 // no foreground task → discard stale events
+  if (!fg) return false; // no foreground task → discard stale events
   return fg === sessionId;
 }
 
-async function setupTauriEventListeners(
-  get: () => ExecutionState,
-  set: (partial: Partial<ExecutionState>) => void
-) {
+async function setupTauriEventListeners(get: () => ExecutionState, set: (partial: Partial<ExecutionState>) => void) {
   const setupVersion = ++listenerSetupVersion;
 
   // Clean up any existing listeners first
@@ -4423,18 +4295,23 @@ async function setupTauriEventListeners(
             break;
           case 'tool_result': {
             const bgIsError = !!streamEvent.error;
-            set(appendToBackgroundSession(
-              get(), session_id,
-              `[tool] ${streamEvent.tool_id} ${bgIsError ? 'failed' : 'completed'}`,
-              bgIsError ? 'error' : 'success'
-            ));
+            set(
+              appendToBackgroundSession(
+                get(),
+                session_id,
+                `[tool] ${streamEvent.tool_id} ${bgIsError ? 'failed' : 'completed'}`,
+                bgIsError ? 'error' : 'success',
+              ),
+            );
             break;
           }
           case 'error':
             set(appendToBackgroundSession(get(), session_id, streamEvent.message, 'error'));
-            set(updateBackgroundSessionByTaskId(get(), session_id, () => ({
-              status: 'failed' as ExecutionStatus,
-            })));
+            set(
+              updateBackgroundSessionByTaskId(get(), session_id, () => ({
+                status: 'failed' as ExecutionStatus,
+              })),
+            );
             break;
           case 'complete': {
             // Flush the per-session tool-call filter
@@ -4449,9 +4326,11 @@ async function setupTauriEventListeners(
             const bgFoundAfter = findBackgroundSessionByTaskId(get(), session_id);
             if (bgFoundAfter) {
               const nextStatus: ExecutionStatus = bgFoundAfter.snapshot.isChatSession ? 'idle' : 'completed';
-              set(updateBackgroundSessionByTaskId(get(), session_id, () => ({
-                status: nextStatus,
-              })));
+              set(
+                updateBackgroundSessionByTaskId(get(), session_id, () => ({
+                  status: nextStatus,
+                })),
+              );
             }
             break;
           }
@@ -4523,7 +4402,7 @@ async function setupTauriEventListeners(
           const isError = !!streamEvent.error;
           get().appendStreamLine(
             `[tool] ${streamEvent.tool_id} ${isError ? 'failed' : 'completed'}`,
-            isError ? 'error' : 'success'
+            isError ? 'error' : 'success',
           );
           break;
         }
@@ -4617,11 +4496,14 @@ async function setupTauriEventListeners(
           set(appendToBackgroundSession(get(), session_id, `[tool] ${execution.tool_name} started`, 'tool'));
         } else if (update_type === 'completed') {
           const bgStatus = execution.success ? 'success' : 'failed';
-          set(appendToBackgroundSession(
-            get(), session_id,
-            `[tool] ${execution.tool_name} ${bgStatus}`,
-            execution.success ? 'success' : 'error'
-          ));
+          set(
+            appendToBackgroundSession(
+              get(),
+              session_id,
+              `[tool] ${execution.tool_name} ${bgStatus}`,
+              execution.success ? 'success' : 'error',
+            ),
+          );
         }
         return;
       }
@@ -4652,14 +4534,18 @@ async function setupTauriEventListeners(
           if (session.state === 'error') {
             const errorMsg = session.error_message || 'Unknown error';
             set(appendToBackgroundSession(get(), session.id, `Session error: ${errorMsg}`, 'error'));
-            set(updateBackgroundSessionByTaskId(get(), session.id, () => ({
-              status: 'failed' as ExecutionStatus,
-            })));
+            set(
+              updateBackgroundSessionByTaskId(get(), session.id, () => ({
+                status: 'failed' as ExecutionStatus,
+              })),
+            );
           } else if (session.state === 'cancelled') {
             set(appendToBackgroundSession(get(), session.id, 'Session cancelled.', 'warning'));
-            set(updateBackgroundSessionByTaskId(get(), session.id, () => ({
-              status: 'idle' as ExecutionStatus,
-            })));
+            set(
+              updateBackgroundSessionByTaskId(get(), session.id, () => ({
+                status: 'idle' as ExecutionStatus,
+              })),
+            );
           }
         }
         return;

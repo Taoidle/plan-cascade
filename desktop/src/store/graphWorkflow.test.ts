@@ -8,12 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { useGraphWorkflowStore } from './graphWorkflow';
-import type {
-  GraphWorkflow,
-  GraphNode,
-  Edge,
-  GraphWorkflowInfo,
-} from '../types/graphWorkflow';
+import type { GraphWorkflow, GraphNode, Edge, GraphWorkflowInfo } from '../types/graphWorkflow';
 import { createEmptyGraphWorkflow } from '../types/graphWorkflow';
 
 // Mock invoke is already mocked in test setup
@@ -37,18 +32,36 @@ function createMockWorkflow(overrides: Partial<GraphWorkflow> = {}): GraphWorkfl
     nodes: {
       'node-1': {
         id: 'node-1',
-        agent_step: { step_type: 'llm_step', name: 'LLM 1', instruction: null, agent_config: { max_iterations: 50, max_total_tokens: 1000000, model_override: null, provider_override: null } },
+        agent_step: {
+          step_type: 'llm_step',
+          name: 'LLM 1',
+          instruction: null,
+          agent_config: {
+            max_iterations: 50,
+            max_total_tokens: 1000000,
+            model_override: null,
+            provider_override: null,
+          },
+        },
         position: { x: 100, y: 100 },
       },
       'node-2': {
         id: 'node-2',
-        agent_step: { step_type: 'llm_step', name: 'LLM 2', instruction: null, agent_config: { max_iterations: 50, max_total_tokens: 1000000, model_override: null, provider_override: null } },
+        agent_step: {
+          step_type: 'llm_step',
+          name: 'LLM 2',
+          instruction: null,
+          agent_config: {
+            max_iterations: 50,
+            max_total_tokens: 1000000,
+            model_override: null,
+            provider_override: null,
+          },
+        },
         position: { x: 300, y: 100 },
       },
     },
-    edges: [
-      { edge_type: 'direct' as const, from: 'node-1', to: 'node-2' },
-    ],
+    edges: [{ edge_type: 'direct' as const, from: 'node-1', to: 'node-2' }],
     entry_node: 'node-1',
     state_schema: { channels: {}, reducers: {} },
     ...overrides,
@@ -520,9 +533,7 @@ describe('useGraphWorkflowStore', () => {
 
     it('should clear execution events', () => {
       useGraphWorkflowStore.setState({
-        executionEvents: [
-          { type: 'graph_node_started', node_id: 'node-1' },
-        ],
+        executionEvents: [{ type: 'graph_node_started', node_id: 'node-1' }],
         isExecuting: true,
       });
 

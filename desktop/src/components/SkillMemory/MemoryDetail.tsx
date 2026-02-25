@@ -25,19 +25,13 @@ interface MemoryDetailProps {
       category?: MemoryCategory;
       importance?: number;
       keywords?: string[];
-    }
+    },
   ) => void;
   onDelete: (id: string) => void;
   className?: string;
 }
 
-export function MemoryDetail({
-  memory,
-  onClose,
-  onUpdate,
-  onDelete,
-  className,
-}: MemoryDetailProps) {
+export function MemoryDetail({ memory, onClose, onUpdate, onDelete, className }: MemoryDetailProps) {
   const { t } = useTranslation('simpleMode');
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(memory.content);
@@ -81,20 +75,13 @@ export function MemoryDetail({
   }, [memory]);
 
   return (
-    <div
-      data-testid="memory-detail"
-      className={clsx('flex flex-col h-full', className)}
-    >
+    <div data-testid="memory-detail" className={clsx('flex flex-col h-full', className)}>
       {/* Header */}
       <div className="flex items-start justify-between p-4 border-b border-gray-200 dark:border-gray-700">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 mb-1">
             <CategoryBadge category={editing ? editCategory : memory.category} />
-            <ImportanceBar
-              value={editing ? editImportance : memory.importance}
-              showLabel
-              className="flex-1"
-            />
+            <ImportanceBar value={editing ? editImportance : memory.importance} showLabel className="flex-1" />
           </div>
           <p className="text-2xs text-gray-500 dark:text-gray-400">
             {t('skillPanel.createdAt')}: {new Date(memory.created_at).toLocaleDateString()}
@@ -116,7 +103,7 @@ export function MemoryDetail({
               'p-1 rounded-md',
               confirmDelete
                 ? 'text-red-600 bg-red-50 dark:bg-red-900/20'
-                : 'text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20'
+                : 'text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20',
             )}
             title={confirmDelete ? t('skillPanel.confirmDelete') : t('skillPanel.delete')}
           >
@@ -149,7 +136,7 @@ export function MemoryDetail({
                   'bg-white dark:bg-gray-800',
                   'border border-gray-300 dark:border-gray-600',
                   'text-gray-700 dark:text-gray-300',
-                  'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500',
                 )}
               >
                 {MEMORY_CATEGORIES.map((cat) => (
@@ -218,7 +205,7 @@ export function MemoryDetail({
                   'border border-gray-300 dark:border-gray-600',
                   'text-gray-700 dark:text-gray-300',
                   'placeholder:text-gray-400 dark:placeholder:text-gray-500',
-                  'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500',
                 )}
               />
             </div>
@@ -238,7 +225,7 @@ export function MemoryDetail({
                   'border border-gray-300 dark:border-gray-600',
                   'text-gray-700 dark:text-gray-300',
                   'focus:outline-none focus:ring-2 focus:ring-primary-500',
-                  'resize-none'
+                  'resize-none',
                 )}
               />
             </div>
@@ -249,7 +236,7 @@ export function MemoryDetail({
                 onClick={handleSave}
                 className={clsx(
                   'px-3 py-1.5 rounded-md text-xs font-medium',
-                  'bg-primary-600 text-white hover:bg-primary-700'
+                  'bg-primary-600 text-white hover:bg-primary-700',
                 )}
               >
                 {t('skillPanel.save')}
@@ -259,7 +246,7 @@ export function MemoryDetail({
                 className={clsx(
                   'px-3 py-1.5 rounded-md text-xs font-medium',
                   'text-gray-600 dark:text-gray-400',
-                  'hover:bg-gray-100 dark:hover:bg-gray-800'
+                  'hover:bg-gray-100 dark:hover:bg-gray-800',
                 )}
               >
                 {t('skillPanel.cancel')}
@@ -276,9 +263,7 @@ export function MemoryDetail({
             {/* Keywords */}
             {memory.keywords.length > 0 && (
               <div className="flex items-center gap-1 flex-wrap">
-                <span className="text-2xs text-gray-500 dark:text-gray-400 shrink-0">
-                  {t('skillPanel.keywords')}:
-                </span>
+                <span className="text-2xs text-gray-500 dark:text-gray-400 shrink-0">{t('skillPanel.keywords')}:</span>
                 {memory.keywords.map((kw) => (
                   <span
                     key={kw}

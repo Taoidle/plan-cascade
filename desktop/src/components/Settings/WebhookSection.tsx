@@ -123,9 +123,7 @@ export function WebhookSection() {
 
   // Toggle event in form
   const toggleEvent = (event: WebhookEventType) => {
-    setFormEvents((prev) =>
-      prev.includes(event) ? prev.filter((e) => e !== event) : [...prev, event]
-    );
+    setFormEvents((prev) => (prev.includes(event) ? prev.filter((e) => e !== event) : [...prev, event]));
   };
 
   // Build scope from form state
@@ -210,11 +208,16 @@ export function WebhookSection() {
   // Get channel type icon
   const channelIcon = (type: WebhookChannelType) => {
     switch (type) {
-      case 'Slack': return '#';
-      case 'Feishu': return 'F';
-      case 'Telegram': return 'T';
-      case 'Discord': return 'D';
-      case 'Custom': return 'H';
+      case 'Slack':
+        return '#';
+      case 'Feishu':
+        return 'F';
+      case 'Telegram':
+        return 'T';
+      case 'Discord':
+        return 'D';
+      case 'Custom':
+        return 'H';
     }
   };
 
@@ -243,10 +246,7 @@ export function WebhookSection() {
       {error && (
         <div className="rounded-md bg-red-50 dark:bg-red-900/20 p-3">
           <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
-          <button
-            onClick={clearError}
-            className="text-xs text-red-600 dark:text-red-300 underline mt-1"
-          >
+          <button onClick={clearError} className="text-xs text-red-600 dark:text-red-300 underline mt-1">
             {t('webhook.dismiss', 'Dismiss')}
           </button>
         </div>
@@ -257,27 +257,20 @@ export function WebhookSection() {
         <div
           className={clsx(
             'rounded-md p-3',
-            testResult.success
-              ? 'bg-green-50 dark:bg-green-900/20'
-              : 'bg-red-50 dark:bg-red-900/20'
+            testResult.success ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20',
           )}
         >
           <p
             className={clsx(
               'text-sm',
-              testResult.success
-                ? 'text-green-700 dark:text-green-400'
-                : 'text-red-700 dark:text-red-400'
+              testResult.success ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400',
             )}
           >
             {testResult.success
               ? `${t('webhook.testSuccess', 'Test successful')}${testResult.latency_ms ? ` (${testResult.latency_ms}ms)` : ''}`
               : `${t('webhook.testFailed', 'Test failed')}: ${testResult.error ?? 'Unknown error'}`}
           </p>
-          <button
-            onClick={clearTestResult}
-            className="text-xs underline mt-1 text-gray-600 dark:text-gray-300"
-          >
+          <button onClick={clearTestResult} className="text-xs underline mt-1 text-gray-600 dark:text-gray-300">
             {t('webhook.dismiss', 'Dismiss')}
           </button>
         </div>
@@ -286,9 +279,7 @@ export function WebhookSection() {
       {/* Channel List */}
       <div className="border border-gray-200 dark:border-gray-700 rounded-lg">
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-          <h4 className="font-medium text-gray-900 dark:text-gray-100">
-            {t('webhook.channels', 'Webhook Channels')}
-          </h4>
+          <h4 className="font-medium text-gray-900 dark:text-gray-100">{t('webhook.channels', 'Webhook Channels')}</h4>
           <button
             onClick={handleAdd}
             className="text-sm px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
@@ -308,24 +299,19 @@ export function WebhookSection() {
         ) : (
           <div className="divide-y divide-gray-200 dark:divide-gray-700">
             {channels.map((channel) => (
-              <div
-                key={channel.id}
-                className="px-4 py-3 flex items-center justify-between"
-              >
+              <div key={channel.id} className="px-4 py-3 flex items-center justify-between">
                 <div className="flex items-center gap-3 min-w-0">
                   <span
                     className={clsx(
                       'w-2 h-2 rounded-full flex-shrink-0',
-                      channel.enabled ? 'bg-green-500' : 'bg-gray-400'
+                      channel.enabled ? 'bg-green-500' : 'bg-gray-400',
                     )}
                   />
                   <span className="w-6 h-6 flex items-center justify-center text-xs font-bold bg-gray-100 dark:bg-gray-800 rounded flex-shrink-0">
                     {channelIcon(channel.channel_type)}
                   </span>
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                      {channel.name}
-                    </p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{channel.name}</p>
                     <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
                       {channel.events.length} {t('webhook.eventsLabel', 'events')} | {scopeDisplay(channel.scope)}
                     </p>
@@ -362,9 +348,7 @@ export function WebhookSection() {
       {showForm && (
         <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4">
           <h4 className="font-medium text-gray-900 dark:text-gray-100">
-            {editingChannel
-              ? t('webhook.editChannel', 'Edit Channel')
-              : t('webhook.addChannel', 'Add Channel')}
+            {editingChannel ? t('webhook.editChannel', 'Edit Channel') : t('webhook.addChannel', 'Add Channel')}
           </h4>
 
           {/* Name */}
@@ -424,7 +408,11 @@ export function WebhookSection() {
               type="password"
               value={formSecret}
               onChange={(e) => setFormSecret(e.target.value)}
-              placeholder={editingChannel ? t('webhook.form.secretPlaceholder', 'Leave empty to keep current') : t('webhook.form.secretOptional', 'Optional')}
+              placeholder={
+                editingChannel
+                  ? t('webhook.form.secretPlaceholder', 'Leave empty to keep current')
+                  : t('webhook.form.secretOptional', 'Optional')
+              }
               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-sm"
             />
           </div>
@@ -436,11 +424,7 @@ export function WebhookSection() {
             </label>
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-1 text-sm">
-                <input
-                  type="radio"
-                  checked={formScopeType === 'global'}
-                  onChange={() => setFormScopeType('global')}
-                />
+                <input type="radio" checked={formScopeType === 'global'} onChange={() => setFormScopeType('global')} />
                 {t('webhook.scope.global', 'Global')}
               </label>
               <label className="flex items-center gap-1 text-sm">
@@ -536,10 +520,7 @@ export function WebhookSection() {
         ) : (
           <div className="divide-y divide-gray-200 dark:divide-gray-700">
             {deliveries.slice(0, 10).map((delivery) => (
-              <div
-                key={delivery.id}
-                className="px-4 py-2 flex items-center justify-between text-sm"
-              >
+              <div key={delivery.id} className="px-4 py-2 flex items-center justify-between text-sm">
                 <div className="flex items-center gap-3 min-w-0">
                   <span
                     className={clsx(
@@ -548,7 +529,7 @@ export function WebhookSection() {
                         ? 'text-green-600'
                         : delivery.status === 'Failed'
                           ? 'text-red-600'
-                          : 'text-yellow-600'
+                          : 'text-yellow-600',
                     )}
                   >
                     {delivery.status === 'Success' ? 'OK' : delivery.status === 'Failed' ? 'ERR' : '...'}
@@ -556,9 +537,7 @@ export function WebhookSection() {
                   <span className="text-gray-500 dark:text-gray-400 text-xs flex-shrink-0">
                     {timeAgo(delivery.created_at)}
                   </span>
-                  <span className="text-gray-700 dark:text-gray-300 truncate">
-                    {delivery.event_type}
-                  </span>
+                  <span className="text-gray-700 dark:text-gray-300 truncate">{delivery.event_type}</span>
                   <span className="text-gray-500 dark:text-gray-400 truncate text-xs">
                     {delivery.payload.summary.substring(0, 50)}
                   </span>

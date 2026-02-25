@@ -144,18 +144,20 @@ function StatisticsPanel({ stats, onRetryFailed }: StatisticsPanelProps) {
       {/* Summary stats */}
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-          <div className="text-2xl font-bold text-gray-900 dark:text-white">
-            {stats.total}
-          </div>
+          <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.total}</div>
           <div className="text-xs text-gray-500">Total Calls</div>
         </div>
         <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-          <div className={clsx(
-            'text-2xl font-bold',
-            stats.successRate >= 80 ? 'text-green-600 dark:text-green-400' :
-            stats.successRate >= 50 ? 'text-yellow-600 dark:text-yellow-400' :
-            'text-red-600 dark:text-red-400'
-          )}>
+          <div
+            className={clsx(
+              'text-2xl font-bold',
+              stats.successRate >= 80
+                ? 'text-green-600 dark:text-green-400'
+                : stats.successRate >= 50
+                  ? 'text-yellow-600 dark:text-yellow-400'
+                  : 'text-red-600 dark:text-red-400',
+            )}
+          >
             {stats.successRate.toFixed(0)}%
           </div>
           <div className="text-xs text-gray-500">Success Rate</div>
@@ -167,9 +169,7 @@ function StatisticsPanel({ stats, onRetryFailed }: StatisticsPanelProps) {
           <div className="text-xs text-gray-500">Avg Duration</div>
         </div>
         <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-          <div className="text-2xl font-bold text-gray-900 dark:text-white">
-            {formatDuration(stats.totalDuration)}
-          </div>
+          <div className="text-2xl font-bold text-gray-900 dark:text-white">{formatDuration(stats.totalDuration)}</div>
           <div className="text-xs text-gray-500">Total Time</div>
         </div>
       </div>
@@ -177,9 +177,7 @@ function StatisticsPanel({ stats, onRetryFailed }: StatisticsPanelProps) {
       {/* Duration by tool (bar chart) */}
       {stats.mostUsed.length > 0 && (
         <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-            Tool Usage
-          </h4>
+          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Tool Usage</h4>
           <div className="space-y-2">
             {stats.mostUsed.map(({ tool, count }) => {
               const percentage = (count / stats.total) * 100;
@@ -198,10 +196,7 @@ function StatisticsPanel({ stats, onRetryFailed }: StatisticsPanelProps) {
                     </span>
                   </div>
                   <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                    <div
-                      className={clsx('h-full rounded-full', config.barColor)}
-                      style={{ width: `${percentage}%` }}
-                    />
+                    <div className={clsx('h-full rounded-full', config.barColor)} style={{ width: `${percentage}%` }} />
                   </div>
                   <div className="flex justify-between text-[10px] text-gray-400">
                     <span>{toolStats.successRate.toFixed(0)}% success</span>
@@ -242,12 +237,8 @@ function StatisticsPanel({ stats, onRetryFailed }: StatisticsPanelProps) {
                   className="flex items-center justify-between p-2 bg-white dark:bg-gray-800 rounded border border-red-200 dark:border-red-800"
                 >
                   <div className="min-w-0">
-                    <div className="text-sm font-medium text-gray-900 dark:text-white">
-                      {tc.name}
-                    </div>
-                    <div className="text-xs text-gray-500 truncate">
-                      {getToolSummary(tc)}
-                    </div>
+                    <div className="text-sm font-medium text-gray-900 dark:text-white">{tc.name}</div>
+                    <div className="text-xs text-gray-500 truncate">{getToolSummary(tc)}</div>
                   </div>
                   {onRetryFailed && (
                     <button
@@ -256,7 +247,7 @@ function StatisticsPanel({ stats, onRetryFailed }: StatisticsPanelProps) {
                         'flex items-center gap-1 px-2 py-1 rounded text-xs',
                         'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400',
                         'hover:bg-red-200 dark:hover:bg-red-900/50',
-                        'transition-colors'
+                        'transition-colors',
                       )}
                     >
                       <PlayIcon className="w-3 h-3" />
@@ -297,7 +288,7 @@ function SearchInput({ value, onChange, onClear }: SearchInputProps) {
           'bg-white dark:bg-gray-800',
           'border border-gray-200 dark:border-gray-700',
           'focus:outline-none focus:ring-2 focus:ring-primary-500',
-          'placeholder-gray-400'
+          'placeholder-gray-400',
         )}
       />
       {value && (
@@ -371,7 +362,7 @@ export function ToolHistorySidebar({ onToolClick, onClose }: ToolHistorySidebarP
 
   // Handle tool type toggle (multi-select)
   const handleToolToggle = useCallback((tool: ToolType | 'all') => {
-    setSelectedTools(prev => {
+    setSelectedTools((prev) => {
       const next = new Set(prev);
 
       if (tool === 'all') {
@@ -406,7 +397,7 @@ export function ToolHistorySidebar({ onToolClick, onClose }: ToolHistorySidebarP
 
   // Export filtered results
   const handleExport = useCallback(() => {
-    const data = filteredToolCalls.map(tc => ({
+    const data = filteredToolCalls.map((tc) => ({
       id: tc.id,
       name: tc.name,
       status: tc.status,
@@ -427,20 +418,23 @@ export function ToolHistorySidebar({ onToolClick, onClose }: ToolHistorySidebarP
   }, [filteredToolCalls]);
 
   // Keyboard navigation
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setFocusedIndex(prev => Math.min(prev + 1, filteredToolCalls.length - 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setFocusedIndex(prev => Math.max(prev - 1, 0));
-    } else if (e.key === 'Enter' && focusedIndex >= 0) {
-      const toolCall = filteredToolCalls[focusedIndex];
-      if (toolCall) {
-        onToolClick?.(toolCall.id);
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setFocusedIndex((prev) => Math.min(prev + 1, filteredToolCalls.length - 1));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setFocusedIndex((prev) => Math.max(prev - 1, 0));
+      } else if (e.key === 'Enter' && focusedIndex >= 0) {
+        const toolCall = filteredToolCalls[focusedIndex];
+        if (toolCall) {
+          onToolClick?.(toolCall.id);
+        }
       }
-    }
-  }, [filteredToolCalls, focusedIndex, onToolClick]);
+    },
+    [filteredToolCalls, focusedIndex, onToolClick],
+  );
 
   // Load filter preferences from localStorage
   useEffect(() => {
@@ -458,10 +452,13 @@ export function ToolHistorySidebar({ onToolClick, onClose }: ToolHistorySidebarP
 
   // Save filter preferences
   useEffect(() => {
-    localStorage.setItem('toolHistoryFilters', JSON.stringify({
-      tools: Array.from(selectedTools),
-      status: statusFilter,
-    }));
+    localStorage.setItem(
+      'toolHistoryFilters',
+      JSON.stringify({
+        tools: Array.from(selectedTools),
+        status: statusFilter,
+      }),
+    );
   }, [selectedTools, statusFilter]);
 
   const hasActiveFilters = searchQuery || statusFilter !== 'all' || !selectedTools.has('all');
@@ -476,9 +473,7 @@ export function ToolHistorySidebar({ onToolClick, onClose }: ToolHistorySidebarP
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center gap-2">
           <MixerHorizontalIcon className="w-4 h-4 text-gray-500" />
-          <h3 className="font-semibold text-gray-900 dark:text-white">
-            {t('sidebar.title')}
-          </h3>
+          <h3 className="font-semibold text-gray-900 dark:text-white">{t('sidebar.title')}</h3>
         </div>
         <div className="flex items-center gap-1">
           {/* Timeline toggle */}
@@ -488,7 +483,7 @@ export function ToolHistorySidebar({ onToolClick, onClose }: ToolHistorySidebarP
               'p-1.5 rounded transition-colors',
               showTimeline
                 ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-600 dark:text-primary-400'
-                : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'
+                : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800',
             )}
             title="Toggle timeline view"
           >
@@ -502,7 +497,7 @@ export function ToolHistorySidebar({ onToolClick, onClose }: ToolHistorySidebarP
               'p-1.5 rounded transition-colors',
               showStats
                 ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-600 dark:text-primary-400'
-                : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'
+                : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800',
             )}
             title="Toggle statistics"
           >
@@ -521,10 +516,7 @@ export function ToolHistorySidebar({ onToolClick, onClose }: ToolHistorySidebarP
 
           {/* Close */}
           {onClose && (
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"
-            >
+            <button onClick={onClose} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500">
               <Cross2Icon className="w-4 h-4" />
             </button>
           )}
@@ -533,11 +525,7 @@ export function ToolHistorySidebar({ onToolClick, onClose }: ToolHistorySidebarP
 
       {/* Search */}
       <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-        <SearchInput
-          value={searchQuery}
-          onChange={setSearchQuery}
-          onClear={() => setSearchQuery('')}
-        />
+        <SearchInput value={searchQuery} onChange={setSearchQuery} onClear={() => setSearchQuery('')} />
       </div>
 
       {/* Quick stats */}
@@ -558,11 +546,7 @@ export function ToolHistorySidebar({ onToolClick, onClose }: ToolHistorySidebarP
             label={t('sidebar.stats.running')}
             color="text-blue-600 dark:text-blue-400"
           />
-          <StatItem
-            value={stats.byStatus.pending || 0}
-            label="Pending"
-            color="text-gray-600 dark:text-gray-400"
-          />
+          <StatItem value={stats.byStatus.pending || 0} label="Pending" color="text-gray-600 dark:text-gray-400" />
         </div>
       </div>
 
@@ -578,7 +562,7 @@ export function ToolHistorySidebar({ onToolClick, onClose }: ToolHistorySidebarP
                 'px-2 py-1 rounded-full text-xs font-medium transition-colors',
                 statusFilter === status
                   ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-700 dark:text-primary-300'
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700',
               )}
             >
               {status === 'all' ? 'All Status' : status.charAt(0).toUpperCase() + status.slice(1)}
@@ -594,7 +578,7 @@ export function ToolHistorySidebar({ onToolClick, onClose }: ToolHistorySidebarP
               'px-2 py-1 rounded-full text-xs font-medium transition-colors',
               selectedTools.has('all')
                 ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-700 dark:text-primary-300'
-                : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700',
             )}
           >
             All Tools
@@ -613,7 +597,7 @@ export function ToolHistorySidebar({ onToolClick, onClose }: ToolHistorySidebarP
                   'flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium transition-colors',
                   selectedTools.has(type)
                     ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-700 dark:text-primary-300'
-                    : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700',
                 )}
               >
                 <config.Icon className="w-3 h-3" />
@@ -639,11 +623,7 @@ export function ToolHistorySidebar({ onToolClick, onClose }: ToolHistorySidebarP
       {/* Timeline view */}
       {showTimeline && toolCallHistory.length > 0 && (
         <div className="border-b border-gray-200 dark:border-gray-700">
-          <ExecutionTimeline
-            toolCalls={filteredToolCalls}
-            onToolClick={onToolClick}
-            height={200}
-          />
+          <ExecutionTimeline toolCalls={filteredToolCalls} onToolClick={onToolClick} height={200} />
         </div>
       )}
 
@@ -659,9 +639,7 @@ export function ToolHistorySidebar({ onToolClick, onClose }: ToolHistorySidebarP
         {filteredToolCalls.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-400 p-4">
             <MagnifyingGlassIcon className="w-8 h-8 mb-2 opacity-50" />
-            <p className="text-sm">
-              {hasActiveFilters ? 'No matching tool calls' : t('sidebar.empty')}
-            </p>
+            <p className="text-sm">{hasActiveFilters ? 'No matching tool calls' : t('sidebar.empty')}</p>
             {hasActiveFilters && (
               <button
                 onClick={handleClearFilters}
@@ -758,7 +736,7 @@ function ToolCallItem({ toolCall, index, isFocused, searchQuery, onClick }: Tool
         </mark>
       ) : (
         part
-      )
+      ),
     );
   };
 
@@ -769,7 +747,7 @@ function ToolCallItem({ toolCall, index, isFocused, searchQuery, onClick }: Tool
         'w-full flex items-center gap-3 px-4 py-2.5',
         'hover:bg-gray-50 dark:hover:bg-gray-800/50',
         'transition-colors text-left',
-        isFocused && 'bg-primary-50 dark:bg-primary-900/20'
+        isFocused && 'bg-primary-50 dark:bg-primary-900/20',
       )}
     >
       {/* Index */}
@@ -785,15 +763,9 @@ function ToolCallItem({ toolCall, index, isFocused, searchQuery, onClick }: Tool
       {/* Tool info */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className="text-sm font-medium text-gray-900 dark:text-white">
-            {highlightText(toolCall.name)}
-          </span>
+          <span className="text-sm font-medium text-gray-900 dark:text-white">{highlightText(toolCall.name)}</span>
           <statusConfig.Icon
-            className={clsx(
-              'w-3.5 h-3.5',
-              statusConfig.textColor,
-              toolCall.status === 'executing' && 'animate-spin'
-            )}
+            className={clsx('w-3.5 h-3.5', statusConfig.textColor, toolCall.status === 'executing' && 'animate-spin')}
           />
         </div>
         <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
@@ -803,9 +775,7 @@ function ToolCallItem({ toolCall, index, isFocused, searchQuery, onClick }: Tool
 
       {/* Duration */}
       {toolCall.duration && (
-        <span className="text-xs text-gray-400 dark:text-gray-500">
-          {formatDuration(toolCall.duration)}
-        </span>
+        <span className="text-xs text-gray-400 dark:text-gray-500">{formatDuration(toolCall.duration)}</span>
       )}
     </button>
   );

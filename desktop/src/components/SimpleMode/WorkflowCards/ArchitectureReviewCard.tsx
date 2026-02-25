@@ -27,9 +27,7 @@ export function ArchitectureReviewCard({
 }) {
   const { t } = useTranslation('simpleMode');
   const [expanded, setExpanded] = useState(false);
-  const [selectedMods, setSelectedMods] = useState<Set<number>>(
-    () => new Set(data.prdModifications.map((_, i) => i))
-  );
+  const [selectedMods, setSelectedMods] = useState<Set<number>>(() => new Set(data.prdModifications.map((_, i) => i)));
   const [acted, setActed] = useState(false);
   const approveArchitecture = useWorkflowOrchestratorStore((s) => s.approveArchitecture);
 

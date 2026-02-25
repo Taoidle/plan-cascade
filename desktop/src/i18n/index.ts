@@ -109,7 +109,20 @@ i18n
     resources,
     fallbackLng: 'en',
     defaultNS: 'common',
-    ns: ['common', 'simpleMode', 'expertMode', 'claudeCode', 'settings', 'wizard', 'analytics', 'agents', 'taskMode', 'knowledge', 'artifacts', 'git'],
+    ns: [
+      'common',
+      'simpleMode',
+      'expertMode',
+      'claudeCode',
+      'settings',
+      'wizard',
+      'analytics',
+      'agents',
+      'taskMode',
+      'knowledge',
+      'artifacts',
+      'git',
+    ],
     interpolation: {
       escapeValue: false, // React already handles escaping
     },

@@ -57,10 +57,7 @@ export async function listGuardrails(): Promise<CommandResponse<GuardrailInfo[]>
 /**
  * Toggle a guardrail on or off by name.
  */
-export async function toggleGuardrailEnabled(
-  name: string,
-  enabled: boolean,
-): Promise<CommandResponse<boolean>> {
+export async function toggleGuardrailEnabled(name: string, enabled: boolean): Promise<CommandResponse<boolean>> {
   try {
     return await invoke<CommandResponse<boolean>>('toggle_guardrail', { name, enabled });
   } catch (error) {
@@ -106,9 +103,7 @@ export async function addCustomRule(
 /**
  * Remove a custom guardrail rule by name.
  */
-export async function removeCustomRule(
-  name: string,
-): Promise<CommandResponse<boolean>> {
+export async function removeCustomRule(name: string): Promise<CommandResponse<boolean>> {
   try {
     return await invoke<CommandResponse<boolean>>('remove_custom_rule', { name });
   } catch (error) {
@@ -127,10 +122,7 @@ export async function removeCustomRule(
 /**
  * Get paginated trigger log entries.
  */
-export async function getTriggerLog(
-  limit?: number,
-  offset?: number,
-): Promise<CommandResponse<TriggerLogEntry[]>> {
+export async function getTriggerLog(limit?: number, offset?: number): Promise<CommandResponse<TriggerLogEntry[]>> {
   try {
     return await invoke<CommandResponse<TriggerLogEntry[]>>('get_trigger_log', {
       limit: limit ?? 50,

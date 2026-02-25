@@ -7,11 +7,7 @@
 
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import type {
-  PermissionLevel,
-  ToolPermissionRequest,
-  PermissionResponseType,
-} from '../types/permission';
+import type { PermissionLevel, ToolPermissionRequest, PermissionResponseType } from '../types/permission';
 
 interface ToolPermissionState {
   /** Current session's permission level (default: standard) */

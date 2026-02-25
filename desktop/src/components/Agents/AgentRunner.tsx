@@ -91,7 +91,7 @@ export function AgentRunner({ agent, open, onOpenChange }: AgentRunnerProps) {
             'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
             'w-full max-w-3xl max-h-[85vh]',
             'bg-white dark:bg-gray-900 rounded-lg shadow-xl z-50',
-            'flex flex-col'
+            'flex flex-col',
           )}
         >
           {/* Header */}
@@ -100,9 +100,7 @@ export function AgentRunner({ agent, open, onOpenChange }: AgentRunnerProps) {
               <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-white">
                 {t('runAgent')}: {agent.name}
               </Dialog.Title>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                {agent.model}
-              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{agent.model}</p>
             </div>
             <Dialog.Close asChild>
               <button
@@ -116,9 +114,7 @@ export function AgentRunner({ agent, open, onOpenChange }: AgentRunnerProps) {
 
           {/* Input Area */}
           <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              {t('input')}
-            </label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('input')}</label>
             <div className="relative">
               <textarea
                 value={input}
@@ -134,14 +130,12 @@ export function AgentRunner({ agent, open, onOpenChange }: AgentRunnerProps) {
                   'text-gray-900 dark:text-white',
                   'placeholder-gray-500',
                   'focus:outline-none focus:ring-2 focus:ring-primary-500',
-                  'disabled:opacity-50 disabled:cursor-not-allowed'
+                  'disabled:opacity-50 disabled:cursor-not-allowed',
                 )}
               />
             </div>
             <div className="flex items-center justify-between mt-2">
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                {t('runShortcut')}
-              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{t('runShortcut')}</p>
               <div className="flex items-center gap-2">
                 {isRunning ? (
                   <button
@@ -151,7 +145,7 @@ export function AgentRunner({ agent, open, onOpenChange }: AgentRunnerProps) {
                       'bg-red-100 dark:bg-red-900/50',
                       'text-red-700 dark:text-red-300',
                       'hover:bg-red-200 dark:hover:bg-red-800',
-                      'text-sm font-medium transition-colors'
+                      'text-sm font-medium transition-colors',
                     )}
                   >
                     <StopIcon className="w-4 h-4" />
@@ -166,7 +160,7 @@ export function AgentRunner({ agent, open, onOpenChange }: AgentRunnerProps) {
                       'bg-primary-600 hover:bg-primary-700',
                       'text-white text-sm font-medium',
                       'disabled:opacity-50 disabled:cursor-not-allowed',
-                      'transition-colors'
+                      'transition-colors',
                     )}
                   >
                     <PlayIcon className="w-4 h-4" />
@@ -180,16 +174,14 @@ export function AgentRunner({ agent, open, onOpenChange }: AgentRunnerProps) {
           {/* Output Area */}
           <div className="flex-1 flex flex-col min-h-0 p-4">
             <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                {t('output')}
-              </label>
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('output')}</label>
               {currentRun && (
                 <div className="flex items-center gap-2">
                   <span
                     className={clsx(
                       'px-2 py-0.5 rounded text-xs font-medium',
                       getStatusBgColor(currentRun.status),
-                      getStatusColor(currentRun.status)
+                      getStatusColor(currentRun.status),
                     )}
                   >
                     {currentRun.status}
@@ -209,7 +201,7 @@ export function AgentRunner({ agent, open, onOpenChange }: AgentRunnerProps) {
                 'border-gray-200 dark:border-gray-700',
                 'bg-gray-50 dark:bg-gray-800',
                 'font-mono text-sm whitespace-pre-wrap',
-                'min-h-[200px]'
+                'min-h-[200px]',
               )}
             >
               {isRunning ? (
@@ -220,9 +212,7 @@ export function AgentRunner({ agent, open, onOpenChange }: AgentRunnerProps) {
               ) : output ? (
                 <div className="text-gray-900 dark:text-white">{output}</div>
               ) : (
-                <div className="text-gray-400 dark:text-gray-500 italic">
-                  {t('outputPlaceholder')}
-                </div>
+                <div className="text-gray-400 dark:text-gray-500 italic">{t('outputPlaceholder')}</div>
               )}
             </div>
 

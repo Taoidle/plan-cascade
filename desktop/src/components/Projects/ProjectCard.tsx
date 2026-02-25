@@ -27,16 +27,16 @@ export function ProjectCard({ project, isSelected, onClick }: ProjectCardProps) 
         'border',
         isSelected
           ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700'
-          : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+          : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600',
       )}
     >
       {/* Project Name */}
-      <h3 className={clsx(
-        'font-semibold text-sm mb-1',
-        isSelected
-          ? 'text-primary-700 dark:text-primary-300'
-          : 'text-gray-900 dark:text-white'
-      )}>
+      <h3
+        className={clsx(
+          'font-semibold text-sm mb-1',
+          isSelected ? 'text-primary-700 dark:text-primary-300' : 'text-gray-900 dark:text-white',
+        )}
+      >
         {project.name}
       </h3>
 
@@ -50,7 +50,9 @@ export function ProjectCard({ project, isSelected, onClick }: ProjectCardProps) 
         {/* Session Count */}
         <span className="flex items-center gap-1">
           <FileIcon className="w-3.5 h-3.5" />
-          <span>{project.session_count} {t('projects.sessions', { count: project.session_count })}</span>
+          <span>
+            {project.session_count} {t('projects.sessions', { count: project.session_count })}
+          </span>
         </span>
 
         {/* Message Count */}

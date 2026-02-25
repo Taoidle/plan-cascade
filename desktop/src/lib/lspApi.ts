@@ -63,9 +63,7 @@ export async function getLspStatus(): Promise<CommandResponse<LspServerStatus[]>
  * Creates LSP clients for detected servers, queries hover/references for
  * each indexed symbol, and stores the enriched data.
  */
-export async function triggerLspEnrichment(
-  projectPath: string,
-): Promise<CommandResponse<EnrichmentReport>> {
+export async function triggerLspEnrichment(projectPath: string): Promise<CommandResponse<EnrichmentReport>> {
   try {
     return await invoke<CommandResponse<EnrichmentReport>>('trigger_lsp_enrichment', {
       projectPath,
@@ -86,9 +84,7 @@ export async function triggerLspEnrichment(
 /**
  * Get the results of the last enrichment pass.
  */
-export async function getEnrichmentReport(): Promise<
-  CommandResponse<EnrichmentReport | null>
-> {
+export async function getEnrichmentReport(): Promise<CommandResponse<EnrichmentReport | null>> {
   try {
     return await invoke<CommandResponse<EnrichmentReport | null>>('get_enrichment_report');
   } catch (error) {

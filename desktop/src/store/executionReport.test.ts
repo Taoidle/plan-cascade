@@ -12,11 +12,7 @@ import {
   calculateAgentPerformance,
   formatReportAsMarkdown,
 } from './executionReport';
-import type {
-  TaskPrd,
-  ExecutionReport,
-  StoryQualityGateResults,
-} from './taskMode';
+import type { TaskPrd, ExecutionReport, StoryQualityGateResults } from './taskMode';
 
 // ============================================================================
 // Test Fixtures

@@ -38,10 +38,7 @@ import { ExecutionReport } from '../ExecutionReport';
 // Phase indicator
 // ============================================================================
 
-const phaseConfig: Record<
-  TaskModeSessionStatus | 'idle',
-  { icon: React.ReactNode; color: string }
-> = {
+const phaseConfig: Record<TaskModeSessionStatus | 'idle', { icon: React.ReactNode; color: string }> = {
   idle: { icon: <ClockIcon className="w-4 h-4" />, color: 'text-gray-500' },
   initialized: { icon: <GearIcon className="w-4 h-4" />, color: 'text-blue-500' },
   generating_prd: { icon: <UpdateIcon className="w-4 h-4 animate-spin" />, color: 'text-blue-500' },
@@ -118,7 +115,7 @@ function StoryRow({ story, status, isEditable: _isEditable }: StoryRowProps) {
       className={clsx(
         'border border-gray-200 dark:border-gray-700 rounded-lg',
         'bg-white dark:bg-gray-800',
-        'transition-all'
+        'transition-all',
       )}
     >
       {/* Header */}
@@ -128,7 +125,7 @@ function StoryRow({ story, status, isEditable: _isEditable }: StoryRowProps) {
           'w-full flex items-center gap-2 px-3 py-2',
           'text-left text-sm',
           'hover:bg-gray-50 dark:hover:bg-gray-700/50',
-          'transition-colors rounded-lg'
+          'transition-colors rounded-lg',
         )}
       >
         {isExpanded ? (
@@ -137,44 +134,32 @@ function StoryRow({ story, status, isEditable: _isEditable }: StoryRowProps) {
           <ChevronRightIcon className="w-4 h-4 text-gray-400 flex-shrink-0" />
         )}
         {statusIcon}
-        <span className="font-medium text-gray-800 dark:text-gray-200 flex-1 truncate">
-          {story.title}
-        </span>
+        <span className="font-medium text-gray-800 dark:text-gray-200 flex-1 truncate">{story.title}</span>
         <span
           className={clsx(
             'text-xs px-1.5 py-0.5 rounded',
             story.priority === 'high' && 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
             story.priority === 'medium' && 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
-            story.priority === 'low' && 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+            story.priority === 'low' && 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400',
           )}
         >
           {story.priority}
         </span>
-        <span className="text-xs text-gray-500 dark:text-gray-400">
-          {statusLabel}
-        </span>
+        <span className="text-xs text-gray-500 dark:text-gray-400">{statusLabel}</span>
       </button>
 
       {/* Expanded content */}
       {isExpanded && (
         <div className="px-3 pb-3 space-y-2 border-t border-gray-100 dark:border-gray-700 pt-2">
-          <p className="text-xs text-gray-600 dark:text-gray-400">
-            {story.description}
-          </p>
+          <p className="text-xs text-gray-600 dark:text-gray-400">{story.description}</p>
 
           {/* Dependencies */}
           <div className="flex items-center gap-1 text-xs">
-            <span className="text-gray-500 dark:text-gray-400 font-medium">
-              {t('panel.prd.dependencies')}:
-            </span>
+            <span className="text-gray-500 dark:text-gray-400 font-medium">{t('panel.prd.dependencies')}:</span>
             {story.dependencies.length > 0 ? (
-              <span className="text-gray-600 dark:text-gray-300">
-                {story.dependencies.join(', ')}
-              </span>
+              <span className="text-gray-600 dark:text-gray-300">{story.dependencies.join(', ')}</span>
             ) : (
-              <span className="text-gray-400 dark:text-gray-500 italic">
-                {t('panel.prd.noDependencies')}
-              </span>
+              <span className="text-gray-400 dark:text-gray-500 italic">{t('panel.prd.noDependencies')}</span>
             )}
           </div>
 
@@ -237,11 +222,7 @@ export function TaskModePanel() {
 
   // Auto-fetch report when completed/failed/cancelled
   useEffect(() => {
-    if (
-      sessionStatus === 'completed' ||
-      sessionStatus === 'failed' ||
-      sessionStatus === 'cancelled'
-    ) {
+    if (sessionStatus === 'completed' || sessionStatus === 'failed' || sessionStatus === 'cancelled') {
       if (!report) {
         fetchReport();
       }
@@ -282,33 +263,22 @@ export function TaskModePanel() {
 
   // Count stories
   const totalStories = prd?.stories.length ?? 0;
-  const completedStories = Object.values(storyStatuses).filter(
-    (s) => s === 'completed'
-  ).length;
-  const failedStories = Object.values(storyStatuses).filter(
-    (s) => s === 'failed'
-  ).length;
+  const completedStories = Object.values(storyStatuses).filter((s) => s === 'completed').length;
+  const failedStories = Object.values(storyStatuses).filter((s) => s === 'failed').length;
 
   return (
     <div
       className={clsx(
         'flex flex-col h-full',
         'bg-white dark:bg-gray-900',
-        'border-l border-gray-200 dark:border-gray-700'
+        'border-l border-gray-200 dark:border-gray-700',
       )}
       data-testid="task-mode-panel"
     >
       {/* Header */}
-      <div
-        className={clsx(
-          'flex items-center gap-2 px-4 py-3',
-          'border-b border-gray-200 dark:border-gray-700'
-        )}
-      >
+      <div className={clsx('flex items-center gap-2 px-4 py-3', 'border-b border-gray-200 dark:border-gray-700')}>
         <RocketIcon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-        <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200 flex-1">
-          {t('panel.title')}
-        </h2>
+        <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200 flex-1">{t('panel.title')}</h2>
         <div className={clsx('flex items-center gap-1.5 text-xs', phase.color)}>
           {phase.icon}
           <span>{t(`panel.phase.${i18nKey}`)}</span>
@@ -322,7 +292,7 @@ export function TaskModePanel() {
             'px-4 py-2 text-xs',
             'bg-red-50 dark:bg-red-900/20',
             'text-red-700 dark:text-red-300',
-            'border-b border-red-200 dark:border-red-800'
+            'border-b border-red-200 dark:border-red-800',
           )}
         >
           {t('panel.error', { message: error })}
@@ -341,7 +311,7 @@ export function TaskModePanel() {
                 'px-4 py-2 rounded-lg text-sm font-medium',
                 'bg-blue-600 hover:bg-blue-700 text-white',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               {isLoading ? (
@@ -374,17 +344,11 @@ export function TaskModePanel() {
             </div>
 
             {prd.stories.length === 0 ? (
-              <p className="text-sm text-gray-500 dark:text-gray-400 italic">
-                {t('panel.prd.noStories')}
-              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 italic">{t('panel.prd.noStories')}</p>
             ) : (
               <div className="space-y-2">
                 {prd.stories.map((story) => (
-                  <StoryRow
-                    key={story.id}
-                    story={story}
-                    isEditable={true}
-                  />
+                  <StoryRow key={story.id} story={story} isEditable={true} />
                 ))}
               </div>
             )}
@@ -398,7 +362,7 @@ export function TaskModePanel() {
                   'flex-1 px-3 py-2 rounded-lg text-sm font-medium',
                   'bg-green-600 hover:bg-green-700 text-white',
                   'disabled:opacity-50 disabled:cursor-not-allowed',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 {t('panel.prd.approve')}
@@ -412,7 +376,7 @@ export function TaskModePanel() {
                   'text-gray-700 dark:text-gray-300',
                   'hover:bg-gray-100 dark:hover:bg-gray-700',
                   'disabled:opacity-50 disabled:cursor-not-allowed',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 <ReloadIcon className="w-4 h-4" />
@@ -446,7 +410,7 @@ export function TaskModePanel() {
                 <div
                   className={clsx(
                     'h-full rounded-full transition-all duration-300',
-                    failedStories > 0 ? 'bg-amber-500' : 'bg-blue-500'
+                    failedStories > 0 ? 'bg-amber-500' : 'bg-blue-500',
                   )}
                   style={{
                     width: `${totalStories > 0 ? ((completedStories + failedStories) / totalStories) * 100 : 0}%`,
@@ -464,21 +428,14 @@ export function TaskModePanel() {
             {/* Story list with status */}
             <div className="space-y-2">
               {prd.stories.map((story) => (
-                <StoryRow
-                  key={story.id}
-                  story={story}
-                  status={storyStatuses[story.id]}
-                  isEditable={false}
-                />
+                <StoryRow key={story.id} story={story} status={storyStatuses[story.id]} isEditable={false} />
               ))}
             </div>
 
             {/* Quality gate results */}
             {Object.keys(qualityGateResults).length > 0 && (
               <div className="space-y-2">
-                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  {t('qualityGates.title')}
-                </h3>
+                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('qualityGates.title')}</h3>
                 <QualityGatesSummary results={qualityGateResults} />
               </div>
             )}
@@ -493,7 +450,7 @@ export function TaskModePanel() {
                 'text-red-700 dark:text-red-300',
                 'hover:bg-red-50 dark:hover:bg-red-900/20',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               {isLoading ? t('panel.execution.cancelling') : t('panel.execution.cancel')}
@@ -502,20 +459,13 @@ export function TaskModePanel() {
         )}
 
         {/* Completed / Failed / Cancelled - Report */}
-        {(normalizedStatus === 'completed' ||
-          normalizedStatus === 'failed' ||
-          normalizedStatus === 'cancelled') && (
+        {(normalizedStatus === 'completed' || normalizedStatus === 'failed' || normalizedStatus === 'cancelled') && (
           <div className="space-y-4">
             {/* Story list with final status */}
             {prd && (
               <div className="space-y-2">
                 {prd.stories.map((story) => (
-                  <StoryRow
-                    key={story.id}
-                    story={story}
-                    status={storyStatuses[story.id]}
-                    isEditable={false}
-                  />
+                  <StoryRow key={story.id} story={story} status={storyStatuses[story.id]} isEditable={false} />
                 ))}
               </div>
             )}
@@ -528,15 +478,13 @@ export function TaskModePanel() {
                   'border',
                   report.success
                     ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20'
-                    : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'
+                    : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20',
                 )}
               >
                 <h3
                   className={clsx(
                     'text-sm font-semibold',
-                    report.success
-                      ? 'text-green-800 dark:text-green-200'
-                      : 'text-red-800 dark:text-red-200'
+                    report.success ? 'text-green-800 dark:text-green-200' : 'text-red-800 dark:text-red-200',
                   )}
                 >
                   {t('panel.report.title')}
@@ -544,33 +492,19 @@ export function TaskModePanel() {
 
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div>
-                    <span className="text-gray-500 dark:text-gray-400">
-                      {t('panel.report.totalStories')}
-                    </span>
-                    <p className="font-semibold text-gray-800 dark:text-gray-200">
-                      {report.totalStories}
-                    </p>
+                    <span className="text-gray-500 dark:text-gray-400">{t('panel.report.totalStories')}</span>
+                    <p className="font-semibold text-gray-800 dark:text-gray-200">{report.totalStories}</p>
                   </div>
                   <div>
-                    <span className="text-gray-500 dark:text-gray-400">
-                      {t('panel.report.completed')}
-                    </span>
-                    <p className="font-semibold text-green-700 dark:text-green-300">
-                      {report.storiesCompleted}
-                    </p>
+                    <span className="text-gray-500 dark:text-gray-400">{t('panel.report.completed')}</span>
+                    <p className="font-semibold text-green-700 dark:text-green-300">{report.storiesCompleted}</p>
                   </div>
                   <div>
-                    <span className="text-gray-500 dark:text-gray-400">
-                      {t('panel.report.failed')}
-                    </span>
-                    <p className="font-semibold text-red-700 dark:text-red-300">
-                      {report.storiesFailed}
-                    </p>
+                    <span className="text-gray-500 dark:text-gray-400">{t('panel.report.failed')}</span>
+                    <p className="font-semibold text-red-700 dark:text-red-300">{report.storiesFailed}</p>
                   </div>
                   <div>
-                    <span className="text-gray-500 dark:text-gray-400">
-                      {t('panel.report.duration')}
-                    </span>
+                    <span className="text-gray-500 dark:text-gray-400">{t('panel.report.duration')}</span>
                     <p className="font-semibold text-gray-800 dark:text-gray-200">
                       {t('panel.report.durationValue', {
                         seconds: (report.totalDurationMs / 1000).toFixed(1),
@@ -584,9 +518,7 @@ export function TaskModePanel() {
             {/* Quality gate results */}
             {Object.keys(qualityGateResults).length > 0 && (
               <div className="space-y-2">
-                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  {t('qualityGates.title')}
-                </h3>
+                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('qualityGates.title')}</h3>
                 <QualityGatesSummary results={qualityGateResults} />
               </div>
             )}
@@ -603,7 +535,7 @@ export function TaskModePanel() {
                 'px-3 py-2 rounded-lg text-sm font-medium',
                 'bg-gray-600 hover:bg-gray-700 text-white',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               <ExitIcon className="w-4 h-4" />

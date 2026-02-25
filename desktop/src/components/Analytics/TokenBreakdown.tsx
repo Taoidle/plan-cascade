@@ -42,7 +42,7 @@ export function TokenBreakdown({ byModel, byProject }: TokenBreakdownProps) {
             'px-3 py-1.5 text-sm rounded-lg transition-colors',
             activeTab === 'model'
               ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
           )}
         >
           {t('breakdown.byModel', 'By Model')}
@@ -53,7 +53,7 @@ export function TokenBreakdown({ byModel, byProject }: TokenBreakdownProps) {
             'px-3 py-1.5 text-sm rounded-lg transition-colors',
             activeTab === 'project'
               ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
           )}
         >
           {t('breakdown.byProject', 'By Project')}
@@ -61,11 +61,7 @@ export function TokenBreakdown({ byModel, byProject }: TokenBreakdownProps) {
       </div>
 
       {/* Content */}
-      {activeTab === 'model' ? (
-        <ModelPieChart data={byModel} />
-      ) : (
-        <ProjectBarChart data={byProject} />
-      )}
+      {activeTab === 'model' ? <ModelPieChart data={byModel} /> : <ProjectBarChart data={byProject} />}
     </div>
   );
 }
@@ -119,12 +115,7 @@ function ModelPieChart({ data }: ModelPieChartProps) {
     const end = polarToCartesian(50, 50, radius, startAngle);
     const largeArcFlag = endAngle - startAngle <= 180 ? '0' : '1';
 
-    return [
-      'M', 50, 50,
-      'L', start.x, start.y,
-      'A', radius, radius, 0, largeArcFlag, 0, end.x, end.y,
-      'Z',
-    ].join(' ');
+    return ['M', 50, 50, 'L', start.x, start.y, 'A', radius, radius, 0, largeArcFlag, 0, end.x, end.y, 'Z'].join(' ');
   };
 
   const polarToCartesian = (cx: number, cy: number, r: number, angle: number) => {
@@ -147,27 +138,17 @@ function ModelPieChart({ data }: ModelPieChartProps) {
               fill={slice.color}
               className={clsx(
                 'transition-opacity cursor-pointer',
-                hoveredIndex !== null && hoveredIndex !== i && 'opacity-50'
+                hoveredIndex !== null && hoveredIndex !== i && 'opacity-50',
               )}
               onMouseEnter={() => setHoveredIndex(i)}
               onMouseLeave={() => setHoveredIndex(null)}
             />
           ))}
           {/* Center text */}
-          <text
-            x="50"
-            y="48"
-            textAnchor="middle"
-            className="fill-gray-900 dark:fill-white text-[6px] font-semibold"
-          >
+          <text x="50" y="48" textAnchor="middle" className="fill-gray-900 dark:fill-white text-[6px] font-semibold">
             {formatCost(chartData.total)}
           </text>
-          <text
-            x="50"
-            y="56"
-            textAnchor="middle"
-            className="fill-gray-500 dark:fill-gray-400 text-[4px]"
-          >
+          <text x="50" y="56" textAnchor="middle" className="fill-gray-500 dark:fill-gray-400 text-[4px]">
             {t('breakdown.total', 'Total')}
           </text>
         </svg>
@@ -182,21 +163,14 @@ function ModelPieChart({ data }: ModelPieChartProps) {
               'flex items-center gap-2 text-sm',
               'cursor-pointer rounded px-2 py-1 -mx-2',
               'transition-colors',
-              hoveredIndex === i && 'bg-gray-100 dark:bg-gray-800'
+              hoveredIndex === i && 'bg-gray-100 dark:bg-gray-800',
             )}
             onMouseEnter={() => setHoveredIndex(i)}
             onMouseLeave={() => setHoveredIndex(null)}
           >
-            <span
-              className="w-3 h-3 rounded-sm shrink-0"
-              style={{ backgroundColor: slice.color }}
-            />
-            <span className="flex-1 text-gray-900 dark:text-white truncate">
-              {slice.model_name}
-            </span>
-            <span className="text-gray-500 dark:text-gray-400 text-xs">
-              {(slice.percentage * 100).toFixed(1)}%
-            </span>
+            <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: slice.color }} />
+            <span className="flex-1 text-gray-900 dark:text-white truncate">{slice.model_name}</span>
+            <span className="text-gray-500 dark:text-gray-400 text-xs">{(slice.percentage * 100).toFixed(1)}%</span>
           </div>
         ))}
       </div>
@@ -244,15 +218,13 @@ function ProjectBarChart({ data }: ProjectBarChartProps) {
           className={clsx(
             'cursor-pointer rounded px-2 py-2 -mx-2',
             'transition-colors',
-            hoveredIndex === i && 'bg-gray-100 dark:bg-gray-800'
+            hoveredIndex === i && 'bg-gray-100 dark:bg-gray-800',
           )}
           onMouseEnter={() => setHoveredIndex(i)}
           onMouseLeave={() => setHoveredIndex(null)}
         >
           <div className="flex items-center justify-between mb-1">
-            <span className="text-sm text-gray-900 dark:text-white truncate">
-              {bar.displayName}
-            </span>
+            <span className="text-sm text-gray-900 dark:text-white truncate">{bar.displayName}</span>
             <span className="text-sm text-gray-500 dark:text-gray-400 ml-2">
               {formatCost(bar.stats.total_cost_microdollars)}
             </span>

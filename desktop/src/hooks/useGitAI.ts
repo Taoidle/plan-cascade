@@ -148,8 +148,11 @@ export function useGitAI(): UseGitAIReturn {
           });
 
           if (!configResult.success) {
-            console.warn('[GitAI] git_configure_llm failed:', configResult.error,
-              { provider: providerName, model: resolvedModel, hasKey: !!resolvedApiKey });
+            console.warn('[GitAI] git_configure_llm failed:', configResult.error, {
+              provider: providerName,
+              model: resolvedModel,
+              hasKey: !!resolvedApiKey,
+            });
           }
         }
         // Now check availability
@@ -238,66 +241,60 @@ export function useGitAI(): UseGitAIReturn {
   }, []);
 
   // Resolve conflict with AI
-  const resolveConflictAI = useCallback(
-    async (repoPath: string, filePath: string): Promise<AIResult> => {
-      setResolvingFiles((prev) => new Set(prev).add(filePath));
-      setLastError(null);
-      try {
-        const res = await invoke<CommandResponse<string>>('git_resolve_conflict_ai', {
-          repoPath,
-          filePath,
-        });
-        if (res.success && res.data) {
-          return { data: res.data, error: null };
-        }
-        const error = res.error || 'Failed to resolve conflict';
-        console.warn('[GitAI] resolveConflictAI failed:', error);
-        setLastError(error);
-        return { data: null, error };
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.warn('[GitAI] resolveConflictAI exception:', msg);
-        setLastError(msg);
-        return { data: null, error: msg };
-      } finally {
-        setResolvingFiles((prev) => {
-          const next = new Set(prev);
-          next.delete(filePath);
-          return next;
-        });
+  const resolveConflictAI = useCallback(async (repoPath: string, filePath: string): Promise<AIResult> => {
+    setResolvingFiles((prev) => new Set(prev).add(filePath));
+    setLastError(null);
+    try {
+      const res = await invoke<CommandResponse<string>>('git_resolve_conflict_ai', {
+        repoPath,
+        filePath,
+      });
+      if (res.success && res.data) {
+        return { data: res.data, error: null };
       }
-    },
-    []
-  );
+      const error = res.error || 'Failed to resolve conflict';
+      console.warn('[GitAI] resolveConflictAI failed:', error);
+      setLastError(error);
+      return { data: null, error };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn('[GitAI] resolveConflictAI exception:', msg);
+      setLastError(msg);
+      return { data: null, error: msg };
+    } finally {
+      setResolvingFiles((prev) => {
+        const next = new Set(prev);
+        next.delete(filePath);
+        return next;
+      });
+    }
+  }, []);
 
   // Summarize commit
-  const summarizeCommit = useCallback(
-    async (repoPath: string, sha: string): Promise<AIResult> => {
-      setIsSummarizing(true);
-      setLastError(null);
-      try {
-        const res = await invoke<CommandResponse<string>>('git_summarize_commit', {
-          repoPath,
-          sha,
-        });
-        if (res.success && res.data) {
-          return { data: res.data, error: null };
-        }
-        const error = res.error || 'Failed to summarize commit';
-        console.warn('[GitAI] summarizeCommit failed:', error);
-        setLastError(error);
-        return { data: null, error };
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.warn('[GitAI] summarizeCommit exception:', msg);
-        setLastError(msg);
-        return { data: null, error: msg };
-      } finally {
-        setIsSummarizing(false);
+  const summarizeCommit = useCallback(async (repoPath: string, sha: string): Promise<AIResult> => {
+    setIsSummarizing(true);
+    setLastError(null);
+    try {
+      const res = await invoke<CommandResponse<string>>('git_summarize_commit', {
+        repoPath,
+        sha,
+      });
+      if (res.success && res.data) {
+        return { data: res.data, error: null };
       }
-    },
-    []
-  );
+      const error = res.error || 'Failed to summarize commit';
+      console.warn('[GitAI] summarizeCommit failed:', error);
+      setLastError(error);
+      return { data: null, error };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn('[GitAI] summarizeCommit exception:', msg);
+      setLastError(msg);
+      return { data: null, error: msg };
+    } finally {
+      setIsSummarizing(false);
+    }
+  }, []);
 
   return {
     isAvailable,

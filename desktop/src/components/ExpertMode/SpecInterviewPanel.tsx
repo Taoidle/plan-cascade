@@ -9,11 +9,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import {
-  useSpecInterviewStore,
-  getPhaseLabel,
-  getPhaseOrder,
-} from '../../store/specInterview';
+import { useSpecInterviewStore, getPhaseLabel, getPhaseOrder } from '../../store/specInterview';
 import type {
   InterviewPhase,
   InterviewConfig,
@@ -27,21 +23,14 @@ import type {
 
 export function SpecInterviewPanel() {
   const { t } = useTranslation('expertMode');
-  const {
-    session,
-    compiledSpec,
-    loading,
-    error,
-    startInterview,
-    submitAnswer,
-    compileSpec,
-    reset,
-    clearError,
-  } = useSpecInterviewStore();
+  const { session, compiledSpec, loading, error, startInterview, submitAnswer, compileSpec, reset, clearError } =
+    useSpecInterviewStore();
 
   // If no session, show the start form
   if (!session) {
-    return <StartInterviewForm onStart={startInterview} loading={loading.starting} error={error} onClearError={clearError} />;
+    return (
+      <StartInterviewForm onStart={startInterview} loading={loading.starting} error={error} onClearError={clearError} />
+    );
   }
 
   // If session is complete and compiled, show results
@@ -65,10 +54,7 @@ export function SpecInterviewPanel() {
         <div className="mx-6 mt-2 px-4 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
           <div className="flex items-center justify-between">
             <span className="text-sm text-red-700 dark:text-red-300">{error}</span>
-            <button
-              onClick={clearError}
-              className="text-red-500 hover:text-red-700 text-sm font-medium"
-            >
+            <button onClick={clearError} className="text-red-500 hover:text-red-700 text-sm font-medium">
               {t('specInterview.dismiss')}
             </button>
           </div>
@@ -81,16 +67,9 @@ export function SpecInterviewPanel() {
 
         {/* Current Question / Compile Action */}
         {session.status === 'finalized' ? (
-          <CompileAction
-            onCompile={() => compileSpec()}
-            loading={loading.compiling}
-          />
+          <CompileAction onCompile={() => compileSpec()} loading={loading.compiling} />
         ) : session.current_question ? (
-          <QuestionInput
-            question={session.current_question}
-            onSubmit={submitAnswer}
-            loading={loading.submitting}
-          />
+          <QuestionInput question={session.current_question} onSubmit={submitAnswer} loading={loading.submitting} />
         ) : null}
       </div>
 
@@ -101,13 +80,17 @@ export function SpecInterviewPanel() {
           className={clsx(
             'text-sm text-gray-500 dark:text-gray-400',
             'hover:text-gray-700 dark:hover:text-gray-200',
-            'transition-colors'
+            'transition-colors',
           )}
         >
           {t('specInterview.cancelInterview')}
         </button>
         <div className="text-xs text-gray-400 dark:text-gray-500">
-          {t('specInterview.flowInfo', { flow: session.flow_level, cursor: session.question_cursor, max: session.max_questions })}
+          {t('specInterview.flowInfo', {
+            flow: session.flow_level,
+            cursor: session.question_cursor,
+            max: session.max_questions,
+          })}
         </div>
       </div>
     </div>
@@ -149,12 +132,8 @@ function StartInterviewForm({ onStart, loading, error, onClearError }: StartInte
     <div className="h-full flex items-center justify-center p-6">
       <div className="max-w-lg w-full">
         <div className="mb-8 text-center">
-          <h2 className="text-2xl font-semibold text-gray-900 dark:text-white mb-2">
-            {t('specInterview.title')}
-          </h2>
-          <p className="text-gray-600 dark:text-gray-400">
-            {t('specInterview.description')}
-          </p>
+          <h2 className="text-2xl font-semibold text-gray-900 dark:text-white mb-2">{t('specInterview.title')}</h2>
+          <p className="text-gray-600 dark:text-gray-400">{t('specInterview.description')}</p>
         </div>
 
         {error && (
@@ -185,7 +164,7 @@ function StartInterviewForm({ onStart, loading, error, onClearError }: StartInte
                 'text-gray-900 dark:text-white',
                 'placeholder-gray-400 dark:placeholder-gray-500',
                 'focus:ring-2 focus:ring-primary-500 focus:border-primary-500',
-                'resize-none'
+                'resize-none',
               )}
               rows={4}
               required
@@ -207,7 +186,7 @@ function StartInterviewForm({ onStart, loading, error, onClearError }: StartInte
                     'flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
                     flowLevel === level
                       ? 'bg-primary-600 text-white'
-                      : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                      : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600',
                   )}
                 >
                   {level.charAt(0).toUpperCase() + level.slice(1)}
@@ -230,9 +209,7 @@ function StartInterviewForm({ onStart, loading, error, onClearError }: StartInte
                 onChange={(e) => setFirstPrinciples(e.target.checked)}
                 className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
               />
-              <span className="text-sm text-gray-700 dark:text-gray-300">
-                {t('specInterview.firstPrinciples')}
-              </span>
+              <span className="text-sm text-gray-700 dark:text-gray-300">{t('specInterview.firstPrinciples')}</span>
             </label>
 
             <div className="flex items-center gap-2">
@@ -247,7 +224,7 @@ function StartInterviewForm({ onStart, loading, error, onClearError }: StartInte
                   'w-16 px-2 py-1 rounded border text-sm',
                   'bg-white dark:bg-gray-800',
                   'border-gray-300 dark:border-gray-600',
-                  'text-gray-900 dark:text-white'
+                  'text-gray-900 dark:text-white',
                 )}
               />
             </div>
@@ -261,7 +238,7 @@ function StartInterviewForm({ onStart, loading, error, onClearError }: StartInte
               'w-full px-6 py-3 rounded-lg font-medium text-white',
               'bg-primary-600 hover:bg-primary-700',
               'disabled:opacity-50 disabled:cursor-not-allowed',
-              'transition-colors'
+              'transition-colors',
             )}
           >
             {loading ? t('specInterview.starting') : t('specInterview.startButton')}
@@ -301,11 +278,7 @@ function InterviewProgressBar({ phase, progress, questionCursor, maxQuestions }:
               <div
                 className={clsx(
                   'w-full h-1.5 rounded-full transition-colors',
-                  isComplete
-                    ? 'bg-green-500'
-                    : isActive
-                    ? 'bg-primary-500'
-                    : 'bg-gray-200 dark:bg-gray-700'
+                  isComplete ? 'bg-green-500' : isActive ? 'bg-primary-500' : 'bg-gray-200 dark:bg-gray-700',
                 )}
               />
               <span
@@ -314,8 +287,8 @@ function InterviewProgressBar({ phase, progress, questionCursor, maxQuestions }:
                   isActive
                     ? 'text-primary-600 dark:text-primary-400'
                     : isComplete
-                    ? 'text-green-600 dark:text-green-400'
-                    : 'text-gray-400 dark:text-gray-500'
+                      ? 'text-green-600 dark:text-green-400'
+                      : 'text-gray-400 dark:text-gray-500',
                 )}
               >
                 {getPhaseLabel(p)}
@@ -328,7 +301,9 @@ function InterviewProgressBar({ phase, progress, questionCursor, maxQuestions }:
       {/* Overall progress */}
       <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
         <span>{t('specInterview.phase', { phase: getPhaseLabel(phase) })}</span>
-        <span>{t('specInterview.progress', { cursor: questionCursor, max: maxQuestions, progress: Math.round(progress) })}</span>
+        <span>
+          {t('specInterview.progress', { cursor: questionCursor, max: maxQuestions, progress: Math.round(progress) })}
+        </span>
       </div>
     </div>
   );
@@ -355,33 +330,32 @@ function ConversationHistory({ history }: ConversationHistoryProps) {
   if (history.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center p-6">
-        <p className="text-gray-400 dark:text-gray-500 text-sm">
-          {t('specInterview.conversationEmpty')}
-        </p>
+        <p className="text-gray-400 dark:text-gray-500 text-sm">{t('specInterview.conversationEmpty')}</p>
       </div>
     );
   }
 
   return (
-    <div
-      ref={scrollRef}
-      className="flex-1 overflow-auto p-6 space-y-4"
-    >
+    <div ref={scrollRef} className="flex-1 overflow-auto p-6 space-y-4">
       {history.map((entry, idx) => (
         <div key={idx} className="space-y-2">
           {/* Question (from system) */}
           <div className="flex gap-3">
-            <div className={clsx(
-              'flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium',
-              'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300'
-            )}>
+            <div
+              className={clsx(
+                'flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium',
+                'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300',
+              )}
+            >
               Q
             </div>
-            <div className={clsx(
-              'flex-1 px-4 py-2.5 rounded-lg text-sm',
-              'bg-gray-100 dark:bg-gray-800',
-              'text-gray-800 dark:text-gray-200'
-            )}>
+            <div
+              className={clsx(
+                'flex-1 px-4 py-2.5 rounded-lg text-sm',
+                'bg-gray-100 dark:bg-gray-800',
+                'text-gray-800 dark:text-gray-200',
+              )}
+            >
               <div className="text-[10px] text-gray-400 dark:text-gray-500 mb-1">
                 {getPhaseLabel(entry.phase as InterviewPhase)}
               </div>
@@ -391,18 +365,22 @@ function ConversationHistory({ history }: ConversationHistoryProps) {
 
           {/* Answer (from user) */}
           <div className="flex gap-3 justify-end">
-            <div className={clsx(
-              'max-w-[80%] px-4 py-2.5 rounded-lg text-sm',
-              'bg-primary-50 dark:bg-primary-900/30',
-              'text-gray-800 dark:text-gray-200',
-              'border border-primary-200 dark:border-primary-800'
-            )}>
+            <div
+              className={clsx(
+                'max-w-[80%] px-4 py-2.5 rounded-lg text-sm',
+                'bg-primary-50 dark:bg-primary-900/30',
+                'text-gray-800 dark:text-gray-200',
+                'border border-primary-200 dark:border-primary-800',
+              )}
+            >
               {entry.answer || <span className="text-gray-400 italic">{t('specInterview.skipped')}</span>}
             </div>
-            <div className={clsx(
-              'flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium',
-              'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
-            )}>
+            <div
+              className={clsx(
+                'flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium',
+                'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300',
+              )}
+            >
               A
             </div>
           </div>
@@ -460,14 +438,8 @@ function QuestionInput({ question, onSubmit, loading }: QuestionInputProps) {
             <span className="text-[10px] text-red-500 font-medium">{t('specInterview.required')}</span>
           )}
         </div>
-        <p className="text-sm font-medium text-gray-900 dark:text-white">
-          {question.question}
-        </p>
-        {question.hint && (
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-            {question.hint}
-          </p>
-        )}
+        <p className="text-sm font-medium text-gray-900 dark:text-white">{question.question}</p>
+        {question.hint && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{question.hint}</p>}
       </div>
 
       {/* Input */}
@@ -483,14 +455,17 @@ function QuestionInput({ question, onSubmit, loading }: QuestionInputProps) {
                 handleSubmit(e as unknown as React.FormEvent);
               }
             }}
-            placeholder={question.hint || (question.input_type === 'list' ? t('specInterview.listPlaceholder') : t('specInterview.textPlaceholder'))}
+            placeholder={
+              question.hint ||
+              (question.input_type === 'list' ? t('specInterview.listPlaceholder') : t('specInterview.textPlaceholder'))
+            }
             className={clsx(
               'flex-1 px-4 py-2.5 rounded-lg border text-sm resize-none',
               'bg-gray-50 dark:bg-gray-800',
               'border-gray-300 dark:border-gray-600',
               'text-gray-900 dark:text-white',
               'placeholder-gray-400 dark:placeholder-gray-500',
-              'focus:ring-2 focus:ring-primary-500 focus:border-primary-500'
+              'focus:ring-2 focus:ring-primary-500 focus:border-primary-500',
             )}
             rows={question.input_type === 'list' ? 3 : 2}
             disabled={loading}
@@ -509,7 +484,7 @@ function QuestionInput({ question, onSubmit, loading }: QuestionInputProps) {
               'border-gray-300 dark:border-gray-600',
               'text-gray-900 dark:text-white',
               'placeholder-gray-400 dark:placeholder-gray-500',
-              'focus:ring-2 focus:ring-primary-500 focus:border-primary-500'
+              'focus:ring-2 focus:ring-primary-500 focus:border-primary-500',
             )}
             disabled={loading}
           />
@@ -523,7 +498,7 @@ function QuestionInput({ question, onSubmit, loading }: QuestionInputProps) {
               'px-4 py-2.5 rounded-lg text-sm font-medium text-white',
               'bg-primary-600 hover:bg-primary-700',
               'disabled:opacity-50 disabled:cursor-not-allowed',
-              'transition-colors'
+              'transition-colors',
             )}
           >
             {loading ? '...' : t('specInterview.submit')}
@@ -538,7 +513,7 @@ function QuestionInput({ question, onSubmit, loading }: QuestionInputProps) {
                 'text-gray-500 dark:text-gray-400',
                 'hover:bg-gray-100 dark:hover:bg-gray-800',
                 'disabled:opacity-50',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               {t('specInterview.skip')}
@@ -568,9 +543,7 @@ function CompileAction({ onCompile, loading }: CompileActionProps) {
         <div className="text-lg font-semibold text-green-700 dark:text-green-400 mb-2">
           {t('specInterview.complete.title')}
         </div>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-          {t('specInterview.complete.description')}
-        </p>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{t('specInterview.complete.description')}</p>
         <button
           onClick={onCompile}
           disabled={loading}
@@ -578,7 +551,7 @@ function CompileAction({ onCompile, loading }: CompileActionProps) {
             'px-8 py-3 rounded-lg font-medium text-white',
             'bg-green-600 hover:bg-green-700',
             'disabled:opacity-50 disabled:cursor-not-allowed',
-            'transition-colors'
+            'transition-colors',
           )}
         >
           {loading ? t('specInterview.complete.compiling') : t('specInterview.complete.compileButton')}
@@ -610,12 +583,8 @@ function CompileResults({ compiledSpec, onReset }: CompileResultsProps) {
       {/* Header */}
       <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            {t('specInterview.results.title')}
-          </h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            {t('specInterview.results.description')}
-          </p>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t('specInterview.results.title')}</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t('specInterview.results.description')}</p>
         </div>
         <button
           onClick={onReset}
@@ -624,7 +593,7 @@ function CompileResults({ compiledSpec, onReset }: CompileResultsProps) {
             'bg-gray-100 dark:bg-gray-700',
             'text-gray-700 dark:text-gray-300',
             'hover:bg-gray-200 dark:hover:bg-gray-600',
-            'transition-colors'
+            'transition-colors',
           )}
         >
           {t('specInterview.results.newInterview')}
@@ -633,11 +602,11 @@ function CompileResults({ compiledSpec, onReset }: CompileResultsProps) {
 
       {/* Tab switcher */}
       <div className="px-6 pt-2 border-b border-gray-200 dark:border-gray-700 flex gap-1">
-        {([
+        {[
           { id: 'md' as const, label: 'spec.md' },
           { id: 'json' as const, label: 'spec.json' },
           { id: 'prd' as const, label: 'prd.json' },
-        ]).map((tab) => (
+        ].map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
@@ -645,7 +614,7 @@ function CompileResults({ compiledSpec, onReset }: CompileResultsProps) {
               'px-4 py-2 rounded-t-lg text-sm font-medium transition-colors',
               activeTab === tab.id
                 ? 'bg-gray-100 dark:bg-gray-800 text-primary-600 dark:text-primary-400'
-                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200',
             )}
           >
             {tab.label}
@@ -656,26 +625,17 @@ function CompileResults({ compiledSpec, onReset }: CompileResultsProps) {
       {/* Content */}
       <div className="flex-1 overflow-auto p-6">
         {activeTab === 'md' && (
-          <pre className={clsx(
-            'whitespace-pre-wrap text-sm font-mono',
-            'text-gray-800 dark:text-gray-200'
-          )}>
+          <pre className={clsx('whitespace-pre-wrap text-sm font-mono', 'text-gray-800 dark:text-gray-200')}>
             {compiledSpec.spec_md}
           </pre>
         )}
         {activeTab === 'json' && (
-          <pre className={clsx(
-            'whitespace-pre-wrap text-sm font-mono',
-            'text-gray-800 dark:text-gray-200'
-          )}>
+          <pre className={clsx('whitespace-pre-wrap text-sm font-mono', 'text-gray-800 dark:text-gray-200')}>
             {JSON.stringify(compiledSpec.spec_json, null, 2)}
           </pre>
         )}
         {activeTab === 'prd' && (
-          <pre className={clsx(
-            'whitespace-pre-wrap text-sm font-mono',
-            'text-gray-800 dark:text-gray-200'
-          )}>
+          <pre className={clsx('whitespace-pre-wrap text-sm font-mono', 'text-gray-800 dark:text-gray-200')}>
             {JSON.stringify(compiledSpec.prd_json, null, 2)}
           </pre>
         )}

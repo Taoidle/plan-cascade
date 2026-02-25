@@ -22,7 +22,7 @@ export function Projects() {
           'h-full border-r border-gray-200 dark:border-gray-700',
           'bg-gray-50 dark:bg-gray-900',
           // Responsive: full width on mobile when no project selected, 1/3 on desktop
-          selectedProject ? 'hidden md:block md:w-1/3 lg:w-1/4' : 'w-full md:w-1/3 lg:w-1/4'
+          selectedProject ? 'hidden md:block md:w-1/3 lg:w-1/4' : 'w-full md:w-1/3 lg:w-1/4',
         )}
       >
         <ProjectBrowser />
@@ -34,7 +34,7 @@ export function Projects() {
           'h-full flex-1',
           'bg-white dark:bg-gray-950',
           // Hide on mobile when no project selected
-          selectedProject ? 'w-full md:w-2/3 lg:w-3/4' : 'hidden md:block'
+          selectedProject ? 'w-full md:w-2/3 lg:w-3/4' : 'hidden md:block',
         )}
       >
         <SessionList />

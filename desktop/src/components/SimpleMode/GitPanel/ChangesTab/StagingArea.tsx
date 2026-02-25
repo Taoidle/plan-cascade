@@ -195,7 +195,7 @@ export function StagingArea() {
         'flex items-center gap-1 text-2xs px-2 py-0.5 rounded transition-colors',
         canReview
           ? 'text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20'
-          : 'text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-50'
+          : 'text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-50',
       )}
       title={
         !isAvailable
@@ -240,9 +240,7 @@ export function StagingArea() {
       </CollapsibleSection>
 
       {/* AI Review results (shown below staged section) */}
-      {reviewText && (
-        <AIReviewPanel reviewText={reviewText} onDismiss={handleDismissReview} />
-      )}
+      {reviewText && <AIReviewPanel reviewText={reviewText} onDismiss={handleDismissReview} />}
 
       {/* Unstaged Changes */}
       <CollapsibleSection

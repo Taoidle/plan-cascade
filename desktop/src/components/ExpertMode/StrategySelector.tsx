@@ -12,13 +12,7 @@ import { clsx } from 'clsx';
 import { usePRDStore, ExecutionStrategy } from '../../store/prd';
 import { useExecutionStore, StrategyAnalysis } from '../../store/execution';
 import * as Tooltip from '@radix-ui/react-tooltip';
-import {
-  RocketIcon,
-  LayersIcon,
-  CubeIcon,
-  InfoCircledIcon,
-  MixIcon,
-} from '@radix-ui/react-icons';
+import { RocketIcon, LayersIcon, CubeIcon, InfoCircledIcon, MixIcon } from '@radix-ui/react-icons';
 
 interface StrategyOption {
   value: ExecutionStrategy;
@@ -37,7 +31,8 @@ const strategyOptions: StrategyOption[] = [
     value: 'direct',
     label: 'Direct',
     description: 'Execute task directly without PRD breakdown',
-    details: 'Best for simple, single-step tasks that can be completed in one pass. The AI will execute the task immediately without creating intermediate stories.',
+    details:
+      'Best for simple, single-step tasks that can be completed in one pass. The AI will execute the task immediately without creating intermediate stories.',
     icon: <RocketIcon className="w-5 h-5" />,
     minStories: 0,
     maxStories: 1,
@@ -47,7 +42,8 @@ const strategyOptions: StrategyOption[] = [
     value: 'hybrid_auto',
     label: 'Hybrid Auto',
     description: 'Automatic PRD generation with story-based execution',
-    details: 'Ideal for medium-sized tasks. The system generates a PRD with multiple stories and executes them in dependency order. Provides good balance of structure and efficiency.',
+    details:
+      'Ideal for medium-sized tasks. The system generates a PRD with multiple stories and executes them in dependency order. Provides good balance of structure and efficiency.',
     icon: <LayersIcon className="w-5 h-5" />,
     minStories: 2,
     maxStories: 10,
@@ -57,7 +53,8 @@ const strategyOptions: StrategyOption[] = [
     value: 'mega_plan',
     label: 'Mega Plan',
     description: 'Full project planning with feature breakdown',
-    details: 'For complex, multi-feature projects. Creates a comprehensive plan with features, stories, and dependencies. Uses parallel execution with Git worktrees for isolation.',
+    details:
+      'For complex, multi-feature projects. Creates a comprehensive plan with features, stories, and dependencies. Uses parallel execution with Git worktrees for isolation.',
     icon: <CubeIcon className="w-5 h-5" />,
     minStories: 10,
     maxStories: Infinity,
@@ -68,19 +65,22 @@ const strategyOptions: StrategyOption[] = [
 /** Map analyzer strategy key to the PRD store ExecutionStrategy value */
 function mapAnalyzerStrategy(analyzerStrategy: string): ExecutionStrategy | null {
   switch (analyzerStrategy) {
-    case 'direct': return 'direct';
-    case 'hybrid_auto': return 'hybrid_auto';
-    case 'hybrid_worktree': return 'hybrid_auto'; // Worktree mapped to hybrid_auto in PRD store
-    case 'mega_plan': return 'mega_plan';
-    default: return null;
+    case 'direct':
+      return 'direct';
+    case 'hybrid_auto':
+      return 'hybrid_auto';
+    case 'hybrid_worktree':
+      return 'hybrid_auto'; // Worktree mapped to hybrid_auto in PRD store
+    case 'mega_plan':
+      return 'mega_plan';
+    default:
+      return null;
   }
 }
 
 /** Format strategy name for display */
 function formatStrategyName(strategy: string): string {
-  return strategy
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  return strategy.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 /** Confidence level label */
@@ -97,11 +97,7 @@ interface StrategySelectorProps {
 
 export function StrategySelector({ taskDescription }: StrategySelectorProps) {
   const { prd, setStrategy } = usePRDStore();
-  const {
-    strategyAnalysis,
-    isAnalyzingStrategy,
-    analyzeStrategy,
-  } = useExecutionStore();
+  const { strategyAnalysis, isAnalyzingStrategy, analyzeStrategy } = useExecutionStore();
   const storyCount = prd.stories.length;
 
   // Auto-analyze when task description changes (debounced)
@@ -117,22 +113,17 @@ export function StrategySelector({ taskDescription }: StrategySelectorProps) {
   }, [runAnalysis]);
 
   // Determine recommended strategy: use analyzer result if available, else story count heuristic
-  const analyzerRecommendation = strategyAnalysis
-    ? mapAnalyzerStrategy(strategyAnalysis.strategy)
-    : null;
+  const analyzerRecommendation = strategyAnalysis ? mapAnalyzerStrategy(strategyAnalysis.strategy) : null;
 
-  const recommendedStrategy = analyzerRecommendation
-    || strategyOptions.find(
-      (opt) => storyCount >= opt.minStories && storyCount <= opt.maxStories
-    )?.value
-    || 'hybrid_auto';
+  const recommendedStrategy =
+    analyzerRecommendation ||
+    strategyOptions.find((opt) => storyCount >= opt.minStories && storyCount <= opt.maxStories)?.value ||
+    'hybrid_auto';
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-          Execution Strategy
-        </label>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Execution Strategy</label>
         {storyCount > 0 && (
           <span className="text-xs text-gray-500 dark:text-gray-400">
             {storyCount} {storyCount === 1 ? 'story' : 'stories'}
@@ -142,10 +133,7 @@ export function StrategySelector({ taskDescription }: StrategySelectorProps) {
 
       {/* AI Analysis Banner */}
       {(isAnalyzingStrategy || strategyAnalysis) && (
-        <AnalysisBanner
-          analysis={strategyAnalysis}
-          isAnalyzing={isAnalyzingStrategy}
-        />
+        <AnalysisBanner analysis={strategyAnalysis} isAnalyzing={isAnalyzingStrategy} />
       )}
 
       <div className="space-y-2">
@@ -161,7 +149,7 @@ export function StrategySelector({ taskDescription }: StrategySelectorProps) {
                 'relative flex items-start gap-3 p-4 rounded-lg border-2 cursor-pointer transition-all',
                 isSelected
                   ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                  : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600'
+                  : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600',
               )}
             >
               <input
@@ -177,14 +165,10 @@ export function StrategySelector({ taskDescription }: StrategySelectorProps) {
               <div
                 className={clsx(
                   'w-5 h-5 rounded-full border-2 flex items-center justify-center mt-0.5 shrink-0',
-                  isSelected
-                    ? 'border-primary-600 bg-primary-600'
-                    : 'border-gray-300 dark:border-gray-600'
+                  isSelected ? 'border-primary-600 bg-primary-600' : 'border-gray-300 dark:border-gray-600',
                 )}
               >
-                {isSelected && (
-                  <div className="w-2 h-2 rounded-full bg-white" />
-                )}
+                {isSelected && <div className="w-2 h-2 rounded-full bg-white" />}
               </div>
 
               {/* Icon */}
@@ -193,7 +177,7 @@ export function StrategySelector({ taskDescription }: StrategySelectorProps) {
                   'w-10 h-10 rounded-lg flex items-center justify-center shrink-0',
                   isSelected
                     ? 'bg-primary-100 dark:bg-primary-800 text-primary-600 dark:text-primary-400'
-                    : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400',
                 )}
               >
                 {option.icon}
@@ -205,9 +189,7 @@ export function StrategySelector({ taskDescription }: StrategySelectorProps) {
                   <span
                     className={clsx(
                       'font-medium',
-                      isSelected
-                        ? 'text-primary-700 dark:text-primary-300'
-                        : 'text-gray-900 dark:text-white'
+                      isSelected ? 'text-primary-700 dark:text-primary-300' : 'text-gray-900 dark:text-white',
                     )}
                   >
                     {option.label}
@@ -235,7 +217,7 @@ export function StrategySelector({ taskDescription }: StrategySelectorProps) {
                           className={clsx(
                             'max-w-xs px-3 py-2 rounded-lg text-sm',
                             'bg-gray-900 dark:bg-gray-700 text-white',
-                            'shadow-lg'
+                            'shadow-lg',
                           )}
                           sideOffset={5}
                         >
@@ -246,9 +228,7 @@ export function StrategySelector({ taskDescription }: StrategySelectorProps) {
                     </Tooltip.Root>
                   </Tooltip.Provider>
                 </div>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                  {option.description}
-                </p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{option.description}</p>
               </div>
             </label>
           );
@@ -259,20 +239,12 @@ export function StrategySelector({ taskDescription }: StrategySelectorProps) {
 }
 
 /** Banner showing the AI analysis result with dimension scores */
-function AnalysisBanner({
-  analysis,
-  isAnalyzing,
-}: {
-  analysis: StrategyAnalysis | null;
-  isAnalyzing: boolean;
-}) {
+function AnalysisBanner({ analysis, isAnalyzing }: { analysis: StrategyAnalysis | null; isAnalyzing: boolean }) {
   if (isAnalyzing) {
     return (
       <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 flex items-center gap-2">
         <div className="animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full" />
-        <p className="text-sm text-blue-600 dark:text-blue-400">
-          Analyzing task complexity...
-        </p>
+        <p className="text-sm text-blue-600 dark:text-blue-400">Analyzing task complexity...</p>
       </div>
     );
   }
@@ -295,9 +267,7 @@ function AnalysisBanner({
         </span>
       </div>
 
-      <p className="text-xs text-indigo-600 dark:text-indigo-400 mb-2">
-        {analysis.reasoning}
-      </p>
+      <p className="text-xs text-indigo-600 dark:text-indigo-400 mb-2">{analysis.reasoning}</p>
 
       {/* Dimension scores bar chart */}
       <div className="grid grid-cols-4 gap-2">
@@ -310,9 +280,7 @@ function AnalysisBanner({
           <div key={dim.label}>
             <div className="flex items-center justify-between mb-0.5">
               <span className="text-[10px] text-indigo-500 dark:text-indigo-400">{dim.label}</span>
-              <span className="text-[10px] text-indigo-500 dark:text-indigo-400">
-                {(dim.value * 100).toFixed(0)}%
-              </span>
+              <span className="text-[10px] text-indigo-500 dark:text-indigo-400">{(dim.value * 100).toFixed(0)}%</span>
             </div>
             <div className="h-1.5 rounded-full bg-indigo-100 dark:bg-indigo-800 overflow-hidden">
               <div
@@ -327,9 +295,7 @@ function AnalysisBanner({
       {/* Estimates */}
       <div className="flex gap-4 mt-2 text-[10px] text-indigo-500 dark:text-indigo-400">
         <span>~{analysis.estimated_stories} stories</span>
-        {analysis.estimated_features > 1 && (
-          <span>~{analysis.estimated_features} features</span>
-        )}
+        {analysis.estimated_features > 1 && <span>~{analysis.estimated_features} features</span>}
         <span>~{analysis.estimated_duration_hours}h estimated</span>
       </div>
     </div>

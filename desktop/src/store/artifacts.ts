@@ -7,17 +7,8 @@
  */
 
 import { create } from 'zustand';
-import type {
-  ArtifactMeta,
-  ArtifactVersion,
-} from '../lib/artifactsApi';
-import {
-  artifactList,
-  artifactVersions,
-  artifactLoad,
-  artifactSave,
-  artifactDelete,
-} from '../lib/artifactsApi';
+import type { ArtifactMeta, ArtifactVersion } from '../lib/artifactsApi';
+import { artifactList, artifactVersions, artifactLoad, artifactSave, artifactDelete } from '../lib/artifactsApi';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -58,12 +49,7 @@ export interface ArtifactsState {
   /** Actions. */
   fetchArtifacts: (projectId: string, sessionId?: string, userId?: string) => Promise<void>;
   selectArtifact: (artifact: ArtifactMeta | null) => void;
-  fetchVersionHistory: (
-    name: string,
-    projectId: string,
-    sessionId?: string,
-    userId?: string,
-  ) => Promise<void>;
+  fetchVersionHistory: (name: string, projectId: string, sessionId?: string, userId?: string) => Promise<void>;
   loadPreview: (
     name: string,
     projectId: string,
@@ -79,12 +65,7 @@ export interface ArtifactsState {
     contentType: string,
     data: number[],
   ) => Promise<boolean>;
-  deleteArtifact: (
-    name: string,
-    projectId: string,
-    sessionId?: string,
-    userId?: string,
-  ) => Promise<boolean>;
+  deleteArtifact: (name: string, projectId: string, sessionId?: string, userId?: string) => Promise<boolean>;
   setScopeFilter: (scope: ScopeFilter) => void;
   setSearchText: (text: string) => void;
   clearError: () => void;
@@ -144,12 +125,7 @@ export const useArtifactsStore = create<ArtifactsState>()((set, get) => ({
     });
   },
 
-  fetchVersionHistory: async (
-    name: string,
-    projectId: string,
-    sessionId?: string,
-    userId?: string,
-  ) => {
+  fetchVersionHistory: async (name: string, projectId: string, sessionId?: string, userId?: string) => {
     set({ isLoadingVersions: true, error: null });
     try {
       const result = await artifactVersions(name, projectId, sessionId, userId);
@@ -169,13 +145,7 @@ export const useArtifactsStore = create<ArtifactsState>()((set, get) => ({
     }
   },
 
-  loadPreview: async (
-    name: string,
-    projectId: string,
-    sessionId?: string,
-    userId?: string,
-    version?: number,
-  ) => {
+  loadPreview: async (name: string, projectId: string, sessionId?: string, userId?: string, version?: number) => {
     set({ isLoadingPreview: true, error: null });
     try {
       const result = await artifactLoad(name, projectId, sessionId ?? null, userId ?? null, version);
@@ -215,8 +185,7 @@ export const useArtifactsStore = create<ArtifactsState>()((set, get) => ({
             : [...state.artifacts, result.data!];
           return {
             artifacts,
-            selectedArtifact:
-              state.selectedArtifact?.name === name ? result.data! : state.selectedArtifact,
+            selectedArtifact: state.selectedArtifact?.name === name ? result.data! : state.selectedArtifact,
             isSaving: false,
           };
         });
@@ -237,20 +206,14 @@ export const useArtifactsStore = create<ArtifactsState>()((set, get) => ({
     }
   },
 
-  deleteArtifact: async (
-    name: string,
-    projectId: string,
-    sessionId?: string,
-    userId?: string,
-  ) => {
+  deleteArtifact: async (name: string, projectId: string, sessionId?: string, userId?: string) => {
     set({ isDeleting: true, error: null });
     try {
       const result = await artifactDelete(name, projectId, sessionId, userId);
       if (result.success) {
         set((state) => ({
           artifacts: state.artifacts.filter((a) => a.name !== name),
-          selectedArtifact:
-            state.selectedArtifact?.name === name ? null : state.selectedArtifact,
+          selectedArtifact: state.selectedArtifact?.name === name ? null : state.selectedArtifact,
           versionHistory: state.selectedArtifact?.name === name ? [] : state.versionHistory,
           previewContent: state.selectedArtifact?.name === name ? null : state.previewContent,
           isDeleting: false,

@@ -83,10 +83,7 @@ function ConfirmRemoveDialog({
         </h3>
         <p className="text-sm text-gray-700 dark:text-gray-300 mb-3">
           {t('worktreeList.removeConfirm')}{' '}
-          <code className="px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-xs font-mono">
-            {worktree.name}
-          </code>
-          ?
+          <code className="px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-xs font-mono">{worktree.name}</code>?
         </p>
 
         <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 mb-4">
@@ -122,13 +119,7 @@ function ConfirmRemoveDialog({
 // WorktreeCard
 // ---------------------------------------------------------------------------
 
-function WorktreeCard({
-  worktree,
-  onRemove,
-}: {
-  worktree: Worktree;
-  onRemove: (worktree: Worktree) => void;
-}) {
+function WorktreeCard({ worktree, onRemove }: { worktree: Worktree; onRemove: (worktree: Worktree) => void }) {
   const { t } = useTranslation('git');
   const isTerminal = worktree.status === 'completed' || worktree.status === 'error';
 
@@ -138,20 +129,13 @@ function WorktreeCard({
         'px-3 py-2 rounded-lg border transition-colors',
         worktree.status === 'active'
           ? 'border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-900/10'
-          : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/50'
+          : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/50',
       )}
     >
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-            {worktree.name}
-          </span>
-          <span
-            className={clsx(
-              'shrink-0 px-1.5 py-0.5 text-2xs font-medium rounded',
-              statusColor(worktree.status)
-            )}
-          >
+          <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{worktree.name}</span>
+          <span className={clsx('shrink-0 px-1.5 py-0.5 text-2xs font-medium rounded', statusColor(worktree.status))}>
             {t(statusLabelKey(worktree.status))}
           </span>
         </div>
@@ -164,7 +148,12 @@ function WorktreeCard({
               title={t('worktreeList.removeWorktree')}
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                />
               </svg>
             </button>
           )}
@@ -238,7 +227,7 @@ export function WorktreeList({ repoPath }: WorktreeListProps) {
         // Silently fail
       }
     },
-    [removeTarget, repoPath, fetchWorktrees]
+    [removeTarget, repoPath, fetchWorktrees],
   );
 
   const handleNewWorktree = useCallback(() => {
@@ -249,9 +238,7 @@ export function WorktreeList({ repoPath }: WorktreeListProps) {
   }, []);
 
   // Filter out completed/terminal worktrees for display
-  const activeWorktrees = worktrees.filter(
-    (wt) => wt.status !== 'completed'
-  );
+  const activeWorktrees = worktrees.filter((wt) => wt.status !== 'completed');
 
   return (
     <div className="flex flex-col h-full">
@@ -261,9 +248,7 @@ export function WorktreeList({ repoPath }: WorktreeListProps) {
           <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
             {t('worktreeList.title')}
           </h4>
-          <span className="text-2xs text-gray-400 dark:text-gray-500">
-            ({activeWorktrees.length})
-          </span>
+          <span className="text-2xs text-gray-400 dark:text-gray-500">({activeWorktrees.length})</span>
         </div>
         <button
           onClick={handleNewWorktree}
@@ -286,29 +271,31 @@ export function WorktreeList({ repoPath }: WorktreeListProps) {
 
         {!isLoading && activeWorktrees.length === 0 && (
           <div className="flex flex-col items-center justify-center py-6 text-sm text-gray-500 dark:text-gray-400">
-            <svg className="w-8 h-8 mb-2 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+            <svg
+              className="w-8 h-8 mb-2 text-gray-300 dark:text-gray-600"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+              />
             </svg>
             <span>{t('worktreeList.noActiveWorktrees')}</span>
           </div>
         )}
 
         {activeWorktrees.map((wt) => (
-          <WorktreeCard
-            key={wt.id}
-            worktree={wt}
-            onRemove={setRemoveTarget}
-          />
+          <WorktreeCard key={wt.id} worktree={wt} onRemove={setRemoveTarget} />
         ))}
       </div>
 
       {/* Remove Confirmation Dialog */}
       {removeTarget && (
-        <ConfirmRemoveDialog
-          worktree={removeTarget}
-          onConfirm={handleRemove}
-          onCancel={() => setRemoveTarget(null)}
-        />
+        <ConfirmRemoveDialog worktree={removeTarget} onConfirm={handleRemove} onCancel={() => setRemoveTarget(null)} />
       )}
     </div>
   );

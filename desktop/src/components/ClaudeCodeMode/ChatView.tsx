@@ -24,14 +24,7 @@ import { FileChip } from './FileAttachment';
 
 export function ChatView() {
   const { t } = useTranslation('claudeCode');
-  const {
-    messages,
-    isStreaming,
-    streamingContent,
-    sessionState,
-    sendMessage,
-    updateMessages,
-  } = useClaudeCodeStore();
+  const { messages, isStreaming, streamingContent, sessionState, sendMessage, updateMessages } = useClaudeCodeStore();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -54,13 +47,11 @@ export function ChatView() {
   }, []);
 
   // Message actions hook
-  const {
-    copyMessage,
-    regenerateMessage,
-    editMessage,
-    forkConversation,
-    regeneratingMessageId,
-  } = useMessageActions(messages, sendMessage, updateMessages);
+  const { copyMessage, regenerateMessage, editMessage, forkConversation, regeneratingMessageId } = useMessageActions(
+    messages,
+    sendMessage,
+    updateMessages,
+  );
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -73,14 +64,12 @@ export function ChatView() {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
         <div className="text-6xl mb-4">
-          <span role="img" aria-label="robot">&#129302;</span>
+          <span role="img" aria-label="robot">
+            &#129302;
+          </span>
         </div>
-        <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">
-          {t('chat.empty.title')}
-        </h2>
-        <p className="text-gray-500 dark:text-gray-400 max-w-md">
-          {t('chat.empty.description')}
-        </p>
+        <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">{t('chat.empty.title')}</h2>
+        <p className="text-gray-500 dark:text-gray-400 max-w-md">{t('chat.empty.description')}</p>
         <div className="mt-6 text-sm text-gray-400 dark:text-gray-500">
           <p>{t('chat.empty.tryAsking')}</p>
           <ul className="mt-2 space-y-1">
@@ -101,16 +90,8 @@ export function ChatView() {
           message={message}
           isDarkMode={isDarkMode}
           onCopy={() => copyMessage(message)}
-          onRegenerate={
-            message.role === 'assistant'
-              ? () => regenerateMessage(message.id)
-              : undefined
-          }
-          onEdit={
-            message.role === 'user'
-              ? (newContent) => editMessage(message.id, newContent)
-              : undefined
-          }
+          onRegenerate={message.role === 'assistant' ? () => regenerateMessage(message.id) : undefined}
+          onEdit={message.role === 'user' ? (newContent) => editMessage(message.id, newContent) : undefined}
           onFork={() => forkConversation(message.id)}
           isRegenerating={regeneratingMessageId === message.id}
         />
@@ -127,15 +108,12 @@ export function ChatView() {
               'flex-1 max-w-[80%] rounded-lg p-4',
               'bg-white dark:bg-gray-800',
               'border border-gray-200 dark:border-gray-700',
-              'shadow-sm'
+              'shadow-sm',
             )}
           >
             {streamingContent ? (
               <div className="prose prose-sm dark:prose-invert max-w-none">
-                <MarkdownRenderer
-                  content={streamingContent}
-                  isDarkMode={isDarkMode}
-                />
+                <MarkdownRenderer content={streamingContent} isDarkMode={isDarkMode} />
               </div>
             ) : (
               <div className="flex items-center gap-2">
@@ -185,7 +163,7 @@ function MessageBubble({
           className={clsx(
             'px-4 py-2 rounded-full text-sm',
             'bg-gray-100 dark:bg-gray-800',
-            'text-gray-500 dark:text-gray-400'
+            'text-gray-500 dark:text-gray-400',
           )}
         >
           {message.content}
@@ -195,20 +173,15 @@ function MessageBubble({
   }
 
   return (
-    <div
-      className={clsx('flex gap-3 group', isUser && 'flex-row-reverse')}
-      id={`message-${message.id}`}
-    >
+    <div className={clsx('flex gap-3 group', isUser && 'flex-row-reverse')} id={`message-${message.id}`}>
       {/* Avatar */}
       <div
         className={clsx(
           'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center',
-          isUser ? 'bg-blue-600' : 'bg-primary-600'
+          isUser ? 'bg-blue-600' : 'bg-primary-600',
         )}
       >
-        <span className="text-white text-sm font-medium">
-          {isUser ? 'U' : 'C'}
-        </span>
+        <span className="text-white text-sm font-medium">{isUser ? 'U' : 'C'}</span>
       </div>
 
       {/* Message content */}
@@ -216,10 +189,8 @@ function MessageBubble({
         <div
           className={clsx(
             'max-w-[80%] rounded-lg p-4',
-            isUser
-              ? 'bg-blue-600 text-white'
-              : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700',
-            'shadow-sm'
+            isUser ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700',
+            'shadow-sm',
           )}
         >
           {/* File attachments */}
@@ -244,10 +215,7 @@ function MessageBubble({
             <p className="whitespace-pre-wrap">{message.content}</p>
           ) : (
             <div className="prose prose-sm dark:prose-invert max-w-none">
-              <MarkdownRenderer
-                content={message.content}
-                isDarkMode={isDarkMode}
-              />
+              <MarkdownRenderer content={message.content} isDarkMode={isDarkMode} />
             </div>
           )}
         </div>
@@ -274,9 +242,7 @@ function MessageBubble({
         )}
 
         {/* Timestamp */}
-        <span className="text-xs text-gray-400 dark:text-gray-500">
-          {formatTimestamp(message.timestamp)}
-        </span>
+        <span className="text-xs text-gray-400 dark:text-gray-500">{formatTimestamp(message.timestamp)}</span>
       </div>
     </div>
   );

@@ -67,11 +67,9 @@ export function TurnChangeSummaryCard({ data }: { data: TurnChangeSummaryCardDat
             {t('workflow.turnSummary.title')}
           </span>
           <span className="text-2xs text-gray-500 dark:text-gray-400">
-            {t('workflow.turnSummary.files', { count: data.totalFiles })}
-            {' '}
+            {t('workflow.turnSummary.files', { count: data.totalFiles })}{' '}
             <span className="font-mono">
-              <span className="text-green-600 dark:text-green-400">+{data.totalLinesAdded}</span>
-              {' '}
+              <span className="text-green-600 dark:text-green-400">+{data.totalLinesAdded}</span>{' '}
               <span className="text-red-600 dark:text-red-400">-{data.totalLinesRemoved}</span>
             </span>
           </span>
@@ -80,14 +78,9 @@ export function TurnChangeSummaryCard({ data }: { data: TurnChangeSummaryCardDat
         {/* File list */}
         <div className="border-t border-gray-200/50 dark:border-gray-700/50">
           {data.files.map((file, i) => (
-            <div
-              key={i}
-              className="flex items-center gap-2 px-3 py-1 text-2xs"
-            >
+            <div key={i} className="flex items-center gap-2 px-3 py-1 text-2xs">
               <span className="text-gray-400 dark:text-gray-500">●</span>
-              <span className="font-mono text-gray-700 dark:text-gray-300 truncate flex-1">
-                {file.filePath}
-              </span>
+              <span className="font-mono text-gray-700 dark:text-gray-300 truncate flex-1">{file.filePath}</span>
               <span
                 className={clsx(
                   'shrink-0 rounded px-1 py-0.5 font-medium',
@@ -96,9 +89,7 @@ export function TurnChangeSummaryCard({ data }: { data: TurnChangeSummaryCardDat
                     : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
                 )}
               >
-                {file.changeType === 'new_file'
-                  ? t('workflow.fileChange.newFile')
-                  : t('workflow.fileChange.modified')}
+                {file.changeType === 'new_file' ? t('workflow.fileChange.newFile') : t('workflow.fileChange.modified')}
               </span>
               <span className="shrink-0 font-mono text-gray-500 dark:text-gray-400">
                 <span className="text-green-600 dark:text-green-400">+{file.linesAdded}</span>
@@ -115,16 +106,10 @@ export function TurnChangeSummaryCard({ data }: { data: TurnChangeSummaryCardDat
 
         {/* Actions */}
         <div className="flex items-center gap-3 px-3 py-1.5 border-t border-gray-200/50 dark:border-gray-700/50">
-          <button
-            onClick={handleViewAll}
-            className="text-2xs text-gray-600 dark:text-gray-400 hover:underline"
-          >
+          <button onClick={handleViewAll} className="text-2xs text-gray-600 dark:text-gray-400 hover:underline">
             {t('workflow.turnSummary.viewAll')}
           </button>
-          <button
-            onClick={handleRevertAll}
-            className="text-2xs text-gray-600 dark:text-gray-400 hover:underline"
-          >
+          <button onClick={handleRevertAll} className="text-2xs text-gray-600 dark:text-gray-400 hover:underline">
             {t('workflow.turnSummary.revertAll')}
           </button>
         </div>

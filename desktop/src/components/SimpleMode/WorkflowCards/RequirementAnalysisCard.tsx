@@ -81,9 +81,7 @@ export function RequirementAnalysisCard({ data }: { data: RequirementAnalysisCar
           <span className="text-2xs font-medium text-amber-600 dark:text-amber-400">
             {t('workflow.requirementAnalysis.scope')}
           </span>
-          <p className="mt-0.5 text-2xs text-amber-700/80 dark:text-amber-300/80">
-            {data.suggestedScope}
-          </p>
+          <p className="mt-0.5 text-2xs text-amber-700/80 dark:text-amber-300/80">{data.suggestedScope}</p>
         </div>
 
         {/* Expanded: Full Analysis */}

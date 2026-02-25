@@ -44,7 +44,7 @@ export function SessionList() {
         }
       }
     }, 300),
-    [selectedProject, searchSessions, fetchSessions]
+    [selectedProject, searchSessions, fetchSessions],
   );
 
   const handleSearch = (query: string) => {
@@ -81,9 +81,7 @@ export function SessionList() {
   if (!selectedProject) {
     return (
       <div className="h-full flex items-center justify-center">
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {t('projects.selectProject')}
-        </p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('projects.selectProject')}</p>
       </div>
     );
   }
@@ -104,15 +102,13 @@ export function SessionList() {
             className={clsx(
               'p-1.5 rounded-md',
               'hover:bg-gray-100 dark:hover:bg-gray-800',
-              'text-gray-500 dark:text-gray-400'
+              'text-gray-500 dark:text-gray-400',
             )}
           >
             <ArrowLeftIcon className="w-4 h-4" />
           </button>
           <div>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              {selectedProject.name}
-            </h2>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{selectedProject.name}</h2>
             <p className="text-xs text-gray-500 dark:text-gray-400">
               {sessions.length} {t('projects.sessions', { count: sessions.length })}
             </p>
@@ -133,7 +129,7 @@ export function SessionList() {
               'border border-gray-200 dark:border-gray-700',
               'text-sm text-gray-900 dark:text-white',
               'placeholder-gray-500 dark:placeholder-gray-400',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500'
+              'focus:outline-none focus:ring-2 focus:ring-primary-500',
             )}
           />
         </div>

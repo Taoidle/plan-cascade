@@ -44,20 +44,23 @@ export function CheckpointNode({
   const [isExpanded, setIsExpanded] = useState(false);
 
   // Format timestamp
-  const formatTime = useCallback((isoString: string) => {
-    const date = new Date(isoString);
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
+  const formatTime = useCallback(
+    (isoString: string) => {
+      const date = new Date(isoString);
+      const now = new Date();
+      const diff = now.getTime() - date.getTime();
 
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
+      const minutes = Math.floor(diff / 60000);
+      const hours = Math.floor(diff / 3600000);
+      const days = Math.floor(diff / 86400000);
 
-    if (minutes < 1) return t('time.justNow');
-    if (minutes < 60) return t('time.minutesAgo', { count: minutes });
-    if (hours < 24) return t('time.hoursAgo', { count: hours });
-    return t('time.daysAgo', { count: days });
-  }, [t]);
+      if (minutes < 1) return t('time.justNow');
+      if (minutes < 60) return t('time.minutesAgo', { count: minutes });
+      if (hours < 24) return t('time.hoursAgo', { count: hours });
+      return t('time.daysAgo', { count: days });
+    },
+    [t],
+  );
 
   // Format full timestamp
   const formatFullTime = useCallback((isoString: string) => {
@@ -70,7 +73,7 @@ export function CheckpointNode({
       e.stopPropagation();
       setIsExpanded(!isExpanded);
     },
-    [isExpanded]
+    [isExpanded],
   );
 
   const handleFork = useCallback(
@@ -78,7 +81,7 @@ export function CheckpointNode({
       e.stopPropagation();
       onFork();
     },
-    [onFork]
+    [onFork],
   );
 
   const handleRestore = useCallback(
@@ -86,7 +89,7 @@ export function CheckpointNode({
       e.stopPropagation();
       onRestore();
     },
-    [onRestore]
+    [onRestore],
   );
 
   const handleCompare = useCallback(
@@ -94,7 +97,7 @@ export function CheckpointNode({
       e.stopPropagation();
       onCompare?.();
     },
-    [onCompare]
+    [onCompare],
   );
 
   return (
@@ -107,13 +110,11 @@ export function CheckpointNode({
             isCurrent
               ? 'bg-primary-500 border-primary-500'
               : isSelected
-              ? 'bg-primary-100 dark:bg-primary-900 border-primary-400'
-              : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600'
+                ? 'bg-primary-100 dark:bg-primary-900 border-primary-400'
+                : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600',
           )}
         />
-        {isCurrent && (
-          <div className="absolute -left-1 -top-1 w-6 h-6 rounded-full bg-primary-500/20 animate-ping" />
-        )}
+        {isCurrent && <div className="absolute -left-1 -top-1 w-6 h-6 rounded-full bg-primary-500/20 animate-ping" />}
       </div>
 
       {/* Checkpoint card */}
@@ -124,7 +125,7 @@ export function CheckpointNode({
           isSelected
             ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 shadow-sm'
             : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600',
-          isExpanded ? 'shadow-md' : ''
+          isExpanded ? 'shadow-md' : '',
         )}
       >
         {/* Compact view */}
@@ -137,7 +138,7 @@ export function CheckpointNode({
                   className={clsx(
                     'flex-shrink-0 px-2 py-0.5 text-xs font-medium rounded',
                     'bg-primary-100 dark:bg-primary-900',
-                    'text-primary-700 dark:text-primary-300'
+                    'text-primary-700 dark:text-primary-300',
                   )}
                 >
                   {t('timeline.current')}
@@ -148,18 +149,14 @@ export function CheckpointNode({
               <span
                 className={clsx(
                   'font-medium truncate',
-                  isSelected
-                    ? 'text-primary-700 dark:text-primary-300'
-                    : 'text-gray-900 dark:text-white'
+                  isSelected ? 'text-primary-700 dark:text-primary-300' : 'text-gray-900 dark:text-white',
                 )}
               >
                 {checkpoint.label}
               </span>
 
               {/* Branch indicator */}
-              {checkpoint.branch_id && !isFirst && (
-                <Link2Icon className="w-3 h-3 text-gray-400 flex-shrink-0" />
-              )}
+              {checkpoint.branch_id && !isFirst && <Link2Icon className="w-3 h-3 text-gray-400 flex-shrink-0" />}
             </div>
 
             {/* Expand button */}
@@ -168,14 +165,10 @@ export function CheckpointNode({
               className={clsx(
                 'p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700',
                 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
-                'transition-colors'
+                'transition-colors',
               )}
             >
-              {isExpanded ? (
-                <ChevronUpIcon className="w-4 h-4" />
-              ) : (
-                <ChevronDownIcon className="w-4 h-4" />
-              )}
+              {isExpanded ? <ChevronUpIcon className="w-4 h-4" /> : <ChevronDownIcon className="w-4 h-4" />}
             </button>
           </div>
 
@@ -197,9 +190,7 @@ export function CheckpointNode({
           <div className="border-t border-gray-200 dark:border-gray-700 p-3">
             {/* Description */}
             {checkpoint.description && (
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
-                {checkpoint.description}
-              </p>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">{checkpoint.description}</p>
             )}
 
             {/* File list preview */}
@@ -233,7 +224,7 @@ export function CheckpointNode({
                   'bg-orange-100 dark:bg-orange-900/50',
                   'text-orange-700 dark:text-orange-300',
                   'hover:bg-orange-200 dark:hover:bg-orange-800',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 <CounterClockwiseClockIcon className="w-3 h-3" />
@@ -247,7 +238,7 @@ export function CheckpointNode({
                   'bg-purple-100 dark:bg-purple-900/50',
                   'text-purple-700 dark:text-purple-300',
                   'hover:bg-purple-200 dark:hover:bg-purple-800',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 <Link2Icon className="w-3 h-3" />
@@ -262,7 +253,7 @@ export function CheckpointNode({
                     'bg-blue-100 dark:bg-blue-900/50',
                     'text-blue-700 dark:text-blue-300',
                     'hover:bg-blue-200 dark:hover:bg-blue-800',
-                    'transition-colors'
+                    'transition-colors',
                   )}
                 >
                   <MixIcon className="w-3 h-3" />

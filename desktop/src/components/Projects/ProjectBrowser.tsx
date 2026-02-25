@@ -54,9 +54,7 @@ export function ProjectBrowser() {
     <div className="h-full flex flex-col">
       {/* Header */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
-          {t('projects.title')}
-        </h2>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">{t('projects.title')}</h2>
 
         {/* Search */}
         <div className="relative mb-3">
@@ -72,7 +70,7 @@ export function ProjectBrowser() {
               'border border-gray-200 dark:border-gray-700',
               'text-sm text-gray-900 dark:text-white',
               'placeholder-gray-500 dark:placeholder-gray-400',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500'
+              'focus:outline-none focus:ring-2 focus:ring-primary-500',
             )}
           />
         </div>
@@ -85,7 +83,7 @@ export function ProjectBrowser() {
               'bg-gray-100 dark:bg-gray-800',
               'border border-gray-200 dark:border-gray-700',
               'text-xs text-gray-600 dark:text-gray-400',
-              'hover:bg-gray-200 dark:hover:bg-gray-700'
+              'hover:bg-gray-200 dark:hover:bg-gray-700',
             )}
           >
             <span>{t('projects.sortBy')}:</span>
@@ -101,7 +99,7 @@ export function ProjectBrowser() {
                 'overflow-hidden rounded-md',
                 'bg-white dark:bg-gray-800',
                 'border border-gray-200 dark:border-gray-700',
-                'shadow-lg'
+                'shadow-lg',
               )}
             >
               <Select.Viewport className="p-1">
@@ -113,7 +111,7 @@ export function ProjectBrowser() {
                       'flex items-center gap-2 px-3 py-2 rounded-md',
                       'text-xs text-gray-700 dark:text-gray-300',
                       'cursor-pointer outline-none',
-                      'data-[highlighted]:bg-gray-100 dark:data-[highlighted]:bg-gray-700'
+                      'data-[highlighted]:bg-gray-100 dark:data-[highlighted]:bg-gray-700',
                     )}
                   >
                     <Select.ItemText>{option.label}</Select.ItemText>

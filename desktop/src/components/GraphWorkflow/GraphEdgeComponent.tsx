@@ -19,13 +19,7 @@ interface GraphEdgeComponentProps {
 const NODE_WIDTH = 140;
 const NODE_HEIGHT = 60;
 
-export function GraphEdgeComponent({
-  edge,
-  index,
-  nodes,
-  isSelected,
-  onClick,
-}: GraphEdgeComponentProps) {
+export function GraphEdgeComponent({ edge, index, nodes, isSelected, onClick }: GraphEdgeComponentProps) {
   const fromNode = nodes[edge.from];
   if (!fromNode?.position) return null;
 
@@ -60,17 +54,13 @@ export function GraphEdgeComponent({
   return (
     <g
       className="pointer-events-auto cursor-pointer"
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
     >
       {/* Invisible wider line for easier clicking */}
-      <line
-        x1={fromX}
-        y1={fromY}
-        x2={toX}
-        y2={toY}
-        stroke="transparent"
-        strokeWidth={12}
-      />
+      <line x1={fromX} y1={fromY} x2={toX} y2={toY} stroke="transparent" strokeWidth={12} />
 
       {/* Visible line */}
       <line

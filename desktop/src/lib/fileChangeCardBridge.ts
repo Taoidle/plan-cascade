@@ -13,11 +13,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useExecutionStore } from '../store/execution';
 import { useFileChangesStore } from '../store/fileChanges';
 import type { CommandResponse } from './tauri';
-import type {
-  CardPayload,
-  FileChangeCardData,
-  TurnChangeSummaryCardData,
-} from '../types/workflowCard';
+import type { CardPayload, FileChangeCardData, TurnChangeSummaryCardData } from '../types/workflowCard';
 
 // ============================================================================
 // Types
@@ -87,10 +83,7 @@ export interface FileChangeCardBridge {
   reset(): void;
 }
 
-export function createFileChangeCardBridge(
-  sessionId: string,
-  projectRoot: string,
-): FileChangeCardBridge {
+export function createFileChangeCardBridge(sessionId: string, projectRoot: string): FileChangeCardBridge {
   /** Accumulated changes per turn for summary card. */
   const turnChanges = new Map<number, PendingChange[]>();
   /** Debounce timer for batching rapid events. */
@@ -141,10 +134,7 @@ export function createFileChangeCardBridge(
         };
 
         // Inject the card into the chat
-        useExecutionStore.getState().appendStreamLine(
-          makeCardPayload('file_change', cardData),
-          'card',
-        );
+        useExecutionStore.getState().appendStreamLine(makeCardPayload('file_change', cardData), 'card');
 
         // Accumulate for turn summary
         const pending: PendingChange = {
@@ -224,10 +214,7 @@ export function createFileChangeCardBridge(
         totalLinesRemoved: changes.reduce((sum, c) => sum + c.linesRemoved, 0),
       };
 
-      useExecutionStore.getState().appendStreamLine(
-        makeCardPayload('turn_change_summary', summaryData),
-        'card',
-      );
+      useExecutionStore.getState().appendStreamLine(makeCardPayload('turn_change_summary', summaryData), 'card');
     },
 
     reset() {

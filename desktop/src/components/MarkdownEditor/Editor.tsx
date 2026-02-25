@@ -49,7 +49,7 @@ function ToolbarButton({ icon, title, onClick, disabled }: ToolbarButtonProps) {
         'hover:bg-gray-200 dark:hover:bg-gray-700',
         'hover:text-gray-900 dark:hover:text-white',
         'disabled:opacity-50 disabled:cursor-not-allowed',
-        'transition-colors'
+        'transition-colors',
       )}
     >
       {icon}
@@ -57,14 +57,7 @@ function ToolbarButton({ icon, title, onClick, disabled }: ToolbarButtonProps) {
   );
 }
 
-export function Editor({
-  content,
-  onChange,
-  onSave,
-  isDark = false,
-  readOnly = false,
-  fileName,
-}: EditorProps) {
+export function Editor({ content, onChange, onSave, isDark = false, readOnly = false, fileName }: EditorProps) {
   const { t } = useTranslation();
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
 
@@ -91,7 +84,7 @@ export function Editor({
       // Focus the editor
       editor.focus();
     },
-    [onSave]
+    [onSave],
   );
 
   // Handle content change
@@ -101,7 +94,7 @@ export function Editor({
         onChange(value);
       }
     },
-    [onChange]
+    [onChange],
   );
 
   // Insert formatting around selection
@@ -424,9 +417,7 @@ export function Editor({
 
         {/* File name indicator */}
         {fileName && (
-          <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]">
-            {fileName}
-          </span>
+          <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]">{fileName}</span>
         )}
       </div>
 

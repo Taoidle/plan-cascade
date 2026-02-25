@@ -20,9 +20,14 @@ interface EdgeCollapseButtonProps {
 export function EdgeCollapseButton({ side, expanded, onToggle, label }: EdgeCollapseButtonProps) {
   const { t } = useTranslation('simpleMode');
 
-  const defaultLabel = side === 'left'
-    ? (expanded ? t('edgeButton.collapseSidebar', { defaultValue: 'Collapse sidebar' }) : t('edgeButton.expandSidebar', { defaultValue: 'Expand sidebar' }))
-    : (expanded ? t('edgeButton.collapsePanel', { defaultValue: 'Collapse panel' }) : t('edgeButton.expandPanel', { defaultValue: 'Expand panel' }));
+  const defaultLabel =
+    side === 'left'
+      ? expanded
+        ? t('edgeButton.collapseSidebar', { defaultValue: 'Collapse sidebar' })
+        : t('edgeButton.expandSidebar', { defaultValue: 'Expand sidebar' })
+      : expanded
+        ? t('edgeButton.collapsePanel', { defaultValue: 'Collapse panel' })
+        : t('edgeButton.expandPanel', { defaultValue: 'Expand panel' });
 
   const isLeft = side === 'left';
 
@@ -43,16 +48,11 @@ export function EdgeCollapseButton({ side, expanded, onToggle, label }: EdgeColl
         'text-gray-500 dark:text-gray-400',
         'opacity-30 hover:opacity-100',
         'transition-all duration-200',
-        isLeft
-          ? 'left-0 rounded-r-md'
-          : 'right-0 rounded-l-md'
+        isLeft ? 'left-0 rounded-r-md' : 'right-0 rounded-l-md',
       )}
     >
       <ChevronRightIcon
-        className={clsx(
-          'w-3.5 h-3.5 transition-transform duration-200',
-          shouldRotate && 'rotate-180'
-        )}
+        className={clsx('w-3.5 h-3.5 transition-transform duration-200', shouldRotate && 'rotate-180')}
       />
     </button>
   );

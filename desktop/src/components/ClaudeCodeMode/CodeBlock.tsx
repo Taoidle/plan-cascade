@@ -10,11 +10,7 @@
 import { useState, useCallback, useRef, useEffect, memo } from 'react';
 import { Highlight, themes, Language } from 'prism-react-renderer';
 import { clsx } from 'clsx';
-import {
-  CopyIcon,
-  CheckIcon,
-  CodeIcon,
-} from '@radix-ui/react-icons';
+import { CopyIcon, CheckIcon, CodeIcon } from '@radix-ui/react-icons';
 import { useSettingsStore } from '../../store/settings';
 
 // ============================================================================
@@ -124,9 +120,7 @@ export const CodeBlock = memo(function CodeBlock({
   const codeRef = useRef<HTMLDivElement>(null);
 
   // Get line numbers preference from settings if not explicitly set
-  const lineNumbersFromSettings = useSettingsStore(
-    (state) => state.showLineNumbers ?? true
-  );
+  const lineNumbersFromSettings = useSettingsStore((state) => state.showLineNumbers ?? true);
   const showLineNumbers = showLineNumbersProp ?? lineNumbersFromSettings;
 
   // Copy to clipboard handler
@@ -171,7 +165,7 @@ export const CodeBlock = memo(function CodeBlock({
         'relative group rounded-lg overflow-hidden',
         'border border-gray-200 dark:border-gray-700',
         'focus:outline-none focus:ring-2 focus:ring-primary-500',
-        className
+        className,
       )}
     >
       {/* Header with language badge and copy button */}
@@ -179,7 +173,7 @@ export const CodeBlock = memo(function CodeBlock({
         className={clsx(
           'flex items-center justify-between px-4 py-2',
           'bg-gray-100 dark:bg-gray-800',
-          'border-b border-gray-200 dark:border-gray-700'
+          'border-b border-gray-200 dark:border-gray-700',
         )}
       >
         {/* Language badge */}
@@ -198,7 +192,7 @@ export const CodeBlock = memo(function CodeBlock({
             'text-xs font-medium transition-all',
             copied
               ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-400'
-              : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+              : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600',
           )}
           title={copied ? 'Copied!' : 'Copy code'}
         >
@@ -217,10 +211,7 @@ export const CodeBlock = memo(function CodeBlock({
       </div>
 
       {/* Code content */}
-      <div
-        className="overflow-auto"
-        style={{ maxHeight }}
-      >
+      <div className="overflow-auto" style={{ maxHeight }}>
         <Highlight theme={theme} code={code} language={normalizedLang}>
           {({ className: highlightClassName, style, tokens, getLineProps, getTokenProps }) => (
             <pre
@@ -235,10 +226,7 @@ export const CodeBlock = memo(function CodeBlock({
                 <div key={i} {...getLineProps({ line })} className="table-row">
                   {showLineNumbers && (
                     <span
-                      className={clsx(
-                        'table-cell pr-4 text-right select-none',
-                        'text-gray-400 dark:text-gray-600'
-                      )}
+                      className={clsx('table-cell pr-4 text-right select-none', 'text-gray-400 dark:text-gray-600')}
                       style={{ minWidth: '3em' }}
                     >
                       {i + 1}

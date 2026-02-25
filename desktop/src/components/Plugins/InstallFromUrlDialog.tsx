@@ -24,22 +24,22 @@ export function InstallFromUrlDialog() {
   const [gitUrl, setGitUrl] = useState('');
   const [urlError, setUrlError] = useState<string | null>(null);
 
-  const validateUrl = useCallback((url: string): boolean => {
-    if (!url.trim()) {
-      setUrlError(null);
-      return false;
-    }
-    const isValid =
-      url.startsWith('https://') ||
-      url.startsWith('http://') ||
-      url.startsWith('git@');
-    if (!isValid) {
-      setUrlError(t('plugins.invalidGitUrl'));
-    } else {
-      setUrlError(null);
-    }
-    return isValid;
-  }, [t]);
+  const validateUrl = useCallback(
+    (url: string): boolean => {
+      if (!url.trim()) {
+        setUrlError(null);
+        return false;
+      }
+      const isValid = url.startsWith('https://') || url.startsWith('http://') || url.startsWith('git@');
+      if (!isValid) {
+        setUrlError(t('plugins.invalidGitUrl'));
+      } else {
+        setUrlError(null);
+      }
+      return isValid;
+    },
+    [t],
+  );
 
   const handleInstall = useCallback(async () => {
     if (!validateUrl(gitUrl)) return;
@@ -65,7 +65,7 @@ export function InstallFromUrlDialog() {
             'w-[480px] max-w-[90vw]',
             'bg-white dark:bg-gray-900 rounded-xl shadow-2xl',
             'border border-gray-200 dark:border-gray-700',
-            'animate-[contentShow_0.2s]'
+            'animate-[contentShow_0.2s]',
           )}
         >
           {/* Header */}
@@ -80,7 +80,7 @@ export function InstallFromUrlDialog() {
                   'p-1.5 rounded-md',
                   'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
                   'hover:bg-gray-100 dark:hover:bg-gray-800',
-                  'disabled:opacity-50'
+                  'disabled:opacity-50',
                 )}
               >
                 <Cross2Icon className="w-4 h-4" />
@@ -90,9 +90,7 @@ export function InstallFromUrlDialog() {
 
           {/* Body */}
           <div className="p-4 space-y-4">
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              {t('plugins.installFromUrlDesc')}
-            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">{t('plugins.installFromUrlDesc')}</p>
 
             {/* URL input */}
             <div>
@@ -109,18 +107,14 @@ export function InstallFromUrlDialog() {
                   'w-full px-3 py-2 rounded-md text-sm',
                   'bg-gray-50 dark:bg-gray-800',
                   'border',
-                  urlError
-                    ? 'border-red-300 dark:border-red-700'
-                    : 'border-gray-200 dark:border-gray-700',
+                  urlError ? 'border-red-300 dark:border-red-700' : 'border-gray-200 dark:border-gray-700',
                   'text-gray-700 dark:text-gray-300',
                   'placeholder:text-gray-400 dark:placeholder:text-gray-500',
                   'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent',
-                  'disabled:opacity-50'
+                  'disabled:opacity-50',
                 )}
               />
-              {urlError && (
-                <p className="mt-1 text-2xs text-red-500">{urlError}</p>
-              )}
+              {urlError && <p className="mt-1 text-2xs text-red-500">{urlError}</p>}
             </div>
 
             {/* Progress */}
@@ -128,9 +122,7 @@ export function InstallFromUrlDialog() {
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <ReloadIcon className="w-3.5 h-3.5 animate-spin text-primary-600" />
-                  <span className="text-xs text-gray-600 dark:text-gray-300">
-                    {installProgress.message}
-                  </span>
+                  <span className="text-xs text-gray-600 dark:text-gray-300">{installProgress.message}</span>
                 </div>
                 <div className="w-full h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
                   <div
@@ -144,9 +136,7 @@ export function InstallFromUrlDialog() {
             {installing && !installProgress && (
               <div className="flex items-center gap-2">
                 <ReloadIcon className="w-3.5 h-3.5 animate-spin text-primary-600" />
-                <span className="text-xs text-gray-600 dark:text-gray-300">
-                  {t('plugins.installing')}
-                </span>
+                <span className="text-xs text-gray-600 dark:text-gray-300">{t('plugins.installing')}</span>
               </div>
             )}
           </div>
@@ -162,7 +152,7 @@ export function InstallFromUrlDialog() {
                 'text-gray-700 dark:text-gray-300',
                 'hover:bg-gray-200 dark:hover:bg-gray-700',
                 'disabled:opacity-50',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               {t('plugins.cancel')}
@@ -174,7 +164,7 @@ export function InstallFromUrlDialog() {
                 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium',
                 'bg-primary-600 hover:bg-primary-700 text-white',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               {installing ? (

@@ -18,12 +18,7 @@ export { MarkdownRenderer } from './MarkdownRenderer';
 export { CodeBlock, SimpleCodeBlock } from './CodeBlock';
 
 // Story 011-3: File Attachment and @ File References
-export {
-  FileAttachmentDropZone,
-  FileChip,
-  FileReferenceAutocomplete,
-  useFileReferences,
-} from './FileAttachment';
+export { FileAttachmentDropZone, FileChip, FileReferenceAutocomplete, useFileReferences } from './FileAttachment';
 
 // Story 011-4: Message Actions
 export { MessageActions, useMessageActions } from './MessageActions';

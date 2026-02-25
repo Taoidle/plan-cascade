@@ -27,22 +27,22 @@ import {
 
 // Standard 16 colors (0-15)
 const ANSI_COLORS: Record<number, string> = {
-  0: '#000000',   // Black
-  1: '#cd0000',   // Red
-  2: '#00cd00',   // Green
-  3: '#cdcd00',   // Yellow
-  4: '#0000ee',   // Blue
-  5: '#cd00cd',   // Magenta
-  6: '#00cdcd',   // Cyan
-  7: '#e5e5e5',   // White
-  8: '#7f7f7f',   // Bright Black (Gray)
-  9: '#ff0000',   // Bright Red
-  10: '#00ff00',  // Bright Green
-  11: '#ffff00',  // Bright Yellow
-  12: '#5c5cff',  // Bright Blue
-  13: '#ff00ff',  // Bright Magenta
-  14: '#00ffff',  // Bright Cyan
-  15: '#ffffff',  // Bright White
+  0: '#000000', // Black
+  1: '#cd0000', // Red
+  2: '#00cd00', // Green
+  3: '#cdcd00', // Yellow
+  4: '#0000ee', // Blue
+  5: '#cd00cd', // Magenta
+  6: '#00cdcd', // Cyan
+  7: '#e5e5e5', // White
+  8: '#7f7f7f', // Bright Black (Gray)
+  9: '#ff0000', // Bright Red
+  10: '#00ff00', // Bright Green
+  11: '#ffff00', // Bright Yellow
+  12: '#5c5cff', // Bright Blue
+  13: '#ff00ff', // Bright Magenta
+  14: '#00ffff', // Bright Cyan
+  15: '#ffffff', // Bright White
 };
 
 // Convert 256-color index to RGB
@@ -124,7 +124,10 @@ function parseAnsiText(text: string): ParsedLine[] {
 
         // Parse the SGR (Select Graphic Rendition) sequence
         if (rawLine[end] === 'm') {
-          const codes = rawLine.slice(i + 2, end).split(';').map(Number);
+          const codes = rawLine
+            .slice(i + 2, end)
+            .split(';')
+            .map(Number);
           currentStyle = applyAnsiCodes(currentStyle, codes);
         }
 
@@ -335,7 +338,10 @@ export function AnsiOutput({
     const query = searchQuery.toLowerCase();
 
     parsedLines.forEach((line, lineIndex) => {
-      const lineText = line.spans.map(s => s.text).join('').toLowerCase();
+      const lineText = line.spans
+        .map((s) => s.text)
+        .join('')
+        .toLowerCase();
       let startIndex = 0;
 
       while (true) {
@@ -385,17 +391,20 @@ export function AnsiOutput({
   }, [searchOpen]);
 
   // Navigate to next/previous match
-  const navigateMatch = useCallback((direction: 'next' | 'prev') => {
-    if (searchMatches.length === 0) return;
+  const navigateMatch = useCallback(
+    (direction: 'next' | 'prev') => {
+      if (searchMatches.length === 0) return;
 
-    let newIndex = currentMatchIndex;
-    if (direction === 'next') {
-      newIndex = (currentMatchIndex + 1) % searchMatches.length;
-    } else {
-      newIndex = (currentMatchIndex - 1 + searchMatches.length) % searchMatches.length;
-    }
-    setCurrentMatchIndex(newIndex);
-  }, [currentMatchIndex, searchMatches.length]);
+      let newIndex = currentMatchIndex;
+      if (direction === 'next') {
+        newIndex = (currentMatchIndex + 1) % searchMatches.length;
+      } else {
+        newIndex = (currentMatchIndex - 1 + searchMatches.length) % searchMatches.length;
+      }
+      setCurrentMatchIndex(newIndex);
+    },
+    [currentMatchIndex, searchMatches.length],
+  );
 
   // Scroll to bottom
   const scrollToBottom = useCallback(() => {
@@ -406,9 +415,7 @@ export function AnsiOutput({
 
   // Copy output (strips ANSI codes)
   const handleCopy = useCallback(async () => {
-    const plainText = parsedLines.map(line =>
-      line.spans.map(s => s.text).join('')
-    ).join('\n');
+    const plainText = parsedLines.map((line) => line.spans.map((s) => s.text).join('')).join('\n');
 
     try {
       await navigator.clipboard.writeText(plainText);
@@ -430,20 +437,22 @@ export function AnsiOutput({
   return (
     <div className={clsx('flex flex-col', className)}>
       {/* Header */}
-      <div className={clsx(
-        'flex items-center justify-between px-3 py-2',
-        'bg-gray-800 border-b border-gray-700',
-        'rounded-t-lg'
-      )}>
+      <div
+        className={clsx(
+          'flex items-center justify-between px-3 py-2',
+          'bg-gray-800 border-b border-gray-700',
+          'rounded-t-lg',
+        )}
+      >
         <div className="flex items-center gap-3">
           {/* Exit code */}
           {exitCode !== undefined && (
-            <span className={clsx(
-              'px-2 py-0.5 rounded text-xs font-mono',
-              exitCode === 0
-                ? 'bg-green-900/50 text-green-400'
-                : 'bg-red-900/50 text-red-400'
-            )}>
+            <span
+              className={clsx(
+                'px-2 py-0.5 rounded text-xs font-mono',
+                exitCode === 0 ? 'bg-green-900/50 text-green-400' : 'bg-red-900/50 text-red-400',
+              )}
+            >
               Exit: {exitCode}
             </span>
           )}
@@ -463,9 +472,7 @@ export function AnsiOutput({
             onClick={() => setSearchOpen(!searchOpen)}
             className={clsx(
               'p-1.5 rounded transition-colors',
-              searchOpen
-                ? 'bg-primary-600 text-white'
-                : 'text-gray-400 hover:text-white hover:bg-gray-700'
+              searchOpen ? 'bg-primary-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700',
             )}
             title="Search (Ctrl+F)"
           >
@@ -477,9 +484,7 @@ export function AnsiOutput({
             onClick={() => setShowLineNumbers(!showLineNumbers)}
             className={clsx(
               'p-1.5 rounded transition-colors',
-              showLineNumbers
-                ? 'bg-primary-600 text-white'
-                : 'text-gray-400 hover:text-white hover:bg-gray-700'
+              showLineNumbers ? 'bg-primary-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700',
             )}
             title="Toggle line numbers"
           >
@@ -491,9 +496,7 @@ export function AnsiOutput({
             onClick={() => setWrapLines(!wrapLines)}
             className={clsx(
               'p-1.5 rounded transition-colors',
-              wrapLines
-                ? 'bg-primary-600 text-white'
-                : 'text-gray-400 hover:text-white hover:bg-gray-700'
+              wrapLines ? 'bg-primary-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700',
             )}
             title="Toggle word wrap"
           >
@@ -505,9 +508,7 @@ export function AnsiOutput({
             onClick={handleCopy}
             className={clsx(
               'p-1.5 rounded transition-colors',
-              copied
-                ? 'bg-green-600 text-white'
-                : 'text-gray-400 hover:text-white hover:bg-gray-700'
+              copied ? 'bg-green-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700',
             )}
             title={copied ? 'Copied!' : 'Copy output'}
           >
@@ -538,10 +539,7 @@ export function AnsiOutput({
 
       {/* Search bar */}
       {searchOpen && (
-        <div className={clsx(
-          'flex items-center gap-2 px-3 py-2',
-          'bg-gray-800 border-b border-gray-700'
-        )}>
+        <div className={clsx('flex items-center gap-2 px-3 py-2', 'bg-gray-800 border-b border-gray-700')}>
           <MagnifyingGlassIcon className="w-4 h-4 text-gray-400" />
           <input
             ref={searchInputRef}
@@ -555,14 +553,12 @@ export function AnsiOutput({
             placeholder="Search..."
             className={clsx(
               'flex-1 bg-gray-900 text-white px-2 py-1 rounded text-sm',
-              'border border-gray-700 focus:border-primary-500 focus:outline-none'
+              'border border-gray-700 focus:border-primary-500 focus:outline-none',
             )}
           />
           {searchQuery && (
             <span className="text-xs text-gray-400">
-              {searchMatches.length > 0
-                ? `${currentMatchIndex + 1}/${searchMatches.length}`
-                : 'No matches'}
+              {searchMatches.length > 0 ? `${currentMatchIndex + 1}/${searchMatches.length}` : 'No matches'}
             </span>
           )}
           <button
@@ -594,25 +590,14 @@ export function AnsiOutput({
       {/* Output content */}
       <div
         ref={containerRef}
-        className={clsx(
-          'bg-gray-900 text-gray-100 p-3 rounded-b-lg overflow-auto',
-          'font-mono text-sm'
-        )}
+        className={clsx('bg-gray-900 text-gray-100 p-3 rounded-b-lg overflow-auto', 'font-mono text-sm')}
         style={{ maxHeight }}
       >
         {parsedLines.map((line, lineIndex) => (
-          <div
-            key={lineIndex}
-            className={clsx(
-              'flex',
-              !wrapLines && 'whitespace-nowrap'
-            )}
-          >
+          <div key={lineIndex} className={clsx('flex', !wrapLines && 'whitespace-nowrap')}>
             {/* Line number */}
             {showLineNumbers && (
-              <span className="select-none w-12 text-right pr-3 text-gray-500 flex-shrink-0">
-                {line.lineNumber}
-              </span>
+              <span className="select-none w-12 text-right pr-3 text-gray-500 flex-shrink-0">{line.lineNumber}</span>
             )}
 
             {/* Line content */}
@@ -651,13 +636,7 @@ interface AnsiSpanProps {
   currentMatchIndex: number;
 }
 
-function AnsiSpan({
-  span,
-  lineIndex,
-  searchQuery,
-  searchMatches,
-  currentMatchIndex,
-}: AnsiSpanProps) {
+function AnsiSpan({ span, lineIndex, searchQuery, searchMatches, currentMatchIndex }: AnsiSpanProps) {
   const style: React.CSSProperties = {};
 
   if (span.style.color) style.color = span.style.color;
@@ -679,14 +658,14 @@ function AnsiSpan({
     let lastIndex = 0;
 
     // Find matches in this line
-    const lineMatches = searchMatches.filter(m => m.lineIndex === lineIndex);
+    const lineMatches = searchMatches.filter((m) => m.lineIndex === lineIndex);
 
     lineMatches.forEach((match, idx) => {
       if (match.startIndex > lastIndex) {
         parts.push(
           <span key={`text-${idx}`} style={style}>
             {text.slice(lastIndex, match.startIndex)}
-          </span>
+          </span>,
         );
       }
 
@@ -697,14 +676,12 @@ function AnsiSpan({
           key={`match-${idx}`}
           className={clsx(
             'rounded px-0.5',
-            isCurrentMatch
-              ? 'bg-yellow-400 text-black'
-              : 'bg-yellow-600/50 text-white'
+            isCurrentMatch ? 'bg-yellow-400 text-black' : 'bg-yellow-600/50 text-white',
           )}
           style={{ ...style, backgroundColor: undefined }}
         >
           {text.slice(match.startIndex, match.startIndex + match.length)}
-        </mark>
+        </mark>,
       );
 
       lastIndex = match.startIndex + match.length;
@@ -714,7 +691,7 @@ function AnsiSpan({
       parts.push(
         <span key="text-end" style={style}>
           {text.slice(lastIndex)}
-        </span>
+        </span>,
       );
     }
 

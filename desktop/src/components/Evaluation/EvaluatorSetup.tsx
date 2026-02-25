@@ -35,13 +35,11 @@ export function EvaluatorSetup() {
         className={clsx(
           'w-64 min-w-[16rem] p-4 overflow-auto',
           'border-r border-gray-200 dark:border-gray-700',
-          'bg-gray-50 dark:bg-gray-900'
+          'bg-gray-50 dark:bg-gray-900',
         )}
       >
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-            {t('evaluation.setup.listTitle')}
-          </h3>
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{t('evaluation.setup.listTitle')}</h3>
           <button
             onClick={startNewEvaluator}
             className="px-2 py-1 text-xs font-medium rounded bg-primary-600 text-white hover:bg-primary-700 transition-colors"
@@ -53,9 +51,7 @@ export function EvaluatorSetup() {
         {loading.evaluators ? (
           <div className="text-xs text-gray-500 dark:text-gray-400">{t('evaluation.setup.loading')}</div>
         ) : evaluators.length === 0 ? (
-          <div className="text-xs text-gray-500 dark:text-gray-400 italic">
-            {t('evaluation.setup.empty')}
-          </div>
+          <div className="text-xs text-gray-500 dark:text-gray-400 italic">{t('evaluation.setup.empty')}</div>
         ) : (
           <div className="space-y-1">
             {evaluators.map((ev) => (
@@ -66,12 +62,10 @@ export function EvaluatorSetup() {
                   'p-2 rounded cursor-pointer transition-colors',
                   currentEvaluator?.id === ev.id
                     ? 'bg-primary-100 dark:bg-primary-900/30 border border-primary-300 dark:border-primary-700'
-                    : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+                    : 'hover:bg-gray-100 dark:hover:bg-gray-800',
                 )}
               >
-                <div className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                  {ev.name}
-                </div>
+                <div className="text-sm font-medium text-gray-900 dark:text-white truncate">{ev.name}</div>
                 <div className="flex gap-1 mt-1">
                   {ev.has_tool_trajectory && (
                     <span className="text-[10px] px-1 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
@@ -132,7 +126,7 @@ export function EvaluatorSetup() {
                   className={clsx(
                     'px-4 py-1.5 text-xs font-medium rounded-lg transition-colors',
                     'bg-primary-600 text-white hover:bg-primary-700',
-                    'disabled:opacity-50 disabled:cursor-not-allowed'
+                    'disabled:opacity-50 disabled:cursor-not-allowed',
                   )}
                 >
                   {loading.save ? t('evaluation.setup.saving') : t('evaluation.setup.save')}
@@ -165,7 +159,10 @@ export function EvaluatorSetup() {
                 title={t('evaluation.setup.criteriaTrajectory')}
                 description={t('evaluation.setup.criteriaTrajectoryDesc')}
                 color="blue"
-                enabled={currentEvaluator.criteria.tool_trajectory !== null && currentEvaluator.criteria.tool_trajectory !== undefined}
+                enabled={
+                  currentEvaluator.criteria.tool_trajectory !== null &&
+                  currentEvaluator.criteria.tool_trajectory !== undefined
+                }
                 onToggle={(enabled) => {
                   updateCriteria({
                     tool_trajectory: enabled ? { expected_tools: [], order_matters: false } : null,
@@ -185,7 +182,10 @@ export function EvaluatorSetup() {
                 title={t('evaluation.setup.criteriaSimilarity')}
                 description={t('evaluation.setup.criteriaSimilarityDesc')}
                 color="green"
-                enabled={currentEvaluator.criteria.response_similarity !== null && currentEvaluator.criteria.response_similarity !== undefined}
+                enabled={
+                  currentEvaluator.criteria.response_similarity !== null &&
+                  currentEvaluator.criteria.response_similarity !== undefined
+                }
                 onToggle={(enabled) => {
                   updateCriteria({
                     response_similarity: enabled ? { reference_response: '', threshold: 0.8 } : null,
@@ -205,7 +205,9 @@ export function EvaluatorSetup() {
                 title={t('evaluation.setup.criteriaLlmJudge')}
                 description={t('evaluation.setup.criteriaLlmJudgeDesc')}
                 color="purple"
-                enabled={currentEvaluator.criteria.llm_judge !== null && currentEvaluator.criteria.llm_judge !== undefined}
+                enabled={
+                  currentEvaluator.criteria.llm_judge !== null && currentEvaluator.criteria.llm_judge !== undefined
+                }
                 onToggle={(enabled) => {
                   updateCriteria({
                     llm_judge: enabled ? { judge_model: '', judge_provider: 'anthropic', rubric: '' } : null,
@@ -228,9 +230,7 @@ export function EvaluatorSetup() {
               <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
                 {t('evaluation.setup.title')}
               </h2>
-              <p className="text-gray-500 dark:text-gray-400 mb-4 max-w-md">
-                {t('evaluation.setup.description')}
-              </p>
+              <p className="text-gray-500 dark:text-gray-400 mb-4 max-w-md">{t('evaluation.setup.description')}</p>
               <button
                 onClick={startNewEvaluator}
                 className="px-4 py-2 text-sm font-medium rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors"
@@ -270,7 +270,7 @@ function CriteriaSection({ title, description, color, enabled, onToggle, childre
       className={clsx(
         'rounded-lg border p-4',
         enabled ? colorClasses[color] : 'border-gray-200 dark:border-gray-700',
-        enabled ? 'bg-white dark:bg-gray-800/50' : 'bg-gray-50 dark:bg-gray-900'
+        enabled ? 'bg-white dark:bg-gray-800/50' : 'bg-gray-50 dark:bg-gray-900',
       )}
     >
       <div className="flex items-center justify-between mb-2">
@@ -408,13 +408,7 @@ function ResponseSimilarityEditor({
   );
 }
 
-function LlmJudgeEditor({
-  config,
-  onChange,
-}: {
-  config: LlmJudgeConfig;
-  onChange: (config: LlmJudgeConfig) => void;
-}) {
+function LlmJudgeEditor({ config, onChange }: { config: LlmJudgeConfig; onChange: (config: LlmJudgeConfig) => void }) {
   const { t } = useTranslation('expertMode');
 
   return (

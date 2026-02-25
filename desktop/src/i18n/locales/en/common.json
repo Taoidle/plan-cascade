@@ -170,7 +170,7 @@
     }
   },
 
-"timeline": {
+  "timeline": {
     "title": "Timeline",
     "noCheckpoints": "No Checkpoints Yet",
     "createFirstCheckpoint": "Create your first checkpoint to start tracking session state.",

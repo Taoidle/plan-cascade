@@ -166,7 +166,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         backgroundSessions={bgSessions}
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
-      />
+      />,
     );
 
     expect(screen.getByText('Active Sessions')).toBeInTheDocument();
@@ -187,7 +187,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         backgroundSessions={bgSessions}
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
-      />
+      />,
     );
 
     // Should display a truncated version of the description
@@ -206,7 +206,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         backgroundSessions={bgSessions}
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
-      />
+      />,
     );
 
     expect(screen.getByText('Untitled Session')).toBeInTheDocument();
@@ -223,7 +223,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         backgroundSessions={bgSessions}
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
-      />
+      />,
     );
 
     // Find the status dot element (data-testid)
@@ -244,7 +244,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         backgroundSessions={bgSessions}
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
-      />
+      />,
     );
 
     const dot = screen.getByTestId('bg-status-dot-bg-1');
@@ -263,7 +263,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         backgroundSessions={bgSessions}
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
-      />
+      />,
     );
 
     const dot = screen.getByTestId('bg-status-dot-bg-1');
@@ -282,7 +282,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         backgroundSessions={bgSessions}
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
-      />
+      />,
     );
 
     const dot = screen.getByTestId('bg-status-dot-bg-1');
@@ -301,7 +301,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         backgroundSessions={bgSessions}
         onSwitchSession={onSwitchSession}
         onRemoveSession={vi.fn()}
-      />
+      />,
     );
 
     const sessionItem = screen.getByTestId('bg-session-item-bg-1');
@@ -322,7 +322,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         backgroundSessions={bgSessions}
         onSwitchSession={vi.fn()}
         onRemoveSession={onRemoveSession}
-      />
+      />,
     );
 
     const removeBtn = screen.getByTestId('bg-remove-btn-bg-1');
@@ -344,7 +344,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         backgroundSessions={bgSessions}
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
-      />
+      />,
     );
 
     expect(screen.getByText('Task Alpha')).toBeInTheDocument();
@@ -378,7 +378,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         backgroundSessions={bgSessions}
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
-      />
+      />,
     );
 
     // Both sessions should be visible
@@ -416,7 +416,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         backgroundSessions={bgSessions}
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
-      />
+      />,
     );
 
     expect(screen.getByText('Original Session')).toBeInTheDocument();
@@ -446,7 +446,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         backgroundSessions={bgSessions}
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
-      />
+      />,
     );
 
     // Both should render as root-level items
@@ -469,7 +469,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
         foregroundParentSessionId="bg-parent"
-      />
+      />,
     );
 
     expect(screen.getByText('Parent Session')).toBeInTheDocument();
@@ -500,7 +500,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         backgroundSessions={bgSessions}
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
-      />
+      />,
     );
 
     expect(screen.getByText('Session A')).toBeInTheDocument();
@@ -528,7 +528,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         backgroundSessions={bgSessions}
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
-      />
+      />,
     );
 
     // Session should be visible inside the directory
@@ -562,7 +562,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         backgroundSessions={bgSessions}
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
-      />
+      />,
     );
 
     // Both sessions visible under the directory
@@ -595,7 +595,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
         foregroundParentSessionId="bg-parent"
-      />
+      />,
     );
 
     expect(screen.getByText('Parent In Dir')).toBeInTheDocument();
@@ -636,7 +636,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         backgroundSessions={bgSessions}
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
-      />
+      />,
     );
 
     // Both active bg session and history session visible under same directory
@@ -679,7 +679,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         backgroundSessions={bgSessions}
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
-      />
+      />,
     );
 
     expect(screen.getByText('Active Fork')).toBeInTheDocument();
@@ -720,7 +720,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         backgroundSessions={bgSessions}
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
-      />
+      />,
     );
 
     expect(screen.getByText('Active Fork Session')).toBeInTheDocument();
@@ -749,7 +749,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         backgroundSessions={bgSessions}
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
-      />
+      />,
     );
 
     // Matched session under directory
@@ -780,7 +780,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
         foregroundBgId={ghostId}
-      />
+      />,
     );
 
     const ghostItem = screen.getByTestId(`bg-session-item-${ghostId}`);
@@ -809,7 +809,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         onRemoveSession={vi.fn()}
         foregroundParentSessionId={parentId}
         foregroundBgId={parentId}
-      />
+      />,
     );
 
     // When foregroundBgId is set, the (current) child indicator should NOT appear
@@ -835,7 +835,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         onRemoveSession={vi.fn()}
         foregroundParentSessionId={parentId}
         foregroundBgId={null}
-      />
+      />,
     );
 
     // Without ghost, the (current) child indicator should appear under parent
@@ -866,7 +866,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
         foregroundBgId={ghostId}
-      />
+      />,
     );
 
     // Ghost parent and child should both be rendered
@@ -893,7 +893,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         onSwitchSession={onSwitch}
         onRemoveSession={vi.fn()}
         foregroundBgId={ghostId}
-      />
+      />,
     );
 
     const ghostItem = screen.getByTestId(`bg-session-item-${ghostId}`);
@@ -921,7 +921,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
         onSwitchSession={vi.fn()}
         onRemoveSession={vi.fn()}
         foregroundBgId={ghostId}
-      />
+      />,
     );
 
     // Ghost node should show the live description, not the stale snapshot description

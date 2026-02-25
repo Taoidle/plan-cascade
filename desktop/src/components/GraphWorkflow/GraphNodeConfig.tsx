@@ -16,21 +16,13 @@ interface GraphNodeConfigProps {
   onDelete: () => void;
 }
 
-export function GraphNodeConfig({
-  node,
-  isEntryNode,
-  onUpdate,
-  onSetEntry,
-  onDelete,
-}: GraphNodeConfigProps) {
+export function GraphNodeConfig({ node, isEntryNode, onUpdate, onSetEntry, onDelete }: GraphNodeConfigProps) {
   const { t } = useTranslation('expertMode');
   const stepType = node.agent_step.step_type;
 
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-        {t('graphWorkflow.nodeConfig.title')}
-      </h3>
+      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{t('graphWorkflow.nodeConfig.title')}</h3>
 
       {/* Node ID */}
       <div>
@@ -98,10 +90,7 @@ export function GraphNodeConfig({
             {t('graphWorkflow.nodeConfig.entryNode')}
           </span>
         ) : (
-          <button
-            onClick={onSetEntry}
-            className="text-xs text-primary-600 dark:text-primary-400 hover:underline"
-          >
+          <button onClick={onSetEntry} className="text-xs text-primary-600 dark:text-primary-400 hover:underline">
             {t('graphWorkflow.nodeConfig.setEntryNode')}
           </button>
         )}
@@ -114,7 +103,7 @@ export function GraphNodeConfig({
           'w-full py-1.5 text-xs font-medium rounded transition-colors',
           'border border-red-300 dark:border-red-700',
           'text-red-600 dark:text-red-400',
-          'hover:bg-red-50 dark:hover:bg-red-900/20'
+          'hover:bg-red-50 dark:hover:bg-red-900/20',
         )}
       >
         {t('graphWorkflow.nodeConfig.deleteNode')}

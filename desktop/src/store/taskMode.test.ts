@@ -27,13 +27,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 
 // Import after mocks
 import { useTaskModeStore } from './taskMode';
-import type {
-  StrategyAnalysis,
-  TaskModeSession,
-  TaskPrd,
-  TaskExecutionStatus,
-  ExecutionReport,
-} from './taskMode';
+import type { StrategyAnalysis, TaskModeSession, TaskPrd, TaskExecutionStatus, ExecutionReport } from './taskMode';
 
 // Helpers
 function resetStore() {
@@ -300,9 +294,7 @@ describe('TaskModeStore', () => {
 
       await useTaskModeStore.getState().approvePrd(emptyPrd);
 
-      expect(useTaskModeStore.getState().error).toBe(
-        'PRD must contain at least one story'
-      );
+      expect(useTaskModeStore.getState().error).toBe('PRD must contain at least one story');
     });
   });
 

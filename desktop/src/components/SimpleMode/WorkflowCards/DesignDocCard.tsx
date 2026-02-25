@@ -28,7 +28,9 @@ export function DesignDocCard({ data }: { data: DesignDocCardData }) {
             onClick={() => setExpanded((v) => !v)}
             className="text-2xs text-teal-600 dark:text-teal-400 hover:text-teal-800 dark:hover:text-teal-200 transition-colors"
           >
-            <ChevronRightIcon className={clsx('w-3.5 h-3.5 transition-transform duration-200', expanded && 'rotate-90')} />
+            <ChevronRightIcon
+              className={clsx('w-3.5 h-3.5 transition-transform duration-200', expanded && 'rotate-90')}
+            />
           </button>
         </div>
       </div>

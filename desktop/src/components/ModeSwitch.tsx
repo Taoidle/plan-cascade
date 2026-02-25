@@ -80,14 +80,10 @@ export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps
   // Trigger a subtle scale pulse on mode change for visual feedback
   useEffect(() => {
     if (isTransitioning && triggerRef.current) {
-      triggerRef.current.animate(
-        [
-          { transform: 'scale(1)' },
-          { transform: 'scale(0.95)' },
-          { transform: 'scale(1)' },
-        ],
-        { duration: 200, easing: 'ease-out' }
-      );
+      triggerRef.current.animate([{ transform: 'scale(1)' }, { transform: 'scale(0.95)' }, { transform: 'scale(1)' }], {
+        duration: 200,
+        easing: 'ease-out',
+      });
     }
   }, [isTransitioning, mode]);
 
@@ -103,22 +99,16 @@ export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps
             'border border-gray-200 dark:border-gray-700',
             'text-sm font-medium text-gray-700 dark:text-gray-300',
             'transition-all duration-200 ease-out',
-            'disabled:opacity-50 disabled:cursor-not-allowed'
+            'disabled:opacity-50 disabled:cursor-not-allowed',
           )}
         >
           <span
-            className={clsx(
-              'inline-flex transition-transform duration-200 ease-out',
-              isTransitioning && 'rotate-12'
-            )}
+            className={clsx('inline-flex transition-transform duration-200 ease-out', isTransitioning && 'rotate-12')}
           >
             <CurrentIcon className="w-4 h-4" />
           </span>
           <span
-            className={clsx(
-              'transition-opacity duration-200 ease-out',
-              isTransitioning ? 'opacity-0' : 'opacity-100'
-            )}
+            className={clsx('transition-opacity duration-200 ease-out', isTransitioning ? 'opacity-0' : 'opacity-100')}
           >
             {getModeLabel(mode)}
           </span>
@@ -135,7 +125,7 @@ export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps
             'shadow-lg',
             'animate-in fade-in-0 zoom-in-95 duration-200',
             'data-[side=bottom]:slide-in-from-top-2',
-            'data-[side=top]:slide-in-from-bottom-2'
+            'data-[side=top]:slide-in-from-bottom-2',
           )}
           sideOffset={5}
           align="end"
@@ -156,25 +146,19 @@ export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps
                   'flex items-start gap-3 px-3 py-2.5 rounded-md',
                   'cursor-pointer outline-none',
                   'transition-colors duration-150',
-                  isSelected
-                    ? 'bg-primary-50 dark:bg-primary-900/30'
-                    : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                  isSelected ? 'bg-primary-50 dark:bg-primary-900/30' : 'hover:bg-gray-100 dark:hover:bg-gray-700',
                 )}
               >
                 <div
                   className={clsx(
                     'p-1.5 rounded-md transition-colors duration-150',
-                    isSelected
-                      ? 'bg-primary-100 dark:bg-primary-900/50'
-                      : 'bg-gray-100 dark:bg-gray-700'
+                    isSelected ? 'bg-primary-100 dark:bg-primary-900/50' : 'bg-gray-100 dark:bg-gray-700',
                   )}
                 >
                   <Icon
                     className={clsx(
                       'w-4 h-4 transition-colors duration-150',
-                      isSelected
-                        ? 'text-primary-600 dark:text-primary-400'
-                        : 'text-gray-500 dark:text-gray-400'
+                      isSelected ? 'text-primary-600 dark:text-primary-400' : 'text-gray-500 dark:text-gray-400',
                     )}
                   />
                 </div>
@@ -183,9 +167,7 @@ export function ModeSwitch({ mode, onChange, disabled = false }: ModeSwitchProps
                   <div
                     className={clsx(
                       'font-medium text-sm transition-colors duration-150',
-                      isSelected
-                        ? 'text-primary-700 dark:text-primary-300'
-                        : 'text-gray-900 dark:text-white'
+                      isSelected ? 'text-primary-700 dark:text-primary-300' : 'text-gray-900 dark:text-white',
                     )}
                   >
                     {getModeLabel(modeOption)}
@@ -237,14 +219,7 @@ export function AnimatedModeContent({ children, mode }: AnimatedModeContentProps
   })();
 
   return (
-    <div
-      key={mode}
-      className={clsx(
-        'flex-1 overflow-hidden',
-        'will-change-transform',
-        enterClass
-      )}
-    >
+    <div key={mode} className={clsx('flex-1 overflow-hidden', 'will-change-transform', enterClass)}>
       {children}
     </div>
   );
@@ -294,7 +269,7 @@ export function ModeTabs({ mode, onChange, disabled = false }: ModeTabsProps) {
       className={clsx(
         'inline-flex items-center rounded-lg p-1',
         'bg-gray-100 dark:bg-gray-800',
-        disabled && 'opacity-50 pointer-events-none'
+        disabled && 'opacity-50 pointer-events-none',
       )}
     >
       {MODES.map((modeOption) => {
@@ -311,7 +286,7 @@ export function ModeTabs({ mode, onChange, disabled = false }: ModeTabsProps) {
               'transition-all duration-200 ease-out',
               isSelected
                 ? 'bg-white dark:bg-gray-700 text-primary-600 dark:text-primary-400 shadow-sm'
-                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white',
             )}
             title={getModeDescription(modeOption)}
           >

@@ -44,13 +44,7 @@ const MODE_ICONS: Record<Mode, typeof LightningBoltIcon> = {
 
 function MiniLogo() {
   return (
-    <svg
-      className="w-6 h-6"
-      viewBox="0 0 32 32"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-    >
+    <svg className="w-6 h-6" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <rect x="4" y="4" width="24" height="6" rx="2" className="fill-primary-600" />
       <rect x="6" y="12" width="20" height="6" rx="2" className="fill-primary-500" />
       <rect x="8" y="20" width="16" height="6" rx="2" className="fill-primary-400" />
@@ -90,7 +84,7 @@ function RailIcon({ mode, icon: Icon, label, description, selected, running, dis
             'disabled:opacity-50 disabled:cursor-not-allowed',
             selected
               ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400'
-              : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'
+              : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white',
           )}
         >
           {/* Left indicator bar */}
@@ -114,7 +108,7 @@ function RailIcon({ mode, icon: Icon, label, description, selected, running, dis
             'px-3 py-2 rounded-lg text-sm max-w-[200px]',
             'bg-gray-900 dark:bg-gray-100',
             'text-white dark:text-gray-900',
-            'shadow-lg z-50'
+            'shadow-lg z-50',
           )}
         >
           <div className="font-medium">{label}</div>
@@ -151,7 +145,7 @@ function RailActionIcon({ icon: Icon, label, onClick, 'data-testid': testId }: R
             'hover:bg-gray-100 dark:hover:bg-gray-800',
             'hover:text-gray-900 dark:hover:text-white',
             'transition-colors duration-150',
-            'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1'
+            'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1',
           )}
         >
           <Icon className="w-5 h-5" />
@@ -165,7 +159,7 @@ function RailActionIcon({ icon: Icon, label, onClick, 'data-testid': testId }: R
             'px-3 py-1.5 rounded-md text-sm',
             'bg-gray-900 dark:bg-gray-100',
             'text-white dark:text-gray-900',
-            'shadow-lg z-50'
+            'shadow-lg z-50',
           )}
         >
           {label}
@@ -226,7 +220,7 @@ export function IconRail({ onOpenCommandPalette }: IconRailProps) {
           'border-r border-gray-200 dark:border-gray-800',
           'bg-white dark:bg-gray-900',
           'py-2 shrink-0',
-          'hidden sm:flex'
+          'hidden sm:flex',
         )}
         aria-label="Main navigation"
         data-testid="icon-rail"

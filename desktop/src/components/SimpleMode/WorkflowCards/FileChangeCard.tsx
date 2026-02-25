@@ -26,9 +26,7 @@ export function FileChangeCard({ data }: { data: FileChangeCardData }) {
   const restoreSingleFile = useFileChangesStore((s) => s.restoreSingleFile);
 
   const fileName = data.filePath.split('/').pop() || data.filePath;
-  const dirPath = data.filePath.includes('/')
-    ? data.filePath.substring(0, data.filePath.lastIndexOf('/'))
-    : '';
+  const dirPath = data.filePath.includes('/') ? data.filePath.substring(0, data.filePath.lastIndexOf('/')) : '';
 
   const handleExpandDiff = useCallback(async () => {
     if (expanded) {
@@ -94,9 +92,7 @@ export function FileChangeCard({ data }: { data: FileChangeCardData }) {
 
         {/* File path */}
         <span className="text-xs font-mono text-gray-700 dark:text-gray-300 truncate flex-1">
-          {dirPath && (
-            <span className="text-gray-400 dark:text-gray-500">{dirPath}/</span>
-          )}
+          {dirPath && <span className="text-gray-400 dark:text-gray-500">{dirPath}/</span>}
           {fileName}
         </span>
 
@@ -109,9 +105,7 @@ export function FileChangeCard({ data }: { data: FileChangeCardData }) {
               : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
           )}
         >
-          {data.changeType === 'new_file'
-            ? t('workflow.fileChange.newFile')
-            : t('workflow.fileChange.modified')}
+          {data.changeType === 'new_file' ? t('workflow.fileChange.newFile') : t('workflow.fileChange.modified')}
         </span>
       </div>
 
@@ -141,29 +135,20 @@ export function FileChangeCard({ data }: { data: FileChangeCardData }) {
       <div className="flex items-center gap-2 px-3 py-1.5 border-t border-amber-200/50 dark:border-amber-800/30">
         {/* Stats */}
         <span className="text-2xs font-mono text-gray-500 dark:text-gray-400">
-          <span className="text-green-600 dark:text-green-400">+{data.linesAdded}</span>
-          {' '}
+          <span className="text-green-600 dark:text-green-400">+{data.linesAdded}</span>{' '}
           <span className="text-red-600 dark:text-red-400">-{data.linesRemoved}</span>
         </span>
 
         <div className="flex-1" />
 
         {/* Actions */}
-        <button
-          onClick={handleExpandDiff}
-          className="text-2xs text-amber-700 dark:text-amber-400 hover:underline"
-        >
-          {expanded
-            ? t('workflow.fileChange.collapseDiff')
-            : t('workflow.fileChange.expandDiff')}
+        <button onClick={handleExpandDiff} className="text-2xs text-amber-700 dark:text-amber-400 hover:underline">
+          {expanded ? t('workflow.fileChange.collapseDiff') : t('workflow.fileChange.expandDiff')}
         </button>
 
         <span className="text-gray-300 dark:text-gray-600">|</span>
 
-        <button
-          onClick={handleViewInChanges}
-          className="text-2xs text-amber-700 dark:text-amber-400 hover:underline"
-        >
+        <button onClick={handleViewInChanges} className="text-2xs text-amber-700 dark:text-amber-400 hover:underline">
           {t('workflow.fileChange.viewInChanges')}
         </button>
 
@@ -175,9 +160,7 @@ export function FileChangeCard({ data }: { data: FileChangeCardData }) {
               disabled={reverting}
               className={clsx(
                 'text-2xs hover:underline',
-                showRevertConfirm
-                  ? 'text-red-600 dark:text-red-400 font-medium'
-                  : 'text-amber-700 dark:text-amber-400',
+                showRevertConfirm ? 'text-red-600 dark:text-red-400 font-medium' : 'text-amber-700 dark:text-amber-400',
                 reverting && 'opacity-50',
               )}
             >
@@ -190,11 +173,7 @@ export function FileChangeCard({ data }: { data: FileChangeCardData }) {
           </>
         )}
 
-        {reverted && (
-          <span className="text-2xs text-green-600 dark:text-green-400 font-medium">
-            Reverted
-          </span>
-        )}
+        {reverted && <span className="text-2xs text-green-600 dark:text-green-400 font-medium">Reverted</span>}
       </div>
     </div>
   );

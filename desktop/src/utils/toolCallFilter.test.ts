@@ -143,7 +143,8 @@ describe('ToolCallStreamFilter', () => {
   // =========================================================================
   describe('mixed content', () => {
     it('preserves text around a tool_call block', () => {
-      const input = 'Let me read the file. ```tool_call\n{"tool": "Read", "params": {"path": "x.ts"}}\n```Here are the results.';
+      const input =
+        'Let me read the file. ```tool_call\n{"tool": "Read", "params": {"path": "x.ts"}}\n```Here are the results.';
       const result = filter.processChunk(input);
       expect(result.output).toBe('Let me read the file. Here are the results.');
       expect(result.toolIndicator).toBe('[tool_call] Read');
@@ -163,7 +164,9 @@ describe('ToolCallStreamFilter', () => {
     });
 
     it('handles text, code block, tool block, text sequence', () => {
-      const r1 = filter.processChunk('Normal text\n```python\nprint("hi")\n```\nMore text ```tool_call\n{"tool": "Bash", "params": {}}\n```\nFinal text');
+      const r1 = filter.processChunk(
+        'Normal text\n```python\nprint("hi")\n```\nMore text ```tool_call\n{"tool": "Bash", "params": {}}\n```\nFinal text',
+      );
       expect(r1.output).toBe('Normal text\n```python\nprint("hi")\n```\nMore text \nFinal text');
       expect(r1.toolIndicator).toBe('[tool_call] Bash');
     });
@@ -305,7 +308,9 @@ describe('ToolCallStreamFilter', () => {
     });
 
     it('handles a tool_call block immediately followed by normal text', () => {
-      const r1 = filter.processChunk('```tool_call\n{"tool": "Glob", "params": {"pattern": "*.ts"}}\n```The results are:');
+      const r1 = filter.processChunk(
+        '```tool_call\n{"tool": "Glob", "params": {"pattern": "*.ts"}}\n```The results are:',
+      );
       expect(r1.output).toBe('The results are:');
       expect(r1.toolIndicator).toBe('[tool_call] Glob');
     });

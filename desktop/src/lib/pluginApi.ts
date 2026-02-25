@@ -48,10 +48,7 @@ export async function listInvocableSkills(): Promise<CommandResponse<PluginSkill
 /**
  * Toggle a plugin's enabled/disabled state.
  */
-export async function togglePlugin(
-  name: string,
-  enabled: boolean
-): Promise<CommandResponse<boolean>> {
+export async function togglePlugin(name: string, enabled: boolean): Promise<CommandResponse<boolean>> {
   try {
     return await invoke<CommandResponse<boolean>>('toggle_plugin', {
       name,
@@ -84,9 +81,7 @@ export async function refreshPlugins(): Promise<CommandResponse<PluginInfo[]>> {
 /**
  * Get detailed information about a specific plugin.
  */
-export async function getPluginDetail(
-  name: string
-): Promise<CommandResponse<PluginDetail>> {
+export async function getPluginDetail(name: string): Promise<CommandResponse<PluginDetail>> {
   try {
     return await invoke<CommandResponse<PluginDetail>>('get_plugin_detail', {
       name,
@@ -103,9 +98,7 @@ export async function getPluginDetail(
 /**
  * Install a plugin from a source directory.
  */
-export async function installPlugin(
-  sourcePath: string
-): Promise<CommandResponse<PluginInfo>> {
+export async function installPlugin(sourcePath: string): Promise<CommandResponse<PluginInfo>> {
   try {
     return await invoke<CommandResponse<PluginInfo>>('install_plugin', {
       sourcePath,
@@ -122,14 +115,11 @@ export async function installPlugin(
 /**
  * Fetch marketplace plugins from the registry.
  */
-export async function fetchMarketplace(
-  registryUrl?: string
-): Promise<CommandResponse<MarketplacePlugin[]>> {
+export async function fetchMarketplace(registryUrl?: string): Promise<CommandResponse<MarketplacePlugin[]>> {
   try {
-    return await invoke<CommandResponse<MarketplacePlugin[]>>(
-      'fetch_marketplace',
-      { registryUrl: registryUrl ?? null }
-    );
+    return await invoke<CommandResponse<MarketplacePlugin[]>>('fetch_marketplace', {
+      registryUrl: registryUrl ?? null,
+    });
   } catch (error) {
     return {
       success: false,
@@ -142,14 +132,9 @@ export async function fetchMarketplace(
 /**
  * Install a plugin from a git URL.
  */
-export async function installPluginFromGit(
-  gitUrl: string
-): Promise<CommandResponse<PluginInfo>> {
+export async function installPluginFromGit(gitUrl: string): Promise<CommandResponse<PluginInfo>> {
   try {
-    return await invoke<CommandResponse<PluginInfo>>(
-      'install_plugin_from_git',
-      { gitUrl }
-    );
+    return await invoke<CommandResponse<PluginInfo>>('install_plugin_from_git', { gitUrl });
   } catch (error) {
     return {
       success: false,
@@ -162,9 +147,7 @@ export async function installPluginFromGit(
 /**
  * Uninstall a plugin by name.
  */
-export async function uninstallPlugin(
-  name: string
-): Promise<CommandResponse<boolean>> {
+export async function uninstallPlugin(name: string): Promise<CommandResponse<boolean>> {
   try {
     return await invoke<CommandResponse<boolean>>('uninstall_plugin', {
       name,
@@ -196,9 +179,7 @@ export async function listMarketplaces(): Promise<CommandResponse<MarketplaceInf
 /**
  * Add a new marketplace source.
  */
-export async function addMarketplace(
-  source: string
-): Promise<CommandResponse<MarketplaceInfo>> {
+export async function addMarketplace(source: string): Promise<CommandResponse<MarketplaceInfo>> {
   try {
     return await invoke<CommandResponse<MarketplaceInfo>>('add_marketplace', {
       source,
@@ -215,9 +196,7 @@ export async function addMarketplace(
 /**
  * Remove a marketplace source.
  */
-export async function removeMarketplace(
-  name: string
-): Promise<CommandResponse<boolean>> {
+export async function removeMarketplace(name: string): Promise<CommandResponse<boolean>> {
   try {
     return await invoke<CommandResponse<boolean>>('remove_marketplace', {
       name,
@@ -234,10 +213,7 @@ export async function removeMarketplace(
 /**
  * Toggle a marketplace's enabled/disabled state.
  */
-export async function toggleMarketplace(
-  name: string,
-  enabled: boolean
-): Promise<CommandResponse<boolean>> {
+export async function toggleMarketplace(name: string, enabled: boolean): Promise<CommandResponse<boolean>> {
   try {
     return await invoke<CommandResponse<boolean>>('toggle_marketplace', {
       name,
@@ -257,13 +233,10 @@ export async function toggleMarketplace(
  */
 export async function installMarketplacePlugin(
   pluginName: string,
-  marketplaceName: string
+  marketplaceName: string,
 ): Promise<CommandResponse<PluginInfo>> {
   try {
-    return await invoke<CommandResponse<PluginInfo>>(
-      'install_marketplace_plugin',
-      { pluginName, marketplaceName }
-    );
+    return await invoke<CommandResponse<PluginInfo>>('install_marketplace_plugin', { pluginName, marketplaceName });
   } catch (error) {
     return {
       success: false,

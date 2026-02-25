@@ -23,9 +23,7 @@ export function GraphEdgeConfig({ edge, onUpdate, onDelete }: GraphEdgeConfigPro
 
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-        {t('graphWorkflow.edgeConfig.title')}
-      </h3>
+      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{t('graphWorkflow.edgeConfig.title')}</h3>
 
       {/* Edge type */}
       <div>
@@ -111,13 +109,9 @@ export function GraphEdgeConfig({ edge, onUpdate, onDelete }: GraphEdgeConfigPro
               <div className="space-y-1">
                 {Object.entries(edge.branches).map(([key, target]) => (
                   <div key={key} className="flex items-center gap-2 text-xs">
-                    <span className="font-mono text-gray-700 dark:text-gray-300">
-                      {key}
-                    </span>
+                    <span className="font-mono text-gray-700 dark:text-gray-300">{key}</span>
                     <span className="text-gray-400">-&gt;</span>
-                    <span className="font-mono text-gray-700 dark:text-gray-300">
-                      {target}
-                    </span>
+                    <span className="font-mono text-gray-700 dark:text-gray-300">{target}</span>
                     <button
                       onClick={() => {
                         const branches = { ...edge.branches };
@@ -175,7 +169,7 @@ export function GraphEdgeConfig({ edge, onUpdate, onDelete }: GraphEdgeConfigPro
           'w-full py-1.5 text-xs font-medium rounded transition-colors',
           'border border-red-300 dark:border-red-700',
           'text-red-600 dark:text-red-400',
-          'hover:bg-red-50 dark:hover:bg-red-900/20'
+          'hover:bg-red-50 dark:hover:bg-red-900/20',
         )}
       >
         {t('graphWorkflow.edgeConfig.deleteEdge')}

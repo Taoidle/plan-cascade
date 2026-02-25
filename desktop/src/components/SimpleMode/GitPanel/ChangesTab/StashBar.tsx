@@ -24,9 +24,7 @@ export function StashBar() {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const hasChanges =
-    (status?.unstaged.length ?? 0) > 0 ||
-    (status?.untracked.length ?? 0) > 0 ||
-    (status?.staged.length ?? 0) > 0;
+    (status?.unstaged.length ?? 0) > 0 || (status?.untracked.length ?? 0) > 0 || (status?.staged.length ?? 0) > 0;
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -53,21 +51,29 @@ export function StashBar() {
     async (index: number) => {
       await stashDrop(index);
     },
-    [stashDrop]
+    [stashDrop],
   );
 
   return (
     <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/30">
       <div className="flex items-center gap-2">
-        <svg className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8" />
+        <svg
+          className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8"
+          />
         </svg>
         <span className="text-2xs text-gray-500 dark:text-gray-400">
           {t('stashBar.stash')}
           {stashList.length > 0 && (
-            <span className="ml-1 font-medium text-gray-700 dark:text-gray-300">
-              ({stashList.length})
-            </span>
+            <span className="ml-1 font-medium text-gray-700 dark:text-gray-300">({stashList.length})</span>
           )}
         </span>
       </div>
@@ -81,7 +87,7 @@ export function StashBar() {
             'text-2xs px-2 py-0.5 rounded transition-colors',
             hasChanges
               ? 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-              : 'text-gray-400 dark:text-gray-500 cursor-not-allowed'
+              : 'text-gray-400 dark:text-gray-500 cursor-not-allowed',
           )}
         >
           {t('stashBar.stash')}
@@ -95,7 +101,7 @@ export function StashBar() {
             'text-2xs px-2 py-0.5 rounded transition-colors',
             stashList.length > 0
               ? 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-              : 'text-gray-400 dark:text-gray-500 cursor-not-allowed'
+              : 'text-gray-400 dark:text-gray-500 cursor-not-allowed',
           )}
         >
           {t('stashBar.pop')}

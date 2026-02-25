@@ -9,12 +9,7 @@
 import { useEffect, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import {
-  CheckCircledIcon,
-  CrossCircledIcon,
-  ReloadIcon,
-  InfoCircledIcon,
-} from '@radix-ui/react-icons';
+import { CheckCircledIcon, CrossCircledIcon, ReloadIcon, InfoCircledIcon } from '@radix-ui/react-icons';
 import { useLspStore } from '../../store/lsp';
 import { useSettingsStore } from '../../store/settings';
 import { LSP_LANGUAGES } from '../../types/lsp';
@@ -25,10 +20,7 @@ import type { LspServerStatus } from '../../types/lsp';
 // ---------------------------------------------------------------------------
 
 /** Find the status entry for a given language from the servers list. */
-function findStatus(
-  servers: LspServerStatus[],
-  language: string,
-): LspServerStatus | undefined {
+function findStatus(servers: LspServerStatus[], language: string): LspServerStatus | undefined {
   return servers.find((s) => s.language === language);
 }
 
@@ -86,20 +78,14 @@ export function LspSection() {
     <div className="space-y-8">
       {/* Section header */}
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-          {t('lsp.title')}
-        </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {t('lsp.description')}
-        </p>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">{t('lsp.title')}</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('lsp.description')}</p>
       </div>
 
       {/* Server Detection */}
       <section className="space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-            {t('lsp.servers.title')}
-          </h3>
+          <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('lsp.servers.title')}</h3>
           <button
             onClick={handleDetect}
             disabled={isDetecting}
@@ -152,30 +138,19 @@ export function LspSection() {
                 const installHint = serverStatus?.install_hint;
 
                 return (
-                  <tr
-                    key={lang.id}
-                    className="hover:bg-gray-50 dark:hover:bg-gray-800/30"
-                  >
-                    <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
-                      {lang.displayName}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
-                      {serverName}
-                    </td>
+                  <tr key={lang.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
+                    <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{lang.displayName}</td>
+                    <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{serverName}</td>
                     <td className="px-4 py-3">
                       {detected ? (
                         <span className="inline-flex items-center gap-1.5">
                           <CheckCircledIcon className="w-4 h-4 text-green-500" />
-                          <span className="text-green-600 dark:text-green-400">
-                            {t('lsp.servers.detected')}
-                          </span>
+                          <span className="text-green-600 dark:text-green-400">{t('lsp.servers.detected')}</span>
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1.5">
                           <CrossCircledIcon className="w-4 h-4 text-gray-400 dark:text-gray-500" />
-                          <span className="text-gray-500 dark:text-gray-400">
-                            {t('lsp.servers.notFound')}
-                          </span>
+                          <span className="text-gray-500 dark:text-gray-400">{t('lsp.servers.notFound')}</span>
                         </span>
                       )}
                     </td>
@@ -198,9 +173,7 @@ export function LspSection() {
 
       {/* Auto-Enrich Toggle */}
       <section className="space-y-3">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('lsp.enrichment.title')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('lsp.enrichment.title')}</h3>
         <label className="flex items-center gap-3 cursor-pointer">
           <input
             type="checkbox"
@@ -209,21 +182,15 @@ export function LspSection() {
             className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
           />
           <div>
-            <span className="text-sm text-gray-900 dark:text-white">
-              {t('lsp.enrichment.autoEnrich')}
-            </span>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              {t('lsp.enrichment.autoEnrichHelp')}
-            </p>
+            <span className="text-sm text-gray-900 dark:text-white">{t('lsp.enrichment.autoEnrich')}</span>
+            <p className="text-xs text-gray-500 dark:text-gray-400">{t('lsp.enrichment.autoEnrichHelp')}</p>
           </div>
         </label>
       </section>
 
       {/* Manual Enrichment */}
       <section className="space-y-3">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('lsp.enrichment.manualTitle')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('lsp.enrichment.manualTitle')}</h3>
         <div className="flex items-center gap-3">
           <button
             onClick={handleEnrich}
@@ -237,19 +204,13 @@ export function LspSection() {
             )}
           >
             <ReloadIcon className={clsx('w-4 h-4', isEnriching && 'animate-spin')} />
-            {isEnriching
-              ? t('lsp.enrichment.enriching')
-              : t('lsp.enrichment.enrichButton')}
+            {isEnriching ? t('lsp.enrichment.enriching') : t('lsp.enrichment.enrichButton')}
           </button>
           {!workspacePath && (
-            <span className="text-xs text-gray-500 dark:text-gray-400">
-              {t('lsp.enrichment.noWorkspace')}
-            </span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">{t('lsp.enrichment.noWorkspace')}</span>
           )}
           {workspacePath && detectedCount === 0 && (
-            <span className="text-xs text-gray-500 dark:text-gray-400">
-              {t('lsp.enrichment.noServers')}
-            </span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">{t('lsp.enrichment.noServers')}</span>
           )}
         </div>
       </section>
@@ -257,14 +218,10 @@ export function LspSection() {
       {/* Enrichment Report */}
       {enrichmentReport && (
         <section className="space-y-3">
-          <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-            {t('lsp.report.title')}
-          </h3>
+          <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('lsp.report.title')}</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50">
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                {t('lsp.report.languages')}
-              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{t('lsp.report.languages')}</p>
               <p className="text-lg font-semibold text-gray-900 dark:text-white">
                 {enrichmentReport.languages_enriched.length}
               </p>
@@ -273,25 +230,15 @@ export function LspSection() {
               </p>
             </div>
             <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50">
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                {t('lsp.report.symbols')}
-              </p>
-              <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                {enrichmentReport.symbols_enriched}
-              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{t('lsp.report.symbols')}</p>
+              <p className="text-lg font-semibold text-gray-900 dark:text-white">{enrichmentReport.symbols_enriched}</p>
             </div>
             <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50">
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                {t('lsp.report.references')}
-              </p>
-              <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                {enrichmentReport.references_found}
-              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{t('lsp.report.references')}</p>
+              <p className="text-lg font-semibold text-gray-900 dark:text-white">{enrichmentReport.references_found}</p>
             </div>
             <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50">
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                {t('lsp.report.duration')}
-              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{t('lsp.report.duration')}</p>
               <p className="text-lg font-semibold text-gray-900 dark:text-white">
                 {formatDuration(enrichmentReport.duration_ms)}
               </p>
@@ -320,12 +267,8 @@ export function LspSection() {
       <div className="flex items-start gap-2 p-3 rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20">
         <InfoCircledIcon className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
         <div>
-          <p className="text-sm text-blue-700 dark:text-blue-300">
-            {t('lsp.info.title')}
-          </p>
-          <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">
-            {t('lsp.info.description')}
-          </p>
+          <p className="text-sm text-blue-700 dark:text-blue-300">{t('lsp.info.title')}</p>
+          <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">{t('lsp.info.description')}</p>
         </div>
       </div>
     </div>

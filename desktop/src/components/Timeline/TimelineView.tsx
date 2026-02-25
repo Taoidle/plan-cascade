@@ -8,11 +8,7 @@
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import {
-  PlusIcon,
-  Link2Icon,
-  ChevronDownIcon,
-} from '@radix-ui/react-icons';
+import { PlusIcon, Link2Icon, ChevronDownIcon } from '@radix-ui/react-icons';
 import { useTimelineStore } from '../../store/timeline';
 import { TimelineSkeleton } from './TimelineSkeleton';
 import { CheckpointNode } from './CheckpointNode';
@@ -64,9 +60,7 @@ export function TimelineView({
   // Get checkpoints sorted by timestamp (newest first)
   const sortedCheckpoints = useMemo(() => {
     if (!timeline?.checkpoints) return [];
-    return [...timeline.checkpoints].sort(
-      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    );
+    return [...timeline.checkpoints].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }, [timeline]);
 
   // Get checkpoints for current branch view
@@ -76,7 +70,7 @@ export function TimelineView({
       (cp) =>
         cp.branch_id === timeline.current_branch_id ||
         // Include checkpoints without branch (pre-branch creation)
-        !cp.branch_id
+        !cp.branch_id,
     );
   }, [sortedCheckpoints, timeline?.current_branch_id]);
 
@@ -98,7 +92,7 @@ export function TimelineView({
       await switchBranch(branch.id);
       setShowBranchSelector(false);
     },
-    [switchBranch]
+    [switchBranch],
   );
 
   // Handle fork branch
@@ -109,7 +103,7 @@ export function TimelineView({
         await forkBranch(checkpoint.id, branchName);
       }
     },
-    [forkBranch, t]
+    [forkBranch, t],
   );
 
   // Loading state
@@ -131,12 +125,8 @@ export function TimelineView({
     return (
       <div className="w-full p-4 text-center">
         <div className="mb-6">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-            {t('timeline.noCheckpoints')}
-          </h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            {t('timeline.createFirstCheckpoint')}
-          </p>
+          <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">{t('timeline.noCheckpoints')}</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t('timeline.createFirstCheckpoint')}</p>
         </div>
 
         {showCreateForm ? (
@@ -151,7 +141,7 @@ export function TimelineView({
                 'border border-gray-300 dark:border-gray-600',
                 'bg-white dark:bg-gray-800',
                 'text-gray-900 dark:text-white',
-                'focus:ring-2 focus:ring-primary-500 focus:border-transparent'
+                'focus:ring-2 focus:ring-primary-500 focus:border-transparent',
               )}
               autoFocus
               onKeyDown={(e) => {
@@ -168,7 +158,7 @@ export function TimelineView({
                   'bg-primary-600 text-white',
                   'hover:bg-primary-700',
                   'disabled:opacity-50 disabled:cursor-not-allowed',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 {loading.checkpoint ? t('common.adding') : t('buttons.save')}
@@ -180,7 +170,7 @@ export function TimelineView({
                   'bg-gray-200 dark:bg-gray-700',
                   'text-gray-700 dark:text-gray-300',
                   'hover:bg-gray-300 dark:hover:bg-gray-600',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 {t('buttons.cancel')}
@@ -194,7 +184,7 @@ export function TimelineView({
               'inline-flex items-center gap-2 px-4 py-2 rounded-lg',
               'bg-primary-600 text-white',
               'hover:bg-primary-700',
-              'transition-colors'
+              'transition-colors',
             )}
           >
             <PlusIcon className="w-4 h-4" />
@@ -209,9 +199,7 @@ export function TimelineView({
     <div className="w-full h-full flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-          {t('timeline.title')}
-        </h2>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t('timeline.title')}</h2>
 
         <div className="flex items-center gap-2">
           {/* Branch Selector */}
@@ -224,7 +212,7 @@ export function TimelineView({
                   'bg-gray-100 dark:bg-gray-800',
                   'text-gray-700 dark:text-gray-300',
                   'hover:bg-gray-200 dark:hover:bg-gray-700',
-                  'transition-colors text-sm'
+                  'transition-colors text-sm',
                 )}
               >
                 <Link2Icon className="w-4 h-4" />
@@ -237,7 +225,7 @@ export function TimelineView({
                   className={clsx(
                     'absolute right-0 mt-2 w-48 rounded-lg shadow-lg z-10',
                     'bg-white dark:bg-gray-800',
-                    'border border-gray-200 dark:border-gray-700'
+                    'border border-gray-200 dark:border-gray-700',
                   )}
                 >
                   {timeline.branches.map((branch) => (
@@ -250,15 +238,13 @@ export function TimelineView({
                         'first:rounded-t-lg last:rounded-b-lg',
                         branch.id === currentBranch?.id
                           ? 'text-primary-600 dark:text-primary-400 font-medium'
-                          : 'text-gray-700 dark:text-gray-300'
+                          : 'text-gray-700 dark:text-gray-300',
                       )}
                     >
                       <div className="flex items-center gap-2">
                         <Link2Icon className="w-3 h-3" />
                         <span>{branch.name}</span>
-                        {branch.is_main && (
-                          <span className="text-xs text-gray-400">(main)</span>
-                        )}
+                        {branch.is_main && <span className="text-xs text-gray-400">(main)</span>}
                       </div>
                     </button>
                   ))}
@@ -274,7 +260,7 @@ export function TimelineView({
               'flex items-center gap-2 px-3 py-1.5 rounded-lg',
               'bg-primary-600 text-white',
               'hover:bg-primary-700',
-              'transition-colors text-sm'
+              'transition-colors text-sm',
             )}
           >
             <PlusIcon className="w-4 h-4" />
@@ -297,7 +283,7 @@ export function TimelineView({
                 'border border-gray-300 dark:border-gray-600',
                 'bg-white dark:bg-gray-800',
                 'text-gray-900 dark:text-white',
-                'focus:ring-2 focus:ring-primary-500 focus:border-transparent'
+                'focus:ring-2 focus:ring-primary-500 focus:border-transparent',
               )}
               autoFocus
               onKeyDown={(e) => {
@@ -313,7 +299,7 @@ export function TimelineView({
                 'bg-primary-600 text-white',
                 'hover:bg-primary-700',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               {loading.checkpoint ? t('common.adding') : t('buttons.save')}
@@ -325,7 +311,7 @@ export function TimelineView({
                 'bg-gray-200 dark:bg-gray-700',
                 'text-gray-700 dark:text-gray-300',
                 'hover:bg-gray-300 dark:hover:bg-gray-600',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               {t('buttons.cancel')}
@@ -338,12 +324,7 @@ export function TimelineView({
       <div className="flex-1 overflow-y-auto p-4">
         <div className="relative">
           {/* Timeline line */}
-          <div
-            className={clsx(
-              'absolute left-[7px] top-0 bottom-0 w-0.5',
-              'bg-gray-200 dark:bg-gray-700'
-            )}
-          />
+          <div className={clsx('absolute left-[7px] top-0 bottom-0 w-0.5', 'bg-gray-200 dark:bg-gray-700')} />
 
           {/* Checkpoint nodes */}
           <div className="space-y-4">

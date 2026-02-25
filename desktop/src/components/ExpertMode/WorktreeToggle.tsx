@@ -9,11 +9,7 @@ import { useState, useEffect } from 'react';
 import { clsx } from 'clsx';
 import { usePRDStore } from '../../store/prd';
 import * as Switch from '@radix-ui/react-switch';
-import {
-  Share1Icon,
-  InfoCircledIcon,
-  ExclamationTriangleIcon,
-} from '@radix-ui/react-icons';
+import { Share1Icon, InfoCircledIcon, ExclamationTriangleIcon } from '@radix-ui/react-icons';
 import * as Tooltip from '@radix-ui/react-tooltip';
 
 // Branch name validation regex
@@ -28,7 +24,9 @@ export function WorktreeToggle() {
   useEffect(() => {
     if (worktree.enabled && worktree.branchName) {
       if (!BRANCH_NAME_REGEX.test(worktree.branchName)) {
-        setBranchError('Branch name must start with a letter and contain only letters, numbers, hyphens, underscores, or slashes');
+        setBranchError(
+          'Branch name must start with a letter and contain only letters, numbers, hyphens, underscores, or slashes',
+        );
       } else if (worktree.branchName.length > 100) {
         setBranchError('Branch name must be less than 100 characters');
       } else {
@@ -55,9 +53,7 @@ export function WorktreeToggle() {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-            Git Worktree
-          </label>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Git Worktree</label>
           <Tooltip.Provider>
             <Tooltip.Root>
               <Tooltip.Trigger asChild>
@@ -70,13 +66,12 @@ export function WorktreeToggle() {
                   className={clsx(
                     'max-w-xs px-3 py-2 rounded-lg text-sm',
                     'bg-gray-900 dark:bg-gray-700 text-white',
-                    'shadow-lg'
+                    'shadow-lg',
                   )}
                   sideOffset={5}
                 >
-                  Git worktrees allow isolated development without switching branches.
-                  Each feature gets its own working directory, preventing conflicts
-                  and enabling parallel development.
+                  Git worktrees allow isolated development without switching branches. Each feature gets its own working
+                  directory, preventing conflicts and enabling parallel development.
                   <Tooltip.Arrow className="fill-gray-900 dark:fill-gray-700" />
                 </Tooltip.Content>
               </Tooltip.Portal>
@@ -89,17 +84,15 @@ export function WorktreeToggle() {
           onCheckedChange={(checked) => setWorktreeConfig({ enabled: checked })}
           className={clsx(
             'w-11 h-6 rounded-full relative transition-colors',
-            worktree.enabled
-              ? 'bg-primary-600'
-              : 'bg-gray-200 dark:bg-gray-700',
+            worktree.enabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-700',
             'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-            'dark:focus:ring-offset-gray-900'
+            'dark:focus:ring-offset-gray-900',
           )}
         >
           <Switch.Thumb
             className={clsx(
               'block w-5 h-5 rounded-full bg-white shadow-sm transition-transform',
-              worktree.enabled ? 'translate-x-[22px]' : 'translate-x-0.5'
+              worktree.enabled ? 'translate-x-[22px]' : 'translate-x-0.5',
             )}
           />
         </Switch.Root>
@@ -112,15 +105,13 @@ export function WorktreeToggle() {
             'space-y-4 p-4 rounded-lg',
             'bg-white dark:bg-gray-800',
             'border border-gray-200 dark:border-gray-700',
-            'animate-in fade-in slide-in-from-top-1'
+            'animate-in fade-in slide-in-from-top-1',
           )}
         >
           {/* Branch name input */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
-                Branch Name
-              </label>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">Branch Name</label>
               {prd.title && (
                 <button
                   onClick={suggestBranchName}
@@ -144,7 +135,7 @@ export function WorktreeToggle() {
                   branchError
                     ? 'border-red-500 focus:ring-red-500'
                     : 'border-gray-200 dark:border-gray-700 focus:ring-primary-500',
-                  'focus:outline-none focus:ring-2'
+                  'focus:outline-none focus:ring-2',
                 )}
               />
             </div>
@@ -158,9 +149,7 @@ export function WorktreeToggle() {
 
           {/* Base branch input */}
           <div>
-            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-              Base Branch
-            </label>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Base Branch</label>
             <select
               value={worktree.baseBranch}
               onChange={(e) => setWorktreeConfig({ baseBranch: e.target.value })}
@@ -169,7 +158,7 @@ export function WorktreeToggle() {
                 'bg-gray-50 dark:bg-gray-900',
                 'text-gray-900 dark:text-white',
                 'border border-gray-200 dark:border-gray-700',
-                'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                'focus:outline-none focus:ring-2 focus:ring-primary-500',
               )}
             >
               <option value="main">main</option>
@@ -181,9 +170,7 @@ export function WorktreeToggle() {
           {/* Worktree path display */}
           {worktree.branchName && !branchError && (
             <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
-              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                Worktree will be created at:
-              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Worktree will be created at:</p>
               <code className="text-xs font-mono text-gray-700 dark:text-gray-300">
                 .worktree/{worktree.branchName.replace(/\//g, '-')}
               </code>
@@ -194,9 +181,7 @@ export function WorktreeToggle() {
 
       {/* Info banner when disabled */}
       {!worktree.enabled && (
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          Enable to develop in an isolated Git worktree branch
-        </p>
+        <p className="text-xs text-gray-500 dark:text-gray-400">Enable to develop in an isolated Git worktree branch</p>
       )}
     </div>
   );

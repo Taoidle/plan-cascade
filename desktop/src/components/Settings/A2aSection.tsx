@@ -8,12 +8,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import {
-  discoverA2aAgent,
-  listA2aAgents,
-  registerA2aAgent,
-  removeA2aAgent,
-} from '../../lib/a2aApi';
+import { discoverA2aAgent, listA2aAgents, registerA2aAgent, removeA2aAgent } from '../../lib/a2aApi';
 import type { RegisteredRemoteAgent, DiscoveredAgent } from '../../lib/a2aApi';
 
 export function A2aSection() {
@@ -100,12 +95,8 @@ export function A2aSection() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-          {t('a2a.title')}
-        </h3>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          {t('a2a.description')}
-        </p>
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{t('a2a.title')}</h3>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('a2a.description')}</p>
       </div>
 
       {/* Status messages */}
@@ -135,9 +126,7 @@ export function A2aSection() {
 
       {/* Add Remote Agent */}
       <div className="space-y-3">
-        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-          {t('a2a.addAgent')}
-        </h4>
+        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('a2a.addAgent')}</h4>
         <div className="flex gap-2">
           <input
             type="text"
@@ -154,7 +143,7 @@ export function A2aSection() {
               'border-gray-300 dark:border-gray-600',
               'text-gray-900 dark:text-white',
               'placeholder-gray-400 dark:placeholder-gray-500',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent'
+              'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent',
             )}
           />
           <button
@@ -163,7 +152,7 @@ export function A2aSection() {
             className={clsx(
               'px-4 py-2 text-sm font-medium rounded-lg transition-colors',
               'bg-primary-600 text-white hover:bg-primary-700',
-              'disabled:opacity-50 disabled:cursor-not-allowed'
+              'disabled:opacity-50 disabled:cursor-not-allowed',
             )}
           >
             {discovering ? t('a2a.discovering') : t('a2a.discover')}
@@ -177,17 +166,13 @@ export function A2aSection() {
           className={clsx(
             'p-4 rounded-lg border-2',
             'border-primary-300 dark:border-primary-700',
-            'bg-primary-50 dark:bg-primary-900/20'
+            'bg-primary-50 dark:bg-primary-900/20',
           )}
         >
           <div className="flex items-start justify-between">
             <div className="min-w-0 flex-1">
-              <h4 className="text-sm font-semibold text-gray-900 dark:text-white">
-                {discovered.agent_card.name}
-              </h4>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                {discovered.agent_card.description}
-              </p>
+              <h4 className="text-sm font-semibold text-gray-900 dark:text-white">{discovered.agent_card.name}</h4>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{discovered.agent_card.description}</p>
               <div className="flex flex-wrap gap-1 mt-2">
                 {discovered.agent_card.capabilities.map((cap) => (
                   <span
@@ -208,7 +193,7 @@ export function A2aSection() {
               className={clsx(
                 'ml-3 px-4 py-1.5 text-xs font-medium rounded-lg transition-colors',
                 'bg-green-600 text-white hover:bg-green-700',
-                'disabled:opacity-50 disabled:cursor-not-allowed'
+                'disabled:opacity-50 disabled:cursor-not-allowed',
               )}
             >
               {registering ? t('a2a.registering') : t('a2a.register')}
@@ -219,18 +204,12 @@ export function A2aSection() {
 
       {/* Registered Agents List */}
       <div className="space-y-3">
-        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-          {t('a2a.registeredAgents')}
-        </h4>
+        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('a2a.registeredAgents')}</h4>
 
         {loading ? (
-          <p className="text-sm text-gray-400 dark:text-gray-500">
-            {t('a2a.loading')}
-          </p>
+          <p className="text-sm text-gray-400 dark:text-gray-500">{t('a2a.loading')}</p>
         ) : agents.length === 0 ? (
-          <p className="text-sm text-gray-400 dark:text-gray-500 italic">
-            {t('a2a.noAgents')}
-          </p>
+          <p className="text-sm text-gray-400 dark:text-gray-500 italic">{t('a2a.noAgents')}</p>
         ) : (
           <div className="space-y-2">
             {agents.map((agent) => (
@@ -239,22 +218,16 @@ export function A2aSection() {
                 className={clsx(
                   'p-3 rounded-lg border',
                   'border-gray-200 dark:border-gray-700',
-                  'bg-gray-50 dark:bg-gray-800/50'
+                  'bg-gray-50 dark:bg-gray-800/50',
                 )}
               >
                 <div className="flex items-start justify-between">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-gray-900 dark:text-white">
-                        {agent.name}
-                      </span>
-                      <span className="text-xs text-gray-400 dark:text-gray-500">
-                        v{agent.version}
-                      </span>
+                      <span className="text-sm font-medium text-gray-900 dark:text-white">{agent.name}</span>
+                      <span className="text-xs text-gray-400 dark:text-gray-500">v{agent.version}</span>
                     </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                      {agent.description}
-                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{agent.description}</p>
                     <div className="flex flex-wrap gap-1 mt-1.5">
                       {agent.capabilities.map((cap) => (
                         <span
@@ -265,9 +238,7 @@ export function A2aSection() {
                         </span>
                       ))}
                     </div>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                      {agent.base_url}
-                    </p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{agent.base_url}</p>
                   </div>
                   <button
                     onClick={() => handleRemove(agent.id, agent.name)}
@@ -275,7 +246,7 @@ export function A2aSection() {
                       'ml-3 px-3 py-1 text-xs font-medium rounded-lg transition-colors',
                       'text-red-600 dark:text-red-400',
                       'hover:bg-red-50 dark:hover:bg-red-900/20',
-                      'border border-red-300 dark:border-red-700'
+                      'border border-red-300 dark:border-red-700',
                     )}
                   >
                     {t('a2a.remove')}

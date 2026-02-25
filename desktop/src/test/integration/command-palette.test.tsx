@@ -70,19 +70,21 @@ function TestConsumer() {
 
   return (
     <div>
-      <button onClick={open} data-testid="open-btn">Open</button>
-      <button onClick={close} data-testid="close-btn">Close</button>
-      <button onClick={toggle} data-testid="toggle-btn">Toggle</button>
+      <button onClick={open} data-testid="open-btn">
+        Open
+      </button>
+      <button onClick={close} data-testid="close-btn">
+        Close
+      </button>
+      <button onClick={toggle} data-testid="toggle-btn">
+        Toggle
+      </button>
       <span data-testid="is-open">{isOpen.toString()}</span>
       <span data-testid="command-count">{commands.length}</span>
       <span data-testid="recent-count">{recentCommands.length}</span>
       <div data-testid="command-list">
-        {commands.map(cmd => (
-          <button
-            key={cmd.id}
-            data-testid={`cmd-${cmd.id}`}
-            onClick={() => executeCommand(cmd.id)}
-          >
+        {commands.map((cmd) => (
+          <button key={cmd.id} data-testid={`cmd-${cmd.id}`} onClick={() => executeCommand(cmd.id)}>
             {cmd.title}
           </button>
         ))}
@@ -91,15 +93,8 @@ function TestConsumer() {
   );
 }
 
-function renderWithProvider(
-  ui: ReactNode,
-  commands: Command[] = []
-) {
-  return render(
-    <CommandPaletteProvider defaultCommands={commands}>
-      {ui}
-    </CommandPaletteProvider>
-  );
+function renderWithProvider(ui: ReactNode, commands: Command[] = []) {
+  return render(<CommandPaletteProvider defaultCommands={commands}>{ui}</CommandPaletteProvider>);
 }
 
 // ============================================================================
@@ -275,10 +270,7 @@ describe('createDefaultCommands Factory', () => {
   const mockT = (key: string) => key;
 
   it('should create commands only for provided callbacks', () => {
-    const commands = createDefaultCommands(
-      { onClearChat: vi.fn() },
-      mockT
-    );
+    const commands = createDefaultCommands({ onClearChat: vi.fn() }, mockT);
 
     expect(commands).toHaveLength(1);
     expect(commands[0].id).toBe('clear-chat');
@@ -298,13 +290,13 @@ describe('createDefaultCommands Factory', () => {
     const commands = createDefaultCommands(callbacks, mockT);
 
     expect(commands.length).toBeGreaterThanOrEqual(7);
-    expect(commands.find(c => c.id === 'clear-chat')).toBeDefined();
-    expect(commands.find(c => c.id === 'new-conversation')).toBeDefined();
-    expect(commands.find(c => c.id === 'export-conversation')).toBeDefined();
-    expect(commands.find(c => c.id === 'toggle-sidebar')).toBeDefined();
-    expect(commands.find(c => c.id === 'open-settings')).toBeDefined();
-    expect(commands.find(c => c.id === 'show-shortcuts')).toBeDefined();
-    expect(commands.find(c => c.id === 'focus-input')).toBeDefined();
+    expect(commands.find((c) => c.id === 'clear-chat')).toBeDefined();
+    expect(commands.find((c) => c.id === 'new-conversation')).toBeDefined();
+    expect(commands.find((c) => c.id === 'export-conversation')).toBeDefined();
+    expect(commands.find((c) => c.id === 'toggle-sidebar')).toBeDefined();
+    expect(commands.find((c) => c.id === 'open-settings')).toBeDefined();
+    expect(commands.find((c) => c.id === 'show-shortcuts')).toBeDefined();
+    expect(commands.find((c) => c.id === 'focus-input')).toBeDefined();
   });
 
   it('should assign correct shortcuts', () => {
@@ -314,12 +306,12 @@ describe('createDefaultCommands Factory', () => {
         onToggleSidebar: vi.fn(),
         onExportConversation: vi.fn(),
       },
-      mockT
+      mockT,
     );
 
-    const clearChat = commands.find(c => c.id === 'clear-chat');
-    const toggleSidebar = commands.find(c => c.id === 'toggle-sidebar');
-    const export_ = commands.find(c => c.id === 'export-conversation');
+    const clearChat = commands.find((c) => c.id === 'clear-chat');
+    const toggleSidebar = commands.find((c) => c.id === 'toggle-sidebar');
+    const export_ = commands.find((c) => c.id === 'export-conversation');
 
     expect(clearChat?.shortcut).toBe('mod+l');
     expect(toggleSidebar?.shortcut).toBe('mod+b');
@@ -335,23 +327,20 @@ describe('createDefaultCommands Factory', () => {
         onOpenSettings: vi.fn(),
         onShowShortcuts: vi.fn(),
       },
-      mockT
+      mockT,
     );
 
-    expect(commands.find(c => c.id === 'clear-chat')?.category).toBe('chat');
-    expect(commands.find(c => c.id === 'export-conversation')?.category).toBe('file');
-    expect(commands.find(c => c.id === 'toggle-sidebar')?.category).toBe('navigation');
-    expect(commands.find(c => c.id === 'open-settings')?.category).toBe('settings');
-    expect(commands.find(c => c.id === 'show-shortcuts')?.category).toBe('help');
+    expect(commands.find((c) => c.id === 'clear-chat')?.category).toBe('chat');
+    expect(commands.find((c) => c.id === 'export-conversation')?.category).toBe('file');
+    expect(commands.find((c) => c.id === 'toggle-sidebar')?.category).toBe('navigation');
+    expect(commands.find((c) => c.id === 'open-settings')?.category).toBe('settings');
+    expect(commands.find((c) => c.id === 'show-shortcuts')?.category).toBe('help');
   });
 
   it('should include keywords for searchability', () => {
-    const commands = createDefaultCommands(
-      { onClearChat: vi.fn() },
-      mockT
-    );
+    const commands = createDefaultCommands({ onClearChat: vi.fn() }, mockT);
 
-    const clearChat = commands.find(c => c.id === 'clear-chat');
+    const clearChat = commands.find((c) => c.id === 'clear-chat');
     expect(clearChat?.keywords).toContain('clear');
     expect(clearChat?.keywords).toContain('delete');
   });
@@ -360,7 +349,7 @@ describe('createDefaultCommands Factory', () => {
     const onClearChat = vi.fn();
     const commands = createDefaultCommands({ onClearChat }, mockT);
 
-    const clearChat = commands.find(c => c.id === 'clear-chat');
+    const clearChat = commands.find((c) => c.id === 'clear-chat');
     clearChat?.action();
 
     expect(onClearChat).toHaveBeenCalledTimes(1);
@@ -389,7 +378,7 @@ describe('Command Search (Fuzzy Search)', () => {
     ];
 
     // Note: This tests the command structure, actual fuzzy search is internal to CommandPaletteDialog
-    expect(commands.filter(c => c.title.toLowerCase().includes('clear'))).toHaveLength(1);
+    expect(commands.filter((c) => c.title.toLowerCase().includes('clear'))).toHaveLength(1);
   });
 
   it('should find commands by keywords', () => {
@@ -425,7 +414,7 @@ describe('Command Category Grouping', () => {
       { id: 'cat-5', title: 'Help Cmd', category: 'help', action: vi.fn() },
     ];
 
-    commands.forEach(cmd => {
+    commands.forEach((cmd) => {
       expect(validCategories).toContain(cmd.category);
     });
   });
@@ -437,13 +426,16 @@ describe('Command Category Grouping', () => {
       { id: 'file-1', title: 'File 1', category: 'file', action: vi.fn() },
     ];
 
-    const grouped = commands.reduce((acc, cmd) => {
-      if (!acc[cmd.category]) {
-        acc[cmd.category] = [];
-      }
-      acc[cmd.category].push(cmd);
-      return acc;
-    }, {} as Record<string, Command[]>);
+    const grouped = commands.reduce(
+      (acc, cmd) => {
+        if (!acc[cmd.category]) {
+          acc[cmd.category] = [];
+        }
+        acc[cmd.category].push(cmd);
+        return acc;
+      },
+      {} as Record<string, Command[]>,
+    );
 
     expect(grouped['chat']).toHaveLength(2);
     expect(grouped['file']).toHaveLength(1);
@@ -496,9 +488,7 @@ describe('Command Palette Accessibility', () => {
   });
 
   it('should have proper ARIA attributes', () => {
-    const commands: Command[] = [
-      { id: 'aria-test', title: 'Test Command', category: 'chat', action: vi.fn() },
-    ];
+    const commands: Command[] = [{ id: 'aria-test', title: 'Test Command', category: 'chat', action: vi.fn() }];
 
     renderWithProvider(<TestConsumer />, commands);
 
@@ -513,7 +503,7 @@ describe('Command Palette Accessibility', () => {
     const expectedKeys = ['ArrowDown', 'ArrowUp', 'Enter', 'Escape'];
 
     // These should be handled by the CommandPaletteDialog
-    expectedKeys.forEach(key => {
+    expectedKeys.forEach((key) => {
       expect(typeof key).toBe('string');
     });
   });

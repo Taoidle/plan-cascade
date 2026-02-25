@@ -7,12 +7,7 @@
 
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import type {
-  PromptTemplate,
-  PromptCreateRequest,
-  PromptUpdateRequest,
-  CommandResponse,
-} from '../types/prompt';
+import type { PromptTemplate, PromptCreateRequest, PromptUpdateRequest, CommandResponse } from '../types/prompt';
 
 interface PromptsState {
   /** List of all prompts */
@@ -160,9 +155,7 @@ export const usePromptsStore = create<PromptsState>((set, get) => ({
       await invoke<CommandResponse<void>>('record_prompt_use', { id });
       // Update local state without full refetch
       set((state) => ({
-        prompts: state.prompts.map((p) =>
-          p.id === id ? { ...p, use_count: p.use_count + 1 } : p
-        ),
+        prompts: state.prompts.map((p) => (p.id === id ? { ...p, use_count: p.use_count + 1 } : p)),
       }));
     } catch {
       // Silent fail for usage tracking

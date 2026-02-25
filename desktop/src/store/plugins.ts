@@ -166,9 +166,7 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
   togglePlugin: async (name: string, enabled: boolean) => {
     // Optimistic update
     set((state) => ({
-      plugins: state.plugins.map((p) =>
-        p.name === name ? { ...p, enabled } : p
-      ),
+      plugins: state.plugins.map((p) => (p.name === name ? { ...p, enabled } : p)),
     }));
 
     try {
@@ -176,28 +174,18 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
       if (!response.success) {
         // Revert on failure
         set((state) => ({
-          plugins: state.plugins.map((p) =>
-            p.name === name ? { ...p, enabled: !enabled } : p
-          ),
+          plugins: state.plugins.map((p) => (p.name === name ? { ...p, enabled: !enabled } : p)),
         }));
         get().showToast(response.error || 'Failed to toggle plugin', 'error');
       } else {
-        get().showToast(
-          `Plugin "${name}" ${enabled ? 'enabled' : 'disabled'}`,
-          'success'
-        );
+        get().showToast(`Plugin "${name}" ${enabled ? 'enabled' : 'disabled'}`, 'success');
       }
     } catch (error) {
       // Revert on error
       set((state) => ({
-        plugins: state.plugins.map((p) =>
-          p.name === name ? { ...p, enabled: !enabled } : p
-        ),
+        plugins: state.plugins.map((p) => (p.name === name ? { ...p, enabled: !enabled } : p)),
       }));
-      get().showToast(
-        error instanceof Error ? error.message : String(error),
-        'error'
-      );
+      get().showToast(error instanceof Error ? error.message : String(error), 'error');
     }
   },
 
@@ -214,10 +202,7 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
       }
     } catch (error) {
       set({ refreshing: false });
-      get().showToast(
-        error instanceof Error ? error.message : String(error),
-        'error'
-      );
+      get().showToast(error instanceof Error ? error.message : String(error), 'error');
     }
   },
 
@@ -233,10 +218,7 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
       }
     } catch (error) {
       set({ detailLoading: false });
-      get().showToast(
-        error instanceof Error ? error.message : String(error),
-        'error'
-      );
+      get().showToast(error instanceof Error ? error.message : String(error), 'error');
     }
   },
 
@@ -298,10 +280,7 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
       }
     } catch (error) {
       set({ installing: false, installProgress: null });
-      get().showToast(
-        error instanceof Error ? error.message : String(error),
-        'error'
-      );
+      get().showToast(error instanceof Error ? error.message : String(error), 'error');
     }
   },
 
@@ -323,10 +302,7 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
       }
     } catch (error) {
       set({ uninstalling: null });
-      get().showToast(
-        error instanceof Error ? error.message : String(error),
-        'error'
-      );
+      get().showToast(error instanceof Error ? error.message : String(error), 'error');
     }
   },
 
@@ -347,10 +323,7 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
       }
     } catch (error) {
       set({ installing: false, installProgress: null });
-      get().showToast(
-        error instanceof Error ? error.message : String(error),
-        'error'
-      );
+      get().showToast(error instanceof Error ? error.message : String(error), 'error');
     }
   },
 
@@ -393,10 +366,7 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
       }
     } catch (error) {
       set({ addingMarketplace: false });
-      get().showToast(
-        error instanceof Error ? error.message : String(error),
-        'error'
-      );
+      get().showToast(error instanceof Error ? error.message : String(error), 'error');
     }
   },
 
@@ -413,19 +383,14 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
         get().showToast(response.error || 'Failed to remove marketplace', 'error');
       }
     } catch (error) {
-      get().showToast(
-        error instanceof Error ? error.message : String(error),
-        'error'
-      );
+      get().showToast(error instanceof Error ? error.message : String(error), 'error');
     }
   },
 
   toggleMarketplaceSource: async (name: string, enabled: boolean) => {
     // Optimistic update
     set((state) => ({
-      marketplaces: state.marketplaces.map((m) =>
-        m.name === name ? { ...m, enabled } : m
-      ),
+      marketplaces: state.marketplaces.map((m) => (m.name === name ? { ...m, enabled } : m)),
     }));
 
     try {
@@ -433,9 +398,7 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
       if (!response.success) {
         // Revert
         set((state) => ({
-          marketplaces: state.marketplaces.map((m) =>
-            m.name === name ? { ...m, enabled: !enabled } : m
-          ),
+          marketplaces: state.marketplaces.map((m) => (m.name === name ? { ...m, enabled: !enabled } : m)),
         }));
         get().showToast(response.error || 'Failed to toggle marketplace', 'error');
       } else {
@@ -444,9 +407,7 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
     } catch {
       // Revert
       set((state) => ({
-        marketplaces: state.marketplaces.map((m) =>
-          m.name === name ? { ...m, enabled: !enabled } : m
-        ),
+        marketplaces: state.marketplaces.map((m) => (m.name === name ? { ...m, enabled: !enabled } : m)),
       }));
     }
   },

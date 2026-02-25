@@ -13,14 +13,7 @@ import { invoke } from '@tauri-apps/api/core';
 // ============================================================================
 
 /** Interview phase enum matching Rust InterviewPhase */
-export type InterviewPhase =
-  | 'overview'
-  | 'scope'
-  | 'requirements'
-  | 'interfaces'
-  | 'stories'
-  | 'review'
-  | 'complete';
+export type InterviewPhase = 'overview' | 'scope' | 'requirements' | 'interfaces' | 'stories' | 'review' | 'complete';
 
 /** A question generated for the interview */
 export interface InterviewQuestion {
@@ -157,16 +150,13 @@ export const useSpecInterviewStore = create<SpecInterviewState>((set, get) => ({
 
     try {
       const { providerSettings } = get();
-      const response = await invoke<CommandResponse<InterviewSession>>(
-        'start_spec_interview',
-        {
-          config,
-          provider: providerSettings?.provider ?? null,
-          model: providerSettings?.model ?? null,
-          apiKey: providerSettings?.apiKey ?? null,
-          baseUrl: providerSettings?.baseUrl ?? null,
-        }
-      );
+      const response = await invoke<CommandResponse<InterviewSession>>('start_spec_interview', {
+        config,
+        provider: providerSettings?.provider ?? null,
+        model: providerSettings?.model ?? null,
+        apiKey: providerSettings?.apiKey ?? null,
+        baseUrl: providerSettings?.baseUrl ?? null,
+      });
 
       if (response.success && response.data) {
         set((state) => ({
@@ -203,17 +193,14 @@ export const useSpecInterviewStore = create<SpecInterviewState>((set, get) => ({
     }));
 
     try {
-      const response = await invoke<CommandResponse<InterviewSession>>(
-        'submit_interview_answer',
-        {
-          interviewId: session.id,
-          answer,
-          provider: providerSettings?.provider ?? null,
-          model: providerSettings?.model ?? null,
-          apiKey: providerSettings?.apiKey ?? null,
-          baseUrl: providerSettings?.baseUrl ?? null,
-        }
-      );
+      const response = await invoke<CommandResponse<InterviewSession>>('submit_interview_answer', {
+        interviewId: session.id,
+        answer,
+        provider: providerSettings?.provider ?? null,
+        model: providerSettings?.model ?? null,
+        apiKey: providerSettings?.apiKey ?? null,
+        baseUrl: providerSettings?.baseUrl ?? null,
+      });
 
       if (response.success && response.data) {
         set((state) => ({
@@ -244,10 +231,7 @@ export const useSpecInterviewStore = create<SpecInterviewState>((set, get) => ({
     }));
 
     try {
-      const response = await invoke<CommandResponse<InterviewSession>>(
-        'get_interview_state',
-        { interviewId }
-      );
+      const response = await invoke<CommandResponse<InterviewSession>>('get_interview_state', { interviewId });
 
       if (response.success && response.data) {
         set((state) => ({
@@ -292,10 +276,10 @@ export const useSpecInterviewStore = create<SpecInterviewState>((set, get) => ({
     };
 
     try {
-      const response = await invoke<CommandResponse<CompiledSpec>>(
-        'compile_spec',
-        { interviewId: session.id, options: compileOptions }
-      );
+      const response = await invoke<CommandResponse<CompiledSpec>>('compile_spec', {
+        interviewId: session.id,
+        options: compileOptions,
+      });
 
       if (response.success && response.data) {
         set((state) => ({

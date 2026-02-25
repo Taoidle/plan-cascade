@@ -76,7 +76,7 @@ function SkillsTab() {
         (s) =>
           s.name.toLowerCase().includes(q) ||
           s.description.toLowerCase().includes(q) ||
-          s.tags.some((tag) => tag.toLowerCase().includes(q))
+          s.tags.some((tag) => tag.toLowerCase().includes(q)),
       );
     }
 
@@ -98,7 +98,7 @@ function SkillsTab() {
     (id: string, enabled: boolean) => {
       toggleSkill(id, enabled);
     },
-    [toggleSkill]
+    [toggleSkill],
   );
 
   const handleSkillClick = useCallback(
@@ -108,7 +108,7 @@ function SkillsTab() {
         loadSkillDetail(workspacePath, skill.id);
       }
     },
-    [workspacePath, loadSkillDetail]
+    [workspacePath, loadSkillDetail],
   );
 
   const handleRefresh = useCallback(() => {
@@ -119,12 +119,7 @@ function SkillsTab() {
 
   // If a skill detail is open, show it
   if (selectedSkillId && skillDetail) {
-    return (
-      <SkillDetail
-        skill={skillDetail}
-        onClose={() => setSelectedSkillId(null)}
-      />
-    );
+    return <SkillDetail skill={skillDetail} onClose={() => setSelectedSkillId(null)} />;
   }
 
   return (
@@ -145,7 +140,7 @@ function SkillsTab() {
               'border border-gray-200 dark:border-gray-700',
               'text-gray-700 dark:text-gray-300',
               'placeholder:text-gray-400 dark:placeholder:text-gray-500',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent'
+              'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent',
             )}
           />
         </div>
@@ -160,7 +155,7 @@ function SkillsTab() {
                 'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
                 skillSourceFilter === filter.value
                   ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                  : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
               )}
             >
               {filter.label}
@@ -171,7 +166,7 @@ function SkillsTab() {
             className={clsx(
               'ml-auto p-1 rounded-md transition-colors',
               'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
-              'hover:bg-gray-100 dark:hover:bg-gray-800'
+              'hover:bg-gray-100 dark:hover:bg-gray-800',
             )}
             title={t('skillPanel.refresh')}
           >
@@ -187,10 +182,7 @@ function SkillsTab() {
             <span className="text-xs text-gray-400">{t('skillPanel.loading')}</span>
           </div>
         ) : filteredSkills.length === 0 ? (
-          <EmptyState
-            title={t('skillPanel.noSkillsFound')}
-            description={t('skillPanel.noSkillsFoundHint')}
-          />
+          <EmptyState title={t('skillPanel.noSkillsFound')} description={t('skillPanel.noSkillsFoundHint')} />
         ) : (
           <div className="space-y-3">
             {Object.entries(groupedSkills).map(([sourceType, groupSkills]) => (
@@ -199,17 +191,10 @@ function SkillsTab() {
                   <span className="text-2xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                     {sourceType.replace('_', ' ')}
                   </span>
-                  <span className="text-2xs text-gray-400 dark:text-gray-500 ml-1">
-                    ({groupSkills.length})
-                  </span>
+                  <span className="text-2xs text-gray-400 dark:text-gray-500 ml-1">({groupSkills.length})</span>
                 </div>
                 {groupSkills.map((skill) => (
-                  <SkillRow
-                    key={skill.id}
-                    skill={skill}
-                    onToggle={handleToggle}
-                    onClick={handleSkillClick}
-                  />
+                  <SkillRow key={skill.id} skill={skill} onToggle={handleToggle} onClick={handleSkillClick} />
                 ))}
               </div>
             ))}
@@ -269,7 +254,7 @@ function MemoryTab() {
           }
         }
       }, 300),
-    [workspacePath, searchMemories, loadMemories]
+    [workspacePath, searchMemories, loadMemories],
   );
 
   const handleSearch = useCallback(
@@ -278,7 +263,7 @@ function MemoryTab() {
       setMemorySearchQuery(query);
       debouncedSearch(query);
     },
-    [setMemorySearchQuery, debouncedSearch]
+    [setMemorySearchQuery, debouncedSearch],
   );
 
   const handleLoadMore = useCallback(() => {
@@ -291,7 +276,7 @@ function MemoryTab() {
     (filter: MemoryCategoryFilter) => {
       setMemoryCategoryFilter(filter);
     },
-    [setMemoryCategoryFilter]
+    [setMemoryCategoryFilter],
   );
 
   const handleAddMemory = useCallback(
@@ -302,7 +287,7 @@ function MemoryTab() {
         loadMemoryStats(workspacePath);
       }
     },
-    [workspacePath, addMemory, loadMemoryStats]
+    [workspacePath, addMemory, loadMemoryStats],
   );
 
   const handleClearAll = useCallback(() => {
@@ -313,12 +298,7 @@ function MemoryTab() {
 
   // If add form is open, show it
   if (showAddForm) {
-    return (
-      <AddMemoryForm
-        onSave={handleAddMemory}
-        onCancel={() => setShowAddForm(false)}
-      />
-    );
+    return <AddMemoryForm onSave={handleAddMemory} onCancel={() => setShowAddForm(false)} />;
   }
 
   // If a memory is selected, show detail view
@@ -357,7 +337,7 @@ function MemoryTab() {
               'border border-gray-200 dark:border-gray-700',
               'text-gray-700 dark:text-gray-300',
               'placeholder:text-gray-400 dark:placeholder:text-gray-500',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent'
+              'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent',
             )}
           />
         </div>
@@ -370,7 +350,7 @@ function MemoryTab() {
               'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
               memoryCategoryFilter === 'all'
                 ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
             )}
           >
             {t('skillPanel.filterAll')}
@@ -383,7 +363,7 @@ function MemoryTab() {
                 'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
                 memoryCategoryFilter === cat
                   ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                  : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
               )}
             >
               {cat.charAt(0).toUpperCase() + cat.slice(1)}
@@ -394,7 +374,7 @@ function MemoryTab() {
             className={clsx(
               'ml-auto p-1 rounded-md transition-colors',
               'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
-              'hover:bg-gray-100 dark:hover:bg-gray-800'
+              'hover:bg-gray-100 dark:hover:bg-gray-800',
             )}
             title={t('skillPanel.addMemory')}
           >
@@ -407,7 +387,7 @@ function MemoryTab() {
               'p-1 rounded-md transition-colors',
               memories.length === 0
                 ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
-                : 'text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20'
+                : 'text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20',
             )}
             title={t('skillPanel.clearAll')}
           >
@@ -451,7 +431,7 @@ function MemoryTab() {
                 onClick={() => setSelectedMemory(memory)}
                 className={clsx(
                   'w-full text-left px-4 py-3 transition-colors',
-                  'hover:bg-gray-50 dark:hover:bg-gray-800/50'
+                  'hover:bg-gray-50 dark:hover:bg-gray-800/50',
                 )}
               >
                 <div className="flex items-center gap-2 mb-1">
@@ -461,9 +441,7 @@ function MemoryTab() {
                     {new Date(memory.updated_at).toLocaleDateString()}
                   </span>
                 </div>
-                <p className="text-xs text-gray-700 dark:text-gray-300 line-clamp-2">
-                  {memory.content}
-                </p>
+                <p className="text-xs text-gray-700 dark:text-gray-300 line-clamp-2">{memory.content}</p>
                 {memory.keywords.length > 0 && (
                   <div className="flex gap-1 mt-1 flex-wrap">
                     {memory.keywords.slice(0, 3).map((kw) => (
@@ -475,9 +453,7 @@ function MemoryTab() {
                       </span>
                     ))}
                     {memory.keywords.length > 3 && (
-                      <span className="text-2xs text-gray-400 dark:text-gray-500">
-                        +{memory.keywords.length - 3}
-                      </span>
+                      <span className="text-2xs text-gray-400 dark:text-gray-500">+{memory.keywords.length - 3}</span>
                     )}
                   </div>
                 )}
@@ -494,7 +470,7 @@ function MemoryTab() {
               className={clsx(
                 'px-4 py-1.5 rounded-md text-xs font-medium transition-colors',
                 'text-primary-600 dark:text-primary-400',
-                'hover:bg-primary-50 dark:hover:bg-primary-900/20'
+                'hover:bg-primary-50 dark:hover:bg-primary-900/20',
               )}
             >
               {t('skillPanel.loadMore')}
@@ -544,7 +520,7 @@ export function SkillMemoryDialog() {
             'bg-white dark:bg-gray-900 rounded-xl shadow-2xl',
             'border border-gray-200 dark:border-gray-700',
             'flex flex-col overflow-hidden',
-            'animate-[contentShow_0.2s]'
+            'animate-[contentShow_0.2s]',
           )}
         >
           {/* Header */}
@@ -557,7 +533,7 @@ export function SkillMemoryDialog() {
                 className={clsx(
                   'p-1.5 rounded-md',
                   'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
-                  'hover:bg-gray-100 dark:hover:bg-gray-800'
+                  'hover:bg-gray-100 dark:hover:bg-gray-800',
                 )}
               >
                 <Cross2Icon className="w-4 h-4" />
@@ -578,7 +554,7 @@ export function SkillMemoryDialog() {
                   'px-4 py-2.5 text-xs font-medium border-b-2 transition-colors -mb-px',
                   activeTab === 'skills'
                     ? 'border-primary-600 text-primary-600 dark:text-primary-400'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300',
                 )}
               >
                 {t('skillPanel.skillsTab')}
@@ -589,7 +565,7 @@ export function SkillMemoryDialog() {
                   'px-4 py-2.5 text-xs font-medium border-b-2 transition-colors -mb-px',
                   activeTab === 'memory'
                     ? 'border-primary-600 text-primary-600 dark:text-primary-400'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300',
                 )}
               >
                 {t('skillPanel.memoryTab')}

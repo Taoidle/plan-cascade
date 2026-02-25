@@ -9,20 +9,8 @@
 
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import {
-  CheckCircledIcon,
-  CrossCircledIcon,
-  ClockIcon,
-  UpdateIcon,
-  MinusCircledIcon,
-} from '@radix-ui/react-icons';
-import type {
-  StoryQualityGateResults,
-  GateResult,
-  GatePhase,
-  GateStatus,
-  DimensionScore,
-} from '../../store/taskMode';
+import { CheckCircledIcon, CrossCircledIcon, ClockIcon, UpdateIcon, MinusCircledIcon } from '@radix-ui/react-icons';
+import type { StoryQualityGateResults, GateResult, GatePhase, GateStatus, DimensionScore } from '../../store/taskMode';
 
 // ============================================================================
 // Helpers
@@ -78,18 +66,14 @@ function GateBadge({ gate }: GateBadgeProps) {
         gate.status === 'failed' && 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20',
         gate.status === 'running' && 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20',
         gate.status === 'pending' && 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800',
-        gate.status === 'skipped' && 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800'
+        gate.status === 'skipped' && 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800',
       )}
       title={gate.message}
     >
       {statusIcons[gate.status]}
-      <span className={clsx('font-medium', statusColors[gate.status])}>
-        {gate.gateName}
-      </span>
+      <span className={clsx('font-medium', statusColors[gate.status])}>{gate.gateName}</span>
       {gate.duration !== undefined && gate.duration > 0 && (
-        <span className="text-gray-400 dark:text-gray-500">
-          {(gate.duration / 1000).toFixed(1)}s
-        </span>
+        <span className="text-gray-400 dark:text-gray-500">{(gate.duration / 1000).toFixed(1)}s</span>
       )}
     </div>
   );
@@ -100,37 +84,22 @@ interface DimensionScoreBarProps {
 }
 
 function DimensionScoreBar({ dimension }: DimensionScoreBarProps) {
-  const percent = dimension.maxScore > 0
-    ? Math.round((dimension.score / dimension.maxScore) * 100)
-    : 0;
+  const percent = dimension.maxScore > 0 ? Math.round((dimension.score / dimension.maxScore) * 100) : 0;
 
-  const color = percent >= 80
-    ? 'bg-green-500'
-    : percent >= 60
-      ? 'bg-yellow-500'
-      : 'bg-red-500';
+  const color = percent >= 80 ? 'bg-green-500' : percent >= 60 ? 'bg-yellow-500' : 'bg-red-500';
 
   return (
     <div className="space-y-0.5">
       <div className="flex items-center justify-between text-xs">
-        <span className="text-gray-600 dark:text-gray-400">
-          {dimension.dimension}
-        </span>
+        <span className="text-gray-600 dark:text-gray-400">{dimension.dimension}</span>
         <span className="text-gray-500 dark:text-gray-400 font-mono">
           {dimension.score}/{dimension.maxScore}
         </span>
       </div>
       <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-        <div
-          className={clsx('h-full rounded-full transition-all', color)}
-          style={{ width: `${percent}%` }}
-        />
+        <div className={clsx('h-full rounded-full transition-all', color)} style={{ width: `${percent}%` }} />
       </div>
-      {dimension.feedback && (
-        <p className="text-xs text-gray-400 dark:text-gray-500 truncate">
-          {dimension.feedback}
-        </p>
-      )}
+      {dimension.feedback && <p className="text-xs text-gray-400 dark:text-gray-500 truncate">{dimension.feedback}</p>}
     </div>
   );
 }
@@ -155,12 +124,7 @@ export function QualityGateResults({ results, expanded = false }: QualityGateRes
       {/* Overall status badge */}
       <div className="flex items-center gap-2">
         {statusIcons[results.overallStatus]}
-        <span
-          className={clsx(
-            'text-sm font-medium',
-            statusColors[results.overallStatus]
-          )}
-        >
+        <span className={clsx('text-sm font-medium', statusColors[results.overallStatus])}>
           {t('qualityGates.title')}
         </span>
         {results.totalScore !== undefined && (
@@ -175,11 +139,8 @@ export function QualityGateResults({ results, expanded = false }: QualityGateRes
         const gates = phaseGroups[phase];
         if (gates.length === 0) return null;
 
-        const phaseKey = phase === 'pre_validation'
-          ? 'preValidation'
-          : phase === 'post_validation'
-            ? 'postValidation'
-            : 'validation';
+        const phaseKey =
+          phase === 'pre_validation' ? 'preValidation' : phase === 'post_validation' ? 'postValidation' : 'validation';
 
         return (
           <div key={phase} className="space-y-1.5">
@@ -226,11 +187,7 @@ export function QualityGatesSummary({ results }: QualityGatesSummaryProps) {
   const storyIds = Object.keys(results);
 
   if (storyIds.length === 0) {
-    return (
-      <p className="text-sm text-gray-500 dark:text-gray-400 italic">
-        {t('qualityGates.noResults')}
-      </p>
-    );
+    return <p className="text-sm text-gray-500 dark:text-gray-400 italic">{t('qualityGates.noResults')}</p>;
   }
 
   return (
@@ -241,14 +198,12 @@ export function QualityGatesSummary({ results }: QualityGatesSummaryProps) {
           className={clsx(
             'p-3 rounded-lg',
             'border border-gray-200 dark:border-gray-700',
-            'bg-gray-50 dark:bg-gray-800/50'
+            'bg-gray-50 dark:bg-gray-800/50',
           )}
         >
           <div className="flex items-center gap-2 mb-2">
             {statusIcons[results[storyId].overallStatus]}
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-              {storyId}
-            </span>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{storyId}</span>
           </div>
           <QualityGateResults results={results[storyId]} expanded />
         </div>

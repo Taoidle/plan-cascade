@@ -117,10 +117,7 @@ describe('usePluginStore', () => {
 
   describe('loadPlugins', () => {
     it('should load plugins successfully', async () => {
-      const mockPlugins = [
-        createMockPluginInfo({ name: 'plugin-a' }),
-        createMockPluginInfo({ name: 'plugin-b' }),
-      ];
+      const mockPlugins = [createMockPluginInfo({ name: 'plugin-a' }), createMockPluginInfo({ name: 'plugin-b' })];
       mockInvoke.mockResolvedValueOnce({
         success: true,
         data: mockPlugins,
@@ -230,9 +227,7 @@ describe('usePluginStore', () => {
 
   describe('refresh', () => {
     it('should refresh plugins successfully', async () => {
-      const mockPlugins = [
-        createMockPluginInfo({ name: 'refreshed-plugin' }),
-      ];
+      const mockPlugins = [createMockPluginInfo({ name: 'refreshed-plugin' })];
       mockInvoke.mockResolvedValueOnce({
         success: true,
         data: mockPlugins,

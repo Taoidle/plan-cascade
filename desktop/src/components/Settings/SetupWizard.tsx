@@ -169,7 +169,9 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
   const [currentStep, setCurrentStep] = useState<WizardStep>('welcome');
   const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
-  const [apiKeyStatus, setApiKeyStatus] = useState<'idle' | 'validating' | 'valid' | 'invalid' | 'format_error'>('idle');
+  const [apiKeyStatus, setApiKeyStatus] = useState<'idle' | 'validating' | 'valid' | 'invalid' | 'format_error'>(
+    'idle',
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [workspacePath, setWorkspacePath] = useState('');
   const [wantsTour, setWantsTour] = useState(true);
@@ -278,50 +280,69 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
     } finally {
       setIsSaving(false);
     }
-  }, [apiKey, needsApiKey, backend, workspacePath, wantsTour, storeSetApiKey, storeSetWorkspacePath, setOnboardingCompleted, onComplete]);
+  }, [
+    apiKey,
+    needsApiKey,
+    backend,
+    workspacePath,
+    wantsTour,
+    storeSetApiKey,
+    storeSetWorkspacePath,
+    setOnboardingCompleted,
+    onComplete,
+  ]);
 
-  const handleProviderChange = useCallback((newBackend: Backend) => {
-    setBackend(newBackend);
-    setProvider(getProviderFromBackend(newBackend));
-    // Reset API key state when provider changes
-    setApiKey('');
-    setApiKeyStatus('idle');
-    setShowApiKey(false);
-  }, [setBackend, setProvider]);
-
-  const validateApiKey = useCallback((key: string) => {
-    if (!key) {
+  const handleProviderChange = useCallback(
+    (newBackend: Backend) => {
+      setBackend(newBackend);
+      setProvider(getProviderFromBackend(newBackend));
+      // Reset API key state when provider changes
+      setApiKey('');
       setApiKeyStatus('idle');
-      return;
-    }
+      setShowApiKey(false);
+    },
+    [setBackend, setProvider],
+  );
 
-    const pattern = API_KEY_PATTERNS[backend];
-    if (pattern) {
-      if (pattern.test(key)) {
-        // Simulate validation delay for UX
+  const validateApiKey = useCallback(
+    (key: string) => {
+      if (!key) {
+        setApiKeyStatus('idle');
+        return;
+      }
+
+      const pattern = API_KEY_PATTERNS[backend];
+      if (pattern) {
+        if (pattern.test(key)) {
+          // Simulate validation delay for UX
+          setApiKeyStatus('validating');
+          setTimeout(() => {
+            setApiKeyStatus('valid');
+          }, 800);
+        } else {
+          setApiKeyStatus('format_error');
+        }
+      } else {
+        // No pattern available, accept any non-empty key
         setApiKeyStatus('validating');
         setTimeout(() => {
           setApiKeyStatus('valid');
-        }, 800);
-      } else {
-        setApiKeyStatus('format_error');
+        }, 500);
       }
-    } else {
-      // No pattern available, accept any non-empty key
-      setApiKeyStatus('validating');
-      setTimeout(() => {
-        setApiKeyStatus('valid');
-      }, 500);
-    }
-  }, [backend]);
+    },
+    [backend],
+  );
 
-  const handleApiKeyChange = useCallback((value: string) => {
-    setApiKey(value);
-    // Debounce validation
-    setApiKeyStatus('idle');
-    const timer = setTimeout(() => validateApiKey(value), 600);
-    return () => clearTimeout(timer);
-  }, [validateApiKey]);
+  const handleApiKeyChange = useCallback(
+    (value: string) => {
+      setApiKey(value);
+      // Debounce validation
+      setApiKeyStatus('idle');
+      const timer = setTimeout(() => validateApiKey(value), 600);
+      return () => clearTimeout(timer);
+    },
+    [validateApiKey],
+  );
 
   const handleBrowseWorkspace = useCallback(async () => {
     try {
@@ -351,7 +372,7 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
           className={clsx(
             'fixed inset-0 bg-black/50 backdrop-blur-sm',
             'data-[state=open]:animate-in data-[state=open]:fade-in-0',
-            'data-[state=closed]:animate-out data-[state=closed]:fade-out-0'
+            'data-[state=closed]:animate-out data-[state=closed]:fade-out-0',
           )}
         />
         <Dialog.Content
@@ -360,7 +381,7 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
             'w-full max-w-2xl max-h-[85vh]',
             'bg-[var(--surface)] rounded-xl shadow-xl',
             'overflow-hidden flex flex-col',
-            'focus:outline-none'
+            'focus:outline-none',
           )}
           onEscapeKeyDown={(e) => e.preventDefault()}
           aria-describedby={undefined}
@@ -384,7 +405,7 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
                 key={step.id}
                 className={clsx(
                   'flex items-center gap-2',
-                  index <= currentStepIndex ? 'text-[var(--color-primary)]' : 'text-[var(--text-muted)]'
+                  index <= currentStepIndex ? 'text-[var(--color-primary)]' : 'text-[var(--text-muted)]',
                 )}
               >
                 <span
@@ -393,34 +414,21 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
                     index < currentStepIndex
                       ? 'bg-[var(--color-primary)] text-[var(--text-inverted)]'
                       : index === currentStepIndex
-                      ? 'border-2 border-[var(--color-primary)] text-[var(--color-primary)]'
-                      : 'border-2 border-[var(--border-strong)] text-[var(--text-muted)]'
+                        ? 'border-2 border-[var(--color-primary)] text-[var(--color-primary)]'
+                        : 'border-2 border-[var(--border-strong)] text-[var(--text-muted)]',
                   )}
                 >
-                  {index < currentStepIndex ? (
-                    <CheckIcon className="w-4 h-4" />
-                  ) : (
-                    index + 1
-                  )}
+                  {index < currentStepIndex ? <CheckIcon className="w-4 h-4" /> : index + 1}
                 </span>
-                <span className="text-sm hidden sm:inline font-medium">
-                  {t(step.titleKey)}
-                </span>
+                <span className="text-sm hidden sm:inline font-medium">{t(step.titleKey)}</span>
               </div>
             ))}
           </div>
 
           {/* Content */}
           <div className="px-8 py-6 min-h-0 flex-1 overflow-y-auto">
-            {currentStep === 'welcome' && (
-              <WelcomeStep />
-            )}
-            {currentStep === 'provider' && (
-              <ProviderStep
-                value={backend}
-                onChange={handleProviderChange}
-              />
-            )}
+            {currentStep === 'welcome' && <WelcomeStep />}
+            {currentStep === 'provider' && <ProviderStep value={backend} onChange={handleProviderChange} />}
             {currentStep === 'apiKey' && (
               <ApiKeyStep
                 backend={backend}
@@ -435,7 +443,9 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
                   if (nextShow && !apiKey) {
                     try {
                       const provider = getProviderFromBackend(backend);
-                      const result = await invoke<{ success: boolean; data?: string | null }>('get_provider_api_key', { provider });
+                      const result = await invoke<{ success: boolean; data?: string | null }>('get_provider_api_key', {
+                        provider,
+                      });
                       if (result.success && typeof result.data === 'string' && result.data.trim()) {
                         setApiKey(result.data);
                         setApiKeyStatus('valid');
@@ -448,11 +458,7 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
               />
             )}
             {currentStep === 'workspace' && (
-              <WorkspaceStep
-                path={workspacePath}
-                onBrowse={handleBrowseWorkspace}
-                onPathChange={setWorkspacePath}
-              />
+              <WorkspaceStep path={workspacePath} onBrowse={handleBrowseWorkspace} onPathChange={setWorkspacePath} />
             )}
             {currentStep === 'complete' && (
               <CompleteStep
@@ -487,7 +493,7 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
                     'inline-flex items-center gap-1 px-4 py-2 rounded-lg',
                     'bg-[var(--bg-subtle)] hover:bg-[var(--bg-muted)]',
                     'text-[var(--text-secondary)]',
-                    'transition-colors'
+                    'transition-colors',
                   )}
                 >
                   <ChevronLeftIcon className="w-4 h-4" />
@@ -504,7 +510,7 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
                     'bg-[var(--color-primary)] text-[var(--text-inverted)]',
                     'hover:bg-[var(--color-primary-hover)]',
                     'disabled:opacity-50 disabled:cursor-not-allowed',
-                    'transition-colors font-medium'
+                    'transition-colors font-medium',
                   )}
                 >
                   {isSaving ? (
@@ -526,7 +532,7 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
                     'inline-flex items-center gap-1 px-5 py-2 rounded-lg',
                     'bg-[var(--color-primary)] text-[var(--text-inverted)]',
                     'hover:bg-[var(--color-primary-hover)]',
-                    'transition-colors font-medium'
+                    'transition-colors font-medium',
                   )}
                 >
                   {currentStep === 'welcome' ? t('actions.getStarted') : t('actions.next')}
@@ -542,7 +548,7 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
             className={clsx(
               'absolute top-4 right-4 p-1.5 rounded-lg',
               'hover:bg-[var(--bg-subtle)]',
-              'transition-colors'
+              'transition-colors',
             )}
             aria-label={t('common:buttons.close')}
           >
@@ -567,29 +573,18 @@ function WelcomeStep() {
         className={clsx(
           'w-24 h-24 mx-auto mb-8 rounded-2xl',
           'bg-[var(--color-primary-subtle)]',
-          'flex items-center justify-center'
+          'flex items-center justify-center',
         )}
       >
-        <svg
-          className="w-14 h-14"
-          viewBox="0 0 32 32"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
+        <svg className="w-14 h-14" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
           <rect x="4" y="4" width="24" height="6" rx="2" style={{ fill: 'var(--color-primary)' }} />
           <rect x="6" y="12" width="20" height="6" rx="2" style={{ fill: 'var(--color-primary)', opacity: 0.7 }} />
           <rect x="8" y="20" width="16" height="6" rx="2" style={{ fill: 'var(--color-primary)', opacity: 0.45 }} />
         </svg>
       </div>
-      <h2 className="text-3xl font-bold text-[var(--text-primary)] mb-3">
-        {t('welcome.title')}
-      </h2>
-      <p className="text-[var(--text-secondary)] max-w-md mx-auto mb-2 leading-relaxed">
-        {t('welcome.description')}
-      </p>
-      <p className="text-sm text-[var(--text-tertiary)]">
-        {t('welcome.subtitle')}
-      </p>
+      <h2 className="text-3xl font-bold text-[var(--text-primary)] mb-3">{t('welcome.title')}</h2>
+      <p className="text-[var(--text-secondary)] max-w-md mx-auto mb-2 leading-relaxed">{t('welcome.description')}</p>
+      <p className="text-sm text-[var(--text-tertiary)]">{t('welcome.subtitle')}</p>
     </div>
   );
 }
@@ -608,12 +603,8 @@ function ProviderStep({ value, onChange }: ProviderStepProps) {
 
   return (
     <div>
-      <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-2">
-        {t('provider.title')}
-      </h2>
-      <p className="text-[var(--text-secondary)] mb-6">
-        {t('provider.description')}
-      </p>
+      <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-2">{t('provider.title')}</h2>
+      <p className="text-[var(--text-secondary)] mb-6">{t('provider.description')}</p>
 
       <div className="space-y-2">
         {providerOptions.map((option) => {
@@ -637,31 +628,27 @@ function ProviderStep({ value, onChange }: ProviderStepProps) {
                 'transition-all duration-200',
                 isSelected
                   ? 'border-[var(--color-primary)] bg-[var(--color-primary-subtle)]'
-                  : 'border-[var(--border-default)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-subtle)]'
+                  : 'border-[var(--border-default)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-subtle)]',
               )}
             >
               {option.icon}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="font-medium text-[var(--text-primary)]">
-                    {name}
-                  </span>
+                  <span className="font-medium text-[var(--text-primary)]">{name}</span>
                   {tag && (
                     <span
                       className={clsx(
                         'text-2xs px-2 py-0.5 rounded-full font-medium',
                         isSelected
                           ? 'bg-[var(--color-primary)] text-[var(--text-inverted)]'
-                          : 'bg-[var(--bg-muted)] text-[var(--text-tertiary)]'
+                          : 'bg-[var(--bg-muted)] text-[var(--text-tertiary)]',
                       )}
                     >
                       {tag}
                     </span>
                   )}
                 </div>
-                <span className="text-sm text-[var(--text-tertiary)] line-clamp-1">
-                  {desc}
-                </span>
+                <span className="text-sm text-[var(--text-tertiary)] line-clamp-1">{desc}</span>
               </div>
               <div
                 className={clsx(
@@ -669,7 +656,7 @@ function ProviderStep({ value, onChange }: ProviderStepProps) {
                   'transition-all',
                   isSelected
                     ? 'border-[var(--color-primary)] bg-[var(--color-primary)]'
-                    : 'border-[var(--border-strong)]'
+                    : 'border-[var(--border-strong)]',
                 )}
               >
                 {isSelected && <CheckIcon className="w-3 h-3 text-[var(--text-inverted)]" />}
@@ -696,15 +683,7 @@ interface ApiKeyStepProps {
   onToggleShow: () => void;
 }
 
-function ApiKeyStep({
-  backend,
-  needsKey,
-  apiKey,
-  showApiKey,
-  status,
-  onApiKeyChange,
-  onToggleShow,
-}: ApiKeyStepProps) {
+function ApiKeyStep({ backend, needsKey, apiKey, showApiKey, status, onApiKeyChange, onToggleShow }: ApiKeyStepProps) {
   const { t } = useTranslation(['wizard', 'settings']);
   const inputRef = useRef<HTMLInputElement>(null);
   const providerName = getProviderDisplayName(backend, t);
@@ -722,35 +701,25 @@ function ApiKeyStep({
           className={clsx(
             'w-16 h-16 mx-auto mb-6 rounded-full',
             'bg-[var(--color-success-subtle)]',
-            'flex items-center justify-center'
+            'flex items-center justify-center',
           )}
         >
           <CheckCircledIcon className="w-8 h-8 text-[var(--color-success)]" />
         </div>
-        <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-2">
-          {t('apiKey.title')}
-        </h2>
-        <p className="text-[var(--text-secondary)] max-w-md">
-          {t('apiKey.noKeyRequired', { provider: providerName })}
-        </p>
+        <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-2">{t('apiKey.title')}</h2>
+        <p className="text-[var(--text-secondary)] max-w-md">{t('apiKey.noKeyRequired', { provider: providerName })}</p>
       </div>
     );
   }
 
   return (
     <div>
-      <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-2">
-        {t('apiKey.title')}
-      </h2>
-      <p className="text-[var(--text-secondary)] mb-6">
-        {t('apiKey.description', { provider: providerName })}
-      </p>
+      <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-2">{t('apiKey.title')}</h2>
+      <p className="text-[var(--text-secondary)] mb-6">{t('apiKey.description', { provider: providerName })}</p>
 
       <div className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">
-            {t('apiKey.label')}
-          </label>
+          <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">{t('apiKey.label')}</label>
           <div className="relative">
             <input
               ref={inputRef}
@@ -768,20 +737,16 @@ function ApiKeyStep({
                 status === 'valid'
                   ? 'border-[var(--color-success)]'
                   : status === 'format_error' || status === 'invalid'
-                  ? 'border-[var(--color-error)]'
-                  : 'border-[var(--border-default)]'
+                    ? 'border-[var(--color-error)]'
+                    : 'border-[var(--border-default)]',
               )}
               autoComplete="off"
               spellCheck={false}
             />
             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
               {/* Validation indicator */}
-              {status === 'validating' && (
-                <ReloadIcon className="w-4 h-4 text-[var(--text-muted)] animate-spin" />
-              )}
-              {status === 'valid' && (
-                <CheckCircledIcon className="w-4 h-4 text-[var(--color-success)]" />
-              )}
+              {status === 'validating' && <ReloadIcon className="w-4 h-4 text-[var(--text-muted)] animate-spin" />}
+              {status === 'valid' && <CheckCircledIcon className="w-4 h-4 text-[var(--color-success)]" />}
               {(status === 'invalid' || status === 'format_error') && apiKey && (
                 <CrossCircledIcon className="w-4 h-4 text-[var(--color-error)]" />
               )}
@@ -793,46 +758,24 @@ function ApiKeyStep({
                   'p-1.5 rounded-md',
                   'hover:bg-[var(--bg-subtle)]',
                   'text-[var(--text-muted)]',
-                  'transition-colors'
+                  'transition-colors',
                 )}
                 aria-label={showApiKey ? t('apiKey.hide') : t('apiKey.show')}
               >
-                {showApiKey ? (
-                  <EyeClosedIcon className="w-4 h-4" />
-                ) : (
-                  <EyeOpenIcon className="w-4 h-4" />
-                )}
+                {showApiKey ? <EyeClosedIcon className="w-4 h-4" /> : <EyeOpenIcon className="w-4 h-4" />}
               </button>
             </div>
           </div>
 
           {/* Status message */}
           <div className="mt-2 min-h-[1.25rem]">
-            {status === 'validating' && (
-              <p className="text-sm text-[var(--text-muted)]">
-                {t('apiKey.validating')}
-              </p>
-            )}
-            {status === 'valid' && (
-              <p className="text-sm text-[var(--color-success)]">
-                {t('apiKey.valid')}
-              </p>
-            )}
-            {status === 'invalid' && (
-              <p className="text-sm text-[var(--color-error)]">
-                {t('apiKey.invalid')}
-              </p>
-            )}
+            {status === 'validating' && <p className="text-sm text-[var(--text-muted)]">{t('apiKey.validating')}</p>}
+            {status === 'valid' && <p className="text-sm text-[var(--color-success)]">{t('apiKey.valid')}</p>}
+            {status === 'invalid' && <p className="text-sm text-[var(--color-error)]">{t('apiKey.invalid')}</p>}
             {status === 'format_error' && apiKey && (
-              <p className="text-sm text-[var(--color-error)]">
-                {t('apiKey.formatError')}
-              </p>
+              <p className="text-sm text-[var(--color-error)]">{t('apiKey.formatError')}</p>
             )}
-            {status === 'idle' && (
-              <p className="text-sm text-[var(--text-muted)]">
-                {t('apiKey.hint')}
-              </p>
-            )}
+            {status === 'idle' && <p className="text-sm text-[var(--text-muted)]">{t('apiKey.hint')}</p>}
           </div>
         </div>
       </div>
@@ -855,18 +798,12 @@ function WorkspaceStep({ path, onBrowse, onPathChange }: WorkspaceStepProps) {
 
   return (
     <div>
-      <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-2">
-        {t('workspace.title')}
-      </h2>
-      <p className="text-[var(--text-secondary)] mb-6">
-        {t('workspace.description')}
-      </p>
+      <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-2">{t('workspace.title')}</h2>
+      <p className="text-[var(--text-secondary)] mb-6">{t('workspace.description')}</p>
 
       <div className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">
-            {t('workspace.label')}
-          </label>
+          <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">{t('workspace.label')}</label>
           <div className="flex gap-2">
             <div className="relative flex-1">
               <FileIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
@@ -882,7 +819,7 @@ function WorkspaceStep({ path, onBrowse, onPathChange }: WorkspaceStepProps) {
                   'placeholder:text-[var(--text-muted)]',
                   'focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]',
                   'font-mono text-sm',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               />
             </div>
@@ -893,7 +830,7 @@ function WorkspaceStep({ path, onBrowse, onPathChange }: WorkspaceStepProps) {
                 'bg-[var(--bg-subtle)] hover:bg-[var(--bg-muted)]',
                 'text-[var(--text-secondary)] font-medium text-sm',
                 'border border-[var(--border-default)]',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               {t('workspace.browse')}
@@ -921,14 +858,7 @@ interface CompleteStepProps {
   onTourToggle: (wants: boolean) => void;
 }
 
-function CompleteStep({
-  backend,
-  apiKey,
-  needsKey,
-  workspacePath,
-  wantsTour,
-  onTourToggle,
-}: CompleteStepProps) {
+function CompleteStep({ backend, apiKey, needsKey, workspacePath, wantsTour, onTourToggle }: CompleteStepProps) {
   const { t } = useTranslation(['wizard', 'settings']);
 
   const providerName = getProviderDisplayName(backend, t);
@@ -953,24 +883,20 @@ function CompleteStep({
         className={clsx(
           'w-20 h-20 mx-auto mb-6 rounded-full',
           'bg-[var(--color-success-subtle)]',
-          'flex items-center justify-center'
+          'flex items-center justify-center',
         )}
       >
         <CheckCircledIcon className="w-12 h-12 text-[var(--color-success)]" />
       </div>
-      <h2 className="text-2xl font-bold text-[var(--text-primary)] mb-2">
-        {t('complete.title')}
-      </h2>
-      <p className="text-[var(--text-secondary)] max-w-md mx-auto mb-6">
-        {t('complete.description')}
-      </p>
+      <h2 className="text-2xl font-bold text-[var(--text-primary)] mb-2">{t('complete.title')}</h2>
+      <p className="text-[var(--text-secondary)] max-w-md mx-auto mb-6">{t('complete.description')}</p>
 
       {/* Configuration Summary */}
       <div
         className={clsx(
           'rounded-xl border border-[var(--border-default)]',
           'bg-[var(--surface-sunken)]',
-          'p-4 mb-6 text-left max-w-sm mx-auto'
+          'p-4 mb-6 text-left max-w-sm mx-auto',
         )}
       >
         {summaryItems.map((item, i) => (
@@ -978,7 +904,7 @@ function CompleteStep({
             key={item.label}
             className={clsx(
               'flex justify-between items-center py-2',
-              i < summaryItems.length - 1 && 'border-b border-[var(--border-subtle)]'
+              i < summaryItems.length - 1 && 'border-b border-[var(--border-subtle)]',
             )}
           >
             <span className="text-sm text-[var(--text-tertiary)]">{item.label}</span>
@@ -989,9 +915,7 @@ function CompleteStep({
 
       {/* Tour prompt */}
       <div className="border-t border-[var(--border-default)] pt-4">
-        <p className="text-sm text-[var(--text-secondary)] mb-3">
-          {t('complete.tourPrompt')}
-        </p>
+        <p className="text-sm text-[var(--text-secondary)] mb-3">{t('complete.tourPrompt')}</p>
         <div className="flex justify-center gap-3">
           <button
             onClick={() => onTourToggle(true)}
@@ -999,7 +923,7 @@ function CompleteStep({
               'px-4 py-2 rounded-lg text-sm font-medium transition-all',
               wantsTour
                 ? 'bg-[var(--color-primary)] text-[var(--text-inverted)]'
-                : 'bg-[var(--bg-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-muted)]'
+                : 'bg-[var(--bg-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-muted)]',
             )}
           >
             {t('complete.launchTour')}
@@ -1010,7 +934,7 @@ function CompleteStep({
               'px-4 py-2 rounded-lg text-sm font-medium transition-all',
               !wantsTour
                 ? 'bg-[var(--color-primary)] text-[var(--text-inverted)]'
-                : 'bg-[var(--bg-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-muted)]'
+                : 'bg-[var(--bg-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-muted)]',
             )}
           >
             {t('complete.skipTour')}
@@ -1047,7 +971,10 @@ function getProviderFromBackend(backend: Backend): string {
   }
 }
 
-function getProviderDisplayName(backend: Backend, t: (key: string, options?: Record<string, string>) => string): string {
+function getProviderDisplayName(
+  backend: Backend,
+  t: (key: string, options?: Record<string, string>) => string,
+): string {
   return t(`settings:llm.providers.${backend}.name`, { defaultValue: backend });
 }
 
@@ -1077,7 +1004,7 @@ async function saveSettings() {
       theme: settings.theme,
       onboardingCompleted: settings.onboardingCompleted,
       workspacePath: settings.workspacePath,
-    })
+    }),
   );
 }
 

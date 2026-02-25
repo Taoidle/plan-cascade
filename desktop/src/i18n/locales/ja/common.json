@@ -128,7 +128,7 @@
     "retryAttempts": "リトライ回数"
   },
 
-"timeline": {
+  "timeline": {
     "title": "タイムライン",
     "noCheckpoints": "チェックポイントがありません",
     "createFirstCheckpoint": "最初のチェックポイントを作成して、セッション状態の追跡を開始しましょう。",

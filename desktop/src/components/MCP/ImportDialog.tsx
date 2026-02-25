@@ -63,7 +63,7 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
             'w-full max-w-md max-h-[85vh] overflow-y-auto',
             'bg-white dark:bg-gray-900 rounded-lg shadow-xl',
             'animate-in fade-in-0 zoom-in-95',
-            'focus:outline-none'
+            'focus:outline-none',
           )}
         >
           {/* Header */}
@@ -82,17 +82,11 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
           <div className="p-4">
             {!result && !error && (
               <>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                  {t('mcp.importDescription')}
-                </p>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{t('mcp.importDescription')}</p>
 
                 <div className="p-3 rounded-md bg-gray-100 dark:bg-gray-800 mb-4">
-                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                    {t('mcp.configPath')}
-                  </p>
-                  <code className="text-xs text-gray-700 dark:text-gray-300">
-                    {getConfigPathForPlatform()}
-                  </code>
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{t('mcp.configPath')}</p>
+                  <code className="text-xs text-gray-700 dark:text-gray-300">{getConfigPathForPlatform()}</code>
                 </div>
 
                 <button
@@ -103,7 +97,7 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
                     'bg-primary-600 hover:bg-primary-700',
                     'text-white text-sm font-medium',
                     'disabled:opacity-50',
-                    'transition-colors'
+                    'transition-colors',
                   )}
                 >
                   {loading ? (
@@ -126,28 +120,16 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
                 {/* Summary */}
                 <div className="grid grid-cols-3 gap-3">
                   <div className="p-3 rounded-md bg-green-100 dark:bg-green-900/30 text-center">
-                    <p className="text-2xl font-bold text-green-700 dark:text-green-300">
-                      {result.added}
-                    </p>
-                    <p className="text-xs text-green-600 dark:text-green-400">
-                      {t('mcp.added')}
-                    </p>
+                    <p className="text-2xl font-bold text-green-700 dark:text-green-300">{result.added}</p>
+                    <p className="text-xs text-green-600 dark:text-green-400">{t('mcp.added')}</p>
                   </div>
                   <div className="p-3 rounded-md bg-yellow-100 dark:bg-yellow-900/30 text-center">
-                    <p className="text-2xl font-bold text-yellow-700 dark:text-yellow-300">
-                      {result.skipped}
-                    </p>
-                    <p className="text-xs text-yellow-600 dark:text-yellow-400">
-                      {t('mcp.skipped')}
-                    </p>
+                    <p className="text-2xl font-bold text-yellow-700 dark:text-yellow-300">{result.skipped}</p>
+                    <p className="text-xs text-yellow-600 dark:text-yellow-400">{t('mcp.skipped')}</p>
                   </div>
                   <div className="p-3 rounded-md bg-red-100 dark:bg-red-900/30 text-center">
-                    <p className="text-2xl font-bold text-red-700 dark:text-red-300">
-                      {result.failed}
-                    </p>
-                    <p className="text-xs text-red-600 dark:text-red-400">
-                      {t('mcp.failed')}
-                    </p>
+                    <p className="text-2xl font-bold text-red-700 dark:text-red-300">{result.failed}</p>
+                    <p className="text-xs text-red-600 dark:text-red-400">{t('mcp.failed')}</p>
                   </div>
                 </div>
 
@@ -159,10 +141,7 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
                     </p>
                     <div className="space-y-1">
                       {result.servers.map((name, i) => (
-                        <div
-                          key={i}
-                          className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400"
-                        >
+                        <div key={i} className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                           <CheckIcon className="w-4 h-4 text-green-500" />
                           <span>{name}</span>
                         </div>
@@ -174,15 +153,10 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
                 {/* Errors */}
                 {result.errors.length > 0 && (
                   <div>
-                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      {t('mcp.importErrors')}
-                    </p>
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('mcp.importErrors')}</p>
                     <div className="space-y-1 max-h-32 overflow-y-auto">
                       {result.errors.map((err, i) => (
-                        <div
-                          key={i}
-                          className="flex items-start gap-2 text-xs text-red-600 dark:text-red-400"
-                        >
+                        <div key={i} className="flex items-start gap-2 text-xs text-red-600 dark:text-red-400">
                           <CrossCircledIcon className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
                           <span>{err}</span>
                         </div>
@@ -207,7 +181,7 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
               className={clsx(
                 'px-4 py-2 rounded-md',
                 'bg-primary-600 hover:bg-primary-700',
-                'text-white text-sm font-medium'
+                'text-white text-sm font-medium',
               )}
             >
               {result ? t('common.done') : t('common.cancel')}

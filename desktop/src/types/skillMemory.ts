@@ -123,13 +123,7 @@ export interface SkillsOverview {
 export type MemoryCategory = 'preference' | 'convention' | 'pattern' | 'correction' | 'fact';
 
 /** All valid memory categories */
-export const MEMORY_CATEGORIES: MemoryCategory[] = [
-  'preference',
-  'convention',
-  'pattern',
-  'correction',
-  'fact',
-];
+export const MEMORY_CATEGORIES: MemoryCategory[] = ['preference', 'convention', 'pattern', 'correction', 'fact'];
 
 /** A single memory entry */
 export interface MemoryEntry {

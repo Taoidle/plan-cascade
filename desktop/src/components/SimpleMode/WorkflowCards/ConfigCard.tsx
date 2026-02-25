@@ -66,16 +66,24 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
 
       <div className="px-3 py-2 space-y-2 relative">
         {/* Layer 1: Summary */}
-        <div className={clsx(
-          'transition-opacity duration-150',
-          layer === 1 ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'
-        )}>
+        <div
+          className={clsx(
+            'transition-opacity duration-150',
+            layer === 1 ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden',
+          )}
+        >
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
             <ConfigRow label={t('workflow.config.flow')} value={data.flowLevel} />
             <ConfigRow label={t('workflow.config.tdd')} value={data.tddMode} />
             <ConfigRow label={t('workflow.config.maxParallel')} value={String(data.maxParallel)} />
-            <ConfigRow label={t('workflow.config.qualityGates')} value={data.qualityGatesEnabled ? t('workflow.config.on') : t('workflow.config.off')} />
-            <ConfigRow label={t('workflow.config.interview')} value={data.specInterviewEnabled ? t('workflow.config.enabled') : t('workflow.config.skip')} />
+            <ConfigRow
+              label={t('workflow.config.qualityGates')}
+              value={data.qualityGatesEnabled ? t('workflow.config.on') : t('workflow.config.off')}
+            />
+            <ConfigRow
+              label={t('workflow.config.interview')}
+              value={data.specInterviewEnabled ? t('workflow.config.enabled') : t('workflow.config.skip')}
+            />
           </div>
 
           {isActive && (
@@ -86,10 +94,7 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
               >
                 {t('workflow.config.continue')}
               </button>
-              <button
-                onClick={() => setLayer(2)}
-                className="text-xs text-sky-600 dark:text-sky-400 hover:underline"
-              >
+              <button onClick={() => setLayer(2)} className="text-xs text-sky-600 dark:text-sky-400 hover:underline">
                 {t('workflow.config.customize')}
               </button>
             </div>
@@ -97,10 +102,12 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
         </div>
 
         {/* Layer 2: Edit form */}
-        <div className={clsx(
-          'transition-opacity duration-150',
-          layer === 2 ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'
-        )}>
+        <div
+          className={clsx(
+            'transition-opacity duration-150',
+            layer === 2 ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden',
+          )}
+        >
           <div className="space-y-2">
             <SelectField
               label={t('workflow.config.flowLevel')}
@@ -123,7 +130,9 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
               onChange={(v) => setLocalConfig({ ...localConfig, tddMode: v as ConfigCardData['tddMode'] })}
             />
             <div className="flex items-center gap-2">
-              <label className="text-xs text-sky-700 dark:text-sky-300 w-24 shrink-0">{t('workflow.config.maxParallel')}</label>
+              <label className="text-xs text-sky-700 dark:text-sky-300 w-24 shrink-0">
+                {t('workflow.config.maxParallel')}
+              </label>
               <input
                 type="range"
                 min={1}
@@ -169,13 +178,13 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
         </div>
 
         {/* Layer 3: NL override */}
-        <div className={clsx(
-          'transition-opacity duration-150',
-          layer === 3 ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'
-        )}>
-          <p className="text-xs text-sky-600 dark:text-sky-400">
-            {t('workflow.config.nlDescription')}
-          </p>
+        <div
+          className={clsx(
+            'transition-opacity duration-150',
+            layer === 3 ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden',
+          )}
+        >
+          <p className="text-xs text-sky-600 dark:text-sky-400">{t('workflow.config.nlDescription')}</p>
           <div className="flex gap-2">
             <input
               type="text"
@@ -233,22 +242,16 @@ function SelectField({
         className="flex-1 px-2 py-1 text-xs rounded border border-sky-300 dark:border-sky-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-sky-500"
       >
         {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>{opt.label}</option>
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
         ))}
       </select>
     </div>
   );
 }
 
-function ToggleField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: boolean;
-  onChange: (v: boolean) => void;
-}) {
+function ToggleField({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
   const { t } = useTranslation('simpleMode');
   return (
     <div className="flex items-center gap-2">
@@ -257,17 +260,19 @@ function ToggleField({
         onClick={() => onChange(!value)}
         className={clsx(
           'relative w-8 h-4 rounded-full transition-colors',
-          value ? 'bg-sky-600' : 'bg-gray-300 dark:bg-gray-600'
+          value ? 'bg-sky-600' : 'bg-gray-300 dark:bg-gray-600',
         )}
       >
         <span
           className={clsx(
             'absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform',
-            value && 'translate-x-4'
+            value && 'translate-x-4',
           )}
         />
       </button>
-      <span className="text-xs text-sky-600/80 dark:text-sky-400/80">{value ? t('workflow.config.on') : t('workflow.config.off')}</span>
+      <span className="text-xs text-sky-600/80 dark:text-sky-400/80">
+        {value ? t('workflow.config.on') : t('workflow.config.off')}
+      </span>
     </div>
   );
 }

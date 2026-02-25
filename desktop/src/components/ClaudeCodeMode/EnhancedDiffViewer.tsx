@@ -70,7 +70,9 @@ function computeDiff(oldLines: string[], newLines: string[]): DiffLine[] {
   // Build LCS matrix
   const m = oldLines.length;
   const n = newLines.length;
-  const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+  const dp: number[][] = Array(m + 1)
+    .fill(null)
+    .map(() => Array(n + 1).fill(0));
 
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
@@ -83,7 +85,8 @@ function computeDiff(oldLines: string[], newLines: string[]): DiffLine[] {
   }
 
   // Backtrack to find diff
-  let i = m, j = n;
+  let i = m,
+    j = n;
   const changes: DiffLine[] = [];
 
   while (i > 0 || j > 0) {
@@ -135,7 +138,10 @@ function computeDiff(oldLines: string[], newLines: string[]): DiffLine[] {
   return result;
 }
 
-function computeCharDiff(oldText: string, newText: string): {
+function computeCharDiff(
+  oldText: string,
+  newText: string,
+): {
   oldDiffs: CharDiff[];
   newDiffs: CharDiff[];
 } {
@@ -149,7 +155,9 @@ function computeCharDiff(oldText: string, newText: string): {
   // Build LCS for words
   const m = oldWords.length;
   const n = newWords.length;
-  const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+  const dp: number[][] = Array(m + 1)
+    .fill(null)
+    .map(() => Array(n + 1).fill(0));
 
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
@@ -162,7 +170,8 @@ function computeCharDiff(oldText: string, newText: string): {
   }
 
   // Backtrack
-  let i = m, j = n;
+  let i = m,
+    j = n;
   const oldResult: CharDiff[] = [];
   const newResult: CharDiff[] = [];
 
@@ -265,9 +274,7 @@ function DiffSummary({ diffLines }: DiffSummaryProps) {
         {stats.deletions} removed
       </span>
       {stats.modifications > 0 && (
-        <span className="text-yellow-600 dark:text-yellow-400">
-          ~{stats.modifications} modified
-        </span>
+        <span className="text-yellow-600 dark:text-yellow-400">~{stats.modifications} modified</span>
       )}
     </div>
   );
@@ -284,12 +291,7 @@ interface UnifiedDiffViewProps {
   toggleCollapse: (index: number) => void;
 }
 
-function UnifiedDiffView({
-  diffLines,
-  wrapLines,
-  collapsedSections,
-  toggleCollapse,
-}: UnifiedDiffViewProps) {
+function UnifiedDiffView({ diffLines, wrapLines, collapsedSections, toggleCollapse }: UnifiedDiffViewProps) {
   // Group consecutive unchanged lines for collapsing
   const groupedLines = useMemo(() => {
     const groups: { lines: DiffLine[]; startIndex: number; isCollapsible: boolean }[] = [];
@@ -358,7 +360,7 @@ function UnifiedDiffView({
                 'bg-gray-100 dark:bg-gray-800',
                 'text-gray-500 dark:text-gray-400',
                 'hover:bg-gray-200 dark:hover:bg-gray-700',
-                'transition-colors text-xs'
+                'transition-colors text-xs',
               )}
             >
               <ChevronRightIcon className="w-3 h-3" />
@@ -377,7 +379,7 @@ function UnifiedDiffView({
                   'bg-gray-100 dark:bg-gray-800',
                   'text-gray-500 dark:text-gray-400',
                   'hover:bg-gray-200 dark:hover:bg-gray-700',
-                  'transition-colors text-xs'
+                  'transition-colors text-xs',
                 )}
               >
                 Hide {group.lines.length} unchanged lines
@@ -391,7 +393,7 @@ function UnifiedDiffView({
                     'flex',
                     line.type === 'added' && 'bg-green-50 dark:bg-green-900/20',
                     line.type === 'removed' && 'bg-red-50 dark:bg-red-900/20',
-                    !wrapLines && 'whitespace-nowrap'
+                    !wrapLines && 'whitespace-nowrap',
                   )}
                 >
                   {/* Line numbers */}
@@ -403,36 +405,38 @@ function UnifiedDiffView({
                   </span>
 
                   {/* Change indicator */}
-                  <span className={clsx(
-                    'w-6 text-center select-none flex-shrink-0',
-                    line.type === 'added' && 'text-green-600 dark:text-green-400',
-                    line.type === 'removed' && 'text-red-600 dark:text-red-400'
-                  )}>
+                  <span
+                    className={clsx(
+                      'w-6 text-center select-none flex-shrink-0',
+                      line.type === 'added' && 'text-green-600 dark:text-green-400',
+                      line.type === 'removed' && 'text-red-600 dark:text-red-400',
+                    )}
+                  >
                     {line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' '}
                   </span>
 
                   {/* Content */}
-                  <pre className={clsx(
-                    'flex-1 px-2',
-                    wrapLines && 'whitespace-pre-wrap break-all',
-                    line.type === 'added' && 'text-green-800 dark:text-green-300',
-                    line.type === 'removed' && 'text-red-800 dark:text-red-300'
-                  )}>
-                    {line.charDiffs ? (
-                      line.charDiffs.map((diff, i) => (
-                        <span
-                          key={i}
-                          className={clsx(
-                            diff.type === 'added' && 'bg-green-200 dark:bg-green-700',
-                            diff.type === 'removed' && 'bg-red-200 dark:bg-red-700'
-                          )}
-                        >
-                          {diff.text}
-                        </span>
-                      ))
-                    ) : (
-                      line.content || '\u00A0'
+                  <pre
+                    className={clsx(
+                      'flex-1 px-2',
+                      wrapLines && 'whitespace-pre-wrap break-all',
+                      line.type === 'added' && 'text-green-800 dark:text-green-300',
+                      line.type === 'removed' && 'text-red-800 dark:text-red-300',
                     )}
+                  >
+                    {line.charDiffs
+                      ? line.charDiffs.map((diff, i) => (
+                          <span
+                            key={i}
+                            className={clsx(
+                              diff.type === 'added' && 'bg-green-200 dark:bg-green-700',
+                              diff.type === 'removed' && 'bg-red-200 dark:bg-red-700',
+                            )}
+                          >
+                            {diff.text}
+                          </span>
+                        ))
+                      : line.content || '\u00A0'}
                   </pre>
                 </div>
               ))}
@@ -502,33 +506,28 @@ function SideBySideDiffView({ diffLines, wrapLines }: SideBySideDiffViewProps) {
               'flex',
               pair.left?.type === 'removed' && 'bg-red-50 dark:bg-red-900/20',
               !pair.left && 'bg-gray-50 dark:bg-gray-800/50',
-              !wrapLines && 'whitespace-nowrap'
+              !wrapLines && 'whitespace-nowrap',
             )}
           >
             <span className="w-10 text-right pr-2 text-gray-400 select-none flex-shrink-0 border-r border-gray-200 dark:border-gray-700">
               {pair.left?.oldLineNumber || ''}
             </span>
-            <pre className={clsx(
-              'flex-1 px-2 min-h-[1.5em]',
-              wrapLines && 'whitespace-pre-wrap break-all',
-              pair.left?.type === 'removed' && 'text-red-800 dark:text-red-300'
-            )}>
-              {pair.left ? (
-                pair.left.charDiffs ? (
-                  pair.left.charDiffs.map((diff, i) => (
-                    <span
-                      key={i}
-                      className={clsx(diff.type === 'removed' && 'bg-red-200 dark:bg-red-700')}
-                    >
-                      {diff.text}
-                    </span>
-                  ))
-                ) : (
-                  pair.left.content || '\u00A0'
-                )
-              ) : (
-                '\u00A0'
+            <pre
+              className={clsx(
+                'flex-1 px-2 min-h-[1.5em]',
+                wrapLines && 'whitespace-pre-wrap break-all',
+                pair.left?.type === 'removed' && 'text-red-800 dark:text-red-300',
               )}
+            >
+              {pair.left
+                ? pair.left.charDiffs
+                  ? pair.left.charDiffs.map((diff, i) => (
+                      <span key={i} className={clsx(diff.type === 'removed' && 'bg-red-200 dark:bg-red-700')}>
+                        {diff.text}
+                      </span>
+                    ))
+                  : pair.left.content || '\u00A0'
+                : '\u00A0'}
             </pre>
           </div>
         ))}
@@ -546,33 +545,28 @@ function SideBySideDiffView({ diffLines, wrapLines }: SideBySideDiffViewProps) {
               'flex',
               pair.right?.type === 'added' && 'bg-green-50 dark:bg-green-900/20',
               !pair.right && 'bg-gray-50 dark:bg-gray-800/50',
-              !wrapLines && 'whitespace-nowrap'
+              !wrapLines && 'whitespace-nowrap',
             )}
           >
             <span className="w-10 text-right pr-2 text-gray-400 select-none flex-shrink-0 border-r border-gray-200 dark:border-gray-700">
               {pair.right?.newLineNumber || ''}
             </span>
-            <pre className={clsx(
-              'flex-1 px-2 min-h-[1.5em]',
-              wrapLines && 'whitespace-pre-wrap break-all',
-              pair.right?.type === 'added' && 'text-green-800 dark:text-green-300'
-            )}>
-              {pair.right ? (
-                pair.right.charDiffs ? (
-                  pair.right.charDiffs.map((diff, i) => (
-                    <span
-                      key={i}
-                      className={clsx(diff.type === 'added' && 'bg-green-200 dark:bg-green-700')}
-                    >
-                      {diff.text}
-                    </span>
-                  ))
-                ) : (
-                  pair.right.content || '\u00A0'
-                )
-              ) : (
-                '\u00A0'
+            <pre
+              className={clsx(
+                'flex-1 px-2 min-h-[1.5em]',
+                wrapLines && 'whitespace-pre-wrap break-all',
+                pair.right?.type === 'added' && 'text-green-800 dark:text-green-300',
               )}
+            >
+              {pair.right
+                ? pair.right.charDiffs
+                  ? pair.right.charDiffs.map((diff, i) => (
+                      <span key={i} className={clsx(diff.type === 'added' && 'bg-green-200 dark:bg-green-700')}>
+                        {diff.text}
+                      </span>
+                    ))
+                  : pair.right.content || '\u00A0'
+                : '\u00A0'}
             </pre>
           </div>
         ))}
@@ -635,24 +629,27 @@ export function EnhancedDiffViewer({
   }, [diffLines]);
 
   // Navigation between changes
-  const navigateToChange = useCallback((direction: 'next' | 'prev') => {
-    if (changes.length === 0) return;
+  const navigateToChange = useCallback(
+    (direction: 'next' | 'prev') => {
+      if (changes.length === 0) return;
 
-    let newIndex = currentChangeIndex;
-    if (direction === 'next') {
-      newIndex = (currentChangeIndex + 1) % changes.length;
-    } else {
-      newIndex = (currentChangeIndex - 1 + changes.length) % changes.length;
-    }
-    setCurrentChangeIndex(newIndex);
+      let newIndex = currentChangeIndex;
+      if (direction === 'next') {
+        newIndex = (currentChangeIndex + 1) % changes.length;
+      } else {
+        newIndex = (currentChangeIndex - 1 + changes.length) % changes.length;
+      }
+      setCurrentChangeIndex(newIndex);
 
-    // Scroll to the change
-    // Note: In a real implementation, you'd scroll to the actual DOM element
-  }, [changes, currentChangeIndex]);
+      // Scroll to the change
+      // Note: In a real implementation, you'd scroll to the actual DOM element
+    },
+    [changes, currentChangeIndex],
+  );
 
   // Toggle collapsed section
   const toggleCollapse = useCallback((index: number) => {
-    setCollapsedSections(prev => {
+    setCollapsedSections((prev) => {
       const next = new Set(prev);
       if (next.has(index)) {
         next.delete(index);
@@ -675,15 +672,17 @@ export function EnhancedDiffViewer({
   }, [newContent]);
 
   // Check if there are any changes
-  const hasChanges = diffLines.some(line => line.type !== 'unchanged');
+  const hasChanges = diffLines.some((line) => line.type !== 'unchanged');
 
   if (!hasChanges) {
     return (
-      <div className={clsx(
-        'flex flex-col items-center justify-center py-8',
-        'text-gray-500 dark:text-gray-400',
-        className
-      )}>
+      <div
+        className={clsx(
+          'flex flex-col items-center justify-center py-8',
+          'text-gray-500 dark:text-gray-400',
+          className,
+        )}
+      >
         <CheckIcon className="w-8 h-8 mb-2 opacity-50" />
         <p className="text-sm">No changes detected</p>
       </div>
@@ -693,11 +692,13 @@ export function EnhancedDiffViewer({
   return (
     <div className={clsx('flex flex-col rounded-lg border border-gray-200 dark:border-gray-700', className)}>
       {/* Header */}
-      <div className={clsx(
-        'flex items-center justify-between px-3 py-2',
-        'bg-gray-50 dark:bg-gray-800/50',
-        'border-b border-gray-200 dark:border-gray-700'
-      )}>
+      <div
+        className={clsx(
+          'flex items-center justify-between px-3 py-2',
+          'bg-gray-50 dark:bg-gray-800/50',
+          'border-b border-gray-200 dark:border-gray-700',
+        )}
+      >
         <DiffSummary diffLines={diffLines} />
 
         <div className="flex items-center gap-2">
@@ -709,7 +710,7 @@ export function EnhancedDiffViewer({
                 'px-2 py-1 text-xs transition-colors',
                 viewMode === 'unified'
                   ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-700 dark:text-primary-300'
-                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700',
               )}
             >
               <ViewVerticalIcon className="w-4 h-4" />
@@ -720,7 +721,7 @@ export function EnhancedDiffViewer({
                 'px-2 py-1 text-xs transition-colors',
                 viewMode === 'side-by-side'
                   ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-700 dark:text-primary-300'
-                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700',
               )}
             >
               <ViewHorizontalIcon className="w-4 h-4" />
@@ -734,7 +735,7 @@ export function EnhancedDiffViewer({
               'p-1.5 rounded transition-colors',
               wrapLines
                 ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-600 dark:text-primary-400'
-                : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700'
+                : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700',
             )}
             title="Toggle word wrap"
           >
@@ -773,7 +774,7 @@ export function EnhancedDiffViewer({
               'p-1.5 rounded transition-colors',
               copied === 'new'
                 ? 'bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-400'
-                : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700'
+                : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700',
             )}
             title={copied === 'new' ? 'Copied!' : 'Copy new content'}
           >
@@ -790,11 +791,7 @@ export function EnhancedDiffViewer({
       )}
 
       {/* Diff content */}
-      <div
-        ref={containerRef}
-        className="overflow-auto"
-        style={{ maxHeight }}
-      >
+      <div ref={containerRef} className="overflow-auto" style={{ maxHeight }}>
         {viewMode === 'unified' ? (
           <UnifiedDiffView
             diffLines={diffLines}
@@ -803,10 +800,7 @@ export function EnhancedDiffViewer({
             toggleCollapse={toggleCollapse}
           />
         ) : (
-          <SideBySideDiffView
-            diffLines={diffLines}
-            wrapLines={wrapLines}
-          />
+          <SideBySideDiffView diffLines={diffLines} wrapLines={wrapLines} />
         )}
       </div>
     </div>

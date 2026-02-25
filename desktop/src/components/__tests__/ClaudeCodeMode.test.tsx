@@ -54,11 +54,7 @@ vi.mock('../ClaudeCodeMode/ChatView', () => ({
 vi.mock('../ClaudeCodeMode/ChatInput', () => ({
   ChatInput: ({ onSend, disabled }: { onSend: (msg: string) => void; disabled: boolean }) => (
     <div data-testid="chat-input">
-      <input
-        data-testid="message-input"
-        disabled={disabled}
-        onChange={() => {}}
-      />
+      <input data-testid="message-input" disabled={disabled} onChange={() => {}} />
       <button data-testid="send-btn" onClick={() => onSend('test message')} disabled={disabled}>
         Send
       </button>
@@ -106,7 +102,9 @@ vi.mock('@radix-ui/react-dropdown-menu', () => ({
   Portal: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   Content: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   Item: ({ children, onSelect, ...props }: { children: React.ReactNode; onSelect?: () => void }) => (
-    <button onClick={onSelect} {...props}>{children}</button>
+    <button onClick={onSelect} {...props}>
+      {children}
+    </button>
   ),
   Separator: () => <hr />,
 }));

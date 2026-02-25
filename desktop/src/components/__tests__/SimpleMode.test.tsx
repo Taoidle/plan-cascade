@@ -77,9 +77,20 @@ vi.mock('../../store/execution', () => ({
 
 // Mock child components to isolate SimpleMode logic
 vi.mock('../SimpleMode/InputBox', () => ({
-  InputBox: ({ value, onChange, onSubmit, disabled, placeholder, isLoading }: {
-    value: string; onChange: (v: string) => void; onSubmit: () => void;
-    disabled: boolean; placeholder: string; isLoading: boolean;
+  InputBox: ({
+    value,
+    onChange,
+    onSubmit,
+    disabled,
+    placeholder,
+    isLoading,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    onSubmit: () => void;
+    disabled: boolean;
+    placeholder: string;
+    isLoading: boolean;
   }) => (
     <div data-testid="input-box">
       <input
@@ -101,9 +112,7 @@ vi.mock('../SimpleMode/ProgressView', () => ({
 }));
 
 vi.mock('../SimpleMode/ResultView', () => ({
-  ResultView: ({ result }: { result: unknown }) => (
-    <div data-testid="result-view">{JSON.stringify(result)}</div>
-  ),
+  ResultView: ({ result }: { result: unknown }) => <div data-testid="result-view">{JSON.stringify(result)}</div>,
 }));
 
 vi.mock('../SimpleMode/HistoryPanel', () => ({
@@ -115,9 +124,7 @@ vi.mock('../SimpleMode/HistoryPanel', () => ({
 }));
 
 vi.mock('../SimpleMode/ConnectionStatus', () => ({
-  ConnectionStatus: ({ status }: { status: string }) => (
-    <div data-testid="connection-status">{status}</div>
-  ),
+  ConnectionStatus: ({ status }: { status: string }) => <div data-testid="connection-status">{status}</div>,
 }));
 
 // Mock shared streaming/progress components imported by SimpleMode

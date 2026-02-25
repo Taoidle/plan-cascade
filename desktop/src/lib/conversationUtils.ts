@@ -139,30 +139,21 @@ export function rebuildStandaloneTurns(lines: StreamLine[]): StandaloneTurn[] {
  * only a reference with the file name and type is included (binary content
  * is not embedded in the text prompt).
  */
-export function buildPromptWithAttachments(
-  prompt: string,
-  attachments: FileAttachmentData[]
-): string {
+export function buildPromptWithAttachments(prompt: string, attachments: FileAttachmentData[]): string {
   if (attachments.length === 0) return prompt;
 
   const sections: string[] = [];
 
   for (const attachment of attachments) {
     if (attachment.type === 'text' && attachment.content) {
-      sections.push(
-        `--- File: ${attachment.name} ---\n${attachment.content}\n--- End of ${attachment.name} ---`
-      );
+      sections.push(`--- File: ${attachment.name} ---\n${attachment.content}\n--- End of ${attachment.name} ---`);
     } else if (attachment.type === 'image') {
-      sections.push(
-        `--- Attached image: ${attachment.name} (${formatFileSize(attachment.size)}) ---`
-      );
+      sections.push(`--- Attached image: ${attachment.name} (${formatFileSize(attachment.size)}) ---`);
     } else if (attachment.type === 'pdf') {
-      sections.push(
-        `--- Attached PDF: ${attachment.name} (${formatFileSize(attachment.size)}) ---`
-      );
+      sections.push(`--- Attached PDF: ${attachment.name} (${formatFileSize(attachment.size)}) ---`);
     } else {
       sections.push(
-        `--- Attached file: ${attachment.name} (${attachment.type}, ${formatFileSize(attachment.size)}) ---`
+        `--- Attached file: ${attachment.name} (${attachment.type}, ${formatFileSize(attachment.size)}) ---`,
       );
     }
   }

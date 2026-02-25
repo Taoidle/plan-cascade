@@ -25,7 +25,7 @@ function polarToCartesian(
   angle: number,
   radius: number,
   cx: number = CENTER,
-  cy: number = CENTER
+  cy: number = CENTER,
 ): { x: number; y: number } {
   // Start from top (-90 degrees)
   const rad = ((angle - 90) * Math.PI) / 180;
@@ -36,11 +36,7 @@ function polarToCartesian(
 }
 
 /** Build a polygon points string from values */
-function buildPolygonPoints(
-  values: number[],
-  maxValues: number[],
-  count: number
-): string {
+function buildPolygonPoints(values: number[], maxValues: number[], count: number): string {
   return values
     .map((val, i) => {
       const max = maxValues[i] || 1;
@@ -53,12 +49,12 @@ function buildPolygonPoints(
 }
 
 const storyColors = [
-  'rgba(59, 130, 246, 0.6)',   // blue
-  'rgba(239, 68, 68, 0.6)',    // red
-  'rgba(34, 197, 94, 0.6)',    // green
-  'rgba(168, 85, 247, 0.6)',   // purple
-  'rgba(245, 158, 11, 0.6)',   // amber
-  'rgba(6, 182, 212, 0.6)',    // cyan
+  'rgba(59, 130, 246, 0.6)', // blue
+  'rgba(239, 68, 68, 0.6)', // red
+  'rgba(34, 197, 94, 0.6)', // green
+  'rgba(168, 85, 247, 0.6)', // purple
+  'rgba(245, 158, 11, 0.6)', // amber
+  'rgba(6, 182, 212, 0.6)', // cyan
 ];
 
 // ============================================================================
@@ -122,9 +118,7 @@ export function QualityRadarChart({ dimensions }: QualityRadarChartProps) {
 
   return (
     <div className="space-y-3" data-testid="quality-radar-chart">
-      <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-        Quality Radar
-      </h4>
+      <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Quality Radar</h4>
 
       <div className="flex justify-center">
         <svg width={CHART_SIZE} height={CHART_SIZE} viewBox={`0 0 ${CHART_SIZE} ${CHART_SIZE}`}>
@@ -156,9 +150,7 @@ export function QualityRadarChart({ dimensions }: QualityRadarChartProps) {
 
           {/* Per-story polygons */}
           {storyIds.map((storyId, si) => {
-            const storyValues = dimensions.map(
-              (dim) => dim.storyScores[storyId] ?? 0
-            );
+            const storyValues = dimensions.map((dim) => dim.storyScores[storyId] ?? 0);
             const points = buildPolygonPoints(storyValues, maxValues, count);
             const color = storyColors[si % storyColors.length];
             return (
@@ -201,10 +193,7 @@ export function QualityRadarChart({ dimensions }: QualityRadarChartProps) {
       <div className="flex flex-wrap gap-3 justify-center">
         {storyIds.map((storyId, si) => (
           <div key={storyId} className="flex items-center gap-1.5 text-xs">
-            <div
-              className="w-3 h-3 rounded-sm"
-              style={{ backgroundColor: storyColors[si % storyColors.length] }}
-            />
+            <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: storyColors[si % storyColors.length] }} />
             <span className="text-gray-600 dark:text-gray-400">{storyId}</span>
           </div>
         ))}

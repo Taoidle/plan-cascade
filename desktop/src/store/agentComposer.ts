@@ -6,12 +6,7 @@
  */
 
 import { create } from 'zustand';
-import type {
-  AgentPipeline,
-  AgentPipelineInfo,
-  AgentStep,
-  AgentEvent,
-} from '../types/agentComposer';
+import type { AgentPipeline, AgentPipelineInfo, AgentStep, AgentEvent } from '../types/agentComposer';
 import { createEmptyPipeline, createLlmStep } from '../types/agentComposer';
 import {
   listAgentPipelines,
@@ -181,10 +176,7 @@ export const useAgentComposerStore = create<AgentComposerState>((set, get) => ({
           loading: { ...get().loading, save: false },
         });
       } else {
-        const saved = await updateAgentPipeline(
-          currentPipeline.pipeline_id,
-          currentPipeline,
-        );
+        const saved = await updateAgentPipeline(currentPipeline.pipeline_id, currentPipeline);
         set({
           currentPipeline: saved,
           loading: { ...get().loading, save: false },

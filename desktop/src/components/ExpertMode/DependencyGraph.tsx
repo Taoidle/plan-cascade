@@ -82,9 +82,7 @@ export function DependencyGraph() {
       }
       if (layer.length === 0) {
         // Circular dependency or orphan - add remaining
-        const remaining = prd.stories
-          .filter((s) => !assigned.has(s.id))
-          .map((s) => s.id);
+        const remaining = prd.stories.filter((s) => !assigned.has(s.id)).map((s) => s.id);
         layers.push(remaining);
         remaining.forEach((id) => assigned.add(id));
         break;
@@ -154,39 +152,14 @@ export function DependencyGraph() {
 
   return (
     <div className="w-full h-full overflow-auto bg-gray-50 dark:bg-gray-900 rounded-lg">
-      <svg
-        ref={svgRef}
-        width={width}
-        height={height}
-        className="min-w-full"
-      >
+      <svg ref={svgRef} width={width} height={height} className="min-w-full">
         {/* Arrow marker definition */}
         <defs>
-          <marker
-            id="arrowhead"
-            markerWidth="10"
-            markerHeight="7"
-            refX="9"
-            refY="3.5"
-            orient="auto"
-          >
-            <polygon
-              points="0 0, 10 3.5, 0 7"
-              fill="#9ca3af"
-            />
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#9ca3af" />
           </marker>
-          <marker
-            id="arrowhead-selected"
-            markerWidth="10"
-            markerHeight="7"
-            refX="9"
-            refY="3.5"
-            orient="auto"
-          >
-            <polygon
-              points="0 0, 10 3.5, 0 7"
-              fill="#6366f1"
-            />
+          <marker id="arrowhead-selected" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#6366f1" />
           </marker>
         </defs>
 
@@ -248,66 +221,26 @@ export function DependencyGraph() {
               />
 
               {/* Story number badge */}
-              <circle
-                cx={20}
-                cy={24}
-                r={12}
-                fill={colors.border}
-              />
-              <text
-                x={20}
-                y={28}
-                textAnchor="middle"
-                fontSize={10}
-                fontWeight="bold"
-                fill="white"
-              >
+              <circle cx={20} cy={24} r={12} fill={colors.border} />
+              <text x={20} y={28} textAnchor="middle" fontSize={10} fontWeight="bold" fill="white">
                 {storyIndex}
               </text>
 
               {/* Story title */}
-              <text
-                x={40}
-                y={20}
-                fontSize={12}
-                fontWeight="500"
-                fill={colors.text}
-              >
-                <tspan>
-                  {story.title.length > 18
-                    ? story.title.substring(0, 18) + '...'
-                    : story.title}
-                </tspan>
+              <text x={40} y={20} fontSize={12} fontWeight="500" fill={colors.text}>
+                <tspan>{story.title.length > 18 ? story.title.substring(0, 18) + '...' : story.title}</tspan>
               </text>
 
               {/* Status label */}
-              <text
-                x={40}
-                y={36}
-                fontSize={10}
-                fill={colors.border}
-              >
+              <text x={40} y={36} fontSize={10} fill={colors.border}>
                 {story.status.replace('_', ' ')}
               </text>
 
               {/* Component mapping indicator */}
               {componentCount > 0 && (
                 <>
-                  <rect
-                    x={40}
-                    y={46}
-                    width={componentCount * 8 + 40}
-                    height={16}
-                    rx={8}
-                    fill="#818cf8"
-                    opacity={0.2}
-                  />
-                  <text
-                    x={48}
-                    y={57}
-                    fontSize={9}
-                    fill="#6366f1"
-                  >
+                  <rect x={40} y={46} width={componentCount * 8 + 40} height={16} rx={8} fill="#818cf8" opacity={0.2} />
+                  <text x={48} y={57} fontSize={9} fill="#6366f1">
                     {componentCount} component{componentCount !== 1 ? 's' : ''}
                   </text>
                 </>
@@ -316,20 +249,8 @@ export function DependencyGraph() {
               {/* Dependency count badge */}
               {story.dependencies.length > 0 && (
                 <>
-                  <circle
-                    cx={NODE_WIDTH - 15}
-                    cy={15}
-                    r={10}
-                    fill="#fbbf24"
-                  />
-                  <text
-                    x={NODE_WIDTH - 15}
-                    y={19}
-                    textAnchor="middle"
-                    fontSize={10}
-                    fontWeight="bold"
-                    fill="white"
-                  >
+                  <circle cx={NODE_WIDTH - 15} cy={15} r={10} fill="#fbbf24" />
+                  <text x={NODE_WIDTH - 15} y={19} textAnchor="middle" fontSize={10} fontWeight="bold" fill="white">
                     {story.dependencies.length}
                   </text>
                 </>
@@ -351,13 +272,7 @@ export function DependencyGraph() {
                     Components
                   </text>
                   {mapping.components.map((comp, i) => (
-                    <text
-                      key={i}
-                      x={12}
-                      y={28 + i * 14}
-                      fontSize={9}
-                      fill="#e0e7ff"
-                    >
+                    <text key={i} x={12} y={28 + i * 14} fontSize={9} fill="#e0e7ff">
                       {'• ' + (comp.length > 18 ? comp.substring(0, 18) + '…' : comp)}
                     </text>
                   ))}
@@ -394,28 +309,20 @@ export function PRDPreviewPanel() {
     <div className="h-full flex flex-col">
       {/* Summary header */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
-          {prd.title || 'Untitled PRD'}
-        </h3>
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">{prd.title || 'Untitled PRD'}</h3>
 
         {/* Stats */}
         <div className="grid grid-cols-3 gap-3 text-center">
           <div className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800">
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">
-              {stats.total}
-            </p>
+            <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.total}</p>
             <p className="text-xs text-gray-500 dark:text-gray-400">Stories</p>
           </div>
           <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/30">
-            <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-              {stats.completed}
-            </p>
+            <p className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.completed}</p>
             <p className="text-xs text-green-600 dark:text-green-400">Complete</p>
           </div>
           <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/30">
-            <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">
-              {stats.withDeps}
-            </p>
+            <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">{stats.withDeps}</p>
             <p className="text-xs text-amber-600 dark:text-amber-400">With Deps</p>
           </div>
         </div>

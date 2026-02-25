@@ -31,7 +31,11 @@ const mockClearError = vi.fn();
 
 let mockSpecInterviewState = {
   session: null as ReturnType<typeof createMockInterviewSession> | null,
-  compiledSpec: null as { spec_json: Record<string, unknown>; spec_md: string; prd_json: Record<string, unknown> } | null,
+  compiledSpec: null as {
+    spec_json: Record<string, unknown>;
+    spec_md: string;
+    prd_json: Record<string, unknown>;
+  } | null,
   loading: { starting: false, submitting: false, fetching: false, compiling: false },
   error: null as string | null,
   startInterview: mockStartInterview,
@@ -159,7 +163,6 @@ describe('SpecInterviewPanel', () => {
     expect(screen.getByText('Who is the audience?')).toBeInTheDocument();
     expect(screen.getByText('Developers')).toBeInTheDocument();
   });
-
 });
 
 // --------------------------------------------------------------------------
@@ -337,5 +340,4 @@ describe('DesignDocPanel', () => {
 
     expect(screen.getByText(/Generating/i)).toBeInTheDocument();
   });
-
 });

@@ -200,7 +200,7 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         contexts: ['global'],
       },
     ],
-    [t, setMode, mode]
+    [t, setMode, mode],
   );
 
   // ============================================================================
@@ -317,7 +317,7 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         contexts: ['projects'],
       },
     ],
-    [t, projectsStore, setMode, options]
+    [t, projectsStore, setMode, options],
   );
 
   // ============================================================================
@@ -456,7 +456,7 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         contexts: ['expert'],
       },
     ],
-    [t, agentsStore]
+    [t, agentsStore],
   );
 
   // ============================================================================
@@ -563,7 +563,7 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         contexts: ['analytics'],
       },
     ],
-    [t, analyticsStore, setMode]
+    [t, analyticsStore, setMode],
   );
 
   // ============================================================================
@@ -651,7 +651,7 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         contexts: ['expert'],
       },
     ],
-    [t]
+    [t],
   );
 
   // ============================================================================
@@ -728,7 +728,7 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         contexts: ['projects'],
       },
     ],
-    [t, timelineStore]
+    [t, timelineStore],
   );
 
   // ============================================================================
@@ -784,9 +784,7 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
       },
       {
         id: 'chat-toggle-sidebar',
-        title: options.sidebarVisible
-          ? t('commands.chat.hideSidebar')
-          : t('commands.chat.showSidebar'),
+        title: options.sidebarVisible ? t('commands.chat.hideSidebar') : t('commands.chat.showSidebar'),
         description: t('commands.chat.toggleSidebarDesc'),
         category: 'chat' as CommandCategory,
         icon: ViewVerticalIcon,
@@ -829,7 +827,7 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         contexts: ['claude-code'],
       },
     ],
-    [t, claudeCodeStore, options]
+    [t, claudeCodeStore, options],
   );
 
   // ============================================================================
@@ -940,7 +938,7 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         contexts: ['global'],
       },
     ],
-    [t, options, theme, setTheme, language, setLanguage]
+    [t, options, theme, setTheme, language, setLanguage],
   );
 
   // ============================================================================
@@ -1017,7 +1015,7 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         contexts: ['global'],
       },
     ],
-    [t, options]
+    [t, options],
   );
 
   // ============================================================================
@@ -1046,7 +1044,7 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
       chatCommands,
       settingsCommands,
       helpCommands,
-    ]
+    ],
   );
 
   useEffect(() => {

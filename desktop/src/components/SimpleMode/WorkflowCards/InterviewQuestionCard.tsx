@@ -14,12 +14,18 @@ export function InterviewQuestionCard({ data }: { data: InterviewQuestionCardDat
 
   const formatInputType = (type: InterviewQuestionCardData['inputType']): string => {
     switch (type) {
-      case 'text': return t('workflow.interview.inputText');
-      case 'textarea': return t('workflow.interview.inputTextarea');
-      case 'single_select': return t('workflow.interview.inputSingleSelect');
-      case 'multi_select': return t('workflow.interview.inputMultiSelect');
-      case 'boolean': return t('workflow.interview.inputBoolean');
-      default: return type;
+      case 'text':
+        return t('workflow.interview.inputText');
+      case 'textarea':
+        return t('workflow.interview.inputTextarea');
+      case 'single_select':
+        return t('workflow.interview.inputSingleSelect');
+      case 'multi_select':
+        return t('workflow.interview.inputMultiSelect');
+      case 'boolean':
+        return t('workflow.interview.inputBoolean');
+      default:
+        return type;
     }
   };
 
@@ -34,15 +40,9 @@ export function InterviewQuestionCard({ data }: { data: InterviewQuestionCardDat
         </span>
       </div>
 
-      <p className="text-sm text-violet-800 dark:text-violet-200 mt-1 font-medium">
-        {data.question}
-      </p>
+      <p className="text-sm text-violet-800 dark:text-violet-200 mt-1 font-medium">{data.question}</p>
 
-      {data.hint && (
-        <p className="text-xs text-violet-600/70 dark:text-violet-400/70 mt-1 italic">
-          {data.hint}
-        </p>
-      )}
+      {data.hint && <p className="text-xs text-violet-600/70 dark:text-violet-400/70 mt-1 italic">{data.hint}</p>}
 
       <div className="mt-1 flex items-center gap-2">
         <span
@@ -50,14 +50,12 @@ export function InterviewQuestionCard({ data }: { data: InterviewQuestionCardDat
             'text-2xs px-1.5 py-0.5 rounded',
             data.required
               ? 'bg-violet-200 dark:bg-violet-800 text-violet-600 dark:text-violet-400'
-              : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
+              : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400',
           )}
         >
           {data.required ? t('workflow.interview.required') : t('workflow.interview.optional')}
         </span>
-        <span className="text-2xs text-violet-500/60 dark:text-violet-400/60">
-          {formatInputType(data.inputType)}
-        </span>
+        <span className="text-2xs text-violet-500/60 dark:text-violet-400/60">{formatInputType(data.inputType)}</span>
       </div>
     </div>
   );

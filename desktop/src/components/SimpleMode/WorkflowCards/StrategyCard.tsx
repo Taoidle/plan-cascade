@@ -20,14 +20,16 @@ export function StrategyCard({ data }: { data: StrategyCardData }) {
           <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-300 uppercase tracking-wide">
             {t('workflow.strategy.title')}
           </span>
-          <span className={clsx(
-            'text-xs px-2 py-0.5 rounded-full font-medium',
-            confidencePct >= 80
-              ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-              : confidencePct >= 50
-                ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
-                : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
-          )}>
+          <span
+            className={clsx(
+              'text-xs px-2 py-0.5 rounded-full font-medium',
+              confidencePct >= 80
+                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                : confidencePct >= 50
+                  ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                  : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
+            )}
+          >
             {t('workflow.strategy.confidence', { pct: confidencePct })}
           </span>
         </div>
@@ -47,8 +49,16 @@ export function StrategyCard({ data }: { data: StrategyCardData }) {
         {/* Dimension bars */}
         <div className="grid grid-cols-3 gap-2">
           <DimensionPill label={t('workflow.strategy.risk')} value={data.riskLevel} color={riskColor(data.riskLevel)} />
-          <DimensionPill label={t('workflow.strategy.stories')} value={String(data.estimatedStories)} color="text-indigo-600 dark:text-indigo-400" />
-          <DimensionPill label={t('workflow.strategy.parallel')} value={data.parallelizationBenefit} color={benefitColor(data.parallelizationBenefit)} />
+          <DimensionPill
+            label={t('workflow.strategy.stories')}
+            value={String(data.estimatedStories)}
+            color="text-indigo-600 dark:text-indigo-400"
+          />
+          <DimensionPill
+            label={t('workflow.strategy.parallel')}
+            value={data.parallelizationBenefit}
+            color={benefitColor(data.parallelizationBenefit)}
+          />
         </div>
 
         {/* Functional areas */}
@@ -92,18 +102,26 @@ function DimensionPill({ label, value, color }: { label: string; value: string; 
 
 function riskColor(level: string): string {
   switch (level) {
-    case 'low': return 'text-green-600 dark:text-green-400';
-    case 'medium': return 'text-amber-600 dark:text-amber-400';
-    case 'high': return 'text-red-600 dark:text-red-400';
-    default: return 'text-gray-600 dark:text-gray-400';
+    case 'low':
+      return 'text-green-600 dark:text-green-400';
+    case 'medium':
+      return 'text-amber-600 dark:text-amber-400';
+    case 'high':
+      return 'text-red-600 dark:text-red-400';
+    default:
+      return 'text-gray-600 dark:text-gray-400';
   }
 }
 
 function benefitColor(benefit: string): string {
   switch (benefit) {
-    case 'significant': return 'text-green-600 dark:text-green-400';
-    case 'moderate': return 'text-amber-600 dark:text-amber-400';
-    case 'none': return 'text-gray-500 dark:text-gray-400';
-    default: return 'text-gray-600 dark:text-gray-400';
+    case 'significant':
+      return 'text-green-600 dark:text-green-400';
+    case 'moderate':
+      return 'text-amber-600 dark:text-amber-400';
+    case 'none':
+      return 'text-gray-500 dark:text-gray-400';
+    default:
+      return 'text-gray-600 dark:text-gray-400';
   }
 }

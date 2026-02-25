@@ -69,15 +69,9 @@ function CollapsibleSection({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
           <span>{title}</span>
-          <span className="text-2xs font-normal text-gray-400 dark:text-gray-500">
-            ({count})
-          </span>
+          <span className="text-2xs font-normal text-gray-400 dark:text-gray-500">({count})</span>
         </div>
-        {actions && (
-          <div onClick={(e) => e.stopPropagation()}>
-            {actions}
-          </div>
-        )}
+        {actions && <div onClick={(e) => e.stopPropagation()}>{actions}</div>}
       </button>
       {open && children}
     </div>
@@ -96,12 +90,14 @@ function AheadBehindBadge({ ahead, behind }: { ahead: number; behind: number }) 
     <span className="flex items-center gap-1 text-2xs font-mono text-gray-500 dark:text-gray-400">
       {ahead > 0 && (
         <span className="text-green-600 dark:text-green-400" title={t('branchList.ahead', { count: ahead })}>
-          {'\u2191'}{ahead}
+          {'\u2191'}
+          {ahead}
         </span>
       )}
       {behind > 0 && (
         <span className="text-orange-600 dark:text-orange-400" title={t('branchList.behind', { count: behind })}>
-          {'\u2193'}{behind}
+          {'\u2193'}
+          {behind}
         </span>
       )}
     </span>
@@ -143,14 +139,14 @@ function BranchRow({
         setCheckingOut(false);
       }
     },
-    [branch, repoPath, onRefresh, checkingOut]
+    [branch, repoPath, onRefresh, checkingOut],
   );
 
   return (
     <div
       className={clsx(
         'flex items-center gap-2 px-3 py-1.5 group hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors',
-        branch.is_head && 'bg-blue-50/50 dark:bg-blue-900/10'
+        branch.is_head && 'bg-blue-50/50 dark:bg-blue-900/10',
       )}
     >
       {/* Current branch indicator */}
@@ -164,9 +160,7 @@ function BranchRow({
       <span
         className={clsx(
           'flex-1 text-sm truncate',
-          branch.is_head
-            ? 'font-semibold text-gray-900 dark:text-gray-100'
-            : 'text-gray-700 dark:text-gray-300'
+          branch.is_head ? 'font-semibold text-gray-900 dark:text-gray-100' : 'text-gray-700 dark:text-gray-300',
         )}
         title={branch.name}
       >
@@ -174,9 +168,7 @@ function BranchRow({
       </span>
 
       {/* Upstream info */}
-      {branch.upstream && (
-        <AheadBehindBadge ahead={branch.ahead} behind={branch.behind} />
-      )}
+      {branch.upstream && <AheadBehindBadge ahead={branch.ahead} behind={branch.behind} />}
 
       {/* Actions */}
       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -348,12 +340,7 @@ function BranchContextMenu({
           .filter((item) => item.show)
           .map((item, idx) => {
             if (item.label === 'divider') {
-              return (
-                <div
-                  key={`divider-${idx}`}
-                  className="my-1 border-t border-gray-200 dark:border-gray-700"
-                />
-              );
+              return <div key={`divider-${idx}`} className="my-1 border-t border-gray-200 dark:border-gray-700" />;
             }
             return (
               <button
@@ -366,7 +353,7 @@ function BranchContextMenu({
                     ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed'
                     : (item as { danger?: boolean }).danger
                       ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
-                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700',
                 )}
               >
                 {item.label}
@@ -459,7 +446,7 @@ export function BranchList({
             className={clsx(
               'px-2 py-0.5 text-2xs rounded transition-colors',
               'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700',
-              isFetching && 'opacity-50 cursor-not-allowed'
+              isFetching && 'opacity-50 cursor-not-allowed',
             )}
             title={t('branchList.fetchAll')}
           >

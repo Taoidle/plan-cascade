@@ -290,10 +290,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
   analyzeForMode: async (description: string) => {
     set({ isLoading: true, error: null, suggestionDismissed: false });
     try {
-      const result = await invoke<CommandResponse<StrategyAnalysis>>(
-        'analyze_task_for_mode',
-        { description }
-      );
+      const result = await invoke<CommandResponse<StrategyAnalysis>>('analyze_task_for_mode', { description });
       if (result.success && result.data) {
         set({ strategyAnalysis: result.data, isLoading: false });
       } else {
@@ -311,10 +308,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
   enterTaskMode: async (description: string) => {
     set({ isLoading: true, error: null });
     try {
-      const result = await invoke<CommandResponse<TaskModeSession>>(
-        'enter_task_mode',
-        { description }
-      );
+      const result = await invoke<CommandResponse<TaskModeSession>>('enter_task_mode', { description });
       if (result.success && result.data) {
         const session = result.data;
         set({
@@ -350,17 +344,14 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
       const baseUrl = provider
         ? resolveProviderBaseUrl(provider, { glmEndpoint, qwenEndpoint, minimaxEndpoint })
         : undefined;
-      const result = await invoke<CommandResponse<TaskPrd>>(
-        'generate_task_prd',
-        {
-          sessionId,
-          provider: provider || null,
-          model: model || null,
-          baseUrl: baseUrl || null,
-          conversationHistory: conversationHistory || [],
-          maxContextTokens: maxContextTokens ?? null,
-        }
-      );
+      const result = await invoke<CommandResponse<TaskPrd>>('generate_task_prd', {
+        sessionId,
+        provider: provider || null,
+        model: model || null,
+        baseUrl: baseUrl || null,
+        conversationHistory: conversationHistory || [],
+        maxContextTokens: maxContextTokens ?? null,
+      });
       if (result.success && result.data) {
         set({
           prd: result.data,
@@ -389,10 +380,14 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
       const baseUrl = provider
         ? resolveProviderBaseUrl(provider, { glmEndpoint, qwenEndpoint, minimaxEndpoint })
         : undefined;
-      const result = await invoke<CommandResponse<boolean>>(
-        'approve_task_prd',
-        { sessionId, prd, provider: provider || null, model: model || null, baseUrl: baseUrl || null, phaseConfigs }
-      );
+      const result = await invoke<CommandResponse<boolean>>('approve_task_prd', {
+        sessionId,
+        prd,
+        provider: provider || null,
+        model: model || null,
+        baseUrl: baseUrl || null,
+        phaseConfigs,
+      });
       if (result.success) {
         set({
           prd,
@@ -411,10 +406,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
     const { sessionId } = get();
     if (!sessionId) return;
     try {
-      const result = await invoke<CommandResponse<TaskExecutionStatus>>(
-        'get_task_execution_status',
-        { sessionId }
-      );
+      const result = await invoke<CommandResponse<TaskExecutionStatus>>('get_task_execution_status', { sessionId });
       if (result.success && result.data) {
         const status = result.data;
         set({
@@ -437,10 +429,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
     }
     set({ isLoading: true, error: null });
     try {
-      const result = await invoke<CommandResponse<boolean>>(
-        'cancel_task_execution',
-        { sessionId }
-      );
+      const result = await invoke<CommandResponse<boolean>>('cancel_task_execution', { sessionId });
       if (result.success) {
         set({ sessionStatus: 'cancelled', isLoading: false });
       } else {
@@ -459,10 +448,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
     }
     set({ isLoading: true, error: null });
     try {
-      const result = await invoke<CommandResponse<ExecutionReport>>(
-        'get_task_execution_report',
-        { sessionId }
-      );
+      const result = await invoke<CommandResponse<ExecutionReport>>('get_task_execution_report', { sessionId });
       if (result.success && result.data) {
         set({ report: result.data, isLoading: false });
       } else {
@@ -481,10 +467,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
     }
     set({ isLoading: true, error: null });
     try {
-      const result = await invoke<CommandResponse<boolean>>(
-        'exit_task_mode',
-        { sessionId }
-      );
+      const result = await invoke<CommandResponse<boolean>>('exit_task_mode', { sessionId });
       if (result.success) {
         get().unsubscribeFromEvents();
         set({ ...DEFAULT_STATE });
@@ -501,36 +484,33 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
     get().unsubscribeFromEvents();
 
     try {
-      const unlisten = await listen<TaskModeProgressPayload>(
-        'task-mode-progress',
-        (event) => {
-          const payload = event.payload;
-          const { sessionId, storyStatuses: prevStatuses } = get();
-          // Only process events for our session
-          if (payload.sessionId !== sessionId) return;
+      const unlisten = await listen<TaskModeProgressPayload>('task-mode-progress', (event) => {
+        const payload = event.payload;
+        const { sessionId, storyStatuses: prevStatuses } = get();
+        // Only process events for our session
+        if (payload.sessionId !== sessionId) return;
 
-          const updates: Partial<TaskModeState> = {
-            currentBatch: payload.currentBatch,
-            totalBatches: payload.totalBatches,
-          };
+        const updates: Partial<TaskModeState> = {
+          currentBatch: payload.currentBatch,
+          totalBatches: payload.totalBatches,
+        };
 
-          // Accumulate story statuses from individual events
-          if (payload.storyId && payload.storyStatus) {
-            updates.storyStatuses = { ...prevStatuses, [payload.storyId]: payload.storyStatus };
-          }
-
-          // Determine session status from event type
-          if (payload.eventType === 'execution_completed') {
-            const allStatuses = updates.storyStatuses ?? prevStatuses;
-            const failedCount = Object.values(allStatuses).filter((s) => s === 'failed').length;
-            updates.sessionStatus = failedCount > 0 ? 'failed' : 'completed';
-          } else if (payload.eventType === 'execution_cancelled') {
-            updates.sessionStatus = 'cancelled';
-          }
-
-          set(updates);
+        // Accumulate story statuses from individual events
+        if (payload.storyId && payload.storyStatus) {
+          updates.storyStatuses = { ...prevStatuses, [payload.storyId]: payload.storyStatus };
         }
-      );
+
+        // Determine session status from event type
+        if (payload.eventType === 'execution_completed') {
+          const allStatuses = updates.storyStatuses ?? prevStatuses;
+          const failedCount = Object.values(allStatuses).filter((s) => s === 'failed').length;
+          updates.sessionStatus = failedCount > 0 ? 'failed' : 'completed';
+        } else if (payload.eventType === 'execution_cancelled') {
+          updates.sessionStatus = 'cancelled';
+        }
+
+        set(updates);
+      });
       set({ _unlistenFn: unlisten });
     } catch {
       // Event subscription failed - non-fatal

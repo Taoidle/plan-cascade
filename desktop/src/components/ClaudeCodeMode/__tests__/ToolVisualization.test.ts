@@ -8,11 +8,7 @@
  * pnpm add -D vitest @testing-library/react @testing-library/user-event
  */
 
-import {
-  truncatePath,
-  truncateCommand,
-  truncateAtWordBoundary,
-} from '../TruncatedText';
+import { truncatePath, truncateCommand, truncateAtWordBoundary } from '../TruncatedText';
 import { parseAnsiText, get256Color } from '../AnsiOutput';
 import { buildFileTree } from '../GlobResultViewer';
 import { highlightPattern } from '../GrepResultViewer';
@@ -139,11 +135,7 @@ describe('AnsiOutput utilities', () => {
 describe('GlobResultViewer utilities', () => {
   describe('buildFileTree', () => {
     it('should build tree from flat file list', () => {
-      const files = [
-        'src/index.ts',
-        'src/utils/helper.ts',
-        'src/utils/format.ts',
-      ];
+      const files = ['src/index.ts', 'src/utils/helper.ts', 'src/utils/format.ts'];
       const tree = buildFileTree(files);
 
       expect(tree.fileCount).toBe(3);
@@ -151,18 +143,13 @@ describe('GlobResultViewer utilities', () => {
     });
 
     it('should handle mixed path separators', () => {
-      const files = [
-        'src/file1.ts',
-        'src\\file2.ts',
-      ];
+      const files = ['src/file1.ts', 'src\\file2.ts'];
       const tree = buildFileTree(files);
       expect(tree.fileCount).toBe(2);
     });
 
     it('should create nested directory structure', () => {
-      const files = [
-        'a/b/c/file.ts',
-      ];
+      const files = ['a/b/c/file.ts'];
       const tree = buildFileTree(files);
 
       let node = tree.children.get('a');
@@ -217,7 +204,7 @@ describe('EnhancedDiffViewer utilities', () => {
       const newLines = ['line 1', 'line 2'];
       const diff = computeDiff(oldLines, newLines);
 
-      expect(diff.every(d => d.type === 'unchanged')).toBe(true);
+      expect(diff.every((d) => d.type === 'unchanged')).toBe(true);
     });
 
     it('should detect additions', () => {
@@ -225,7 +212,7 @@ describe('EnhancedDiffViewer utilities', () => {
       const newLines = ['line 1', 'line 2'];
       const diff = computeDiff(oldLines, newLines);
 
-      expect(diff.some(d => d.type === 'added')).toBe(true);
+      expect(diff.some((d) => d.type === 'added')).toBe(true);
     });
 
     it('should detect removals', () => {
@@ -233,7 +220,7 @@ describe('EnhancedDiffViewer utilities', () => {
       const newLines = ['line 1'];
       const diff = computeDiff(oldLines, newLines);
 
-      expect(diff.some(d => d.type === 'removed')).toBe(true);
+      expect(diff.some((d) => d.type === 'removed')).toBe(true);
     });
 
     it('should handle empty inputs', () => {
@@ -247,8 +234,8 @@ describe('EnhancedDiffViewer utilities', () => {
       const diff = computeDiff(oldLines, newLines);
 
       // Should have both added and removed
-      expect(diff.some(d => d.type === 'added')).toBe(true);
-      expect(diff.some(d => d.type === 'removed')).toBe(true);
+      expect(diff.some((d) => d.type === 'added')).toBe(true);
+      expect(diff.some((d) => d.type === 'removed')).toBe(true);
     });
   });
 

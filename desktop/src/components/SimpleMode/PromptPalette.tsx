@@ -89,13 +89,15 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
           return b.use_count - a.use_count;
         })
         .slice(0, 6)
-        .map((p): PaletteItem => ({
-          kind: 'prompt',
-          id: p.id,
-          title: p.title,
-          description: p.description || undefined,
-          category: p.category,
-        }));
+        .map(
+          (p): PaletteItem => ({
+            kind: 'prompt',
+            id: p.id,
+            title: p.title,
+            description: p.description || undefined,
+            category: p.category,
+          }),
+        );
       const skills = skillItems.slice(0, 8 - sortedPrompts.length);
       return [...sortedPrompts, ...skills];
     }
@@ -110,18 +112,12 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
             (item.description && item.description.toLowerCase().includes(q))
           );
         }
-        return (
-          item.name.toLowerCase().includes(q) ||
-          item.description.toLowerCase().includes(q)
-        );
+        return item.name.toLowerCase().includes(q) || item.description.toLowerCase().includes(q);
       })
       .slice(0, 8);
   }, [prompts, pluginSkills, query]);
 
-  const selectedPrompt = useMemo(
-    () => prompts.find((p) => p.id === selectedPromptId),
-    [prompts, selectedPromptId]
-  );
+  const selectedPrompt = useMemo(() => prompts.find((p) => p.id === selectedPromptId), [prompts, selectedPromptId]);
 
   // Reset selection when filtered list changes
   useEffect(() => {
@@ -150,7 +146,7 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
         onSelect(prompt.content);
       }
     },
-    [prompts, recordUse, onSelect]
+    [prompts, recordUse, onSelect],
   );
 
   const handleVariableSubmit = useCallback(() => {
@@ -175,9 +171,7 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
 
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setSelectedIndex((prev) =>
-          prev < filteredItems.length - 1 ? prev + 1 : prev
-        );
+        setSelectedIndex((prev) => (prev < filteredItems.length - 1 ? prev + 1 : prev));
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
@@ -192,7 +186,7 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
         onClose();
       }
     },
-    [variableMode, filteredItems, selectedIndex, handleSelectItem, handleVariableSubmit, onClose]
+    [variableMode, filteredItems, selectedIndex, handleSelectItem, handleVariableSubmit, onClose],
   );
 
   // Expose keyboard handler via ref-like pattern
@@ -224,16 +218,14 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
         'bg-white dark:bg-gray-800',
         'border border-gray-200 dark:border-gray-700',
         'rounded-lg shadow-lg',
-        'bottom-full mb-2'
+        'bottom-full mb-2',
       )}
     >
       {variableMode && selectedPrompt ? (
         /* Variable fill mode */
         <div className="p-3 space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
-              {selectedPrompt.title}
-            </span>
+            <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{selectedPrompt.title}</span>
             <button
               onClick={() => {
                 setVariableMode(false);
@@ -246,15 +238,11 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
           </div>
           {selectedPrompt.variables.map((varName) => (
             <div key={varName}>
-              <label className="block text-2xs text-gray-500 dark:text-gray-400 mb-0.5">
-                {`{{${varName}}}`}
-              </label>
+              <label className="block text-2xs text-gray-500 dark:text-gray-400 mb-0.5">{`{{${varName}}}`}</label>
               <input
                 type="text"
                 value={variableValues[varName] || ''}
-                onChange={(e) =>
-                  setVariableValues((prev) => ({ ...prev, [varName]: e.target.value }))
-                }
+                onChange={(e) => setVariableValues((prev) => ({ ...prev, [varName]: e.target.value }))}
                 placeholder={varName}
                 className="w-full px-2 py-1 text-xs rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-primary-500"
                 autoFocus={selectedPrompt.variables[0] === varName}
@@ -266,7 +254,7 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
             className={clsx(
               'w-full px-3 py-1.5 text-xs font-medium rounded-md',
               'bg-primary-600 text-white hover:bg-primary-700',
-              'transition-colors'
+              'transition-colors',
             )}
           >
             {t('promptPalette.insertPrompt', { defaultValue: 'Insert Prompt' })}
@@ -296,7 +284,7 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
                     'w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors',
                     index === selectedIndex
                       ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-900 dark:text-primary-100'
-                      : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                      : 'hover:bg-gray-100 dark:hover:bg-gray-700',
                   )}
                 >
                   <div className="flex-1 min-w-0">
@@ -305,17 +293,13 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
                       <span
                         className={clsx(
                           'text-2xs px-1 py-0.5 rounded shrink-0',
-                          categoryBadgeColor[badge] || categoryBadgeColor.custom
+                          categoryBadgeColor[badge] || categoryBadgeColor.custom,
                         )}
                       >
                         {badge}
                       </span>
                     </div>
-                    {desc && (
-                      <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                        {desc}
-                      </div>
-                    )}
+                    {desc && <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{desc}</div>}
                   </div>
                 </button>
               );

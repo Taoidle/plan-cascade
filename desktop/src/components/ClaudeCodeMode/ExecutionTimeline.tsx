@@ -9,14 +9,7 @@
 
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { clsx } from 'clsx';
-import {
-  ZoomInIcon,
-  ZoomOutIcon,
-  ResetIcon,
-  DownloadIcon,
-  InfoCircledIcon,
-  PlayIcon,
-} from '@radix-ui/react-icons';
+import { ZoomInIcon, ZoomOutIcon, ResetIcon, DownloadIcon, InfoCircledIcon, PlayIcon } from '@radix-ui/react-icons';
 import type { ToolCall, ToolType } from '../../store/claudeCode';
 
 // ============================================================================
@@ -53,15 +46,15 @@ interface TooltipData {
 // ============================================================================
 
 const TOOL_COLORS: Record<ToolType | 'Unknown', string> = {
-  Read: '#3b82f6',     // blue-500
-  Write: '#22c55e',    // green-500
-  Edit: '#eab308',     // yellow-500
-  Bash: '#a855f7',     // purple-500
-  Glob: '#f97316',     // orange-500
-  Grep: '#ec4899',     // pink-500
+  Read: '#3b82f6', // blue-500
+  Write: '#22c55e', // green-500
+  Edit: '#eab308', // yellow-500
+  Bash: '#a855f7', // purple-500
+  Glob: '#f97316', // orange-500
+  Grep: '#ec4899', // pink-500
   WebFetch: '#06b6d4', // cyan-500
   WebSearch: '#06b6d4', // cyan-500
-  Unknown: '#6b7280',  // gray-500
+  Unknown: '#6b7280', // gray-500
 };
 
 const LANE_HEIGHT = 32;
@@ -113,30 +106,32 @@ function calculateTimeline(toolCalls: ToolCall[]): {
   }
 
   // Calculate start and end times for each tool call
-  const toolCallTimes = toolCalls.map(tc => {
-    const startMs = parseTimestamp(tc.startedAt);
-    let endMs = parseTimestamp(tc.completedAt);
+  const toolCallTimes = toolCalls
+    .map((tc) => {
+      const startMs = parseTimestamp(tc.startedAt);
+      let endMs = parseTimestamp(tc.completedAt);
 
-    // If not completed, use current time or duration
-    if (!endMs) {
-      endMs = tc.duration ? startMs + tc.duration : Date.now();
-    }
+      // If not completed, use current time or duration
+      if (!endMs) {
+        endMs = tc.duration ? startMs + tc.duration : Date.now();
+      }
 
-    return {
-      toolCall: tc,
-      startMs,
-      endMs,
-      duration: endMs - startMs,
-    };
-  }).filter(t => t.startMs > 0); // Filter out invalid entries
+      return {
+        toolCall: tc,
+        startMs,
+        endMs,
+        duration: endMs - startMs,
+      };
+    })
+    .filter((t) => t.startMs > 0); // Filter out invalid entries
 
   if (toolCallTimes.length === 0) {
     return { bars: [], startTime: 0, endTime: 0, duration: 0, laneCount: 0 };
   }
 
   // Find global time range
-  const startTime = Math.min(...toolCallTimes.map(t => t.startMs));
-  const endTime = Math.max(...toolCallTimes.map(t => t.endMs));
+  const startTime = Math.min(...toolCallTimes.map((t) => t.startMs));
+  const endTime = Math.max(...toolCallTimes.map((t) => t.endMs));
   const duration = endTime - startTime;
 
   // Assign lanes using a greedy algorithm (avoid overlapping bars)
@@ -187,7 +182,10 @@ function calculateTimeline(toolCalls: ToolCall[]): {
 // Statistics Calculation
 // ============================================================================
 
-function calculateStatistics(bars: TimelineBar[], totalDuration: number): {
+function calculateStatistics(
+  bars: TimelineBar[],
+  totalDuration: number,
+): {
   totalExecutionTime: number;
   parallelEfficiency: number;
   averageDuration: number;
@@ -207,15 +205,17 @@ function calculateStatistics(bars: TimelineBar[], totalDuration: number): {
   const totalExecutionTime = bars.reduce((sum, bar) => sum + bar.duration, 0);
   const parallelEfficiency = totalDuration > 0 ? totalExecutionTime / totalDuration : 0;
   const averageDuration = totalExecutionTime / bars.length;
-  const longestOperation = bars.reduce((longest, bar) =>
-    bar.duration > (longest?.duration || 0) ? bar : longest, bars[0]);
+  const longestOperation = bars.reduce(
+    (longest, bar) => (bar.duration > (longest?.duration || 0) ? bar : longest),
+    bars[0],
+  );
 
   // Calculate idle time (gaps between operations)
   const sortedBars = [...bars].sort((a, b) => a.startMs - b.startMs);
   let idleTime = 0;
   let currentEnd = 0;
 
-  sortedBars.forEach(bar => {
+  sortedBars.forEach((bar) => {
     if (bar.startMs > currentEnd) {
       idleTime += bar.startMs - currentEnd;
     }
@@ -235,12 +235,7 @@ function calculateStatistics(bars: TimelineBar[], totalDuration: number): {
 // ExecutionTimeline Component
 // ============================================================================
 
-export function ExecutionTimeline({
-  toolCalls,
-  onToolClick,
-  height: propHeight,
-  className,
-}: ExecutionTimelineProps) {
+export function ExecutionTimeline({ toolCalls, onToolClick, height: propHeight, className }: ExecutionTimelineProps) {
   // State
   const [zoom, setZoom] = useState(1);
   const [panOffset, setPanOffset] = useState(0);
@@ -254,16 +249,10 @@ export function ExecutionTimeline({
   const svgRef = useRef<SVGSVGElement>(null);
 
   // Calculate timeline data
-  const { bars, startTime, duration, laneCount } = useMemo(
-    () => calculateTimeline(toolCalls),
-    [toolCalls]
-  );
+  const { bars, startTime, duration, laneCount } = useMemo(() => calculateTimeline(toolCalls), [toolCalls]);
 
   // Calculate statistics
-  const stats = useMemo(
-    () => calculateStatistics(bars, duration),
-    [bars, duration]
-  );
+  const stats = useMemo(() => calculateStatistics(bars, duration), [bars, duration]);
 
   // Calculate dimensions
   const height = propHeight || Math.max(200, PADDING_TOP + laneCount * LANE_HEIGHT + PADDING_BOTTOM);
@@ -284,15 +273,15 @@ export function ExecutionTimeline({
 
   // Calculate scale
   const contentWidth = containerWidth - PADDING_LEFT - PADDING_RIGHT;
-  const timeScale = contentWidth * zoom / duration;
+  const timeScale = (contentWidth * zoom) / duration;
 
   // Zoom handlers
   const handleZoomIn = useCallback(() => {
-    setZoom(prev => Math.min(prev * 1.5, 10));
+    setZoom((prev) => Math.min(prev * 1.5, 10));
   }, []);
 
   const handleZoomOut = useCallback(() => {
-    setZoom(prev => Math.max(prev / 1.5, 0.5));
+    setZoom((prev) => Math.max(prev / 1.5, 0.5));
   }, []);
 
   const handleResetZoom = useCallback(() => {
@@ -301,21 +290,27 @@ export function ExecutionTimeline({
   }, []);
 
   // Pan handlers
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (zoom > 1) {
-      setIsPanning(true);
-      setPanStart(e.clientX - panOffset);
-    }
-  }, [zoom, panOffset]);
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (zoom > 1) {
+        setIsPanning(true);
+        setPanStart(e.clientX - panOffset);
+      }
+    },
+    [zoom, panOffset],
+  );
 
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (isPanning) {
-      const newOffset = e.clientX - panStart;
-      const maxOffset = 0;
-      const minOffset = -(contentWidth * zoom - contentWidth);
-      setPanOffset(Math.max(minOffset, Math.min(maxOffset, newOffset)));
-    }
-  }, [isPanning, panStart, contentWidth, zoom]);
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (isPanning) {
+        const newOffset = e.clientX - panStart;
+        const maxOffset = 0;
+        const minOffset = -(contentWidth * zoom - contentWidth);
+        setPanOffset(Math.max(minOffset, Math.min(maxOffset, newOffset)));
+      }
+    },
+    [isPanning, panStart, contentWidth, zoom],
+  );
 
   const handleMouseUp = useCallback(() => {
     setIsPanning(false);
@@ -366,21 +361,15 @@ export function ExecutionTimeline({
   }, [duration, contentWidth, timeScale, panOffset, containerWidth]);
 
   // Current time marker (for running operations)
-  const hasRunningOps = bars.some(bar =>
-    bar.toolCall.status === 'executing' || bar.toolCall.status === 'pending'
-  );
+  const hasRunningOps = bars.some((bar) => bar.toolCall.status === 'executing' || bar.toolCall.status === 'pending');
 
-  const currentTimeX = hasRunningOps
-    ? PADDING_LEFT + (Date.now() - startTime) * timeScale + panOffset
-    : null;
+  const currentTimeX = hasRunningOps ? PADDING_LEFT + (Date.now() - startTime) * timeScale + panOffset : null;
 
   if (bars.length === 0) {
     return (
-      <div className={clsx(
-        'flex flex-col items-center justify-center p-8',
-        'text-gray-500 dark:text-gray-400',
-        className
-      )}>
+      <div
+        className={clsx('flex flex-col items-center justify-center p-8', 'text-gray-500 dark:text-gray-400', className)}
+      >
         <PlayIcon className="w-8 h-8 mb-2 opacity-50" />
         <p className="text-sm">No tool execution data available</p>
       </div>
@@ -388,24 +377,19 @@ export function ExecutionTimeline({
   }
 
   return (
-    <div
-      ref={containerRef}
-      className={clsx('relative flex flex-col', className)}
-    >
+    <div ref={containerRef} className={clsx('relative flex flex-col', className)}>
       {/* Controls */}
-      <div className={clsx(
-        'flex items-center justify-between px-3 py-2',
-        'bg-gray-50 dark:bg-gray-800/50',
-        'border-b border-gray-200 dark:border-gray-700',
-        'rounded-t-lg'
-      )}>
+      <div
+        className={clsx(
+          'flex items-center justify-between px-3 py-2',
+          'bg-gray-50 dark:bg-gray-800/50',
+          'border-b border-gray-200 dark:border-gray-700',
+          'rounded-t-lg',
+        )}
+      >
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            Execution Timeline
-          </span>
-          <span className="text-xs text-gray-500">
-            {formatDuration(duration)} total
-          </span>
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Execution Timeline</span>
+          <span className="text-xs text-gray-500">{formatDuration(duration)} total</span>
         </div>
 
         <div className="flex items-center gap-1">
@@ -416,7 +400,7 @@ export function ExecutionTimeline({
               'p-1.5 rounded transition-colors',
               showStats
                 ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-600 dark:text-primary-400'
-                : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700'
+                : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700',
             )}
             title="Toggle statistics"
           >
@@ -432,9 +416,7 @@ export function ExecutionTimeline({
           >
             <ZoomOutIcon className="w-4 h-4" />
           </button>
-          <span className="text-xs text-gray-500 w-12 text-center">
-            {Math.round(zoom * 100)}%
-          </span>
+          <span className="text-xs text-gray-500 w-12 text-center">{Math.round(zoom * 100)}%</span>
           <button
             onClick={handleZoomIn}
             disabled={zoom >= 10}
@@ -464,12 +446,14 @@ export function ExecutionTimeline({
 
       {/* Statistics panel */}
       {showStats && (
-        <div className={clsx(
-          'flex items-center gap-6 px-4 py-2',
-          'bg-blue-50 dark:bg-blue-900/20',
-          'border-b border-gray-200 dark:border-gray-700',
-          'text-sm'
-        )}>
+        <div
+          className={clsx(
+            'flex items-center gap-6 px-4 py-2',
+            'bg-blue-50 dark:bg-blue-900/20',
+            'border-b border-gray-200 dark:border-gray-700',
+            'text-sm',
+          )}
+        >
           <div>
             <span className="text-gray-500 dark:text-gray-400">Total execution: </span>
             <span className="font-medium text-gray-700 dark:text-gray-300">
@@ -490,9 +474,7 @@ export function ExecutionTimeline({
           </div>
           <div>
             <span className="text-gray-500 dark:text-gray-400">Idle time: </span>
-            <span className="font-medium text-gray-700 dark:text-gray-300">
-              {formatDuration(stats.idleTime)}
-            </span>
+            <span className="font-medium text-gray-700 dark:text-gray-300">{formatDuration(stats.idleTime)}</span>
           </div>
           {stats.longestOperation && (
             <div>
@@ -507,22 +489,13 @@ export function ExecutionTimeline({
 
       {/* Timeline SVG */}
       <div
-        className={clsx(
-          'overflow-hidden',
-          zoom > 1 && 'cursor-grab',
-          isPanning && 'cursor-grabbing'
-        )}
+        className={clsx('overflow-hidden', zoom > 1 && 'cursor-grab', isPanning && 'cursor-grabbing')}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       >
-        <svg
-          ref={svgRef}
-          width={containerWidth}
-          height={height}
-          className="bg-white dark:bg-gray-900"
-        >
+        <svg ref={svgRef} width={containerWidth} height={height} className="bg-white dark:bg-gray-900">
           {/* Lane backgrounds */}
           {Array.from({ length: laneCount }).map((_, i) => (
             <rect
@@ -587,7 +560,7 @@ export function ExecutionTimeline({
           ))}
 
           {/* Tool call bars */}
-          {bars.map(bar => {
+          {bars.map((bar) => {
             const { x, y, width } = getBarProps(bar);
             const color = TOOL_COLORS[bar.toolCall.name] || TOOL_COLORS.Unknown;
             const isRunning = bar.toolCall.status === 'executing';
@@ -597,23 +570,17 @@ export function ExecutionTimeline({
                 key={bar.toolCall.id}
                 className="cursor-pointer"
                 onClick={() => onToolClick?.(bar.toolCall.id)}
-                onMouseEnter={(e) => setTooltip({
-                  toolCall: bar.toolCall,
-                  x: e.clientX,
-                  y: e.clientY,
-                })}
+                onMouseEnter={(e) =>
+                  setTooltip({
+                    toolCall: bar.toolCall,
+                    x: e.clientX,
+                    y: e.clientY,
+                  })
+                }
                 onMouseLeave={() => setTooltip(null)}
               >
                 {/* Bar shadow */}
-                <rect
-                  x={x + 2}
-                  y={y + 2}
-                  width={width}
-                  height={BAR_HEIGHT}
-                  rx={4}
-                  fill="black"
-                  opacity={0.1}
-                />
+                <rect x={x + 2} y={y + 2} width={width} height={BAR_HEIGHT} rx={4} fill="black" opacity={0.1} />
 
                 {/* Bar */}
                 <rect
@@ -624,10 +591,7 @@ export function ExecutionTimeline({
                   rx={4}
                   fill={color}
                   opacity={bar.toolCall.status === 'failed' ? 0.6 : 1}
-                  className={clsx(
-                    'transition-opacity',
-                    isRunning && 'animate-pulse'
-                  )}
+                  className={clsx('transition-opacity', isRunning && 'animate-pulse')}
                 />
 
                 {/* Tool name (if bar is wide enough) */}
@@ -646,15 +610,7 @@ export function ExecutionTimeline({
 
                 {/* Failed indicator */}
                 {bar.toolCall.status === 'failed' && (
-                  <line
-                    x1={x}
-                    y1={y}
-                    x2={x + width}
-                    y2={y + BAR_HEIGHT}
-                    stroke="white"
-                    strokeWidth={2}
-                    opacity={0.5}
-                  />
+                  <line x1={x} y1={y} x2={x + width} y2={y + BAR_HEIGHT} stroke="white" strokeWidth={2} opacity={0.5} />
                 )}
               </g>
             );
@@ -672,12 +628,7 @@ export function ExecutionTimeline({
                 strokeWidth={2}
                 strokeDasharray="4 2"
               />
-              <circle
-                cx={currentTimeX}
-                cy={PADDING_TOP - 5}
-                r={4}
-                fill="#ef4444"
-              />
+              <circle cx={currentTimeX} cy={PADDING_TOP - 5} r={4} fill="#ef4444" />
             </g>
           )}
         </svg>
@@ -689,7 +640,7 @@ export function ExecutionTimeline({
           className={clsx(
             'fixed z-50 px-3 py-2 rounded-lg shadow-lg',
             'bg-gray-900 text-white text-sm',
-            'pointer-events-none'
+            'pointer-events-none',
           )}
           style={{
             left: tooltip.x + 10,
@@ -697,12 +648,8 @@ export function ExecutionTimeline({
           }}
         >
           <div className="font-medium">{tooltip.toolCall.name}</div>
-          <div className="text-gray-300 text-xs mt-1">
-            Duration: {formatDuration(tooltip.toolCall.duration || 0)}
-          </div>
-          <div className="text-gray-300 text-xs">
-            Status: {tooltip.toolCall.status}
-          </div>
+          <div className="text-gray-300 text-xs mt-1">Duration: {formatDuration(tooltip.toolCall.duration || 0)}</div>
+          <div className="text-gray-300 text-xs">Status: {tooltip.toolCall.status}</div>
           {tooltip.toolCall.parameters.file_path && (
             <div className="text-gray-400 text-xs mt-1 truncate max-w-[200px]">
               {tooltip.toolCall.parameters.file_path}
@@ -712,21 +659,22 @@ export function ExecutionTimeline({
       )}
 
       {/* Legend */}
-      <div className={clsx(
-        'flex flex-wrap items-center gap-4 px-4 py-2',
-        'bg-gray-50 dark:bg-gray-800/50',
-        'border-t border-gray-200 dark:border-gray-700',
-        'rounded-b-lg'
-      )}>
-        {Object.entries(TOOL_COLORS).filter(([key]) => key !== 'Unknown').map(([name, color]) => (
-          <div key={name} className="flex items-center gap-1.5">
-            <div
-              className="w-3 h-3 rounded"
-              style={{ backgroundColor: color }}
-            />
-            <span className="text-xs text-gray-600 dark:text-gray-400">{name}</span>
-          </div>
-        ))}
+      <div
+        className={clsx(
+          'flex flex-wrap items-center gap-4 px-4 py-2',
+          'bg-gray-50 dark:bg-gray-800/50',
+          'border-t border-gray-200 dark:border-gray-700',
+          'rounded-b-lg',
+        )}
+      >
+        {Object.entries(TOOL_COLORS)
+          .filter(([key]) => key !== 'Unknown')
+          .map(([name, color]) => (
+            <div key={name} className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded" style={{ backgroundColor: color }} />
+              <span className="text-xs text-gray-600 dark:text-gray-400">{name}</span>
+            </div>
+          ))}
       </div>
     </div>
   );

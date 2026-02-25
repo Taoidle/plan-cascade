@@ -135,15 +135,7 @@ function extractToolChanges(lines: StreamLine[]): ToolChange[] {
 // Sub-components
 // ============================================================================
 
-function SectionHeader({
-  title,
-  count,
-  defaultOpen = true,
-}: {
-  title: string;
-  count?: number;
-  defaultOpen?: boolean;
-}) {
+function SectionHeader({ title, count, defaultOpen = true }: { title: string; count?: number; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
 
   return {
@@ -164,9 +156,7 @@ function SectionHeader({
           </svg>
           <span>{title}</span>
         </div>
-        {typeof count === 'number' && (
-          <span className="text-xs text-gray-500 dark:text-gray-400">{count}</span>
-        )}
+        {typeof count === 'number' && <span className="text-xs text-gray-500 dark:text-gray-400">{count}</span>}
       </button>
     ),
   };
@@ -199,11 +189,7 @@ function GitChangesSection({
               <span>Loading...</span>
             </div>
           )}
-          {error && (
-            <div className="py-3 text-center text-sm text-gray-500 dark:text-gray-400">
-              {error}
-            </div>
-          )}
+          {error && <div className="py-3 text-center text-sm text-gray-500 dark:text-gray-400">{error}</div>}
           {!isLoading && !error && displayDiffs.length === 0 && (
             <div className="py-4 text-center text-sm text-gray-500 dark:text-gray-400">
               {t('diffPanel.noChanges', { defaultValue: 'No changes detected' })}
@@ -272,18 +258,14 @@ function ToolChangesSection({ changes }: { changes: ToolChange[] }) {
                         'text-2xs font-medium px-1.5 py-0.5 rounded',
                         change.toolName === 'Write'
                           ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
-                          : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+                          : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400',
                       )}
                     >
                       {change.toolName}
                     </span>
-                    <code className="text-xs text-gray-600 dark:text-gray-400 truncate flex-1">
-                      {change.filePath}
-                    </code>
+                    <code className="text-xs text-gray-600 dark:text-gray-400 truncate flex-1">{change.filePath}</code>
                   </div>
-                  <p className="text-2xs text-gray-500 dark:text-gray-400 truncate">
-                    {change.preview}
-                  </p>
+                  <p className="text-2xs text-gray-500 dark:text-gray-400 truncate">{change.preview}</p>
                 </div>
               ))}
             </div>
@@ -356,10 +338,7 @@ export function DiffPanel({ streamingOutput, workspacePath }: DiffPanelProps) {
   }, [fetchGitDiff]);
 
   // Extract tool changes from streaming output
-  const toolChanges = useMemo(
-    () => extractToolChanges(streamingOutput),
-    [streamingOutput]
-  );
+  const toolChanges = useMemo(() => extractToolChanges(streamingOutput), [streamingOutput]);
 
   return (
     <div className="min-h-0 flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
@@ -375,7 +354,7 @@ export function DiffPanel({ streamingOutput, workspacePath }: DiffPanelProps) {
             'text-xs px-2 py-1 rounded transition-colors',
             'text-gray-600 dark:text-gray-400',
             'hover:bg-gray-100 dark:hover:bg-gray-700',
-            gitLoading && 'opacity-50 cursor-not-allowed'
+            gitLoading && 'opacity-50 cursor-not-allowed',
           )}
           title={t('diffPanel.refresh', { defaultValue: 'Refresh' })}
         >
@@ -397,11 +376,7 @@ export function DiffPanel({ streamingOutput, workspacePath }: DiffPanelProps) {
 
       {/* Scrollable content */}
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <GitChangesSection
-          fileDiffs={gitDiffs}
-          isLoading={gitLoading}
-          error={gitError}
-        />
+        <GitChangesSection fileDiffs={gitDiffs} isLoading={gitLoading} error={gitError} />
         <ToolChangesSection changes={toolChanges} />
       </div>
     </div>

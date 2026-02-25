@@ -32,15 +32,7 @@ interface BranchActionsProps {
 // Dialog Shell
 // ---------------------------------------------------------------------------
 
-function DialogShell({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
+function DialogShell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
   // Close on Escape
@@ -61,10 +53,7 @@ function DialogShell({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/40 dark:bg-black/60"
-        onClick={onClose}
-      />
+      <div className="absolute inset-0 bg-black/40 dark:bg-black/60" onClick={onClose} />
 
       {/* Dialog */}
       <div
@@ -154,7 +143,7 @@ function CreateBranchDialog({
         handleCreate();
       }
     },
-    [handleCreate, isCreating]
+    [handleCreate, isCreating],
   );
 
   return (
@@ -186,15 +175,14 @@ function CreateBranchDialog({
           >
             {branches.map((b) => (
               <option key={b.name} value={b.name}>
-                {b.name}{b.is_head ? ` ${t('branchActions.current')}` : ''}
+                {b.name}
+                {b.is_head ? ` ${t('branchActions.current')}` : ''}
               </option>
             ))}
           </select>
         </div>
 
-        {error && (
-          <div className="text-sm text-red-600 dark:text-red-400">{error}</div>
-        )}
+        {error && <div className="text-sm text-red-600 dark:text-red-400">{error}</div>}
 
         <div className="flex justify-end gap-2 pt-2">
           <button
@@ -208,9 +196,7 @@ function CreateBranchDialog({
             disabled={isCreating || !name.trim()}
             className={clsx(
               'px-4 py-2 text-sm rounded-lg font-medium text-white transition-colors',
-              isCreating || !name.trim()
-                ? 'bg-blue-400 cursor-not-allowed'
-                : 'bg-blue-600 hover:bg-blue-700'
+              isCreating || !name.trim() ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700',
             )}
           >
             {isCreating ? t('branchActions.creating') : t('branchActions.create')}
@@ -276,10 +262,7 @@ function DeleteBranchDialog({
       <div className="space-y-4">
         <p className="text-sm text-gray-700 dark:text-gray-300">
           {t('branchActions.deleteConfirm')}{' '}
-          <code className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-sm font-mono">
-            {branch.name}
-          </code>
-          ?
+          <code className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-sm font-mono">{branch.name}</code>?
         </p>
 
         {isProtected && (
@@ -288,9 +271,7 @@ function DeleteBranchDialog({
               {t('branchActions.protectedWarning')} ({branch.name})
             </p>
             {confirmMainDelete && (
-              <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">
-                {t('branchActions.confirmDeleteAgain')}
-              </p>
+              <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">{t('branchActions.confirmDeleteAgain')}</p>
             )}
           </div>
         )}
@@ -305,9 +286,7 @@ function DeleteBranchDialog({
           {t('branchActions.forceDelete')}
         </label>
 
-        {error && (
-          <div className="text-sm text-red-600 dark:text-red-400">{error}</div>
-        )}
+        {error && <div className="text-sm text-red-600 dark:text-red-400">{error}</div>}
 
         <div className="flex justify-end gap-2 pt-2">
           <button
@@ -321,12 +300,14 @@ function DeleteBranchDialog({
             disabled={isDeleting}
             className={clsx(
               'px-4 py-2 text-sm rounded-lg font-medium text-white transition-colors',
-              isDeleting
-                ? 'bg-red-400 cursor-not-allowed'
-                : 'bg-red-600 hover:bg-red-700'
+              isDeleting ? 'bg-red-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700',
             )}
           >
-            {isDeleting ? t('branchActions.deleting') : confirmMainDelete && isProtected ? t('branchActions.confirmDelete') : t('branchActions.deleteBranch')}
+            {isDeleting
+              ? t('branchActions.deleting')
+              : confirmMainDelete && isProtected
+                ? t('branchActions.confirmDelete')
+                : t('branchActions.deleteBranch')}
           </button>
         </div>
       </div>
@@ -392,7 +373,7 @@ function RenameBranchDialog({
         handleRename();
       }
     },
-    [handleRename, isRenaming]
+    [handleRename, isRenaming],
   );
 
   return (
@@ -425,9 +406,7 @@ function RenameBranchDialog({
           />
         </div>
 
-        {error && (
-          <div className="text-sm text-red-600 dark:text-red-400">{error}</div>
-        )}
+        {error && <div className="text-sm text-red-600 dark:text-red-400">{error}</div>}
 
         <div className="flex justify-end gap-2 pt-2">
           <button
@@ -443,7 +422,7 @@ function RenameBranchDialog({
               'px-4 py-2 text-sm rounded-lg font-medium text-white transition-colors',
               isRenaming || !newName.trim() || newName.trim() === branch.name
                 ? 'bg-blue-400 cursor-not-allowed'
-                : 'bg-blue-600 hover:bg-blue-700'
+                : 'bg-blue-600 hover:bg-blue-700',
             )}
           >
             {isRenaming ? t('branchActions.renaming') : t('branchActions.rename')}
@@ -458,41 +437,17 @@ function RenameBranchDialog({
 // BranchActions (exported entry point)
 // ---------------------------------------------------------------------------
 
-export function BranchActions({
-  type,
-  branch,
-  branches,
-  repoPath,
-  onClose,
-  onSuccess,
-}: BranchActionsProps) {
+export function BranchActions({ type, branch, branches, repoPath, onClose, onSuccess }: BranchActionsProps) {
   switch (type) {
     case 'create':
-      return (
-        <CreateBranchDialog
-          branches={branches}
-          repoPath={repoPath}
-          onClose={onClose}
-          onSuccess={onSuccess}
-        />
-      );
+      return <CreateBranchDialog branches={branches} repoPath={repoPath} onClose={onClose} onSuccess={onSuccess} />;
     case 'delete':
       return branch ? (
-        <DeleteBranchDialog
-          branch={branch}
-          repoPath={repoPath}
-          onClose={onClose}
-          onSuccess={onSuccess}
-        />
+        <DeleteBranchDialog branch={branch} repoPath={repoPath} onClose={onClose} onSuccess={onSuccess} />
       ) : null;
     case 'rename':
       return branch ? (
-        <RenameBranchDialog
-          branch={branch}
-          repoPath={repoPath}
-          onClose={onClose}
-          onSuccess={onSuccess}
-        />
+        <RenameBranchDialog branch={branch} repoPath={repoPath} onClose={onClose} onSuccess={onSuccess} />
       ) : null;
     default:
       return null;

@@ -100,7 +100,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
             'w-full max-w-md max-h-[85vh] overflow-y-auto',
             'bg-white dark:bg-gray-900 rounded-lg shadow-xl',
             'animate-in fade-in-0 zoom-in-95',
-            'focus:outline-none'
+            'focus:outline-none',
           )}
         >
           <form onSubmit={handleSubmit}>
@@ -110,10 +110,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                 {t('mcp.addServerTitle')}
               </Dialog.Title>
               <Dialog.Close asChild>
-                <button
-                  type="button"
-                  className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
-                >
+                <button type="button" className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800">
                   <Cross2Icon className="w-5 h-5 text-gray-500 dark:text-gray-400" />
                 </button>
               </Dialog.Close>
@@ -134,7 +131,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                       'flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors',
                       serverType === 'stdio'
                         ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-700 dark:text-primary-300 border-2 border-primary-500'
-                        : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-2 border-transparent'
+                        : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-2 border-transparent',
                     )}
                   >
                     Stdio
@@ -146,7 +143,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                       'flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors',
                       serverType === 'sse'
                         ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-700 dark:text-primary-300 border-2 border-primary-500'
-                        : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-2 border-transparent'
+                        : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-2 border-transparent',
                     )}
                   >
                     SSE
@@ -170,7 +167,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                     'bg-gray-100 dark:bg-gray-800',
                     'border border-gray-200 dark:border-gray-700',
                     'text-gray-900 dark:text-white',
-                    'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                    'focus:outline-none focus:ring-2 focus:ring-primary-500',
                   )}
                 />
               </div>
@@ -193,7 +190,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                         'bg-gray-100 dark:bg-gray-800',
                         'border border-gray-200 dark:border-gray-700',
                         'text-gray-900 dark:text-white',
-                        'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                        'focus:outline-none focus:ring-2 focus:ring-primary-500',
                       )}
                     />
                   </div>
@@ -212,7 +209,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                         'bg-gray-100 dark:bg-gray-800',
                         'border border-gray-200 dark:border-gray-700',
                         'text-gray-900 dark:text-white',
-                        'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                        'focus:outline-none focus:ring-2 focus:ring-primary-500',
                       )}
                     />
                   </div>
@@ -244,7 +241,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                               'flex-1 px-2 py-1.5 rounded-md font-mono text-xs',
                               'bg-gray-100 dark:bg-gray-800',
                               'text-gray-900 dark:text-white',
-                              'border border-gray-200 dark:border-gray-700'
+                              'border border-gray-200 dark:border-gray-700',
                             )}
                           />
                           <input
@@ -256,7 +253,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                               'flex-1 px-2 py-1.5 rounded-md font-mono text-xs',
                               'bg-gray-100 dark:bg-gray-800',
                               'text-gray-900 dark:text-white',
-                              'border border-gray-200 dark:border-gray-700'
+                              'border border-gray-200 dark:border-gray-700',
                             )}
                           />
                           <button
@@ -290,7 +287,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                       'bg-gray-100 dark:bg-gray-800',
                       'border border-gray-200 dark:border-gray-700',
                       'text-gray-900 dark:text-white',
-                      'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                      'focus:outline-none focus:ring-2 focus:ring-primary-500',
                     )}
                   />
                 </div>
@@ -314,7 +311,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                     'bg-gray-100 dark:bg-gray-800',
                     'text-gray-700 dark:text-gray-300',
                     'hover:bg-gray-200 dark:hover:bg-gray-700',
-                    'text-sm font-medium'
+                    'text-sm font-medium',
                   )}
                 >
                   {t('common.cancel')}
@@ -327,7 +324,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                   'px-4 py-2 rounded-md',
                   'bg-primary-600 hover:bg-primary-700',
                   'text-white text-sm font-medium',
-                  'disabled:opacity-50'
+                  'disabled:opacity-50',
                 )}
               >
                 {loading ? t('common.adding') : t('mcp.addServer')}

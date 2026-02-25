@@ -10,12 +10,7 @@
 
 import { useState, useMemo, useCallback, KeyboardEvent } from 'react';
 import { clsx } from 'clsx';
-import {
-  ChevronDownIcon,
-  ChevronUpIcon,
-  CopyIcon,
-  CheckIcon,
-} from '@radix-ui/react-icons';
+import { ChevronDownIcon, ChevronUpIcon, CopyIcon, CheckIcon } from '@radix-ui/react-icons';
 
 // ============================================================================
 // Types
@@ -107,9 +102,7 @@ function truncatePath(path: string, maxLength: number = 60): string {
 
   // If filename alone is too long, truncate it
   if (filename.length > maxLength - 4) {
-    const ext = filename.includes('.')
-      ? '.' + filename.split('.').pop()
-      : '';
+    const ext = filename.includes('.') ? '.' + filename.split('.').pop() : '';
     const nameWithoutExt = filename.slice(0, filename.length - ext.length);
     const availableLength = maxLength - 4 - ext.length;
     return '...' + nameWithoutExt.slice(-availableLength) + ext;
@@ -139,8 +132,7 @@ function truncateCommand(command: string, maxLength: number = 80): string {
   const semiIndex = command.indexOf(';');
   const andIndex = command.indexOf('&&');
 
-  const breakPoints = [pipeIndex, semiIndex, andIndex]
-    .filter(i => i > 0 && i < maxLength - 3);
+  const breakPoints = [pipeIndex, semiIndex, andIndex].filter((i) => i > 0 && i < maxLength - 3);
 
   if (breakPoints.length > 0) {
     const breakAt = Math.max(...breakPoints);
@@ -153,7 +145,10 @@ function truncateCommand(command: string, maxLength: number = 80): string {
 /**
  * Format JSON with depth indicator for collapsed nested objects
  */
-function formatJsonPreview(content: string, maxLength: number = 200): {
+function formatJsonPreview(
+  content: string,
+  maxLength: number = 200,
+): {
   preview: string;
   isComplex: boolean;
   depth: number;
@@ -165,12 +160,9 @@ function formatJsonPreview(content: string, maxLength: number = 200): {
     const getDepth = (obj: unknown, currentDepth = 0): number => {
       if (typeof obj !== 'object' || obj === null) return currentDepth;
       if (Array.isArray(obj)) {
-        return Math.max(currentDepth, ...obj.map(item => getDepth(item, currentDepth + 1)));
+        return Math.max(currentDepth, ...obj.map((item) => getDepth(item, currentDepth + 1)));
       }
-      return Math.max(
-        currentDepth,
-        ...Object.values(obj).map(val => getDepth(val, currentDepth + 1))
-      );
+      return Math.max(currentDepth, ...Object.values(obj).map((val) => getDepth(val, currentDepth + 1)));
     };
 
     const depth = getDepth(parsed);
@@ -190,7 +182,9 @@ function formatJsonPreview(content: string, maxLength: number = 200): {
       }
       if (typeof obj !== 'object' || obj === null) return obj;
       if (Array.isArray(obj)) {
-        return obj.slice(0, 3).map(item => simplify(item, currentDepth + 1))
+        return obj
+          .slice(0, 3)
+          .map((item) => simplify(item, currentDepth + 1))
           .concat(obj.length > 3 ? [`...+${obj.length - 3} more`] : []);
       }
       const entries = Object.entries(obj);
@@ -211,7 +205,7 @@ function formatJsonPreview(content: string, maxLength: number = 200): {
     return {
       preview: truncateAtWordBoundary(content, maxLength),
       isComplex: false,
-      depth: 0
+      depth: 0,
     };
   }
 }
@@ -271,9 +265,7 @@ export function TruncatedText({
     return {
       truncatedContent: truncated,
       needsTruncation: content.length > maxLength,
-      extraInfo: content.length > maxLength
-        ? `(${content.length} chars)`
-        : '',
+      extraInfo: content.length > maxLength ? `(${content.length} chars)` : '',
     };
   }, [content, maxLength, isPath, isCommand, isJson]);
 
@@ -289,19 +281,18 @@ export function TruncatedText({
   }, [content]);
 
   // Keyboard handler for expand/collapse
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      toggle();
-    }
-  }, [toggle]);
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggle();
+      }
+    },
+    [toggle],
+  );
 
   if (!content) {
-    return (
-      <span className={clsx('text-gray-400 italic', className)}>
-        No content
-      </span>
-    );
+    return <span className={clsx('text-gray-400 italic', className)}>No content</span>;
   }
 
   return (
@@ -317,7 +308,7 @@ export function TruncatedText({
       <div
         className={clsx(
           'relative rounded-lg transition-all duration-200',
-          isExpanded ? 'bg-gray-50 dark:bg-gray-800/50' : ''
+          isExpanded ? 'bg-gray-50 dark:bg-gray-800/50' : '',
         )}
       >
         {/* Main content */}
@@ -326,28 +317,23 @@ export function TruncatedText({
             'font-mono text-sm',
             isPath && 'text-blue-600 dark:text-blue-400',
             isCommand && 'text-purple-600 dark:text-purple-400',
-            isJson && 'text-gray-700 dark:text-gray-300'
+            isJson && 'text-gray-700 dark:text-gray-300',
           )}
         >
           {isExpanded ? (
-            <div
-              className="overflow-auto p-3"
-              style={{ maxHeight: `${maxExpandedHeight}px` }}
-            >
+            <div className="overflow-auto p-3" style={{ maxHeight: `${maxExpandedHeight}px` }}>
               <pre className="whitespace-pre-wrap break-words">
-                {isJson ? (
-                  <code>{JSON.stringify(JSON.parse(content), null, 2)}</code>
-                ) : (
-                  content
-                )}
+                {isJson ? <code>{JSON.stringify(JSON.parse(content), null, 2)}</code> : content}
               </pre>
             </div>
           ) : (
-            <code className={clsx(
-              'block px-2 py-1 rounded',
-              'bg-gray-100 dark:bg-gray-800',
-              needsTruncation && 'cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700'
-            )}>
+            <code
+              className={clsx(
+                'block px-2 py-1 rounded',
+                'bg-gray-100 dark:bg-gray-800',
+                needsTruncation && 'cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700',
+              )}
+            >
               {truncatedContent}
             </code>
           )}
@@ -355,10 +341,7 @@ export function TruncatedText({
 
         {/* Controls */}
         {(needsTruncation || showCopy) && (
-          <div className={clsx(
-            'flex items-center gap-2 mt-2',
-            'text-xs text-gray-500 dark:text-gray-400'
-          )}>
+          <div className={clsx('flex items-center gap-2 mt-2', 'text-xs text-gray-500 dark:text-gray-400')}>
             {/* Expand/Collapse button */}
             {needsTruncation && (
               <button
@@ -367,7 +350,7 @@ export function TruncatedText({
                 className={clsx(
                   'flex items-center gap-1 px-2 py-1 rounded',
                   'hover:bg-gray-200 dark:hover:bg-gray-700',
-                  'transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500'
+                  'transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500',
                 )}
                 aria-expanded={isExpanded}
                 aria-label={isExpanded ? 'Show less' : 'Show more'}
@@ -394,7 +377,7 @@ export function TruncatedText({
                   'flex items-center gap-1 px-2 py-1 rounded',
                   'hover:bg-gray-200 dark:hover:bg-gray-700',
                   'transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500',
-                  copied && 'text-green-600 dark:text-green-400'
+                  copied && 'text-green-600 dark:text-green-400',
                 )}
                 aria-label={copied ? 'Copied!' : 'Copy to clipboard'}
               >

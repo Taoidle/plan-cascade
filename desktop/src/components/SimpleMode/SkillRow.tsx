@@ -22,7 +22,7 @@ export function SkillRow({ skill, onToggle, onClick }: SkillRowProps) {
       e.stopPropagation();
       onToggle(skill.id, e.target.checked);
     },
-    [skill.id, onToggle]
+    [skill.id, onToggle],
   );
 
   const handleClick = useCallback(() => {
@@ -35,7 +35,7 @@ export function SkillRow({ skill, onToggle, onClick }: SkillRowProps) {
       className={clsx(
         'group flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors',
         'hover:bg-gray-50 dark:hover:bg-gray-800',
-        onClick && 'cursor-pointer'
+        onClick && 'cursor-pointer',
       )}
       onClick={handleClick}
       role={onClick ? 'button' : undefined}
@@ -55,15 +55,13 @@ export function SkillRow({ skill, onToggle, onClick }: SkillRowProps) {
         onClick={(e) => e.stopPropagation()}
         className={clsx(
           'h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600 shrink-0',
-          'text-primary-600 focus:ring-primary-500'
+          'text-primary-600 focus:ring-primary-500',
         )}
         aria-label={`Toggle ${skill.name}`}
       />
 
       {/* Name */}
-      <span className="flex-1 min-w-0 text-xs text-gray-700 dark:text-gray-300 truncate">
-        {skill.name}
-      </span>
+      <span className="flex-1 min-w-0 text-xs text-gray-700 dark:text-gray-300 truncate">{skill.name}</span>
 
       {/* Source badge */}
       <SkillSourceBadge source={skill.source} compact />

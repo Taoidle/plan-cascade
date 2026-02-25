@@ -38,12 +38,7 @@ interface TreeNode {
   children: TreeNode[];
 }
 
-export function BranchTree({
-  timeline,
-  selectedCheckpointId,
-  onCheckpointSelect,
-  onCheckpointHover,
-}: BranchTreeProps) {
+export function BranchTree({ timeline, selectedCheckpointId, onCheckpointSelect, onCheckpointHover }: BranchTreeProps) {
   const { t } = useTranslation();
   const [hoveredNode, setHoveredNode] = useState<TreeNode | null>(null);
 
@@ -52,20 +47,13 @@ export function BranchTree({
     if (!timeline.checkpoints.length) return null;
 
     // Create a map of branches by ID
-    const branchMap = new Map(
-      timeline.branches.map((b) => [b.id, b])
-    );
+    const branchMap = new Map(timeline.branches.map((b) => [b.id, b]));
 
     // Find root checkpoints (no parent)
     const roots = timeline.checkpoints.filter((cp) => !cp.parent_id);
 
     // Build tree nodes recursively
-    const buildNode = (
-      checkpoint: Checkpoint,
-      branchIndex: number,
-      depth: number,
-      xOffset: number
-    ): TreeNode => {
+    const buildNode = (checkpoint: Checkpoint, branchIndex: number, depth: number, xOffset: number): TreeNode => {
       const branch = checkpoint.branch_id ? branchMap.get(checkpoint.branch_id) || null : null;
 
       // Find children
@@ -75,7 +63,7 @@ export function BranchTree({
           // Check if child is on a different branch
           const childBranchIndex =
             child.branch_id && child.branch_id !== checkpoint.branch_id
-              ? (timeline.branches.findIndex((b) => b.id === child.branch_id) % BRANCH_COLORS.length)
+              ? timeline.branches.findIndex((b) => b.id === child.branch_id) % BRANCH_COLORS.length
               : branchIndex;
 
           return buildNode(child, childBranchIndex, depth + 1, xOffset + idx * 2);
@@ -93,9 +81,7 @@ export function BranchTree({
 
     // Build trees from roots
     const trees = roots.map((root, idx) => {
-      const branchIndex = root.branch_id
-        ? timeline.branches.findIndex((b) => b.id === root.branch_id)
-        : 0;
+      const branchIndex = root.branch_id ? timeline.branches.findIndex((b) => b.id === root.branch_id) : 0;
       return buildNode(root, branchIndex, 0, idx * 4);
     });
 
@@ -132,7 +118,7 @@ export function BranchTree({
     (node: TreeNode) => {
       onCheckpointSelect(node.checkpoint);
     },
-    [onCheckpointSelect]
+    [onCheckpointSelect],
   );
 
   // Handle node hover
@@ -141,15 +127,11 @@ export function BranchTree({
       setHoveredNode(node);
       onCheckpointHover?.(node?.checkpoint || null);
     },
-    [onCheckpointHover]
+    [onCheckpointHover],
   );
 
   if (!treeData || treeData.length === 0) {
-    return (
-      <div className="text-center p-4 text-gray-500 dark:text-gray-400">
-        {t('timeline.noCheckpoints')}
-      </div>
-    );
+    return <div className="text-center p-4 text-gray-500 dark:text-gray-400">{t('timeline.noCheckpoints')}</div>;
   }
 
   const nodeRadius = 12;
@@ -226,14 +208,10 @@ export function BranchTree({
           textAnchor="middle"
           className={clsx(
             'text-xs pointer-events-none',
-            isSelected || isHovered
-              ? 'fill-gray-900 dark:fill-white font-medium'
-              : 'fill-gray-500 dark:fill-gray-400'
+            isSelected || isHovered ? 'fill-gray-900 dark:fill-white font-medium' : 'fill-gray-500 dark:fill-gray-400',
           )}
         >
-          {node.checkpoint.label.length > 12
-            ? node.checkpoint.label.slice(0, 12) + '...'
-            : node.checkpoint.label}
+          {node.checkpoint.label.length > 12 ? node.checkpoint.label.slice(0, 12) + '...' : node.checkpoint.label}
         </text>
 
         {/* Recursively render children */}
@@ -244,12 +222,7 @@ export function BranchTree({
 
   return (
     <div className="w-full overflow-auto">
-      <svg
-        width={dimensions.width}
-        height={dimensions.height}
-        className="min-w-full"
-        style={{ minHeight: '200px' }}
-      >
+      <svg width={dimensions.width} height={dimensions.height} className="min-w-full" style={{ minHeight: '200px' }}>
         <defs>
           {/* Define filters for glow effect */}
           <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
@@ -272,7 +245,7 @@ export function BranchTree({
             'fixed z-50 px-3 py-2 rounded-lg shadow-lg',
             'bg-white dark:bg-gray-800',
             'border border-gray-200 dark:border-gray-700',
-            'text-sm'
+            'text-sm',
           )}
           style={{
             left: `${padding + hoveredNode.x * nodeSpacing + nodeRadius + 10}px`,
@@ -280,9 +253,7 @@ export function BranchTree({
             transform: 'translateY(-100%)',
           }}
         >
-          <p className="font-medium text-gray-900 dark:text-white">
-            {hoveredNode.checkpoint.label}
-          </p>
+          <p className="font-medium text-gray-900 dark:text-white">{hoveredNode.checkpoint.label}</p>
           <p className="text-xs text-gray-500 dark:text-gray-400">
             {new Date(hoveredNode.checkpoint.timestamp).toLocaleString()}
           </p>
@@ -290,9 +261,7 @@ export function BranchTree({
             {hoveredNode.checkpoint.files_snapshot.length} {t('timeline.files')}
           </p>
           {hoveredNode.branch && (
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              Branch: {hoveredNode.branch.name}
-            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Branch: {hoveredNode.branch.name}</p>
           )}
         </div>
       )}

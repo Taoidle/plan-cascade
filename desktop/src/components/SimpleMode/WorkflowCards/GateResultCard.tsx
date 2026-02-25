@@ -19,7 +19,7 @@ export function GateResultCard({ data }: { data: GateResultCardData }) {
         'rounded-lg border px-3 py-2',
         isPassed
           ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20'
-          : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'
+          : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20',
       )}
     >
       <div className="flex items-center justify-between">
@@ -28,7 +28,7 @@ export function GateResultCard({ data }: { data: GateResultCardData }) {
           <span
             className={clsx(
               'text-xs font-medium',
-              isPassed ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'
+              isPassed ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300',
             )}
           >
             {t('workflow.gates.qualityGate', { title: data.storyTitle })}
@@ -39,7 +39,7 @@ export function GateResultCard({ data }: { data: GateResultCardData }) {
             'text-2xs px-1.5 py-0.5 rounded font-medium',
             isPassed
               ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
-              : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+              : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400',
           )}
         >
           {data.overallStatus}
@@ -52,10 +52,7 @@ export function GateResultCard({ data }: { data: GateResultCardData }) {
           {data.gates.map((gate) => (
             <span
               key={gate.gateId}
-              className={clsx(
-                'text-2xs px-1.5 py-0.5 rounded',
-                gateStatusColor(gate.status)
-              )}
+              className={clsx('text-2xs px-1.5 py-0.5 rounded', gateStatusColor(gate.status))}
               title={gate.message || gate.gateName}
             >
               {gate.gateName}: {gate.status}
@@ -69,9 +66,7 @@ export function GateResultCard({ data }: { data: GateResultCardData }) {
         <div className="mt-1.5 grid grid-cols-5 gap-1">
           {data.codeReviewScores.map((score) => (
             <div key={score.dimension} className="text-center">
-              <span className="text-2xs text-gray-500 dark:text-gray-400 block truncate">
-                {score.dimension}
-              </span>
+              <span className="text-2xs text-gray-500 dark:text-gray-400 block truncate">{score.dimension}</span>
               <span
                 className={clsx(
                   'text-xs font-medium',
@@ -79,7 +74,7 @@ export function GateResultCard({ data }: { data: GateResultCardData }) {
                     ? 'text-green-600 dark:text-green-400'
                     : score.score >= score.maxScore * 0.5
                       ? 'text-amber-600 dark:text-amber-400'
-                      : 'text-red-600 dark:text-red-400'
+                      : 'text-red-600 dark:text-red-400',
                 )}
               >
                 {score.score}/{score.maxScore}
@@ -118,10 +113,15 @@ function StatusIcon({ status }: { status: GateStatus }) {
 
 function gateStatusColor(status: GateStatus): string {
   switch (status) {
-    case 'passed': return 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400';
-    case 'failed': return 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400';
-    case 'running': return 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400';
-    case 'skipped': return 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400';
-    default: return 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400';
+    case 'passed':
+      return 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400';
+    case 'failed':
+      return 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400';
+    case 'running':
+      return 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400';
+    case 'skipped':
+      return 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400';
+    default:
+      return 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400';
   }
 }

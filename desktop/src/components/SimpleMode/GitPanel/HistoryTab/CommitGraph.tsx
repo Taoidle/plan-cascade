@@ -15,13 +15,7 @@ import { useRef, useMemo, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { GraphLayout, CommitNode } from '../../../../types/git';
 import CommitRow from './CommitRow';
-import {
-  ROW_HEIGHT,
-  graphWidth,
-  getLaneColor,
-  renderEdgesForRange,
-  renderNodesForRange,
-} from './graphRenderer';
+import { ROW_HEIGHT, graphWidth, getLaneColor, renderEdgesForRange, renderNodesForRange } from './graphRenderer';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -127,19 +121,12 @@ export function CommitGraph({
 
   const renderedEdges = useMemo(
     () => renderEdgesForRange(graphLayout.edges, startRow, endRow),
-    [graphLayout.edges, startRow, endRow]
+    [graphLayout.edges, startRow, endRow],
   );
 
   const renderedNodes = useMemo(
-    () =>
-      renderNodesForRange(
-        graphLayout.nodes,
-        startRow,
-        endRow,
-        commitParentCounts,
-        headSha,
-      ),
-    [graphLayout.nodes, startRow, endRow, commitParentCounts, headSha]
+    () => renderNodesForRange(graphLayout.nodes, startRow, endRow, commitParentCounts, headSha),
+    [graphLayout.nodes, startRow, endRow, commitParentCounts, headSha],
   );
 
   // ---------------------------------------------------------------------------
@@ -170,14 +157,11 @@ export function CommitGraph({
       setScrollTop(target.scrollTop);
 
       // Detect scroll to bottom for infinite scroll
-      if (
-        onScrollToBottom &&
-        target.scrollHeight - target.scrollTop - target.clientHeight < ROW_HEIGHT * 3
-      ) {
+      if (onScrollToBottom && target.scrollHeight - target.scrollTop - target.clientHeight < ROW_HEIGHT * 3) {
         onScrollToBottom();
       }
     },
-    [onScrollToBottom]
+    [onScrollToBottom],
   );
 
   // ---------------------------------------------------------------------------
@@ -212,7 +196,7 @@ export function CommitGraph({
         onSelectCommit(sha);
       }
     },
-    [selectedCommitSha, onSelectCommit, onCompareCommit]
+    [selectedCommitSha, onSelectCommit, onCompareCommit],
   );
 
   // ---------------------------------------------------------------------------
@@ -228,36 +212,15 @@ export function CommitGraph({
   }
 
   return (
-    <div
-      ref={containerRef}
-      className="flex-1 min-h-0 overflow-auto"
-      onScroll={handleScroll}
-    >
+    <div ref={containerRef} className="flex-1 min-h-0 overflow-auto" onScroll={handleScroll}>
       {/* Virtual scroll container */}
-      <div
-        style={{ height: totalHeight, position: 'relative' }}
-        className="flex"
-      >
+      <div style={{ height: totalHeight, position: 'relative' }} className="flex">
         {/* SVG graph column (left) */}
-        <div
-          className="shrink-0 sticky left-0 z-10 bg-white dark:bg-gray-900"
-          style={{ width: svgWidth }}
-        >
-          <svg
-            width={svgWidth}
-            height={totalHeight}
-            className="absolute top-0 left-0"
-          >
+        <div className="shrink-0 sticky left-0 z-10 bg-white dark:bg-gray-900" style={{ width: svgWidth }}>
+          <svg width={svgWidth} height={totalHeight} className="absolute top-0 left-0">
             {/* Edges */}
             {renderedEdges.map((edge) => (
-              <path
-                key={edge.key}
-                d={edge.d}
-                stroke={edge.color}
-                strokeWidth={1.5}
-                fill="none"
-                strokeLinecap="round"
-              />
+              <path key={edge.key} d={edge.d} stroke={edge.color} strokeWidth={1.5} fill="none" strokeLinecap="round" />
             ))}
 
             {/* Nodes */}
@@ -275,11 +238,7 @@ export function CommitGraph({
                     opacity={0.4}
                   />
                 )}
-                <path
-                  d={node.data.shapePath}
-                  fill={node.data.color}
-                  stroke="none"
-                />
+                <path d={node.data.shapePath} fill={node.data.color} stroke="none" />
               </g>
             ))}
           </svg>

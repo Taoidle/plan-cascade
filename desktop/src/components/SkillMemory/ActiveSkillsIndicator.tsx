@@ -20,10 +20,7 @@ export function ActiveSkillsIndicator({ className }: ActiveSkillsIndicatorProps)
   const skills = useSkillMemoryStore((s) => s.skills);
   const openDialog = useSkillMemoryStore((s) => s.openDialog);
 
-  const enabledCount = useMemo(
-    () => skills.filter((s) => s.enabled).length,
-    [skills]
-  );
+  const enabledCount = useMemo(() => skills.filter((s) => s.enabled).length, [skills]);
 
   if (enabledCount === 0) return null;
 
@@ -36,17 +33,12 @@ export function ActiveSkillsIndicator({ className }: ActiveSkillsIndicatorProps)
         'bg-primary-50 dark:bg-primary-900/20',
         'text-primary-700 dark:text-primary-300',
         'hover:bg-primary-100 dark:hover:bg-primary-900/40',
-        className
+        className,
       )}
       title={t('skillPanel.activeSkillsTooltip', { count: enabledCount })}
     >
       <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M13 10V3L4 14h7v7l9-11h-7z"
-        />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
       </svg>
       <span>{enabledCount}</span>
     </button>

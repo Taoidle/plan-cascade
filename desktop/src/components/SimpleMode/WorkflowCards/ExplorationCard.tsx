@@ -17,10 +17,7 @@ export function ExplorationCard({ data }: { data: ExplorationCardData }) {
   const { t } = useTranslation('simpleMode');
   const [expanded, setExpanded] = useState(false);
 
-  const hasContent =
-    data.techStack.languages.length > 0 ||
-    data.components.length > 0 ||
-    data.keyFiles.length > 0;
+  const hasContent = data.techStack.languages.length > 0 || data.components.length > 0 || data.keyFiles.length > 0;
 
   if (!hasContent && !data.llmSummary) return null;
 
@@ -38,12 +35,10 @@ export function ExplorationCard({ data }: { data: ExplorationCardData }) {
                 'text-2xs px-1.5 py-0.5 rounded',
                 data.usedLlmExploration
                   ? 'bg-violet-200 dark:bg-violet-800 text-violet-600 dark:text-violet-400'
-                  : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+                  : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400',
               )}
             >
-              {data.usedLlmExploration
-                ? t('workflow.exploration.aiAssisted')
-                : t('workflow.exploration.deterministic')}
+              {data.usedLlmExploration ? t('workflow.exploration.aiAssisted') : t('workflow.exploration.deterministic')}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -54,7 +49,9 @@ export function ExplorationCard({ data }: { data: ExplorationCardData }) {
               onClick={() => setExpanded((v) => !v)}
               className="text-2xs text-violet-600 dark:text-violet-400 hover:text-violet-800 dark:hover:text-violet-200 transition-colors"
             >
-              <ChevronRightIcon className={clsx('w-3.5 h-3.5 transition-transform duration-200', expanded && 'rotate-90')} />
+              <ChevronRightIcon
+                className={clsx('w-3.5 h-3.5 transition-transform duration-200', expanded && 'rotate-90')}
+              />
             </button>
           </div>
         </div>
@@ -108,9 +105,7 @@ export function ExplorationCard({ data }: { data: ExplorationCardData }) {
                   key={comp.name}
                   className="text-2xs px-1.5 py-0.5 rounded bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-800"
                 >
-                  <span className="text-violet-700 dark:text-violet-300 font-medium">
-                    {comp.name}
-                  </span>
+                  <span className="text-violet-700 dark:text-violet-300 font-medium">{comp.name}</span>
                   <span className="text-violet-500 dark:text-violet-400 ml-1">
                     {t('workflow.exploration.fileCount', { count: comp.fileCount })}
                   </span>
@@ -132,12 +127,8 @@ export function ExplorationCard({ data }: { data: ExplorationCardData }) {
                 <div className="mt-0.5 space-y-0.5">
                   {data.keyFiles.map((file) => (
                     <div key={file.path} className="flex items-center gap-1 text-2xs">
-                      <span className="text-violet-700 dark:text-violet-300 font-mono truncate">
-                        {file.path}
-                      </span>
-                      <span className="text-violet-400 dark:text-violet-500 shrink-0">
-                        [{file.fileType}]
-                      </span>
+                      <span className="text-violet-700 dark:text-violet-300 font-mono truncate">{file.path}</span>
+                      <span className="text-violet-400 dark:text-violet-500 shrink-0">[{file.fileType}]</span>
                     </div>
                   ))}
                 </div>

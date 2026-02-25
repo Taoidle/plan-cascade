@@ -9,12 +9,7 @@
 
 import { useState, useCallback, useRef, useEffect, memo, createContext, useContext, ReactNode } from 'react';
 import { clsx } from 'clsx';
-import {
-  StopIcon,
-  PauseIcon,
-  PlayIcon,
-  ReloadIcon,
-} from '@radix-ui/react-icons';
+import { StopIcon, PauseIcon, PlayIcon, ReloadIcon } from '@radix-ui/react-icons';
 import { useTranslation } from 'react-i18next';
 
 // ============================================================================
@@ -72,11 +67,7 @@ interface SessionControlProviderProps {
   onContentUpdate?: (content: string) => void;
 }
 
-export function SessionControlProvider({
-  children,
-  onStateChange,
-  onContentUpdate,
-}: SessionControlProviderProps) {
+export function SessionControlProvider({ children, onStateChange, onContentUpdate }: SessionControlProviderProps) {
   const [controlState, setControlState] = useState<SessionControlState>({
     state: 'idle',
     partialContent: '',
@@ -238,11 +229,7 @@ export function SessionControlProvider({
     abortController: abortControllerRef.current,
   };
 
-  return (
-    <SessionControlContext.Provider value={contextValue}>
-      {children}
-    </SessionControlContext.Provider>
-  );
+  return <SessionControlContext.Provider value={contextValue}>{children}</SessionControlContext.Provider>;
 }
 
 // ============================================================================
@@ -253,9 +240,7 @@ interface SessionControlBarProps {
   className?: string;
 }
 
-export const SessionControlBar = memo(function SessionControlBar({
-  className,
-}: SessionControlBarProps) {
+export const SessionControlBar = memo(function SessionControlBar({ className }: SessionControlBarProps) {
   const { t } = useTranslation('claudeCode');
   const { state, actions } = useSessionControl();
 
@@ -275,20 +260,16 @@ export const SessionControlBar = memo(function SessionControlBar({
         'flex items-center justify-between px-4 py-2',
         'bg-gray-50 dark:bg-gray-800',
         'border-t border-gray-200 dark:border-gray-700',
-        className
+        className,
       )}
     >
       {/* Status indicator */}
       <div className="flex items-center gap-3">
         <SessionStateIndicator state={state.state} />
         <div className="text-sm">
-          <span className="text-gray-700 dark:text-gray-300">
-            {getStateLabel(state.state, t)}
-          </span>
+          <span className="text-gray-700 dark:text-gray-300">{getStateLabel(state.state, t)}</span>
           {isActive && state.elapsedTime > 0 && (
-            <span className="ml-2 text-gray-500 dark:text-gray-400">
-              {formatElapsedTime(state.elapsedTime)}
-            </span>
+            <span className="ml-2 text-gray-500 dark:text-gray-400">{formatElapsedTime(state.elapsedTime)}</span>
           )}
         </div>
       </div>
@@ -303,12 +284,7 @@ export const SessionControlBar = memo(function SessionControlBar({
               onClick={actions.pause}
               variant="secondary"
             />
-            <ControlButton
-              icon={StopIcon}
-              label={t('sessionControl.stop')}
-              onClick={actions.stop}
-              variant="danger"
-            />
+            <ControlButton icon={StopIcon} label={t('sessionControl.stop')} onClick={actions.stop} variant="danger" />
           </>
         )}
 
@@ -320,12 +296,7 @@ export const SessionControlBar = memo(function SessionControlBar({
               onClick={actions.resume}
               variant="primary"
             />
-            <ControlButton
-              icon={StopIcon}
-              label={t('sessionControl.stop')}
-              onClick={actions.stop}
-              variant="danger"
-            />
+            <ControlButton icon={StopIcon} label={t('sessionControl.stop')} onClick={actions.stop} variant="danger" />
           </>
         )}
 
@@ -369,16 +340,7 @@ export const SessionStateIndicator = memo(function SessionStateIndicator({
     error: 'bg-red-500',
   };
 
-  return (
-    <span
-      className={clsx(
-        'rounded-full',
-        sizeClasses[size],
-        stateClasses[state]
-      )}
-      aria-label={state}
-    />
-  );
+  return <span className={clsx('rounded-full', sizeClasses[size], stateClasses[state])} aria-label={state} />;
 });
 
 // ============================================================================
@@ -416,7 +378,7 @@ const ControlButton = memo(function ControlButton({
         'transition-colors',
         'focus:outline-none focus:ring-2 focus:ring-offset-1',
         variantClasses[variant],
-        disabled && 'opacity-50 cursor-not-allowed'
+        disabled && 'opacity-50 cursor-not-allowed',
       )}
       title={label}
     >
@@ -463,7 +425,7 @@ export const InlineSessionControl = memo(function InlineSessionControl({
               'p-2 rounded-lg transition-colors',
               'bg-yellow-100 dark:bg-yellow-900/50',
               'text-yellow-700 dark:text-yellow-400',
-              'hover:bg-yellow-200 dark:hover:bg-yellow-900'
+              'hover:bg-yellow-200 dark:hover:bg-yellow-900',
             )}
             title={t('sessionControl.pause')}
           >
@@ -475,7 +437,7 @@ export const InlineSessionControl = memo(function InlineSessionControl({
               'p-2 rounded-lg transition-colors',
               'bg-red-100 dark:bg-red-900/50',
               'text-red-700 dark:text-red-400',
-              'hover:bg-red-200 dark:hover:bg-red-900'
+              'hover:bg-red-200 dark:hover:bg-red-900',
             )}
             title={t('sessionControl.stop')}
           >
@@ -492,7 +454,7 @@ export const InlineSessionControl = memo(function InlineSessionControl({
               'p-2 rounded-lg transition-colors',
               'bg-green-100 dark:bg-green-900/50',
               'text-green-700 dark:text-green-400',
-              'hover:bg-green-200 dark:hover:bg-green-900'
+              'hover:bg-green-200 dark:hover:bg-green-900',
             )}
             title={t('sessionControl.resume')}
           >
@@ -504,7 +466,7 @@ export const InlineSessionControl = memo(function InlineSessionControl({
               'p-2 rounded-lg transition-colors',
               'bg-red-100 dark:bg-red-900/50',
               'text-red-700 dark:text-red-400',
-              'hover:bg-red-200 dark:hover:bg-red-900'
+              'hover:bg-red-200 dark:hover:bg-red-900',
             )}
             title={t('sessionControl.stop')}
           >
@@ -557,9 +519,7 @@ export function useStreamingWithControl(options: UseStreamingWithControlOptions 
   const { state, actions, abortController } = useSessionControl();
 
   const handleStream = useCallback(
-    async (
-      streamFn: (signal: AbortSignal) => AsyncIterable<string>
-    ): Promise<string> => {
+    async (streamFn: (signal: AbortSignal) => AsyncIterable<string>): Promise<string> => {
       if (!abortController) {
         throw new Error('No active session');
       }
@@ -587,7 +547,7 @@ export function useStreamingWithControl(options: UseStreamingWithControlOptions 
         throw error;
       }
     },
-    [abortController, actions, options, state.partialContent]
+    [abortController, actions, options, state.partialContent],
   );
 
   return {

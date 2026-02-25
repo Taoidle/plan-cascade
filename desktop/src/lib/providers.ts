@@ -136,7 +136,7 @@ export const FALLBACK_MODELS_BY_PROVIDER: Record<string, string[]> = {
  * Default model for each provider (first entry in FALLBACK_MODELS_BY_PROVIDER).
  */
 export const DEFAULT_MODEL_BY_PROVIDER: Record<string, string> = Object.fromEntries(
-  Object.entries(FALLBACK_MODELS_BY_PROVIDER).map(([provider, models]) => [provider, models[0]])
+  Object.entries(FALLBACK_MODELS_BY_PROVIDER).map(([provider, models]) => [provider, models[0]]),
 );
 
 export const CUSTOM_MODELS_STORAGE_KEY = 'plan-cascade-custom-models';
@@ -170,9 +170,7 @@ export function dedupeModels(models: string[]): string[] {
  */
 export function getApiKeyRequiredProviders(): string[] {
   return dedupeModels(
-    BACKEND_OPTIONS
-      .filter((option) => option.requiresApiKey)
-      .map((option) => normalizeProvider(option.provider))
+    BACKEND_OPTIONS.filter((option) => option.requiresApiKey).map((option) => normalizeProvider(option.provider)),
   );
 }
 

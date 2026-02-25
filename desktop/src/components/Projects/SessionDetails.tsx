@@ -20,13 +20,7 @@ import { formatRelativeTime } from './utils';
 
 export function SessionDetails() {
   const { t } = useTranslation();
-  const {
-    selectedSession,
-    sessionDetails,
-    loading,
-    selectSession,
-    resumeSession,
-  } = useProjectsStore();
+  const { selectedSession, sessionDetails, loading, selectSession, resumeSession } = useProjectsStore();
 
   if (!selectedSession) {
     return null;
@@ -84,14 +78,12 @@ export function SessionDetails() {
               className={clsx(
                 'p-1.5 rounded-md',
                 'hover:bg-gray-100 dark:hover:bg-gray-800',
-                'text-gray-500 dark:text-gray-400'
+                'text-gray-500 dark:text-gray-400',
               )}
             >
               <ArrowLeftIcon className="w-4 h-4" />
             </button>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              {t('projects.sessionDetails')}
-            </h2>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t('projects.sessionDetails')}</h2>
           </div>
 
           <button
@@ -100,7 +92,7 @@ export function SessionDetails() {
               'flex items-center gap-1.5 px-3 py-1.5 rounded-md',
               'bg-primary-600 hover:bg-primary-700',
               'text-white text-sm font-medium',
-              'transition-colors'
+              'transition-colors',
             )}
           >
             <PlayIcon className="w-4 h-4" />
@@ -116,12 +108,17 @@ export function SessionDetails() {
           </span>
           <span className="flex items-center gap-1">
             <ChatBubbleIcon className="w-3.5 h-3.5" />
-            <span>{selectedSession.message_count} {t('projects.messages', { count: selectedSession.message_count })}</span>
+            <span>
+              {selectedSession.message_count} {t('projects.messages', { count: selectedSession.message_count })}
+            </span>
           </span>
           {sessionDetails && sessionDetails.checkpoint_count > 0 && (
             <span className="flex items-center gap-1">
               <CheckCircledIcon className="w-3.5 h-3.5 text-green-500" />
-              <span>{sessionDetails.checkpoint_count} {t('projects.checkpoints', { count: sessionDetails.checkpoint_count })}</span>
+              <span>
+                {sessionDetails.checkpoint_count}{' '}
+                {t('projects.checkpoints', { count: sessionDetails.checkpoint_count })}
+              </span>
             </span>
           )}
         </div>
@@ -149,8 +146,8 @@ export function SessionDetails() {
                 message.message_type === 'user'
                   ? 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800'
                   : message.message_type === 'assistant'
-                  ? 'bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700'
-                  : 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800'
+                    ? 'bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700'
+                    : 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800',
               )}
             >
               {/* Message Type Label */}
@@ -167,17 +164,13 @@ export function SessionDetails() {
               </div>
 
               {/* Message Content */}
-              <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                {message.content_preview}
-              </p>
+              <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{message.content_preview}</p>
             </div>
           ))
         ) : (
           // No details
           <div className="text-center py-8">
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              {t('projects.noDetails')}
-            </p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">{t('projects.noDetails')}</p>
           </div>
         )}
       </div>

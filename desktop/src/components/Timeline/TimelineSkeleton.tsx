@@ -25,9 +25,7 @@ export function TimelineSkeleton() {
             {/* Timeline line and node */}
             <div className="flex flex-col items-center">
               <div className="w-4 h-4 rounded-full bg-gray-300 dark:bg-gray-600 animate-skeleton" />
-              {i < 5 && (
-                <div className="w-0.5 h-16 bg-gray-200 dark:bg-gray-700" />
-              )}
+              {i < 5 && <div className="w-0.5 h-16 bg-gray-200 dark:bg-gray-700" />}
             </div>
 
             {/* Checkpoint card skeleton */}
@@ -35,7 +33,7 @@ export function TimelineSkeleton() {
               className={clsx(
                 'flex-1 p-4 rounded-lg',
                 'bg-white dark:bg-gray-800',
-                'border border-gray-200 dark:border-gray-700'
+                'border border-gray-200 dark:border-gray-700',
               )}
             >
               <div className="h-4 w-1/3 bg-gray-200 dark:bg-gray-700 rounded mb-2 animate-skeleton" />

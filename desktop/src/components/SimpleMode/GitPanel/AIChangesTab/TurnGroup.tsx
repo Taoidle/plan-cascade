@@ -8,10 +8,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
-import {
-  ChevronRightIcon,
-  ResetIcon,
-} from '@radix-ui/react-icons';
+import { ChevronRightIcon, ResetIcon } from '@radix-ui/react-icons';
 import type { TurnChanges, RestoredFile } from '../../../../types/fileChanges';
 import { useFileChangesStore } from '../../../../store/fileChanges';
 import { FileChangeEntry } from './FileChangeEntry';
@@ -99,7 +96,12 @@ export function TurnGroup({ turn, sessionId, projectRoot, onRestoreComplete }: T
           onClick={handleToggle}
           className="flex items-center gap-2 w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group"
         >
-          <ChevronRightIcon className={clsx('w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform duration-200', !collapsed && 'rotate-90')} />
+          <ChevronRightIcon
+            className={clsx(
+              'w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform duration-200',
+              !collapsed && 'rotate-90',
+            )}
+          />
 
           <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
             {t('aiChanges.turn', { index: turn.turn_index })}
@@ -109,9 +111,7 @@ export function TurnGroup({ turn, sessionId, projectRoot, onRestoreComplete }: T
             {t('aiChanges.files', { count: turn.changes.length })}
           </span>
 
-          <span className="text-2xs text-gray-400 dark:text-gray-500 ml-auto mr-2">
-            {timeStr}
-          </span>
+          <span className="text-2xs text-gray-400 dark:text-gray-500 ml-auto mr-2">{timeStr}</span>
 
           {/* Restore button */}
           <span
@@ -136,12 +136,7 @@ export function TurnGroup({ turn, sessionId, projectRoot, onRestoreComplete }: T
         <Collapsible open={!collapsed}>
           <div className="pl-3">
             {turn.changes.map((change) => (
-              <FileChangeEntry
-                key={change.id}
-                change={change}
-                sessionId={sessionId}
-                projectRoot={projectRoot}
-              />
+              <FileChangeEntry key={change.id} change={change} sessionId={sessionId} projectRoot={projectRoot} />
             ))}
           </div>
         </Collapsible>

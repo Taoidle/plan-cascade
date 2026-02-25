@@ -99,7 +99,7 @@ export const MessageActions = memo(function MessageActions({
         'absolute top-1 flex items-center gap-0.5 z-10',
         'opacity-0 group-hover:opacity-100',
         'transition-opacity duration-150',
-        isUserMessage ? 'right-1' : 'left-1'
+        isUserMessage ? 'right-1' : 'left-1',
       )}
       role="toolbar"
       aria-label="Message actions"
@@ -163,12 +163,7 @@ export interface EditModeProps {
   isClaudeCodeBackend: boolean;
 }
 
-export const EditMode = memo(function EditMode({
-  content,
-  onSave,
-  onCancel,
-  isClaudeCodeBackend,
-}: EditModeProps) {
+export const EditMode = memo(function EditMode({ content, onSave, onCancel, isClaudeCodeBackend }: EditModeProps) {
   const { t } = useTranslation('simpleMode');
   const [editedContent, setEditedContent] = useState(content);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -194,7 +189,7 @@ export const EditMode = memo(function EditMode({
         }
       }
     },
-    [editedContent, onSave, onCancel]
+    [editedContent, onSave, onCancel],
   );
 
   const hasChanges = editedContent.trim() !== content.trim();
@@ -212,7 +207,7 @@ export const EditMode = memo(function EditMode({
           'border border-primary-300 dark:border-primary-700',
           'focus:border-primary-500 focus:ring-1 focus:ring-primary-500',
           'text-gray-900 dark:text-white',
-          'text-sm'
+          'text-sm',
         )}
         rows={Math.min(10, editedContent.split('\n').length + 1)}
         placeholder={t('messageActions.editPlaceholder')}
@@ -225,9 +220,7 @@ export const EditMode = memo(function EditMode({
       )}
 
       <div className="flex items-center justify-end gap-2">
-        <span className="text-xs text-gray-500 dark:text-gray-400 mr-auto">
-          Cmd/Ctrl+Enter to save, Esc to cancel
-        </span>
+        <span className="text-xs text-gray-500 dark:text-gray-400 mr-auto">Cmd/Ctrl+Enter to save, Esc to cancel</span>
 
         <button
           onClick={onCancel}
@@ -237,7 +230,7 @@ export const EditMode = memo(function EditMode({
             'bg-gray-100 dark:bg-gray-800',
             'text-gray-700 dark:text-gray-300',
             'hover:bg-gray-200 dark:hover:bg-gray-700',
-            'transition-colors'
+            'transition-colors',
           )}
         >
           <Cross2Icon className="w-3.5 h-3.5" />
@@ -253,7 +246,7 @@ export const EditMode = memo(function EditMode({
             hasChanges && editedContent.trim()
               ? 'bg-primary-600 text-white hover:bg-primary-700'
               : 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed',
-            'transition-colors'
+            'transition-colors',
           )}
         >
           <CheckIcon className="w-3.5 h-3.5" />
@@ -297,7 +290,7 @@ const ActionButton = memo(function ActionButton({
           'bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm',
           'text-gray-500 dark:text-gray-400',
           !disabled && 'hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200',
-          disabled && 'opacity-50 cursor-not-allowed'
+          disabled && 'opacity-50 cursor-not-allowed',
         )}
         title={warningTooltip ? `${label} - ${warningTooltip}` : label}
         aria-label={label}
@@ -305,14 +298,16 @@ const ActionButton = memo(function ActionButton({
         <Icon className="w-3.5 h-3.5" />
       </button>
       {warningTooltip && (
-        <div className={clsx(
-          'absolute bottom-full left-1/2 -translate-x-1/2 mb-1',
-          'hidden group-hover/action:block',
-          'px-2 py-1 rounded text-2xs whitespace-nowrap',
-          'bg-amber-100 dark:bg-amber-900/80 text-amber-700 dark:text-amber-300',
-          'border border-amber-200 dark:border-amber-800',
-          'pointer-events-none'
-        )}>
+        <div
+          className={clsx(
+            'absolute bottom-full left-1/2 -translate-x-1/2 mb-1',
+            'hidden group-hover/action:block',
+            'px-2 py-1 rounded text-2xs whitespace-nowrap',
+            'bg-amber-100 dark:bg-amber-900/80 text-amber-700 dark:text-amber-300',
+            'border border-amber-200 dark:border-amber-800',
+            'pointer-events-none',
+          )}
+        >
           {warningTooltip}
         </div>
       )}
@@ -343,7 +338,7 @@ const CopyButton = memo(function CopyButton({ copied, label, onClick }: CopyButt
         'bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm',
         copied
           ? 'text-green-600 dark:text-green-400'
-          : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200'
+          : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200',
       )}
       title={label}
       aria-label={label}

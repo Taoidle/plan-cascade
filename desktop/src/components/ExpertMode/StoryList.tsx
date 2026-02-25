@@ -76,7 +76,7 @@ function StoryCard({ story, index, onDelete }: StoryCardProps) {
         'group rounded-lg border transition-all',
         'bg-white dark:bg-gray-800',
         'border-gray-200 dark:border-gray-700',
-        'hover:border-gray-300 dark:hover:border-gray-600'
+        'hover:border-gray-300 dark:hover:border-gray-600',
       )}
     >
       <div className="p-4">
@@ -88,10 +88,7 @@ function StoryCard({ story, index, onDelete }: StoryCardProps) {
 
           {/* Status indicator */}
           <span
-            className={clsx(
-              'w-2.5 h-2.5 rounded-full',
-              statusColors[story.status]
-            )}
+            className={clsx('w-2.5 h-2.5 rounded-full', statusColors[story.status])}
             title={statusLabels[story.status]}
           />
 
@@ -106,23 +103,18 @@ function StoryCard({ story, index, onDelete }: StoryCardProps) {
                 'bg-gray-50 dark:bg-gray-900',
                 'text-gray-900 dark:text-white font-medium',
                 'border border-primary-500',
-                'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                'focus:outline-none focus:ring-2 focus:ring-primary-500',
               )}
               autoFocus
             />
           ) : (
-            <button
-              onClick={() => setIsExpanded(!isExpanded)}
-              className="flex-1 flex items-center gap-2 text-left"
-            >
+            <button onClick={() => setIsExpanded(!isExpanded)} className="flex-1 flex items-center gap-2 text-left">
               {isExpanded ? (
                 <ChevronDownIcon className="w-4 h-4 text-gray-400" />
               ) : (
                 <ChevronRightIcon className="w-4 h-4 text-gray-400" />
               )}
-              <span className="font-medium text-gray-900 dark:text-white">
-                {story.title}
-              </span>
+              <span className="font-medium text-gray-900 dark:text-white">{story.title}</span>
             </button>
           )}
 
@@ -188,9 +180,7 @@ function StoryCard({ story, index, onDelete }: StoryCardProps) {
           <div className="mt-4 ml-11 space-y-4">
             {/* Description */}
             <div>
-              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                Description
-              </label>
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Description</label>
               {isEditing ? (
                 <textarea
                   value={editedDescription}
@@ -201,13 +191,11 @@ function StoryCard({ story, index, onDelete }: StoryCardProps) {
                     'bg-gray-50 dark:bg-gray-900',
                     'text-gray-900 dark:text-white text-sm',
                     'border border-primary-500',
-                    'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                    'focus:outline-none focus:ring-2 focus:ring-primary-500',
                   )}
                 />
               ) : (
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  {story.description || 'No description'}
-                </p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">{story.description || 'No description'}</p>
               )}
             </div>
 
@@ -219,10 +207,7 @@ function StoryCard({ story, index, onDelete }: StoryCardProps) {
                 </label>
                 <ul className="space-y-1">
                   {story.acceptance_criteria.map((criterion, i) => (
-                    <li
-                      key={i}
-                      className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400"
-                    >
+                    <li key={i} className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400">
                       <CheckIcon className="w-4 h-4 mt-0.5 text-green-500 shrink-0" />
                       <span>{criterion}</span>
                     </li>
@@ -234,9 +219,7 @@ function StoryCard({ story, index, onDelete }: StoryCardProps) {
             {/* Dependencies badge */}
             {story.dependencies && story.dependencies.length > 0 && (
               <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                  Blocked by:
-                </span>
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Blocked by:</span>
                 <div className="flex flex-wrap gap-1">
                   {story.dependencies.map((depId) => (
                     <span
@@ -280,14 +263,12 @@ function AddStoryForm({ onAdd, onCancel }: AddStoryFormProps) {
       className={clsx(
         'p-4 rounded-lg border-2 border-dashed',
         'border-primary-300 dark:border-primary-700',
-        'bg-primary-50 dark:bg-primary-900/20'
+        'bg-primary-50 dark:bg-primary-900/20',
       )}
     >
       <div className="space-y-3">
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Story Title
-          </label>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Story Title</label>
           <input
             type="text"
             value={title}
@@ -299,7 +280,7 @@ function AddStoryForm({ onAdd, onCancel }: AddStoryFormProps) {
               'text-gray-900 dark:text-white',
               'border border-gray-200 dark:border-gray-700',
               'placeholder-gray-400 dark:placeholder-gray-500',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500'
+              'focus:outline-none focus:ring-2 focus:ring-primary-500',
             )}
             autoFocus
           />
@@ -319,7 +300,7 @@ function AddStoryForm({ onAdd, onCancel }: AddStoryFormProps) {
               'text-gray-900 dark:text-white',
               'border border-gray-200 dark:border-gray-700',
               'placeholder-gray-400 dark:placeholder-gray-500',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500'
+              'focus:outline-none focus:ring-2 focus:ring-primary-500',
             )}
           />
         </div>
@@ -331,7 +312,7 @@ function AddStoryForm({ onAdd, onCancel }: AddStoryFormProps) {
               'px-4 py-2 rounded-lg',
               'bg-gray-100 dark:bg-gray-700',
               'text-gray-700 dark:text-gray-300',
-              'hover:bg-gray-200 dark:hover:bg-gray-600'
+              'hover:bg-gray-200 dark:hover:bg-gray-600',
             )}
           >
             Cancel
@@ -343,7 +324,7 @@ function AddStoryForm({ onAdd, onCancel }: AddStoryFormProps) {
               'px-4 py-2 rounded-lg',
               'bg-primary-600 text-white',
               'hover:bg-primary-700',
-              'disabled:opacity-50 disabled:cursor-not-allowed'
+              'disabled:opacity-50 disabled:cursor-not-allowed',
             )}
           >
             Add Story
@@ -376,9 +357,7 @@ export function StoryList() {
         <div className="w-16 h-16 mb-4 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
           <PlusIcon className="w-8 h-8 text-gray-400" />
         </div>
-        <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-          No stories yet
-        </h3>
+        <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No stories yet</h3>
         <p className="text-gray-500 dark:text-gray-400 mb-4 max-w-sm">
           Generate a PRD from your requirements or add stories manually.
         </p>
@@ -387,7 +366,7 @@ export function StoryList() {
           className={clsx(
             'flex items-center gap-2 px-4 py-2 rounded-lg',
             'bg-primary-600 text-white',
-            'hover:bg-primary-700'
+            'hover:bg-primary-700',
           )}
         >
           <PlusIcon className="w-4 h-4" />
@@ -401,21 +380,12 @@ export function StoryList() {
     <div className="space-y-3">
       {/* Story cards */}
       {prd.stories.map((story, index) => (
-        <StoryCard
-          key={story.id}
-          story={story}
-          index={index}
-          onEdit={() => {}}
-          onDelete={deleteStory}
-        />
+        <StoryCard key={story.id} story={story} index={index} onEdit={() => {}} onDelete={deleteStory} />
       ))}
 
       {/* Add story form or button */}
       {isAddingStory ? (
-        <AddStoryForm
-          onAdd={handleAddStory}
-          onCancel={() => setIsAddingStory(false)}
-        />
+        <AddStoryForm onAdd={handleAddStory} onCancel={() => setIsAddingStory(false)} />
       ) : (
         <button
           onClick={() => setIsAddingStory(true)}
@@ -424,7 +394,7 @@ export function StoryList() {
             'border-2 border-dashed border-gray-300 dark:border-gray-600',
             'text-gray-500 dark:text-gray-400',
             'hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400',
-            'transition-colors'
+            'transition-colors',
           )}
         >
           <PlusIcon className="w-4 h-4" />

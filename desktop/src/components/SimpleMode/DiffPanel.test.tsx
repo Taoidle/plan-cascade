@@ -45,7 +45,11 @@ vi.mock('@tauri-apps/plugin-shell', () => ({
 
 // Mock EnhancedDiffViewer to avoid rendering complexities
 vi.mock('../ClaudeCodeMode/EnhancedDiffViewer', () => ({
-  EnhancedDiffViewer: ({ filePath, oldContent, newContent }: {
+  EnhancedDiffViewer: ({
+    filePath,
+    oldContent,
+    newContent,
+  }: {
     filePath?: string;
     oldContent: string;
     newContent: string;
@@ -61,11 +65,7 @@ vi.mock('../ClaudeCodeMode/EnhancedDiffViewer', () => ({
 // Test Helpers
 // --------------------------------------------------------------------------
 
-function createStreamLine(
-  id: number,
-  content: string,
-  type: StreamLine['type'] = 'tool'
-): StreamLine {
+function createStreamLine(id: number, content: string, type: StreamLine['type'] = 'tool'): StreamLine {
   return { id, content, type, timestamp: Date.now() };
 }
 
@@ -84,9 +84,7 @@ describe('extractToolChanges', () => {
   });
 
   it('extracts Write tool changes from tool lines', () => {
-    const lines: StreamLine[] = [
-      createStreamLine(1, '[tool:Write] /src/index.ts content here', 'tool'),
-    ];
+    const lines: StreamLine[] = [createStreamLine(1, '[tool:Write] /src/index.ts content here', 'tool')];
     const changes = extractToolChanges(lines);
     expect(changes).toHaveLength(1);
     expect(changes[0].toolName).toBe('Write');
@@ -94,9 +92,7 @@ describe('extractToolChanges', () => {
   });
 
   it('extracts Edit tool changes from tool lines', () => {
-    const lines: StreamLine[] = [
-      createStreamLine(1, '[tool:Edit] /src/app.tsx replacing content', 'tool'),
-    ];
+    const lines: StreamLine[] = [createStreamLine(1, '[tool:Edit] /src/app.tsx replacing content', 'tool')];
     const changes = extractToolChanges(lines);
     expect(changes).toHaveLength(1);
     expect(changes[0].toolName).toBe('Edit');
@@ -132,9 +128,7 @@ describe('extractToolChanges', () => {
 
   it('truncates preview to 120 characters', () => {
     const longContent = 'a'.repeat(200);
-    const lines: StreamLine[] = [
-      createStreamLine(1, `[tool:Write] /src/long.ts ${longContent}`, 'tool'),
-    ];
+    const lines: StreamLine[] = [createStreamLine(1, `[tool:Write] /src/long.ts ${longContent}`, 'tool')];
     const changes = extractToolChanges(lines);
     expect(changes[0].preview.length).toBeLessThanOrEqual(123); // 120 + '...'
   });

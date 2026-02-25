@@ -156,7 +156,7 @@ function HunkView({ hunk, hunkIndex, filePath, isStaged, isOnlyHunk }: HunkViewP
         setIsApplying(false);
       }
     },
-    [stageHunk, filePath, hunkIndex, isStaged]
+    [stageHunk, filePath, hunkIndex, isStaged],
   );
 
   return (
@@ -167,12 +167,8 @@ function HunkView({ hunk, hunkIndex, filePath, isStaged, isOnlyHunk }: HunkViewP
           <div className="flex items-center gap-2 text-2xs text-gray-500 dark:text-gray-400">
             <span className="font-mono">{hunk.header.split('@@').slice(0, 2).join('@@') + ' @@'}</span>
             <span className="flex items-center gap-1">
-              {additions > 0 && (
-                <span className="text-green-600 dark:text-green-400">+{additions}</span>
-              )}
-              {deletions > 0 && (
-                <span className="text-red-600 dark:text-red-400">-{deletions}</span>
-              )}
+              {additions > 0 && <span className="text-green-600 dark:text-green-400">+{additions}</span>}
+              {deletions > 0 && <span className="text-red-600 dark:text-red-400">-{deletions}</span>}
             </span>
           </div>
           <button
@@ -183,7 +179,7 @@ function HunkView({ hunk, hunkIndex, filePath, isStaged, isOnlyHunk }: HunkViewP
               isApplying && 'opacity-50 cursor-not-allowed',
               isStaged
                 ? 'text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20'
-                : 'text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20'
+                : 'text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20',
             )}
             title={isStaged ? t('fileEntry.unstageHunk') : t('fileEntry.stageHunk')}
           >
@@ -201,13 +197,12 @@ function HunkView({ hunk, hunkIndex, filePath, isStaged, isOnlyHunk }: HunkViewP
       )}
 
       {/* Diff content */}
-      <div className={clsx(!isOnlyHunk && 'border border-t-0 border-gray-200 dark:border-gray-700 rounded-b overflow-hidden')}>
-        <EnhancedDiffViewer
-          oldContent={oldContent}
-          newContent={newContent}
-          filePath={filePath}
-          maxHeight={250}
-        />
+      <div
+        className={clsx(
+          !isOnlyHunk && 'border border-t-0 border-gray-200 dark:border-gray-700 rounded-b overflow-hidden',
+        )}
+      >
+        <EnhancedDiffViewer oldContent={oldContent} newContent={newContent} filePath={filePath} maxHeight={250} />
       </div>
     </div>
   );
@@ -240,7 +235,7 @@ export function FileEntry({ file, isStaged, isUntracked }: FileEntryProps) {
         await stageFiles([file.path]);
       }
     },
-    [file.path, isStaged, stageFiles, unstageFiles]
+    [file.path, isStaged, stageFiles, unstageFiles],
   );
 
   const handleDiscard = useCallback(
@@ -248,7 +243,7 @@ export function FileEntry({ file, isStaged, isUntracked }: FileEntryProps) {
       e.stopPropagation();
       await discardChanges([file.path]);
     },
-    [file.path, discardChanges]
+    [file.path, discardChanges],
   );
 
   const handleToggleExpand = useCallback(async () => {
@@ -279,14 +274,14 @@ export function FileEntry({ file, isStaged, isUntracked }: FileEntryProps) {
         className={clsx(
           'flex items-center gap-2 px-2 py-1.5 cursor-pointer transition-colors',
           'hover:bg-gray-50 dark:hover:bg-gray-800/60',
-          expanded && 'bg-gray-50 dark:bg-gray-800/40'
+          expanded && 'bg-gray-50 dark:bg-gray-800/40',
         )}
       >
         {/* Expand chevron */}
         <svg
           className={clsx(
             'w-3 h-3 text-gray-400 dark:text-gray-500 transition-transform shrink-0',
-            expanded && 'rotate-90'
+            expanded && 'rotate-90',
           )}
           fill="none"
           stroke="currentColor"
@@ -299,7 +294,7 @@ export function FileEntry({ file, isStaged, isUntracked }: FileEntryProps) {
         <span
           className={clsx(
             'text-2xs font-bold w-5 h-5 flex items-center justify-center rounded shrink-0',
-            badge.className
+            badge.className,
           )}
         >
           {badge.letter}
@@ -307,9 +302,7 @@ export function FileEntry({ file, isStaged, isUntracked }: FileEntryProps) {
 
         {/* File path */}
         <span className="flex-1 min-w-0 text-xs truncate">
-          {dir && (
-            <span className="text-gray-400 dark:text-gray-500">{dir}</span>
-          )}
+          {dir && <span className="text-gray-400 dark:text-gray-500">{dir}</span>}
           <span className="text-gray-800 dark:text-gray-200 font-medium">{name}</span>
         </span>
 
@@ -330,7 +323,12 @@ export function FileEntry({ file, isStaged, isUntracked }: FileEntryProps) {
               title={t('fileEntry.discardChanges')}
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                />
               </svg>
             </button>
           )}
@@ -342,7 +340,7 @@ export function FileEntry({ file, isStaged, isUntracked }: FileEntryProps) {
               'p-1 rounded transition-colors',
               isStaged
                 ? 'text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20'
-                : 'text-gray-400 hover:text-green-600 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20'
+                : 'text-gray-400 hover:text-green-600 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20',
             )}
             title={isStaged ? t('fileEntry.unstageFile') : t('fileEntry.stageFile')}
           >
@@ -370,26 +368,22 @@ export function FileEntry({ file, isStaged, isUntracked }: FileEntryProps) {
           )}
 
           {/* Multiple hunks: show individual hunk views with stage buttons */}
-          {!loadingDiff && hasMultipleHunks && hunks.map((hunk, idx) => (
-            <HunkView
-              key={`hunk-${idx}-${hunk.header}`}
-              hunk={hunk}
-              hunkIndex={idx}
-              filePath={file.path}
-              isStaged={isStaged}
-              isOnlyHunk={false}
-            />
-          ))}
+          {!loadingDiff &&
+            hasMultipleHunks &&
+            hunks.map((hunk, idx) => (
+              <HunkView
+                key={`hunk-${idx}-${hunk.header}`}
+                hunk={hunk}
+                hunkIndex={idx}
+                filePath={file.path}
+                isStaged={isStaged}
+                isOnlyHunk={false}
+              />
+            ))}
 
           {/* Single hunk or fallback: show unified diff with single stage button */}
           {!loadingDiff && !hasMultipleHunks && hunks.length === 1 && (
-            <HunkView
-              hunk={hunks[0]}
-              hunkIndex={0}
-              filePath={file.path}
-              isStaged={isStaged}
-              isOnlyHunk={true}
-            />
+            <HunkView hunk={hunks[0]} hunkIndex={0} filePath={file.path} isStaged={isStaged} isOnlyHunk={true} />
           )}
 
           {/* No hunks but we have contents (fallback for new/deleted files) */}

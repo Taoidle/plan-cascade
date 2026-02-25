@@ -113,7 +113,7 @@ function buildFileTree(files: string[]): TreeNode {
     fileCount: 0,
   };
 
-  files.forEach(filePath => {
+  files.forEach((filePath) => {
     // Normalize path separators
     const normalizedPath = filePath.replace(/\\/g, '/');
     const parts = normalizedPath.split('/').filter(Boolean);
@@ -188,14 +188,7 @@ interface TreeNodeItemProps {
   filter: string;
 }
 
-function TreeNodeItem({
-  node,
-  depth,
-  expandedPaths,
-  toggleExpanded,
-  onFileClick,
-  filter,
-}: TreeNodeItemProps) {
+function TreeNodeItem({ node, depth, expandedPaths, toggleExpanded, onFileClick, filter }: TreeNodeItemProps) {
   const isExpanded = expandedPaths.has(node.path);
   const hasChildren = node.children.size > 0;
 
@@ -209,7 +202,7 @@ function TreeNodeItem({
     if (!filter) return children;
 
     // Show children that match or have matching descendants
-    return children.filter(child => {
+    return children.filter((child) => {
       if (child.name.toLowerCase().includes(filter.toLowerCase())) return true;
       if (child.isDirectory) {
         // Check if any descendant matches
@@ -250,15 +243,17 @@ function TreeNodeItem({
         className={clsx(
           'w-full flex items-center gap-2 px-2 py-1.5 rounded',
           'hover:bg-gray-100 dark:hover:bg-gray-700',
-          'transition-colors text-left'
+          'transition-colors text-left',
         )}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
       >
         <Icon className={clsx('w-4 h-4 flex-shrink-0', color)} />
-        <span className={clsx(
-          'text-sm truncate',
-          filter && matchesFilter && 'font-medium text-primary-600 dark:text-primary-400'
-        )}>
+        <span
+          className={clsx(
+            'text-sm truncate',
+            filter && matchesFilter && 'font-medium text-primary-600 dark:text-primary-400',
+          )}
+        >
           {node.name}
         </span>
       </button>
@@ -273,7 +268,7 @@ function TreeNodeItem({
         className={clsx(
           'w-full flex items-center gap-2 px-2 py-1.5 rounded',
           'hover:bg-gray-100 dark:hover:bg-gray-700',
-          'transition-colors text-left font-medium'
+          'transition-colors text-left font-medium',
         )}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
       >
@@ -286,20 +281,20 @@ function TreeNodeItem({
         ) : (
           <span className="w-4" />
         )}
-        <span className={clsx(
-          'text-sm text-gray-700 dark:text-gray-300',
-          filter && matchesFilter && 'text-primary-600 dark:text-primary-400'
-        )}>
+        <span
+          className={clsx(
+            'text-sm text-gray-700 dark:text-gray-300',
+            filter && matchesFilter && 'text-primary-600 dark:text-primary-400',
+          )}
+        >
           {node.name}
         </span>
-        <span className="text-xs text-gray-400 ml-1">
-          ({node.fileCount})
-        </span>
+        <span className="text-xs text-gray-400 ml-1">({node.fileCount})</span>
       </button>
 
       {isExpanded && sortedChildren.length > 0 && (
         <div>
-          {sortedChildren.map(child => (
+          {sortedChildren.map((child) => (
             <TreeNodeItem
               key={child.path}
               node={child}
@@ -320,13 +315,7 @@ function TreeNodeItem({
 // GlobResultViewer Component
 // ============================================================================
 
-export function GlobResultViewer({
-  files,
-  pattern,
-  onFileClick,
-  maxHeight = 300,
-  className,
-}: GlobResultViewerProps) {
+export function GlobResultViewer({ files, pattern, onFileClick, maxHeight = 300, className }: GlobResultViewerProps) {
   // State
   const [filter, setFilter] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('name');
@@ -341,12 +330,12 @@ export function GlobResultViewer({
   const sortedFiles = useMemo(() => {
     const sorted = sortFiles(files, sortBy);
     if (!filter) return sorted;
-    return sorted.filter(f => f.toLowerCase().includes(filter.toLowerCase()));
+    return sorted.filter((f) => f.toLowerCase().includes(filter.toLowerCase()));
   }, [files, sortBy, filter]);
 
   // Toggle expanded state
   const toggleExpanded = useCallback((path: string) => {
-    setExpandedPaths(prev => {
+    setExpandedPaths((prev) => {
       const next = new Set(prev);
       if (next.has(path)) {
         next.delete(path);
@@ -364,7 +353,7 @@ export function GlobResultViewer({
       if (node.isDirectory && node.path) {
         allPaths.add(node.path);
       }
-      node.children.forEach(child => collectPaths(child));
+      node.children.forEach((child) => collectPaths(child));
     };
     collectPaths(fileTree);
     setExpandedPaths(allPaths);
@@ -396,12 +385,14 @@ export function GlobResultViewer({
   return (
     <div className={clsx('flex flex-col', className)}>
       {/* Header with count */}
-      <div className={clsx(
-        'flex items-center justify-between px-3 py-2',
-        'bg-gray-50 dark:bg-gray-800/50',
-        'border-b border-gray-200 dark:border-gray-700',
-        'rounded-t-lg'
-      )}>
+      <div
+        className={clsx(
+          'flex items-center justify-between px-3 py-2',
+          'bg-gray-50 dark:bg-gray-800/50',
+          'border-b border-gray-200 dark:border-gray-700',
+          'rounded-t-lg',
+        )}
+      >
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
             {files.length} file{files.length !== 1 ? 's' : ''} matched
@@ -420,15 +411,11 @@ export function GlobResultViewer({
             className={clsx(
               'p-1.5 rounded text-gray-500',
               'hover:bg-gray-200 dark:hover:bg-gray-700',
-              'transition-colors'
+              'transition-colors',
             )}
             title={viewMode === 'tree' ? 'Switch to list view' : 'Switch to tree view'}
           >
-            {viewMode === 'tree' ? (
-              <FileTextIcon className="w-4 h-4" />
-            ) : (
-              <ChevronRightIcon className="w-4 h-4" />
-            )}
+            {viewMode === 'tree' ? <FileTextIcon className="w-4 h-4" /> : <ChevronRightIcon className="w-4 h-4" />}
           </button>
 
           {/* Copy button */}
@@ -436,9 +423,7 @@ export function GlobResultViewer({
             onClick={handleCopy}
             className={clsx(
               'p-1.5 rounded transition-colors',
-              copied
-                ? 'text-green-500'
-                : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700'
+              copied ? 'text-green-500' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700',
             )}
             title={copied ? 'Copied!' : 'Copy file list'}
           >
@@ -448,10 +433,7 @@ export function GlobResultViewer({
       </div>
 
       {/* Filter and sort controls */}
-      <div className={clsx(
-        'flex items-center gap-2 px-3 py-2',
-        'border-b border-gray-200 dark:border-gray-700'
-      )}>
+      <div className={clsx('flex items-center gap-2 px-3 py-2', 'border-b border-gray-200 dark:border-gray-700')}>
         {/* Filter input */}
         <div className="relative flex-1">
           <MagnifyingGlassIcon className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -464,7 +446,7 @@ export function GlobResultViewer({
               'w-full pl-8 pr-8 py-1.5 rounded text-sm',
               'bg-white dark:bg-gray-800',
               'border border-gray-200 dark:border-gray-700',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500'
+              'focus:outline-none focus:ring-2 focus:ring-primary-500',
             )}
           />
           {filter && (
@@ -486,7 +468,7 @@ export function GlobResultViewer({
               'appearance-none pl-2 pr-7 py-1.5 rounded text-sm',
               'bg-white dark:bg-gray-800',
               'border border-gray-200 dark:border-gray-700',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500'
+              'focus:outline-none focus:ring-2 focus:ring-primary-500',
             )}
           >
             <option value="name">By name</option>
@@ -518,10 +500,7 @@ export function GlobResultViewer({
       </div>
 
       {/* File list/tree */}
-      <div
-        className="overflow-auto"
-        style={{ maxHeight }}
-      >
+      <div className="overflow-auto" style={{ maxHeight }}>
         {viewMode === 'tree' ? (
           <div className="py-1">
             {Array.from(fileTree.children.values())
@@ -530,7 +509,7 @@ export function GlobResultViewer({
                 if (!a.isDirectory && b.isDirectory) return 1;
                 return a.name.localeCompare(b.name);
               })
-              .map(node => (
+              .map((node) => (
                 <TreeNodeItem
                   key={node.path}
                   node={node}
@@ -555,13 +534,11 @@ export function GlobResultViewer({
                   className={clsx(
                     'w-full flex items-center gap-2 px-3 py-2',
                     'hover:bg-gray-50 dark:hover:bg-gray-800',
-                    'transition-colors text-left'
+                    'transition-colors text-left',
                   )}
                 >
                   <Icon className={clsx('w-4 h-4 flex-shrink-0', color)} />
-                  <span className="text-sm font-mono truncate">
-                    {file}
-                  </span>
+                  <span className="text-sm font-mono truncate">{file}</span>
                 </button>
               );
             })}

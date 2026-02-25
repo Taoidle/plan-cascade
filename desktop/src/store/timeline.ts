@@ -7,13 +7,7 @@
 
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import type {
-  Checkpoint,
-  CheckpointBranch,
-  CheckpointDiff,
-  RestoreResult,
-  TimelineMetadata,
-} from '../types/timeline';
+import type { Checkpoint, CheckpointBranch, CheckpointDiff, RestoreResult, TimelineMetadata } from '../types/timeline';
 import type { CommandResponse } from '../types/project';
 
 interface TimelineState {
@@ -52,7 +46,11 @@ interface TimelineState {
   createCheckpoint: (label: string, trackedFiles: string[]) => Promise<Checkpoint | null>;
   selectCheckpoint: (checkpoint: Checkpoint | null) => void;
   deleteCheckpoint: (checkpointId: string) => Promise<boolean>;
-  restoreCheckpoint: (checkpointId: string, createBackup: boolean, trackedFiles: string[]) => Promise<RestoreResult | null>;
+  restoreCheckpoint: (
+    checkpointId: string,
+    createBackup: boolean,
+    trackedFiles: string[],
+  ) => Promise<RestoreResult | null>;
   forkBranch: (checkpointId: string, branchName: string) => Promise<CheckpointBranch | null>;
   switchBranch: (branchId: string) => Promise<boolean>;
   deleteBranch: (branchId: string) => Promise<boolean>;

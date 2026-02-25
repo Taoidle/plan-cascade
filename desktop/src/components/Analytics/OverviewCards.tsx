@@ -38,9 +38,7 @@ export function OverviewCards({ summary, isLoading }: OverviewCardsProps) {
     },
     {
       title: t('cards.totalTokens', 'Total Tokens'),
-      value: formatTokens(
-        summary.current_period.total_input_tokens + summary.current_period.total_output_tokens
-      ),
+      value: formatTokens(summary.current_period.total_input_tokens + summary.current_period.total_output_tokens),
       change: summary.tokens_change_percent,
       icon: (
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -61,12 +59,7 @@ export function OverviewCards({ summary, isLoading }: OverviewCardsProps) {
       change: summary.requests_change_percent,
       icon: (
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M13 10V3L4 14h7v7l9-11h-7z"
-          />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
         </svg>
       ),
       colorClass: 'text-purple-600 dark:text-purple-400',
@@ -101,7 +94,7 @@ export function OverviewCards({ summary, isLoading }: OverviewCardsProps) {
             'border border-gray-200 dark:border-gray-800',
             'p-6',
             'transition-shadow hover:shadow-md',
-            isLoading && 'animate-pulse'
+            isLoading && 'animate-pulse',
           )}
         >
           <div className="flex items-start justify-between">
@@ -109,9 +102,7 @@ export function OverviewCards({ summary, isLoading }: OverviewCardsProps) {
               <div className={card.colorClass}>{card.icon}</div>
             </div>
 
-            {card.change !== null && (
-              <ChangeIndicator value={card.change} />
-            )}
+            {card.change !== null && <ChangeIndicator value={card.change} />}
           </div>
 
           <div className="mt-4">
@@ -140,7 +131,7 @@ function ChangeIndicator({ value }: ChangeIndicatorProps) {
         className={clsx(
           'inline-flex items-center px-2 py-1 rounded-full text-xs font-medium',
           'bg-gray-100 dark:bg-gray-800',
-          'text-gray-600 dark:text-gray-400'
+          'text-gray-600 dark:text-gray-400',
         )}
       >
         0%
@@ -154,7 +145,7 @@ function ChangeIndicator({ value }: ChangeIndicatorProps) {
         'inline-flex items-center px-2 py-1 rounded-full text-xs font-medium',
         isPositive
           ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
-          : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+          : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300',
       )}
     >
       {isPositive ? (

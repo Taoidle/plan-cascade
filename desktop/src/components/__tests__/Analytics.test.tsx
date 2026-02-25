@@ -10,10 +10,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { OverviewCards } from '../Analytics/OverviewCards';
 import { Dashboard } from '../Analytics/Dashboard';
-import {
-  createMockDashboardSummary,
-  createMockUsageStats,
-} from './test-utils';
+import { createMockDashboardSummary, createMockUsageStats } from './test-utils';
 import type { DashboardSummary } from '../../store/analytics';
 
 // --------------------------------------------------------------------------
@@ -73,7 +70,9 @@ vi.mock('../../store/analytics', () => ({
 // Mock Radix Select for PeriodSelector
 vi.mock('@radix-ui/react-select', () => ({
   Root: ({ children, value }: { children: React.ReactNode; value: string; onValueChange: (v: string) => void }) => (
-    <div data-testid="select-root" data-value={value}>{children}</div>
+    <div data-testid="select-root" data-value={value}>
+      {children}
+    </div>
   ),
   Trigger: ({ children }: { children: React.ReactNode }) => <button data-testid="period-trigger">{children}</button>,
   Value: () => <span>Value</span>,
@@ -98,7 +97,7 @@ vi.mock('../Analytics/TokenBreakdown', () => ({
 }));
 
 vi.mock('../Analytics/ExportDialog', () => ({
-  ExportDialog: ({ open }: { open: boolean }) => open ? <div data-testid="export-dialog">Export</div> : null,
+  ExportDialog: ({ open }: { open: boolean }) => (open ? <div data-testid="export-dialog">Export</div> : null),
 }));
 
 vi.mock('../Analytics/UsageTable', () => ({
@@ -276,11 +275,13 @@ describe('Dashboard', () => {
 
   it('renders model table when summary has model data', () => {
     mockAnalyticsState.summary = createMockDashboardSummary({
-      by_model: [{
-        model_name: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
-        stats: createMockUsageStats(),
-      }],
+      by_model: [
+        {
+          model_name: 'claude-sonnet-4-20250514',
+          provider: 'anthropic',
+          stats: createMockUsageStats(),
+        },
+      ],
     });
 
     render(<Dashboard />);

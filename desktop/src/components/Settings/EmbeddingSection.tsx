@@ -129,9 +129,7 @@ export function EmbeddingSection() {
   }, [currentPreset, currentCapability]);
 
   // Fallback provider options (exclude current provider)
-  const fallbackOptions = providers.filter(
-    (p) => p.provider_type !== provider,
-  );
+  const fallbackOptions = providers.filter((p) => p.provider_type !== provider);
 
   // Handle save
   const handleSave = useCallback(async () => {
@@ -175,9 +173,7 @@ export function EmbeddingSection() {
     return (
       <div className="flex items-center justify-center py-12">
         <ReloadIcon className="w-5 h-5 animate-spin text-gray-400" />
-        <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">
-          {t('embedding.loading')}
-        </span>
+        <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">{t('embedding.loading')}</span>
       </div>
     );
   }
@@ -186,19 +182,13 @@ export function EmbeddingSection() {
     <div className="space-y-8">
       {/* Section header */}
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-          {t('embedding.title')}
-        </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {t('embedding.description')}
-        </p>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">{t('embedding.title')}</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('embedding.description')}</p>
       </div>
 
       {/* Provider Selection */}
       <section className="space-y-3">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('embedding.provider.label')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('embedding.provider.label')}</h3>
         <div className="space-y-2">
           {providers.map((cap) => (
             <label
@@ -221,9 +211,7 @@ export function EmbeddingSection() {
               />
               <div className="flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="font-medium text-gray-900 dark:text-white">
-                    {cap.display_name}
-                  </span>
+                  <span className="font-medium text-gray-900 dark:text-white">{cap.display_name}</span>
                   {cap.is_local ? (
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
                       {t('embedding.provider.local')}
@@ -335,9 +323,7 @@ export function EmbeddingSection() {
 
       {/* Model */}
       <section className="space-y-3">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('embedding.model.label')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('embedding.model.label')}</h3>
         {hasPresets ? (
           <div className="space-y-2">
             <select
@@ -400,25 +386,17 @@ export function EmbeddingSection() {
             )}
           />
         )}
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {t('embedding.model.help')}
-        </p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('embedding.model.help')}</p>
       </section>
 
       {/* Base URL (most useful for Ollama, but available for all) */}
       <section className="space-y-3">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('embedding.baseUrl.label')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('embedding.baseUrl.label')}</h3>
         <input
           type="text"
           value={baseUrl}
           onChange={(e) => setBaseUrl(e.target.value)}
-          placeholder={
-            provider === 'ollama'
-              ? 'http://localhost:11434'
-              : t('embedding.baseUrl.placeholder')
-          }
+          placeholder={provider === 'ollama' ? 'http://localhost:11434' : t('embedding.baseUrl.placeholder')}
           className={clsx(
             'w-full max-w-md px-3 py-2 rounded-lg border',
             'border-gray-200 dark:border-gray-700',
@@ -427,16 +405,12 @@ export function EmbeddingSection() {
             'focus:outline-none focus:ring-2 focus:ring-primary-500',
           )}
         />
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {t('embedding.baseUrl.help')}
-        </p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('embedding.baseUrl.help')}</p>
       </section>
 
       {/* Dimension & Batch Size */}
       <section className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('embedding.advanced.label')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('embedding.advanced.label')}</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Dimension */}
           <div>
@@ -458,9 +432,7 @@ export function EmbeddingSection() {
                 {supportedDimensions.map((dim) => (
                   <option key={dim} value={String(dim)}>
                     {dim}
-                    {dim === currentCapability?.default_dimension
-                      ? ` (${t('embedding.dimension.default')})`
-                      : ''}
+                    {dim === currentCapability?.default_dimension ? ` (${t('embedding.dimension.default')})` : ''}
                   </option>
                 ))}
               </select>
@@ -482,9 +454,7 @@ export function EmbeddingSection() {
                 )}
               />
             )}
-            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-              {t('embedding.dimension.help')}
-            </p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{t('embedding.dimension.help')}</p>
           </div>
 
           {/* Batch Size */}
@@ -518,9 +488,7 @@ export function EmbeddingSection() {
 
       {/* Fallback Provider */}
       <section className="space-y-3">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('embedding.fallback.label')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('embedding.fallback.label')}</h3>
         <select
           value={fallbackProvider}
           onChange={(e) => setFallbackProvider(e.target.value)}
@@ -539,16 +507,12 @@ export function EmbeddingSection() {
             </option>
           ))}
         </select>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {t('embedding.fallback.help')}
-        </p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('embedding.fallback.help')}</p>
       </section>
 
       {/* Health Check */}
       <section className="space-y-3">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('embedding.health.label')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('embedding.health.label')}</h3>
         <button
           onClick={handleHealthCheck}
           disabled={healthChecking}
@@ -562,9 +526,7 @@ export function EmbeddingSection() {
           )}
         >
           <ReloadIcon className={clsx('w-4 h-4', healthChecking && 'animate-spin')} />
-          {healthChecking
-            ? t('embedding.health.checking')
-            : t('embedding.health.checkButton')}
+          {healthChecking ? t('embedding.health.checking') : t('embedding.health.checkButton')}
         </button>
         {healthResult && (
           <div
@@ -584,18 +546,12 @@ export function EmbeddingSection() {
               <p
                 className={clsx(
                   'text-sm font-medium',
-                  healthResult.healthy
-                    ? 'text-green-700 dark:text-green-300'
-                    : 'text-red-700 dark:text-red-300',
+                  healthResult.healthy ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300',
                 )}
               >
-                {healthResult.healthy
-                  ? t('embedding.health.healthy')
-                  : t('embedding.health.unhealthy')}
+                {healthResult.healthy ? t('embedding.health.healthy') : t('embedding.health.unhealthy')}
               </p>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                {healthResult.message}
-              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{healthResult.message}</p>
               {healthResult.latency_ms != null && (
                 <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
                   {t('embedding.health.latency', { ms: healthResult.latency_ms })}
@@ -627,12 +583,8 @@ export function EmbeddingSection() {
         <div className="flex items-start gap-2 p-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20">
           <InfoCircledIcon className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
           <div>
-            <p className="text-sm font-medium text-amber-700 dark:text-amber-300">
-              {t('embedding.reindex.title')}
-            </p>
-            <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
-              {t('embedding.reindex.message')}
-            </p>
+            <p className="text-sm font-medium text-amber-700 dark:text-amber-300">{t('embedding.reindex.title')}</p>
+            <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">{t('embedding.reindex.message')}</p>
             <button
               onClick={clearReindexRequired}
               className="text-xs text-amber-500 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300 mt-1 underline"
@@ -656,9 +608,7 @@ export function EmbeddingSection() {
             'disabled:opacity-50 disabled:cursor-not-allowed',
           )}
         >
-          {saving
-            ? t('embedding.save.saving')
-            : t('embedding.save.button')}
+          {saving ? t('embedding.save.saving') : t('embedding.save.button')}
         </button>
       </section>
     </div>

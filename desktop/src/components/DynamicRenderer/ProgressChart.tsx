@@ -44,11 +44,7 @@ export function ProgressChart({ data }: ProgressChartProps) {
 
   return (
     <div className="space-y-3" data-testid="progress-chart">
-      {data.title && (
-        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-          {data.title}
-        </h4>
-      )}
+      {data.title && <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">{data.title}</h4>}
 
       {/* Stacked bar */}
       {total > 0 && (
@@ -63,10 +59,7 @@ export function ProgressChart({ data }: ProgressChartProps) {
             return (
               <div
                 key={idx}
-                className={clsx(
-                  'h-full transition-all duration-300',
-                  !isCustomColor && barColorClass
-                )}
+                className={clsx('h-full transition-all duration-300', !isCustomColor && barColorClass)}
                 style={{
                   width: `${percent}%`,
                   ...(isCustomColor ? { backgroundColor: item.color } : {}),
@@ -91,15 +84,9 @@ export function ProgressChart({ data }: ProgressChartProps) {
                 className={clsx('w-3 h-3 rounded-sm', !isCustomColor && barColorClass)}
                 style={isCustomColor ? { backgroundColor: item.color } : undefined}
               />
-              <span className="text-gray-600 dark:text-gray-400">
-                {item.label}:
-              </span>
-              <span className="font-medium text-gray-800 dark:text-gray-200">
-                {item.value}
-              </span>
-              <span className="text-gray-400 dark:text-gray-500">
-                ({percent}%)
-              </span>
+              <span className="text-gray-600 dark:text-gray-400">{item.label}:</span>
+              <span className="font-medium text-gray-800 dark:text-gray-200">{item.value}</span>
+              <span className="text-gray-400 dark:text-gray-500">({percent}%)</span>
             </div>
           );
         })}

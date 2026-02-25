@@ -44,10 +44,7 @@ export function AgentDialog() {
   const [formSystemPrompt, setFormSystemPrompt] = useState('');
   const [formAllowedTools, setFormAllowedTools] = useState<string[]>([]);
 
-  const filteredAgents = useMemo(
-    () => getFilteredAgents(agents, searchQuery),
-    [agents, searchQuery]
-  );
+  const filteredAgents = useMemo(() => getFilteredAgents(agents, searchQuery), [agents, searchQuery]);
 
   // Load agents when dialog opens
   useEffect(() => {
@@ -70,9 +67,8 @@ export function AgentDialog() {
     setFormDescription(agent.description || '');
     setFormModel(agent.model || 'claude-sonnet-4-20250514');
     setFormSystemPrompt(agent.system_prompt || '');
-    const tools: string[] = typeof agent.allowed_tools === 'string'
-      ? JSON.parse(agent.allowed_tools || '[]')
-      : agent.allowed_tools || [];
+    const tools: string[] =
+      typeof agent.allowed_tools === 'string' ? JSON.parse(agent.allowed_tools || '[]') : agent.allowed_tools || [];
     setFormAllowedTools(tools);
   }, []);
 
@@ -90,7 +86,7 @@ export function AgentDialog() {
       populateForm(agent);
       setIsNew(false);
     },
-    [populateForm]
+    [populateForm],
   );
 
   const handleNewAgent = useCallback(() => {
@@ -125,7 +121,17 @@ export function AgentDialog() {
       };
       await updateAgent(selectedId, req);
     }
-  }, [isNew, selectedId, formName, formDescription, formModel, formSystemPrompt, formAllowedTools, createAgent, updateAgent]);
+  }, [
+    isNew,
+    selectedId,
+    formName,
+    formDescription,
+    formModel,
+    formSystemPrompt,
+    formAllowedTools,
+    createAgent,
+    updateAgent,
+  ]);
 
   const handleDelete = useCallback(async () => {
     if (!selectedId) return;
@@ -167,9 +173,7 @@ export function AgentDialog() {
   }, [importAgents]);
 
   const handleToolToggle = useCallback((toolName: string) => {
-    setFormAllowedTools((prev) =>
-      prev.includes(toolName) ? prev.filter((t) => t !== toolName) : [...prev, toolName]
-    );
+    setFormAllowedTools((prev) => (prev.includes(toolName) ? prev.filter((t) => t !== toolName) : [...prev, toolName]));
   }, []);
 
   const toolCategories = useMemo(() => getToolsByCategory(), []);
@@ -184,7 +188,7 @@ export function AgentDialog() {
             'w-[720px] h-[580px] z-50',
             'bg-white dark:bg-gray-900 rounded-xl shadow-xl',
             'flex flex-col overflow-hidden',
-            'focus:outline-none'
+            'focus:outline-none',
           )}
         >
           {/* Header */}
@@ -234,7 +238,7 @@ export function AgentDialog() {
                     'w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs',
                     'text-primary-600 dark:text-primary-400',
                     'hover:bg-primary-50 dark:hover:bg-primary-900/20',
-                    'transition-colors'
+                    'transition-colors',
                   )}
                 >
                   <PlusIcon className="w-3.5 h-3.5" />
@@ -251,14 +255,12 @@ export function AgentDialog() {
                       'w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors',
                       selectedId === agent.id
                         ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-900 dark:text-primary-100'
-                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800',
                     )}
                   >
                     <div className="truncate font-medium">{agent.name}</div>
                     {agent.description && (
-                      <div className="truncate text-2xs text-gray-400 dark:text-gray-500">
-                        {agent.description}
-                      </div>
+                      <div className="truncate text-2xs text-gray-400 dark:text-gray-500">{agent.description}</div>
                     )}
                   </button>
                 ))}
@@ -267,7 +269,7 @@ export function AgentDialog() {
 
             {/* Right: Edit form */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {(!selectedId && !isNew) ? (
+              {!selectedId && !isNew ? (
                 <div className="h-full flex items-center justify-center text-xs text-gray-400">
                   {t('agentDialog.selectOrCreate', { defaultValue: 'Select or create an agent' })}
                 </div>
@@ -296,7 +298,9 @@ export function AgentDialog() {
                       type="text"
                       value={formDescription}
                       onChange={(e) => setFormDescription(e.target.value)}
-                      placeholder={t('agentDialog.descriptionPlaceholder', { defaultValue: 'What does this agent do?' })}
+                      placeholder={t('agentDialog.descriptionPlaceholder', {
+                        defaultValue: 'What does this agent do?',
+                      })}
                       className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-primary-500"
                     />
                   </div>
@@ -327,7 +331,9 @@ export function AgentDialog() {
                     <textarea
                       value={formSystemPrompt}
                       onChange={(e) => setFormSystemPrompt(e.target.value)}
-                      placeholder={t('agentDialog.systemPromptPlaceholder', { defaultValue: "Define the agent's behavior..." })}
+                      placeholder={t('agentDialog.systemPromptPlaceholder', {
+                        defaultValue: "Define the agent's behavior...",
+                      })}
                       rows={8}
                       className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-primary-500 resize-none min-h-[200px]"
                     />
@@ -346,9 +352,7 @@ export function AgentDialog() {
                     <div className="space-y-2 max-h-[140px] overflow-y-auto">
                       {Object.entries(toolCategories).map(([category, tools]) => (
                         <div key={category}>
-                          <div className="text-2xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                            {category}
-                          </div>
+                          <div className="text-2xs font-medium text-gray-500 dark:text-gray-400 mb-1">{category}</div>
                           <div className="flex flex-wrap gap-1">
                             {tools.map((tool) => (
                               <button
@@ -358,7 +362,7 @@ export function AgentDialog() {
                                   'px-1.5 py-0.5 text-2xs rounded-md border transition-colors',
                                   formAllowedTools.includes(tool.name)
                                     ? 'bg-primary-100 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-300'
-                                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-primary-300 dark:hover:border-primary-700'
+                                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-primary-300 dark:hover:border-primary-700',
                                 )}
                               >
                                 {tool.name}
@@ -378,7 +382,7 @@ export function AgentDialog() {
                       className={clsx(
                         'px-4 py-1.5 text-xs font-medium rounded-md transition-colors',
                         'bg-primary-600 text-white hover:bg-primary-700',
-                        'disabled:opacity-50 disabled:cursor-not-allowed'
+                        'disabled:opacity-50 disabled:cursor-not-allowed',
                       )}
                     >
                       {t('agentDialog.save', { defaultValue: 'Save' })}
@@ -390,7 +394,7 @@ export function AgentDialog() {
                         className={clsx(
                           'px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
                           'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',
-                          'disabled:opacity-50'
+                          'disabled:opacity-50',
                         )}
                       >
                         <TrashIcon className="w-3.5 h-3.5 inline mr-1" />

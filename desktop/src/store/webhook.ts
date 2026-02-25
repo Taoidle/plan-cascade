@@ -94,9 +94,7 @@ export const useWebhookStore = create<WebhookState>((set, _get) => ({
       const response = await updateWebhookChannel(id, request);
       if (response.success && response.data) {
         set((state) => ({
-          channels: state.channels.map((ch) =>
-            ch.id === id ? response.data! : ch
-          ),
+          channels: state.channels.map((ch) => (ch.id === id ? response.data! : ch)),
           saving: false,
         }));
         return true;
@@ -176,9 +174,7 @@ export const useWebhookStore = create<WebhookState>((set, _get) => ({
       const response = await retryWebhookDelivery(deliveryId);
       if (response.success && response.data) {
         set((state) => ({
-          deliveries: state.deliveries.map((d) =>
-            d.id === deliveryId ? response.data! : d
-          ),
+          deliveries: state.deliveries.map((d) => (d.id === deliveryId ? response.data! : d)),
           saving: false,
         }));
         return true;

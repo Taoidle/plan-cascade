@@ -32,20 +32,16 @@ export function PluginMarketplaceCard({
       className={clsx(
         'p-4 rounded-lg border transition-colors',
         'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700',
-        'hover:border-gray-300 dark:hover:border-gray-600'
+        'hover:border-gray-300 dark:hover:border-gray-600',
       )}
     >
       {/* Header: name + version + marketplace badge */}
       <div className="flex items-start justify-between mb-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h3 className="font-medium text-sm text-gray-900 dark:text-white truncate">
-              {plugin.name}
-            </h3>
+            <h3 className="font-medium text-sm text-gray-900 dark:text-white truncate">{plugin.name}</h3>
             {plugin.version && (
-              <span className="text-2xs text-gray-400 dark:text-gray-500 shrink-0">
-                v{plugin.version}
-              </span>
+              <span className="text-2xs text-gray-400 dark:text-gray-500 shrink-0">v{plugin.version}</span>
             )}
           </div>
           <div className="flex items-center gap-2 mt-0.5">
@@ -64,7 +60,7 @@ export function PluginMarketplaceCard({
             <span
               className={clsx(
                 'inline-flex items-center px-2 py-0.5 rounded text-2xs font-medium',
-                'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300'
+                'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300',
               )}
             >
               {t('plugins.installed')}
@@ -77,14 +73,10 @@ export function PluginMarketplaceCard({
                 'inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium',
                 'bg-primary-600 hover:bg-primary-700 text-white',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
-                'transition-colors'
+                'transition-colors',
               )}
             >
-              {installing ? (
-                <ReloadIcon className="w-3 h-3 animate-spin" />
-              ) : (
-                <DownloadIcon className="w-3 h-3" />
-              )}
+              {installing ? <ReloadIcon className="w-3 h-3 animate-spin" /> : <DownloadIcon className="w-3 h-3" />}
               {t('plugins.install')}
             </button>
           )}
@@ -105,7 +97,7 @@ export function PluginMarketplaceCard({
               className={clsx(
                 'px-1.5 py-0.5 text-2xs rounded-full',
                 'bg-gray-100 dark:bg-gray-700',
-                'text-gray-500 dark:text-gray-400'
+                'text-gray-500 dark:text-gray-400',
               )}
             >
               {kw}
@@ -123,7 +115,7 @@ export function PluginMarketplaceCard({
               'inline-flex items-center px-1.5 py-0.5 rounded-full',
               plugin.marketplace_name === 'claude-plugins-official'
                 ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400',
             )}
           >
             {plugin.marketplace_name === 'claude-plugins-official'
@@ -142,14 +134,10 @@ export function PluginMarketplaceCard({
               'text-red-600 dark:text-red-400',
               'hover:bg-red-50 dark:hover:bg-red-900/20',
               'disabled:opacity-50 disabled:cursor-not-allowed',
-              'transition-colors'
+              'transition-colors',
             )}
           >
-            {uninstalling ? (
-              <ReloadIcon className="w-3 h-3 animate-spin" />
-            ) : (
-              <TrashIcon className="w-3 h-3" />
-            )}
+            {uninstalling ? <ReloadIcon className="w-3 h-3 animate-spin" /> : <TrashIcon className="w-3 h-3" />}
             {t('plugins.uninstall')}
           </button>
         )}

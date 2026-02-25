@@ -52,9 +52,7 @@ export function RunHistory({ history, loading, onLoadMore, onExport }: RunHistor
     return (
       <div className="text-center py-8">
         <ClockIcon className="w-8 h-8 mx-auto mb-2 text-gray-400" />
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {t('noRunHistory')}
-        </p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('noRunHistory')}</p>
       </div>
     );
   }
@@ -74,7 +72,7 @@ export function RunHistory({ history, loading, onLoadMore, onExport }: RunHistor
             className={clsx(
               'flex items-center gap-1 px-2 py-1 rounded text-xs',
               'text-gray-600 dark:text-gray-400',
-              'hover:bg-gray-100 dark:hover:bg-gray-800'
+              'hover:bg-gray-100 dark:hover:bg-gray-800',
             )}
           >
             <DownloadIcon className="w-3 h-3" />
@@ -85,12 +83,7 @@ export function RunHistory({ history, loading, onLoadMore, onExport }: RunHistor
 
       {/* Run List */}
       {history.runs.map((run) => (
-        <RunHistoryItem
-          key={run.id}
-          run={run}
-          expanded={expandedRuns.has(run.id)}
-          onToggle={() => toggleRun(run.id)}
-        />
+        <RunHistoryItem key={run.id} run={run} expanded={expandedRuns.has(run.id)} onToggle={() => toggleRun(run.id)} />
       ))}
 
       {/* Load More */}
@@ -103,7 +96,7 @@ export function RunHistory({ history, loading, onLoadMore, onExport }: RunHistor
             'bg-gray-100 dark:bg-gray-800',
             'text-gray-600 dark:text-gray-400',
             'hover:bg-gray-200 dark:hover:bg-gray-700',
-            'disabled:opacity-50'
+            'disabled:opacity-50',
           )}
         >
           {loading ? t('common:loading') : t('common:loadMore')}
@@ -122,28 +115,22 @@ interface RunHistoryItemProps {
 function RunHistoryItem({ run, expanded, onToggle }: RunHistoryItemProps) {
   const { t } = useTranslation(['agents', 'common']);
 
-  const timestamp = run.created_at
-    ? new Date(run.created_at).toLocaleString()
-    : '-';
+  const timestamp = run.created_at ? new Date(run.created_at).toLocaleString() : '-';
 
-  const inputPreview =
-    run.input.length > 100 ? run.input.substring(0, 100) + '...' : run.input;
+  const inputPreview = run.input.length > 100 ? run.input.substring(0, 100) + '...' : run.input;
 
   return (
     <div
       className={clsx(
         'rounded-md border transition-colors',
         'border-gray-200 dark:border-gray-700',
-        'bg-white dark:bg-gray-800'
+        'bg-white dark:bg-gray-800',
       )}
     >
       {/* Header Row */}
       <button
         onClick={onToggle}
-        className={clsx(
-          'w-full flex items-center gap-3 p-3 text-left',
-          'hover:bg-gray-50 dark:hover:bg-gray-750'
-        )}
+        className={clsx('w-full flex items-center gap-3 p-3 text-left', 'hover:bg-gray-50 dark:hover:bg-gray-750')}
       >
         {/* Expand Icon */}
         {expanded ? (
@@ -157,16 +144,14 @@ function RunHistoryItem({ run, expanded, onToggle }: RunHistoryItemProps) {
           className={clsx(
             'px-2 py-0.5 rounded text-xs font-medium flex-shrink-0',
             getStatusBgColor(run.status),
-            getStatusColor(run.status)
+            getStatusColor(run.status),
           )}
         >
           {run.status}
         </span>
 
         {/* Input Preview */}
-        <span className="flex-1 text-sm text-gray-700 dark:text-gray-300 truncate">
-          {inputPreview}
-        </span>
+        <span className="flex-1 text-sm text-gray-700 dark:text-gray-300 truncate">{inputPreview}</span>
 
         {/* Duration & Time */}
         <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
@@ -185,14 +170,12 @@ function RunHistoryItem({ run, expanded, onToggle }: RunHistoryItemProps) {
         <div className="px-3 pb-3 pt-0 border-t border-gray-100 dark:border-gray-700">
           {/* Input */}
           <div className="mt-3">
-            <label className="text-xs font-medium text-gray-500 dark:text-gray-400">
-              {t('input')}
-            </label>
+            <label className="text-xs font-medium text-gray-500 dark:text-gray-400">{t('input')}</label>
             <div
               className={clsx(
                 'mt-1 p-2 rounded text-sm font-mono whitespace-pre-wrap',
                 'bg-gray-50 dark:bg-gray-900',
-                'text-gray-800 dark:text-gray-200'
+                'text-gray-800 dark:text-gray-200',
               )}
             >
               {run.input}
@@ -202,14 +185,12 @@ function RunHistoryItem({ run, expanded, onToggle }: RunHistoryItemProps) {
           {/* Output */}
           {run.output && (
             <div className="mt-3">
-              <label className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                {t('output')}
-              </label>
+              <label className="text-xs font-medium text-gray-500 dark:text-gray-400">{t('output')}</label>
               <div
                 className={clsx(
                   'mt-1 p-2 rounded text-sm font-mono whitespace-pre-wrap max-h-64 overflow-y-auto',
                   'bg-gray-50 dark:bg-gray-900',
-                  'text-gray-800 dark:text-gray-200'
+                  'text-gray-800 dark:text-gray-200',
                 )}
               >
                 {run.output}
@@ -220,14 +201,12 @@ function RunHistoryItem({ run, expanded, onToggle }: RunHistoryItemProps) {
           {/* Error */}
           {run.error && (
             <div className="mt-3">
-              <label className="text-xs font-medium text-red-500 dark:text-red-400">
-                {t('error')}
-              </label>
+              <label className="text-xs font-medium text-red-500 dark:text-red-400">{t('error')}</label>
               <div
                 className={clsx(
                   'mt-1 p-2 rounded text-sm font-mono',
                   'bg-red-50 dark:bg-red-900/20',
-                  'text-red-700 dark:text-red-300'
+                  'text-red-700 dark:text-red-300',
                 )}
               >
                 {run.error}

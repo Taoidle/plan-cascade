@@ -126,7 +126,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     public statusText: string,
-    public detail?: string
+    public detail?: string,
   ) {
     super(detail || `API Error: ${status} ${statusText}`);
     this.name = 'ApiError';
@@ -329,10 +329,7 @@ export const api = {
   /**
    * @deprecated Use claudeCodeClient.startChat()
    */
-  async createClaudeCodeSession(
-    workingDir?: string,
-    _model?: string
-  ): Promise<ClaudeCodeSession> {
+  async createClaudeCodeSession(workingDir?: string, _model?: string): Promise<ClaudeCodeSession> {
     console.warn('api.createClaudeCodeSession() is deprecated. Use claudeCodeClient');
     const { getClaudeCodeClient } = await import('./claudeCodeClient');
     const client = getClaudeCodeClient();
@@ -394,10 +391,7 @@ export const api = {
   /**
    * @deprecated Use claudeCodeClient.sendMessage()
    */
-  async sendClaudeCodeMessage(
-    sessionId: string,
-    content: string
-  ): Promise<{ content: string; tool_calls: unknown[] }> {
+  async sendClaudeCodeMessage(sessionId: string, content: string): Promise<{ content: string; tool_calls: unknown[] }> {
     console.warn('api.sendClaudeCodeMessage() is deprecated. Use claudeCodeClient');
     const { getClaudeCodeClient } = await import('./claudeCodeClient');
     const client = getClaudeCodeClient();

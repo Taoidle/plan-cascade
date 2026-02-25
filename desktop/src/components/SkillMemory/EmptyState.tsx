@@ -22,10 +22,7 @@ export function EmptyState({ title, description, icon, className, action }: Empt
   return (
     <div
       data-testid="empty-state"
-      className={clsx(
-        'flex flex-col items-center justify-center text-center py-8 px-4',
-        className
-      )}
+      className={clsx('flex flex-col items-center justify-center text-center py-8 px-4', className)}
     >
       {icon ? (
         <div className="mb-3 text-gray-300 dark:text-gray-600">{icon}</div>
@@ -45,16 +42,14 @@ export function EmptyState({ title, description, icon, className, action }: Empt
         </svg>
       )}
       <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{title}</p>
-      {description && (
-        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 max-w-xs">{description}</p>
-      )}
+      {description && <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 max-w-xs">{description}</p>}
       {action && (
         <button
           onClick={action.onClick}
           className={clsx(
             'mt-3 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
             'bg-primary-600 text-white hover:bg-primary-700',
-            'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1'
+            'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1',
           )}
         >
           {action.label}

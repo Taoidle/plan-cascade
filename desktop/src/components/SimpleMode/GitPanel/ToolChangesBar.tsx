@@ -93,10 +93,7 @@ export function ToolChangesBar({ streamingOutput }: ToolChangesBarProps) {
     return paths;
   }, [status]);
 
-  const toolChanges = useMemo(
-    () => extractToolChanges(streamingOutput, changedPaths),
-    [streamingOutput, changedPaths]
-  );
+  const toolChanges = useMemo(() => extractToolChanges(streamingOutput, changedPaths), [streamingOutput, changedPaths]);
 
   if (toolChanges.length === 0) {
     return null;
@@ -111,7 +108,12 @@ export function ToolChangesBar({ streamingOutput }: ToolChangesBarProps) {
       >
         <span className="flex items-center gap-1.5">
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
+            />
           </svg>
           {t('toolChanges.title')}
           <span className="text-gray-400 dark:text-gray-500">({toolChanges.length})</span>
@@ -140,7 +142,7 @@ export function ToolChangesBar({ streamingOutput }: ToolChangesBarProps) {
                   'text-2xs font-medium px-1.5 py-0.5 rounded shrink-0 mt-0.5',
                   change.toolName === 'Write'
                     ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
-                    : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+                    : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400',
                 )}
               >
                 {change.toolName}
@@ -148,9 +150,7 @@ export function ToolChangesBar({ streamingOutput }: ToolChangesBarProps) {
 
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <code className="text-2xs text-gray-600 dark:text-gray-400 truncate">
-                    {change.filePath}
-                  </code>
+                  <code className="text-2xs text-gray-600 dark:text-gray-400 truncate">{change.filePath}</code>
                   {/* Git correlation marker */}
                   {change.hasGitChange && (
                     <span

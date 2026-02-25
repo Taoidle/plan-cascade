@@ -6,12 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ReactNode } from 'react';
-import {
-  CommandPaletteProvider,
-  useCommandPalette,
-  createDefaultCommands,
-  Command,
-} from '../CommandPalette';
+import { CommandPaletteProvider, useCommandPalette, createDefaultCommands, Command } from '../CommandPalette';
 
 // Test wrapper component
 function TestComponent() {
@@ -31,15 +26,8 @@ function TestComponent() {
   );
 }
 
-function renderWithProvider(
-  ui: ReactNode,
-  defaultCommands: Command[] = []
-) {
-  return render(
-    <CommandPaletteProvider defaultCommands={defaultCommands}>
-      {ui}
-    </CommandPaletteProvider>
-  );
+function renderWithProvider(ui: ReactNode, defaultCommands: Command[] = []) {
+  return render(<CommandPaletteProvider defaultCommands={defaultCommands}>{ui}</CommandPaletteProvider>);
 }
 
 describe('CommandPaletteProvider', () => {

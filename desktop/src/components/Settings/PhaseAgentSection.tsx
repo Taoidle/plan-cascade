@@ -72,10 +72,7 @@ function AgentSelectOptions({
         return (
           <optgroup key={provider} label={label}>
             {models.map((model) => (
-              <option
-                key={`llm:${provider}:${model}`}
-                value={`llm:${provider}:${model}`}
-              >
+              <option key={`llm:${provider}:${model}`} value={`llm:${provider}:${model}`}>
                 {model}
               </option>
             ))}
@@ -169,12 +166,8 @@ export function PhaseAgentSection() {
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-          {t('phases.title')}
-        </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {t('phases.description')}
-        </p>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">{t('phases.title')}</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('phases.description')}</p>
       </div>
 
       {/* Phase Table */}
@@ -185,7 +178,7 @@ export function PhaseAgentSection() {
             className={clsx(
               'grid grid-cols-12 gap-4 px-4 py-3',
               'bg-gray-50 dark:bg-gray-800',
-              'text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'
+              'text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider',
             )}
           >
             <div className="col-span-3">{t('phases.columns.phase')}</div>
@@ -205,19 +198,16 @@ export function PhaseAgentSection() {
                     className={clsx(
                       'grid grid-cols-12 gap-4 px-4 py-3 items-center',
                       'bg-white dark:bg-gray-900',
-                      'hover:bg-gray-50 dark:hover:bg-gray-800/50'
+                      'hover:bg-gray-50 dark:hover:bg-gray-800/50',
                     )}
                   >
                     {/* Phase Name */}
                     <div className="col-span-3">
-                      <button
-                        onClick={() => toggleExpanded(phase.id)}
-                        className="flex items-center gap-2 text-left"
-                      >
+                      <button onClick={() => toggleExpanded(phase.id)} className="flex items-center gap-2 text-left">
                         <ChevronDownIcon
                           className={clsx(
                             'w-4 h-4 text-gray-400 transition-transform',
-                            expandedPhase === phase.id && 'rotate-180'
+                            expandedPhase === phase.id && 'rotate-180',
                           )}
                         />
                         <div>
@@ -241,7 +231,7 @@ export function PhaseAgentSection() {
                           'border-gray-200 dark:border-gray-700',
                           'bg-white dark:bg-gray-800',
                           'text-gray-900 dark:text-white',
-                          'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                          'focus:outline-none focus:ring-2 focus:ring-primary-500',
                         )}
                       >
                         <AgentSelectOptions
@@ -261,7 +251,7 @@ export function PhaseAgentSection() {
                               key={agent}
                               className={clsx(
                                 'inline-flex items-center px-2 py-0.5 rounded text-xs',
-                                'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                                'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
                               )}
                             >
                               {index + 1}. {agent}
@@ -282,7 +272,7 @@ export function PhaseAgentSection() {
                       className={clsx(
                         'px-4 py-4 border-t',
                         'border-gray-100 dark:border-gray-800',
-                        'bg-gray-50 dark:bg-gray-800/30'
+                        'bg-gray-50 dark:bg-gray-800/30',
                       )}
                     >
                       <div className="ml-6 space-y-4">
@@ -290,9 +280,7 @@ export function PhaseAgentSection() {
                           <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                             {t('phases.fallback.title')}
                           </h4>
-                          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                            {t('phases.fallback.help')}
-                          </p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">{t('phases.fallback.help')}</p>
 
                           {/* Fallback List */}
                           <div className="space-y-2">
@@ -302,15 +290,11 @@ export function PhaseAgentSection() {
                                 className={clsx(
                                   'flex items-center gap-3 p-2 rounded-lg',
                                   'bg-white dark:bg-gray-800',
-                                  'border border-gray-200 dark:border-gray-700'
+                                  'border border-gray-200 dark:border-gray-700',
                                 )}
                               >
-                                <span className="text-xs text-gray-400 w-6">
-                                  #{index + 1}
-                                </span>
-                                <span className="flex-1 text-sm text-gray-900 dark:text-white">
-                                  {agent}
-                                </span>
+                                <span className="text-xs text-gray-400 w-6">#{index + 1}</span>
+                                <span className="flex-1 text-sm text-gray-900 dark:text-white">{agent}</span>
                                 <div className="flex items-center gap-1">
                                   <button
                                     onClick={() => handleMoveFallback(phase.id, agent, 'up')}
@@ -318,12 +302,18 @@ export function PhaseAgentSection() {
                                     className={clsx(
                                       'p-1 rounded text-xs',
                                       'hover:bg-gray-100 dark:hover:bg-gray-700',
-                                      'disabled:opacity-30 disabled:cursor-not-allowed'
+                                      'disabled:opacity-30 disabled:cursor-not-allowed',
                                     )}
                                     title={t('phases.fallback.moveUp')}
                                   >
                                     <span className="sr-only">{t('phases.fallback.moveUp')}</span>
-                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <svg
+                                      className="w-4 h-4"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                    >
                                       <polyline points="18 15 12 9 6 15" />
                                     </svg>
                                   </button>
@@ -333,12 +323,18 @@ export function PhaseAgentSection() {
                                     className={clsx(
                                       'p-1 rounded text-xs',
                                       'hover:bg-gray-100 dark:hover:bg-gray-700',
-                                      'disabled:opacity-30 disabled:cursor-not-allowed'
+                                      'disabled:opacity-30 disabled:cursor-not-allowed',
                                     )}
                                     title={t('phases.fallback.moveDown')}
                                   >
                                     <span className="sr-only">{t('phases.fallback.moveDown')}</span>
-                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <svg
+                                      className="w-4 h-4"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                    >
                                       <polyline points="6 9 12 15 18 9" />
                                     </svg>
                                   </button>
@@ -346,7 +342,7 @@ export function PhaseAgentSection() {
                                     onClick={() => handleRemoveFallback(phase.id, agent)}
                                     className={clsx(
                                       'p-1 rounded text-red-500 hover:text-red-700',
-                                      'hover:bg-red-50 dark:hover:bg-red-900/20'
+                                      'hover:bg-red-50 dark:hover:bg-red-900/20',
                                     )}
                                     title={t('phases.fallback.remove')}
                                   >
@@ -371,15 +367,13 @@ export function PhaseAgentSection() {
                                 'border-gray-200 dark:border-gray-700',
                                 'bg-white dark:bg-gray-800',
                                 'text-gray-900 dark:text-white',
-                                'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                                'focus:outline-none focus:ring-2 focus:ring-primary-500',
                               )}
                             >
                               <option value="">{t('phases.fallback.addFallback')}</option>
                               <AgentSelectOptions
                                 enabledAgents={enabledAgents.filter(
-                                  (a) =>
-                                    a.name !== config.defaultAgent &&
-                                    !config.fallbackChain.includes(a.name)
+                                  (a) => a.name !== config.defaultAgent && !config.fallbackChain.includes(a.name),
                                 )}
                                 cliAgentsLabel={cliAgentsLabel}
                                 configuredProviders={configuredProviders}
@@ -403,15 +397,11 @@ export function PhaseAgentSection() {
           className={clsx(
             'p-4 rounded-lg',
             'bg-blue-50 dark:bg-blue-900/20',
-            'border border-blue-200 dark:border-blue-800'
+            'border border-blue-200 dark:border-blue-800',
           )}
         >
-          <h4 className="text-sm font-medium text-blue-800 dark:text-blue-300 mb-1">
-            {t('phases.info.title')}
-          </h4>
-          <p className="text-sm text-blue-700 dark:text-blue-400">
-            {t('phases.info.description')}
-          </p>
+          <h4 className="text-sm font-medium text-blue-800 dark:text-blue-300 mb-1">{t('phases.info.title')}</h4>
+          <p className="text-sm text-blue-700 dark:text-blue-400">{t('phases.info.description')}</p>
         </div>
       </section>
     </div>

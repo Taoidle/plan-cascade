@@ -50,10 +50,7 @@ export async function saveTextWithDialog(filename: string, content: string): Pro
   return true;
 }
 
-export async function saveBinaryWithDialog(
-  filename: string,
-  dataBase64: string,
-): Promise<boolean> {
+export async function saveBinaryWithDialog(filename: string, dataBase64: string): Promise<boolean> {
   const { save } = await import('@tauri-apps/plugin-dialog');
   const selected = await save({
     title: 'Export Output',
@@ -128,9 +125,7 @@ export function serializeConversationOutput(lines: StreamLine[]): string {
   return out.join('\n\n');
 }
 
-export function collectAssistantReplies(
-  lines: StreamLine[],
-): Array<{ id: number; content: string }> {
+export function collectAssistantReplies(lines: StreamLine[]): Array<{ id: number; content: string }> {
   return lines
     .filter((line) => line.type === 'text' && line.content.trim().length > 0)
     .map((line) => ({ id: line.id, content: line.content }));
@@ -164,9 +159,7 @@ export function serializeConversationMarkdown(lines: StreamLine[]): string {
         parts.push(`\`\`\`\n[Result] ${content}\n\`\`\``);
         break;
       case 'thinking':
-        parts.push(
-          `<details>\n<summary>Thinking</summary>\n\n${content}\n\n</details>`,
-        );
+        parts.push(`<details>\n<summary>Thinking</summary>\n\n${content}\n\n</details>`);
         break;
       default:
         break;
@@ -220,10 +213,7 @@ const nodeFilter = (node: HTMLElement) => {
   return true;
 };
 
-export async function captureElementToBlob(
-  element: HTMLElement,
-  format: 'png' | 'jpeg',
-): Promise<Blob> {
+export async function captureElementToBlob(element: HTMLElement, format: 'png' | 'jpeg'): Promise<Blob> {
   const htmlToImage = await import('html-to-image');
 
   const restore = expandForCapture(element);
@@ -256,9 +246,7 @@ export async function captureElementToBlob(
   }
 }
 
-export async function captureElementToPdfBlob(
-  element: HTMLElement,
-): Promise<Blob> {
+export async function captureElementToPdfBlob(element: HTMLElement): Promise<Blob> {
   const htmlToImage = await import('html-to-image');
   const { jsPDF } = await import('jspdf');
 
@@ -296,7 +284,7 @@ export async function captureElementToPdfBlob(
 
     // Scale image to fit A4 width
     const scale = contentWidthMm / (w * pixelRatio);
-    const scaledHeightMm = (h * pixelRatio) * scale;
+    const scaledHeightMm = h * pixelRatio * scale;
 
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 

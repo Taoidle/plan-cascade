@@ -31,10 +31,22 @@ let _statusUnsubscribe: (() => void) | null = null;
 let _lifecycleVersion = 0;
 
 function cleanupEventListeners() {
-  if (_statusUnsubscribe) { _statusUnsubscribe(); _statusUnsubscribe = null; }
-  if (_streamUnlisten) { _streamUnlisten(); _streamUnlisten = null; }
-  if (_toolUnlisten) { _toolUnlisten(); _toolUnlisten = null; }
-  if (_sessionUnlisten) { _sessionUnlisten(); _sessionUnlisten = null; }
+  if (_statusUnsubscribe) {
+    _statusUnsubscribe();
+    _statusUnsubscribe = null;
+  }
+  if (_streamUnlisten) {
+    _streamUnlisten();
+    _streamUnlisten = null;
+  }
+  if (_toolUnlisten) {
+    _toolUnlisten();
+    _toolUnlisten = null;
+  }
+  if (_sessionUnlisten) {
+    _sessionUnlisten();
+    _sessionUnlisten = null;
+  }
 }
 
 // ============================================================================
@@ -262,7 +274,7 @@ function generateId(): string {
 
 function parseToolType(name: string): ToolType {
   const toolTypes: ToolType[] = ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebFetch', 'WebSearch'];
-  const found = toolTypes.find(t => name.toLowerCase().includes(t.toLowerCase()));
+  const found = toolTypes.find((t) => name.toLowerCase().includes(t.toLowerCase()));
   return found || 'Unknown';
 }
 
@@ -275,12 +287,19 @@ function parseStreamEvent(event: UnifiedStreamEvent): { type: string; data: Reco
     case 'tool_start': {
       let input = {};
       if (event.arguments) {
-        try { input = JSON.parse(event.arguments); } catch { /* keep empty */ }
+        try {
+          input = JSON.parse(event.arguments);
+        } catch {
+          /* keep empty */
+        }
       }
       return { type: 'tool_use', data: { tool_use_id: event.tool_id, name: event.tool_name, input } };
     }
     case 'tool_result':
-      return { type: 'tool_result', data: { tool_use_id: event.tool_id, success: !event.error, output: event.result || event.error || '' } };
+      return {
+        type: 'tool_result',
+        data: { tool_use_id: event.tool_id, success: !event.error, output: event.result || event.error || '' },
+      };
     case 'usage':
       return { type: 'usage', data: { input_tokens: event.input_tokens, output_tokens: event.output_tokens } };
     case 'error':
@@ -382,7 +401,7 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
               }
               case 'error': {
                 set({
-                  error: parsed.data.message as string || 'An error occurred',
+                  error: (parsed.data.message as string) || 'An error occurred',
                   isStreaming: false,
                   isSending: false,
                   sessionState: 'idle',
@@ -591,12 +610,8 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
 
       updateToolCall: (id: string, updates: Partial<ToolCall>) => {
         set((state) => ({
-          activeToolCalls: state.activeToolCalls.map((tc) =>
-            tc.id === id ? { ...tc, ...updates } : tc
-          ),
-          toolCallHistory: state.toolCallHistory.map((tc) =>
-            tc.id === id ? { ...tc, ...updates } : tc
-          ),
+          activeToolCalls: state.activeToolCalls.map((tc) => (tc.id === id ? { ...tc, ...updates } : tc)),
+          toolCallHistory: state.toolCallHistory.map((tc) => (tc.id === id ? { ...tc, ...updates } : tc)),
         }));
       },
 
@@ -623,8 +638,7 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
         const state = get();
         if (state.messages.length === 0) return;
 
-        const conversationTitle =
-          title || state.messages[0]?.content.slice(0, 50) || 'Untitled';
+        const conversationTitle = title || state.messages[0]?.content.slice(0, 50) || 'Untitled';
 
         const conversation: Conversation = {
           id: state.activeConversationId || generateId(),
@@ -638,9 +652,7 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
         };
 
         set((prevState) => {
-          const existing = prevState.conversations.findIndex(
-            (c) => c.id === conversation.id
-          );
+          const existing = prevState.conversations.findIndex((c) => c.id === conversation.id);
 
           let newConversations: Conversation[];
           if (existing >= 0) {
@@ -684,8 +696,7 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
       deleteConversation: (id: string) => {
         set((state) => ({
           conversations: state.conversations.filter((c) => c.id !== id),
-          activeConversationId:
-            state.activeConversationId === id ? null : state.activeConversationId,
+          activeConversationId: state.activeConversationId === id ? null : state.activeConversationId,
         }));
       },
 
@@ -727,7 +738,7 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
               exportedAt: new Date().toISOString(),
             },
             null,
-            2
+            2,
           );
         }
 
@@ -843,9 +854,7 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
 
       updateMessage: (id: string, updates: Partial<Message>) => {
         set((state) => ({
-          messages: state.messages.map((msg) =>
-            msg.id === id ? { ...msg, ...updates } : msg
-          ),
+          messages: state.messages.map((msg) => (msg.id === id ? { ...msg, ...updates } : msg)),
         }));
       },
 
@@ -886,8 +895,8 @@ export const useClaudeCodeStore = create<ClaudeCodeState>()(
       partialize: (state) => ({
         conversations: state.conversations,
       }),
-    }
-  )
+    },
+  ),
 );
 
 // Re-export ConnectionStatus for backwards compatibility

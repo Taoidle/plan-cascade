@@ -128,9 +128,7 @@ export function MergeBar() {
           message: `Merge branch '${mergeState.branch_name || 'unknown'}'`,
         });
       } else {
-        setError(
-          `Continue not yet supported via IPC for ${mergeState.kind}. Use terminal.`
-        );
+        setError(`Continue not yet supported via IPC for ${mergeState.kind}. Use terminal.`);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

@@ -225,10 +225,7 @@ describe('useSkillMemoryStore', () => {
 
     it('should delete skill', async () => {
       useSkillMemoryStore.setState({
-        skills: [
-          createMockSkillSummary({ id: 'skill-1' }),
-          createMockSkillSummary({ id: 'skill-2' }),
-        ],
+        skills: [createMockSkillSummary({ id: 'skill-1' }), createMockSkillSummary({ id: 'skill-2' })],
       });
 
       mockInvoke.mockResolvedValueOnce({ success: true, data: null, error: null });
@@ -246,10 +243,7 @@ describe('useSkillMemoryStore', () => {
 
   describe('Memory Actions', () => {
     it('should load memories successfully', async () => {
-      const mockMemories = [
-        createMockMemoryEntry({ id: 'mem-1' }),
-        createMockMemoryEntry({ id: 'mem-2' }),
-      ];
+      const mockMemories = [createMockMemoryEntry({ id: 'mem-1' }), createMockMemoryEntry({ id: 'mem-2' })];
       mockInvoke.mockResolvedValueOnce({
         success: true,
         data: mockMemories,
@@ -290,13 +284,7 @@ describe('useSkillMemoryStore', () => {
         error: null,
       });
 
-      await useSkillMemoryStore.getState().addMemory(
-        '/test/project',
-        'fact',
-        'New memory',
-        ['test'],
-        0.7
-      );
+      await useSkillMemoryStore.getState().addMemory('/test/project', 'fact', 'New memory', ['test'], 0.7);
 
       const state = useSkillMemoryStore.getState();
       expect(state.memories).toHaveLength(2);
@@ -322,10 +310,7 @@ describe('useSkillMemoryStore', () => {
 
     it('should delete memory from list', async () => {
       useSkillMemoryStore.setState({
-        memories: [
-          createMockMemoryEntry({ id: 'mem-1' }),
-          createMockMemoryEntry({ id: 'mem-2' }),
-        ],
+        memories: [createMockMemoryEntry({ id: 'mem-1' }), createMockMemoryEntry({ id: 'mem-2' })],
       });
 
       mockInvoke.mockResolvedValueOnce({ success: true, data: null, error: null });

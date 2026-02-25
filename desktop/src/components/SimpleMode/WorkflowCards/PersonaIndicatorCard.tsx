@@ -26,9 +26,7 @@ export function PersonaIndicatorCard({ data }: { data: PersonaIndicatorData }) {
   return (
     <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
       <span className="text-xs">{icon}</span>
-      <span className="text-2xs font-medium text-gray-700 dark:text-gray-300">
-        {data.displayName}
-      </span>
+      <span className="text-2xs font-medium text-gray-700 dark:text-gray-300">{data.displayName}</span>
       <span className="text-2xs text-gray-400 dark:text-gray-500">
         {t(`workflow.persona.active`, { name: data.displayName, defaultValue: '{{name}} is working...' })}
       </span>

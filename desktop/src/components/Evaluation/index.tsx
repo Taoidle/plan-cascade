@@ -35,12 +35,7 @@ export function EvaluationDashboard() {
   return (
     <div className="h-full flex flex-col">
       {/* Tab bar */}
-      <div
-        className={clsx(
-          'flex items-center gap-1 px-6 py-2',
-          'border-b border-gray-200 dark:border-gray-700'
-        )}
-      >
+      <div className={clsx('flex items-center gap-1 px-6 py-2', 'border-b border-gray-200 dark:border-gray-700')}>
         {tabs.map((tab) => (
           <button
             key={tab.value}
@@ -49,7 +44,7 @@ export function EvaluationDashboard() {
               'px-4 py-2 rounded-t-lg text-sm font-medium transition-colors',
               activeTab === tab.value
                 ? 'text-primary-600 dark:text-primary-400 bg-gray-100 dark:bg-gray-800'
-                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white',
             )}
           >
             {tab.label}

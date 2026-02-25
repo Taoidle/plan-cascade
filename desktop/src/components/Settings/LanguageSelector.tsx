@@ -15,9 +15,7 @@ export function LanguageSelector() {
 
   return (
     <section className="space-y-4">
-      <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-        {t('general.language.title')}
-      </h3>
+      <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('general.language.title')}</h3>
       <select
         value={language}
         onChange={(e) => setLanguage(e.target.value as Language)}
@@ -26,7 +24,7 @@ export function LanguageSelector() {
           'border-gray-200 dark:border-gray-700',
           'bg-white dark:bg-gray-800',
           'text-gray-900 dark:text-white',
-          'focus:outline-none focus:ring-2 focus:ring-primary-500'
+          'focus:outline-none focus:ring-2 focus:ring-primary-500',
         )}
       >
         {supportedLanguages.map((lang) => (
@@ -35,9 +33,7 @@ export function LanguageSelector() {
           </option>
         ))}
       </select>
-      <p className="text-sm text-gray-500 dark:text-gray-400">
-        {t('general.language.description')}
-      </p>
+      <p className="text-sm text-gray-500 dark:text-gray-400">{t('general.language.description')}</p>
     </section>
   );
 }

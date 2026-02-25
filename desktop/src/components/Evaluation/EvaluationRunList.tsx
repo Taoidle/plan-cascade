@@ -50,16 +50,14 @@ export function EvaluationRunList() {
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-          {t('evaluation.runs.title')}
-        </h2>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t('evaluation.runs.title')}</h2>
         <button
           onClick={() => setShowNewRun(!showNewRun)}
           disabled={evaluators.length === 0}
           className={clsx(
             'px-3 py-1.5 text-sm font-medium rounded-lg transition-colors',
             'bg-primary-600 text-white hover:bg-primary-700',
-            'disabled:opacity-50 disabled:cursor-not-allowed'
+            'disabled:opacity-50 disabled:cursor-not-allowed',
           )}
         >
           {showNewRun ? t('evaluation.runs.cancel') : t('evaluation.runs.newRun')}
@@ -67,9 +65,7 @@ export function EvaluationRunList() {
       </div>
 
       {evaluators.length === 0 && (
-        <div className="text-sm text-gray-500 dark:text-gray-400 italic">
-          {t('evaluation.runs.noEvaluator')}
-        </div>
+        <div className="text-sm text-gray-500 dark:text-gray-400 italic">{t('evaluation.runs.noEvaluator')}</div>
       )}
 
       {/* New Run Configuration */}
@@ -78,7 +74,7 @@ export function EvaluationRunList() {
           className={clsx(
             'p-4 rounded-lg border',
             'border-primary-200 dark:border-primary-800',
-            'bg-primary-50/50 dark:bg-primary-900/10'
+            'bg-primary-50/50 dark:bg-primary-900/10',
           )}
         >
           <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
@@ -109,11 +105,7 @@ export function EvaluationRunList() {
             <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
               {t('evaluation.runs.modelsToCompare')}
             </label>
-            <ModelSelector
-              models={selectedModels}
-              onAdd={addModel}
-              onRemove={removeModel}
-            />
+            <ModelSelector models={selectedModels} onAdd={addModel} onRemove={removeModel} />
           </div>
 
           {/* Test Cases */}
@@ -121,27 +113,17 @@ export function EvaluationRunList() {
             <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
               {t('evaluation.runs.testCases')}
             </label>
-            <TestCaseEditor
-              cases={testCases}
-              onAdd={addTestCase}
-              onUpdate={updateTestCase}
-              onRemove={removeTestCase}
-            />
+            <TestCaseEditor cases={testCases} onAdd={addTestCase} onUpdate={updateTestCase} onRemove={removeTestCase} />
           </div>
 
           {/* Start button */}
           <button
             onClick={handleCreateRun}
-            disabled={
-              isRunning ||
-              !selectedEvaluatorId ||
-              selectedModels.length === 0 ||
-              testCases.length === 0
-            }
+            disabled={isRunning || !selectedEvaluatorId || selectedModels.length === 0 || testCases.length === 0}
             className={clsx(
               'w-full py-2 text-sm font-medium rounded-lg transition-colors',
               'bg-primary-600 text-white hover:bg-primary-700',
-              'disabled:opacity-50 disabled:cursor-not-allowed'
+              'disabled:opacity-50 disabled:cursor-not-allowed',
             )}
           >
             {isRunning ? t('evaluation.runs.creating') : t('evaluation.runs.createButton')}
@@ -165,7 +147,7 @@ export function EvaluationRunList() {
               className={clsx(
                 'flex items-center justify-between p-4 rounded-lg border',
                 'border-gray-200 dark:border-gray-700',
-                'bg-white dark:bg-gray-800'
+                'bg-white dark:bg-gray-800',
               )}
             >
               <div className="flex-1 min-w-0">
@@ -176,7 +158,9 @@ export function EvaluationRunList() {
                   <StatusBadge status={run.status} />
                 </div>
                 <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  {t('evaluation.runs.modelCount', { count: run.model_count })} | {t('evaluation.runs.caseCount', { count: run.case_count })} | {new Date(run.created_at).toLocaleDateString()}
+                  {t('evaluation.runs.modelCount', { count: run.model_count })} |{' '}
+                  {t('evaluation.runs.caseCount', { count: run.case_count })} |{' '}
+                  {new Date(run.created_at).toLocaleDateString()}
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -219,7 +203,7 @@ function StatusBadge({ status }: { status: string }) {
     <span
       className={clsx(
         'text-[10px] px-1.5 py-0.5 rounded font-medium',
-        colorMap[status] ?? 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+        colorMap[status] ?? 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400',
       )}
     >
       {status}
@@ -254,10 +238,7 @@ function ModelSelector({
           <span className="font-mono text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 px-2 py-1 rounded">
             {m.provider}/{m.model}
           </span>
-          <button
-            onClick={() => onRemove(i)}
-            className="text-red-400 hover:text-red-600"
-          >
+          <button onClick={() => onRemove(i)} className="text-red-400 hover:text-red-600">
             x
           </button>
         </div>
@@ -326,15 +307,12 @@ function TestCaseEditor({
               className="text-xs font-medium bg-transparent border-none outline-none text-gray-900 dark:text-white flex-1"
               placeholder={t('evaluation.runs.caseName')}
             />
-            <button
-              onClick={() => onRemove(tc.id)}
-              className="text-xs text-red-400 hover:text-red-600"
-            >
+            <button onClick={() => onRemove(tc.id)} className="text-xs text-red-400 hover:text-red-600">
               {t('evaluation.runs.remove')}
             </button>
           </div>
           <textarea
-            value={typeof tc.input === 'object' ? (tc.input as Record<string, unknown>).prompt as string ?? '' : ''}
+            value={typeof tc.input === 'object' ? (((tc.input as Record<string, unknown>).prompt as string) ?? '') : ''}
             onChange={(e) => onUpdate(tc.id, { input: { prompt: e.target.value } })}
             className="w-full text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 h-12 resize-y"
             placeholder={t('evaluation.runs.inputPlaceholder')}

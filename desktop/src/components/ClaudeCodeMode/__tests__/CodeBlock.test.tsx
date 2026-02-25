@@ -72,11 +72,7 @@ describe('CodeBlock', () => {
 
   it('shows line numbers when enabled', () => {
     const { container } = render(
-      <CodeBlock
-        code={'const a = 1;\nconst b = 2;\nconst c = 3;'}
-        language="javascript"
-        showLineNumbers={true}
-      />
+      <CodeBlock code={'const a = 1;\nconst b = 2;\nconst c = 3;'} language="javascript" showLineNumbers={true} />,
     );
     const lineNumbers = container.querySelectorAll('.table-cell.pr-4.text-right');
     expect(lineNumbers).toHaveLength(3);
@@ -84,11 +80,7 @@ describe('CodeBlock', () => {
 
   it('hides line numbers when disabled', () => {
     const { container } = render(
-      <CodeBlock
-        code={'const a = 1;\nconst b = 2;'}
-        language="javascript"
-        showLineNumbers={false}
-      />
+      <CodeBlock code={'const a = 1;\nconst b = 2;'} language="javascript" showLineNumbers={false} />,
     );
     const lineNumbers = container.querySelectorAll('.table-cell.pr-4.text-right');
     expect(lineNumbers).toHaveLength(0);
@@ -115,9 +107,7 @@ describe('SimpleCodeBlock', () => {
   });
 
   it('applies custom className', () => {
-    const { container } = render(
-      <SimpleCodeBlock code="test" className="custom-class" />
-    );
+    const { container } = render(<SimpleCodeBlock code="test" className="custom-class" />);
     expect(container.querySelector('.custom-class')).toBeInTheDocument();
   });
 });

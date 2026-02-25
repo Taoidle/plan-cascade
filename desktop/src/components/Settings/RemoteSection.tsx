@@ -8,12 +8,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import {
-  CheckCircledIcon,
-  CrossCircledIcon,
-  TrashIcon,
-  PlusIcon,
-} from '@radix-ui/react-icons';
+import { CheckCircledIcon, CrossCircledIcon, TrashIcon, PlusIcon } from '@radix-ui/react-icons';
 import { useRemoteStore } from '../../store/remote';
 
 // ---------------------------------------------------------------------------
@@ -138,9 +133,12 @@ export function RemoteSection() {
     }
   }, [newChatId, chatIds]);
 
-  const handleRemoveChatId = useCallback((id: number) => {
-    setChatIds(chatIds.filter((cid) => cid !== id));
-  }, [chatIds]);
+  const handleRemoveChatId = useCallback(
+    (id: number) => {
+      setChatIds(chatIds.filter((cid) => cid !== id));
+    },
+    [chatIds],
+  );
 
   const handleAddUserId = useCallback(() => {
     const id = parseInt(newUserId, 10);
@@ -150,9 +148,12 @@ export function RemoteSection() {
     }
   }, [newUserId, userIds]);
 
-  const handleRemoveUserId = useCallback((id: number) => {
-    setUserIds(userIds.filter((uid) => uid !== id));
-  }, [userIds]);
+  const handleRemoveUserId = useCallback(
+    (id: number) => {
+      setUserIds(userIds.filter((uid) => uid !== id));
+    },
+    [userIds],
+  );
 
   return (
     <div className="space-y-8">
@@ -174,7 +175,7 @@ export function RemoteSection() {
             'flex items-center gap-2 p-3 rounded-lg text-sm',
             statusMessage.type === 'success'
               ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300'
-              : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'
+              : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300',
           )}
         >
           {statusMessage.type === 'success' ? (
@@ -194,12 +195,7 @@ export function RemoteSection() {
         <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4 space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div
-                className={clsx(
-                  'w-3 h-3 rounded-full',
-                  gatewayStatus?.running ? 'bg-green-500' : 'bg-gray-400'
-                )}
-              />
+              <div className={clsx('w-3 h-3 rounded-full', gatewayStatus?.running ? 'bg-green-500' : 'bg-gray-400')} />
               <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                 {gatewayStatus?.running
                   ? t('remote.gateway.running', 'Running')
@@ -213,7 +209,7 @@ export function RemoteSection() {
                 className={clsx(
                   'px-3 py-1.5 rounded-md text-sm font-medium',
                   'bg-green-600 text-white hover:bg-green-700',
-                  'disabled:opacity-50 disabled:cursor-not-allowed'
+                  'disabled:opacity-50 disabled:cursor-not-allowed',
                 )}
               >
                 {t('remote.gateway.start', 'Start')}
@@ -224,7 +220,7 @@ export function RemoteSection() {
                 className={clsx(
                   'px-3 py-1.5 rounded-md text-sm font-medium',
                   'bg-red-600 text-white hover:bg-red-700',
-                  'disabled:opacity-50 disabled:cursor-not-allowed'
+                  'disabled:opacity-50 disabled:cursor-not-allowed',
                 )}
               >
                 {t('remote.gateway.stop', 'Stop')}
@@ -238,9 +234,7 @@ export function RemoteSection() {
                   {t('remote.gateway.connectedSince', 'Connected Since')}
                 </span>
                 <span className="font-mono">
-                  {gatewayStatus.connected_since
-                    ? new Date(gatewayStatus.connected_since).toLocaleString()
-                    : '-'}
+                  {gatewayStatus.connected_since ? new Date(gatewayStatus.connected_since).toLocaleString() : '-'}
                 </span>
               </div>
               <div>
@@ -294,7 +288,7 @@ export function RemoteSection() {
             className={clsx(
               'px-4 py-2 rounded-lg text-sm font-medium',
               'bg-primary-600 text-white hover:bg-primary-700',
-              'disabled:opacity-50 disabled:cursor-not-allowed'
+              'disabled:opacity-50 disabled:cursor-not-allowed',
             )}
           >
             {saving ? t('remote.saving', 'Saving...') : t('remote.save', 'Save')}
@@ -323,7 +317,7 @@ export function RemoteSection() {
                   'flex-1 px-3 py-2 rounded-lg text-sm',
                   'bg-white dark:bg-gray-800',
                   'border border-gray-300 dark:border-gray-600',
-                  'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500',
                 )}
               />
               {hasBotToken && (
@@ -347,10 +341,7 @@ export function RemoteSection() {
                   className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-700 text-sm"
                 >
                   {id}
-                  <button
-                    onClick={() => handleRemoveChatId(id)}
-                    className="text-gray-400 hover:text-red-500"
-                  >
+                  <button onClick={() => handleRemoveChatId(id)} className="text-gray-400 hover:text-red-500">
                     <CrossCircledIcon className="w-3 h-3" />
                   </button>
                 </span>
@@ -366,7 +357,7 @@ export function RemoteSection() {
                   'flex-1 px-3 py-2 rounded-lg text-sm',
                   'bg-white dark:bg-gray-800',
                   'border border-gray-300 dark:border-gray-600',
-                  'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500',
                 )}
                 onKeyDown={(e) => e.key === 'Enter' && handleAddChatId()}
               />
@@ -394,10 +385,7 @@ export function RemoteSection() {
                   className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-700 text-sm"
                 >
                   {id}
-                  <button
-                    onClick={() => handleRemoveUserId(id)}
-                    className="text-gray-400 hover:text-red-500"
-                  >
+                  <button onClick={() => handleRemoveUserId(id)} className="text-gray-400 hover:text-red-500">
                     <CrossCircledIcon className="w-3 h-3" />
                   </button>
                 </span>
@@ -413,7 +401,7 @@ export function RemoteSection() {
                   'flex-1 px-3 py-2 rounded-lg text-sm',
                   'bg-white dark:bg-gray-800',
                   'border border-gray-300 dark:border-gray-600',
-                  'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500',
                 )}
                 onKeyDown={(e) => e.key === 'Enter' && handleAddUserId()}
               />
@@ -449,15 +437,13 @@ export function RemoteSection() {
                   value={accessPassword}
                   onChange={(e) => setAccessPassword(e.target.value)}
                   placeholder={
-                    hasAccessPassword
-                      ? '***'
-                      : t('remote.telegram.accessPasswordPlaceholder', 'Set access password...')
+                    hasAccessPassword ? '***' : t('remote.telegram.accessPasswordPlaceholder', 'Set access password...')
                   }
                   className={clsx(
                     'w-full px-3 py-2 rounded-lg text-sm',
                     'bg-white dark:bg-gray-800',
                     'border border-gray-300 dark:border-gray-600',
-                    'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                    'focus:outline-none focus:ring-2 focus:ring-primary-500',
                   )}
                 />
               </div>
@@ -476,18 +462,12 @@ export function RemoteSection() {
                 'w-full px-3 py-2 rounded-lg text-sm',
                 'bg-white dark:bg-gray-800',
                 'border border-gray-300 dark:border-gray-600',
-                'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                'focus:outline-none focus:ring-2 focus:ring-primary-500',
               )}
             >
-              <option value="WaitForComplete">
-                {t('remote.telegram.modeWaitForComplete', 'Wait for Complete')}
-              </option>
-              <option value="PeriodicUpdate">
-                {t('remote.telegram.modePeriodicUpdate', 'Periodic Update')}
-              </option>
-              <option value="LiveEdit">
-                {t('remote.telegram.modeLiveEdit', 'Live Edit')}
-              </option>
+              <option value="WaitForComplete">{t('remote.telegram.modeWaitForComplete', 'Wait for Complete')}</option>
+              <option value="PeriodicUpdate">{t('remote.telegram.modePeriodicUpdate', 'Periodic Update')}</option>
+              <option value="LiveEdit">{t('remote.telegram.modeLiveEdit', 'Live Edit')}</option>
             </select>
           </div>
 
@@ -497,7 +477,7 @@ export function RemoteSection() {
             className={clsx(
               'px-4 py-2 rounded-lg text-sm font-medium',
               'bg-primary-600 text-white hover:bg-primary-700',
-              'disabled:opacity-50 disabled:cursor-not-allowed'
+              'disabled:opacity-50 disabled:cursor-not-allowed',
             )}
           >
             {saving ? t('remote.saving', 'Saving...') : t('remote.save', 'Save')}
@@ -522,9 +502,7 @@ export function RemoteSection() {
                 className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50"
               >
                 <div>
-                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Chat {session.chat_id}
-                  </div>
+                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Chat {session.chat_id}</div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">
                     Session: {session.local_session_id ?? 'N/A'} | Type: {session.session_type}
                   </div>
@@ -549,9 +527,7 @@ export function RemoteSection() {
           {t('remote.audit.title', 'Audit Log')}
         </h3>
         {!auditLog || auditLog.entries.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            {t('remote.audit.none', 'No audit log entries.')}
-          </p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t('remote.audit.none', 'No audit log entries.')}</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -572,9 +548,7 @@ export function RemoteSection() {
                     <td className="py-2 pr-4 text-gray-700 dark:text-gray-300">
                       {entry.username ?? `User ${entry.user_id}`}
                     </td>
-                    <td className="py-2 pr-4 text-gray-700 dark:text-gray-300">
-                      {entry.command_type}
-                    </td>
+                    <td className="py-2 pr-4 text-gray-700 dark:text-gray-300">{entry.command_type}</td>
                     <td className="py-2 pr-4">
                       <span
                         className={clsx(
@@ -583,7 +557,7 @@ export function RemoteSection() {
                             ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
                             : entry.result_status === 'unauthorized'
                               ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
-                              : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+                              : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
                         )}
                       >
                         {entry.result_status}

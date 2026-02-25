@@ -116,10 +116,7 @@ interface DiffViewerProps {
 }
 
 export function DiffViewer({ data }: DiffViewerProps) {
-  const diffLines = useMemo(
-    () => computeDiffLines(data.old, data.new),
-    [data.old, data.new]
-  );
+  const diffLines = useMemo(() => computeDiffLines(data.old, data.new), [data.old, data.new]);
 
   const addedCount = diffLines.filter((l) => l.type === 'added').length;
   const removedCount = diffLines.filter((l) => l.type === 'removed').length;
@@ -128,11 +125,7 @@ export function DiffViewer({ data }: DiffViewerProps) {
     <div className="space-y-2" data-testid="diff-viewer">
       {/* Header */}
       <div className="flex items-center gap-3 text-xs">
-        {data.file && (
-          <span className="font-mono text-gray-600 dark:text-gray-400 truncate">
-            {data.file}
-          </span>
-        )}
+        {data.file && <span className="font-mono text-gray-600 dark:text-gray-400 truncate">{data.file}</span>}
         {data.language && (
           <span className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
             {data.language}
@@ -150,7 +143,7 @@ export function DiffViewer({ data }: DiffViewerProps) {
           'overflow-x-auto rounded-lg border',
           'border-gray-200 dark:border-gray-700',
           'bg-gray-50 dark:bg-gray-900',
-          'font-mono text-xs'
+          'font-mono text-xs',
         )}
       >
         <table className="w-full border-collapse">
@@ -160,7 +153,7 @@ export function DiffViewer({ data }: DiffViewerProps) {
                 key={idx}
                 className={clsx(
                   line.type === 'added' && 'bg-green-50 dark:bg-green-900/20',
-                  line.type === 'removed' && 'bg-red-50 dark:bg-red-900/20'
+                  line.type === 'removed' && 'bg-red-50 dark:bg-red-900/20',
                 )}
               >
                 {/* Old line number */}
@@ -177,15 +170,13 @@ export function DiffViewer({ data }: DiffViewerProps) {
                     'px-1 py-0.5 w-5 text-center select-none',
                     line.type === 'added' && 'text-green-600 dark:text-green-400',
                     line.type === 'removed' && 'text-red-600 dark:text-red-400',
-                    line.type === 'context' && 'text-gray-400'
+                    line.type === 'context' && 'text-gray-400',
                   )}
                 >
                   {line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' '}
                 </td>
                 {/* Content */}
-                <td className="px-2 py-0.5 whitespace-pre text-gray-800 dark:text-gray-200">
-                  {line.content}
-                </td>
+                <td className="px-2 py-0.5 whitespace-pre text-gray-800 dark:text-gray-200">{line.content}</td>
               </tr>
             ))}
           </tbody>

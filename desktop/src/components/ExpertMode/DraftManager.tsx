@@ -88,7 +88,7 @@ export function DraftManager() {
               'bg-gray-100 dark:bg-gray-700',
               'text-gray-700 dark:text-gray-300',
               'hover:bg-gray-200 dark:hover:bg-gray-600',
-              'transition-colors'
+              'transition-colors',
             )}
             title="Save Draft"
           >
@@ -103,12 +103,10 @@ export function DraftManager() {
             className={clsx(
               'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
               'w-full max-w-md p-6 rounded-xl shadow-xl',
-              'bg-white dark:bg-gray-800'
+              'bg-white dark:bg-gray-800',
             )}
           >
-            <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-              Save Draft
-            </Dialog.Title>
+            <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Save Draft</Dialog.Title>
 
             <div className="space-y-4">
               <div>
@@ -124,7 +122,7 @@ export function DraftManager() {
                     'w-full px-3 py-2 rounded-lg',
                     'bg-gray-50 dark:bg-gray-900',
                     'border border-gray-300 dark:border-gray-600',
-                    'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                    'focus:outline-none focus:ring-2 focus:ring-primary-500',
                   )}
                   autoFocus
                 />
@@ -137,7 +135,7 @@ export function DraftManager() {
                       'px-4 py-2 rounded-lg',
                       'bg-gray-100 dark:bg-gray-700',
                       'text-gray-700 dark:text-gray-300',
-                      'hover:bg-gray-200 dark:hover:bg-gray-600'
+                      'hover:bg-gray-200 dark:hover:bg-gray-600',
                     )}
                   >
                     Cancel
@@ -145,11 +143,7 @@ export function DraftManager() {
                 </Dialog.Close>
                 <button
                   onClick={handleSaveDraft}
-                  className={clsx(
-                    'px-4 py-2 rounded-lg',
-                    'bg-primary-600 text-white',
-                    'hover:bg-primary-700'
-                  )}
+                  className={clsx('px-4 py-2 rounded-lg', 'bg-primary-600 text-white', 'hover:bg-primary-700')}
                 >
                   Save Draft
                 </button>
@@ -178,7 +172,7 @@ export function DraftManager() {
               'text-gray-700 dark:text-gray-300',
               'hover:bg-gray-200 dark:hover:bg-gray-600',
               'transition-colors',
-              drafts.length === 0 && 'opacity-50 cursor-not-allowed'
+              drafts.length === 0 && 'opacity-50 cursor-not-allowed',
             )}
             disabled={drafts.length === 0}
             title="Load Draft"
@@ -194,7 +188,7 @@ export function DraftManager() {
             className={clsx(
               'min-w-[250px] max-h-[400px] overflow-auto p-1 rounded-lg shadow-lg',
               'bg-white dark:bg-gray-800',
-              'border border-gray-200 dark:border-gray-700'
+              'border border-gray-200 dark:border-gray-700',
             )}
             sideOffset={5}
             align="end"
@@ -234,9 +228,7 @@ export function DraftManager() {
             )}
 
             {drafts.length === 0 && (
-              <div className="px-3 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
-                No saved drafts
-              </div>
+              <div className="px-3 py-4 text-center text-sm text-gray-500 dark:text-gray-400">No saved drafts</div>
             )}
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
@@ -261,23 +253,14 @@ function DraftItem({ draft, onLoad, onDelete, formatTimestamp }: DraftItemProps)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   return (
-    <div
-      className={clsx(
-        'flex items-center gap-2 px-3 py-2 rounded-md',
-        'hover:bg-gray-100 dark:hover:bg-gray-700'
-      )}
-    >
-      <button
-        onClick={onLoad}
-        className="flex-1 flex items-center gap-2 text-left"
-      >
+    <div className={clsx('flex items-center gap-2 px-3 py-2 rounded-md', 'hover:bg-gray-100 dark:hover:bg-gray-700')}>
+      <button onClick={onLoad} className="flex-1 flex items-center gap-2 text-left">
         <ClockIcon className="w-4 h-4 text-gray-400 shrink-0" />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-            {draft.name}
-          </p>
+          <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{draft.name}</p>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            {formatTimestamp(draft.timestamp)} &middot; {(draft.prd as { stories: unknown[] }).stories?.length || 0} stories
+            {formatTimestamp(draft.timestamp)} &middot; {(draft.prd as { stories: unknown[] }).stories?.length || 0}{' '}
+            stories
           </p>
         </div>
       </button>

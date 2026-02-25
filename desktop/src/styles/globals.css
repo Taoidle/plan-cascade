@@ -19,7 +19,11 @@
   body {
     @apply bg-gray-100 text-gray-900;
     @apply dark:bg-gray-950 dark:text-gray-100;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-family:
+      'Inter',
+      system-ui,
+      -apple-system,
+      sans-serif;
   }
 
   /* Custom scrollbar */
@@ -172,7 +176,8 @@
   }
 
   @keyframes progressPulse {
-    0%, 100% {
+    0%,
+    100% {
       opacity: 1;
     }
     50% {
@@ -182,12 +187,7 @@
 
   /* Skeleton loading animation - uses design token variables */
   .animate-skeleton {
-    background: linear-gradient(
-      90deg,
-      var(--skeleton-base) 0%,
-      var(--skeleton-shine) 50%,
-      var(--skeleton-base) 100%
-    );
+    background: linear-gradient(90deg, var(--skeleton-base) 0%, var(--skeleton-shine) 50%, var(--skeleton-base) 100%);
     background-size: 200% 100%;
     animation: skeleton 1.5s ease-in-out infinite;
   }
@@ -225,13 +225,21 @@
 
   /* Shake X animation (for error/failure feedback) */
   @keyframes shakeX {
-    0%, 100% {
+    0%,
+    100% {
       transform: translateX(0);
     }
-    10%, 30%, 50%, 70%, 90% {
+    10%,
+    30%,
+    50%,
+    70%,
+    90% {
       transform: translateX(-3px);
     }
-    20%, 40%, 60%, 80% {
+    20%,
+    40%,
+    60%,
+    80% {
       transform: translateX(3px);
     }
   }

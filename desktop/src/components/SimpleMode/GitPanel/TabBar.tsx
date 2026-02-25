@@ -33,7 +33,7 @@ export function TabBar({ tabs }: TabBarProps) {
             'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500',
             selectedTab === tab.id
               ? 'text-primary-600 dark:text-primary-400'
-              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300',
           )}
         >
           <span className="flex items-center gap-1.5">
@@ -44,7 +44,7 @@ export function TabBar({ tabs }: TabBarProps) {
                   'text-2xs min-w-[1.125rem] h-[1.125rem] flex items-center justify-center rounded-full px-1',
                   selectedTab === tab.id
                     ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300'
-                    : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+                    : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400',
                 )}
               >
                 {tab.count}

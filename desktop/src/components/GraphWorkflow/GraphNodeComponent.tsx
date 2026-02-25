@@ -32,13 +32,7 @@ const STEP_TYPE_LABEL_KEYS: Record<string, string> = {
   conditional_step: 'graphWorkflow.nodeTypes.conditional',
 };
 
-export function GraphNodeComponent({
-  node,
-  isSelected,
-  isEntryNode,
-  onClick,
-  onDrag,
-}: GraphNodeComponentProps) {
+export function GraphNodeComponent({ node, isSelected, isEntryNode, onClick, onDrag }: GraphNodeComponentProps) {
   const { t } = useTranslation('expertMode');
   const nodeRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -48,30 +42,33 @@ export function GraphNodeComponent({
   const stepType = node.agent_step.step_type;
   const stepName = node.agent_step.name;
 
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.button !== 0) return; // Left click only
-    e.stopPropagation();
-    setIsDragging(true);
-    dragStart.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.button !== 0) return; // Left click only
+      e.stopPropagation();
+      setIsDragging(true);
+      dragStart.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
 
-    const handleMouseMove = (ev: MouseEvent) => {
-      if (dragStart.current) {
-        const newX = ev.clientX - dragStart.current.x;
-        const newY = ev.clientY - dragStart.current.y;
-        onDrag({ x: Math.max(0, newX), y: Math.max(0, newY) });
-      }
-    };
+      const handleMouseMove = (ev: MouseEvent) => {
+        if (dragStart.current) {
+          const newX = ev.clientX - dragStart.current.x;
+          const newY = ev.clientY - dragStart.current.y;
+          onDrag({ x: Math.max(0, newX), y: Math.max(0, newY) });
+        }
+      };
 
-    const handleMouseUp = () => {
-      setIsDragging(false);
-      dragStart.current = null;
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
+      const handleMouseUp = () => {
+        setIsDragging(false);
+        dragStart.current = null;
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
 
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-  }, [pos.x, pos.y, onDrag]);
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    },
+    [pos.x, pos.y, onDrag],
+  );
 
   return (
     <div
@@ -82,19 +79,23 @@ export function GraphNodeComponent({
         'min-w-[140px]',
         STEP_TYPE_COLORS[stepType] ?? 'border-gray-400',
         isSelected && 'ring-2 ring-primary-500 shadow-md',
-        isDragging && 'shadow-lg opacity-90'
+        isDragging && 'shadow-lg opacity-90',
       )}
       style={{
         left: `${pos.x}px`,
         top: `${pos.y}px`,
         zIndex: isSelected ? 20 : isDragging ? 30 : 10,
       }}
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
       onMouseDown={handleMouseDown}
     >
       {/* Entry indicator */}
       {isEntryNode && (
-        <div className="absolute -top-2 -left-2 w-4 h-4 rounded-full bg-green-500 border-2 border-white dark:border-gray-900"
+        <div
+          className="absolute -top-2 -left-2 w-4 h-4 rounded-full bg-green-500 border-2 border-white dark:border-gray-900"
           title={t('graphWorkflow.nodeTypes.entryNode')}
         />
       )}
@@ -105,9 +106,7 @@ export function GraphNodeComponent({
       </div>
 
       {/* Node name */}
-      <div className="text-sm font-medium text-gray-900 dark:text-white truncate max-w-[180px]">
-        {stepName}
-      </div>
+      <div className="text-sm font-medium text-gray-900 dark:text-white truncate max-w-[180px]">{stepName}</div>
     </div>
   );
 }

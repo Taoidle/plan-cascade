@@ -50,18 +50,14 @@ export function GitPanel({ streamingOutput, workspacePath }: GitPanelProps) {
   const taskId = useExecutionStore((s) => s.taskId);
   const standaloneSessionId = useExecutionStore((s) => s.standaloneSessionId);
   const activeSessionId = taskId || standaloneSessionId;
-  const aiChangeCount = useFileChangesStore((s) =>
-    s.turnChanges.reduce((acc, t) => acc + t.changes.length, 0),
-  );
+  const aiChangeCount = useFileChangesStore((s) => s.turnChanges.reduce((acc, t) => acc + t.changes.length, 0));
 
   // Initialize git status polling / event subscription
   useGitStatus();
 
   // Build tab definitions with counts
   const tabs = useMemo(() => {
-    const stagedCount = (status?.staged.length ?? 0) +
-      (status?.unstaged.length ?? 0) +
-      (status?.untracked.length ?? 0);
+    const stagedCount = (status?.staged.length ?? 0) + (status?.unstaged.length ?? 0) + (status?.untracked.length ?? 0);
 
     return [
       { id: 'changes' as const, label: t('tabs.changes'), count: stagedCount },
@@ -75,7 +71,7 @@ export function GitPanel({ streamingOutput, workspacePath }: GitPanelProps) {
     <div
       className={clsx(
         'min-h-0 flex flex-col rounded-lg border border-gray-200 dark:border-gray-700',
-        'bg-white dark:bg-gray-900 overflow-hidden'
+        'bg-white dark:bg-gray-900 overflow-hidden',
       )}
     >
       {/* Tab Bar */}
@@ -86,9 +82,7 @@ export function GitPanel({ streamingOutput, workspacePath }: GitPanelProps) {
       {/* Tab Content */}
       <div className="flex-1 min-h-0 overflow-y-auto">
         {selectedTab === 'changes' && <ChangesTab />}
-        {selectedTab === 'ai-changes' && (
-          <AIChangesTab sessionId={activeSessionId} projectRoot={workspacePath} />
-        )}
+        {selectedTab === 'ai-changes' && <AIChangesTab sessionId={activeSessionId} projectRoot={workspacePath} />}
         {selectedTab === 'history' && <HistoryTab />}
         {selectedTab === 'branches' && <BranchesTab />}
       </div>

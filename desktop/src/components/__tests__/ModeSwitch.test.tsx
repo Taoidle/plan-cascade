@@ -52,10 +52,16 @@ vi.mock('@radix-ui/react-dropdown-menu', () => ({
   Trigger: ({ children, asChild, disabled }: { children: React.ReactNode; asChild?: boolean; disabled?: boolean }) =>
     asChild ? <>{children}</> : <button disabled={disabled}>{children}</button>,
   Portal: ({ children }: { children: React.ReactNode }) => <div data-testid="dropdown-portal">{children}</div>,
-  Content: ({ children }: { children: React.ReactNode }) => <div data-testid="dropdown-content" role="menu">{children}</div>,
+  Content: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="dropdown-content" role="menu">
+      {children}
+    </div>
+  ),
   Label: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   Item: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (
-    <div role="menuitem" onClick={onClick}>{children}</div>
+    <div role="menuitem" onClick={onClick}>
+      {children}
+    </div>
   ),
 }));
 
@@ -175,7 +181,7 @@ describe('AnimatedModeContent', () => {
     render(
       <AnimatedModeContent mode="simple">
         <div>Content Here</div>
-      </AnimatedModeContent>
+      </AnimatedModeContent>,
     );
 
     expect(screen.getByText('Content Here')).toBeInTheDocument();
@@ -185,7 +191,7 @@ describe('AnimatedModeContent', () => {
     const { container } = render(
       <AnimatedModeContent mode="simple">
         <div>Content</div>
-      </AnimatedModeContent>
+      </AnimatedModeContent>,
     );
 
     const wrapper = container.firstChild;
@@ -198,7 +204,7 @@ describe('AnimatedModeContent', () => {
     const { container } = render(
       <AnimatedModeContent mode="expert">
         <div>Content</div>
-      </AnimatedModeContent>
+      </AnimatedModeContent>,
     );
 
     const wrapper = container.firstChild;
@@ -211,7 +217,7 @@ describe('AnimatedModeContent', () => {
     const { container } = render(
       <AnimatedModeContent mode="simple">
         <div>Content</div>
-      </AnimatedModeContent>
+      </AnimatedModeContent>,
     );
 
     const wrapper = container.firstChild;

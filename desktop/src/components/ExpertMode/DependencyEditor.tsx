@@ -9,13 +9,7 @@ import { useState } from 'react';
 import { clsx } from 'clsx';
 import { usePRDStore, PRDStory } from '../../store/prd';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import {
-  PlusIcon,
-  Cross2Icon,
-  Link2Icon,
-  ExclamationTriangleIcon,
-  ChevronDownIcon,
-} from '@radix-ui/react-icons';
+import { PlusIcon, Cross2Icon, Link2Icon, ExclamationTriangleIcon, ChevronDownIcon } from '@radix-ui/react-icons';
 
 interface DependencyEditorProps {
   story: PRDStory;
@@ -26,9 +20,7 @@ export function DependencyEditor({ story }: DependencyEditorProps) {
   const [showWarning, setShowWarning] = useState<string | null>(null);
 
   // Get available stories that can be dependencies (not self, not already a dependency)
-  const availableStories = prd.stories.filter(
-    (s) => s.id !== story.id && !story.dependencies.includes(s.id)
-  );
+  const availableStories = prd.stories.filter((s) => s.id !== story.id && !story.dependencies.includes(s.id));
 
   // Get story title by ID
   const getStoryTitle = (id: string) => {
@@ -53,9 +45,7 @@ export function DependencyEditor({ story }: DependencyEditorProps) {
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <Link2Icon className="w-4 h-4 text-gray-400" />
-        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
-          Blocked By
-        </span>
+        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Blocked By</span>
         {story.dependencies.length > 0 && (
           <span className="px-1.5 py-0.5 text-xs rounded-full bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300">
             {story.dependencies.length}
@@ -67,9 +57,7 @@ export function DependencyEditor({ story }: DependencyEditorProps) {
       {showWarning && (
         <div className="flex items-center gap-2 p-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
           <ExclamationTriangleIcon className="w-4 h-4 text-red-500" />
-          <span className="text-xs text-red-600 dark:text-red-400">
-            {showWarning}
-          </span>
+          <span className="text-xs text-red-600 dark:text-red-400">{showWarning}</span>
         </div>
       )}
 
@@ -81,7 +69,7 @@ export function DependencyEditor({ story }: DependencyEditorProps) {
             className={clsx(
               'inline-flex items-center gap-1 px-2 py-1 rounded-lg text-sm',
               'bg-gray-100 dark:bg-gray-700',
-              'text-gray-700 dark:text-gray-300'
+              'text-gray-700 dark:text-gray-300',
             )}
           >
             <span className="truncate max-w-[150px]">{getStoryTitle(depId)}</span>
@@ -105,7 +93,7 @@ export function DependencyEditor({ story }: DependencyEditorProps) {
                   'border border-dashed border-gray-300 dark:border-gray-600',
                   'text-gray-500 dark:text-gray-400',
                   'hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 <PlusIcon className="w-3 h-3" />
@@ -119,7 +107,7 @@ export function DependencyEditor({ story }: DependencyEditorProps) {
                 className={clsx(
                   'min-w-[200px] max-h-[300px] overflow-auto p-1 rounded-lg shadow-lg',
                   'bg-white dark:bg-gray-800',
-                  'border border-gray-200 dark:border-gray-700'
+                  'border border-gray-200 dark:border-gray-700',
                 )}
                 sideOffset={5}
               >
@@ -131,7 +119,7 @@ export function DependencyEditor({ story }: DependencyEditorProps) {
                       'flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer',
                       'text-sm text-gray-700 dark:text-gray-300',
                       'hover:bg-gray-100 dark:hover:bg-gray-700',
-                      'focus:outline-none focus:bg-gray-100 dark:focus:bg-gray-700'
+                      'focus:outline-none focus:bg-gray-100 dark:focus:bg-gray-700',
                     )}
                   >
                     <span className="flex items-center justify-center w-5 h-5 rounded bg-gray-200 dark:bg-gray-600 text-xs">

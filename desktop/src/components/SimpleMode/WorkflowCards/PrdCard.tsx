@@ -25,9 +25,7 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
   const isActive = interactive && phase === 'reviewing_prd';
 
   // When editing, read stories from the live editablePrd; otherwise use the snapshot card data
-  const displayStories: PrdStoryData[] = isEditing && editablePrd
-    ? editablePrd.stories
-    : data.stories;
+  const displayStories: PrdStoryData[] = isEditing && editablePrd ? editablePrd.stories : data.stories;
 
   const toggleStory = useCallback((storyId: string) => {
     setExpandedStories((prev) => {
@@ -78,7 +76,11 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
               <span className="text-2xs font-medium text-emerald-600 dark:text-emerald-400">
                 {t('workflow.prd.batch', { index: (batch.index ?? batchIdx) + 1 })}
                 <span className="ml-1 text-emerald-500/60 dark:text-emerald-400/60">
-                  ({batch.storyIds.length === 1 ? t('workflow.prd.storyCount', { count: batch.storyIds.length }) : t('workflow.prd.storyCountPlural', { count: batch.storyIds.length })})
+                  (
+                  {batch.storyIds.length === 1
+                    ? t('workflow.prd.storyCount', { count: batch.storyIds.length })
+                    : t('workflow.prd.storyCountPlural', { count: batch.storyIds.length })}
+                  )
                 </span>
               </span>
             </div>
@@ -131,7 +133,7 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
               'px-3 py-1.5 text-xs font-medium rounded-md border transition-colors',
               isEditing
                 ? 'border-emerald-600 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'
-                : 'border-emerald-300 dark:border-emerald-700 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100/50 dark:hover:bg-emerald-900/30'
+                : 'border-emerald-300 dark:border-emerald-700 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100/50 dark:hover:bg-emerald-900/30',
             )}
           >
             {isEditing ? t('workflow.prd.doneEditing') : t('workflow.prd.edit')}
@@ -153,27 +155,29 @@ function StoryRow({
   expanded: boolean;
   onToggle: () => void;
   isEditing: boolean;
-  onUpdate: (storyId: string, updates: Partial<Pick<TaskStory, 'title' | 'description' | 'priority' | 'acceptanceCriteria'>>) => void;
+  onUpdate: (
+    storyId: string,
+    updates: Partial<Pick<TaskStory, 'title' | 'description' | 'priority' | 'acceptanceCriteria'>>,
+  ) => void;
 }) {
   const { t } = useTranslation('simpleMode');
-  const priorityColor = {
-    high: 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400',
-    medium: 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400',
-    low: 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400',
-  }[story.priority] || 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400';
+  const priorityColor =
+    {
+      high: 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400',
+      medium: 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400',
+      low: 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400',
+    }[story.priority] || 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400';
 
-  const inputClass = 'w-full px-1.5 py-0.5 text-xs rounded border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-gray-800 text-emerald-800 dark:text-emerald-200 focus:outline-none focus:ring-1 focus:ring-emerald-500';
+  const inputClass =
+    'w-full px-1.5 py-0.5 text-xs rounded border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-gray-800 text-emerald-800 dark:text-emerald-200 focus:outline-none focus:ring-1 focus:ring-emerald-500';
 
   return (
     <div className="px-3 py-1.5">
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center gap-2 text-left group"
-      >
+      <button onClick={onToggle} className="w-full flex items-center gap-2 text-left group">
         <svg
           className={clsx(
             'w-3 h-3 shrink-0 text-emerald-500 dark:text-emerald-400 transition-transform',
-            expanded && 'rotate-90'
+            expanded && 'rotate-90',
           )}
           fill="none"
           stroke="currentColor"
@@ -182,9 +186,7 @@ function StoryRow({
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
         </svg>
 
-        <span className="text-2xs text-emerald-500/60 dark:text-emerald-400/60 shrink-0 w-14">
-          {story.id}
-        </span>
+        <span className="text-2xs text-emerald-500/60 dark:text-emerald-400/60 shrink-0 w-14">{story.id}</span>
 
         {isEditing ? (
           <input
@@ -211,9 +213,7 @@ function StoryRow({
             <option value="low">{t('workflow.prd.priorityLow')}</option>
           </select>
         ) : (
-          <span className={clsx('text-2xs px-1.5 py-0.5 rounded', priorityColor)}>
-            {story.priority}
-          </span>
+          <span className={clsx('text-2xs px-1.5 py-0.5 rounded', priorityColor)}>{story.priority}</span>
         )}
 
         {!isEditing && story.dependencies.length > 0 && (
@@ -237,7 +237,9 @@ function StoryRow({
 
           {story.acceptanceCriteria.length > 0 && (
             <div className="space-y-0.5">
-              <span className="text-2xs font-medium text-emerald-600 dark:text-emerald-400">{t('workflow.prd.acceptanceCriteria')}</span>
+              <span className="text-2xs font-medium text-emerald-600 dark:text-emerald-400">
+                {t('workflow.prd.acceptanceCriteria')}
+              </span>
               {story.acceptanceCriteria.map((ac, i) => (
                 <p key={i} className="text-2xs text-emerald-600/70 dark:text-emerald-400/70 pl-2">
                   • {ac}

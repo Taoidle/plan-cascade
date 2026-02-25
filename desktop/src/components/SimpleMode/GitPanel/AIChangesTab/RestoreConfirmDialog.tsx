@@ -32,7 +32,7 @@ export function RestoreConfirmDialog({
       <div
         className={clsx(
           'w-full max-w-md rounded-lg border border-gray-200 dark:border-gray-700',
-          'bg-white dark:bg-gray-900 shadow-xl p-5'
+          'bg-white dark:bg-gray-900 shadow-xl p-5',
         )}
       >
         {result ? (
@@ -42,16 +42,13 @@ export function RestoreConfirmDialog({
             </h3>
             <ul className="space-y-1 mb-4 max-h-48 overflow-y-auto">
               {result.map((r) => (
-                <li
-                  key={r.path}
-                  className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400"
-                >
+                <li key={r.path} className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
                   <span
                     className={clsx(
                       'inline-block w-14 text-center rounded px-1 py-0.5 text-2xs font-medium',
                       r.action === 'deleted'
                         ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
-                        : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                        : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300',
                     )}
                   >
                     {r.action === 'deleted' ? t('aiChanges.actionDeleted') : t('aiChanges.actionRestored')}
@@ -74,21 +71,16 @@ export function RestoreConfirmDialog({
             <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">
               {t('aiChanges.restoreConfirm', { index: turnIndex })}
             </h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-              {t('aiChanges.affectedFiles')}
-            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">{t('aiChanges.affectedFiles')}</p>
             <ul className="space-y-1 mb-4 max-h-48 overflow-y-auto">
               {expectedFiles.map((f) => (
-                <li
-                  key={f.path}
-                  className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400"
-                >
+                <li key={f.path} className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
                   <span
                     className={clsx(
                       'inline-block w-14 text-center rounded px-1 py-0.5 text-2xs font-medium',
                       f.willDelete
                         ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
-                        : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                        : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
                     )}
                   >
                     {f.willDelete ? t('aiChanges.actionDelete') : t('aiChanges.actionRestore')}

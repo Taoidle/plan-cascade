@@ -8,13 +8,7 @@
 import { useState, useMemo } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import {
-  FileIcon,
-  PlusIcon,
-  MinusIcon,
-  ChevronDownIcon,
-  ChevronUpIcon,
-} from '@radix-ui/react-icons';
+import { FileIcon, PlusIcon, MinusIcon, ChevronDownIcon, ChevronUpIcon } from '@radix-ui/react-icons';
 import type { CheckpointDiff, FileDiff } from '../../types/timeline';
 
 interface DiffViewerProps {
@@ -93,12 +87,7 @@ function FileItem({ file, defaultExpanded = false }: FileItemProps) {
   };
 
   return (
-    <div
-      className={clsx(
-        'border rounded-lg overflow-hidden',
-        'border-gray-200 dark:border-gray-700'
-      )}
-    >
+    <div className={clsx('border rounded-lg overflow-hidden', 'border-gray-200 dark:border-gray-700')}>
       {/* File header */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
@@ -106,20 +95,13 @@ function FileItem({ file, defaultExpanded = false }: FileItemProps) {
           'w-full flex items-center justify-between px-3 py-2',
           'bg-gray-50 dark:bg-gray-800',
           'hover:bg-gray-100 dark:hover:bg-gray-700',
-          'transition-colors'
+          'transition-colors',
         )}
       >
         <div className="flex items-center gap-2 min-w-0">
           <FileIcon className="w-4 h-4 text-gray-400 flex-shrink-0" />
-          <span className="text-sm font-medium text-gray-900 dark:text-white truncate">
-            {file.path}
-          </span>
-          <span
-            className={clsx(
-              'px-2 py-0.5 text-xs font-medium rounded',
-              getBadgeColor(file.change_type)
-            )}
-          >
+          <span className="text-sm font-medium text-gray-900 dark:text-white truncate">{file.path}</span>
+          <span className={clsx('px-2 py-0.5 text-xs font-medium rounded', getBadgeColor(file.change_type))}>
             {t(`timeline.${file.change_type}`)}
           </span>
           {file.is_binary && (
@@ -173,7 +155,7 @@ function FileItem({ file, defaultExpanded = false }: FileItemProps) {
                     type === 'added' && 'bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-300',
                     type === 'removed' && 'bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300',
                     type === 'header' && 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-medium',
-                    type === 'context' && 'text-gray-600 dark:text-gray-400'
+                    type === 'context' && 'text-gray-600 dark:text-gray-400',
                   )}
                 >
                   {line || '\u00A0'}
@@ -181,9 +163,7 @@ function FileItem({ file, defaultExpanded = false }: FileItemProps) {
               ))}
             </pre>
           ) : (
-            <div className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 italic">
-              {t('timeline.noDiff')}
-            </div>
+            <div className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 italic">{t('timeline.noDiff')}</div>
           )}
         </div>
       )}
@@ -196,11 +176,7 @@ export function DiffViewer({ diff, className }: DiffViewerProps) {
 
   // Combine all files in order: added, modified, deleted
   const allFiles = useMemo(() => {
-    return [
-      ...diff.added_files,
-      ...diff.modified_files,
-      ...diff.deleted_files,
-    ];
+    return [...diff.added_files, ...diff.modified_files, ...diff.deleted_files];
   }, [diff]);
 
   if (allFiles.length === 0) {
@@ -215,9 +191,7 @@ export function DiffViewer({ diff, className }: DiffViewerProps) {
     <div className={clsx('space-y-4', className)}>
       {/* Summary */}
       <div className="flex items-center gap-4 text-sm">
-        <span className="font-medium text-gray-900 dark:text-white">
-          {t('timeline.diffTitle')}:
-        </span>
+        <span className="font-medium text-gray-900 dark:text-white">{t('timeline.diffTitle')}:</span>
         <div className="flex items-center gap-3">
           {diff.summary.files_added > 0 && (
             <span className="text-green-600 dark:text-green-400">
@@ -247,11 +221,7 @@ export function DiffViewer({ diff, className }: DiffViewerProps) {
       {/* File list */}
       <div className="space-y-2">
         {allFiles.map((file, idx) => (
-          <FileItem
-            key={file.path}
-            file={file}
-            defaultExpanded={idx === 0}
-          />
+          <FileItem key={file.path} file={file} defaultExpanded={idx === 0} />
         ))}
       </div>
     </div>

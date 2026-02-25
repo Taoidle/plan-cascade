@@ -106,7 +106,7 @@ function highlightPattern(text: string, pattern: string): JSX.Element[] {
           className="bg-yellow-200 dark:bg-yellow-800 text-yellow-900 dark:text-yellow-100 rounded px-0.5"
         >
           {text.slice(index, index + pattern.length)}
-        </mark>
+        </mark>,
       );
 
       lastIndex = index + pattern.length;
@@ -156,7 +156,7 @@ function FileMatchGroup({
           'w-full flex items-center gap-2 px-3 py-2',
           'bg-gray-50 dark:bg-gray-800',
           'hover:bg-gray-100 dark:hover:bg-gray-700',
-          'transition-colors text-left'
+          'transition-colors text-left',
         )}
       >
         {isExpanded ? (
@@ -165,9 +165,7 @@ function FileMatchGroup({
           <ChevronRightIcon className="w-4 h-4 text-gray-400" />
         )}
         <Icon className={clsx('w-4 h-4', color)} />
-        <span className="flex-1 text-sm font-medium text-gray-700 dark:text-gray-300 truncate">
-          {group.file}
-        </span>
+        <span className="flex-1 text-sm font-medium text-gray-700 dark:text-gray-300 truncate">{group.file}</span>
         <span className="text-xs text-gray-500 px-2 py-0.5 bg-gray-200 dark:bg-gray-700 rounded-full">
           {group.matches.length} match{group.matches.length !== 1 ? 'es' : ''}
         </span>
@@ -177,24 +175,21 @@ function FileMatchGroup({
       {isExpanded && (
         <div className="divide-y divide-gray-100 dark:divide-gray-800">
           {group.matches.map((match, index) => (
-            <div
-              key={index}
-              className="bg-white dark:bg-gray-900"
-            >
+            <div key={index} className="bg-white dark:bg-gray-900">
               {/* Context before */}
-              {showContext && showFullContext && match.contextBefore?.map((ctx, ctxIndex) => (
-                <div
-                  key={`before-${ctxIndex}`}
-                  className="flex items-start px-3 py-1 text-gray-400 dark:text-gray-500"
-                >
-                  <span className="w-12 flex-shrink-0 text-right pr-3 text-xs font-mono">
-                    {match.line - (match.contextBefore!.length - ctxIndex)}
-                  </span>
-                  <pre className="flex-1 text-xs font-mono overflow-x-auto whitespace-pre">
-                    {ctx}
-                  </pre>
-                </div>
-              ))}
+              {showContext &&
+                showFullContext &&
+                match.contextBefore?.map((ctx, ctxIndex) => (
+                  <div
+                    key={`before-${ctxIndex}`}
+                    className="flex items-start px-3 py-1 text-gray-400 dark:text-gray-500"
+                  >
+                    <span className="w-12 flex-shrink-0 text-right pr-3 text-xs font-mono">
+                      {match.line - (match.contextBefore!.length - ctxIndex)}
+                    </span>
+                    <pre className="flex-1 text-xs font-mono overflow-x-auto whitespace-pre">{ctx}</pre>
+                  </div>
+                ))}
 
               {/* Match line */}
               <button
@@ -202,7 +197,7 @@ function FileMatchGroup({
                 className={clsx(
                   'w-full flex items-start px-3 py-1.5 text-left',
                   'hover:bg-yellow-50 dark:hover:bg-yellow-900/20',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 <span className="w-12 flex-shrink-0 text-right pr-3 text-xs font-mono text-primary-600 dark:text-primary-400 font-medium">
@@ -215,31 +210,31 @@ function FileMatchGroup({
               </button>
 
               {/* Context after */}
-              {showContext && showFullContext && match.contextAfter?.map((ctx, ctxIndex) => (
-                <div
-                  key={`after-${ctxIndex}`}
-                  className="flex items-start px-3 py-1 text-gray-400 dark:text-gray-500"
-                >
-                  <span className="w-12 flex-shrink-0 text-right pr-3 text-xs font-mono">
-                    {match.line + ctxIndex + 1}
-                  </span>
-                  <pre className="flex-1 text-xs font-mono overflow-x-auto whitespace-pre">
-                    {ctx}
-                  </pre>
-                </div>
-              ))}
+              {showContext &&
+                showFullContext &&
+                match.contextAfter?.map((ctx, ctxIndex) => (
+                  <div
+                    key={`after-${ctxIndex}`}
+                    className="flex items-start px-3 py-1 text-gray-400 dark:text-gray-500"
+                  >
+                    <span className="w-12 flex-shrink-0 text-right pr-3 text-xs font-mono">
+                      {match.line + ctxIndex + 1}
+                    </span>
+                    <pre className="flex-1 text-xs font-mono overflow-x-auto whitespace-pre">{ctx}</pre>
+                  </div>
+                ))}
             </div>
           ))}
 
           {/* Context toggle */}
-          {showContext && group.matches.some(m => m.contextBefore?.length || m.contextAfter?.length) && (
+          {showContext && group.matches.some((m) => m.contextBefore?.length || m.contextAfter?.length) && (
             <button
               onClick={() => setShowFullContext(!showFullContext)}
               className={clsx(
                 'w-full px-3 py-1.5 text-xs text-center',
                 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300',
                 'hover:bg-gray-50 dark:hover:bg-gray-800',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               {showFullContext ? 'Hide context lines' : 'Show context lines'}
@@ -273,7 +268,7 @@ export function GrepResultViewer({
   const groupedMatches = useMemo(() => {
     const groups = new Map<string, GrepMatch[]>();
 
-    matches.forEach(match => {
+    matches.forEach((match) => {
       if (!groups.has(match.file)) {
         groups.set(match.file, []);
       }
@@ -294,23 +289,24 @@ export function GrepResultViewer({
     if (!filter) return groupedMatches;
 
     const lowerFilter = filter.toLowerCase();
-    return groupedMatches.filter(group =>
-      group.file.toLowerCase().includes(lowerFilter) ||
-      group.matches.some(m => m.content.toLowerCase().includes(lowerFilter))
+    return groupedMatches.filter(
+      (group) =>
+        group.file.toLowerCase().includes(lowerFilter) ||
+        group.matches.some((m) => m.content.toLowerCase().includes(lowerFilter)),
     );
   }, [groupedMatches, filter]);
 
   // Total match count
-  const totalMatches = useMemo(() =>
-    groupedMatches.reduce((sum, group) => sum + group.matches.length, 0),
-    [groupedMatches]
+  const totalMatches = useMemo(
+    () => groupedMatches.reduce((sum, group) => sum + group.matches.length, 0),
+    [groupedMatches],
   );
 
   // Copy results
   const handleCopy = useCallback(async () => {
-    const text = filteredGroups.map(group =>
-      group.matches.map(m => `${group.file}:${m.line}:${m.content}`).join('\n')
-    ).join('\n');
+    const text = filteredGroups
+      .map((group) => group.matches.map((m) => `${group.file}:${m.line}:${m.content}`).join('\n'))
+      .join('\n');
 
     try {
       await navigator.clipboard.writeText(text);
@@ -326,12 +322,14 @@ export function GrepResultViewer({
     return (
       <div className={clsx('flex flex-col', className)}>
         {/* Header */}
-        <div className={clsx(
-          'flex items-center justify-between px-3 py-2',
-          'bg-gray-50 dark:bg-gray-800/50',
-          'border-b border-gray-200 dark:border-gray-700',
-          'rounded-t-lg'
-        )}>
+        <div
+          className={clsx(
+            'flex items-center justify-between px-3 py-2',
+            'bg-gray-50 dark:bg-gray-800/50',
+            'border-b border-gray-200 dark:border-gray-700',
+            'rounded-t-lg',
+          )}
+        >
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
               {files.length} file{files.length !== 1 ? 's' : ''} with matches
@@ -345,10 +343,7 @@ export function GrepResultViewer({
         </div>
 
         {/* File list */}
-        <div
-          className="overflow-auto divide-y divide-gray-100 dark:divide-gray-800"
-          style={{ maxHeight }}
-        >
+        <div className="overflow-auto divide-y divide-gray-100 dark:divide-gray-800" style={{ maxHeight }}>
           {files.map((file, index) => {
             const filename = file.split(/[/\\]/).pop() || file;
             const { Icon, color } = getFileIcon(filename);
@@ -360,13 +355,11 @@ export function GrepResultViewer({
                 className={clsx(
                   'w-full flex items-center gap-2 px-3 py-2',
                   'hover:bg-gray-50 dark:hover:bg-gray-800',
-                  'transition-colors text-left'
+                  'transition-colors text-left',
                 )}
               >
                 <Icon className={clsx('w-4 h-4 flex-shrink-0', color)} />
-                <span className="text-sm font-mono truncate">
-                  {file}
-                </span>
+                <span className="text-sm font-mono truncate">{file}</span>
               </button>
             );
           })}
@@ -378,15 +371,18 @@ export function GrepResultViewer({
   return (
     <div className={clsx('flex flex-col', className)}>
       {/* Header */}
-      <div className={clsx(
-        'flex items-center justify-between px-3 py-2',
-        'bg-gray-50 dark:bg-gray-800/50',
-        'border-b border-gray-200 dark:border-gray-700',
-        'rounded-t-lg'
-      )}>
+      <div
+        className={clsx(
+          'flex items-center justify-between px-3 py-2',
+          'bg-gray-50 dark:bg-gray-800/50',
+          'border-b border-gray-200 dark:border-gray-700',
+          'rounded-t-lg',
+        )}
+      >
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            {totalMatches} match{totalMatches !== 1 ? 'es' : ''} in {groupedMatches.length} file{groupedMatches.length !== 1 ? 's' : ''}
+            {totalMatches} match{totalMatches !== 1 ? 'es' : ''} in {groupedMatches.length} file
+            {groupedMatches.length !== 1 ? 's' : ''}
           </span>
           {pattern && (
             <code className="text-xs px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
@@ -402,11 +398,7 @@ export function GrepResultViewer({
             className="p-1.5 rounded text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
             title={expandAll ? 'Collapse all' : 'Expand all'}
           >
-            {expandAll ? (
-              <ChevronDownIcon className="w-4 h-4" />
-            ) : (
-              <ChevronRightIcon className="w-4 h-4" />
-            )}
+            {expandAll ? <ChevronDownIcon className="w-4 h-4" /> : <ChevronRightIcon className="w-4 h-4" />}
           </button>
 
           {/* Copy button */}
@@ -414,9 +406,7 @@ export function GrepResultViewer({
             onClick={handleCopy}
             className={clsx(
               'p-1.5 rounded transition-colors',
-              copied
-                ? 'text-green-500'
-                : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700'
+              copied ? 'text-green-500' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700',
             )}
             title={copied ? 'Copied!' : 'Copy results'}
           >
@@ -438,7 +428,7 @@ export function GrepResultViewer({
               'w-full pl-8 pr-8 py-1.5 rounded text-sm',
               'bg-white dark:bg-gray-800',
               'border border-gray-200 dark:border-gray-700',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500'
+              'focus:outline-none focus:ring-2 focus:ring-primary-500',
             )}
           />
           {filter && (
@@ -453,10 +443,7 @@ export function GrepResultViewer({
       </div>
 
       {/* Results */}
-      <div
-        className="overflow-auto p-3 space-y-2"
-        style={{ maxHeight }}
-      >
+      <div className="overflow-auto p-3 space-y-2" style={{ maxHeight }}>
         {filteredGroups.map((group, index) => (
           <FileMatchGroup
             key={group.file}
@@ -470,9 +457,7 @@ export function GrepResultViewer({
         {filteredGroups.length === 0 && (
           <div className="flex flex-col items-center justify-center py-8 text-gray-500">
             <MagnifyingGlassIcon className="w-8 h-8 mb-2 opacity-50" />
-            <p className="text-sm">
-              {filter ? 'No results match the filter' : 'No matches found'}
-            </p>
+            <p className="text-sm">{filter ? 'No results match the filter' : 'No matches found'}</p>
           </div>
         )}
       </div>

@@ -61,13 +61,16 @@ function getGateIcon(gateId: string): React.ReactNode {
 // Status Colors and Icons
 // ============================================================================
 
-const STATUS_CONFIG: Record<QualityGateStatus, {
-  bg: string;
-  text: string;
-  border: string;
-  icon: React.ReactNode;
-  label: string;
-}> = {
+const STATUS_CONFIG: Record<
+  QualityGateStatus,
+  {
+    bg: string;
+    text: string;
+    border: string;
+    icon: React.ReactNode;
+    label: string;
+  }
+> = {
   pending: {
     bg: 'bg-gray-100 dark:bg-gray-800',
     text: 'text-gray-600 dark:text-gray-400',
@@ -121,12 +124,7 @@ function SingleBadge({ result, compact = false }: SingleBadgeProps) {
   };
 
   return (
-    <div
-      className={clsx(
-        'animate-[fadeIn_0.3s_ease-in-out]',
-        !compact && 'transition-all duration-200'
-      )}
-    >
+    <div className={clsx('animate-[fadeIn_0.3s_ease-in-out]', !compact && 'transition-all duration-200')}>
       <button
         onClick={handleClick}
         disabled={!isExpandable}
@@ -139,7 +137,7 @@ function SingleBadge({ result, compact = false }: SingleBadgeProps) {
           isExpandable && 'cursor-pointer hover:shadow-sm',
           !isExpandable && 'cursor-default',
           result.status === 'passed' && 'animate-[scaleIn_0.3s_ease-out]',
-          result.status === 'failed' && 'animate-[shakeX_0.4s_ease-in-out]'
+          result.status === 'failed' && 'animate-[shakeX_0.4s_ease-in-out]',
         )}
       >
         {getGateIcon(result.gateId)}
@@ -148,11 +146,12 @@ function SingleBadge({ result, compact = false }: SingleBadgeProps) {
         {result.duration !== undefined && !compact && (
           <span className="opacity-70 text-2xs">{formatDuration(result.duration)}</span>
         )}
-        {isExpandable && (
-          isExpanded
-            ? <ChevronDownIcon className="w-3 h-3 ml-0.5" />
-            : <ChevronRightIcon className="w-3 h-3 ml-0.5" />
-        )}
+        {isExpandable &&
+          (isExpanded ? (
+            <ChevronDownIcon className="w-3 h-3 ml-0.5" />
+          ) : (
+            <ChevronRightIcon className="w-3 h-3 ml-0.5" />
+          ))}
       </button>
 
       {/* Expandable detail panel */}
@@ -162,20 +161,18 @@ function SingleBadge({ result, compact = false }: SingleBadgeProps) {
             'mt-2 rounded-lg overflow-hidden border',
             'bg-gray-50 dark:bg-gray-900',
             'border-gray-200 dark:border-gray-700',
-            'animate-[slideDown_0.2s_ease-out]'
+            'animate-[slideDown_0.2s_ease-out]',
           )}
         >
-          <div className={clsx(
-            'flex items-center justify-between px-3 py-1.5',
-            'bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700'
-          )}>
-            <span className={clsx('text-2xs font-medium', config.text)}>
-              {result.gateName} Output
-            </span>
+          <div
+            className={clsx(
+              'flex items-center justify-between px-3 py-1.5',
+              'bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700',
+            )}
+          >
+            <span className={clsx('text-2xs font-medium', config.text)}>{result.gateName} Output</span>
             {result.duration !== undefined && (
-              <span className="text-2xs text-gray-500">
-                {formatDuration(result.duration)}
-              </span>
+              <span className="text-2xs text-gray-500">{formatDuration(result.duration)}</span>
             )}
           </div>
           <pre
@@ -183,7 +180,7 @@ function SingleBadge({ result, compact = false }: SingleBadgeProps) {
               'p-3 text-xs font-mono',
               'text-gray-700 dark:text-gray-300',
               'whitespace-pre-wrap break-all',
-              'max-h-64 overflow-y-auto'
+              'max-h-64 overflow-y-auto',
             )}
           >
             {result.output}
@@ -198,11 +195,7 @@ function SingleBadge({ result, compact = false }: SingleBadgeProps) {
 // QualityGateBadge Component
 // ============================================================================
 
-export function QualityGateBadge({
-  storyId,
-  className,
-  compact = false,
-}: QualityGateBadgeProps) {
+export function QualityGateBadge({ storyId, className, compact = false }: QualityGateBadgeProps) {
   const { qualityGateResults } = useExecutionStore();
 
   const filteredResults = useMemo(() => {
@@ -234,11 +227,7 @@ export function QualityGateBadge({
     return (
       <div className={clsx('flex flex-wrap gap-2', className)}>
         {filteredResults.map((result) => (
-          <SingleBadge
-            key={`${result.gateId}-${result.storyId}`}
-            result={result}
-            compact={compact}
-          />
+          <SingleBadge key={`${result.gateId}-${result.storyId}`} result={result} compact={compact} />
         ))}
       </div>
     );
@@ -249,16 +238,10 @@ export function QualityGateBadge({
     <div className={clsx('space-y-3', className)}>
       {Object.entries(groupedResults).map(([sid, results]) => (
         <div key={sid}>
-          <div className="text-xs text-gray-500 dark:text-gray-400 mb-1.5 font-medium">
-            {sid}
-          </div>
+          <div className="text-xs text-gray-500 dark:text-gray-400 mb-1.5 font-medium">{sid}</div>
           <div className="flex flex-wrap gap-2">
             {results.map((result) => (
-              <SingleBadge
-                key={`${result.gateId}-${result.storyId}`}
-                result={result}
-                compact={compact}
-              />
+              <SingleBadge key={`${result.gateId}-${result.storyId}`} result={result} compact={compact} />
             ))}
           </div>
         </div>

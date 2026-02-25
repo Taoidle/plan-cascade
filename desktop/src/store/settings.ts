@@ -258,9 +258,7 @@ export const useSettingsStore = create<SettingsState>()(
 
       updateAgent: (name, updates) =>
         set((state) => ({
-          agents: state.agents.map((a) =>
-            a.name === name ? { ...a, ...updates } : a
-          ),
+          agents: state.agents.map((a) => (a.name === name ? { ...a, ...updates } : a)),
         })),
 
       updateQualityGates: (updates) =>
@@ -306,7 +304,7 @@ export const useSettingsStore = create<SettingsState>()(
           const normalized = workspacePath.replace(/\\/g, '/').replace(/\/+$/, '');
           set((state) => {
             const alreadyExists = state.pinnedDirectories.some(
-              (p) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() === normalized.toLowerCase()
+              (p) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() === normalized.toLowerCase(),
             );
             if (alreadyExists) return state;
             return { pinnedDirectories: [...state.pinnedDirectories, normalized] };
@@ -322,7 +320,7 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => {
           const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
           const alreadyExists = state.pinnedDirectories.some(
-            (p) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() === normalized.toLowerCase()
+            (p) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() === normalized.toLowerCase(),
           );
           if (alreadyExists) return state;
           return { pinnedDirectories: [...state.pinnedDirectories, normalized] };
@@ -333,7 +331,7 @@ export const useSettingsStore = create<SettingsState>()(
           const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
           return {
             pinnedDirectories: state.pinnedDirectories.filter(
-              (p) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() !== normalized
+              (p) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() !== normalized,
             ),
           };
         }),
@@ -353,15 +351,13 @@ export const useSettingsStore = create<SettingsState>()(
         // language selector stays in sync.
         const detected = i18n.resolvedLanguage || i18n.language || 'en';
         const supportedLangs: Language[] = ['en', 'zh', 'ja'];
-        const lang: Language = supportedLangs.includes(detected as Language)
-          ? (detected as Language)
-          : 'en';
+        const lang: Language = supportedLangs.includes(detected as Language) ? (detected as Language) : 'en';
         if (state && state.language !== lang) {
           useSettingsStore.setState({ language: lang });
         }
       },
-    }
-  )
+    },
+  ),
 );
 
 function applyTheme(theme: Theme) {

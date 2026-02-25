@@ -7,12 +7,7 @@
 
 import { create } from 'zustand';
 import type { LspServerStatus, EnrichmentReport } from '../types/lsp';
-import {
-  detectLspServers,
-  getLspStatus,
-  triggerLspEnrichment,
-  getEnrichmentReport,
-} from '../lib/lspApi';
+import { detectLspServers, getLspStatus, triggerLspEnrichment, getEnrichmentReport } from '../lib/lspApi';
 
 // ---------------------------------------------------------------------------
 // Types

@@ -12,11 +12,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { CommandResponse } from '../lib/tauri';
-import type {
-  CommitNode,
-  GraphLayout,
-  BranchInfo,
-} from '../types/git';
+import type { CommitNode, GraphLayout, BranchInfo } from '../types/git';
 import { useGitStore } from '../store/git';
 
 // ---------------------------------------------------------------------------
@@ -78,14 +74,7 @@ export function useGitGraph({
   const [currentCount, setCurrentCount] = useState(pageSize);
 
   // Use the git store for cached data
-  const {
-    commitLog: commits,
-    graphLayout,
-    branches,
-    setCommits,
-    setGraphLayout,
-    setBranches,
-  } = useGitStore();
+  const { commitLog: commits, graphLayout, branches, setCommits, setGraphLayout, setBranches } = useGitStore();
 
   // Track last refresh time for debouncing
   const lastRefreshRef = useRef<number>(0);
@@ -153,7 +142,7 @@ export function useGitGraph({
         lastRefreshRef.current = Date.now();
       }
     },
-    [repoPath, setCommits, setGraphLayout, setBranches]
+    [repoPath, setCommits, setGraphLayout, setBranches],
   );
 
   // ---------------------------------------------------------------------------

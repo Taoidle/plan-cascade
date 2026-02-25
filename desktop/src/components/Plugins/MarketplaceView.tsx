@@ -73,7 +73,7 @@ export function MarketplaceView() {
           p.name.toLowerCase().includes(q) ||
           p.description.toLowerCase().includes(q) ||
           (p.author && p.author.toLowerCase().includes(q)) ||
-          p.keywords.some((k) => k.toLowerCase().includes(q))
+          p.keywords.some((k) => k.toLowerCase().includes(q)),
       );
     }
 
@@ -88,10 +88,7 @@ export function MarketplaceView() {
           {[1, 2, 3, 4].map((i) => (
             <div
               key={i}
-              className={clsx(
-                'p-4 rounded-lg border border-gray-200 dark:border-gray-700',
-                'animate-pulse'
-              )}
+              className={clsx('p-4 rounded-lg border border-gray-200 dark:border-gray-700', 'animate-pulse')}
             >
               <div className="h-4 w-2/3 bg-gray-200 dark:bg-gray-700 rounded mb-3" />
               <div className="h-3 w-full bg-gray-100 dark:bg-gray-800 rounded mb-2" />
@@ -121,7 +118,7 @@ export function MarketplaceView() {
                 'border border-gray-200 dark:border-gray-700',
                 'text-gray-700 dark:text-gray-300',
                 'placeholder:text-gray-400 dark:placeholder:text-gray-500',
-                'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent'
+                'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent',
               )}
             />
           </div>
@@ -131,7 +128,7 @@ export function MarketplaceView() {
               'inline-flex items-center gap-1 px-2 py-1.5 rounded-md text-xs',
               'text-gray-500 dark:text-gray-400',
               'hover:bg-gray-100 dark:hover:bg-gray-800',
-              'transition-colors'
+              'transition-colors',
             )}
             title={t('plugins.addMarketplace')}
           >
@@ -145,7 +142,7 @@ export function MarketplaceView() {
               'p-1.5 rounded-md transition-colors',
               'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
               'hover:bg-gray-100 dark:hover:bg-gray-800',
-              'disabled:opacity-50'
+              'disabled:opacity-50',
             )}
             title={t('plugins.refresh')}
           >
@@ -162,7 +159,7 @@ export function MarketplaceView() {
                 'px-2 py-0.5 rounded-full text-2xs font-medium transition-colors',
                 !selectedMarketplace
                   ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700',
               )}
             >
               {t('plugins.allCategories')}
@@ -175,12 +172,10 @@ export function MarketplaceView() {
                   'px-2 py-0.5 rounded-full text-2xs font-medium transition-colors',
                   source === selectedMarketplace
                     ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
-                    : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700',
                 )}
               >
-                {source === 'claude-plugins-official'
-                  ? t('plugins.officialMarketplace')
-                  : source}
+                {source === 'claude-plugins-official' ? t('plugins.officialMarketplace') : source}
               </button>
             ))}
           </div>
@@ -195,7 +190,7 @@ export function MarketplaceView() {
                 'px-2 py-0.5 rounded-full text-2xs font-medium transition-colors',
                 !selectedCategory
                   ? 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300'
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700',
               )}
             >
               {t('plugins.allCategories')}
@@ -208,7 +203,7 @@ export function MarketplaceView() {
                   'px-2 py-0.5 rounded-full text-2xs font-medium transition-colors capitalize',
                   cat === selectedCategory
                     ? 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300'
-                    : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700',
                 )}
               >
                 {cat}
@@ -230,9 +225,7 @@ export function MarketplaceView() {
         {filteredPlugins.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-center">
             <MagnifyingGlassIcon className="w-8 h-8 text-gray-300 dark:text-gray-600 mb-2" />
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              {t('plugins.noMarketplaceResults')}
-            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">{t('plugins.noMarketplaceResults')}</p>
           </div>
         ) : (
           <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">

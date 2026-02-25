@@ -59,10 +59,8 @@ export function ServerRegistry() {
         // Update server status in local state
         setServers((prev) =>
           prev.map((s) =>
-            s.id === serverId
-              ? { ...s, status: response.data!.status, last_checked: response.data!.checked_at }
-              : s
-          )
+            s.id === serverId ? { ...s, status: response.data!.status, last_checked: response.data!.checked_at } : s,
+          ),
         );
       }
     } catch (err) {
@@ -81,9 +79,7 @@ export function ServerRegistry() {
       });
 
       if (response.success && response.data) {
-        setServers((prev) =>
-          prev.map((s) => (s.id === serverId ? response.data! : s))
-        );
+        setServers((prev) => prev.map((s) => (s.id === serverId ? response.data! : s)));
       }
     } catch (err) {
       console.error('Toggle failed:', err);
@@ -124,9 +120,7 @@ export function ServerRegistry() {
       {/* Header */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            {t('mcp.title')}
-          </h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t('mcp.title')}</h2>
 
           <div className="flex items-center gap-2">
             {/* Refresh Button */}
@@ -139,7 +133,7 @@ export function ServerRegistry() {
                 'text-gray-600 dark:text-gray-400',
                 'hover:bg-gray-200 dark:hover:bg-gray-700',
                 'disabled:opacity-50',
-                'transition-colors'
+                'transition-colors',
               )}
               title={t('mcp.refresh')}
             >
@@ -155,7 +149,7 @@ export function ServerRegistry() {
                 'text-gray-700 dark:text-gray-300',
                 'hover:bg-gray-200 dark:hover:bg-gray-700',
                 'text-sm font-medium',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               <DownloadIcon className="w-4 h-4" />
@@ -169,7 +163,7 @@ export function ServerRegistry() {
                 'flex items-center gap-1.5 px-3 py-1.5 rounded-md',
                 'bg-primary-600 hover:bg-primary-700',
                 'text-white text-sm font-medium',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               <PlusIcon className="w-4 h-4" />
@@ -178,9 +172,7 @@ export function ServerRegistry() {
           </div>
         </div>
 
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {t('mcp.description')}
-        </p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('mcp.description')}</p>
       </div>
 
       {/* Server List */}
@@ -208,12 +200,8 @@ export function ServerRegistry() {
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
               <PlusIcon className="w-8 h-8 text-gray-400" />
             </div>
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-              {t('mcp.noServers')}
-            </h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-              {t('mcp.noServersDescription')}
-            </p>
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">{t('mcp.noServers')}</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{t('mcp.noServersDescription')}</p>
             <div className="flex items-center justify-center gap-2">
               <button
                 onClick={() => setImportDialogOpen(true)}
@@ -223,7 +211,7 @@ export function ServerRegistry() {
                   'text-gray-700 dark:text-gray-300',
                   'hover:bg-gray-200 dark:hover:bg-gray-700',
                   'text-sm font-medium',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 <DownloadIcon className="w-4 h-4" />
@@ -235,7 +223,7 @@ export function ServerRegistry() {
                   'flex items-center gap-1.5 px-3 py-2 rounded-md',
                   'bg-primary-600 hover:bg-primary-700',
                   'text-white text-sm font-medium',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 <PlusIcon className="w-4 h-4" />
@@ -265,11 +253,7 @@ export function ServerRegistry() {
       </div>
 
       {/* Dialogs */}
-      <AddServerDialog
-        open={addDialogOpen}
-        onOpenChange={setAddDialogOpen}
-        onServerAdded={handleServerAdded}
-      />
+      <AddServerDialog open={addDialogOpen} onOpenChange={setAddDialogOpen} onServerAdded={handleServerAdded} />
 
       <ImportDialog
         open={importDialogOpen}

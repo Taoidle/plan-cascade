@@ -22,7 +22,7 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => {
       const translations: Record<string, string> = {
-        'title': 'Settings',
+        title: 'Settings',
         'tabs.general': 'General',
         'tabs.llm': 'LLM Backend',
         'tabs.agents': 'Agents',
@@ -84,7 +84,7 @@ const mockInvoke = vi.fn(async (command: string, args?: { provider?: string; api
       }
       return { success: true, data: true, error: null };
     case 'get_provider_api_key':
-      return { success: true, data: args?.provider ? (mockProviderKeys[args.provider] || null) : null, error: null };
+      return { success: true, data: args?.provider ? mockProviderKeys[args.provider] || null : null, error: null };
     default:
       return { success: true, data: null, error: null };
   }
@@ -143,13 +143,10 @@ const mockSettingsState = {
 };
 
 vi.mock('../../store/settings', () => ({
-  useSettingsStore: Object.assign(
-    () => mockSettingsState,
-    {
-      getState: () => mockSettingsState,
-      setState: vi.fn(),
-    }
-  ),
+  useSettingsStore: Object.assign(() => mockSettingsState, {
+    getState: () => mockSettingsState,
+    setState: vi.fn(),
+  }),
 }));
 
 // Mock settings API
@@ -165,10 +162,14 @@ vi.mock('@radix-ui/react-dialog', () => ({
   Portal: ({ children }: { children: React.ReactNode }) => <div data-testid="dialog-portal">{children}</div>,
   Overlay: ({ className }: { className: string }) => <div data-testid="dialog-overlay" className={className} />,
   Content: ({ children, className }: { children: React.ReactNode; className: string }) => (
-    <div data-testid="dialog-content" className={className}>{children}</div>
+    <div data-testid="dialog-content" className={className}>
+      {children}
+    </div>
   ),
   Title: ({ children, className }: { children: React.ReactNode; className: string }) => (
-    <h2 data-testid="dialog-title" className={className}>{children}</h2>
+    <h2 data-testid="dialog-title" className={className}>
+      {children}
+    </h2>
   ),
   Close: ({ children, asChild }: { children: React.ReactNode; asChild?: boolean }) =>
     asChild ? <>{children}</> : <button>{children}</button>,
@@ -176,17 +177,33 @@ vi.mock('@radix-ui/react-dialog', () => ({
 
 // Mock Radix Tabs
 vi.mock('@radix-ui/react-tabs', () => ({
-  Root: ({ children, value, onValueChange: _onValueChange }: { children: React.ReactNode; value: string; onValueChange: (v: string) => void }) => (
-    <div data-testid="tabs-root" data-active-tab={value}>{children}</div>
+  Root: ({
+    children,
+    value,
+    onValueChange: _onValueChange,
+  }: {
+    children: React.ReactNode;
+    value: string;
+    onValueChange: (v: string) => void;
+  }) => (
+    <div data-testid="tabs-root" data-active-tab={value}>
+      {children}
+    </div>
   ),
   List: ({ children, className }: { children: React.ReactNode; className: string }) => (
-    <div data-testid="tabs-list" className={className} role="tablist">{children}</div>
+    <div data-testid="tabs-list" className={className} role="tablist">
+      {children}
+    </div>
   ),
   Trigger: ({ children, value }: { children: React.ReactNode; value: string }) => (
-    <button data-testid={`tab-${value}`} role="tab">{children}</button>
+    <button data-testid={`tab-${value}`} role="tab">
+      {children}
+    </button>
   ),
   Content: ({ children, value, className }: { children: React.ReactNode; value: string; className: string }) => (
-    <div data-testid={`tab-content-${value}`} role="tabpanel" className={className}>{children}</div>
+    <div data-testid={`tab-content-${value}`} role="tabpanel" className={className}>
+      {children}
+    </div>
   ),
 }));
 
@@ -297,9 +314,7 @@ describe('GeneralSection', () => {
 
     // The maxTotalTokens field should display the default value (1000000)
     const tokenInputs = screen.getAllByRole('spinbutton');
-    const tokenInput = tokenInputs.find(
-      (el) => (el as HTMLInputElement).value === '1000000'
-    );
+    const tokenInput = tokenInputs.find((el) => (el as HTMLInputElement).value === '1000000');
     expect(tokenInput).toBeDefined();
   });
 
@@ -308,9 +323,7 @@ describe('GeneralSection', () => {
 
     // The maxIterations field should display the default value (50)
     const inputs = screen.getAllByRole('spinbutton');
-    const iterationsInput = inputs.find(
-      (el) => (el as HTMLInputElement).value === '50'
-    );
+    const iterationsInput = inputs.find((el) => (el as HTMLInputElement).value === '50');
     expect(iterationsInput).toBeDefined();
   });
 
@@ -318,9 +331,7 @@ describe('GeneralSection', () => {
     render(<GeneralSection />);
 
     const tokenInputs = screen.getAllByRole('spinbutton');
-    const tokenInput = tokenInputs.find(
-      (el) => (el as HTMLInputElement).value === '1000000'
-    ) as HTMLInputElement;
+    const tokenInput = tokenInputs.find((el) => (el as HTMLInputElement).value === '1000000') as HTMLInputElement;
 
     fireEvent.change(tokenInput, { target: { value: '2000000' } });
 
@@ -331,9 +342,7 @@ describe('GeneralSection', () => {
     render(<GeneralSection />);
 
     const tokenInputs = screen.getAllByRole('spinbutton');
-    const tokenInput = tokenInputs.find(
-      (el) => (el as HTMLInputElement).value === '1000000'
-    ) as HTMLInputElement;
+    const tokenInput = tokenInputs.find((el) => (el as HTMLInputElement).value === '1000000') as HTMLInputElement;
 
     expect(tokenInput).toBeDefined();
     expect(tokenInput.min).toBe('100000');
@@ -343,9 +352,7 @@ describe('GeneralSection', () => {
     render(<GeneralSection />);
 
     const tokenInputs = screen.getAllByRole('spinbutton');
-    const tokenInput = tokenInputs.find(
-      (el) => (el as HTMLInputElement).value === '1000000'
-    ) as HTMLInputElement;
+    const tokenInput = tokenInputs.find((el) => (el as HTMLInputElement).value === '1000000') as HTMLInputElement;
 
     expect(tokenInput).toBeDefined();
     expect(tokenInput.max).toBe('5000000');
@@ -355,9 +362,7 @@ describe('GeneralSection', () => {
     render(<GeneralSection />);
 
     const inputs = screen.getAllByRole('spinbutton');
-    const iterationsInput = inputs.find(
-      (el) => (el as HTMLInputElement).value === '50'
-    ) as HTMLInputElement;
+    const iterationsInput = inputs.find((el) => (el as HTMLInputElement).value === '50') as HTMLInputElement;
 
     expect(iterationsInput).toBeDefined();
     expect(iterationsInput.min).toBe('10');
@@ -367,9 +372,7 @@ describe('GeneralSection', () => {
     render(<GeneralSection />);
 
     const inputs = screen.getAllByRole('spinbutton');
-    const iterationsInput = inputs.find(
-      (el) => (el as HTMLInputElement).value === '50'
-    ) as HTMLInputElement;
+    const iterationsInput = inputs.find((el) => (el as HTMLInputElement).value === '50') as HTMLInputElement;
 
     expect(iterationsInput).toBeDefined();
     expect(iterationsInput.max).toBe('200');
@@ -430,7 +433,6 @@ describe('LLMBackendSection', () => {
 
     expect(screen.queryByText(/API Key for/)).not.toBeInTheDocument();
   });
-
 });
 
 // --------------------------------------------------------------------------

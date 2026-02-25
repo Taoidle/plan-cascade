@@ -33,7 +33,21 @@ interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type SettingsTab = 'general' | 'llm' | 'embedding' | 'lsp' | 'network' | 'notifications' | 'remote' | 'plugins' | 'security' | 'agents' | 'quality' | 'phases' | 'a2a' | 'import-export';
+type SettingsTab =
+  | 'general'
+  | 'llm'
+  | 'embedding'
+  | 'lsp'
+  | 'network'
+  | 'notifications'
+  | 'remote'
+  | 'plugins'
+  | 'security'
+  | 'agents'
+  | 'quality'
+  | 'phases'
+  | 'a2a'
+  | 'import-export';
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const { t } = useTranslation('settings');
@@ -81,21 +95,19 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             'bg-white dark:bg-gray-900 rounded-xl shadow-xl',
             'flex flex-col',
             'focus:outline-none',
-            'animate-in fade-in-0 zoom-in-95 duration-200'
+            'animate-in fade-in-0 zoom-in-95 duration-200',
           )}
           aria-describedby={undefined}
         >
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-800">
-            <Dialog.Title className="text-xl font-semibold text-gray-900 dark:text-white">
-              {t('title')}
-            </Dialog.Title>
+            <Dialog.Title className="text-xl font-semibold text-gray-900 dark:text-white">{t('title')}</Dialog.Title>
             <Dialog.Close asChild>
               <button
                 className={clsx(
                   'p-2 rounded-lg',
                   'hover:bg-gray-100 dark:hover:bg-gray-800',
-                  'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500',
                 )}
                 aria-label="Close"
               >
@@ -115,7 +127,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               className={clsx(
                 'w-48 shrink-0 border-r border-gray-200 dark:border-gray-800',
                 'bg-gray-50 dark:bg-gray-950',
-                'p-2 space-y-1'
+                'p-2 space-y-1',
               )}
             >
               {tabs.map((tab) => (
@@ -128,7 +140,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     'data-[state=active]:bg-primary-100 dark:data-[state=active]:bg-primary-900',
                     'data-[state=active]:text-primary-700 dark:data-[state=active]:text-primary-300',
                     'data-[state=inactive]:text-gray-600 dark:data-[state=inactive]:text-gray-400',
-                    'data-[state=inactive]:hover:bg-gray-100 dark:data-[state=inactive]:hover:bg-gray-800'
+                    'data-[state=inactive]:hover:bg-gray-100 dark:data-[state=inactive]:hover:bg-gray-800',
                   )}
                 >
                   {tab.label}
@@ -192,7 +204,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   'bg-gray-100 dark:bg-gray-800',
                   'text-gray-700 dark:text-gray-300',
                   'hover:bg-gray-200 dark:hover:bg-gray-700',
-                  'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500',
                 )}
               >
                 {t('buttons.cancel', { ns: 'common' })}
@@ -206,7 +218,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 'bg-primary-600 text-white',
                 'hover:bg-primary-700',
                 'focus:outline-none focus:ring-2 focus:ring-primary-500',
-                'disabled:opacity-50 disabled:cursor-not-allowed'
+                'disabled:opacity-50 disabled:cursor-not-allowed',
               )}
             >
               {isSaving ? t('buttons.saving', { ns: 'common' }) : t('buttons.save', { ns: 'common' })}
@@ -246,7 +258,7 @@ async function saveSettingsToBackend() {
       model: settings.model,
       defaultMode: settings.defaultMode,
       theme: settings.theme,
-    })
+    }),
   );
 }
 

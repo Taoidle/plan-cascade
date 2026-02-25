@@ -52,7 +52,7 @@ export function BottomStatusBar({
         'shrink-0 flex items-center gap-3 px-4 py-1.5',
         'border-t border-gray-200 dark:border-gray-700',
         'bg-white dark:bg-gray-900',
-        'text-xs text-gray-600 dark:text-gray-400'
+        'text-xs text-gray-600 dark:text-gray-400',
       )}
     >
       <ConnectionStatus status={connectionStatus} />

@@ -102,7 +102,9 @@ vi.mock('../../store/projects', () => ({
 // Mock Radix Select to avoid portal issues
 vi.mock('@radix-ui/react-select', () => ({
   Root: ({ children, value }: { children: React.ReactNode; value: string; onValueChange: (v: string) => void }) => (
-    <div data-testid="select-root" data-value={value}>{children}</div>
+    <div data-testid="select-root" data-value={value}>
+      {children}
+    </div>
   ),
   Trigger: ({ children }: { children: React.ReactNode }) => <button data-testid="select-trigger">{children}</button>,
   Value: () => <span data-testid="select-value">Value</span>,
@@ -120,12 +122,7 @@ vi.mock('@radix-ui/react-select', () => ({
 // Mock sub-components with minimal implementations for isolation
 vi.mock('../Projects/ProjectCard', () => ({
   ProjectCard: ({ project, isSelected, onClick }: { project: Project; isSelected: boolean; onClick: () => void }) => (
-    <div
-      data-testid={`project-card-${project.id}`}
-      data-selected={isSelected}
-      onClick={onClick}
-      role="button"
-    >
+    <div data-testid={`project-card-${project.id}`} data-selected={isSelected} onClick={onClick} role="button">
       <span>{project.name}</span>
       <span>{project.session_count} sessions</span>
     </div>
@@ -133,14 +130,18 @@ vi.mock('../Projects/ProjectCard', () => ({
 }));
 
 vi.mock('../Projects/SessionCard', () => ({
-  SessionCard: ({ session, isSelected, onClick, onResume }: {
-    session: Session; isSelected: boolean; onClick: () => void; onResume: () => void;
+  SessionCard: ({
+    session,
+    isSelected,
+    onClick,
+    onResume,
+  }: {
+    session: Session;
+    isSelected: boolean;
+    onClick: () => void;
+    onResume: () => void;
   }) => (
-    <div
-      data-testid={`session-card-${session.id}`}
-      data-selected={isSelected}
-      onClick={onClick}
-    >
+    <div data-testid={`session-card-${session.id}`} data-selected={isSelected} onClick={onClick}>
       <span>{session.first_message_preview || 'No preview'}</span>
       <button onClick={onResume}>Resume</button>
     </div>

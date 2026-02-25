@@ -6,11 +6,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { renderHook, act } from '@testing-library/react';
-import {
-  FileChip,
-  FileReferenceAutocomplete,
-  useFileReferences,
-} from '../FileAttachment';
+import { FileChip, FileReferenceAutocomplete, useFileReferences } from '../FileAttachment';
 
 describe('FileChip', () => {
   it('renders file name', () => {
@@ -58,7 +54,7 @@ describe('FileReferenceAutocomplete', () => {
         onSelect={vi.fn()}
         onClose={vi.fn()}
         position={{ top: 0, left: 0 }}
-      />
+      />,
     );
     expect(screen.queryByText('App.tsx')).not.toBeInTheDocument();
   });
@@ -72,7 +68,7 @@ describe('FileReferenceAutocomplete', () => {
         onSelect={vi.fn()}
         onClose={vi.fn()}
         position={{ top: 0, left: 0 }}
-      />
+      />,
     );
     expect(screen.getByText('App.tsx')).toBeInTheDocument();
   });
@@ -86,7 +82,7 @@ describe('FileReferenceAutocomplete', () => {
         onSelect={vi.fn()}
         onClose={vi.fn()}
         position={{ top: 0, left: 0 }}
-      />
+      />,
     );
     expect(screen.getByText('App.tsx')).toBeInTheDocument();
   });
@@ -101,7 +97,7 @@ describe('FileReferenceAutocomplete', () => {
         onSelect={onSelect}
         onClose={vi.fn()}
         position={{ top: 0, left: 0 }}
-      />
+      />,
     );
 
     fireEvent.click(screen.getByText('App.tsx'));
@@ -118,7 +114,7 @@ describe('FileReferenceAutocomplete', () => {
         onSelect={vi.fn()}
         onClose={onClose}
         position={{ top: 0, left: 0 }}
-      />
+      />,
     );
 
     fireEvent.keyDown(window, { key: 'Escape' });

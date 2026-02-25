@@ -7,17 +7,7 @@
  * Story 011-7: Command Palette with Fuzzy Search
  */
 
-import {
-  useState,
-  useCallback,
-  useEffect,
-  useRef,
-  memo,
-  createContext,
-  useContext,
-  ReactNode,
-  useMemo,
-} from 'react';
+import { useState, useCallback, useEffect, useRef, memo, createContext, useContext, ReactNode, useMemo } from 'react';
 import { clsx } from 'clsx';
 import {
   MagnifyingGlassIcon,
@@ -40,12 +30,7 @@ import { formatShortcut } from './KeyboardShortcuts';
 // Types
 // ============================================================================
 
-export type CommandCategory =
-  | 'chat'
-  | 'navigation'
-  | 'settings'
-  | 'file'
-  | 'help';
+export type CommandCategory = 'chat' | 'navigation' | 'settings' | 'file' | 'help';
 
 export interface Command {
   id: string;
@@ -153,7 +138,7 @@ export function CommandPaletteProvider({
         close();
       }
     },
-    [commands, close, maxRecentCommands]
+    [commands, close, maxRecentCommands],
   );
 
   // Global keyboard shortcut to open command palette
@@ -164,7 +149,7 @@ export function CommandPaletteProvider({
       toggle();
     },
     { enableOnFormTags: true },
-    [toggle]
+    [toggle],
   );
 
   const contextValue: CommandPaletteContext = useMemo(
@@ -179,17 +164,7 @@ export function CommandPaletteProvider({
       recentCommands,
       executeCommand,
     }),
-    [
-      isOpen,
-      open,
-      close,
-      toggle,
-      registerCommand,
-      unregisterCommand,
-      commands,
-      recentCommands,
-      executeCommand,
-    ]
+    [isOpen, open, close, toggle, registerCommand, unregisterCommand, commands, recentCommands, executeCommand],
   );
 
   return (
@@ -225,20 +200,16 @@ const CommandPaletteDialog = memo(function CommandPaletteDialog() {
         threshold: 0.4,
         includeScore: true,
       }),
-    [commands]
+    [commands],
   );
 
   // Filter and sort commands
   const filteredCommands = useMemo(() => {
     if (!query) {
       // Show recent commands first, then all by category
-      const recent = recentCommands
-        .map((id) => commands.find((c) => c.id === id))
-        .filter(Boolean) as Command[];
+      const recent = recentCommands.map((id) => commands.find((c) => c.id === id)).filter(Boolean) as Command[];
 
-      const others = commands.filter(
-        (c) => !recentCommands.includes(c.id)
-      );
+      const others = commands.filter((c) => !recentCommands.includes(c.id));
 
       return { recent, all: others };
     }
@@ -247,10 +218,7 @@ const CommandPaletteDialog = memo(function CommandPaletteDialog() {
     return { recent: [], all: results };
   }, [query, commands, recentCommands, fuse]);
 
-  const allVisibleCommands = [
-    ...filteredCommands.recent,
-    ...filteredCommands.all,
-  ];
+  const allVisibleCommands = [...filteredCommands.recent, ...filteredCommands.all];
 
   // Reset state when opening
   useEffect(() => {
@@ -274,9 +242,7 @@ const CommandPaletteDialog = memo(function CommandPaletteDialog() {
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault();
-          setSelectedIndex((prev) =>
-            prev < allVisibleCommands.length - 1 ? prev + 1 : prev
-          );
+          setSelectedIndex((prev) => (prev < allVisibleCommands.length - 1 ? prev + 1 : prev));
           break;
         case 'ArrowUp':
           e.preventDefault();
@@ -302,9 +268,7 @@ const CommandPaletteDialog = memo(function CommandPaletteDialog() {
   // Scroll selected item into view
   useEffect(() => {
     if (listRef.current) {
-      const selectedElement = listRef.current.querySelector(
-        `[data-index="${selectedIndex}"]`
-      ) as HTMLElement;
+      const selectedElement = listRef.current.querySelector(`[data-index="${selectedIndex}"]`) as HTMLElement;
       if (selectedElement) {
         selectedElement.scrollIntoView({ block: 'nearest' });
       }
@@ -315,11 +279,7 @@ const CommandPaletteDialog = memo(function CommandPaletteDialog() {
 
   return (
     <div
-      className={clsx(
-        'fixed inset-0 z-50',
-        'flex items-start justify-center pt-[15vh]',
-        'bg-black/50'
-      )}
+      className={clsx('fixed inset-0 z-50', 'flex items-start justify-center pt-[15vh]', 'bg-black/50')}
       onClick={close}
     >
       <div
@@ -328,7 +288,7 @@ const CommandPaletteDialog = memo(function CommandPaletteDialog() {
           'bg-white dark:bg-gray-900',
           'rounded-lg shadow-2xl',
           'overflow-hidden',
-          'animate-in fade-in-0 zoom-in-95 slide-in-from-top-2'
+          'animate-in fade-in-0 zoom-in-95 slide-in-from-top-2',
         )}
         onClick={(e) => e.stopPropagation()}
       >
@@ -346,25 +306,18 @@ const CommandPaletteDialog = memo(function CommandPaletteDialog() {
               'text-gray-900 dark:text-white',
               'placeholder-gray-400 dark:placeholder-gray-500',
               'outline-none',
-              'text-sm'
+              'text-sm',
             )}
           />
           {query && (
-            <button
-              onClick={() => setQuery('')}
-              className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
-            >
+            <button onClick={() => setQuery('')} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800">
               <Cross2Icon className="w-4 h-4 text-gray-400" />
             </button>
           )}
         </div>
 
         {/* Command list */}
-        <div
-          ref={listRef}
-          className="max-h-[50vh] overflow-auto"
-          role="listbox"
-        >
+        <div ref={listRef} className="max-h-[50vh] overflow-auto" role="listbox">
           {allVisibleCommands.length === 0 ? (
             <div className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
               <p>{t('commandPalette.noResults')}</p>
@@ -397,31 +350,27 @@ const CommandPaletteDialog = memo(function CommandPaletteDialog() {
                       {t('commandPalette.allCommands')}
                     </div>
                   )}
-                  {Object.entries(groupByCategory(filteredCommands.all)).map(
-                    ([category, categoryCommands]) => (
-                      <div key={category}>
-                        {query && (
-                          <div className="px-4 py-1 text-xs font-medium text-gray-400 dark:text-gray-500 uppercase">
-                            {getCategoryLabel(category as CommandCategory, t)}
-                          </div>
-                        )}
-                        {categoryCommands.map((command) => {
-                          const globalIndex =
-                            filteredCommands.recent.length +
-                            filteredCommands.all.indexOf(command);
-                          return (
-                            <CommandItem
-                              key={command.id}
-                              command={command}
-                              isSelected={globalIndex === selectedIndex}
-                              onClick={() => executeCommand(command.id)}
-                              dataIndex={globalIndex}
-                            />
-                          );
-                        })}
-                      </div>
-                    )
-                  )}
+                  {Object.entries(groupByCategory(filteredCommands.all)).map(([category, categoryCommands]) => (
+                    <div key={category}>
+                      {query && (
+                        <div className="px-4 py-1 text-xs font-medium text-gray-400 dark:text-gray-500 uppercase">
+                          {getCategoryLabel(category as CommandCategory, t)}
+                        </div>
+                      )}
+                      {categoryCommands.map((command) => {
+                        const globalIndex = filteredCommands.recent.length + filteredCommands.all.indexOf(command);
+                        return (
+                          <CommandItem
+                            key={command.id}
+                            command={command}
+                            isSelected={globalIndex === selectedIndex}
+                            onClick={() => executeCommand(command.id)}
+                            dataIndex={globalIndex}
+                          />
+                        );
+                      })}
+                    </div>
+                  ))}
                 </div>
               )}
             </>
@@ -433,21 +382,15 @@ const CommandPaletteDialog = memo(function CommandPaletteDialog() {
           <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
             <div className="flex items-center gap-4">
               <span className="flex items-center gap-1">
-                <kbd className="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded">
-                  {'\u2191\u2193'}
-                </kbd>
+                <kbd className="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded">{'\u2191\u2193'}</kbd>
                 {t('commandPalette.navigate')}
               </span>
               <span className="flex items-center gap-1">
-                <kbd className="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded">
-                  Enter
-                </kbd>
+                <kbd className="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded">Enter</kbd>
                 {t('commandPalette.select')}
               </span>
               <span className="flex items-center gap-1">
-                <kbd className="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded">
-                  Esc
-                </kbd>
+                <kbd className="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded">Esc</kbd>
                 {t('commandPalette.close')}
               </span>
             </div>
@@ -469,12 +412,7 @@ interface CommandItemProps {
   dataIndex: number;
 }
 
-const CommandItem = memo(function CommandItem({
-  command,
-  isSelected,
-  onClick,
-  dataIndex,
-}: CommandItemProps) {
+const CommandItem = memo(function CommandItem({ command, isSelected, onClick, dataIndex }: CommandItemProps) {
   const Icon = command.icon || getDefaultIcon(command.category);
 
   return (
@@ -485,10 +423,8 @@ const CommandItem = memo(function CommandItem({
       className={clsx(
         'w-full flex items-center gap-3 px-4 py-2',
         'text-left transition-colors',
-        isSelected
-          ? 'bg-primary-100 dark:bg-primary-900/50'
-          : 'hover:bg-gray-100 dark:hover:bg-gray-800',
-        command.disabled && 'opacity-50 cursor-not-allowed'
+        isSelected ? 'bg-primary-100 dark:bg-primary-900/50' : 'hover:bg-gray-100 dark:hover:bg-gray-800',
+        command.disabled && 'opacity-50 cursor-not-allowed',
       )}
       role="option"
       aria-selected={isSelected}
@@ -496,9 +432,7 @@ const CommandItem = memo(function CommandItem({
       <Icon
         className={clsx(
           'w-4 h-4 flex-shrink-0',
-          isSelected
-            ? 'text-primary-600 dark:text-primary-400'
-            : 'text-gray-400'
+          isSelected ? 'text-primary-600 dark:text-primary-400' : 'text-gray-400',
         )}
       />
 
@@ -506,17 +440,13 @@ const CommandItem = memo(function CommandItem({
         <div
           className={clsx(
             'text-sm font-medium truncate',
-            isSelected
-              ? 'text-primary-900 dark:text-primary-100'
-              : 'text-gray-900 dark:text-gray-100'
+            isSelected ? 'text-primary-900 dark:text-primary-100' : 'text-gray-900 dark:text-gray-100',
           )}
         >
           {command.title}
         </div>
         {command.description && (
-          <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-            {command.description}
-          </div>
+          <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{command.description}</div>
         )}
       </div>
 
@@ -526,7 +456,7 @@ const CommandItem = memo(function CommandItem({
             'px-2 py-0.5 rounded text-xs font-mono',
             'bg-gray-100 dark:bg-gray-800',
             'text-gray-500 dark:text-gray-400',
-            'border border-gray-200 dark:border-gray-700'
+            'border border-gray-200 dark:border-gray-700',
           )}
         >
           {formatShortcut(command.shortcut)}
@@ -540,9 +470,7 @@ const CommandItem = memo(function CommandItem({
 // Helper Functions
 // ============================================================================
 
-function groupByCategory(
-  commands: Command[]
-): Record<CommandCategory, Command[]> {
+function groupByCategory(commands: Command[]): Record<CommandCategory, Command[]> {
   return commands.reduce(
     (acc, command) => {
       if (!acc[command.category]) {
@@ -551,14 +479,14 @@ function groupByCategory(
       acc[command.category].push(command);
       return acc;
     },
-    {} as Record<CommandCategory, Command[]>
+    {} as Record<CommandCategory, Command[]>,
   );
 }
 
 function getCategoryLabel(
   category: CommandCategory,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  t: any
+  t: any,
 ): string {
   const labels: Record<CommandCategory, string> = {
     chat: t('commandPalette.categories.chat'),
@@ -570,9 +498,7 @@ function getCategoryLabel(
   return labels[category] || category;
 }
 
-function getDefaultIcon(
-  category: CommandCategory
-): React.ComponentType<{ className?: string }> {
+function getDefaultIcon(category: CommandCategory): React.ComponentType<{ className?: string }> {
   const icons: Record<CommandCategory, React.ComponentType<{ className?: string }>> = {
     chat: ChatBubbleIcon,
     navigation: ViewVerticalIcon,
@@ -598,7 +524,7 @@ export function createDefaultCommands(
     onNewConversation?: () => void;
   },
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  t: any
+  t: any,
 ): Command[] {
   const commands: Command[] = [];
 

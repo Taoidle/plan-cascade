@@ -58,7 +58,7 @@ export function TabbedRightPanel({
               'px-3 py-2 text-xs font-medium transition-colors relative',
               activeTab === tab.id
                 ? 'text-primary-600 dark:text-primary-400'
-                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300',
             )}
           >
             {tab.label}
@@ -92,10 +92,7 @@ export function TabbedRightPanel({
             <StreamingOutput maxHeight="none" compact={false} showClear className="flex-1 min-h-0 px-2 pb-2" />
           </div>
         ) : (
-          <GitPanel
-            streamingOutput={streamingOutput}
-            workspacePath={workspacePath}
-          />
+          <GitPanel streamingOutput={streamingOutput} workspacePath={workspacePath} />
         )}
       </div>
     </div>
@@ -111,11 +108,7 @@ function pct(value: number | undefined): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
-function AnalysisCoveragePanel({
-  coverage,
-}: {
-  coverage: AnalysisCoverageSnapshot;
-}) {
+function AnalysisCoveragePanel({ coverage }: { coverage: AnalysisCoverageSnapshot }) {
   const { t } = useTranslation('simpleMode');
   const coverageProgress = Math.max(0, Math.min(100, (coverage.coverageRatio || 0) * 100));
   const sampledProgress = Math.max(0, Math.min(100, (coverage.sampledReadRatio || 0) * 100));
@@ -129,18 +122,32 @@ function AnalysisCoveragePanel({
       </div>
 
       <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-        <MetricBar label={t('analysisCoverage.observed')} value={pct(coverage.coverageRatio)} progress={coverageProgress} />
-        <MetricBar label={t('analysisCoverage.readDepth')} value={pct(coverage.sampledReadRatio)} progress={sampledProgress} />
-        <MetricBar label={t('analysisCoverage.testsRead')} value={pct(coverage.testCoverageRatio)} progress={testsProgress} />
+        <MetricBar
+          label={t('analysisCoverage.observed')}
+          value={pct(coverage.coverageRatio)}
+          progress={coverageProgress}
+        />
+        <MetricBar
+          label={t('analysisCoverage.readDepth')}
+          value={pct(coverage.sampledReadRatio)}
+          progress={sampledProgress}
+        />
+        <MetricBar
+          label={t('analysisCoverage.testsRead')}
+          value={pct(coverage.testCoverageRatio)}
+          progress={testsProgress}
+        />
       </div>
 
       <div className="mt-2 text-xs text-sky-700/90 dark:text-sky-300/90">
-        files {coverage.observedPaths}/{coverage.inventoryTotalFiles} | sampled {coverage.sampledReadFiles} | tests {coverage.testFilesRead}/{coverage.testFilesTotal}
+        files {coverage.observedPaths}/{coverage.inventoryTotalFiles} | sampled {coverage.sampledReadFiles} | tests{' '}
+        {coverage.testFilesRead}/{coverage.testFilesTotal}
       </div>
 
       {(coverage.coverageTargetRatio || coverage.sampledReadTargetRatio || coverage.testCoverageTargetRatio) && (
         <div className="mt-1 text-xs text-sky-600 dark:text-sky-400">
-          targets: observed {pct(coverage.coverageTargetRatio)} | read depth {pct(coverage.sampledReadTargetRatio)} | tests {pct(coverage.testCoverageTargetRatio)}
+          targets: observed {pct(coverage.coverageTargetRatio)} | read depth {pct(coverage.sampledReadTargetRatio)} |
+          tests {pct(coverage.testCoverageTargetRatio)}
         </div>
       )}
 
@@ -153,15 +160,7 @@ function AnalysisCoveragePanel({
   );
 }
 
-function MetricBar({
-  label,
-  value,
-  progress,
-}: {
-  label: string;
-  value: string;
-  progress: number;
-}) {
+function MetricBar({ label, value, progress }: { label: string; value: string; progress: number }) {
   return (
     <div>
       <div className="flex items-center justify-between text-sky-700 dark:text-sky-300">

@@ -11,13 +11,7 @@
 import { useMemo } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import {
-  PlayIcon,
-  StopIcon,
-  ResetIcon,
-  PlusIcon,
-  DownloadIcon,
-} from '@radix-ui/react-icons';
+import { PlayIcon, StopIcon, ResetIcon, PlusIcon, DownloadIcon } from '@radix-ui/react-icons';
 import { Mode, useModeStore } from '../../store/mode';
 import { useExecutionStore, ExecutionStatus } from '../../store/execution';
 
@@ -53,22 +47,14 @@ interface ContextualActionsProps {
 // ============================================================================
 
 const VARIANT_CLASSES: Record<string, string> = {
-  primary: clsx(
-    'bg-primary-600 hover:bg-primary-700',
-    'text-white',
-    'shadow-sm'
-  ),
+  primary: clsx('bg-primary-600 hover:bg-primary-700', 'text-white', 'shadow-sm'),
   secondary: clsx(
     'bg-gray-100 dark:bg-gray-800',
     'hover:bg-gray-200 dark:hover:bg-gray-700',
     'text-gray-700 dark:text-gray-300',
-    'border border-gray-200 dark:border-gray-700'
+    'border border-gray-200 dark:border-gray-700',
   ),
-  danger: clsx(
-    'bg-red-600 hover:bg-red-700',
-    'text-white',
-    'shadow-sm'
-  ),
+  danger: clsx('bg-red-600 hover:bg-red-700', 'text-white', 'shadow-sm'),
 };
 
 // ============================================================================
@@ -122,11 +108,7 @@ export function ContextualActions({
   if (actions.length === 0) return null;
 
   return (
-    <div
-      className={clsx('flex items-center gap-2', className)}
-      role="toolbar"
-      aria-label="Contextual actions"
-    >
+    <div className={clsx('flex items-center gap-2', className)} role="toolbar" aria-label="Contextual actions">
       {actions.map((action) => (
         <button
           key={action.id}
@@ -139,7 +121,7 @@ export function ContextualActions({
             'transition-all duration-150',
             'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1',
             'disabled:opacity-50 disabled:cursor-not-allowed',
-            VARIANT_CLASSES[action.variant]
+            VARIANT_CLASSES[action.variant],
           )}
         >
           <action.icon className="w-4 h-4" />
@@ -169,7 +151,7 @@ function getActionsForContext(
     onExportChat?: () => void;
     onRefreshProjects?: () => void;
     onRefreshAnalytics?: () => void;
-  }
+  },
 ): ContextualAction[] {
   const actions: ContextualAction[] = [];
 

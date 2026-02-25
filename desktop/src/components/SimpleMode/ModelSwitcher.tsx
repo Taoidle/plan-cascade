@@ -42,11 +42,7 @@ interface ProviderGroup {
 // Helper: determine transition type and apply switch
 // ============================================================================
 
-type TransitionKind =
-  | 'standalone_to_standalone'
-  | 'standalone_to_cli'
-  | 'cli_to_standalone'
-  | 'cli_to_cli';
+type TransitionKind = 'standalone_to_standalone' | 'standalone_to_cli' | 'cli_to_standalone' | 'cli_to_cli';
 
 function classifyTransition(currentBackend: Backend, targetBackend: Backend): TransitionKind {
   const currentIsCli = currentBackend === 'claude-code';
@@ -86,9 +82,7 @@ export function ModelSwitcher({ dropdownDirection = 'down' }: ModelSwitcherProps
   const containerRef = useRef<HTMLDivElement>(null);
 
   // API key statuses (refreshed on open)
-  const [apiKeyStatuses, setApiKeyStatuses] = useState<ApiKeyStatus>(() =>
-    getLocalProviderApiKeyStatuses()
-  );
+  const [apiKeyStatuses, setApiKeyStatuses] = useState<ApiKeyStatus>(() => getLocalProviderApiKeyStatuses());
 
   const isRunning = status === 'running' || status === 'paused';
 
@@ -151,9 +145,7 @@ export function ModelSwitcher({ dropdownDirection = 'down' }: ModelSwitcherProps
     }
     const normalizedProvider = normalizeProvider(provider);
     const option = BACKEND_OPTIONS.find((o) => o.id === backend);
-    const providerName = option
-      ? tSettings(`llm.providers.${option.i18nKey}.name`)
-      : normalizedProvider;
+    const providerName = option ? tSettings(`llm.providers.${option.i18nKey}.name`) : normalizedProvider;
     const modelName = model || DEFAULT_MODEL_BY_PROVIDER[normalizedProvider] || '';
     return modelName ? `${providerName} / ${modelName}` : providerName;
   }, [backend, provider, model, tSettings]);
@@ -165,10 +157,7 @@ export function ModelSwitcher({ dropdownDirection = 'down' }: ModelSwitcherProps
 
       // For providers requiring API key but none configured, warn and abort
       if (group.requiresApiKey && !group.hasApiKey) {
-        appendStreamLine(
-          `Cannot switch to ${group.displayName}: ${t('modelSwitcher.noApiKey')}.`,
-          'warning'
-        );
+        appendStreamLine(`Cannot switch to ${group.displayName}: ${t('modelSwitcher.noApiKey')}.`, 'warning');
         setOpen(false);
         return;
       }
@@ -186,23 +175,17 @@ export function ModelSwitcher({ dropdownDirection = 'down' }: ModelSwitcherProps
         case 'standalone_to_standalone':
           appendStreamLine(
             `Switched to ${group.displayName} / ${selectedModel}. ${t('modelSwitcher.contextPreserved')}.`,
-            'warning'
+            'warning',
           );
           break;
 
         case 'standalone_to_cli':
           // Should not reach here (CLI has no models), but handle gracefully
-          appendStreamLine(
-            `Switched to Claude Code CLI. ${t('modelSwitcher.sessionRestart')}`,
-            'warning'
-          );
+          appendStreamLine(`Switched to Claude Code CLI. ${t('modelSwitcher.sessionRestart')}`, 'warning');
           break;
 
         case 'cli_to_standalone': {
-          appendStreamLine(
-            `Switched to ${group.displayName} / ${selectedModel}.`,
-            'warning'
-          );
+          appendStreamLine(`Switched to ${group.displayName} / ${selectedModel}.`, 'warning');
           // Reset Claude Code session state
           useExecutionStore.setState({ taskId: null, isChatSession: false });
           break;
@@ -215,7 +198,7 @@ export function ModelSwitcher({ dropdownDirection = 'down' }: ModelSwitcherProps
 
       setOpen(false);
     },
-    [backend, isRunning, appendStreamLine, t, setBackend, setProvider, setModel]
+    [backend, isRunning, appendStreamLine, t, setBackend, setProvider, setModel],
   );
 
   // Handle selecting a provider (for Claude Code, no model)
@@ -225,10 +208,7 @@ export function ModelSwitcher({ dropdownDirection = 'down' }: ModelSwitcherProps
 
       // For providers requiring API key but none configured, warn and abort
       if (group.requiresApiKey && !group.hasApiKey) {
-        appendStreamLine(
-          `Cannot switch to ${group.displayName}: ${t('modelSwitcher.noApiKey')}.`,
-          'warning'
-        );
+        appendStreamLine(`Cannot switch to ${group.displayName}: ${t('modelSwitcher.noApiKey')}.`, 'warning');
         setOpen(false);
         return;
       }
@@ -242,10 +222,7 @@ export function ModelSwitcher({ dropdownDirection = 'down' }: ModelSwitcherProps
         setProvider(group.option.provider);
 
         if (transition === 'standalone_to_cli') {
-          appendStreamLine(
-            `Switched to Claude Code CLI. ${t('modelSwitcher.sessionRestart')}`,
-            'warning'
-          );
+          appendStreamLine(`Switched to Claude Code CLI. ${t('modelSwitcher.sessionRestart')}`, 'warning');
         } else if (transition === 'cli_to_cli') {
           // no-op, already on Claude Code
         }
@@ -260,7 +237,7 @@ export function ModelSwitcher({ dropdownDirection = 'down' }: ModelSwitcherProps
 
       handleSelectModel(group, defaultModel);
     },
-    [backend, isRunning, appendStreamLine, t, setBackend, setProvider, handleSelectModel]
+    [backend, isRunning, appendStreamLine, t, setBackend, setProvider, handleSelectModel],
   );
 
   // Check if a specific model in a provider is the currently selected one
@@ -272,13 +249,10 @@ export function ModelSwitcher({ dropdownDirection = 'down' }: ModelSwitcherProps
       }
       return model === modelId;
     },
-    [backend, model, provider]
+    [backend, model, provider],
   );
 
-  const isSelectedProvider = useCallback(
-    (optionId: Backend): boolean => backend === optionId,
-    [backend]
-  );
+  const isSelectedProvider = useCallback((optionId: Backend): boolean => backend === optionId, [backend]);
 
   return (
     <div ref={containerRef} className="relative">
@@ -295,17 +269,11 @@ export function ModelSwitcher({ dropdownDirection = 'down' }: ModelSwitcherProps
             ? 'opacity-50 cursor-not-allowed border-gray-300 dark:border-gray-700 text-gray-400 dark:text-gray-500'
             : open
               ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
-              : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+              : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800',
         )}
         title={t('modelSwitcher.current')}
       >
-        <svg
-          className="w-3.5 h-3.5 shrink-0"
-          fill="none"
-          viewBox="0 0 24 24"
-          strokeWidth={1.5}
-          stroke="currentColor"
-        >
+        <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
           <path
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -334,15 +302,13 @@ export function ModelSwitcher({ dropdownDirection = 'down' }: ModelSwitcherProps
             'bg-white dark:bg-gray-900',
             'shadow-lg',
             'py-1',
-            'animate-in fade-in-0 zoom-in-95 duration-150'
+            'animate-in fade-in-0 zoom-in-95 duration-150',
           )}
         >
           {providerGroups.map((group, groupIdx) => (
             <div key={group.option.id}>
               {/* Divider between groups */}
-              {groupIdx > 0 && (
-                <div className="mx-2 my-1 border-t border-gray-100 dark:border-gray-800" />
-              )}
+              {groupIdx > 0 && <div className="mx-2 my-1 border-t border-gray-100 dark:border-gray-800" />}
 
               {/* Provider header */}
               {group.isCli ? (
@@ -353,7 +319,7 @@ export function ModelSwitcher({ dropdownDirection = 'down' }: ModelSwitcherProps
                     'w-full text-left px-3 py-2 flex items-center justify-between gap-2 transition-colors',
                     isSelectedProvider(group.option.id)
                       ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
-                      : 'hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-white'
+                      : 'hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-white',
                   )}
                 >
                   <div className="flex items-center gap-2">
@@ -361,7 +327,13 @@ export function ModelSwitcher({ dropdownDirection = 'down' }: ModelSwitcherProps
                     <span className="text-2xs text-gray-400 dark:text-gray-500">(local CLI)</span>
                   </div>
                   {isSelectedProvider(group.option.id) && (
-                    <svg className="w-4 h-4 text-primary-600 dark:text-primary-400 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <svg
+                      className="w-4 h-4 text-primary-600 dark:text-primary-400 shrink-0"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={2}
+                      stroke="currentColor"
+                    >
                       <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
                     </svg>
                   )}
@@ -372,9 +344,7 @@ export function ModelSwitcher({ dropdownDirection = 'down' }: ModelSwitcherProps
                   <span
                     className={clsx(
                       'text-xs font-semibold',
-                      group.hasApiKey
-                        ? 'text-gray-700 dark:text-gray-300'
-                        : 'text-gray-400 dark:text-gray-600'
+                      group.hasApiKey ? 'text-gray-700 dark:text-gray-300' : 'text-gray-400 dark:text-gray-600',
                     )}
                   >
                     {group.displayName}
@@ -385,7 +355,7 @@ export function ModelSwitcher({ dropdownDirection = 'down' }: ModelSwitcherProps
                         'text-2xs px-1.5 py-0.5 rounded-full',
                         group.hasApiKey
                           ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                          : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+                          : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400',
                       )}
                     >
                       {group.hasApiKey ? 'API key \u2713' : t('modelSwitcher.noApiKey')}
@@ -414,12 +384,18 @@ export function ModelSwitcher({ dropdownDirection = 'down' }: ModelSwitcherProps
                             ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed'
                             : selected
                               ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
-                              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+                              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800',
                         )}
                       >
                         <span className="truncate font-mono">{modelId}</span>
                         {selected && (
-                          <svg className="w-3.5 h-3.5 text-primary-600 dark:text-primary-400 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                          <svg
+                            className="w-3.5 h-3.5 text-primary-600 dark:text-primary-400 shrink-0"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            strokeWidth={2}
+                            stroke="currentColor"
+                          >
                             <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
                           </svg>
                         )}

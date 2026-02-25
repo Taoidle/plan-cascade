@@ -49,14 +49,7 @@ function SortableStoryCard({ story, index, isActive }: SortableStoryCardProps) {
   const [editedTitle, setEditedTitle] = useState(story.title);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: story.id });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: story.id });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -99,7 +92,7 @@ function SortableStoryCard({ story, index, isActive }: SortableStoryCardProps) {
         isDragging
           ? 'border-primary-500 shadow-lg opacity-50'
           : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600',
-        isActive && 'ring-2 ring-primary-500'
+        isActive && 'ring-2 ring-primary-500',
       )}
     >
       <div className="p-4">
@@ -112,7 +105,7 @@ function SortableStoryCard({ story, index, isActive }: SortableStoryCardProps) {
               'p-1 rounded cursor-grab active:cursor-grabbing',
               'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
               'hover:bg-gray-100 dark:hover:bg-gray-700',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500'
+              'focus:outline-none focus:ring-2 focus:ring-primary-500',
             )}
             title="Drag to reorder"
           >
@@ -125,12 +118,7 @@ function SortableStoryCard({ story, index, isActive }: SortableStoryCardProps) {
           </span>
 
           {/* Status indicator */}
-          <span
-            className={clsx(
-              'w-2.5 h-2.5 rounded-full shrink-0',
-              statusColors[story.status]
-            )}
-          />
+          <span className={clsx('w-2.5 h-2.5 rounded-full shrink-0', statusColors[story.status])} />
 
           {/* Title */}
           {isEditing ? (
@@ -147,7 +135,7 @@ function SortableStoryCard({ story, index, isActive }: SortableStoryCardProps) {
                 'bg-gray-50 dark:bg-gray-900',
                 'text-gray-900 dark:text-white font-medium',
                 'border border-primary-500',
-                'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                'focus:outline-none focus:ring-2 focus:ring-primary-500',
               )}
               autoFocus
             />
@@ -161,9 +149,7 @@ function SortableStoryCard({ story, index, isActive }: SortableStoryCardProps) {
               ) : (
                 <ChevronRightIcon className="w-4 h-4 text-gray-400 shrink-0" />
               )}
-              <span className="font-medium text-gray-900 dark:text-white truncate">
-                {story.title}
-              </span>
+              <span className="font-medium text-gray-900 dark:text-white truncate">{story.title}</span>
             </button>
           )}
 
@@ -227,9 +213,7 @@ function SortableStoryCard({ story, index, isActive }: SortableStoryCardProps) {
         {/* Expanded content */}
         {isExpanded && (
           <div className="mt-4 ml-14 space-y-3">
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              {story.description || 'No description'}
-            </p>
+            <p className="text-sm text-gray-600 dark:text-gray-400">{story.description || 'No description'}</p>
             {story.dependencies.length > 0 && (
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs text-gray-500">Blocked by:</span>
@@ -260,21 +244,14 @@ function DragOverlayCard({ story, index }: { story: PRDStory; index: number }) {
   };
 
   return (
-    <div
-      className={clsx(
-        'rounded-lg border-2 border-primary-500 shadow-2xl',
-        'bg-white dark:bg-gray-800'
-      )}
-    >
+    <div className={clsx('rounded-lg border-2 border-primary-500 shadow-2xl', 'bg-white dark:bg-gray-800')}>
       <div className="p-4 flex items-center gap-3">
         <DragHandleDots2Icon className="w-5 h-5 text-primary-500" />
         <span className="flex items-center justify-center w-7 h-7 rounded-full bg-primary-100 dark:bg-primary-900 text-sm font-medium text-primary-600 dark:text-primary-400">
           {index + 1}
         </span>
         <span className={clsx('w-2.5 h-2.5 rounded-full', statusColors[story.status])} />
-        <span className="font-medium text-gray-900 dark:text-white">
-          {story.title}
-        </span>
+        <span className="font-medium text-gray-900 dark:text-white">{story.title}</span>
       </div>
     </div>
   );
@@ -292,7 +269,7 @@ export function SortableStoryList() {
     }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
-    })
+    }),
   );
 
   const storyIds = useMemo(() => prd.stories.map((s) => s.id), [prd.stories]);
@@ -328,21 +305,12 @@ export function SortableStoryList() {
       <SortableContext items={storyIds} strategy={verticalListSortingStrategy}>
         <div className="space-y-2">
           {prd.stories.map((story, index) => (
-            <SortableStoryCard
-              key={story.id}
-              story={story}
-              index={index}
-              isActive={story.id === activeId}
-            />
+            <SortableStoryCard key={story.id} story={story} index={index} isActive={story.id === activeId} />
           ))}
         </div>
       </SortableContext>
 
-      <DragOverlay>
-        {activeStory && (
-          <DragOverlayCard story={activeStory} index={activeIndex} />
-        )}
-      </DragOverlay>
+      <DragOverlay>{activeStory && <DragOverlayCard story={activeStory} index={activeIndex} />}</DragOverlay>
     </DndContext>
   );
 }

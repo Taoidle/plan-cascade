@@ -11,8 +11,7 @@ import type { AgentEvent } from '../../types/agentComposer';
 
 export function AgentPipelineRunner() {
   const { t } = useTranslation('expertMode');
-  const { executionEvents, isExecuting, clearExecutionEvents } =
-    useAgentComposerStore();
+  const { executionEvents, isExecuting, clearExecutionEvents } = useAgentComposerStore();
 
   if (executionEvents.length === 0 && !isExecuting) {
     return (
@@ -27,9 +26,7 @@ export function AgentPipelineRunner() {
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
           {t('agentComposer.runner.title')}
-          {isExecuting && (
-            <span className="ml-2 inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-          )}
+          {isExecuting && <span className="ml-2 inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
         </h3>
         {executionEvents.length > 0 && (
           <button
@@ -45,7 +42,7 @@ export function AgentPipelineRunner() {
         className={clsx(
           'flex-1 overflow-auto rounded-lg p-3',
           'bg-gray-900 text-gray-100 font-mono text-xs',
-          'space-y-1'
+          'space-y-1',
         )}
       >
         {executionEvents.map((event, i) => (
@@ -61,23 +58,21 @@ function EventLine({ event }: { event: AgentEvent }) {
 
   switch (event.type) {
     case 'text_delta':
-      return (
-        <span className="text-green-400">{event.content}</span>
-      );
+      return <span className="text-green-400">{event.content}</span>;
     case 'thinking_delta':
-      return (
-        <span className="text-blue-400 italic">{event.content}</span>
-      );
+      return <span className="text-blue-400 italic">{event.content}</span>;
     case 'tool_call':
       return (
         <div className="text-yellow-400">
-          {t('agentComposer.runner.toolCall')} {event.name}({event.args.length > 80 ? event.args.slice(0, 80) + '...' : event.args})
+          {t('agentComposer.runner.toolCall')} {event.name}(
+          {event.args.length > 80 ? event.args.slice(0, 80) + '...' : event.args})
         </div>
       );
     case 'tool_result':
       return (
         <div className="text-cyan-400">
-          {t('agentComposer.runner.toolResult')} {event.result.length > 120 ? event.result.slice(0, 120) + '...' : event.result}
+          {t('agentComposer.runner.toolResult')}{' '}
+          {event.result.length > 120 ? event.result.slice(0, 120) + '...' : event.result}
         </div>
       );
     case 'state_update':

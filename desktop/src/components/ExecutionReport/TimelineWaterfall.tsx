@@ -9,10 +9,7 @@
 
 import { useMemo } from 'react';
 import { clsx } from 'clsx';
-import {
-  CheckCircledIcon,
-  CrossCircledIcon,
-} from '@radix-ui/react-icons';
+import { CheckCircledIcon, CrossCircledIcon } from '@radix-ui/react-icons';
 import type { TimelineEntry } from '../../store/executionReport';
 
 // ============================================================================
@@ -25,8 +22,8 @@ const agentColors: Record<string, string> = {
   'claude-opus': 'bg-purple-400',
   'gpt-4': 'bg-green-400',
   'gpt-3.5': 'bg-emerald-400',
-  'deepseek': 'bg-amber-400',
-  'unknown': 'bg-gray-400',
+  deepseek: 'bg-amber-400',
+  unknown: 'bg-gray-400',
 };
 
 function getAgentColor(agent: string): string {
@@ -66,9 +63,7 @@ export function TimelineWaterfall({ entries, totalDurationMs }: TimelineWaterfal
 
   return (
     <div className="space-y-3" data-testid="timeline-waterfall">
-      <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-        Execution Timeline
-      </h4>
+      <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Execution Timeline</h4>
 
       <div className="space-y-1">
         {batchGroups.map(([batchIndex, batchEntries]) => (
@@ -96,7 +91,7 @@ export function TimelineWaterfall({ entries, totalDurationMs }: TimelineWaterfal
                       className={clsx(
                         'absolute h-full rounded transition-all',
                         entry.status === 'completed' ? getAgentColor(entry.agent) : 'bg-red-400',
-                        'opacity-70 hover:opacity-100'
+                        'opacity-70 hover:opacity-100',
                       )}
                       style={{
                         left: `${left}%`,

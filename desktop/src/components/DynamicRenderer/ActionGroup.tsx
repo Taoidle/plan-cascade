@@ -50,16 +50,12 @@ export function ActionGroup({ data, onAction }: ActionGroupProps) {
         // IPC command may not exist yet -- non-fatal
       }
     },
-    [onAction]
+    [onAction],
   );
 
   return (
     <div className="space-y-2" data-testid="action-group">
-      {data.label && (
-        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
-          {data.label}
-        </span>
-      )}
+      {data.label && <span className="text-xs font-medium text-gray-500 dark:text-gray-400">{data.label}</span>}
       <div className="flex flex-wrap items-center gap-2">
         {data.actions.map((action) => {
           const variant = action.variant ?? 'secondary';
@@ -72,7 +68,7 @@ export function ActionGroup({ data, onAction }: ActionGroupProps) {
                 'px-3 py-1.5 rounded-md text-sm font-medium',
                 'transition-colors',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
-                variantStyles[variant]
+                variantStyles[variant],
               )}
               data-action-id={action.id}
             >

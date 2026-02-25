@@ -21,7 +21,9 @@ const eventHandlers: Record<string, EventCallback> = {};
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn().mockImplementation((eventName: string, handler: EventCallback) => {
     eventHandlers[eventName] = handler;
-    return Promise.resolve(() => { delete eventHandlers[eventName]; });
+    return Promise.resolve(() => {
+      delete eventHandlers[eventName];
+    });
   }),
   emit: vi.fn(),
 }));
@@ -109,13 +111,33 @@ describe('Execution Store - Background Session State', () => {
     });
 
     it('should restore persisted session tree on initialize()', () => {
-      localStorage.setItem('plan-cascade-execution-sessions-v1', JSON.stringify({
-        version: 1,
-        activeSessionId: 'bg-1',
-        backgroundSessions: {
-          'bg-1': {
-            id: 'bg-1',
-            taskDescription: 'Persisted background',
+      localStorage.setItem(
+        'plan-cascade-execution-sessions-v1',
+        JSON.stringify({
+          version: 1,
+          activeSessionId: 'bg-1',
+          backgroundSessions: {
+            'bg-1': {
+              id: 'bg-1',
+              taskDescription: 'Persisted background',
+              status: 'idle',
+              streamingOutput: [],
+              streamLineCounter: 0,
+              currentTurnStartLineId: 0,
+              taskId: null,
+              isChatSession: false,
+              standaloneTurns: [],
+              standaloneSessionId: null,
+              latestUsage: null,
+              sessionUsageTotals: null,
+              startedAt: Date.now(),
+              llmBackend: 'openai',
+              llmProvider: 'openai',
+              llmModel: 'gpt-4o',
+            },
+          },
+          foreground: {
+            taskDescription: 'Persisted foreground',
             status: 'idle',
             streamingOutput: [],
             streamLineCounter: 0,
@@ -126,36 +148,19 @@ describe('Execution Store - Background Session State', () => {
             standaloneSessionId: null,
             latestUsage: null,
             sessionUsageTotals: null,
+            turnUsageTotals: null,
             startedAt: Date.now(),
             llmBackend: 'openai',
             llmProvider: 'openai',
             llmModel: 'gpt-4o',
+            foregroundParentSessionId: null,
+            foregroundBgId: null,
+            foregroundOriginHistoryId: 'hist-1',
+            foregroundOriginSessionId: 'standalone:sess-1',
+            foregroundDirty: false,
           },
-        },
-        foreground: {
-          taskDescription: 'Persisted foreground',
-          status: 'idle',
-          streamingOutput: [],
-          streamLineCounter: 0,
-          currentTurnStartLineId: 0,
-          taskId: null,
-          isChatSession: false,
-          standaloneTurns: [],
-          standaloneSessionId: null,
-          latestUsage: null,
-          sessionUsageTotals: null,
-          turnUsageTotals: null,
-          startedAt: Date.now(),
-          llmBackend: 'openai',
-          llmProvider: 'openai',
-          llmModel: 'gpt-4o',
-          foregroundParentSessionId: null,
-          foregroundBgId: null,
-          foregroundOriginHistoryId: 'hist-1',
-          foregroundOriginSessionId: 'standalone:sess-1',
-          foregroundDirty: false,
-        },
-      }));
+        }),
+      );
 
       useExecutionStore.getState().initialize();
       const state = useExecutionStore.getState();
@@ -245,9 +250,7 @@ describe('Execution Store - Background Session State', () => {
       useExecutionStore.setState({
         taskDescription: 'Build something',
         status: 'running',
-        streamingOutput: [
-          { id: 1, content: 'test', type: 'text', timestamp: 1000 },
-        ],
+        streamingOutput: [{ id: 1, content: 'test', type: 'text', timestamp: 1000 }],
         streamLineCounter: 1,
         taskId: 'task-abc',
         isChatSession: true,
@@ -345,9 +348,7 @@ describe('Execution Store - Background Session State', () => {
       useExecutionStore.setState({
         taskDescription: 'Current foreground task',
         status: 'idle',
-        streamingOutput: [
-          { id: 1, content: 'Foreground task', type: 'info', timestamp: 3000 },
-        ],
+        streamingOutput: [{ id: 1, content: 'Foreground task', type: 'info', timestamp: 3000 }],
         streamLineCounter: 1,
         currentTurnStartLineId: 0,
         taskId: 'fg-task-id',
@@ -381,9 +382,7 @@ describe('Execution Store - Background Session State', () => {
       // The old foreground should also be in backgroundSessions (new bg entry)
       const bgKeys = Object.keys(state.backgroundSessions);
       expect(bgKeys.length).toBe(2); // ghost + new bg entry for old foreground
-      const swappedBg = Object.values(state.backgroundSessions).find(
-        (s) => s.taskId === 'fg-task-id'
-      );
+      const swappedBg = Object.values(state.backgroundSessions).find((s) => s.taskId === 'fg-task-id');
       expect(swappedBg).toBeDefined();
       expect(swappedBg!.taskDescription).toBe('Current foreground task');
       expect(swappedBg!.status).toBe('idle');
@@ -489,7 +488,7 @@ describe('Execution Store - Background Session State', () => {
 
       // Fork should be persisted as a distinct child snapshot
       const childSnapshot = Object.values(state.backgroundSessions).find(
-        (snap) => snap.id !== parentId && snap.parentSessionId === parentId
+        (snap) => snap.id !== parentId && snap.parentSessionId === parentId,
       );
       expect(childSnapshot).toBeDefined();
       expect(childSnapshot!.taskDescription).toBe('Forked Current Session');
@@ -654,10 +653,10 @@ describe('Execution Store - Background Session State', () => {
 
       // Find the "Remove me" session
       const removeKey = bgKeys.find(
-        (k) => useExecutionStore.getState().backgroundSessions[k].taskDescription === 'Remove me'
+        (k) => useExecutionStore.getState().backgroundSessions[k].taskDescription === 'Remove me',
       )!;
       const keepKey = bgKeys.find(
-        (k) => useExecutionStore.getState().backgroundSessions[k].taskDescription === 'Keep me'
+        (k) => useExecutionStore.getState().backgroundSessions[k].taskDescription === 'Keep me',
       )!;
 
       useExecutionStore.getState().removeBackgroundSession(removeKey);
@@ -773,9 +772,7 @@ describe('Execution Store - Background Session State', () => {
       useExecutionStore.setState({
         taskDescription: 'Full snapshot test',
         status: 'running',
-        streamingOutput: [
-          { id: 1, content: 'hello', type: 'info', timestamp: 1000 },
-        ],
+        streamingOutput: [{ id: 1, content: 'hello', type: 'info', timestamp: 1000 }],
         streamLineCounter: 1,
         currentTurnStartLineId: 0,
         taskId: 'task-full',
@@ -896,7 +893,7 @@ describe('Execution Store - Background Session State', () => {
 
       // Find the newly backgrounded Session B
       const bgSessions = useExecutionStore.getState().backgroundSessions;
-      const sessionBSnapshot = Object.values(bgSessions).find(s => s.taskId === 'task-b');
+      const sessionBSnapshot = Object.values(bgSessions).find((s) => s.taskId === 'task-b');
 
       expect(sessionBSnapshot).toBeDefined();
       expect(sessionBSnapshot!.llmBackend).toBe('deepseek');
@@ -1044,8 +1041,9 @@ describe('Execution Store - Background Session State', () => {
       const stateAfterSecond = useExecutionStore.getState();
 
       expect(stateAfterSecond.foregroundBgId).toBe(bgId);
-      expect(Object.keys(stateAfterSecond.backgroundSessions).length)
-        .toBe(Object.keys(stateAfterFirst.backgroundSessions).length);
+      expect(Object.keys(stateAfterSecond.backgroundSessions).length).toBe(
+        Object.keys(stateAfterFirst.backgroundSessions).length,
+      );
     });
 
     it('switchToSession should update previous ghost with live state when switching again', () => {
@@ -1065,8 +1063,7 @@ describe('Execution Store - Background Session State', () => {
         taskId: 'b',
       });
       useExecutionStore.getState().backgroundCurrentSession();
-      const bgIdB = Object.keys(useExecutionStore.getState().backgroundSessions)
-        .find((k) => k !== bgIdA)!;
+      const bgIdB = Object.keys(useExecutionStore.getState().backgroundSessions).find((k) => k !== bgIdA)!;
 
       // Switch to A (A becomes ghost)
       useExecutionStore.getState().switchToSession(bgIdA);
@@ -1106,9 +1103,7 @@ describe('Execution Store - Background Session State', () => {
       // Ghost is the target
       expect(state.foregroundBgId).toBe(bgId);
       // Old foreground should be saved as new bg entry
-      const freshBg = Object.values(state.backgroundSessions).find(
-        (s) => s.taskId === 'fg-task'
-      );
+      const freshBg = Object.values(state.backgroundSessions).find((s) => s.taskId === 'fg-task');
       expect(freshBg).toBeDefined();
       expect(freshBg!.taskDescription).toBe('Fresh foreground');
     });
@@ -1295,8 +1290,9 @@ describe('Execution Store - Background Session State', () => {
         foregroundParentSessionId: gpId,
       });
       useExecutionStore.getState().backgroundCurrentSession();
-      const parentId = Object.values(useExecutionStore.getState().backgroundSessions)
-        .find((s) => s.taskId === 'parent')!.id;
+      const parentId = Object.values(useExecutionStore.getState().backgroundSessions).find(
+        (s) => s.taskId === 'parent',
+      )!.id;
 
       useExecutionStore.setState({
         taskDescription: 'Child',
@@ -1321,9 +1317,7 @@ describe('Execution Store - Background Session State', () => {
         status: 'idle',
         taskId: 'gt',
         isChatSession: true,
-        streamingOutput: [
-          { id: 1, content: 'test', type: 'info', timestamp: 1000 },
-        ],
+        streamingOutput: [{ id: 1, content: 'test', type: 'info', timestamp: 1000 }],
       });
       useExecutionStore.getState().backgroundCurrentSession();
       const bgId = Object.keys(useExecutionStore.getState().backgroundSessions)[0];
@@ -1376,8 +1370,7 @@ describe('Execution Store - Background Session State', () => {
         standaloneSessionId: 'sa-b',
       });
       useExecutionStore.getState().backgroundCurrentSession();
-      const bId = Object.values(useExecutionStore.getState().backgroundSessions)
-        .find((s) => s.taskId === 'b')!.id;
+      const bId = Object.values(useExecutionStore.getState().backgroundSessions).find((s) => s.taskId === 'b')!.id;
 
       // Create C as child of B, background it
       useExecutionStore.setState({
@@ -1387,8 +1380,7 @@ describe('Execution Store - Background Session State', () => {
         foregroundParentSessionId: bId,
       });
       useExecutionStore.getState().backgroundCurrentSession();
-      const cId = Object.values(useExecutionStore.getState().backgroundSessions)
-        .find((s) => s.taskId === 'c')!.id;
+      const cId = Object.values(useExecutionStore.getState().backgroundSessions).find((s) => s.taskId === 'c')!.id;
 
       // Switch to A — A becomes ghost, hierarchy should be intact
       useExecutionStore.getState().switchToSession(aId);
@@ -1424,9 +1416,7 @@ describe('Execution Store - Event Routing to Background Sessions', () => {
     useExecutionStore.setState({
       taskDescription: 'Background session task',
       status: 'running',
-      streamingOutput: [
-        { id: 1, content: 'Background task started', type: 'info', timestamp: 1000 },
-      ],
+      streamingOutput: [{ id: 1, content: 'Background task started', type: 'info', timestamp: 1000 }],
       streamLineCounter: 1,
       currentTurnStartLineId: 0,
       taskId: 'bg-session-1',
@@ -1445,9 +1435,7 @@ describe('Execution Store - Event Routing to Background Sessions', () => {
     useExecutionStore.setState({
       taskDescription: 'Foreground session task',
       status: 'running',
-      streamingOutput: [
-        { id: 1, content: 'Foreground task started', type: 'info', timestamp: 2000 },
-      ],
+      streamingOutput: [{ id: 1, content: 'Foreground task started', type: 'info', timestamp: 2000 }],
       streamLineCounter: 1,
       currentTurnStartLineId: 0,
       taskId: 'fg-session-1',
@@ -1970,9 +1958,7 @@ describe('Execution Store - Auto-Background on start()', () => {
     useExecutionStore.setState({
       taskDescription: 'Chat session task',
       status: 'running',
-      streamingOutput: [
-        { id: 1, content: 'Chat session...', type: 'text', timestamp: 1000 },
-      ],
+      streamingOutput: [{ id: 1, content: 'Chat session...', type: 'text', timestamp: 1000 }],
       streamLineCounter: 1,
       currentTurnStartLineId: 0,
       taskId: 'chat-task-456',

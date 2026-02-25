@@ -26,16 +26,7 @@ export function HistoryTab() {
   const { t } = useTranslation('git');
   const repoPath = useSettingsStore((s) => s.workspacePath);
   // Git graph data
-  const {
-    graphLayout,
-    commits,
-    branches,
-    isLoading,
-    error,
-    loadMore,
-    refresh,
-    hasMore,
-  } = useGitGraph({ repoPath });
+  const { graphLayout, commits, branches, isLoading, error, loadMore, refresh, hasMore } = useGitGraph({ repoPath });
 
   // Git store state
   const {
@@ -80,7 +71,7 @@ export function HistoryTab() {
           c.author_name.toLowerCase().includes(q) ||
           c.author_email.toLowerCase().includes(q) ||
           c.short_sha.toLowerCase().includes(q) ||
-          c.sha.toLowerCase().startsWith(q)
+          c.sha.toLowerCase().startsWith(q),
       );
     }
 
@@ -95,13 +86,9 @@ export function HistoryTab() {
     const filteredShas = new Set(filteredCommits.map((c) => c.sha));
 
     // When filtering, we re-index rows to be sequential
-    const filteredNodes = graphLayout.nodes
-      .filter((n) => filteredShas.has(n.sha))
-      .map((n, i) => ({ ...n, row: i }));
+    const filteredNodes = graphLayout.nodes.filter((n) => filteredShas.has(n.sha)).map((n, i) => ({ ...n, row: i }));
 
-    const filteredEdges = graphLayout.edges.filter(
-      (e) => filteredShas.has(e.from_sha) && filteredShas.has(e.to_sha)
-    );
+    const filteredEdges = graphLayout.edges.filter((e) => filteredShas.has(e.from_sha) && filteredShas.has(e.to_sha));
 
     // Remap edge rows to match filtered node rows
     const shaToRow = new Map(filteredNodes.map((n) => [n.sha, n.row]));
@@ -168,9 +155,10 @@ export function HistoryTab() {
                 is_new: additions > 0 && deletions === 0,
                 is_deleted: deletions > 0 && additions === 0,
                 is_renamed: false,
-                hunks: lines.length > 0
-                  ? [{ header: '', old_start: 1, old_count: deletions, new_start: 1, new_count: additions, lines }]
-                  : [],
+                hunks:
+                  lines.length > 0
+                    ? [{ header: '', old_start: 1, old_count: deletions, new_start: 1, new_count: additions, lines }]
+                    : [],
               };
             });
 
@@ -184,7 +172,7 @@ export function HistoryTab() {
         // Silently fail - diff is optional enhancement
       }
     },
-    [repoPath, commits, setSelectedCommitSha, setSelectedCommitDiff]
+    [repoPath, commits, setSelectedCommitSha, setSelectedCommitDiff],
   );
 
   const handleCompareCommit = useCallback(
@@ -195,23 +183,20 @@ export function HistoryTab() {
         compareSha: sha,
       });
     },
-    [selectedCommitSha, setCompareSelection]
+    [selectedCommitSha, setCompareSelection],
   );
 
   // ---------------------------------------------------------------------------
   // Context menu
   // ---------------------------------------------------------------------------
 
-  const handleContextMenu = useCallback(
-    (sha: string, event: React.MouseEvent) => {
-      setContextMenu({
-        sha,
-        x: event.clientX,
-        y: event.clientY,
-      });
-    },
-    []
-  );
+  const handleContextMenu = useCallback((sha: string, event: React.MouseEvent) => {
+    setContextMenu({
+      sha,
+      x: event.clientX,
+      y: event.clientY,
+    });
+  }, []);
 
   const closeContextMenu = useCallback(() => {
     setContextMenu(null);
@@ -286,7 +271,7 @@ export function HistoryTab() {
               'text-gray-800 dark:text-gray-200',
               'placeholder-gray-400 dark:placeholder-gray-500',
               'focus:outline-none focus:ring-1 focus:ring-blue-500 dark:focus:ring-blue-400',
-              'transition-colors'
+              'transition-colors',
             )}
           />
           {searchQuery && (
@@ -295,12 +280,7 @@ export function HistoryTab() {
               className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
             >
               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           )}
@@ -316,7 +296,7 @@ export function HistoryTab() {
             'border border-gray-200 dark:border-gray-700',
             'text-gray-700 dark:text-gray-300',
             'focus:outline-none focus:ring-1 focus:ring-blue-500',
-            'transition-colors'
+            'transition-colors',
           )}
         >
           <option value="">{t('historyTab.allBranches')}</option>
@@ -336,7 +316,7 @@ export function HistoryTab() {
             'p-1.5 rounded-md text-gray-500 dark:text-gray-400',
             'hover:bg-gray-100 dark:hover:bg-gray-700',
             'disabled:opacity-50 disabled:cursor-not-allowed',
-            'transition-colors'
+            'transition-colors',
           )}
           title={t('historyTab.refresh')}
         >
@@ -360,7 +340,10 @@ export function HistoryTab() {
       {compareSelection && (
         <div className="shrink-0 flex items-center justify-between px-3 py-1.5 bg-purple-50 dark:bg-purple-900/20 border-b border-purple-200 dark:border-purple-800">
           <span className="text-xs text-purple-700 dark:text-purple-300">
-            {t('historyTab.comparing', { base: compareSelection.baseSha.slice(0, 7), compare: compareSelection.compareSha.slice(0, 7) })}
+            {t('historyTab.comparing', {
+              base: compareSelection.baseSha.slice(0, 7),
+              compare: compareSelection.compareSha.slice(0, 7),
+            })}
           </span>
           <button
             onClick={() => setCompareSelection(null)}

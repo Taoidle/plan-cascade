@@ -17,7 +17,7 @@ export function AnalyticsSkeleton() {
             className={clsx(
               'bg-white dark:bg-gray-900 rounded-xl',
               'border border-gray-200 dark:border-gray-800',
-              'p-6'
+              'p-6',
             )}
           >
             <div className="flex items-start justify-between">
@@ -36,11 +36,7 @@ export function AnalyticsSkeleton() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Cost Chart Skeleton */}
         <div
-          className={clsx(
-            'bg-white dark:bg-gray-900 rounded-xl',
-            'border border-gray-200 dark:border-gray-800',
-            'p-6'
-          )}
+          className={clsx('bg-white dark:bg-gray-900 rounded-xl', 'border border-gray-200 dark:border-gray-800', 'p-6')}
         >
           <div className="w-40 h-6 bg-gray-200 dark:bg-gray-700 rounded mb-4 animate-skeleton" />
           <div className="h-[300px] bg-gray-100 dark:bg-gray-800 rounded-lg animate-skeleton" />
@@ -48,11 +44,7 @@ export function AnalyticsSkeleton() {
 
         {/* Token Breakdown Skeleton */}
         <div
-          className={clsx(
-            'bg-white dark:bg-gray-900 rounded-xl',
-            'border border-gray-200 dark:border-gray-800',
-            'p-6'
-          )}
+          className={clsx('bg-white dark:bg-gray-900 rounded-xl', 'border border-gray-200 dark:border-gray-800', 'p-6')}
         >
           <div className="w-40 h-6 bg-gray-200 dark:bg-gray-700 rounded mb-4 animate-skeleton" />
           <div className="flex gap-6">
@@ -72,11 +64,7 @@ export function AnalyticsSkeleton() {
 
       {/* Table Skeleton */}
       <div
-        className={clsx(
-          'bg-white dark:bg-gray-900 rounded-xl',
-          'border border-gray-200 dark:border-gray-800',
-          'p-6'
-        )}
+        className={clsx('bg-white dark:bg-gray-900 rounded-xl', 'border border-gray-200 dark:border-gray-800', 'p-6')}
       >
         <div className="w-40 h-6 bg-gray-200 dark:bg-gray-700 rounded mb-4 animate-skeleton" />
         <div className="space-y-3">

@@ -20,14 +20,7 @@ interface ServerCardProps {
   isLoading?: boolean;
 }
 
-export function ServerCard({
-  server,
-  onTest,
-  onToggle,
-  onEdit,
-  onDelete,
-  isLoading = false,
-}: ServerCardProps) {
+export function ServerCard({ server, onTest, onToggle, onEdit, onDelete, isLoading = false }: ServerCardProps) {
   const { t } = useTranslation();
 
   const statusColor = getServerStatusColor(server.status, server.enabled);
@@ -39,7 +32,7 @@ export function ServerCard({
         'p-4 rounded-lg border transition-colors',
         server.enabled
           ? 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
-          : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800 opacity-75'
+          : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800 opacity-75',
       )}
     >
       {/* Header Row */}
@@ -47,18 +40,12 @@ export function ServerCard({
         <div className="flex items-center gap-3">
           {/* Status Indicator */}
           <div
-            className={clsx(
-              'w-2.5 h-2.5 rounded-full',
-              statusColor,
-              server.status === 'connected' && 'animate-pulse'
-            )}
+            className={clsx('w-2.5 h-2.5 rounded-full', statusColor, server.status === 'connected' && 'animate-pulse')}
           />
 
           {/* Server Name */}
           <div>
-            <h3 className="font-semibold text-gray-900 dark:text-white">
-              {server.name}
-            </h3>
+            <h3 className="font-semibold text-gray-900 dark:text-white">{server.name}</h3>
             <div className="flex items-center gap-2 mt-0.5">
               {/* Type Badge */}
               <span
@@ -66,15 +53,13 @@ export function ServerCard({
                   'px-1.5 py-0.5 rounded text-xs font-medium',
                   server.server_type === 'stdio'
                     ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
-                    : 'bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300'
+                    : 'bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300',
                 )}
               >
                 {server.server_type.toUpperCase()}
               </span>
               {/* Status Label */}
-              <span className={clsx('text-xs', getStatusTextColor(server.status))}>
-                {statusLabel}
-              </span>
+              <span className={clsx('text-xs', getStatusTextColor(server.status))}>{statusLabel}</span>
             </div>
           </div>
         </div>
@@ -91,7 +76,7 @@ export function ServerCard({
             'transition-colors',
             'disabled:opacity-50',
             'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-            'dark:focus:ring-offset-gray-800'
+            'dark:focus:ring-offset-gray-800',
           )}
         >
           <Switch.Thumb
@@ -99,7 +84,7 @@ export function ServerCard({
               'block w-4 h-4 rounded-full bg-white',
               'transition-transform',
               'translate-x-0.5',
-              'data-[state=checked]:translate-x-[18px]'
+              'data-[state=checked]:translate-x-[18px]',
             )}
           />
         </Switch.Root>
@@ -134,7 +119,7 @@ export function ServerCard({
             'text-primary-700 dark:text-primary-300',
             'hover:bg-primary-200 dark:hover:bg-primary-800',
             'disabled:opacity-50 disabled:cursor-not-allowed',
-            'text-xs font-medium transition-colors'
+            'text-xs font-medium transition-colors',
           )}
         >
           <PlayIcon className="w-3 h-3" />
@@ -150,7 +135,7 @@ export function ServerCard({
             'text-gray-700 dark:text-gray-300',
             'hover:bg-gray-200 dark:hover:bg-gray-600',
             'disabled:opacity-50 disabled:cursor-not-allowed',
-            'text-xs font-medium transition-colors'
+            'text-xs font-medium transition-colors',
           )}
         >
           <Pencil1Icon className="w-3 h-3" />
@@ -166,7 +151,7 @@ export function ServerCard({
             'text-red-700 dark:text-red-300',
             'hover:bg-red-200 dark:hover:bg-red-800',
             'disabled:opacity-50 disabled:cursor-not-allowed',
-            'text-xs font-medium transition-colors ml-auto'
+            'text-xs font-medium transition-colors ml-auto',
           )}
         >
           <TrashIcon className="w-3 h-3" />

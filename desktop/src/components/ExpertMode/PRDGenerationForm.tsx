@@ -8,12 +8,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { clsx } from 'clsx';
 import { usePRDStore } from '../../store/prd';
-import {
-  RocketIcon,
-  MagicWandIcon,
-  LayersIcon,
-  CubeIcon,
-} from '@radix-ui/react-icons';
+import { RocketIcon, MagicWandIcon, LayersIcon, CubeIcon } from '@radix-ui/react-icons';
 
 interface StrategySuggestion {
   strategy: 'direct' | 'hybrid_auto' | 'mega_plan';
@@ -53,9 +48,7 @@ export function PRDGenerationForm() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Determine suggested strategy based on input length
-  const suggestedStrategy = strategies.find(
-    (s) => requirements.length < s.threshold
-  ) || strategies[2];
+  const suggestedStrategy = strategies.find((s) => requirements.length < s.threshold) || strategies[2];
 
   // Auto-resize textarea
   useEffect(() => {
@@ -83,15 +76,13 @@ export function PRDGenerationForm() {
     <div className="space-y-6">
       {/* Requirements Input */}
       <div className="space-y-2">
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-          Task Requirements
-        </label>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Task Requirements</label>
         <div
           className={clsx(
             'relative rounded-xl border-2 transition-colors',
             'bg-white dark:bg-gray-800',
             'border-gray-200 dark:border-gray-700',
-            'focus-within:border-primary-500 dark:focus-within:border-primary-500'
+            'focus-within:border-primary-500 dark:focus-within:border-primary-500',
           )}
         >
           <textarea
@@ -109,22 +100,18 @@ export function PRDGenerationForm() {
               'placeholder-gray-400 dark:placeholder-gray-500',
               'focus:outline-none',
               'text-base leading-relaxed',
-              isGenerating && 'opacity-50 cursor-not-allowed'
+              isGenerating && 'opacity-50 cursor-not-allowed',
             )}
           />
 
           {/* Character count */}
-          <div className="absolute bottom-3 right-3 text-xs text-gray-400">
-            {requirements.length} characters
-          </div>
+          <div className="absolute bottom-3 right-3 text-xs text-gray-400">{requirements.length} characters</div>
         </div>
       </div>
 
       {/* Strategy Suggestions */}
       <div className="space-y-2">
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-          Suggested Strategy
-        </label>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Suggested Strategy</label>
         <div className="grid grid-cols-3 gap-3">
           {strategies.map((strategy) => (
             <button
@@ -134,7 +121,7 @@ export function PRDGenerationForm() {
                 'relative p-4 rounded-lg border-2 transition-all text-left',
                 strategy.strategy === (prd.strategy || suggestedStrategy.strategy)
                   ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                  : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600'
+                  : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600',
               )}
             >
               {strategy.strategy === suggestedStrategy.strategy && requirements.length > 0 && (
@@ -143,24 +130,27 @@ export function PRDGenerationForm() {
                 </span>
               )}
               <div className="flex items-center gap-2 mb-1">
-                <span className={clsx(
-                  'text-gray-600 dark:text-gray-400',
-                  strategy.strategy === (prd.strategy || suggestedStrategy.strategy) && 'text-primary-600 dark:text-primary-400'
-                )}>
+                <span
+                  className={clsx(
+                    'text-gray-600 dark:text-gray-400',
+                    strategy.strategy === (prd.strategy || suggestedStrategy.strategy) &&
+                      'text-primary-600 dark:text-primary-400',
+                  )}
+                >
                   {strategy.icon}
                 </span>
-                <span className={clsx(
-                  'font-medium',
-                  strategy.strategy === (prd.strategy || suggestedStrategy.strategy)
-                    ? 'text-primary-700 dark:text-primary-300'
-                    : 'text-gray-900 dark:text-white'
-                )}>
+                <span
+                  className={clsx(
+                    'font-medium',
+                    strategy.strategy === (prd.strategy || suggestedStrategy.strategy)
+                      ? 'text-primary-700 dark:text-primary-300'
+                      : 'text-gray-900 dark:text-white',
+                  )}
+                >
                   {strategy.label}
                 </span>
               </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                {strategy.description}
-              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{strategy.description}</p>
             </button>
           ))}
         </div>
@@ -169,9 +159,7 @@ export function PRDGenerationForm() {
       {/* Error Message */}
       {generationError && (
         <div className="p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
-          <p className="text-sm text-red-700 dark:text-red-300">
-            {generationError}
-          </p>
+          <p className="text-sm text-red-700 dark:text-red-300">{generationError}</p>
         </div>
       )}
 
@@ -186,7 +174,7 @@ export function PRDGenerationForm() {
           'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
           'dark:focus:ring-offset-gray-900',
           'disabled:opacity-50 disabled:cursor-not-allowed',
-          'transition-colors'
+          'transition-colors',
         )}
       >
         {isGenerating ? (
@@ -212,20 +200,8 @@ export function PRDGenerationForm() {
 
 function LoadingSpinner() {
   return (
-    <svg
-      className="animate-spin h-5 w-5"
-      xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      viewBox="0 0 24 24"
-    >
-      <circle
-        className="opacity-25"
-        cx="12"
-        cy="12"
-        r="10"
-        stroke="currentColor"
-        strokeWidth="4"
-      />
+    <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
       <path
         className="opacity-75"
         fill="currentColor"

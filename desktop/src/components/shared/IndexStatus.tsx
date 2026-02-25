@@ -162,33 +162,14 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
     return (
       <div className={clsx('flex items-center gap-1.5', className)}>
         <svg
-          className={clsx(
-            'animate-spin text-blue-500 dark:text-blue-400',
-            compact ? 'w-3 h-3' : 'w-4 h-4'
-          )}
+          className={clsx('animate-spin text-blue-500 dark:text-blue-400', compact ? 'w-3 h-3' : 'w-4 h-4')}
           fill="none"
           viewBox="0 0 24 24"
         >
-          <circle
-            className="opacity-25"
-            cx="12"
-            cy="12"
-            r="10"
-            stroke="currentColor"
-            strokeWidth="4"
-          />
-          <path
-            className="opacity-75"
-            fill="currentColor"
-            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-          />
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
-        <span
-          className={clsx(
-            'text-blue-600 dark:text-blue-400',
-            compact ? 'text-xs' : 'text-sm'
-          )}
-        >
+        <span className={clsx('text-blue-600 dark:text-blue-400', compact ? 'text-xs' : 'text-sm')}>
           {compact
             ? `${indexedFiles}/${totalFiles}`
             : totalFiles > 0
@@ -209,12 +190,7 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
     return (
       <div className={clsx('flex items-center gap-1.5 flex-wrap', className)}>
         <div className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
-        <span
-          className={clsx(
-            'text-green-600 dark:text-green-400',
-            compact ? 'text-xs' : 'text-sm'
-          )}
-        >
+        <span className={clsx('text-green-600 dark:text-green-400', compact ? 'text-xs' : 'text-sm')}>
           {t('indexing.readyFiles', { count: indexedFiles })}
         </span>
 
@@ -232,7 +208,7 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
               'inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium',
               semanticReady
                 ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
-                : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+                : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400',
             )}
           >
             {semanticReady
@@ -246,10 +222,7 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
         {/* Compact semantic indicator (small dot) */}
         {compact && (
           <div
-            className={clsx(
-              'w-1.5 h-1.5 rounded-full flex-shrink-0',
-              semanticReady ? 'bg-purple-500' : 'bg-gray-400'
-            )}
+            className={clsx('w-1.5 h-1.5 rounded-full flex-shrink-0', semanticReady ? 'bg-purple-500' : 'bg-gray-400')}
             title={
               semanticReady
                 ? embeddingProviderName
@@ -267,12 +240,10 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
               'inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium',
               lspEnrichment === 'enriched'
                 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300'
+                : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300',
             )}
           >
-            {lspEnrichment === 'enriched'
-              ? t('indexing.lspEnrichmentReady')
-              : t('indexing.lspEnrichmentInProgress')}
+            {lspEnrichment === 'enriched' ? t('indexing.lspEnrichmentReady') : t('indexing.lspEnrichmentInProgress')}
           </span>
         )}
 
@@ -281,12 +252,10 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
           <div
             className={clsx(
               'w-1.5 h-1.5 rounded-full flex-shrink-0',
-              lspEnrichment === 'enriched' ? 'bg-green-500' : 'bg-yellow-500'
+              lspEnrichment === 'enriched' ? 'bg-green-500' : 'bg-yellow-500',
             )}
             title={
-              lspEnrichment === 'enriched'
-                ? t('indexing.lspEnrichmentReady')
-                : t('indexing.lspEnrichmentInProgress')
+              lspEnrichment === 'enriched' ? t('indexing.lspEnrichmentReady') : t('indexing.lspEnrichmentInProgress')
             }
           />
         )}
@@ -299,7 +268,7 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
             'text-gray-400 dark:text-gray-500',
             'hover:text-gray-600 dark:hover:text-gray-300',
             'hover:bg-gray-100 dark:hover:bg-gray-800',
-            compact ? 'w-5 h-5' : 'w-6 h-6'
+            compact ? 'w-5 h-5' : 'w-6 h-6',
           )}
         >
           <svg
@@ -325,10 +294,7 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
     <div className={clsx('flex items-center gap-1.5', className)}>
       <div className="w-2 h-2 rounded-full bg-red-500" />
       <span
-        className={clsx(
-          'text-red-600 dark:text-red-400',
-          compact ? 'text-xs' : 'text-sm'
-        )}
+        className={clsx('text-red-600 dark:text-red-400', compact ? 'text-xs' : 'text-sm')}
         title={errorMessage || undefined}
       >
         {t('indexing.error')}
@@ -341,7 +307,7 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
           'text-gray-400 dark:text-gray-500',
           'hover:text-gray-600 dark:hover:text-gray-300',
           'hover:bg-gray-100 dark:hover:bg-gray-800',
-          compact ? 'w-5 h-5' : 'w-6 h-6'
+          compact ? 'w-5 h-5' : 'w-6 h-6',
         )}
       >
         <svg

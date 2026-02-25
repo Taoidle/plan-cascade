@@ -89,19 +89,13 @@ export function AgentConfigSection() {
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-          {t('agents.title')}
-        </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {t('agents.description')}
-        </p>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">{t('agents.title')}</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('agents.description')}</p>
       </div>
 
       {/* Agent Selection Strategy */}
       <section className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('agents.selection.title')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('agents.selection.title')}</h3>
         <select
           value={agentSelection}
           onChange={(e) => handleAgentSelectionChange(e.target.value)}
@@ -110,7 +104,7 @@ export function AgentConfigSection() {
             'border-gray-200 dark:border-gray-700',
             'bg-white dark:bg-gray-800',
             'text-gray-900 dark:text-white',
-            'focus:outline-none focus:ring-2 focus:ring-primary-500'
+            'focus:outline-none focus:ring-2 focus:ring-primary-500',
           )}
         >
           <option value="smart">{t('agents.selection.smart')}</option>
@@ -127,16 +121,14 @@ export function AgentConfigSection() {
       {/* Agent List */}
       <section className="space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-            {t('agents.configuredAgents')}
-          </h3>
+          <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('agents.configuredAgents')}</h3>
           <button
             onClick={() => setIsAddDialogOpen(true)}
             className={clsx(
               'inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm',
               'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400',
               'hover:bg-primary-200 dark:hover:bg-primary-900/50',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500'
+              'focus:outline-none focus:ring-2 focus:ring-primary-500',
             )}
           >
             <PlusIcon className="w-4 h-4" />
@@ -151,7 +143,7 @@ export function AgentConfigSection() {
               className={clsx(
                 'flex items-center justify-between p-4 rounded-lg border',
                 'border-gray-200 dark:border-gray-700',
-                'bg-white dark:bg-gray-800'
+                'bg-white dark:bg-gray-800',
               )}
             >
               <div className="flex items-center gap-4">
@@ -163,7 +155,7 @@ export function AgentConfigSection() {
                     'bg-gray-200 dark:bg-gray-700',
                     'data-[state=checked]:bg-primary-600',
                     'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                    'dark:focus:ring-offset-gray-800'
+                    'dark:focus:ring-offset-gray-800',
                   )}
                 >
                   <Switch.Thumb
@@ -171,29 +163,26 @@ export function AgentConfigSection() {
                       'block w-5 h-5 bg-white rounded-full shadow',
                       'transition-transform',
                       'data-[state=checked]:translate-x-[18px]',
-                      'data-[state=unchecked]:translate-x-[2px]'
+                      'data-[state=unchecked]:translate-x-[2px]',
                     )}
                   />
                 </Switch.Root>
 
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-gray-900 dark:text-white">
-                      {agent.name}
-                    </span>
+                    <span className="font-medium text-gray-900 dark:text-white">{agent.name}</span>
                     {agent.isDefault && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400">
                         <StarFilledIcon className="w-3 h-3" /> {t('agents.default')}
                       </span>
                     )}
                     {!agent.enabled && (
-                      <span className="text-xs text-gray-400 dark:text-gray-500">
-                        {t('agents.disabled')}
-                      </span>
+                      <span className="text-xs text-gray-400 dark:text-gray-500">{t('agents.disabled')}</span>
                     )}
                   </div>
                   <div className="text-sm text-gray-500 dark:text-gray-400">
-                    {t('agents.commandLabel')} <code className="text-xs bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded">{agent.command}</code>
+                    {t('agents.commandLabel')}{' '}
+                    <code className="text-xs bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded">{agent.command}</code>
                   </div>
                 </div>
               </div>
@@ -205,7 +194,7 @@ export function AgentConfigSection() {
                     className={clsx(
                       'px-2 py-1 rounded text-xs',
                       'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400',
-                      'hover:bg-gray-200 dark:hover:bg-gray-600'
+                      'hover:bg-gray-200 dark:hover:bg-gray-600',
                     )}
                   >
                     {t('agents.setDefault')}
@@ -216,7 +205,7 @@ export function AgentConfigSection() {
                   className={clsx(
                     'p-2 rounded-lg',
                     'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200',
-                    'hover:bg-gray-100 dark:hover:bg-gray-700'
+                    'hover:bg-gray-100 dark:hover:bg-gray-700',
                   )}
                   aria-label={`Edit ${agent.name}`}
                 >
@@ -227,7 +216,7 @@ export function AgentConfigSection() {
                   className={clsx(
                     'p-2 rounded-lg',
                     'text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400',
-                    'hover:bg-gray-100 dark:hover:bg-gray-700'
+                    'hover:bg-gray-100 dark:hover:bg-gray-700',
                   )}
                   aria-label={`Delete ${agent.name}`}
                 >
@@ -238,9 +227,7 @@ export function AgentConfigSection() {
           ))}
 
           {agents.length === 0 && (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-              {t('agents.emptyState')}
-            </div>
+            <div className="text-center py-8 text-gray-500 dark:text-gray-400">{t('agents.emptyState')}</div>
           )}
         </div>
       </section>
@@ -274,7 +261,7 @@ export function AgentConfigSection() {
               'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
               'w-full max-w-md p-6',
               'bg-white dark:bg-gray-900 rounded-xl shadow-xl',
-              'focus:outline-none'
+              'focus:outline-none',
             )}
           >
             <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -290,7 +277,7 @@ export function AgentConfigSection() {
                     'px-4 py-2 rounded-lg',
                     'bg-gray-100 dark:bg-gray-800',
                     'text-gray-700 dark:text-gray-300',
-                    'hover:bg-gray-200 dark:hover:bg-gray-700'
+                    'hover:bg-gray-200 dark:hover:bg-gray-700',
                   )}
                 >
                   {t('agents.dialog.cancel')}
@@ -298,11 +285,7 @@ export function AgentConfigSection() {
               </Dialog.Close>
               <button
                 onClick={() => deleteConfirm && handleDeleteAgent(deleteConfirm)}
-                className={clsx(
-                  'px-4 py-2 rounded-lg',
-                  'bg-red-600 text-white',
-                  'hover:bg-red-700'
-                )}
+                className={clsx('px-4 py-2 rounded-lg', 'bg-red-600 text-white', 'hover:bg-red-700')}
               >
                 {t('agents.dialog.delete')}
               </button>
@@ -365,12 +348,10 @@ function AgentFormDialog({
             'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
             'w-full max-w-md p-6',
             'bg-white dark:bg-gray-900 rounded-xl shadow-xl',
-            'focus:outline-none'
+            'focus:outline-none',
           )}
         >
-          <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-white">
-            {title}
-          </Dialog.Title>
+          <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-white">{title}</Dialog.Title>
 
           <form onSubmit={handleSubmit} className="mt-4 space-y-4">
             <div>
@@ -389,7 +370,7 @@ function AgentFormDialog({
                   'bg-white dark:bg-gray-800',
                   'text-gray-900 dark:text-white',
                   'focus:outline-none focus:ring-2 focus:ring-primary-500',
-                  'disabled:opacity-50 disabled:cursor-not-allowed'
+                  'disabled:opacity-50 disabled:cursor-not-allowed',
                 )}
               />
             </div>
@@ -408,12 +389,10 @@ function AgentFormDialog({
                   'border-gray-200 dark:border-gray-700',
                   'bg-white dark:bg-gray-800',
                   'text-gray-900 dark:text-white',
-                  'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500',
                 )}
               />
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {t('agents.commandHelp')}
-              </p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t('agents.commandHelp')}</p>
             </div>
 
             <div className="flex items-center gap-3">
@@ -424,7 +403,7 @@ function AgentFormDialog({
                   'w-10 h-6 rounded-full relative',
                   'bg-gray-200 dark:bg-gray-700',
                   'data-[state=checked]:bg-primary-600',
-                  'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2'
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
                 )}
               >
                 <Switch.Thumb
@@ -432,13 +411,11 @@ function AgentFormDialog({
                     'block w-5 h-5 bg-white rounded-full shadow',
                     'transition-transform',
                     'data-[state=checked]:translate-x-[18px]',
-                    'data-[state=unchecked]:translate-x-[2px]'
+                    'data-[state=unchecked]:translate-x-[2px]',
                   )}
                 />
               </Switch.Root>
-              <span className="text-sm text-gray-700 dark:text-gray-300">
-                {t('agents.enabled')}
-              </span>
+              <span className="text-sm text-gray-700 dark:text-gray-300">{t('agents.enabled')}</span>
             </div>
 
             <div className="flex justify-end gap-3 pt-4">
@@ -449,7 +426,7 @@ function AgentFormDialog({
                     'px-4 py-2 rounded-lg',
                     'bg-gray-100 dark:bg-gray-800',
                     'text-gray-700 dark:text-gray-300',
-                    'hover:bg-gray-200 dark:hover:bg-gray-700'
+                    'hover:bg-gray-200 dark:hover:bg-gray-700',
                   )}
                 >
                   {t('agents.dialog.cancel')}
@@ -462,7 +439,7 @@ function AgentFormDialog({
                   'px-4 py-2 rounded-lg',
                   'bg-primary-600 text-white',
                   'hover:bg-primary-700',
-                  'disabled:opacity-50 disabled:cursor-not-allowed'
+                  'disabled:opacity-50 disabled:cursor-not-allowed',
                 )}
               >
                 {isEdit ? t('agents.dialog.save') : t('agents.dialog.add')}
@@ -472,10 +449,7 @@ function AgentFormDialog({
 
           <Dialog.Close asChild>
             <button
-              className={clsx(
-                'absolute top-4 right-4 p-1 rounded-lg',
-                'hover:bg-gray-100 dark:hover:bg-gray-800'
-              )}
+              className={clsx('absolute top-4 right-4 p-1 rounded-lg', 'hover:bg-gray-100 dark:hover:bg-gray-800')}
               aria-label={t('agents.dialog.close')}
             >
               <Cross2Icon className="w-4 h-4 text-gray-500 dark:text-gray-400" />

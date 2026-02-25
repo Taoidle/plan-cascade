@@ -20,30 +20,19 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
   const { t } = useTranslation('settings');
   const { t: tCommon } = useTranslation();
   const { t: tWizard } = useTranslation('wizard');
-  const {
-    defaultMode,
-    setDefaultMode,
-    theme,
-    setTheme
-  } = useSettingsStore();
+  const { defaultMode, setDefaultMode, theme, setTheme } = useSettingsStore();
   const { triggerWizard, startTour } = useOnboardingStore();
 
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-          {t('general.title')}
-        </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {t('general.description')}
-        </p>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">{t('general.title')}</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('general.description')}</p>
       </div>
 
       {/* Working Mode Section */}
       <section className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('general.workingMode.title')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('general.workingMode.title')}</h3>
         <div className="space-y-3">
           <label
             className={clsx(
@@ -51,7 +40,7 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
               'transition-colors',
               defaultMode === 'simple'
                 ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800',
             )}
           >
             <input
@@ -63,9 +52,7 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
               className="mt-1 text-primary-600"
             />
             <div>
-              <div className="font-medium text-gray-900 dark:text-white">
-                {t('general.workingMode.simple.name')}
-              </div>
+              <div className="font-medium text-gray-900 dark:text-white">{t('general.workingMode.simple.name')}</div>
               <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                 {t('general.workingMode.simple.description')}
               </div>
@@ -78,7 +65,7 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
               'transition-colors',
               defaultMode === 'expert'
                 ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800',
             )}
           >
             <input
@@ -90,9 +77,7 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
               className="mt-1 text-primary-600"
             />
             <div>
-              <div className="font-medium text-gray-900 dark:text-white">
-                {t('general.workingMode.expert.name')}
-              </div>
+              <div className="font-medium text-gray-900 dark:text-white">{t('general.workingMode.expert.name')}</div>
               <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                 {t('general.workingMode.expert.description')}
               </div>
@@ -106,9 +91,7 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
 
       {/* Theme Section */}
       <section className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('general.theme.title')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('general.theme.title')}</h3>
         <select
           value={theme}
           onChange={(e) => setTheme(e.target.value as 'system' | 'light' | 'dark')}
@@ -117,23 +100,19 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
             'border-gray-200 dark:border-gray-700',
             'bg-white dark:bg-gray-800',
             'text-gray-900 dark:text-white',
-            'focus:outline-none focus:ring-2 focus:ring-primary-500'
+            'focus:outline-none focus:ring-2 focus:ring-primary-500',
           )}
         >
           <option value="system">{t('general.theme.system')}</option>
           <option value="light">{t('general.theme.light')}</option>
           <option value="dark">{t('general.theme.dark')}</option>
         </select>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {t('general.theme.description')}
-        </p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('general.theme.description')}</p>
       </section>
 
       {/* Execution Limits */}
       <section className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('general.executionLimits.title')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('general.executionLimits.title')}</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
@@ -155,7 +134,7 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
                 'border-gray-200 dark:border-gray-700',
                 'bg-white dark:bg-gray-800',
                 'text-gray-900 dark:text-white',
-                'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                'focus:outline-none focus:ring-2 focus:ring-primary-500',
               )}
             />
           </div>
@@ -179,7 +158,7 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
                 'border-gray-200 dark:border-gray-700',
                 'bg-white dark:bg-gray-800',
                 'text-gray-900 dark:text-white',
-                'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                'focus:outline-none focus:ring-2 focus:ring-primary-500',
               )}
             />
           </div>
@@ -203,7 +182,7 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
                 'border-gray-200 dark:border-gray-700',
                 'bg-white dark:bg-gray-800',
                 'text-gray-900 dark:text-white',
-                'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                'focus:outline-none focus:ring-2 focus:ring-primary-500',
               )}
             />
           </div>
@@ -227,7 +206,7 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
                 'border-gray-200 dark:border-gray-700',
                 'bg-white dark:bg-gray-800',
                 'text-gray-900 dark:text-white',
-                'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                'focus:outline-none focus:ring-2 focus:ring-primary-500',
               )}
             />
             <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
@@ -239,21 +218,17 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
 
       {/* Onboarding & Tour Section */}
       <section className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {tWizard('tour.title')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{tWizard('tour.title')}</h3>
         <div className="space-y-3">
           <div
             className={clsx(
               'flex items-center justify-between p-4 rounded-lg border',
               'border-gray-200 dark:border-gray-700',
-              'bg-white dark:bg-gray-800'
+              'bg-white dark:bg-gray-800',
             )}
           >
             <div>
-              <div className="font-medium text-gray-900 dark:text-white text-sm">
-                {tWizard('settings.rerunWizard')}
-              </div>
+              <div className="font-medium text-gray-900 dark:text-white text-sm">{tWizard('settings.rerunWizard')}</div>
               <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                 {tWizard('settings.rerunWizardDescription')}
               </div>
@@ -269,7 +244,7 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
                 'bg-gray-100 dark:bg-gray-700',
                 'text-gray-700 dark:text-gray-300',
                 'hover:bg-gray-200 dark:hover:bg-gray-600',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               <ResetIcon className="w-4 h-4" />
@@ -281,13 +256,11 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
             className={clsx(
               'flex items-center justify-between p-4 rounded-lg border',
               'border-gray-200 dark:border-gray-700',
-              'bg-white dark:bg-gray-800'
+              'bg-white dark:bg-gray-800',
             )}
           >
             <div>
-              <div className="font-medium text-gray-900 dark:text-white text-sm">
-                {tWizard('settings.replayTour')}
-              </div>
+              <div className="font-medium text-gray-900 dark:text-white text-sm">{tWizard('settings.replayTour')}</div>
               <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                 {tWizard('settings.replayTourDescription')}
               </div>
@@ -303,7 +276,7 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
                 'bg-primary-50 dark:bg-primary-900/30',
                 'text-primary-700 dark:text-primary-300',
                 'hover:bg-primary-100 dark:hover:bg-primary-900/50',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               <RocketIcon className="w-4 h-4" />

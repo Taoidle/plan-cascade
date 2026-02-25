@@ -86,14 +86,13 @@ describe('AIReviewPanel', () => {
     render(
       <ToastProvider>
         <AIReviewPanel reviewText={reviewText} onDismiss={vi.fn()} />
-      </ToastProvider>
+      </ToastProvider>,
     );
 
     expect(screen.getByText(/First bullet point/)).toBeTruthy();
     expect(screen.getByText(/Second bullet point/)).toBeTruthy();
     expect(screen.getByText(/Third point uses asterisk/)).toBeTruthy();
   });
-
 });
 
 // ============================================================================
@@ -105,7 +104,7 @@ describe('ToastProvider', () => {
     render(
       <ToastProvider>
         <div data-testid="child">Hello</div>
-      </ToastProvider>
+      </ToastProvider>,
     );
 
     expect(screen.getByTestId('child')).toBeTruthy();
@@ -132,7 +131,7 @@ describe('useToast', () => {
     render(
       <ToastProvider>
         <ToastTestComponent />
-      </ToastProvider>
+      </ToastProvider>,
     );
 
     fireEvent.click(screen.getByText('Show Toast'));
@@ -146,7 +145,7 @@ describe('useToast', () => {
     render(
       <ToastProvider>
         <ToastTestComponent />
-      </ToastProvider>
+      </ToastProvider>,
     );
 
     fireEvent.click(screen.getByText('Show Error'));
@@ -160,7 +159,7 @@ describe('useToast', () => {
     render(
       <ToastProvider>
         <ToastTestComponent />
-      </ToastProvider>
+      </ToastProvider>,
     );
 
     fireEvent.click(screen.getByText('Show Toast'));
@@ -176,7 +175,7 @@ describe('useToast', () => {
     render(
       <ToastProvider>
         <ToastTestComponent />
-      </ToastProvider>
+      </ToastProvider>,
     );
 
     fireEvent.click(screen.getByText('Show Info'));
@@ -242,4 +241,3 @@ describe('IPC Command Contracts', () => {
     expect(response.error).toBe('Something went wrong');
   });
 });
-

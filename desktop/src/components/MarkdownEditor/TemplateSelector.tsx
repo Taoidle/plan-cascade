@@ -51,7 +51,7 @@ export function TemplateSelector({ onSelect, disabled }: TemplateSelectorProps) 
             'text-gray-700 dark:text-gray-300',
             'hover:bg-gray-200 dark:hover:bg-gray-700',
             'disabled:opacity-50 disabled:cursor-not-allowed',
-            'transition-colors'
+            'transition-colors',
           )}
         >
           <FileTextIcon className="w-4 h-4" />
@@ -68,7 +68,7 @@ export function TemplateSelector({ onSelect, disabled }: TemplateSelectorProps) 
             'bg-white dark:bg-gray-900',
             'rounded-lg shadow-xl',
             'flex flex-col',
-            'z-50'
+            'z-50',
           )}
         >
           {/* Header */}
@@ -97,7 +97,7 @@ export function TemplateSelector({ onSelect, disabled }: TemplateSelectorProps) 
                       'transition-colors',
                       selectedTemplate?.id === template.id
                         ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300'
-                        : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'
+                        : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300',
                     )}
                   >
                     <div className="font-medium text-sm">{getTemplateDisplayName(template)}</div>
@@ -138,13 +138,13 @@ export function TemplateSelector({ onSelect, disabled }: TemplateSelectorProps) 
                   'bg-gray-100 dark:bg-gray-800',
                   'text-gray-700 dark:text-gray-300',
                   'hover:bg-gray-200 dark:hover:bg-gray-700',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 {t('buttons.cancel')}
               </button>
             </Dialog.Close>
-<button
+            <button
               onClick={handleSelect}
               disabled={!selectedTemplate}
               className={clsx(
@@ -154,7 +154,7 @@ export function TemplateSelector({ onSelect, disabled }: TemplateSelectorProps) 
                 'text-white',
                 'hover:bg-primary-700 dark:hover:bg-primary-600',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
-                'transition-colors'
+                'transition-colors',
               )}
             >
               <CheckIcon className="w-4 h-4" />

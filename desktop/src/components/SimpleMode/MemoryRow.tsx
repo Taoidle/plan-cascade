@@ -21,8 +21,7 @@ export function MemoryRow({ memory, onClick }: MemoryRowProps) {
     onClick?.(memory);
   }, [memory, onClick]);
 
-  const truncatedContent =
-    memory.content.length > 80 ? memory.content.slice(0, 80) + '...' : memory.content;
+  const truncatedContent = memory.content.length > 80 ? memory.content.slice(0, 80) + '...' : memory.content;
 
   return (
     <div
@@ -30,7 +29,7 @@ export function MemoryRow({ memory, onClick }: MemoryRowProps) {
       className={clsx(
         'group flex items-start gap-2 px-2 py-1.5 rounded-md transition-colors',
         'hover:bg-gray-50 dark:hover:bg-gray-800',
-        onClick && 'cursor-pointer'
+        onClick && 'cursor-pointer',
       )}
       onClick={handleClick}
       role={onClick ? 'button' : undefined}

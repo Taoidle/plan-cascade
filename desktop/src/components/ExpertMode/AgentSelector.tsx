@@ -8,13 +8,7 @@
 import { clsx } from 'clsx';
 import { usePRDStore, AgentType, PRDStory } from '../../store/prd';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import {
-  ChevronDownIcon,
-  PersonIcon,
-  CodeIcon,
-  GearIcon,
-  CheckIcon,
-} from '@radix-ui/react-icons';
+import { ChevronDownIcon, PersonIcon, CodeIcon, GearIcon, CheckIcon } from '@radix-ui/react-icons';
 
 interface AgentConfig {
   value: AgentType;
@@ -65,7 +59,7 @@ export function AgentSelector({ story, compact = false }: AgentSelectorProps) {
             className={clsx(
               'inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs',
               currentAgent.color,
-              'hover:opacity-80 transition-opacity'
+              'hover:opacity-80 transition-opacity',
             )}
           >
             {currentAgent.icon}
@@ -79,7 +73,7 @@ export function AgentSelector({ story, compact = false }: AgentSelectorProps) {
             className={clsx(
               'min-w-[180px] p-1 rounded-lg shadow-lg',
               'bg-white dark:bg-gray-800',
-              'border border-gray-200 dark:border-gray-700'
+              'border border-gray-200 dark:border-gray-700',
             )}
             sideOffset={5}
           >
@@ -91,16 +85,12 @@ export function AgentSelector({ story, compact = false }: AgentSelectorProps) {
                   'flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer',
                   'text-sm text-gray-700 dark:text-gray-300',
                   'hover:bg-gray-100 dark:hover:bg-gray-700',
-                  'focus:outline-none focus:bg-gray-100 dark:focus:bg-gray-700'
+                  'focus:outline-none focus:bg-gray-100 dark:focus:bg-gray-700',
                 )}
               >
-                <span className={clsx('p-1 rounded', agent.color)}>
-                  {agent.icon}
-                </span>
+                <span className={clsx('p-1 rounded', agent.color)}>{agent.icon}</span>
                 <span className="flex-1">{agent.label}</span>
-                {story.agent === agent.value && (
-                  <CheckIcon className="w-4 h-4 text-primary-600" />
-                )}
+                {story.agent === agent.value && <CheckIcon className="w-4 h-4 text-primary-600" />}
               </DropdownMenu.Item>
             ))}
           </DropdownMenu.Content>
@@ -111,9 +101,7 @@ export function AgentSelector({ story, compact = false }: AgentSelectorProps) {
 
   return (
     <div className="space-y-2">
-      <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-        Agent
-      </label>
+      <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">Agent</label>
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
           <button
@@ -122,19 +110,13 @@ export function AgentSelector({ story, compact = false }: AgentSelectorProps) {
               'bg-white dark:bg-gray-800',
               'border border-gray-200 dark:border-gray-700',
               'hover:border-gray-300 dark:hover:border-gray-600',
-              'text-left transition-colors'
+              'text-left transition-colors',
             )}
           >
-            <span className={clsx('p-1.5 rounded', currentAgent.color)}>
-              {currentAgent.icon}
-            </span>
+            <span className={clsx('p-1.5 rounded', currentAgent.color)}>{currentAgent.icon}</span>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900 dark:text-white">
-                {currentAgent.label}
-              </p>
-              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                {currentAgent.description}
-              </p>
+              <p className="text-sm font-medium text-gray-900 dark:text-white">{currentAgent.label}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{currentAgent.description}</p>
             </div>
             <ChevronDownIcon className="w-4 h-4 text-gray-400" />
           </button>
@@ -145,7 +127,7 @@ export function AgentSelector({ story, compact = false }: AgentSelectorProps) {
             className={clsx(
               'w-[var(--radix-dropdown-menu-trigger-width)] p-1 rounded-lg shadow-lg',
               'bg-white dark:bg-gray-800',
-              'border border-gray-200 dark:border-gray-700'
+              'border border-gray-200 dark:border-gray-700',
             )}
             sideOffset={5}
           >
@@ -157,21 +139,15 @@ export function AgentSelector({ story, compact = false }: AgentSelectorProps) {
                   'flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer',
                   'text-sm text-gray-700 dark:text-gray-300',
                   'hover:bg-gray-100 dark:hover:bg-gray-700',
-                  'focus:outline-none focus:bg-gray-100 dark:focus:bg-gray-700'
+                  'focus:outline-none focus:bg-gray-100 dark:focus:bg-gray-700',
                 )}
               >
-                <span className={clsx('p-1.5 rounded', agent.color)}>
-                  {agent.icon}
-                </span>
+                <span className={clsx('p-1.5 rounded', agent.color)}>{agent.icon}</span>
                 <div className="flex-1 min-w-0">
                   <p className="font-medium">{agent.label}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {agent.description}
-                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{agent.description}</p>
                 </div>
-                {story.agent === agent.value && (
-                  <CheckIcon className="w-4 h-4 text-primary-600" />
-                )}
+                {story.agent === agent.value && <CheckIcon className="w-4 h-4 text-primary-600" />}
               </DropdownMenu.Item>
             ))}
           </DropdownMenu.Content>
@@ -190,21 +166,14 @@ export function BulkAgentSelector() {
   const { prd, setBulkAgent } = usePRDStore();
 
   // Determine if all stories have the same agent
-  const allSameAgent = prd.stories.length > 0 &&
-    prd.stories.every((s) => s.agent === prd.stories[0].agent);
-  const currentAgent = allSameAgent
-    ? agents.find((a) => a.value === prd.stories[0].agent)
-    : null;
+  const allSameAgent = prd.stories.length > 0 && prd.stories.every((s) => s.agent === prd.stories[0].agent);
+  const currentAgent = allSameAgent ? agents.find((a) => a.value === prd.stories[0].agent) : null;
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-          Default Agent
-        </label>
-        <span className="text-xs text-gray-500 dark:text-gray-400">
-          Applies to all stories
-        </span>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Default Agent</label>
+        <span className="text-xs text-gray-500 dark:text-gray-400">Applies to all stories</span>
       </div>
 
       <div className="grid grid-cols-3 gap-2">
@@ -216,15 +185,11 @@ export function BulkAgentSelector() {
               'flex flex-col items-center gap-2 p-3 rounded-lg border-2 transition-all',
               currentAgent?.value === agent.value
                 ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600'
+                : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600',
             )}
           >
-            <span className={clsx('p-2 rounded-lg', agent.color)}>
-              {agent.icon}
-            </span>
-            <span className="text-sm font-medium text-gray-900 dark:text-white">
-              {agent.label}
-            </span>
+            <span className={clsx('p-2 rounded-lg', agent.color)}>{agent.icon}</span>
+            <span className="text-sm font-medium text-gray-900 dark:text-white">{agent.label}</span>
           </button>
         ))}
       </div>
@@ -245,12 +210,7 @@ export function AgentBadge({ agent }: AgentBadgeProps) {
   const config = agents.find((a) => a.value === agent) || agents[0];
 
   return (
-    <span
-      className={clsx(
-        'inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs',
-        config.color
-      )}
-    >
+    <span className={clsx('inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs', config.color)}>
       {config.icon}
       <span>{config.label}</span>
     </span>

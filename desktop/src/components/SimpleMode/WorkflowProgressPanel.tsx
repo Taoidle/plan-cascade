@@ -61,9 +61,7 @@ export function WorkflowProgressPanel() {
       )}
 
       {/* Quality Gate Summary */}
-      {Object.keys(qualityGateResults).length > 0 && (
-        <QualityGateSummary results={qualityGateResults} />
-      )}
+      {Object.keys(qualityGateResults).length > 0 && <QualityGateSummary results={qualityGateResults} />}
     </div>
   );
 }
@@ -100,7 +98,7 @@ function WorkflowPhaseTimeline({
                         ? isFailed
                           ? 'bg-red-500'
                           : 'bg-blue-500 animate-pulse'
-                        : 'bg-gray-200 dark:bg-gray-700'
+                        : 'bg-gray-200 dark:bg-gray-700',
                   )}
                 />
                 <span
@@ -112,7 +110,7 @@ function WorkflowPhaseTimeline({
                         : 'text-blue-600 dark:text-blue-400 font-medium'
                       : isCompleted
                         ? 'text-green-600 dark:text-green-400'
-                        : 'text-gray-400 dark:text-gray-500'
+                        : 'text-gray-400 dark:text-gray-500',
                   )}
                 >
                   {t(step.labelKey)}
@@ -161,14 +159,7 @@ function BatchProgressSection({
       <div className="mt-1.5 grid grid-cols-2 gap-1">
         {stories.map((story) => {
           const status = storyStatuses[story.id] || 'pending';
-          return (
-            <StoryStatusCard
-              key={story.id}
-              storyId={story.id}
-              storyTitle={story.title}
-              status={status}
-            />
-          );
+          return <StoryStatusCard key={story.id} storyId={story.id} storyTitle={story.title} status={status} />;
         })}
       </div>
 
@@ -181,7 +172,9 @@ function BatchProgressSection({
           </span>
         )}
         {completed > 0 && (
-          <span className="text-green-600 dark:text-green-400">{t('workflow.progress.completed', { count: completed })}</span>
+          <span className="text-green-600 dark:text-green-400">
+            {t('workflow.progress.completed', { count: completed })}
+          </span>
         )}
         {failed > 0 && (
           <span className="text-red-600 dark:text-red-400">{t('workflow.progress.failed', { count: failed })}</span>
@@ -191,23 +184,43 @@ function BatchProgressSection({
   );
 }
 
-function StoryStatusCard({
-  storyId,
-  storyTitle,
-  status,
-}: {
-  storyId: string;
-  storyTitle: string;
-  status: string;
-}) {
+function StoryStatusCard({ storyId, storyTitle, status }: { storyId: string; storyTitle: string; status: string }) {
   const statusConfig = {
-    pending: { bg: 'bg-gray-50 dark:bg-gray-800', text: 'text-gray-500 dark:text-gray-400', badge: 'bg-gray-200 dark:bg-gray-700' },
-    running: { bg: 'bg-blue-50 dark:bg-blue-900/20', text: 'text-blue-700 dark:text-blue-300', badge: 'bg-blue-200 dark:bg-blue-800' },
-    executing: { bg: 'bg-blue-50 dark:bg-blue-900/20', text: 'text-blue-700 dark:text-blue-300', badge: 'bg-blue-200 dark:bg-blue-800' },
-    completed: { bg: 'bg-green-50 dark:bg-green-900/20', text: 'text-green-700 dark:text-green-300', badge: 'bg-green-200 dark:bg-green-800' },
-    failed: { bg: 'bg-red-50 dark:bg-red-900/20', text: 'text-red-700 dark:text-red-300', badge: 'bg-red-200 dark:bg-red-800' },
-    cancelled: { bg: 'bg-gray-50 dark:bg-gray-800', text: 'text-gray-500 dark:text-gray-400', badge: 'bg-gray-200 dark:bg-gray-700' },
-  }[status] || { bg: 'bg-gray-50 dark:bg-gray-800', text: 'text-gray-500 dark:text-gray-400', badge: 'bg-gray-200 dark:bg-gray-700' };
+    pending: {
+      bg: 'bg-gray-50 dark:bg-gray-800',
+      text: 'text-gray-500 dark:text-gray-400',
+      badge: 'bg-gray-200 dark:bg-gray-700',
+    },
+    running: {
+      bg: 'bg-blue-50 dark:bg-blue-900/20',
+      text: 'text-blue-700 dark:text-blue-300',
+      badge: 'bg-blue-200 dark:bg-blue-800',
+    },
+    executing: {
+      bg: 'bg-blue-50 dark:bg-blue-900/20',
+      text: 'text-blue-700 dark:text-blue-300',
+      badge: 'bg-blue-200 dark:bg-blue-800',
+    },
+    completed: {
+      bg: 'bg-green-50 dark:bg-green-900/20',
+      text: 'text-green-700 dark:text-green-300',
+      badge: 'bg-green-200 dark:bg-green-800',
+    },
+    failed: {
+      bg: 'bg-red-50 dark:bg-red-900/20',
+      text: 'text-red-700 dark:text-red-300',
+      badge: 'bg-red-200 dark:bg-red-800',
+    },
+    cancelled: {
+      bg: 'bg-gray-50 dark:bg-gray-800',
+      text: 'text-gray-500 dark:text-gray-400',
+      badge: 'bg-gray-200 dark:bg-gray-700',
+    },
+  }[status] || {
+    bg: 'bg-gray-50 dark:bg-gray-800',
+    text: 'text-gray-500 dark:text-gray-400',
+    badge: 'bg-gray-200 dark:bg-gray-700',
+  };
 
   return (
     <div className={clsx('px-2 py-1 rounded', statusConfig.bg)}>
@@ -224,11 +237,7 @@ function StoryStatusCard({
   );
 }
 
-function QualityGateSummary({
-  results,
-}: {
-  results: Record<string, { overallStatus: GateStatus; gates: unknown[] }>;
-}) {
+function QualityGateSummary({ results }: { results: Record<string, { overallStatus: GateStatus; gates: unknown[] }> }) {
   const { t } = useTranslation('simpleMode');
   const entries = Object.values(results);
   const passed = entries.filter((r) => r.overallStatus === 'passed').length;
@@ -242,7 +251,9 @@ function QualityGateSummary({
       <p className="text-xs font-medium text-gray-700 dark:text-gray-300">{t('workflow.progress.qualityGates')}</p>
       <div className="mt-1 flex items-center gap-3 text-xs">
         <span className="text-green-600 dark:text-green-400">{t('workflow.progress.passed', { count: passed })}</span>
-        {failed > 0 && <span className="text-red-600 dark:text-red-400">{t('workflow.progress.failed', { count: failed })}</span>}
+        {failed > 0 && (
+          <span className="text-red-600 dark:text-red-400">{t('workflow.progress.failed', { count: failed })}</span>
+        )}
         <span className="text-gray-500 dark:text-gray-400">{t('workflow.progress.total', { count: total })}</span>
       </div>
 

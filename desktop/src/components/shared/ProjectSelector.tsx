@@ -23,9 +23,7 @@ export function ProjectSelector({ compact = false, className }: ProjectSelectorP
   const workspacePath = useSettingsStore((s) => s.workspacePath);
   const setWorkspacePath = useSettingsStore((s) => s.setWorkspacePath);
 
-  const basename = workspacePath
-    ? workspacePath.split(/[/\\]/).filter(Boolean).pop() || workspacePath
-    : 'No directory';
+  const basename = workspacePath ? workspacePath.split(/[/\\]/).filter(Boolean).pop() || workspacePath : 'No directory';
 
   const handleClick = useCallback(async () => {
     try {
@@ -63,7 +61,7 @@ export function ProjectSelector({ compact = false, className }: ProjectSelectorP
           console.error('Failed to open file manager:', err);
         });
     },
-    [workspacePath]
+    [workspacePath],
   );
 
   const handleClear = useCallback(
@@ -71,7 +69,7 @@ export function ProjectSelector({ compact = false, className }: ProjectSelectorP
       e.stopPropagation();
       setWorkspacePath('');
     },
-    [setWorkspacePath]
+    [setWorkspacePath],
   );
 
   return (
@@ -84,7 +82,7 @@ export function ProjectSelector({ compact = false, className }: ProjectSelectorP
           'text-gray-600 dark:text-gray-400',
           'hover:bg-gray-100 dark:hover:bg-gray-800',
           compact ? 'px-2 py-1 text-xs' : 'px-3 py-1.5 text-sm',
-          className
+          className,
         )}
       >
         <svg
@@ -111,7 +109,7 @@ export function ProjectSelector({ compact = false, className }: ProjectSelectorP
             'text-gray-400 dark:text-gray-500',
             'hover:text-gray-600 dark:hover:text-gray-300',
             'hover:bg-gray-100 dark:hover:bg-gray-800',
-            compact ? 'w-5 h-5' : 'w-6 h-6'
+            compact ? 'w-5 h-5' : 'w-6 h-6',
           )}
         >
           <svg
@@ -138,7 +136,7 @@ export function ProjectSelector({ compact = false, className }: ProjectSelectorP
             'text-gray-400 dark:text-gray-500',
             'hover:text-gray-600 dark:hover:text-gray-300',
             'hover:bg-gray-100 dark:hover:bg-gray-800',
-            compact ? 'w-5 h-5' : 'w-6 h-6'
+            compact ? 'w-5 h-5' : 'w-6 h-6',
           )}
         >
           <svg
@@ -148,11 +146,7 @@ export function ProjectSelector({ compact = false, className }: ProjectSelectorP
             stroke="currentColor"
             strokeWidth={2}
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M6 18L18 6M6 6l12 12"
-            />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
       )}

@@ -92,7 +92,7 @@ interface SkillMemoryState {
     category: MemoryCategory,
     content: string,
     keywords: string[],
-    importance?: number
+    importance?: number,
   ) => Promise<void>;
   updateMemory: (
     id: string,
@@ -101,7 +101,7 @@ interface SkillMemoryState {
       category?: MemoryCategory;
       importance?: number;
       keywords?: string[];
-    }
+    },
   ) => Promise<void>;
   deleteMemory: (id: string) => Promise<void>;
   clearMemories: (projectPath: string) => Promise<void>;
@@ -275,7 +275,7 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
               (s) =>
                 s.name.toLowerCase().includes(query.toLowerCase()) ||
                 s.description.toLowerCase().includes(query.toLowerCase()) ||
-                s.tags.some((t) => t.toLowerCase().includes(query.toLowerCase()))
+                s.tags.some((t) => t.toLowerCase().includes(query.toLowerCase())),
             )
           : response.data;
         set({ skills: filtered, skillsLoading: false });
@@ -400,7 +400,7 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
     category: MemoryCategory,
     content: string,
     keywords: string[],
-    importance?: number
+    importance?: number,
   ) => {
     try {
       const response = await invoke<CommandResponse<MemoryEntry>>('add_project_memory', {
@@ -485,8 +485,7 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
     }
     try {
       const { memoryCategoryFilter } = get();
-      const categories =
-        memoryCategoryFilter === 'all' ? null : [memoryCategoryFilter];
+      const categories = memoryCategoryFilter === 'all' ? null : [memoryCategoryFilter];
       const response = await invoke<CommandResponse<Array<{ entry: MemoryEntry; relevance_score: number }>>>(
         'search_project_memories',
         {
@@ -494,7 +493,7 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
           query,
           categories,
           topK: 50,
-        }
+        },
       );
       if (response.success && response.data) {
         set({
@@ -515,9 +514,12 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
 
   runMaintenance: async (projectPath: string) => {
     try {
-      await invoke<CommandResponse<{ decayed_count: number; pruned_count: number; compacted_count: number }>>('run_memory_maintenance', {
-        projectPath,
-      });
+      await invoke<CommandResponse<{ decayed_count: number; pruned_count: number; compacted_count: number }>>(
+        'run_memory_maintenance',
+        {
+          projectPath,
+        },
+      );
       // Silent success — maintenance is non-critical
     } catch {
       // Silent failure — maintenance is non-critical
@@ -531,8 +533,7 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
 
   togglePanel: () => set((state) => ({ panelOpen: !state.panelOpen })),
 
-  openDialog: (tab?: SkillMemoryTab) =>
-    set({ dialogOpen: true, activeTab: tab ?? get().activeTab }),
+  openDialog: (tab?: SkillMemoryTab) => set({ dialogOpen: true, activeTab: tab ?? get().activeTab }),
 
   closeDialog: () => set({ dialogOpen: false }),
 

@@ -44,13 +44,7 @@ export function CostChart({ data, height = 300 }: CostChartProps) {
 
   if (!data || data.length === 0) {
     return (
-      <div
-        className={clsx(
-          'flex items-center justify-center',
-          'h-[300px]',
-          'text-gray-400 dark:text-gray-600'
-        )}
-      >
+      <div className={clsx('flex items-center justify-center', 'h-[300px]', 'text-gray-400 dark:text-gray-600')}>
         {t('charts.noData', 'No data available for this period')}
       </div>
     );
@@ -102,18 +96,10 @@ export function CostChart({ data, height = 300 }: CostChartProps) {
           <rect width="100" height="100" fill="url(#grid)" />
 
           {/* Area fill */}
-          <path
-            d={areaPath}
-            className="fill-primary-100 dark:fill-primary-900/30"
-          />
+          <path d={areaPath} className="fill-primary-100 dark:fill-primary-900/30" />
 
           {/* Line */}
-          <path
-            d={linePath}
-            fill="none"
-            strokeWidth="0.5"
-            className="stroke-primary-500"
-          />
+          <path d={linePath} fill="none" strokeWidth="0.5" className="stroke-primary-500" />
 
           {/* Data points */}
           {chartData.points.map((point, i) => (
@@ -122,10 +108,7 @@ export function CostChart({ data, height = 300 }: CostChartProps) {
                 cx={point.x}
                 cy={point.y}
                 r={hoveredIndex === i ? 1.5 : 0.8}
-                className={clsx(
-                  'fill-primary-500',
-                  hoveredIndex === i && 'stroke-white stroke-[0.3]'
-                )}
+                className={clsx('fill-primary-500', hoveredIndex === i && 'stroke-white stroke-[0.3]')}
               />
               {/* Invisible larger hit area */}
               <circle
@@ -148,7 +131,7 @@ export function CostChart({ data, height = 300 }: CostChartProps) {
               'px-3 py-2 rounded-lg shadow-lg',
               'bg-gray-900 dark:bg-gray-800',
               'text-white text-xs',
-              'transform -translate-x-1/2'
+              'transform -translate-x-1/2',
             )}
             style={{
               left: `${chartData.points[hoveredIndex].x}%`,
@@ -176,9 +159,7 @@ export function CostChart({ data, height = 300 }: CostChartProps) {
         {data.length > 0 && (
           <>
             <span>{data[0].timestamp_formatted}</span>
-            {data.length > 2 && (
-              <span>{data[Math.floor(data.length / 2)].timestamp_formatted}</span>
-            )}
+            {data.length > 2 && <span>{data[Math.floor(data.length / 2)].timestamp_formatted}</span>}
             <span>{data[data.length - 1].timestamp_formatted}</span>
           </>
         )}

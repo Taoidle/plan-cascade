@@ -154,9 +154,7 @@ export async function getRemoteConfig(): Promise<CommandResponse<RemoteGatewayCo
 /**
  * Update remote gateway configuration.
  */
-export async function updateRemoteConfig(
-  request: UpdateRemoteConfigRequest,
-): Promise<CommandResponse<void>> {
+export async function updateRemoteConfig(request: UpdateRemoteConfigRequest): Promise<CommandResponse<void>> {
   try {
     return await invoke<CommandResponse<void>>('update_remote_config', { request });
   } catch (error) {
@@ -186,9 +184,7 @@ export async function getTelegramConfig(): Promise<CommandResponse<TelegramAdapt
 /**
  * Update Telegram adapter configuration.
  */
-export async function updateTelegramConfig(
-  request: UpdateTelegramConfigRequest,
-): Promise<CommandResponse<void>> {
+export async function updateTelegramConfig(request: UpdateTelegramConfigRequest): Promise<CommandResponse<void>> {
   try {
     return await invoke<CommandResponse<void>>('update_telegram_config', { request });
   } catch (error) {
@@ -218,9 +214,7 @@ export async function listRemoteSessions(): Promise<CommandResponse<RemoteSessio
 /**
  * Disconnect a remote session by chat_id.
  */
-export async function disconnectRemoteSession(
-  chatId: number,
-): Promise<CommandResponse<void>> {
+export async function disconnectRemoteSession(chatId: number): Promise<CommandResponse<void>> {
   try {
     return await invoke<CommandResponse<void>>('disconnect_remote_session', {
       chatId,
@@ -237,10 +231,7 @@ export async function disconnectRemoteSession(
 /**
  * Query remote audit log with pagination.
  */
-export async function getRemoteAuditLog(
-  limit?: number,
-  offset?: number,
-): Promise<CommandResponse<AuditLogResponse>> {
+export async function getRemoteAuditLog(limit?: number, offset?: number): Promise<CommandResponse<AuditLogResponse>> {
   try {
     return await invoke<CommandResponse<AuditLogResponse>>('get_remote_audit_log', {
       limit: limit ?? null,

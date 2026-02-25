@@ -7,18 +7,8 @@
  */
 
 import { create } from 'zustand';
-import type {
-  KnowledgeCollection,
-  DocumentInput,
-  SearchResult,
-  RagQueryResult,
-} from '../lib/knowledgeApi';
-import {
-  ragListCollections,
-  ragIngestDocuments,
-  ragQuery,
-  ragDeleteCollection,
-} from '../lib/knowledgeApi';
+import type { KnowledgeCollection, DocumentInput, SearchResult, RagQueryResult } from '../lib/knowledgeApi';
+import { ragListCollections, ragIngestDocuments, ragQuery, ragDeleteCollection } from '../lib/knowledgeApi';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,17 +52,8 @@ export interface KnowledgeState {
     documents: DocumentInput[],
   ) => Promise<boolean>;
   deleteCollection: (projectId: string, collectionName: string) => Promise<boolean>;
-  ingestDocuments: (
-    projectId: string,
-    collectionName: string,
-    documents: DocumentInput[],
-  ) => Promise<boolean>;
-  queryCollection: (
-    projectId: string,
-    collectionName: string,
-    query: string,
-    topK?: number,
-  ) => Promise<void>;
+  ingestDocuments: (projectId: string, collectionName: string, documents: DocumentInput[]) => Promise<boolean>;
+  queryCollection: (projectId: string, collectionName: string, query: string, topK?: number) => Promise<void>;
   setSearchQuery: (query: string) => void;
   clearQueryResults: () => void;
   clearError: () => void;
@@ -173,8 +154,7 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
       if (result.success) {
         set((state) => ({
           collections: state.collections.filter((c) => c.name !== collectionName),
-          activeCollection:
-            state.activeCollection?.name === collectionName ? null : state.activeCollection,
+          activeCollection: state.activeCollection?.name === collectionName ? null : state.activeCollection,
           isDeleting: false,
         }));
         return true;
@@ -194,22 +174,15 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
     }
   },
 
-  ingestDocuments: async (
-    projectId: string,
-    collectionName: string,
-    documents: DocumentInput[],
-  ) => {
+  ingestDocuments: async (projectId: string, collectionName: string, documents: DocumentInput[]) => {
     set({ isIngesting: true, uploadProgress: 10, error: null });
     try {
       const result = await ragIngestDocuments(collectionName, projectId, null, documents);
       if (result.success && result.data) {
         // Update the collection in the list
         set((state) => ({
-          collections: state.collections.map((c) =>
-            c.name === collectionName ? result.data! : c,
-          ),
-          activeCollection:
-            state.activeCollection?.name === collectionName ? result.data! : state.activeCollection,
+          collections: state.collections.map((c) => (c.name === collectionName ? result.data! : c)),
+          activeCollection: state.activeCollection?.name === collectionName ? result.data! : state.activeCollection,
           isIngesting: false,
           uploadProgress: 100,
         }));
@@ -232,12 +205,7 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
     }
   },
 
-  queryCollection: async (
-    projectId: string,
-    collectionName: string,
-    query: string,
-    topK?: number,
-  ) => {
+  queryCollection: async (projectId: string, collectionName: string, query: string, topK?: number) => {
     set({ isQuerying: true, error: null, searchQuery: query });
     try {
       const result = await ragQuery(collectionName, projectId, query, topK);

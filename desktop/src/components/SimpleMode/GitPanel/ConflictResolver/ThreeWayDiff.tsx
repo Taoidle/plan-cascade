@@ -46,7 +46,7 @@ interface RegionResolution {
 function buildResolvedContent(
   fileContent: string,
   regions: ConflictRegion[],
-  resolutions: Map<number, RegionResolution>
+  resolutions: Map<number, RegionResolution>,
 ): string {
   const lines = fileContent.split('\n');
   const result: string[] = [];
@@ -139,12 +139,14 @@ function RegionActions({
       <span className="text-2xs font-medium text-gray-500 dark:text-gray-400 mr-1">
         {t('threeWayDiff.region', { index: regionIndex + 1 })}
         {resolution && (
-          <span className={clsx(
-            'ml-1',
-            resolution.method === 'ai'
-              ? 'text-purple-600 dark:text-purple-400'
-              : 'text-green-600 dark:text-green-400'
-          )}>
+          <span
+            className={clsx(
+              'ml-1',
+              resolution.method === 'ai'
+                ? 'text-purple-600 dark:text-purple-400'
+                : 'text-green-600 dark:text-green-400',
+            )}
+          >
             ({resolution.method})
           </span>
         )}
@@ -155,7 +157,7 @@ function RegionActions({
           'px-2 py-0.5 text-2xs rounded transition-colors',
           resolution?.method === 'ours'
             ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 font-medium'
-            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-blue-50 dark:hover:bg-blue-900/20'
+            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-blue-50 dark:hover:bg-blue-900/20',
         )}
       >
         {t('threeWayDiff.acceptOurs')}
@@ -166,7 +168,7 @@ function RegionActions({
           'px-2 py-0.5 text-2xs rounded transition-colors',
           resolution?.method === 'theirs'
             ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium'
-            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-purple-50 dark:hover:bg-purple-900/20'
+            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-purple-50 dark:hover:bg-purple-900/20',
         )}
       >
         {t('threeWayDiff.acceptTheirs')}
@@ -177,7 +179,7 @@ function RegionActions({
           'px-2 py-0.5 text-2xs rounded transition-colors',
           resolution?.method === 'both'
             ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-medium'
-            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-amber-50 dark:hover:bg-amber-900/20'
+            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-amber-50 dark:hover:bg-amber-900/20',
         )}
       >
         {t('threeWayDiff.acceptBoth')}
@@ -188,7 +190,7 @@ function RegionActions({
           'px-2 py-0.5 text-2xs rounded transition-colors',
           resolution?.method === 'manual'
             ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium'
-            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-green-50 dark:hover:bg-green-900/20'
+            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-green-50 dark:hover:bg-green-900/20',
         )}
       >
         {t('threeWayDiff.manualEdit')}
@@ -203,7 +205,7 @@ function RegionActions({
             ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium'
             : isAIAvailable && !isAIResolving
               ? 'bg-gray-100 dark:bg-gray-800 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20'
-              : 'bg-gray-50 dark:bg-gray-900 text-gray-400 dark:text-gray-600 cursor-not-allowed'
+              : 'bg-gray-50 dark:bg-gray-900 text-gray-400 dark:text-gray-600 cursor-not-allowed',
         )}
         title={
           !isAIAvailable
@@ -251,7 +253,12 @@ function CodePanel({
 
   return (
     <div className="flex flex-col h-full border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-      <div className={clsx('shrink-0 px-3 py-1.5 text-xs font-semibold border-b border-gray-200 dark:border-gray-700', titleColor)}>
+      <div
+        className={clsx(
+          'shrink-0 px-3 py-1.5 text-xs font-semibold border-b border-gray-200 dark:border-gray-700',
+          titleColor,
+        )}
+      >
         {title}
       </div>
       <div className="flex-1 overflow-auto font-mono text-xs bg-gray-50 dark:bg-gray-950">
@@ -261,7 +268,9 @@ function CodePanel({
               key={idx}
               className={clsx(
                 'px-1',
-                side === 'ours' ? 'hover:bg-blue-50/50 dark:hover:bg-blue-900/10' : 'hover:bg-purple-50/50 dark:hover:bg-purple-900/10'
+                side === 'ours'
+                  ? 'hover:bg-blue-50/50 dark:hover:bg-blue-900/10'
+                  : 'hover:bg-purple-50/50 dark:hover:bg-purple-900/10',
               )}
             >
               <span className="inline-block w-8 text-right text-gray-400 dark:text-gray-600 mr-2 select-none">
@@ -431,7 +440,7 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
         return next;
       });
     },
-    [regions]
+    [regions],
   );
 
   const handleAcceptTheirs = useCallback(
@@ -442,7 +451,7 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
         return next;
       });
     },
-    [regions]
+    [regions],
   );
 
   const handleAcceptBoth = useCallback(
@@ -457,7 +466,7 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
         return next;
       });
     },
-    [regions]
+    [regions],
   );
 
   const handleManualEdit = useCallback(
@@ -473,7 +482,7 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
         });
       }
     },
-    [regions, resolutions]
+    [regions, resolutions],
   );
 
   // AI Resolve for a single region
@@ -494,7 +503,7 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
         showToast(result.error || t('threeWayDiff.aiResolveFailed'), 'error');
       }
     },
-    [isAvailable, resolveConflictAI, repoPath, filePath, showToast]
+    [isAvailable, resolveConflictAI, repoPath, filePath, showToast],
   );
 
   // AI Resolve All
@@ -531,7 +540,7 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
         });
       }
     },
-    [editingRegion]
+    [editingRegion],
   );
 
   const handleMarkResolved = useCallback(async () => {
@@ -602,14 +611,18 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
                 'flex items-center gap-1.5 px-3 py-1 text-xs rounded-md transition-colors',
                 isAIResolvingAll
                   ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-500 dark:text-purple-400 cursor-wait'
-                  : 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/30 border border-purple-200 dark:border-purple-700'
+                  : 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/30 border border-purple-200 dark:border-purple-700',
               )}
             >
               {isAIResolvingAll ? (
                 <>
                   <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    />
                   </svg>
                   {t('threeWayDiff.resolvingAll')}
                 </>
@@ -694,18 +707,14 @@ export function ThreeWayDiff({ repoPath, filePath, onResolved }: ThreeWayDiffPro
         <div className="text-sm text-gray-600 dark:text-gray-400">
           <span className="font-mono">{filePath}</span>
           <span className="mx-2">-</span>
-          <span>
-            {t('threeWayDiff.regionsResolved', { resolved: resolutions.size, total: regions.length })}
-          </span>
+          <span>{t('threeWayDiff.regionsResolved', { resolved: resolutions.size, total: regions.length })}</span>
         </div>
         <button
           onClick={handleMarkResolved}
           disabled={!allRegionsResolved || isResolving}
           className={clsx(
             'px-4 py-1.5 text-sm rounded-lg font-medium text-white transition-colors',
-            allRegionsResolved && !isResolving
-              ? 'bg-green-600 hover:bg-green-700'
-              : 'bg-green-400 cursor-not-allowed'
+            allRegionsResolved && !isResolving ? 'bg-green-600 hover:bg-green-700' : 'bg-green-400 cursor-not-allowed',
           )}
         >
           {isResolving ? t('threeWayDiff.resolving') : t('threeWayDiff.markResolved')}

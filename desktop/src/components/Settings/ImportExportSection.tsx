@@ -172,12 +172,8 @@ export function ImportExportSection() {
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-          {t('importExport.title')}
-        </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {t('importExport.description')}
-        </p>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">{t('importExport.title')}</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('importExport.description')}</p>
       </div>
 
       {/* Status Message */}
@@ -185,20 +181,24 @@ export function ImportExportSection() {
         <div
           className={clsx(
             'flex items-center gap-3 p-4 rounded-lg',
-            message.type === 'success' && 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800',
+            message.type === 'success' &&
+              'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800',
             message.type === 'error' && 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800',
-            message.type === 'warning' && 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800'
+            message.type === 'warning' &&
+              'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800',
           )}
         >
           {message.type === 'success' && <CheckCircledIcon className="w-5 h-5 text-green-600 dark:text-green-400" />}
           {message.type === 'error' && <Cross2Icon className="w-5 h-5 text-red-600 dark:text-red-400" />}
-          {message.type === 'warning' && <ExclamationTriangleIcon className="w-5 h-5 text-yellow-600 dark:text-yellow-400" />}
+          {message.type === 'warning' && (
+            <ExclamationTriangleIcon className="w-5 h-5 text-yellow-600 dark:text-yellow-400" />
+          )}
           <span
             className={clsx(
               'text-sm',
               message.type === 'success' && 'text-green-700 dark:text-green-300',
               message.type === 'error' && 'text-red-700 dark:text-red-300',
-              message.type === 'warning' && 'text-yellow-700 dark:text-yellow-300'
+              message.type === 'warning' && 'text-yellow-700 dark:text-yellow-300',
             )}
           >
             {message.text}
@@ -208,20 +208,16 @@ export function ImportExportSection() {
 
       {/* Export Section */}
       <section className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('importExport.export.title')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('importExport.export.title')}</h3>
         <div
           className={clsx(
             'p-6 rounded-lg border-2 border-dashed',
             'border-gray-200 dark:border-gray-700',
-            'text-center'
+            'text-center',
           )}
         >
           <DownloadIcon className="w-12 h-12 mx-auto text-gray-400 dark:text-gray-500 mb-4" />
-          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            {t('importExport.export.description')}
-          </p>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{t('importExport.export.description')}</p>
           <button
             onClick={handleExport}
             disabled={isExporting}
@@ -230,7 +226,7 @@ export function ImportExportSection() {
               'bg-primary-600 text-white',
               'hover:bg-primary-700',
               'focus:outline-none focus:ring-2 focus:ring-primary-500',
-              'disabled:opacity-50 disabled:cursor-not-allowed'
+              'disabled:opacity-50 disabled:cursor-not-allowed',
             )}
           >
             <DownloadIcon className="w-4 h-4" />
@@ -241,20 +237,16 @@ export function ImportExportSection() {
 
       {/* Import Section */}
       <section className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('importExport.import.title')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('importExport.import.title')}</h3>
         <div
           className={clsx(
             'p-6 rounded-lg border-2 border-dashed',
             'border-gray-200 dark:border-gray-700',
-            'text-center'
+            'text-center',
           )}
         >
           <UploadIcon className="w-12 h-12 mx-auto text-gray-400 dark:text-gray-500 mb-4" />
-          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            {t('importExport.import.description')}
-          </p>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{t('importExport.import.description')}</p>
           <input
             ref={fileInputRef}
             type="file"
@@ -270,7 +262,7 @@ export function ImportExportSection() {
               'bg-gray-100 dark:bg-gray-800',
               'text-gray-700 dark:text-gray-300',
               'hover:bg-gray-200 dark:hover:bg-gray-700',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500'
+              'focus:outline-none focus:ring-2 focus:ring-primary-500',
             )}
           >
             <UploadIcon className="w-4 h-4" />
@@ -281,29 +273,25 @@ export function ImportExportSection() {
 
       {/* Reset Section */}
       <section className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('importExport.reset.title')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('importExport.reset.title')}</h3>
         <div
           className={clsx(
             'p-4 rounded-lg',
             'bg-yellow-50 dark:bg-yellow-900/10',
-            'border border-yellow-200 dark:border-yellow-800'
+            'border border-yellow-200 dark:border-yellow-800',
           )}
         >
           <div className="flex items-start gap-3">
             <ExclamationTriangleIcon className="w-5 h-5 text-yellow-600 dark:text-yellow-500 shrink-0 mt-0.5" />
             <div className="flex-1">
-              <p className="text-sm text-yellow-800 dark:text-yellow-200 mb-3">
-                {t('importExport.reset.description')}
-              </p>
+              <p className="text-sm text-yellow-800 dark:text-yellow-200 mb-3">{t('importExport.reset.description')}</p>
               <button
                 onClick={handleReset}
                 className={clsx(
                   'px-3 py-1.5 rounded-lg text-sm',
                   'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
                   'hover:bg-yellow-200 dark:hover:bg-yellow-900/50',
-                  'focus:outline-none focus:ring-2 focus:ring-yellow-500'
+                  'focus:outline-none focus:ring-2 focus:ring-yellow-500',
                 )}
               >
                 {t('importExport.reset.button')}
@@ -323,7 +311,7 @@ export function ImportExportSection() {
               'w-full max-w-lg max-h-[85vh] overflow-auto',
               'bg-white dark:bg-gray-900 rounded-xl shadow-xl',
               'p-6',
-              'focus:outline-none'
+              'focus:outline-none',
             )}
           >
             <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -344,7 +332,7 @@ export function ImportExportSection() {
                     'max-h-48 overflow-auto p-3 rounded-lg',
                     'bg-gray-50 dark:bg-gray-800',
                     'border border-gray-200 dark:border-gray-700',
-                    'text-xs font-mono text-gray-600 dark:text-gray-400'
+                    'text-xs font-mono text-gray-600 dark:text-gray-400',
                   )}
                 >
                   <pre>{JSON.stringify((importPreview as { settings: object }).settings, null, 2)}</pre>
@@ -359,7 +347,7 @@ export function ImportExportSection() {
                     'px-4 py-2 rounded-lg',
                     'bg-gray-100 dark:bg-gray-800',
                     'text-gray-700 dark:text-gray-300',
-                    'hover:bg-gray-200 dark:hover:bg-gray-700'
+                    'hover:bg-gray-200 dark:hover:bg-gray-700',
                   )}
                 >
                   {t('importExport.import.cancel')}
@@ -372,7 +360,7 @@ export function ImportExportSection() {
                   'px-4 py-2 rounded-lg',
                   'bg-primary-600 text-white',
                   'hover:bg-primary-700',
-                  'disabled:opacity-50 disabled:cursor-not-allowed'
+                  'disabled:opacity-50 disabled:cursor-not-allowed',
                 )}
               >
                 {isImporting ? t('importExport.import.importing') : t('importExport.import.importButton')}
@@ -381,10 +369,7 @@ export function ImportExportSection() {
 
             <Dialog.Close asChild>
               <button
-                className={clsx(
-                  'absolute top-4 right-4 p-1 rounded-lg',
-                  'hover:bg-gray-100 dark:hover:bg-gray-800'
-                )}
+                className={clsx('absolute top-4 right-4 p-1 rounded-lg', 'hover:bg-gray-100 dark:hover:bg-gray-800')}
                 aria-label={t('importExport.import.close')}
               >
                 <Cross2Icon className="w-4 h-4 text-gray-500 dark:text-gray-400" />
@@ -460,7 +445,9 @@ function syncSettingsToStore(settings: Record<string, unknown>) {
   if (typeof settings.standalone_context_turns === 'number') {
     const allowed = new Set([2, 4, 6, 8, 10, 20, 50, 100, 200, 500, -1]);
     if (allowed.has(settings.standalone_context_turns)) {
-      store.setStandaloneContextTurns(settings.standalone_context_turns as Parameters<typeof store.setStandaloneContextTurns>[0]);
+      store.setStandaloneContextTurns(
+        settings.standalone_context_turns as Parameters<typeof store.setStandaloneContextTurns>[0],
+      );
     }
   }
 

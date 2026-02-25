@@ -10,8 +10,8 @@ export interface FileAttachmentData {
   path: string;
   size: number;
   type: 'text' | 'image' | 'pdf' | 'unknown';
-  content?: string;       // Text content for text files
-  preview?: string;       // Base64 data URL for images
+  content?: string; // Text content for text files
+  preview?: string; // Base64 data URL for images
 }
 
 export interface WorkspaceFile {

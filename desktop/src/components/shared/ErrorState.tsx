@@ -46,14 +46,17 @@ interface SingleErrorProps {
 // Severity Configuration
 // ============================================================================
 
-const SEVERITY_CONFIG: Record<ErrorSeverity, {
-  containerBg: string;
-  containerBorder: string;
-  iconColor: string;
-  titleColor: string;
-  icon: React.ReactNode;
-  label: string;
-}> = {
+const SEVERITY_CONFIG: Record<
+  ErrorSeverity,
+  {
+    containerBg: string;
+    containerBorder: string;
+    iconColor: string;
+    titleColor: string;
+    icon: React.ReactNode;
+    label: string;
+  }
+> = {
   warning: {
     containerBg: 'bg-warning-50 dark:bg-warning-950',
     containerBorder: 'border-warning-200 dark:border-warning-800',
@@ -106,15 +109,13 @@ function SingleError({ error, onDismiss, onRetry }: SingleErrorProps) {
         'animate-[slideDown_0.3s_ease-out]',
         config.containerBg,
         config.containerBorder,
-        error.severity === 'critical' && 'ring-2 ring-error-400/50 dark:ring-error-600/50'
+        error.severity === 'critical' && 'ring-2 ring-error-400/50 dark:ring-error-600/50',
       )}
     >
       {/* Header */}
       <div className="flex items-start gap-3 p-4">
         {/* Severity icon */}
-        <div className={clsx('mt-0.5 shrink-0', config.iconColor)}>
-          {config.icon}
-        </div>
+        <div className={clsx('mt-0.5 shrink-0', config.iconColor)}>{config.icon}</div>
 
         {/* Content */}
         <div className="flex-1 min-w-0">
@@ -122,21 +123,21 @@ function SingleError({ error, onDismiss, onRetry }: SingleErrorProps) {
           <div className="flex items-start justify-between gap-2">
             <div>
               <div className="flex items-center gap-2">
-                <span className={clsx(
-                  'text-2xs font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded',
-                  error.severity === 'warning' && 'bg-warning-200 dark:bg-warning-800 text-warning-800 dark:text-warning-200',
-                  error.severity === 'error' && 'bg-error-200 dark:bg-error-800 text-error-800 dark:text-error-200',
-                  error.severity === 'critical' && 'bg-error-300 dark:bg-error-700 text-error-900 dark:text-error-100'
-                )}>
+                <span
+                  className={clsx(
+                    'text-2xs font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded',
+                    error.severity === 'warning' &&
+                      'bg-warning-200 dark:bg-warning-800 text-warning-800 dark:text-warning-200',
+                    error.severity === 'error' && 'bg-error-200 dark:bg-error-800 text-error-800 dark:text-error-200',
+                    error.severity === 'critical' &&
+                      'bg-error-300 dark:bg-error-700 text-error-900 dark:text-error-100',
+                  )}
+                >
                   {config.label}
                 </span>
-                <span className="text-2xs text-gray-500 dark:text-gray-400">
-                  {timestamp}
-                </span>
+                <span className="text-2xs text-gray-500 dark:text-gray-400">{timestamp}</span>
               </div>
-              <h4 className={clsx('font-semibold mt-1', config.titleColor)}>
-                {error.title}
-              </h4>
+              <h4 className={clsx('font-semibold mt-1', config.titleColor)}>{error.title}</h4>
             </div>
 
             {/* Dismiss button */}
@@ -146,7 +147,7 @@ function SingleError({ error, onDismiss, onRetry }: SingleErrorProps) {
                 'p-1 rounded shrink-0',
                 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
                 'hover:bg-gray-200/50 dark:hover:bg-gray-700/50',
-                'transition-colors'
+                'transition-colors',
               )}
               title="Dismiss"
             >
@@ -155,25 +156,21 @@ function SingleError({ error, onDismiss, onRetry }: SingleErrorProps) {
           </div>
 
           {/* Description */}
-          <p className="text-sm text-gray-700 dark:text-gray-300 mt-1.5">
-            {error.description}
-          </p>
+          <p className="text-sm text-gray-700 dark:text-gray-300 mt-1.5">{error.description}</p>
 
           {/* Suggested fix */}
           {error.suggestedFix && (
-            <div className={clsx(
-              'flex items-start gap-2 mt-3 p-2.5 rounded-md',
-              'bg-white/60 dark:bg-gray-800/60',
-              'border border-gray-200/50 dark:border-gray-700/50'
-            )}>
+            <div
+              className={clsx(
+                'flex items-start gap-2 mt-3 p-2.5 rounded-md',
+                'bg-white/60 dark:bg-gray-800/60',
+                'border border-gray-200/50 dark:border-gray-700/50',
+              )}
+            >
               <InfoCircledIcon className="w-4 h-4 text-primary-500 mt-0.5 shrink-0" />
               <div>
-                <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                  Suggested Fix
-                </span>
-                <p className="text-sm text-gray-800 dark:text-gray-200 mt-0.5">
-                  {error.suggestedFix}
-                </p>
+                <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Suggested Fix</span>
+                <p className="text-sm text-gray-800 dark:text-gray-200 mt-0.5">{error.suggestedFix}</p>
               </div>
             </div>
           )}
@@ -190,7 +187,7 @@ function SingleError({ error, onDismiss, onRetry }: SingleErrorProps) {
                   'bg-primary-600 text-white',
                   'hover:bg-primary-700',
                   'transition-colors',
-                  'shadow-sm'
+                  'shadow-sm',
                 )}
               >
                 <ReloadIcon className="w-3.5 h-3.5" />
@@ -208,13 +205,14 @@ function SingleError({ error, onDismiss, onRetry }: SingleErrorProps) {
                   'bg-gray-200/50 dark:bg-gray-700/50',
                   'text-gray-600 dark:text-gray-400',
                   'hover:bg-gray-300/50 dark:hover:bg-gray-600/50',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
-                {showStackTrace
-                  ? <ChevronDownIcon className="w-3.5 h-3.5" />
-                  : <ChevronRightIcon className="w-3.5 h-3.5" />
-                }
+                {showStackTrace ? (
+                  <ChevronDownIcon className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronRightIcon className="w-3.5 h-3.5" />
+                )}
                 {showStackTrace ? 'Hide' : 'Show'} Details
               </button>
             )}
@@ -224,17 +222,14 @@ function SingleError({ error, onDismiss, onRetry }: SingleErrorProps) {
 
       {/* Collapsible stack trace */}
       {showStackTrace && hasStackTrace && (
-        <div className={clsx(
-          'border-t',
-          config.containerBorder
-        )}>
+        <div className={clsx('border-t', config.containerBorder)}>
           <pre
             className={clsx(
               'p-4 text-xs font-mono',
               'text-gray-700 dark:text-gray-300',
               'whitespace-pre-wrap break-all',
               'max-h-48 overflow-y-auto',
-              'bg-white/40 dark:bg-gray-900/40'
+              'bg-white/40 dark:bg-gray-900/40',
             )}
           >
             {error.stackTrace}
@@ -249,12 +244,7 @@ function SingleError({ error, onDismiss, onRetry }: SingleErrorProps) {
 // ErrorState Component
 // ============================================================================
 
-export function ErrorState({
-  storyId,
-  className,
-  showDismissed = false,
-  maxErrors = 10,
-}: ErrorStateProps) {
+export function ErrorState({ storyId, className, showDismissed = false, maxErrors = 10 }: ErrorStateProps) {
   const { executionErrors, dismissError, retryStory, clearExecutionErrors } = useExecutionStore();
 
   const filteredErrors = (() => {
@@ -294,9 +284,7 @@ export function ErrorState({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-xs">
             {criticalCount > 0 && (
-              <span className="text-error-600 dark:text-error-400 font-medium">
-                {criticalCount} critical
-              </span>
+              <span className="text-error-600 dark:text-error-400 font-medium">{criticalCount} critical</span>
             )}
             {errorCount > 0 && (
               <span className="text-error-500 font-medium">
@@ -315,7 +303,7 @@ export function ErrorState({
               'text-xs px-2 py-1 rounded',
               'text-gray-500 dark:text-gray-400',
               'hover:bg-gray-100 dark:hover:bg-gray-800',
-              'transition-colors'
+              'transition-colors',
             )}
           >
             Dismiss All
@@ -325,12 +313,7 @@ export function ErrorState({
 
       {/* Error list */}
       {filteredErrors.map((error) => (
-        <SingleError
-          key={error.id}
-          error={error}
-          onDismiss={dismissError}
-          onRetry={retryStory}
-        />
+        <SingleError key={error.id} error={error} onDismiss={dismissError} onRetry={retryStory} />
       ))}
     </div>
   );

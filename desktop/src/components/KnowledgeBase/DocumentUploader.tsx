@@ -55,19 +55,22 @@ export function DocumentUploader({ projectId, collectionName }: DocumentUploader
     setIsDragOver(false);
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(false);
-    setUploadError(null);
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragOver(false);
+      setUploadError(null);
 
-    const files = Array.from(e.dataTransfer.files).filter(isAcceptedFile);
-    if (files.length === 0) {
-      setUploadError(t('upload.noValidFiles'));
-      return;
-    }
-    setSelectedFiles((prev) => [...prev, ...files]);
-  }, [t]);
+      const files = Array.from(e.dataTransfer.files).filter(isAcceptedFile);
+      if (files.length === 0) {
+        setUploadError(t('upload.noValidFiles'));
+        return;
+      }
+      setSelectedFiles((prev) => [...prev, ...files]);
+    },
+    [t],
+  );
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
@@ -98,7 +101,7 @@ export function DocumentUploader({ projectId, collectionName }: DocumentUploader
             source_path: file.name,
             source_type: ext,
           };
-        })
+        }),
       );
 
       const ok = await ingestDocuments(projectId, collectionName, documents);
@@ -119,12 +122,8 @@ export function DocumentUploader({ projectId, collectionName }: DocumentUploader
   return (
     <div className="p-6 space-y-6">
       <div>
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-          {t('upload.title')}
-        </h3>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          {t('upload.subtitle')}
-        </p>
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{t('upload.title')}</h3>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('upload.subtitle')}</p>
       </div>
 
       {/* Drop zone */}
@@ -139,7 +138,7 @@ export function DocumentUploader({ projectId, collectionName }: DocumentUploader
           isDragOver
             ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
             : 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500',
-          'bg-gray-50 dark:bg-gray-900/50'
+          'bg-gray-50 dark:bg-gray-900/50',
         )}
       >
         <input
@@ -150,15 +149,23 @@ export function DocumentUploader({ projectId, collectionName }: DocumentUploader
           onChange={handleFileSelect}
           className="hidden"
         />
-        <svg className="mx-auto w-10 h-10 text-gray-400 dark:text-gray-500 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+        <svg
+          className="mx-auto w-10 h-10 text-gray-400 dark:text-gray-500 mb-3"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.5}
+            d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+          />
         </svg>
         <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
           {isDragOver ? t('upload.dropHere') : t('upload.dragOrClick')}
         </p>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-          {t('upload.acceptedFormats')}
-        </p>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{t('upload.acceptedFormats')}</p>
       </div>
 
       {/* Error */}
@@ -179,17 +186,19 @@ export function DocumentUploader({ projectId, collectionName }: DocumentUploader
               <div key={`${file.name}-${index}`} className="flex items-center justify-between px-4 py-2">
                 <div className="flex items-center gap-3 min-w-0">
                   <svg className="w-5 h-5 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+                    />
                   </svg>
                   <div className="min-w-0">
                     <p className="text-sm text-gray-900 dark:text-white truncate">{file.name}</p>
                     <p className="text-xs text-gray-500">{formatSize(file.size)}</p>
                   </div>
                 </div>
-                <button
-                  onClick={() => removeFile(index)}
-                  className="text-gray-400 hover:text-red-500 p-1"
-                >
+                <button onClick={() => removeFile(index)} className="text-gray-400 hover:text-red-500 p-1">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
@@ -224,7 +233,7 @@ export function DocumentUploader({ projectId, collectionName }: DocumentUploader
             'w-full px-4 py-2.5 rounded-lg text-sm font-medium',
             'bg-primary-600 hover:bg-primary-700',
             'text-white',
-            'transition-colors'
+            'transition-colors',
           )}
         >
           {t('upload.uploadAndIndex', { count: selectedFiles.length })}

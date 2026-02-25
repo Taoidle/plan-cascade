@@ -74,9 +74,7 @@ describe('GuardrailsStore', () => {
   describe('toggleGuardrail', () => {
     it('should optimistically update guardrail state', async () => {
       useGuardrailsStore.setState({
-        guardrails: [
-          { name: 'SensitiveData', guardrail_type: 'builtin', enabled: true, description: '' },
-        ],
+        guardrails: [{ name: 'SensitiveData', guardrail_type: 'builtin', enabled: true, description: '' }],
       });
 
       vi.mocked(api.toggleGuardrailEnabled).mockResolvedValue({
@@ -133,9 +131,7 @@ describe('GuardrailsStore', () => {
   describe('removeCustomRule', () => {
     it('should remove a rule on success', async () => {
       useGuardrailsStore.setState({
-        guardrails: [
-          { name: 'MyRule', guardrail_type: 'custom', enabled: true, description: '' },
-        ],
+        guardrails: [{ name: 'MyRule', guardrail_type: 'custom', enabled: true, description: '' }],
       });
 
       vi.mocked(api.removeCustomRule).mockResolvedValue({
@@ -183,7 +179,14 @@ describe('GuardrailsStore', () => {
     it('should clear the trigger log', async () => {
       useGuardrailsStore.setState({
         triggerLog: [
-          { id: 1, guardrail_name: 'Test', direction: 'input', result_type: 'warn', content_snippet: '', timestamp: '' },
+          {
+            id: 1,
+            guardrail_name: 'Test',
+            direction: 'input',
+            result_type: 'warn',
+            content_snippet: '',
+            timestamp: '',
+          },
         ],
       });
 

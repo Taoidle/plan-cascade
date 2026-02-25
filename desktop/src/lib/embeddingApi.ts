@@ -30,9 +30,7 @@ import type {
  * Returns the persisted config from the database settings store, or defaults
  * to TF-IDF if no config has been explicitly saved.
  */
-export async function getEmbeddingConfig(
-  projectPath?: string,
-): Promise<CommandResponse<EmbeddingConfigResponse>> {
+export async function getEmbeddingConfig(projectPath?: string): Promise<CommandResponse<EmbeddingConfigResponse>> {
   try {
     return await invoke<CommandResponse<EmbeddingConfigResponse>>('get_embedding_config', {
       project_path: projectPath ?? null,
@@ -78,13 +76,9 @@ export async function setEmbeddingConfig(
 /**
  * List all available embedding providers with their capabilities.
  */
-export async function listEmbeddingProviders(): Promise<
-  CommandResponse<EmbeddingProviderCapability[]>
-> {
+export async function listEmbeddingProviders(): Promise<CommandResponse<EmbeddingProviderCapability[]>> {
   try {
-    return await invoke<CommandResponse<EmbeddingProviderCapability[]>>(
-      'list_embedding_providers',
-    );
+    return await invoke<CommandResponse<EmbeddingProviderCapability[]>>('list_embedding_providers');
   } catch (error) {
     return {
       success: false,
@@ -105,10 +99,7 @@ export async function checkEmbeddingProviderHealth(
   request: CheckEmbeddingHealthRequest,
 ): Promise<CommandResponse<EmbeddingHealthResponse>> {
   try {
-    return await invoke<CommandResponse<EmbeddingHealthResponse>>(
-      'check_embedding_provider_health',
-      { request },
-    );
+    return await invoke<CommandResponse<EmbeddingHealthResponse>>('check_embedding_provider_health', { request });
   } catch (error) {
     return {
       success: false,
@@ -128,9 +119,7 @@ export async function checkEmbeddingProviderHealth(
  * Returns the stored key for the given provider alias, or `null` if no key
  * has been saved.
  */
-export async function getEmbeddingApiKey(
-  request: GetEmbeddingApiKeyRequest,
-): Promise<CommandResponse<string | null>> {
+export async function getEmbeddingApiKey(request: GetEmbeddingApiKeyRequest): Promise<CommandResponse<string | null>> {
   try {
     return await invoke<CommandResponse<string | null>>('get_embedding_api_key', {
       request,

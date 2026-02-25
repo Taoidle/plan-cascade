@@ -12,12 +12,7 @@ import { TimelineWaterfall } from '../TimelineWaterfall';
 import { AgentPerformanceTable } from '../AgentPerformanceTable';
 import { ExecutionReport } from '../ExecutionReport';
 import { useExecutionReportStore } from '../../../store/executionReport';
-import type {
-  ReportSummary,
-  RadarDimension,
-  TimelineEntry,
-  AgentPerformance,
-} from '../../../store/executionReport';
+import type { ReportSummary, RadarDimension, TimelineEntry, AgentPerformance } from '../../../store/executionReport';
 
 // ============================================================================
 // Test Fixtures
@@ -38,26 +33,67 @@ function makeSummary(overrides?: Partial<ReportSummary>): ReportSummary {
 
 function makeRadarDimensions(): RadarDimension[] {
   return [
-    { dimension: 'correctness', averageScore: 8, maxScore: 10, storyScores: { 's1': 9, 's2': 7 } },
-    { dimension: 'readability', averageScore: 7, maxScore: 10, storyScores: { 's1': 8, 's2': 6 } },
-    { dimension: 'performance', averageScore: 6, maxScore: 10, storyScores: { 's1': 7, 's2': 5 } },
-    { dimension: 'security', averageScore: 9, maxScore: 10, storyScores: { 's1': 9, 's2': 9 } },
-    { dimension: 'maintainability', averageScore: 7, maxScore: 10, storyScores: { 's1': 8, 's2': 6 } },
+    { dimension: 'correctness', averageScore: 8, maxScore: 10, storyScores: { s1: 9, s2: 7 } },
+    { dimension: 'readability', averageScore: 7, maxScore: 10, storyScores: { s1: 8, s2: 6 } },
+    { dimension: 'performance', averageScore: 6, maxScore: 10, storyScores: { s1: 7, s2: 5 } },
+    { dimension: 'security', averageScore: 9, maxScore: 10, storyScores: { s1: 9, s2: 9 } },
+    { dimension: 'maintainability', averageScore: 7, maxScore: 10, storyScores: { s1: 8, s2: 6 } },
   ];
 }
 
 function makeTimelineEntries(): TimelineEntry[] {
   return [
-    { storyId: 's1', storyTitle: 'Story One', batchIndex: 0, agent: 'claude-sonnet', durationMs: 10000, startOffsetMs: 0, status: 'completed', gateResult: 'passed' },
-    { storyId: 's2', storyTitle: 'Story Two', batchIndex: 0, agent: 'claude-haiku', durationMs: 8000, startOffsetMs: 0, status: 'completed', gateResult: 'passed' },
-    { storyId: 's3', storyTitle: 'Story Three', batchIndex: 1, agent: 'claude-sonnet', durationMs: 12000, startOffsetMs: 10000, status: 'failed', gateResult: 'failed' },
+    {
+      storyId: 's1',
+      storyTitle: 'Story One',
+      batchIndex: 0,
+      agent: 'claude-sonnet',
+      durationMs: 10000,
+      startOffsetMs: 0,
+      status: 'completed',
+      gateResult: 'passed',
+    },
+    {
+      storyId: 's2',
+      storyTitle: 'Story Two',
+      batchIndex: 0,
+      agent: 'claude-haiku',
+      durationMs: 8000,
+      startOffsetMs: 0,
+      status: 'completed',
+      gateResult: 'passed',
+    },
+    {
+      storyId: 's3',
+      storyTitle: 'Story Three',
+      batchIndex: 1,
+      agent: 'claude-sonnet',
+      durationMs: 12000,
+      startOffsetMs: 10000,
+      status: 'failed',
+      gateResult: 'failed',
+    },
   ];
 }
 
 function makeAgentPerformance(): AgentPerformance[] {
   return [
-    { agentName: 'claude-sonnet', storiesAssigned: 4, storiesCompleted: 3, successRate: 75, averageDurationMs: 11000, averageQualityScore: 38.5 },
-    { agentName: 'claude-haiku', storiesAssigned: 2, storiesCompleted: 2, successRate: 100, averageDurationMs: 8000, averageQualityScore: 35.0 },
+    {
+      agentName: 'claude-sonnet',
+      storiesAssigned: 4,
+      storiesCompleted: 3,
+      successRate: 75,
+      averageDurationMs: 11000,
+      averageQualityScore: 38.5,
+    },
+    {
+      agentName: 'claude-haiku',
+      storiesAssigned: 2,
+      storiesCompleted: 2,
+      successRate: 100,
+      averageDurationMs: 8000,
+      averageQualityScore: 35.0,
+    },
   ];
 }
 
@@ -236,11 +272,11 @@ describe('ExecutionReport', () => {
         storiesCompleted: 2,
         storiesFailed: 0,
         totalDurationMs: 10000,
-        agentAssignments: { 's1': 'claude-sonnet', 's2': 'claude-haiku' },
+        agentAssignments: { s1: 'claude-sonnet', s2: 'claude-haiku' },
         success: true,
       },
       qualityGateResults: {
-        's1': {
+        s1: {
           storyId: 's1',
           overallStatus: 'passed',
           gates: [],
@@ -251,7 +287,7 @@ describe('ExecutionReport', () => {
           totalScore: 17,
         },
       },
-      storyStatuses: { 's1': 'completed', 's2': 'completed' },
+      storyStatuses: { s1: 'completed', s2: 'completed' },
     });
 
     render(<ExecutionReport />);
@@ -277,11 +313,11 @@ describe('ExecutionReport', () => {
         storiesCompleted: 1,
         storiesFailed: 0,
         totalDurationMs: 5000,
-        agentAssignments: { 's1': 'claude-sonnet' },
+        agentAssignments: { s1: 'claude-sonnet' },
         success: true,
       },
       qualityGateResults: {},
-      storyStatuses: { 's1': 'completed' },
+      storyStatuses: { s1: 'completed' },
     });
 
     render(<ExecutionReport />);

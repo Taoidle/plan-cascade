@@ -43,16 +43,12 @@ export function buildConversationHistory(): CrossModeConversationTurn[] {
  * Creates a StandaloneTurn summarizing the Task planning output
  * and appends it to the execution store's standaloneTurns.
  */
-export function synthesizePlanningTurn(
-  description: string,
-  analysis: StrategyAnalysis | null,
-  prd: TaskPrd
-): void {
+export function synthesizePlanningTurn(description: string, analysis: StrategyAnalysis | null, prd: TaskPrd): void {
   const lines: string[] = [];
 
   if (analysis) {
     lines.push(
-      `Strategy: ${analysis.strategyDecision?.strategy ?? analysis.recommendedMode} (confidence: ${analysis.strategyDecision?.confidence ?? analysis.confidence})`
+      `Strategy: ${analysis.strategyDecision?.strategy ?? analysis.recommendedMode} (confidence: ${analysis.strategyDecision?.confidence ?? analysis.confidence})`,
     );
     lines.push(`Risk: ${analysis.riskLevel}, Estimated stories: ${analysis.estimatedStories}`);
   }
@@ -74,11 +70,7 @@ export function synthesizePlanningTurn(
  *
  * Called when Task execution completes (success or failure).
  */
-export function synthesizeExecutionTurn(
-  completedCount: number,
-  totalCount: number,
-  success: boolean
-): void {
+export function synthesizeExecutionTurn(completedCount: number, totalCount: number, success: boolean): void {
   const outcome = success ? 'completed successfully' : 'completed with failures';
   appendSyntheticTurn(
     '[Task Execution] Execute approved PRD',
@@ -86,7 +78,7 @@ export function synthesizeExecutionTurn(
     {
       source: 'task-synthesized',
       type: 'execution',
-    }
+    },
   );
 }
 
@@ -107,7 +99,7 @@ export function setPendingTaskContext(context: string): void {
 function appendSyntheticTurn(
   userMessage: string,
   assistantMessage: string,
-  metadata?: { source?: string; type?: string }
+  metadata?: { source?: string; type?: string },
 ): void {
   const turn: StandaloneTurn = {
     user: userMessage,

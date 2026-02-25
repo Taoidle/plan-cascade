@@ -20,8 +20,7 @@ interface MergeBarProps {
 export function MergeBar({ onOpenConflictResolver }: MergeBarProps) {
   const { t } = useTranslation('git');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
-  const { isInMerge, mergeState, mergeSourceBranch, conflictFiles, resolvedFiles, abortMerge } =
-    useGitStore();
+  const { isInMerge, mergeState, mergeSourceBranch, conflictFiles, resolvedFiles, abortMerge } = useGitStore();
   const [isAborting, setIsAborting] = useState(false);
 
   const handleAbort = useCallback(async () => {
@@ -47,12 +46,7 @@ export function MergeBar({ onOpenConflictResolver }: MergeBarProps) {
   return (
     <div className="shrink-0 flex items-center justify-between px-3 py-1.5 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800">
       <div className="flex items-center gap-2 text-sm">
-        <svg
-          className="w-4 h-4 text-amber-500"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
+        <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -63,11 +57,7 @@ export function MergeBar({ onOpenConflictResolver }: MergeBarProps) {
         <span className="font-medium text-amber-700 dark:text-amber-400">
           {kindLabel} {t('mergeBar.inProgress')}
         </span>
-        {mergeSourceBranch && (
-          <span className="text-amber-600 dark:text-amber-500">
-            ({mergeSourceBranch})
-          </span>
-        )}
+        {mergeSourceBranch && <span className="text-amber-600 dark:text-amber-500">({mergeSourceBranch})</span>}
         {totalCount > 0 && (
           <span className="text-xs text-amber-600 dark:text-amber-500">
             {t('mergeBar.conflictsResolved', { count: `${resolvedCount}/${totalCount}` })}
@@ -90,7 +80,7 @@ export function MergeBar({ onOpenConflictResolver }: MergeBarProps) {
           className={clsx(
             'px-2 py-1 text-xs rounded transition-colors',
             'text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-800/30',
-            isAborting && 'opacity-50 cursor-not-allowed'
+            isAborting && 'opacity-50 cursor-not-allowed',
           )}
         >
           {isAborting ? t('mergeBar.aborting') : t('mergeBar.abort')}

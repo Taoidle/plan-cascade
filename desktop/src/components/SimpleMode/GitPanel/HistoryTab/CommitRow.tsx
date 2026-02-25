@@ -126,10 +126,7 @@ function commitSubject(message: string): string {
  * Highlight search matches in text.
  * Returns an array of spans with matched portions highlighted.
  */
-function highlightMatch(
-  text: string,
-  query: string
-): { text: string; isMatch: boolean }[] {
+function highlightMatch(text: string, query: string): { text: string; isMatch: boolean }[] {
   if (!query) return [{ text, isMatch: false }];
 
   const lowerText = text.toLowerCase();
@@ -175,17 +172,16 @@ export function CommitRow({
   const relativeTime = t(relativeTimeData.key, { count: relativeTimeData.count });
   const authorAbbr = useMemo(() => abbreviateAuthor(commit.author_name), [commit.author_name]);
 
-  const highlightedSubject = useMemo(
-    () => highlightMatch(subject, searchQuery),
-    [subject, searchQuery]
-  );
+  const highlightedSubject = useMemo(() => highlightMatch(subject, searchQuery), [subject, searchQuery]);
 
   return (
     <div
       className={clsx(
         'flex items-center gap-2 px-2 cursor-pointer select-none border-b border-transparent transition-colors',
         isSelected && 'bg-blue-50 dark:bg-blue-900/30 border-b-blue-200 dark:border-b-blue-800',
-        isCompareTarget && !isSelected && 'bg-purple-50 dark:bg-purple-900/20 border-b-purple-200 dark:border-b-purple-800',
+        isCompareTarget &&
+          !isSelected &&
+          'bg-purple-50 dark:bg-purple-900/20 border-b-purple-200 dark:border-b-purple-800',
         !isSelected && !isCompareTarget && 'hover:bg-gray-50 dark:hover:bg-gray-800/50',
       )}
       style={{ height: ROW_HEIGHT }}
@@ -197,12 +193,7 @@ export function CommitRow({
       title={`${commit.short_sha} - ${subject}`}
     >
       {/* HEAD indicator */}
-      {isHead && (
-        <div
-          className="shrink-0 w-1.5 h-1.5 rounded-full"
-          style={{ backgroundColor: laneColor }}
-        />
-      )}
+      {isHead && <div className="shrink-0 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: laneColor }} />}
 
       {/* Ref badges */}
       {branches.length > 0 && (
@@ -212,9 +203,7 @@ export function CommitRow({
               key={branch.name}
               className={clsx(
                 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium leading-none truncate max-w-[100px]',
-                branch.isHead
-                  ? 'text-white'
-                  : 'text-white/90',
+                branch.isHead ? 'text-white' : 'text-white/90',
               )}
               style={{ backgroundColor: laneColor }}
               title={branch.name}
@@ -244,11 +233,7 @@ export function CommitRow({
               {tag}
             </span>
           ))}
-          {tags.length > 1 && (
-            <span className="text-[10px] text-gray-500 dark:text-gray-400">
-              +{tags.length - 1}
-            </span>
-          )}
+          {tags.length > 1 && <span className="text-[10px] text-gray-500 dark:text-gray-400">+{tags.length - 1}</span>}
         </div>
       )}
 
@@ -264,19 +249,15 @@ export function CommitRow({
             </mark>
           ) : (
             <span key={i}>{part.text}</span>
-          )
+          ),
         )}
       </span>
 
       {/* Author */}
-      <span className="shrink-0 text-[10px] text-gray-500 dark:text-gray-400 max-w-[80px] truncate">
-        {authorAbbr}
-      </span>
+      <span className="shrink-0 text-[10px] text-gray-500 dark:text-gray-400 max-w-[80px] truncate">{authorAbbr}</span>
 
       {/* Relative time */}
-      <span className="shrink-0 text-[10px] text-gray-400 dark:text-gray-500 w-[52px] text-right">
-        {relativeTime}
-      </span>
+      <span className="shrink-0 text-[10px] text-gray-400 dark:text-gray-500 w-[52px] text-right">{relativeTime}</span>
     </div>
   );
 }

@@ -106,14 +106,20 @@ export function SimpleMode() {
 
       // Show notification about context inheritance
       if (newMode === 'task' && hasChatHistory) {
-        showToast(t('contextBridge.switchToTaskWithContext', { defaultValue: 'Switching to Task mode with chat context' }), 'info');
+        showToast(
+          t('contextBridge.switchToTaskWithContext', { defaultValue: 'Switching to Task mode with chat context' }),
+          'info',
+        );
       } else if (newMode === 'chat' && hasPendingTaskContext) {
-        showToast(t('contextBridge.switchToChatWithTaskContext', { defaultValue: 'Switching to Chat mode with task context' }), 'info');
+        showToast(
+          t('contextBridge.switchToChatWithTaskContext', { defaultValue: 'Switching to Chat mode with task context' }),
+          'info',
+        );
       }
 
       setWorkflowMode(newMode);
     },
-    [workflowMode, streamingOutput, showToast, t]
+    [workflowMode, streamingOutput, showToast, t],
   );
 
   useEffect(() => {
@@ -149,8 +155,7 @@ export function SimpleMode() {
     let prevStatus = useExecutionStore.getState().status;
     const unsub = useExecutionStore.subscribe((state) => {
       if (prevStatus === 'running' && state.status !== 'running') {
-        const currentTurn = state.streamingOutput
-          .filter((l) => l.type === 'info').length - 1;
+        const currentTurn = state.streamingOutput.filter((l) => l.type === 'info').length - 1;
         if (currentTurn >= 0) bridge.onTurnEnd(currentTurn);
       }
       prevStatus = state.status;
@@ -172,8 +177,8 @@ export function SimpleMode() {
   const addPrdFeedback = useWorkflowOrchestratorStore((s) => s.addPrdFeedback);
   const cancelWorkflow = useWorkflowOrchestratorStore((s) => s.cancelWorkflow);
   const resetWorkflow = useWorkflowOrchestratorStore((s) => s.resetWorkflow);
-  const isInterviewSubmitting = useWorkflowOrchestratorStore((s) => s.phase === 'interviewing') &&
-    pendingQuestion === null;
+  const isInterviewSubmitting =
+    useWorkflowOrchestratorStore((s) => s.phase === 'interviewing') && pendingQuestion === null;
 
   // Tool permission state
   const permissionRequest = useToolPermissionStore((s) => s.pendingRequest);
@@ -195,14 +200,7 @@ export function SimpleMode() {
 
     await start(description, 'simple');
     setDescription('');
-  }, [
-    description,
-    isAnalyzingStrategy,
-    isSubmitting,
-    start,
-    startWorkflow,
-    workflowMode,
-  ]);
+  }, [description, isAnalyzingStrategy, isSubmitting, start, startWorkflow, workflowMode]);
 
   const handleFollowUp = useCallback(async () => {
     if (!description.trim() || isSubmitting) return;
@@ -222,7 +220,16 @@ export function SimpleMode() {
     }
 
     await sendFollowUp(prompt);
-  }, [description, isSubmitting, sendFollowUp, workflowMode, workflowPhase, submitInterviewAnswer, overrideConfigNatural, addPrdFeedback]);
+  }, [
+    description,
+    isSubmitting,
+    sendFollowUp,
+    workflowMode,
+    workflowPhase,
+    submitInterviewAnswer,
+    overrideConfigNatural,
+    addPrdFeedback,
+  ]);
 
   const handleNewTask = useCallback(() => {
     const hasContext = streamingOutput.length > 0 || useExecutionStore.getState()._pendingTaskContext;
@@ -243,7 +250,7 @@ export function SimpleMode() {
       setRightPanelOpen(false);
       handleWorkflowModeChange('chat');
     },
-    [restoreFromHistory, handleWorkflowModeChange]
+    [restoreFromHistory, handleWorkflowModeChange],
   );
 
   const isRunning = status === 'running' || status === 'paused';
@@ -251,7 +258,7 @@ export function SimpleMode() {
 
   const detailLineCount = useMemo(
     () => streamingOutput.filter((line) => line.type !== 'text' && line.type !== 'info').length,
-    [streamingOutput]
+    [streamingOutput],
   );
 
   // Output button toggle logic
@@ -271,12 +278,13 @@ export function SimpleMode() {
       {/* Main content area */}
       <div className="flex-1 min-h-0 px-4 py-2">
         <div className="h-full max-w-[2200px] mx-auto w-full flex">
-
           {/* Left panel: WorkspaceTreeSidebar */}
-          <div className={clsx(
-            'shrink-0 transition-all duration-200 ease-out overflow-hidden',
-            sidebarCollapsed ? 'w-0 opacity-0' : 'w-[280px] opacity-100 mr-3'
-          )}>
+          <div
+            className={clsx(
+              'shrink-0 transition-all duration-200 ease-out overflow-hidden',
+              sidebarCollapsed ? 'w-0 opacity-0' : 'w-[280px] opacity-100 mr-3',
+            )}
+          >
             <div className="w-[280px] h-full">
               <WorkspaceTreeSidebar
                 history={history}
@@ -285,7 +293,7 @@ export function SimpleMode() {
                 onRename={renameHistory}
                 onClear={clearHistory}
                 onNewTask={handleNewTask}
-                currentTask={isChatSession ? (streamingOutput[0]?.content || null) : null}
+                currentTask={isChatSession ? streamingOutput[0]?.content || null : null}
                 backgroundSessions={backgroundSessions}
                 onSwitchSession={switchToSession}
                 onRemoveSession={removeBackgroundSession}
@@ -341,7 +349,10 @@ export function SimpleMode() {
                   queueSize={permissionQueueSize}
                 />
               ) : /* Priority 2: Structured input overlay for interview boolean/select questions */
-              workflowMode === 'task' && pendingQuestion && pendingQuestion.inputType !== 'text' && pendingQuestion.inputType !== 'textarea' ? (
+              workflowMode === 'task' &&
+                pendingQuestion &&
+                pendingQuestion.inputType !== 'text' &&
+                pendingQuestion.inputType !== 'textarea' ? (
                 <StructuredInputOverlay
                   question={pendingQuestion}
                   onSubmit={submitInterviewAnswer}
@@ -354,7 +365,11 @@ export function SimpleMode() {
                     ref={inputBoxRef}
                     value={description}
                     onChange={setDescription}
-                    onSubmit={isChatSession || (workflowMode === 'task' && workflowPhase !== 'idle') ? handleFollowUp : handleStart}
+                    onSubmit={
+                      isChatSession || (workflowMode === 'task' && workflowPhase !== 'idle')
+                        ? handleFollowUp
+                        : handleStart
+                    }
                     disabled={isDisabled}
                     enterSubmits={workflowMode === 'task' && workflowPhase === 'interviewing'}
                     placeholder={
@@ -363,16 +378,21 @@ export function SimpleMode() {
                         : workflowMode === 'task' && workflowPhase === 'interviewing'
                           ? t('workflow.input.interviewPlaceholder', { defaultValue: 'Type your answer...' })
                           : workflowMode === 'task' && workflowPhase === 'configuring'
-                          ? t('workflow.input.configuringPlaceholder', { defaultValue: 'Type config overrides (e.g. "6 parallel, enable TDD") or click Continue above...' })
-                          : workflowMode === 'task' && workflowPhase === 'reviewing_prd'
-                            ? t('workflow.input.prdFeedbackPlaceholder', { defaultValue: 'Add feedback or press Approve on the PRD card...' })
-                            : workflowMode === 'task'
-                              ? t('workflow.input.taskPlaceholder', {
-                                  defaultValue: 'Describe a task (implementation / analysis / refactor)...',
+                            ? t('workflow.input.configuringPlaceholder', {
+                                defaultValue:
+                                  'Type config overrides (e.g. "6 parallel, enable TDD") or click Continue above...',
+                              })
+                            : workflowMode === 'task' && workflowPhase === 'reviewing_prd'
+                              ? t('workflow.input.prdFeedbackPlaceholder', {
+                                  defaultValue: 'Add feedback or press Approve on the PRD card...',
                                 })
-                              : t('input.followUpPlaceholder', {
-                                  defaultValue: 'Type a normal chat message...',
-                                })
+                              : workflowMode === 'task'
+                                ? t('workflow.input.taskPlaceholder', {
+                                    defaultValue: 'Describe a task (implementation / analysis / refactor)...',
+                                  })
+                                : t('input.followUpPlaceholder', {
+                                    defaultValue: 'Type a normal chat message...',
+                                  })
                     }
                     isLoading={isRunning}
                     attachments={attachments}
@@ -393,24 +413,30 @@ export function SimpleMode() {
                 </div>
               )}
               {/* Cancel button during active workflow */}
-              {workflowMode === 'task' && workflowPhase !== 'idle' && workflowPhase !== 'completed' && workflowPhase !== 'failed' && workflowPhase !== 'cancelled' && (
-                <div className="px-4 pb-3">
-                  <button
-                    onClick={cancelWorkflow}
-                    className="text-xs text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                  >
-                    {t('workflow.cancelWorkflow')}
-                  </button>
-                </div>
-              )}
+              {workflowMode === 'task' &&
+                workflowPhase !== 'idle' &&
+                workflowPhase !== 'completed' &&
+                workflowPhase !== 'failed' &&
+                workflowPhase !== 'cancelled' && (
+                  <div className="px-4 pb-3">
+                    <button
+                      onClick={cancelWorkflow}
+                      className="text-xs text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                    >
+                      {t('workflow.cancelWorkflow')}
+                    </button>
+                  </div>
+                )}
             </div>
           </div>
 
           {/* Right panel: Output + Git tabs */}
-          <div className={clsx(
-            'shrink-0 transition-all duration-200 ease-out overflow-hidden',
-            rightPanelOpen ? 'w-[520px] opacity-100 ml-3' : 'w-0 opacity-0'
-          )}>
+          <div
+            className={clsx(
+              'shrink-0 transition-all duration-200 ease-out overflow-hidden',
+              rightPanelOpen ? 'w-[520px] opacity-100 ml-3' : 'w-0 opacity-0',
+            )}
+          >
             <div className="w-[520px] h-full">
               <TabbedRightPanel
                 activeTab={rightPanelTab}
@@ -481,10 +507,12 @@ function ChatTranscript({
       result.push({ turnIndex: turnIndex++, userLine: lines[i], assistantLines });
     }
     // Fallback: if no info lines but content exists, synthesize a turn so the panel isn't empty
-    if (result.length === 0 && lines.length > 0 &&
-        lines.some((l) => l.type !== 'info')) {
+    if (result.length === 0 && lines.length > 0 && lines.some((l) => l.type !== 'info')) {
       const syntheticUserLine: StreamLine = {
-        id: -1, content: '(continued)', type: 'info', timestamp: lines[0].timestamp,
+        id: -1,
+        content: '(continued)',
+        type: 'info',
+        timestamp: lines[0].timestamp,
       };
       result.push({
         turnIndex: 0,
@@ -636,11 +664,20 @@ function ChatTranscript({
             'text-gray-500 dark:text-gray-400',
             'hover:bg-gray-50 dark:hover:bg-gray-700',
             'transition-colors',
-            'animate-in fade-in-0 zoom-in-75 duration-150'
+            'animate-in fade-in-0 zoom-in-75 duration-150',
           )}
           title={t('chat.scrollToBottom', { defaultValue: 'Scroll to bottom' })}
         >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <path d="M4 6l4 4 4-4" />
           </svg>
         </button>
@@ -680,19 +717,21 @@ function ChatAssistantSection({
 
   // Collect text content for copy
   const textContent = useMemo(
-    () => lines.filter((l) => l.type === 'text').map((l) => l.content).join(''),
-    [lines]
+    () =>
+      lines
+        .filter((l) => l.type === 'text')
+        .map((l) => l.content)
+        .join(''),
+    [lines],
   );
 
   // Find last text line for MessageActions
-  const lastTextLine = useMemo(
-    () => [...lines].reverse().find((l) => l.type === 'text'),
-    [lines]
-  );
+  const lastTextLine = useMemo(() => [...lines].reverse().find((l) => l.type === 'text'), [lines]);
 
   // Check if there's rich content (tools, sub-agents, etc.)
   const hasRichContent = contentLines.some(
-    (l) => l.type === 'tool' || l.type === 'tool_result' || l.type === 'sub_agent' || l.type === 'analysis' || l.subAgentId
+    (l) =>
+      l.type === 'tool' || l.type === 'tool_result' || l.type === 'sub_agent' || l.type === 'analysis' || l.subAgentId,
   );
 
   return (
@@ -704,9 +743,7 @@ function ChatAssistantSection({
         )}
       >
         {/* Thinking section (collapsed by default) */}
-        {showReasoning && thinkingLines.length > 0 && (
-          <ChatThinkingSection lines={thinkingLines} />
-        )}
+        {showReasoning && thinkingLines.length > 0 && <ChatThinkingSection lines={thinkingLines} />}
 
         {/* Content blocks */}
         {blocks.map((block, idx) => {

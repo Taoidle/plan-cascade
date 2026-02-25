@@ -78,9 +78,7 @@ export function AIChangesTab({ sessionId, projectRoot }: AIChangesTabProps) {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-full text-xs text-red-500 dark:text-red-400 p-4">
-        {error}
-      </div>
+      <div className="flex items-center justify-center h-full text-xs text-red-500 dark:text-red-400 p-4">{error}</div>
     );
   }
 

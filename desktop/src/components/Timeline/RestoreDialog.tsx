@@ -53,7 +53,7 @@ export function RestoreDialog({
           className={clsx(
             'fixed inset-0 bg-black/50',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
-            'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0'
+            'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
           )}
         />
         <Dialog.Content
@@ -68,7 +68,7 @@ export function RestoreDialog({
             'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
             'data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%]',
             'data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%]',
-            'duration-200'
+            'duration-200',
           )}
         >
           {/* Header */}
@@ -82,7 +82,7 @@ export function RestoreDialog({
                 className={clsx(
                   'p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800',
                   'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 <Cross2Icon className="w-5 h-5" />
@@ -97,12 +97,10 @@ export function RestoreDialog({
               className={clsx(
                 'p-3 rounded-lg',
                 'bg-gray-50 dark:bg-gray-800',
-                'border border-gray-200 dark:border-gray-700'
+                'border border-gray-200 dark:border-gray-700',
               )}
             >
-              <p className="font-medium text-gray-900 dark:text-white">
-                {checkpoint.label}
-              </p>
+              <p className="font-medium text-gray-900 dark:text-white">{checkpoint.label}</p>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                 {new Date(checkpoint.timestamp).toLocaleString()}
               </p>
@@ -116,12 +114,10 @@ export function RestoreDialog({
               className={clsx(
                 'p-3 rounded-lg',
                 'bg-orange-50 dark:bg-orange-900/20',
-                'border border-orange-200 dark:border-orange-800'
+                'border border-orange-200 dark:border-orange-800',
               )}
             >
-              <p className="text-sm text-orange-800 dark:text-orange-200">
-                {t('timeline.restoreWarning')}
-              </p>
+              <p className="text-sm text-orange-800 dark:text-orange-200">{t('timeline.restoreWarning')}</p>
             </div>
 
             {/* Files that will change */}
@@ -132,17 +128,14 @@ export function RestoreDialog({
                 </p>
                 <ul className="space-y-1 max-h-32 overflow-y-auto">
                   {changedFiles.slice(0, 10).map((file) => (
-                    <li
-                      key={file.path}
-                      className="flex items-center gap-2 text-sm"
-                    >
+                    <li key={file.path} className="flex items-center gap-2 text-sm">
                       <FileIcon className="w-3 h-3 text-gray-400" />
                       <span
                         className={clsx(
                           'truncate',
                           file.action === 'remove' && 'text-red-600 dark:text-red-400',
                           file.action === 'restore' && 'text-green-600 dark:text-green-400',
-                          file.action === 'revert' && 'text-yellow-600 dark:text-yellow-400'
+                          file.action === 'revert' && 'text-yellow-600 dark:text-yellow-400',
                         )}
                       >
                         {file.path}
@@ -168,17 +161,14 @@ export function RestoreDialog({
                   'w-5 h-5 rounded border-2 flex items-center justify-center',
                   'border-gray-300 dark:border-gray-600',
                   'data-[state=checked]:bg-primary-600 data-[state=checked]:border-primary-600',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 <Checkbox.Indicator>
                   <CheckIcon className="w-3 h-3 text-white" />
                 </Checkbox.Indicator>
               </Checkbox.Root>
-              <label
-                htmlFor="backup"
-                className="text-sm text-gray-700 dark:text-gray-300 cursor-pointer"
-              >
+              <label htmlFor="backup" className="text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
                 {t('timeline.createBackup')}
               </label>
             </div>
@@ -195,7 +185,7 @@ export function RestoreDialog({
                   'text-gray-700 dark:text-gray-300',
                   'hover:bg-gray-200 dark:hover:bg-gray-700',
                   'disabled:opacity-50 disabled:cursor-not-allowed',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 {t('timeline.cancelRestore')}
@@ -209,7 +199,7 @@ export function RestoreDialog({
                 'bg-orange-600 text-white',
                 'hover:bg-orange-700',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
-                'transition-colors flex items-center gap-2'
+                'transition-colors flex items-center gap-2',
               )}
             >
               {isRestoring ? (

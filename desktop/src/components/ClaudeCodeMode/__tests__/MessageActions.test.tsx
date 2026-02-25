@@ -42,12 +42,7 @@ describe('MessageActions', () => {
 
   it('renders copy button for all messages', () => {
     const message = createMessage('user');
-    render(
-      <MessageActions
-        message={message}
-        onCopy={vi.fn().mockResolvedValue(undefined)}
-      />
-    );
+    render(<MessageActions message={message} onCopy={vi.fn().mockResolvedValue(undefined)} />);
 
     expect(screen.getByTitle('Copy')).toBeInTheDocument();
   });
@@ -81,7 +76,7 @@ describe('MessageActions', () => {
         message={message}
         onCopy={vi.fn().mockResolvedValue(undefined)}
         onRegenerate={vi.fn().mockResolvedValue(undefined)}
-      />
+      />,
     );
 
     expect(screen.getByTitle('Regenerate')).toBeInTheDocument();
@@ -94,7 +89,7 @@ describe('MessageActions', () => {
         message={message}
         onCopy={vi.fn().mockResolvedValue(undefined)}
         onRegenerate={vi.fn().mockResolvedValue(undefined)}
-      />
+      />,
     );
 
     expect(screen.queryByTitle('Regenerate')).not.toBeInTheDocument();
@@ -107,7 +102,7 @@ describe('MessageActions', () => {
         message={message}
         onCopy={vi.fn().mockResolvedValue(undefined)}
         onEdit={vi.fn().mockResolvedValue(undefined)}
-      />
+      />,
     );
 
     expect(screen.getByTitle('Edit')).toBeInTheDocument();
@@ -120,7 +115,7 @@ describe('MessageActions', () => {
         message={message}
         onCopy={vi.fn().mockResolvedValue(undefined)}
         onEdit={vi.fn().mockResolvedValue(undefined)}
-      />
+      />,
     );
 
     expect(screen.queryByTitle('Edit')).not.toBeInTheDocument();
@@ -128,13 +123,7 @@ describe('MessageActions', () => {
 
   it('renders fork button when onFork is provided', () => {
     const message = createMessage('user');
-    render(
-      <MessageActions
-        message={message}
-        onCopy={vi.fn().mockResolvedValue(undefined)}
-        onFork={vi.fn()}
-      />
-    );
+    render(<MessageActions message={message} onCopy={vi.fn().mockResolvedValue(undefined)} onFork={vi.fn()} />);
 
     expect(screen.getByTitle('Fork')).toBeInTheDocument();
   });
@@ -147,7 +136,7 @@ describe('MessageActions', () => {
         onCopy={vi.fn().mockResolvedValue(undefined)}
         onRegenerate={vi.fn().mockResolvedValue(undefined)}
         isRegenerating={true}
-      />
+      />,
     );
 
     const regenButton = screen.getByTitle('Regenerate');
@@ -165,9 +154,7 @@ describe('useMessageActions', () => {
 
   it('copies message content to clipboard', async () => {
     const messages = createMessages();
-    const { result } = renderHook(() =>
-      useMessageActions(messages, vi.fn(), vi.fn())
-    );
+    const { result } = renderHook(() => useMessageActions(messages, vi.fn(), vi.fn()));
 
     await act(async () => {
       await result.current.copyMessage(messages[0]);
@@ -181,9 +168,7 @@ describe('useMessageActions', () => {
     const sendMessage = vi.fn().mockResolvedValue(undefined);
     const updateMessages = vi.fn();
 
-    const { result } = renderHook(() =>
-      useMessageActions(messages, sendMessage, updateMessages)
-    );
+    const { result } = renderHook(() => useMessageActions(messages, sendMessage, updateMessages));
 
     await act(async () => {
       await result.current.regenerateMessage('2'); // assistant message
@@ -198,9 +183,7 @@ describe('useMessageActions', () => {
     const sendMessage = vi.fn().mockResolvedValue(undefined);
     const updateMessages = vi.fn();
 
-    const { result } = renderHook(() =>
-      useMessageActions(messages, sendMessage, updateMessages)
-    );
+    const { result } = renderHook(() => useMessageActions(messages, sendMessage, updateMessages));
 
     await act(async () => {
       await result.current.editMessage('1', 'Updated message');
@@ -212,14 +195,10 @@ describe('useMessageActions', () => {
 
   it('tracks regenerating state', async () => {
     const messages = createMessages();
-    const sendMessage = vi.fn().mockImplementation(
-      () => new Promise((resolve) => setTimeout(resolve, 100))
-    );
+    const sendMessage = vi.fn().mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 100)));
     const updateMessages = vi.fn();
 
-    const { result } = renderHook(() =>
-      useMessageActions(messages, sendMessage, updateMessages)
-    );
+    const { result } = renderHook(() => useMessageActions(messages, sendMessage, updateMessages));
 
     expect(result.current.isRegenerating).toBe(false);
     expect(result.current.regeneratingMessageId).toBeNull();

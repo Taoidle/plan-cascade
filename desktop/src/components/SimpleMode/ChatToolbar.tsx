@@ -9,12 +9,7 @@
 
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import {
-  FilePlusIcon,
-  PauseIcon,
-  PlayIcon,
-  Cross2Icon,
-} from '@radix-ui/react-icons';
+import { FilePlusIcon, PauseIcon, PlayIcon, Cross2Icon } from '@radix-ui/react-icons';
 
 type WorkflowMode = 'chat' | 'task';
 
@@ -59,7 +54,7 @@ export function ChatToolbar({
     <div
       className={clsx(
         'shrink-0 flex items-center justify-between px-3 py-1.5',
-        'border-t border-gray-200 dark:border-gray-700'
+        'border-t border-gray-200 dark:border-gray-700',
       )}
     >
       {/* Left group: mode toggle + file attach */}
@@ -72,7 +67,7 @@ export function ChatToolbar({
               'px-3 py-1.5 text-xs font-medium transition-colors',
               workflowMode === 'chat'
                 ? 'bg-primary-600 text-white'
-                : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+                : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800',
             )}
           >
             {t('workflowMode.chat', { defaultValue: 'Chat' })}
@@ -83,7 +78,7 @@ export function ChatToolbar({
               'px-3 py-1.5 text-xs font-medium transition-colors',
               workflowMode === 'task'
                 ? 'bg-primary-600 text-white'
-                : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+                : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800',
             )}
           >
             {t('workflowMode.task', { defaultValue: 'Task' })}
@@ -100,7 +95,7 @@ export function ChatToolbar({
             'text-gray-500 dark:text-gray-400',
             'hover:bg-gray-100 dark:hover:bg-gray-700',
             'disabled:opacity-50 disabled:cursor-not-allowed',
-            'transition-colors'
+            'transition-colors',
           )}
           title={t('chatToolbar.attachFile', { defaultValue: 'Attach file' })}
         >
@@ -119,7 +114,7 @@ export function ChatToolbar({
                 'w-7 h-7 rounded-md',
                 'text-gray-600 dark:text-gray-300',
                 'hover:bg-gray-100 dark:hover:bg-gray-700',
-                'transition-colors'
+                'transition-colors',
               )}
               title={t('chatToolbar.pause', { defaultValue: 'Pause' })}
             >
@@ -133,7 +128,7 @@ export function ChatToolbar({
                 'w-7 h-7 rounded-md',
                 'text-gray-600 dark:text-gray-300',
                 'hover:bg-gray-100 dark:hover:bg-gray-700',
-                'transition-colors'
+                'transition-colors',
               )}
               title={t('chatToolbar.resume', { defaultValue: 'Resume' })}
             >
@@ -147,7 +142,7 @@ export function ChatToolbar({
               'w-7 h-7 rounded-md',
               'text-red-500 dark:text-red-400',
               'hover:bg-red-50 dark:hover:bg-red-900/20',
-              'transition-colors'
+              'transition-colors',
             )}
             title={t('chatToolbar.cancel', { defaultValue: 'Cancel' })}
           >
@@ -164,7 +159,7 @@ export function ChatToolbar({
             'text-xs px-2.5 py-1.5 rounded-md transition-colors',
             'text-gray-600 dark:text-gray-400',
             'hover:bg-gray-100 dark:hover:bg-gray-800',
-            rightPanelOpen && rightPanelTab === 'output' && 'bg-gray-100 dark:bg-gray-800'
+            rightPanelOpen && rightPanelTab === 'output' && 'bg-gray-100 dark:bg-gray-800',
           )}
           title={t('chatToolbar.toggleOutput', { defaultValue: 'Output' })}
         >

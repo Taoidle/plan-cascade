@@ -7,12 +7,7 @@
 
 import { useEffect } from 'react';
 import { clsx } from 'clsx';
-import {
-  CheckCircledIcon,
-  CrossCircledIcon,
-  InfoCircledIcon,
-  Cross2Icon,
-} from '@radix-ui/react-icons';
+import { CheckCircledIcon, CrossCircledIcon, InfoCircledIcon, Cross2Icon } from '@radix-ui/react-icons';
 import { useSkillMemoryStore } from '../../store/skillMemory';
 
 const TOAST_DURATION = 3000;
@@ -50,7 +45,7 @@ export function SkillMemoryToast() {
         'fixed bottom-4 right-4 z-[60]',
         'flex items-center gap-2 px-4 py-2.5 rounded-lg shadow-lg border',
         'animate-[slideUp_0.3s_ease-out]',
-        bgMap[toastType]
+        bgMap[toastType],
       )}
     >
       {iconMap[toastType]}

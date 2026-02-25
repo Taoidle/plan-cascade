@@ -21,14 +21,7 @@ import type { BranchInfo, MergeBranchResult } from '../../../../types/git';
 export function BranchesTab() {
   const { t } = useTranslation('git');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
-  const {
-    localBranches,
-    remoteBranches,
-    currentBranch,
-    isLoading,
-    error,
-    refresh,
-  } = useGitBranches();
+  const { localBranches, remoteBranches, currentBranch, isLoading, error, refresh } = useGitBranches();
 
   const { startMerge, isInMerge } = useGitStore();
 
@@ -66,7 +59,7 @@ export function BranchesTab() {
         }
       }
     },
-    [repoPath, startMerge, refresh]
+    [repoPath, startMerge, refresh],
   );
 
   const handleDialogClose = useCallback(() => {
@@ -95,7 +88,8 @@ export function BranchesTab() {
           <h3 className="text-sm font-medium text-gray-800 dark:text-gray-200">{t('branchesTab.title')}</h3>
           {currentBranch && (
             <span className="text-xs text-gray-500 dark:text-gray-400">
-              {t('branchesTab.on')} <span className="font-medium text-gray-700 dark:text-gray-300">{currentBranch.name}</span>
+              {t('branchesTab.on')}{' '}
+              <span className="font-medium text-gray-700 dark:text-gray-300">{currentBranch.name}</span>
             </span>
           )}
         </div>
@@ -115,7 +109,7 @@ export function BranchesTab() {
             className={clsx(
               'p-1 rounded transition-colors',
               'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700',
-              isLoading && 'opacity-50 cursor-not-allowed'
+              isLoading && 'opacity-50 cursor-not-allowed',
             )}
             title={t('branchesTab.refresh')}
           >
@@ -143,19 +137,14 @@ export function BranchesTab() {
             'shrink-0 px-3 py-2 text-sm border-b',
             mergeResult.success
               ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800'
-              : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800'
+              : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800',
           )}
         >
           <div className="flex items-center justify-between">
             <span>
-              {mergeResult.success
-                ? t('branchesTab.mergeSuccess')
-                : mergeResult.error || t('branchesTab.mergeFailed')}
+              {mergeResult.success ? t('branchesTab.mergeSuccess') : mergeResult.error || t('branchesTab.mergeFailed')}
             </span>
-            <button
-              onClick={() => setMergeResult(null)}
-              className="text-xs underline ml-2"
-            >
+            <button onClick={() => setMergeResult(null)} className="text-xs underline ml-2">
               {t('branchesTab.dismiss')}
             </button>
           </div>

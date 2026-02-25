@@ -41,9 +41,7 @@ interface ShortcutOverlayProps {
 // Platform Detection
 // ============================================================================
 
-const isMac =
-  typeof navigator !== 'undefined' &&
-  /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 
 function formatKey(key: string): string {
   return key
@@ -142,7 +140,7 @@ export function ShortcutOverlay({
       toggle();
     },
     { enableOnFormTags: true },
-    [toggle]
+    [toggle],
   );
 
   // Close on Escape
@@ -162,10 +160,7 @@ export function ShortcutOverlay({
   }, [isOpen, close]);
 
   // Merge default and additional groups
-  const allGroups = useMemo(
-    () => [...DEFAULT_GROUPS, ...additionalGroups],
-    [additionalGroups]
-  );
+  const allGroups = useMemo(() => [...DEFAULT_GROUPS, ...additionalGroups], [additionalGroups]);
 
   if (!isOpen && !isAnimatingOut) return null;
 
@@ -176,7 +171,7 @@ export function ShortcutOverlay({
         'flex items-center justify-center',
         'bg-black/50 backdrop-blur-sm',
         isAnimatingOut ? 'animate-out fade-out-0 duration-150' : 'animate-in fade-in-0 duration-200',
-        className
+        className,
       )}
       onClick={close}
       role="dialog"
@@ -191,7 +186,7 @@ export function ShortcutOverlay({
           'border border-gray-200 dark:border-gray-700',
           isAnimatingOut
             ? 'animate-out zoom-out-95 fade-out-0 duration-150'
-            : 'animate-in zoom-in-95 fade-in-0 slide-in-from-bottom-2 duration-200'
+            : 'animate-in zoom-in-95 fade-in-0 slide-in-from-bottom-2 duration-200',
         )}
         onClick={(e) => e.stopPropagation()}
       >
@@ -202,11 +197,13 @@ export function ShortcutOverlay({
               <KeyboardIcon className="w-5 h-5 text-primary-600 dark:text-primary-400" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                Keyboard Shortcuts
-              </h2>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Keyboard Shortcuts</h2>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Press <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-[10px] font-mono border border-gray-200 dark:border-gray-700">Esc</kbd> to close
+                Press{' '}
+                <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-[10px] font-mono border border-gray-200 dark:border-gray-700">
+                  Esc
+                </kbd>{' '}
+                to close
               </p>
             </div>
           </div>
@@ -216,7 +213,7 @@ export function ShortcutOverlay({
               'p-2 rounded-lg',
               'hover:bg-gray-100 dark:hover:bg-gray-800',
               'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
-              'transition-colors duration-150'
+              'transition-colors duration-150',
             )}
             aria-label="Close"
           >
@@ -238,12 +235,10 @@ export function ShortcutOverlay({
                     className={clsx(
                       'flex items-center justify-between py-2 px-3 rounded-lg',
                       'hover:bg-gray-50 dark:hover:bg-gray-800/50',
-                      'transition-colors duration-100'
+                      'transition-colors duration-100',
                     )}
                   >
-                    <span className="text-sm text-gray-700 dark:text-gray-300">
-                      {shortcut.description}
-                    </span>
+                    <span className="text-sm text-gray-700 dark:text-gray-300">{shortcut.description}</span>
                     <ShortcutKeys keys={shortcut.keys} />
                   </div>
                 ))}
@@ -288,7 +283,7 @@ function ShortcutKeys({ keys }: { keys: string }) {
               'text-xs font-mono',
               'text-gray-600 dark:text-gray-400',
               'border border-gray-200 dark:border-gray-700',
-              'rounded shadow-sm'
+              'rounded shadow-sm',
             )}
           >
             {part}

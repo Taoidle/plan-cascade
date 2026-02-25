@@ -146,7 +146,7 @@ export interface ExecutionReportState {
  * Aggregate quality gate dimension scores into radar chart data
  */
 export function aggregateRadarDimensions(
-  qualityGateResults: Record<string, StoryQualityGateResults>
+  qualityGateResults: Record<string, StoryQualityGateResults>,
 ): RadarDimension[] {
   const dimensionMap = new Map<
     string,
@@ -183,7 +183,7 @@ export function aggregateRadarDimensions(
 export function buildTimeline(
   prd: TaskPrd,
   executionReport: ExecutionReport,
-  storyStatuses: Record<string, string>
+  storyStatuses: Record<string, string>,
 ): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
   let offsetMs = 0;
@@ -191,9 +191,7 @@ export function buildTimeline(
   for (const batch of prd.batches) {
     const batchStoryCount = batch.storyIds.length;
     const avgDurationPerStory =
-      batchStoryCount > 0
-        ? Math.round(executionReport.totalDurationMs / prd.stories.length)
-        : 0;
+      batchStoryCount > 0 ? Math.round(executionReport.totalDurationMs / prd.stories.length) : 0;
 
     for (const storyId of batch.storyIds) {
       const story = prd.stories.find((s) => s.id === storyId);
@@ -225,7 +223,7 @@ export function calculateAgentPerformance(
   executionReport: ExecutionReport,
   storyStatuses: Record<string, string>,
   qualityGateResults: Record<string, StoryQualityGateResults>,
-  totalStories: number
+  totalStories: number,
 ): AgentPerformance[] {
   const agentMap = new Map<
     string,
@@ -237,10 +235,7 @@ export function calculateAgentPerformance(
     }
   >();
 
-  const avgDuration =
-    totalStories > 0
-      ? Math.round(executionReport.totalDurationMs / totalStories)
-      : 0;
+  const avgDuration = totalStories > 0 ? Math.round(executionReport.totalDurationMs / totalStories) : 0;
 
   for (const [storyId, agent] of Object.entries(executionReport.agentAssignments)) {
     const existing = agentMap.get(agent) ?? {
@@ -274,9 +269,7 @@ export function calculateAgentPerformance(
     averageDurationMs: data.assigned > 0 ? Math.round(data.totalDuration / data.assigned) : 0,
     averageQualityScore:
       data.qualityScores.length > 0
-        ? Math.round(
-            (data.qualityScores.reduce((a, b) => a + b, 0) / data.qualityScores.length) * 10
-          ) / 10
+        ? Math.round((data.qualityScores.reduce((a, b) => a + b, 0) / data.qualityScores.length) * 10) / 10
         : null,
   }));
 }
@@ -331,7 +324,7 @@ export function formatReportAsMarkdown(report: ExecutionReportModel): string {
     lines.push(`| --- | --- | --- | --- | --- |`);
     for (const agent of report.agentPerformance) {
       lines.push(
-        `| ${agent.agentName} | ${agent.storiesAssigned} | ${agent.storiesCompleted} | ${agent.successRate}% | ${(agent.averageDurationMs / 1000).toFixed(1)}s |`
+        `| ${agent.agentName} | ${agent.storiesAssigned} | ${agent.storiesCompleted} | ${agent.successRate}% | ${(agent.averageDurationMs / 1000).toFixed(1)}s |`,
       );
     }
     lines.push('');
@@ -345,7 +338,7 @@ export function formatReportAsMarkdown(report: ExecutionReportModel): string {
     lines.push(`| --- | --- | --- | --- | --- |`);
     for (const entry of report.timeline) {
       lines.push(
-        `| ${entry.storyTitle} | ${entry.batchIndex} | ${entry.agent} | ${(entry.durationMs / 1000).toFixed(1)}s | ${entry.status} |`
+        `| ${entry.storyTitle} | ${entry.batchIndex} | ${entry.agent} | ${(entry.durationMs / 1000).toFixed(1)}s | ${entry.status} |`,
       );
     }
     lines.push('');
@@ -384,8 +377,7 @@ export const useExecutionReportStore = create<ExecutionReportState>()((set, get)
         totalTimeMs: executionReport.totalDurationMs,
         totalTokens: null,
         estimatedCost: null,
-        successRate:
-          totalStories > 0 ? Math.round((storiesPassed / totalStories) * 100) : 0,
+        successRate: totalStories > 0 ? Math.round((storiesPassed / totalStories) * 100) : 0,
       };
 
       const radarDimensions = aggregateRadarDimensions(qualityGateResults);
@@ -394,7 +386,7 @@ export const useExecutionReportStore = create<ExecutionReportState>()((set, get)
         executionReport,
         storyStatuses,
         qualityGateResults,
-        totalStories
+        totalStories,
       );
 
       const report: ExecutionReportModel = {

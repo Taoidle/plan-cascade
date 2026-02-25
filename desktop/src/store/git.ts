@@ -265,12 +265,7 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   refreshAll: async () => {
     const { refreshStatus, refreshDiffs, refreshStashList, refreshMergeState } = get();
-    await Promise.all([
-      refreshStatus(),
-      refreshDiffs(),
-      refreshStashList(),
-      refreshMergeState(),
-    ]);
+    await Promise.all([refreshStatus(), refreshDiffs(), refreshStashList(), refreshMergeState()]);
   },
 
   stageFiles: async (paths: string[]) => {
@@ -301,10 +296,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     const { status } = get();
     if (!status) return;
 
-    const allPaths = [
-      ...status.unstaged.map((f) => f.path),
-      ...status.untracked.map((f) => f.path),
-    ];
+    const allPaths = [...status.unstaged.map((f) => f.path), ...status.untracked.map((f) => f.path)];
     if (allPaths.length > 0) {
       await get().stageFiles(allPaths);
     }

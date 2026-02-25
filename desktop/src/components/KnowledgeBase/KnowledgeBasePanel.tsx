@@ -35,15 +35,15 @@ function CreateCollectionDialog({ isOpen, onClose, onSubmit, isLoading }: Create
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className={clsx(
-        'w-full max-w-md rounded-xl p-6',
-        'bg-white dark:bg-gray-800',
-        'border border-gray-200 dark:border-gray-700',
-        'shadow-xl'
-      )}>
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-          {t('createCollection')}
-        </h3>
+      <div
+        className={clsx(
+          'w-full max-w-md rounded-xl p-6',
+          'bg-white dark:bg-gray-800',
+          'border border-gray-200 dark:border-gray-700',
+          'shadow-xl',
+        )}
+      >
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t('createCollection')}</h3>
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -60,7 +60,7 @@ function CreateCollectionDialog({ isOpen, onClose, onSubmit, isLoading }: Create
                 'bg-white dark:bg-gray-700',
                 'text-gray-900 dark:text-white',
                 'focus:ring-2 focus:ring-primary-500 focus:border-transparent',
-                'text-sm'
+                'text-sm',
               )}
             />
           </div>
@@ -79,7 +79,7 @@ function CreateCollectionDialog({ isOpen, onClose, onSubmit, isLoading }: Create
                 'bg-white dark:bg-gray-700',
                 'text-gray-900 dark:text-white',
                 'focus:ring-2 focus:ring-primary-500 focus:border-transparent',
-                'text-sm resize-none'
+                'text-sm resize-none',
               )}
             />
           </div>
@@ -91,7 +91,7 @@ function CreateCollectionDialog({ isOpen, onClose, onSubmit, isLoading }: Create
               'px-4 py-2 rounded-lg text-sm font-medium',
               'text-gray-700 dark:text-gray-300',
               'hover:bg-gray-100 dark:hover:bg-gray-700',
-              'transition-colors'
+              'transition-colors',
             )}
           >
             {t('cancel', { ns: 'common' })}
@@ -108,7 +108,7 @@ function CreateCollectionDialog({ isOpen, onClose, onSubmit, isLoading }: Create
               'bg-primary-600 hover:bg-primary-700',
               'text-white',
               'disabled:opacity-50 disabled:cursor-not-allowed',
-              'transition-colors'
+              'transition-colors',
             )}
           >
             {isLoading ? t('creating') : t('create')}
@@ -138,18 +138,16 @@ function DeleteConfirmDialog({ isOpen, collectionName, onClose, onConfirm, isLoa
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className={clsx(
-        'w-full max-w-sm rounded-xl p-6',
-        'bg-white dark:bg-gray-800',
-        'border border-gray-200 dark:border-gray-700',
-        'shadow-xl'
-      )}>
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-          {t('deleteCollection')}
-        </h3>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
-          {t('deleteConfirm', { name: collectionName })}
-        </p>
+      <div
+        className={clsx(
+          'w-full max-w-sm rounded-xl p-6',
+          'bg-white dark:bg-gray-800',
+          'border border-gray-200 dark:border-gray-700',
+          'shadow-xl',
+        )}
+      >
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">{t('deleteCollection')}</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">{t('deleteConfirm', { name: collectionName })}</p>
         <div className="flex justify-end gap-3">
           <button
             onClick={onClose}
@@ -157,7 +155,7 @@ function DeleteConfirmDialog({ isOpen, collectionName, onClose, onConfirm, isLoa
               'px-4 py-2 rounded-lg text-sm font-medium',
               'text-gray-700 dark:text-gray-300',
               'hover:bg-gray-100 dark:hover:bg-gray-700',
-              'transition-colors'
+              'transition-colors',
             )}
           >
             {t('cancel', { ns: 'common' })}
@@ -170,7 +168,7 @@ function DeleteConfirmDialog({ isOpen, collectionName, onClose, onConfirm, isLoa
               'bg-red-600 hover:bg-red-700',
               'text-white',
               'disabled:opacity-50 disabled:cursor-not-allowed',
-              'transition-colors'
+              'transition-colors',
             )}
           >
             {isLoading ? t('deleting') : t('delete')}
@@ -216,13 +214,16 @@ export function KnowledgeBasePanel() {
     fetchCollections(projectId);
   }, [projectId, fetchCollections]);
 
-  const handleCreate = useCallback(async (name: string, description: string) => {
-    const ok = await createCollection(projectId, name, description, []);
-    if (ok) {
-      setShowCreateDialog(false);
-      fetchCollections(projectId);
-    }
-  }, [projectId, createCollection, fetchCollections]);
+  const handleCreate = useCallback(
+    async (name: string, description: string) => {
+      const ok = await createCollection(projectId, name, description, []);
+      if (ok) {
+        setShowCreateDialog(false);
+        fetchCollections(projectId);
+      }
+    },
+    [projectId, createCollection, fetchCollections],
+  );
 
   const handleDelete = useCallback(async () => {
     if (!deleteTarget) return;
@@ -236,11 +237,13 @@ export function KnowledgeBasePanel() {
     <div className="h-full flex flex-col">
       {/* Error banner */}
       {error && (
-        <div className={clsx(
-          'px-4 py-2 flex items-center justify-between',
-          'bg-red-50 dark:bg-red-900/20',
-          'border-b border-red-200 dark:border-red-800'
-        )}>
+        <div
+          className={clsx(
+            'px-4 py-2 flex items-center justify-between',
+            'bg-red-50 dark:bg-red-900/20',
+            'border-b border-red-200 dark:border-red-800',
+          )}
+        >
           <span className="text-sm text-red-700 dark:text-red-300">{error}</span>
           <button onClick={clearError} className="text-sm text-red-600 hover:text-red-800 dark:text-red-400">
             {t('dismiss')}
@@ -250,25 +253,25 @@ export function KnowledgeBasePanel() {
 
       <div className="flex-1 flex overflow-hidden">
         {/* Left Panel - Collection List */}
-        <div className={clsx(
-          'h-full border-r border-gray-200 dark:border-gray-700',
-          'bg-gray-50 dark:bg-gray-900',
-          activeCollection ? 'hidden md:block md:w-1/3 lg:w-1/4' : 'w-full md:w-1/3 lg:w-1/4'
-        )}>
+        <div
+          className={clsx(
+            'h-full border-r border-gray-200 dark:border-gray-700',
+            'bg-gray-50 dark:bg-gray-900',
+            activeCollection ? 'hidden md:block md:w-1/3 lg:w-1/4' : 'w-full md:w-1/3 lg:w-1/4',
+          )}
+        >
           <div className="h-full flex flex-col">
             {/* Header */}
             <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
               <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
-                  {t('title')}
-                </h2>
+                <h2 className="text-sm font-semibold text-gray-900 dark:text-white">{t('title')}</h2>
                 <button
                   onClick={() => setShowCreateDialog(true)}
                   className={clsx(
                     'px-3 py-1.5 rounded-lg text-xs font-medium',
                     'bg-primary-600 hover:bg-primary-700',
                     'text-white',
-                    'transition-colors'
+                    'transition-colors',
                   )}
                 >
                   {t('newCollection')}
@@ -287,12 +290,8 @@ export function KnowledgeBasePanel() {
                 </div>
               ) : collections.length === 0 ? (
                 <div className="px-4 py-8 text-center">
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    {t('noCollections')}
-                  </p>
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                    {t('noCollectionsHint')}
-                  </p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{t('noCollections')}</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{t('noCollectionsHint')}</p>
                 </div>
               ) : (
                 <div className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -308,7 +307,7 @@ export function KnowledgeBasePanel() {
                         'hover:bg-gray-100 dark:hover:bg-gray-800',
                         'transition-colors',
                         activeCollection?.id === collection.id &&
-                          'bg-primary-50 dark:bg-primary-900/20 border-l-2 border-primary-500'
+                          'bg-primary-50 dark:bg-primary-900/20 border-l-2 border-primary-500',
                       )}
                     >
                       <div className="flex items-center justify-between">
@@ -324,7 +323,12 @@ export function KnowledgeBasePanel() {
                           title={t('delete')}
                         >
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                            />
                           </svg>
                         </button>
                       </div>
@@ -347,11 +351,13 @@ export function KnowledgeBasePanel() {
         </div>
 
         {/* Right Panel - Detail / Upload / Query */}
-        <div className={clsx(
-          'h-full flex-1',
-          'bg-white dark:bg-gray-950',
-          activeCollection ? 'w-full md:w-2/3 lg:w-3/4' : 'hidden md:flex md:items-center md:justify-center'
-        )}>
+        <div
+          className={clsx(
+            'h-full flex-1',
+            'bg-white dark:bg-gray-950',
+            activeCollection ? 'w-full md:w-2/3 lg:w-3/4' : 'hidden md:flex md:items-center md:justify-center',
+          )}
+        >
           {activeCollection ? (
             <div className="h-full flex flex-col">
               {/* Tab bar */}
@@ -374,7 +380,7 @@ export function KnowledgeBasePanel() {
                       'px-4 py-3 text-sm font-medium border-b-2 transition-colors',
                       activeTab === tab
                         ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-                        : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300',
                     )}
                   >
                     {t(`tabs.${tab}`)}
@@ -384,31 +390,31 @@ export function KnowledgeBasePanel() {
 
               {/* Tab content */}
               <div className="flex-1 overflow-y-auto">
-                {activeTab === 'details' && (
-                  <CollectionDetail collection={activeCollection} />
-                )}
+                {activeTab === 'details' && <CollectionDetail collection={activeCollection} />}
                 {activeTab === 'upload' && (
-                  <DocumentUploader
-                    projectId={projectId}
-                    collectionName={activeCollection.name}
-                  />
+                  <DocumentUploader projectId={projectId} collectionName={activeCollection.name} />
                 )}
                 {activeTab === 'query' && (
-                  <KnowledgeQuery
-                    projectId={projectId}
-                    collectionName={activeCollection.name}
-                  />
+                  <KnowledgeQuery projectId={projectId} collectionName={activeCollection.name} />
                 )}
               </div>
             </div>
           ) : (
             <div className="text-center px-4">
-              <svg className="mx-auto w-12 h-12 text-gray-300 dark:text-gray-600 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+              <svg
+                className="mx-auto w-12 h-12 text-gray-300 dark:text-gray-600 mb-3"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+                />
               </svg>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                {t('selectCollection')}
-              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{t('selectCollection')}</p>
             </div>
           )}
         </div>

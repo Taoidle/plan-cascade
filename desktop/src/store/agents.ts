@@ -209,8 +209,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
         // Refresh agents list
         await get().fetchAgents();
         set((state) => ({
-          selectedAgent:
-            state.selectedAgent?.id === id ? response.data : state.selectedAgent,
+          selectedAgent: state.selectedAgent?.id === id ? response.data : state.selectedAgent,
           loading: { ...state.loading, updating: false },
         }));
         return response.data;
@@ -433,7 +432,7 @@ export function getFilteredAgents(agents: AgentWithStats[], searchQuery: string)
   return agents.filter(
     (agent) =>
       agent.name.toLowerCase().includes(query) ||
-      (agent.description && agent.description.toLowerCase().includes(query))
+      (agent.description && agent.description.toLowerCase().includes(query)),
   );
 }
 

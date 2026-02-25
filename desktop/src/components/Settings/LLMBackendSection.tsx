@@ -9,7 +9,14 @@ import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
 import { CheckCircledIcon, CrossCircledIcon, EyeOpenIcon, EyeNoneIcon } from '@radix-ui/react-icons';
 import { useTranslation } from 'react-i18next';
-import { useSettingsStore, type Backend, type StandaloneContextTurns, type GlmEndpoint, type MinimaxEndpoint, type QwenEndpoint } from '../../store/settings';
+import {
+  useSettingsStore,
+  type Backend,
+  type StandaloneContextTurns,
+  type GlmEndpoint,
+  type MinimaxEndpoint,
+  type QwenEndpoint,
+} from '../../store/settings';
 import {
   BACKEND_OPTIONS,
   FALLBACK_MODELS_BY_PROVIDER,
@@ -78,7 +85,9 @@ export function LLMBackendSection() {
   const [showApiKey, setShowApiKey] = useState<{ [provider: string]: boolean }>({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [loadingSavedKey, setLoadingSavedKey] = useState<string | null>(null);
-  const [keyMessage, setKeyMessage] = useState<{ provider: string; type: 'success' | 'error'; message: string } | null>(null);
+  const [keyMessage, setKeyMessage] = useState<{ provider: string; type: 'success' | 'error'; message: string } | null>(
+    null,
+  );
   const [modelsByProvider, setModelsByProvider] = useState<Record<string, string[]>>(FALLBACK_MODELS_BY_PROVIDER);
   const [customModelsByProvider, setCustomModelsByProvider] = useState<Record<string, string[]>>({});
   const [customModelInput, setCustomModelInput] = useState('');
@@ -160,7 +169,7 @@ export function LLMBackendSection() {
           } catch {
             return { provider, configured: false, checked: false };
           }
-        })
+        }),
       );
 
       if (checks.some((item) => item.checked)) {
@@ -396,19 +405,13 @@ export function LLMBackendSection() {
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-          {t('llm.title')}
-        </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {t('llm.description')}
-        </p>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">{t('llm.title')}</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('llm.description')}</p>
       </div>
 
       {/* Backend Selection */}
       <section className="space-y-3">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('llm.provider.label')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('llm.provider.label')}</h3>
         <div className="space-y-2">
           {backendOptions.map((option) => (
             <label
@@ -418,7 +421,7 @@ export function LLMBackendSection() {
                 'transition-colors',
                 backend === option.id
                   ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                  : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                  : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800',
               )}
             >
               <input
@@ -434,32 +437,31 @@ export function LLMBackendSection() {
                   <span className="font-medium text-gray-900 dark:text-white">
                     {t(`llm.providers.${option.i18nKey}.name`)}
                   </span>
-                  {option.requiresApiKey && (
+                  {option.requiresApiKey &&
                     (() => {
                       const provider = normalizeProvider(option.provider || option.id);
                       const configured = !!apiKeyStatuses[provider];
                       return (
-                    <span
-                      className={clsx(
-                        'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs',
-                        configured
-                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                          : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
-                      )}
-                    >
-                      {configured ? (
-                        <>
-                          <CheckCircledIcon className="w-3 h-3" /> {t('llm.apiKey.configured')}
-                        </>
-                      ) : (
-                        <>
-                          <CrossCircledIcon className="w-3 h-3" /> {t('llm.apiKey.required')}
-                        </>
-                      )}
-                    </span>
+                        <span
+                          className={clsx(
+                            'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs',
+                            configured
+                              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                              : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400',
+                          )}
+                        >
+                          {configured ? (
+                            <>
+                              <CheckCircledIcon className="w-3 h-3" /> {t('llm.apiKey.configured')}
+                            </>
+                          ) : (
+                            <>
+                              <CrossCircledIcon className="w-3 h-3" /> {t('llm.apiKey.required')}
+                            </>
+                          )}
+                        </span>
                       );
-                    })()
-                  )}
+                    })()}
                 </div>
                 <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                   {t(`llm.providers.${option.i18nKey}.description`)}
@@ -485,29 +487,25 @@ export function LLMBackendSection() {
                   const configured = !!apiKeyStatuses[provider];
                   const inputValue = apiKeyInputs[provider] || '';
                   return (
-                <input
-                  type={showApiKey[provider] ? 'text' : 'password'}
-                  placeholder={
-                    configured
-                      ? t('llm.apiKey.placeholderConfigured')
-                      : t('llm.apiKey.placeholder')
-                  }
-                  value={inputValue}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setApiKeyInputs((prev) => ({
-                      ...prev,
-                      [provider]: value,
-                    }));
-                  }}
-                  className={clsx(
-                    'w-full px-3 py-2 pr-10 rounded-lg border',
-                    'border-gray-200 dark:border-gray-700',
-                    'bg-white dark:bg-gray-800',
-                    'text-gray-900 dark:text-white',
-                    'focus:outline-none focus:ring-2 focus:ring-primary-500'
-                  )}
-                />
+                    <input
+                      type={showApiKey[provider] ? 'text' : 'password'}
+                      placeholder={configured ? t('llm.apiKey.placeholderConfigured') : t('llm.apiKey.placeholder')}
+                      value={inputValue}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setApiKeyInputs((prev) => ({
+                          ...prev,
+                          [provider]: value,
+                        }));
+                      }}
+                      className={clsx(
+                        'w-full px-3 py-2 pr-10 rounded-lg border',
+                        'border-gray-200 dark:border-gray-700',
+                        'bg-white dark:bg-gray-800',
+                        'text-gray-900 dark:text-white',
+                        'focus:outline-none focus:ring-2 focus:ring-primary-500',
+                      )}
+                    />
                   );
                 })()}
                 <button
@@ -515,7 +513,7 @@ export function LLMBackendSection() {
                   onClick={() => handleToggleApiKeyVisibility(selectedOption.provider || '')}
                   className={clsx(
                     'absolute right-2 top-1/2 -translate-y-1/2 p-1',
-                    'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+                    'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
                   )}
                 >
                   {showApiKey[normalizeProvider(selectedOption.provider || '')] ? (
@@ -536,10 +534,12 @@ export function LLMBackendSection() {
                   'bg-primary-600 text-white',
                   'hover:bg-primary-700',
                   'focus:outline-none focus:ring-2 focus:ring-primary-500',
-                  'disabled:opacity-50 disabled:cursor-not-allowed'
+                  'disabled:opacity-50 disabled:cursor-not-allowed',
                 )}
               >
-                {savingKey === normalizeProvider(selectedOption.provider || '') ? t('llm.apiKey.saving') : t('llm.apiKey.save')}
+                {savingKey === normalizeProvider(selectedOption.provider || '')
+                  ? t('llm.apiKey.saving')
+                  : t('llm.apiKey.save')}
               </button>
               {apiKeyStatuses[normalizeProvider(selectedOption.provider || '')] && (
                 <button
@@ -550,7 +550,7 @@ export function LLMBackendSection() {
                     'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
                     'hover:bg-red-200 dark:hover:bg-red-900/50',
                     'focus:outline-none focus:ring-2 focus:ring-red-500',
-                    'disabled:opacity-50 disabled:cursor-not-allowed'
+                    'disabled:opacity-50 disabled:cursor-not-allowed',
                   )}
                 >
                   {t('llm.apiKey.remove')}
@@ -558,9 +558,7 @@ export function LLMBackendSection() {
               )}
             </div>
             {loadingSavedKey === normalizeProvider(selectedOption.provider || '') && (
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                {t('llm.apiKey.loading')}
-              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{t('llm.apiKey.loading')}</p>
             )}
 
             {keyMessage && keyMessage.provider === normalizeProvider(selectedOption.provider || '') && (
@@ -569,7 +567,7 @@ export function LLMBackendSection() {
                   'text-sm',
                   keyMessage.type === 'success'
                     ? 'text-green-600 dark:text-green-400'
-                    : 'text-red-600 dark:text-red-400'
+                    : 'text-red-600 dark:text-red-400',
                 )}
               >
                 {keyMessage.message}
@@ -582,9 +580,7 @@ export function LLMBackendSection() {
       {/* GLM Endpoint Selection (only when GLM is selected) */}
       {selectedProvider === 'glm' && (
         <section className="space-y-3">
-          <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-            {t('llm.glmEndpoint.label')}
-          </h3>
+          <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('llm.glmEndpoint.label')}</h3>
           <div className="space-y-2">
             {(['standard', 'coding', 'international', 'international-coding'] as GlmEndpoint[]).map((ep) => (
               <label
@@ -594,7 +590,7 @@ export function LLMBackendSection() {
                   'transition-colors',
                   glmEndpoint === ep
                     ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                    : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                    : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800',
                 )}
               >
                 <input
@@ -619,18 +615,14 @@ export function LLMBackendSection() {
               </label>
             ))}
           </div>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            {t('llm.glmEndpoint.help')}
-          </p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t('llm.glmEndpoint.help')}</p>
         </section>
       )}
 
       {/* Qwen Endpoint Selection (only when Qwen is selected) */}
       {selectedProvider === 'qwen' && (
         <section className="space-y-3">
-          <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-            {t('llm.qwenEndpoint.label')}
-          </h3>
+          <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('llm.qwenEndpoint.label')}</h3>
           <div className="space-y-2">
             {(['china', 'singapore', 'us'] as QwenEndpoint[]).map((ep) => (
               <label
@@ -640,7 +632,7 @@ export function LLMBackendSection() {
                   'transition-colors',
                   qwenEndpoint === ep
                     ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                    : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                    : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800',
                 )}
               >
                 <input
@@ -665,18 +657,14 @@ export function LLMBackendSection() {
               </label>
             ))}
           </div>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            {t('llm.qwenEndpoint.help')}
-          </p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t('llm.qwenEndpoint.help')}</p>
         </section>
       )}
 
       {/* MiniMax Endpoint Selection (only when MiniMax is selected) */}
       {selectedProvider === 'minimax' && (
         <section className="space-y-3">
-          <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-            {t('llm.minimaxEndpoint.label')}
-          </h3>
+          <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('llm.minimaxEndpoint.label')}</h3>
           <div className="space-y-2">
             {(['international', 'china'] as MinimaxEndpoint[]).map((ep) => (
               <label
@@ -686,7 +674,7 @@ export function LLMBackendSection() {
                   'transition-colors',
                   minimaxEndpoint === ep
                     ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                    : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                    : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800',
                 )}
               >
                 <input
@@ -711,17 +699,13 @@ export function LLMBackendSection() {
               </label>
             ))}
           </div>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            {t('llm.minimaxEndpoint.help')}
-          </p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t('llm.minimaxEndpoint.help')}</p>
         </section>
       )}
 
       {/* Model Selection */}
       <section className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('llm.model.label')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('llm.model.label')}</h3>
         <select
           value={modelSelectValue}
           onChange={(e) => {
@@ -743,7 +727,7 @@ export function LLMBackendSection() {
             'border-gray-200 dark:border-gray-700',
             'bg-white dark:bg-gray-800',
             'text-gray-900 dark:text-white',
-            'focus:outline-none focus:ring-2 focus:ring-primary-500'
+            'focus:outline-none focus:ring-2 focus:ring-primary-500',
           )}
         >
           <option value={MODEL_DEFAULT_VALUE}>{t('llm.model.providerDefault')}</option>
@@ -753,7 +737,9 @@ export function LLMBackendSection() {
             </option>
           ))}
           <option value={MODEL_CUSTOM_VALUE}>
-            {model?.trim() && !allModels.includes(model) ? t('llm.model.customPrefix', { model }) : t('llm.model.customModel')}
+            {model?.trim() && !allModels.includes(model)
+              ? t('llm.model.customPrefix', { model })
+              : t('llm.model.customModel')}
           </option>
         </select>
         <div className="flex gap-2 max-w-md">
@@ -767,7 +753,7 @@ export function LLMBackendSection() {
               'border-gray-200 dark:border-gray-700',
               'bg-white dark:bg-gray-800',
               'text-gray-900 dark:text-white',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500'
+              'focus:outline-none focus:ring-2 focus:ring-primary-500',
             )}
           />
           <button
@@ -778,7 +764,7 @@ export function LLMBackendSection() {
               'bg-primary-600 text-white',
               'hover:bg-primary-700',
               'focus:outline-none focus:ring-2 focus:ring-primary-500',
-              'disabled:opacity-50 disabled:cursor-not-allowed'
+              'disabled:opacity-50 disabled:cursor-not-allowed',
             )}
           >
             {t('llm.model.add')}
@@ -794,7 +780,7 @@ export function LLMBackendSection() {
                   'px-2 py-1 rounded border text-xs',
                   'border-gray-300 dark:border-gray-600',
                   'text-gray-700 dark:text-gray-300',
-                  'hover:bg-gray-100 dark:hover:bg-gray-800'
+                  'hover:bg-gray-100 dark:hover:bg-gray-800',
                 )}
                 title={t('llm.model.removeCustom')}
               >
@@ -803,15 +789,11 @@ export function LLMBackendSection() {
             ))}
           </div>
         )}
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {t('llm.model.help')}
-        </p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('llm.model.help')}</p>
       </section>
 
       <section className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('llm.contextTurns.label')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('llm.contextTurns.label')}</h3>
         <select
           value={String(standaloneContextTurns)}
           onChange={(e) => setStandaloneContextTurns(Number(e.target.value) as StandaloneContextTurns)}
@@ -820,7 +802,7 @@ export function LLMBackendSection() {
             'border-gray-200 dark:border-gray-700',
             'bg-white dark:bg-gray-800',
             'text-gray-900 dark:text-white',
-            'focus:outline-none focus:ring-2 focus:ring-primary-500'
+            'focus:outline-none focus:ring-2 focus:ring-primary-500',
           )}
         >
           {standaloneContextTurnValues.map((value) => (
@@ -829,17 +811,13 @@ export function LLMBackendSection() {
             </option>
           ))}
         </select>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {t('llm.contextTurns.help')}
-        </p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('llm.contextTurns.help')}</p>
       </section>
 
       {/* Context Compaction (only for non-Claude-Code backends) */}
       {backend !== 'claude-code' && (
         <section className="space-y-4">
-          <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-            {t('llm.contextManagement.label')}
-          </h3>
+          <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('llm.contextManagement.label')}</h3>
           <label className="flex items-start gap-3 cursor-pointer">
             <input
               type="checkbox"
@@ -860,9 +838,7 @@ export function LLMBackendSection() {
       )}
 
       <section className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('llm.streaming.label')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('llm.streaming.label')}</h3>
         <label className="flex items-start gap-3 cursor-pointer">
           <input
             type="checkbox"
@@ -874,9 +850,7 @@ export function LLMBackendSection() {
             <span className="text-sm font-medium text-gray-900 dark:text-white">
               {t('llm.streaming.subAgentEvents')}
             </span>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              {t('llm.streaming.subAgentEventsHelp')}
-            </p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('llm.streaming.subAgentEventsHelp')}</p>
           </div>
         </label>
         <label className="flex items-start gap-3 cursor-pointer">
@@ -890,9 +864,7 @@ export function LLMBackendSection() {
             <span className="text-sm font-medium text-gray-900 dark:text-white">
               {t('llm.streaming.reasoningTraces')}
             </span>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              {t('llm.streaming.reasoningTracesHelp')}
-            </p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('llm.streaming.reasoningTracesHelp')}</p>
           </div>
         </label>
         <label className="flex items-start gap-3 cursor-pointer">
@@ -906,18 +878,14 @@ export function LLMBackendSection() {
             <span className="text-sm font-medium text-gray-900 dark:text-white">
               {t('llm.streaming.enableThinking')}
             </span>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              {t('llm.streaming.enableThinkingHelp')}
-            </p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('llm.streaming.enableThinkingHelp')}</p>
           </div>
         </label>
       </section>
 
       {/* Search Provider */}
       <section className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('llm.searchProvider.label')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('llm.searchProvider.label')}</h3>
         <select
           value={searchProvider}
           onChange={(e) => setSearchProvider(e.target.value as 'tavily' | 'brave' | 'duckduckgo')}
@@ -926,16 +894,14 @@ export function LLMBackendSection() {
             'border-gray-200 dark:border-gray-700',
             'bg-white dark:bg-gray-800',
             'text-gray-900 dark:text-white',
-            'focus:outline-none focus:ring-2 focus:ring-primary-500'
+            'focus:outline-none focus:ring-2 focus:ring-primary-500',
           )}
         >
           <option value="duckduckgo">{t('llm.searchProvider.duckduckgo')}</option>
           <option value="tavily">{t('llm.searchProvider.tavily')}</option>
           <option value="brave">{t('llm.searchProvider.brave')}</option>
         </select>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {t('llm.searchProvider.help')}
-        </p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('llm.searchProvider.help')}</p>
       </section>
     </div>
   );

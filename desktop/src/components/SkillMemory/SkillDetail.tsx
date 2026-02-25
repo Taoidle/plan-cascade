@@ -21,17 +21,12 @@ export function SkillDetail({ skill, onClose, className }: SkillDetailProps) {
   const { t } = useTranslation('simpleMode');
 
   return (
-    <div
-      data-testid="skill-detail"
-      className={clsx('flex flex-col h-full', className)}
-    >
+    <div data-testid="skill-detail" className={clsx('flex flex-col h-full', className)}>
       {/* Header */}
       <div className="flex items-start justify-between p-4 border-b border-gray-200 dark:border-gray-700">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 mb-1">
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-white truncate">
-              {skill.name}
-            </h3>
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white truncate">{skill.name}</h3>
             <SkillSourceBadge source={skill.source} />
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400">{skill.description}</p>
@@ -41,7 +36,7 @@ export function SkillDetail({ skill, onClose, className }: SkillDetailProps) {
           className={clsx(
             'p-1 rounded-md shrink-0 ml-2',
             'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
-            'hover:bg-gray-100 dark:hover:bg-gray-800'
+            'hover:bg-gray-100 dark:hover:bg-gray-800',
           )}
           title={t('skillPanel.close')}
         >
@@ -54,9 +49,7 @@ export function SkillDetail({ skill, onClose, className }: SkillDetailProps) {
         {/* Tags */}
         {skill.tags.length > 0 && (
           <div className="flex items-center gap-1 flex-wrap">
-            <span className="text-2xs text-gray-500 dark:text-gray-400 shrink-0">
-              {t('skillPanel.tags')}:
-            </span>
+            <span className="text-2xs text-gray-500 dark:text-gray-400 shrink-0">{t('skillPanel.tags')}:</span>
             {skill.tags.map((tag) => (
               <span
                 key={tag}
@@ -71,26 +64,20 @@ export function SkillDetail({ skill, onClose, className }: SkillDetailProps) {
         {/* Version */}
         {skill.version && (
           <div className="flex items-center gap-1">
-            <span className="text-2xs text-gray-500 dark:text-gray-400">
-              {t('skillPanel.version')}:
-            </span>
+            <span className="text-2xs text-gray-500 dark:text-gray-400">{t('skillPanel.version')}:</span>
             <span className="text-2xs text-gray-700 dark:text-gray-300">{skill.version}</span>
           </div>
         )}
 
         {/* Priority */}
         <div className="flex items-center gap-1">
-          <span className="text-2xs text-gray-500 dark:text-gray-400">
-            {t('skillPanel.priority')}:
-          </span>
+          <span className="text-2xs text-gray-500 dark:text-gray-400">{t('skillPanel.priority')}:</span>
           <span className="text-2xs text-gray-700 dark:text-gray-300">{skill.priority}</span>
         </div>
 
         {/* Injection phases */}
         <div className="flex items-center gap-1 flex-wrap">
-          <span className="text-2xs text-gray-500 dark:text-gray-400 shrink-0">
-            {t('skillPanel.phases')}:
-          </span>
+          <span className="text-2xs text-gray-500 dark:text-gray-400 shrink-0">{t('skillPanel.phases')}:</span>
           {skill.inject_into.map((phase) => (
             <span
               key={phase}

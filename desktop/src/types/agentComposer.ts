@@ -44,10 +44,23 @@ export interface LlmStepConfig {
 
 /** A single step in an agent pipeline (discriminated union) */
 export type AgentStep =
-  | { step_type: 'llm_step'; name: string; instruction: string | null; model: string | null; tools: string[] | null; config: AgentConfig }
+  | {
+      step_type: 'llm_step';
+      name: string;
+      instruction: string | null;
+      model: string | null;
+      tools: string[] | null;
+      config: AgentConfig;
+    }
   | { step_type: 'sequential_step'; name: string; steps: AgentStep[] }
   | { step_type: 'parallel_step'; name: string; steps: AgentStep[] }
-  | { step_type: 'conditional_step'; name: string; condition_key: string; branches: Record<string, AgentStep>; default_branch: AgentStep | null };
+  | {
+      step_type: 'conditional_step';
+      name: string;
+      condition_key: string;
+      branches: Record<string, AgentStep>;
+      default_branch: AgentStep | null;
+    };
 
 /** Serializable definition of an agent pipeline */
 export interface AgentPipeline {

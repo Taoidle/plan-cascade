@@ -62,10 +62,8 @@ export function ResultView({ result }: ResultViewProps) {
           'p-6 rounded-xl',
           'bg-white dark:bg-gray-800',
           'border-2',
-          success
-            ? 'border-green-200 dark:border-green-800'
-            : 'border-red-200 dark:border-red-800',
-          'animate-fade-in'
+          success ? 'border-green-200 dark:border-green-800' : 'border-red-200 dark:border-red-800',
+          'animate-fade-in',
         )}
       >
         {/* Status Icon */}
@@ -81,15 +79,13 @@ export function ResultView({ result }: ResultViewProps) {
         <h2
           className={clsx(
             'text-xl font-semibold text-center mb-2',
-            success ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+            success ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400',
           )}
         >
           {success ? t('result.completedSuccessfully') : t('result.executionFailed')}
         </h2>
 
-        <p className="text-center text-gray-600 dark:text-gray-400 mb-6">
-          {message}
-        </p>
+        <p className="text-center text-gray-600 dark:text-gray-400 mb-6">{message}</p>
 
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4 text-center">
@@ -97,44 +93,34 @@ export function ResultView({ result }: ResultViewProps) {
             <div className="text-2xl font-bold text-gray-900 dark:text-white">
               {completedStories}/{totalStories}
             </div>
-            <div className="text-sm text-gray-500 dark:text-gray-400">
-              {t('labels.stories', { ns: 'common' })}
-            </div>
+            <div className="text-sm text-gray-500 dark:text-gray-400">{t('labels.stories', { ns: 'common' })}</div>
           </div>
           <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
-            <div className="text-2xl font-bold text-gray-900 dark:text-white">
-              {formatDuration(duration)}
-            </div>
-            <div className="text-sm text-gray-500 dark:text-gray-400">
-              {t('labels.duration', { ns: 'common' })}
-            </div>
+            <div className="text-2xl font-bold text-gray-900 dark:text-white">{formatDuration(duration)}</div>
+            <div className="text-sm text-gray-500 dark:text-gray-400">{t('labels.duration', { ns: 'common' })}</div>
           </div>
           <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
             <div
               className={clsx(
                 'text-2xl font-bold',
-                successRate >= 80 ? 'text-green-600 dark:text-green-400' :
-                successRate >= 50 ? 'text-yellow-600 dark:text-yellow-400' :
-                'text-red-600 dark:text-red-400'
+                successRate >= 80
+                  ? 'text-green-600 dark:text-green-400'
+                  : successRate >= 50
+                    ? 'text-yellow-600 dark:text-yellow-400'
+                    : 'text-red-600 dark:text-red-400',
               )}
             >
               {successRate}%
             </div>
-            <div className="text-sm text-gray-500 dark:text-gray-400">
-              {t('labels.successRate', { ns: 'common' })}
-            </div>
+            <div className="text-sm text-gray-500 dark:text-gray-400">{t('labels.successRate', { ns: 'common' })}</div>
           </div>
         </div>
 
         {/* Error Details */}
         {error && (
           <div className="mt-4 p-4 rounded-lg bg-red-50 dark:bg-red-900/20">
-            <h3 className="font-medium text-red-600 dark:text-red-400 mb-1">
-              {t('result.errorDetails')}
-            </h3>
-            <pre className="text-sm text-red-500 dark:text-red-300 whitespace-pre-wrap font-mono">
-              {error}
-            </pre>
+            <h3 className="font-medium text-red-600 dark:text-red-400 mb-1">{t('result.errorDetails')}</h3>
+            <pre className="text-sm text-red-500 dark:text-red-300 whitespace-pre-wrap font-mono">{error}</pre>
           </div>
         )}
       </div>
@@ -142,9 +128,7 @@ export function ResultView({ result }: ResultViewProps) {
       {/* Story Breakdown */}
       {stories.length > 0 && (
         <div className="space-y-3">
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            {t('result.storyBreakdown')}
-          </h3>
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('result.storyBreakdown')}</h3>
 
           {stories.map((story) => (
             <StoryResultItem
@@ -167,11 +151,7 @@ export function ResultView({ result }: ResultViewProps) {
             {failedStories.map((story) => (
               <li key={story.id} className="text-sm text-red-500 dark:text-red-300">
                 <span className="font-medium">{story.title}</span>
-                {story.error && (
-                  <span className="text-red-400 dark:text-red-400">
-                    {' '}- {story.error}
-                  </span>
-                )}
+                {story.error && <span className="text-red-400 dark:text-red-400"> - {story.error}</span>}
               </li>
             ))}
           </ul>
@@ -211,9 +191,7 @@ function StoryResultItem({ story, isExpanded, onToggle }: StoryResultItemProps) 
   };
 
   const hasDuration = story.startedAt && story.completedAt;
-  const storyDuration = hasDuration
-    ? new Date(story.completedAt!).getTime() - new Date(story.startedAt!).getTime()
-    : 0;
+  const storyDuration = hasDuration ? new Date(story.completedAt!).getTime() - new Date(story.startedAt!).getTime() : 0;
 
   return (
     <div
@@ -223,7 +201,7 @@ function StoryResultItem({ story, isExpanded, onToggle }: StoryResultItemProps) 
         'border border-gray-200 dark:border-gray-700',
         'border-l-4',
         getStatusColor(),
-        'transition-all duration-200'
+        'transition-all duration-200',
       )}
     >
       <button
@@ -231,7 +209,7 @@ function StoryResultItem({ story, isExpanded, onToggle }: StoryResultItemProps) 
         className={clsx(
           'w-full flex items-center gap-3 p-3',
           'hover:bg-gray-50 dark:hover:bg-gray-700/50',
-          'transition-colors'
+          'transition-colors',
         )}
       >
         {isExpanded ? (
@@ -242,14 +220,10 @@ function StoryResultItem({ story, isExpanded, onToggle }: StoryResultItemProps) 
 
         {getStatusIcon()}
 
-        <span className="flex-1 text-left font-medium text-gray-900 dark:text-white truncate">
-          {story.title}
-        </span>
+        <span className="flex-1 text-left font-medium text-gray-900 dark:text-white truncate">{story.title}</span>
 
         {hasDuration && (
-          <span className="text-xs text-gray-500 dark:text-gray-400">
-            {formatDuration(storyDuration)}
-          </span>
+          <span className="text-xs text-gray-500 dark:text-gray-400">{formatDuration(storyDuration)}</span>
         )}
       </button>
 
@@ -263,7 +237,7 @@ function StoryResultItem({ story, isExpanded, onToggle }: StoryResultItemProps) 
                   'font-medium',
                   story.status === 'completed' && 'text-green-600 dark:text-green-400',
                   story.status === 'failed' && 'text-red-600 dark:text-red-400',
-                  story.status === 'pending' && 'text-gray-600 dark:text-gray-400'
+                  story.status === 'pending' && 'text-gray-600 dark:text-gray-400',
                 )}
               >
                 {story.status.charAt(0).toUpperCase() + story.status.slice(1).replace('_', ' ')}
@@ -273,18 +247,14 @@ function StoryResultItem({ story, isExpanded, onToggle }: StoryResultItemProps) 
             {hasDuration && (
               <div className="flex justify-between">
                 <dt className="text-gray-500 dark:text-gray-400">Duration</dt>
-                <dd className="text-gray-900 dark:text-white">
-                  {formatDuration(storyDuration)}
-                </dd>
+                <dd className="text-gray-900 dark:text-white">{formatDuration(storyDuration)}</dd>
               </div>
             )}
 
             {story.retryCount !== undefined && story.retryCount > 0 && (
               <div className="flex justify-between">
                 <dt className="text-gray-500 dark:text-gray-400">Retry Attempts</dt>
-                <dd className="text-yellow-600 dark:text-yellow-400">
-                  {story.retryCount}
-                </dd>
+                <dd className="text-yellow-600 dark:text-yellow-400">{story.retryCount}</dd>
               </div>
             )}
 
@@ -300,9 +270,7 @@ function StoryResultItem({ story, isExpanded, onToggle }: StoryResultItemProps) 
             {story.description && (
               <div className="pt-2">
                 <dt className="text-gray-500 dark:text-gray-400 mb-1">Description</dt>
-                <dd className="text-gray-700 dark:text-gray-300">
-                  {story.description}
-                </dd>
+                <dd className="text-gray-700 dark:text-gray-300">{story.description}</dd>
               </div>
             )}
           </dl>

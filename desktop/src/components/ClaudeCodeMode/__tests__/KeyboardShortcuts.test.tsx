@@ -17,12 +17,7 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-import {
-  formatShortcut,
-  getPlatformModifier,
-  KeyboardShortcutHint,
-  ShortcutsHelpDialog,
-} from '../KeyboardShortcuts';
+import { formatShortcut, getPlatformModifier, KeyboardShortcutHint, ShortcutsHelpDialog } from '../KeyboardShortcuts';
 
 describe('formatShortcut', () => {
   it('formats mod+key shortcuts', () => {
@@ -56,9 +51,7 @@ describe('KeyboardShortcutHint', () => {
   });
 
   it('applies custom className', () => {
-    const { container } = render(
-      <KeyboardShortcutHint shortcut="escape" className="custom" />
-    );
+    const { container } = render(<KeyboardShortcutHint shortcut="escape" className="custom" />);
     expect(container.querySelector('.custom')).toBeInTheDocument();
   });
 });

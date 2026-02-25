@@ -6,11 +6,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import type {
-  GraphWorkflow,
-  GraphWorkflowInfo,
-  CommandResponse,
-} from '../types/graphWorkflow';
+import type { GraphWorkflow, GraphWorkflowInfo, CommandResponse } from '../types/graphWorkflow';
 
 /**
  * List all saved graph workflows (summary info only).

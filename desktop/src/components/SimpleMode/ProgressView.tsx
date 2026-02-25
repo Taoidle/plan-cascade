@@ -7,31 +7,13 @@
 
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import {
-  CheckIcon,
-  Cross2Icon,
-  UpdateIcon,
-  PauseIcon,
-  PlayIcon,
-  StopIcon,
-} from '@radix-ui/react-icons';
+import { CheckIcon, Cross2Icon, UpdateIcon, PauseIcon, PlayIcon, StopIcon } from '@radix-ui/react-icons';
 import { useExecutionStore } from '../../store/execution';
 
 export function ProgressView() {
   const { t } = useTranslation('simpleMode');
-  const {
-    stories,
-    batches,
-    currentBatch,
-    currentStoryId,
-    progress,
-    strategy,
-    status,
-    pause,
-    resume,
-    cancel,
-    logs,
-  } = useExecutionStore();
+  const { stories, batches, currentBatch, currentStoryId, progress, strategy, status, pause, resume, cancel, logs } =
+    useExecutionStore();
 
   const isPaused = status === 'paused';
   const totalBatches = batches.length > 0 ? batches[batches.length - 1]?.totalBatches || 1 : 1;
@@ -59,7 +41,7 @@ export function ProgressView() {
               'px-3 py-1 rounded-full text-sm font-medium',
               'bg-primary-100 dark:bg-primary-900',
               'text-primary-700 dark:text-primary-300',
-              'animate-fade-in'
+              'animate-fade-in',
             )}
           >
             {t('progress.strategy', { strategy: formatStrategy(strategy) })}
@@ -78,7 +60,7 @@ export function ProgressView() {
             className={clsx(
               'h-full bg-gradient-to-r from-primary-500 to-primary-600',
               'transition-all duration-500 ease-out',
-              status === 'running' && 'animate-progress-pulse'
+              status === 'running' && 'animate-progress-pulse',
             )}
             style={{ width: `${progress}%` }}
           />
@@ -106,7 +88,7 @@ export function ProgressView() {
                     isComplete && 'bg-green-500',
                     isFailed && 'bg-red-500',
                     isCurrent && !isComplete && !isFailed && 'bg-primary-500 animate-pulse',
-                    !isComplete && !isCurrent && !isFailed && 'bg-gray-300 dark:bg-gray-600'
+                    !isComplete && !isCurrent && !isFailed && 'bg-gray-300 dark:bg-gray-600',
                   )}
                 />
               );
@@ -125,7 +107,7 @@ export function ProgressView() {
               'bg-gray-100 dark:bg-gray-700',
               'text-gray-700 dark:text-gray-300',
               'hover:bg-gray-200 dark:hover:bg-gray-600',
-              'transition-colors'
+              'transition-colors',
             )}
           >
             <PauseIcon className="w-4 h-4" />
@@ -139,7 +121,7 @@ export function ProgressView() {
               'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium',
               'bg-primary-600 text-white',
               'hover:bg-primary-700',
-              'transition-colors'
+              'transition-colors',
             )}
           >
             <PlayIcon className="w-4 h-4" />
@@ -153,7 +135,7 @@ export function ProgressView() {
             'bg-red-100 dark:bg-red-900/30',
             'text-red-700 dark:text-red-300',
             'hover:bg-red-200 dark:hover:bg-red-900/50',
-            'transition-colors'
+            'transition-colors',
           )}
         >
           <StopIcon className="w-4 h-4" />
@@ -164,34 +146,24 @@ export function ProgressView() {
       {/* Stories List */}
       <div className="space-y-3">
         {stories.map((story, index) => (
-          <StoryItem
-            key={story.id}
-            story={story}
-            isCurrent={story.id === currentStoryId}
-            index={index}
-          />
+          <StoryItem key={story.id} story={story} isCurrent={story.id === currentStoryId} index={index} />
         ))}
       </div>
 
       {/* Execution Logs */}
       {logs.length > 0 && (
         <div className="mt-6">
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            {t('progress.executionLog')}
-          </h3>
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('progress.executionLog')}</h3>
           <div
             className={clsx(
               'max-h-40 overflow-y-auto p-3 rounded-lg',
               'bg-gray-50 dark:bg-gray-900',
               'border border-gray-200 dark:border-gray-700',
-              'font-mono text-xs'
+              'font-mono text-xs',
             )}
           >
             {logs.slice(-20).map((log, idx) => (
-              <div
-                key={idx}
-                className="text-gray-600 dark:text-gray-400 py-0.5"
-              >
+              <div key={idx} className="text-gray-600 dark:text-gray-400 py-0.5">
                 {log}
               </div>
             ))}
@@ -239,7 +211,7 @@ function StoryItem({ story, isCurrent, index }: StoryItemProps) {
         'border border-gray-200 dark:border-gray-700',
         isCurrent && 'ring-2 ring-primary-500 shadow-md',
         isCurrent && 'animate-fade-in',
-        'transition-all duration-300'
+        'transition-all duration-300',
       )}
       style={{
         animationDelay: `${index * 100}ms`,
@@ -247,9 +219,7 @@ function StoryItem({ story, isCurrent, index }: StoryItemProps) {
     >
       {getStatusIcon()}
       <div className="flex-1 min-w-0">
-        <div className="font-medium text-gray-900 dark:text-white truncate">
-          {story.title}
-        </div>
+        <div className="font-medium text-gray-900 dark:text-white truncate">{story.title}</div>
 
         {/* Retry indicator */}
         {story.retryCount && story.retryCount > 0 && (
@@ -260,19 +230,14 @@ function StoryItem({ story, isCurrent, index }: StoryItemProps) {
 
         {/* Error message */}
         {story.status === 'failed' && story.error && (
-          <div className="text-xs text-red-500 dark:text-red-400 mt-1 truncate">
-            {story.error}
-          </div>
+          <div className="text-xs text-red-500 dark:text-red-400 mt-1 truncate">{story.error}</div>
         )}
 
         {/* Progress bar for in-progress stories */}
         {story.status === 'in_progress' && (
           <div className="mt-2 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
             <div
-              className={clsx(
-                'h-full bg-primary-500 transition-all duration-300',
-                'animate-progress-pulse'
-              )}
+              className={clsx('h-full bg-primary-500 transition-all duration-300', 'animate-progress-pulse')}
               style={{ width: `${story.progress}%` }}
             />
           </div>
@@ -281,9 +246,7 @@ function StoryItem({ story, isCurrent, index }: StoryItemProps) {
 
       {/* Progress percentage for in-progress */}
       {story.status === 'in_progress' && (
-        <span className="text-sm text-gray-500 dark:text-gray-400">
-          {Math.round(story.progress)}%
-        </span>
+        <span className="text-sm text-gray-500 dark:text-gray-400">{Math.round(story.progress)}%</span>
       )}
     </div>
   );

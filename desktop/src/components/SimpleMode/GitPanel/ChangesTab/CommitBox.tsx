@@ -84,7 +84,7 @@ export function CommitBox() {
         handleCommit();
       }
     },
-    [handleCommit]
+    [handleCommit],
   );
 
   const handleGenerateMessage = useCallback(async () => {
@@ -114,7 +114,7 @@ export function CommitBox() {
           'text-gray-800 dark:text-gray-200',
           'placeholder-gray-400 dark:placeholder-gray-500',
           'focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500',
-          'transition-colors'
+          'transition-colors',
         )}
       />
 
@@ -141,7 +141,7 @@ export function CommitBox() {
               'flex items-center gap-1',
               canGenerate
                 ? 'text-purple-600 dark:text-purple-400 border-purple-300 dark:border-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20'
-                : 'text-gray-400 dark:text-gray-500 border-dashed border-gray-300 dark:border-gray-600 opacity-50 cursor-not-allowed'
+                : 'text-gray-400 dark:text-gray-500 border-dashed border-gray-300 dark:border-gray-600 opacity-50 cursor-not-allowed',
             )}
             title={
               !isAvailable
@@ -153,11 +153,7 @@ export function CommitBox() {
                     : t('commitBox.generateAIMessage')
             }
           >
-            {isGeneratingCommit ? (
-              <Spinner className="w-3 h-3" />
-            ) : (
-              <SparkleIcon className="w-3 h-3" />
-            )}
+            {isGeneratingCommit ? <Spinner className="w-3 h-3" /> : <SparkleIcon className="w-3 h-3" />}
             {isGeneratingCommit ? t('commitBox.generating') : t('commitBox.ai')}
           </button>
         </div>
@@ -170,13 +166,11 @@ export function CommitBox() {
             'text-xs px-3 py-1.5 rounded-md font-medium transition-colors',
             canCommit
               ? 'bg-primary-600 hover:bg-primary-700 text-white'
-              : 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+              : 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed',
           )}
         >
           {isAmend ? t('commitBox.amend') : t('commitBox.commit')}
-          {stagedCount > 0 && (
-            <span className="ml-1 opacity-75">({stagedCount})</span>
-          )}
+          {stagedCount > 0 && <span className="ml-1 opacity-75">({stagedCount})</span>}
         </button>
       </div>
     </div>

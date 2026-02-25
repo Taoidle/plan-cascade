@@ -1,10 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  parseUnifiedDiff,
-  type FileDiff,
-  type DiffHunk,
-  type DiffLine,
-} from './diffParser';
+import { parseUnifiedDiff, type FileDiff, type DiffHunk, type DiffLine } from './diffParser';
 
 // ============================================================================
 // Empty / Invalid Input

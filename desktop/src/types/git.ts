@@ -161,12 +161,7 @@ export type ConflictStrategy = 'ours' | 'theirs' | 'both';
 // Merge State
 // ---------------------------------------------------------------------------
 
-export type MergeStateKind =
-  | 'none'
-  | 'merging'
-  | 'rebasing'
-  | 'cherry_picking'
-  | 'reverting';
+export type MergeStateKind = 'none' | 'merging' | 'rebasing' | 'cherry_picking' | 'reverting';
 
 export interface MergeState {
   /** Kind of operation. */
@@ -194,14 +189,7 @@ export interface MergeBranchResult {
 // Worktree
 // ---------------------------------------------------------------------------
 
-export type WorktreeStatus =
-  | 'creating'
-  | 'active'
-  | 'in_progress'
-  | 'ready'
-  | 'merging'
-  | 'completed'
-  | 'error';
+export type WorktreeStatus = 'creating' | 'active' | 'in_progress' | 'ready' | 'merging' | 'completed' | 'error';
 
 export interface Worktree {
   id: string;

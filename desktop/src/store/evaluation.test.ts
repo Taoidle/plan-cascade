@@ -239,7 +239,11 @@ describe('useEvaluationStore', () => {
 
     it('should remove evaluator and clear current if same ID', async () => {
       useEvaluationStore.setState({
-        currentEvaluator: { id: 'eval-1', name: 'Test', criteria: { tool_trajectory: null, response_similarity: null, llm_judge: null } },
+        currentEvaluator: {
+          id: 'eval-1',
+          name: 'Test',
+          criteria: { tool_trajectory: null, response_similarity: null, llm_judge: null },
+        },
       });
 
       mockInvoke.mockResolvedValueOnce({
@@ -359,13 +363,15 @@ describe('useEvaluationStore', () => {
 
     it('should update a test case', () => {
       useEvaluationStore.setState({
-        testCases: [{
-          id: 'tc-1',
-          name: 'Case 1',
-          input: { prompt: 'Hello' },
-          expected_output: null,
-          expected_tools: null,
-        }],
+        testCases: [
+          {
+            id: 'tc-1',
+            name: 'Case 1',
+            input: { prompt: 'Hello' },
+            expected_output: null,
+            expected_tools: null,
+          },
+        ],
       });
 
       useEvaluationStore.getState().updateTestCase('tc-1', { name: 'Updated Case' });

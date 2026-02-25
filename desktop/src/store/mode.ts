@@ -218,8 +218,8 @@ export const useModeStore = create<ModeState>()(
       partialize: (state) => ({
         mode: state.mode,
       }),
-    }
-  )
+    },
+  ),
 );
 
 export default useModeStore;

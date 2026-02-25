@@ -29,14 +29,12 @@ export function UsageTable() {
       className={clsx(
         'bg-white dark:bg-gray-900 rounded-xl',
         'border border-gray-200 dark:border-gray-800',
-        'overflow-hidden'
+        'overflow-hidden',
       )}
     >
       {/* Table Header */}
       <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-          {t('table.title', 'Usage Records')}
-        </h3>
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{t('table.title', 'Usage Records')}</h3>
       </div>
 
       {/* Table */}
@@ -84,12 +82,8 @@ export function UsageTable() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap font-medium">{record.model_name}</td>
                   <td className="px-6 py-4 whitespace-nowrap capitalize">{record.provider}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right">
-                    {formatTokens(record.input_tokens)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right">
-                    {formatTokens(record.output_tokens)}
-                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right">{formatTokens(record.input_tokens)}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right">{formatTokens(record.output_tokens)}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-gray-500 dark:text-gray-400">
                     {record.thinking_tokens > 0 ? formatTokens(record.thinking_tokens) : '-'}
                   </td>
@@ -103,9 +97,7 @@ export function UsageTable() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
                     {record.session_id ? (
-                      <span title={record.session_id}>
-                        {record.session_id.substring(0, 8)}...
-                      </span>
+                      <span title={record.session_id}>{record.session_id.substring(0, 8)}...</span>
                     ) : (
                       '-'
                     )}
@@ -121,8 +113,7 @@ export function UsageTable() {
       <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-800 flex items-center justify-between">
         <div className="text-sm text-gray-500 dark:text-gray-400">
           {t('table.showing', 'Showing')} {page * pageSize + 1} -{' '}
-          {Math.min((page + 1) * pageSize, page * pageSize + records.length)}{' '}
-          {t('table.records', 'records')}
+          {Math.min((page + 1) * pageSize, page * pageSize + records.length)} {t('table.records', 'records')}
         </div>
         <div className="flex gap-2">
           <button
@@ -132,7 +123,7 @@ export function UsageTable() {
               'px-3 py-1.5 rounded-lg text-sm',
               'border border-gray-200 dark:border-gray-700',
               'hover:bg-gray-50 dark:hover:bg-gray-800',
-              'disabled:opacity-50 disabled:cursor-not-allowed'
+              'disabled:opacity-50 disabled:cursor-not-allowed',
             )}
           >
             {t('table.previous', 'Previous')}
@@ -144,7 +135,7 @@ export function UsageTable() {
               'px-3 py-1.5 rounded-lg text-sm',
               'border border-gray-200 dark:border-gray-700',
               'hover:bg-gray-50 dark:hover:bg-gray-800',
-              'disabled:opacity-50 disabled:cursor-not-allowed'
+              'disabled:opacity-50 disabled:cursor-not-allowed',
             )}
           >
             {t('table.next', 'Next')}

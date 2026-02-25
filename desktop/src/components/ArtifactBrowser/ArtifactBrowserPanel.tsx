@@ -79,11 +79,13 @@ export function ArtifactBrowserPanel() {
     <div className="h-full flex flex-col">
       {/* Error banner */}
       {error && (
-        <div className={clsx(
-          'px-4 py-2 flex items-center justify-between',
-          'bg-red-50 dark:bg-red-900/20',
-          'border-b border-red-200 dark:border-red-800'
-        )}>
+        <div
+          className={clsx(
+            'px-4 py-2 flex items-center justify-between',
+            'bg-red-50 dark:bg-red-900/20',
+            'border-b border-red-200 dark:border-red-800',
+          )}
+        >
           <span className="text-sm text-red-700 dark:text-red-300">{error}</span>
           <button onClick={clearError} className="text-sm text-red-600 hover:text-red-800 dark:text-red-400">
             {t('dismiss')}
@@ -93,18 +95,18 @@ export function ArtifactBrowserPanel() {
 
       <div className="flex-1 flex overflow-hidden">
         {/* Left Panel - Artifact List */}
-        <div className={clsx(
-          'h-full border-r border-gray-200 dark:border-gray-700',
-          'bg-gray-50 dark:bg-gray-900',
-          selectedArtifact ? 'hidden md:block md:w-1/3 lg:w-1/4' : 'w-full md:w-1/3 lg:w-1/4'
-        )}>
+        <div
+          className={clsx(
+            'h-full border-r border-gray-200 dark:border-gray-700',
+            'bg-gray-50 dark:bg-gray-900',
+            selectedArtifact ? 'hidden md:block md:w-1/3 lg:w-1/4' : 'w-full md:w-1/3 lg:w-1/4',
+          )}
+        >
           <div className="h-full flex flex-col">
             {/* Header */}
             <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 space-y-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
-                  {t('title')}
-                </h2>
+                <h2 className="text-sm font-semibold text-gray-900 dark:text-white">{t('title')}</h2>
                 <span className="text-xs text-gray-500 dark:text-gray-400">
                   {t('count', { count: filteredArtifacts.length })}
                 </span>
@@ -120,7 +122,7 @@ export function ArtifactBrowserPanel() {
                       'px-3 py-1 rounded-md text-xs font-medium transition-colors',
                       scopeFilter === scope
                         ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                        : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'
+                        : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800',
                     )}
                   >
                     {t(`scope.${scope}`)}
@@ -139,7 +141,7 @@ export function ArtifactBrowserPanel() {
                   'border border-gray-300 dark:border-gray-600',
                   'bg-white dark:bg-gray-800',
                   'text-gray-900 dark:text-white',
-                  'placeholder:text-gray-400'
+                  'placeholder:text-gray-400',
                 )}
               />
             </div>
@@ -152,12 +154,8 @@ export function ArtifactBrowserPanel() {
                 </div>
               ) : filteredArtifacts.length === 0 ? (
                 <div className="px-4 py-8 text-center">
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    {t('noArtifacts')}
-                  </p>
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                    {t('noArtifactsHint')}
-                  </p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{t('noArtifacts')}</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{t('noArtifactsHint')}</p>
                 </div>
               ) : (
                 <div className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -170,7 +168,7 @@ export function ArtifactBrowserPanel() {
                         'hover:bg-gray-100 dark:hover:bg-gray-800',
                         'transition-colors',
                         selectedArtifact?.id === artifact.id &&
-                          'bg-primary-50 dark:bg-primary-900/20 border-l-2 border-primary-500'
+                          'bg-primary-50 dark:bg-primary-900/20 border-l-2 border-primary-500',
                       )}
                     >
                       <div className="flex items-center justify-between">
@@ -186,7 +184,12 @@ export function ArtifactBrowserPanel() {
                           title={t('delete')}
                         >
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                            />
                           </svg>
                         </button>
                       </div>
@@ -205,25 +208,31 @@ export function ArtifactBrowserPanel() {
         </div>
 
         {/* Right Panel - Artifact Detail */}
-        <div className={clsx(
-          'h-full flex-1',
-          'bg-white dark:bg-gray-950',
-          selectedArtifact ? 'w-full md:w-2/3 lg:w-3/4' : 'hidden md:flex md:items-center md:justify-center'
-        )}>
+        <div
+          className={clsx(
+            'h-full flex-1',
+            'bg-white dark:bg-gray-950',
+            selectedArtifact ? 'w-full md:w-2/3 lg:w-3/4' : 'hidden md:flex md:items-center md:justify-center',
+          )}
+        >
           {selectedArtifact ? (
-            <ArtifactDetail
-              artifact={selectedArtifact}
-              projectId={projectId}
-              onBack={() => selectArtifact(null)}
-            />
+            <ArtifactDetail artifact={selectedArtifact} projectId={projectId} onBack={() => selectArtifact(null)} />
           ) : (
             <div className="text-center px-4">
-              <svg className="mx-auto w-12 h-12 text-gray-300 dark:text-gray-600 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+              <svg
+                className="mx-auto w-12 h-12 text-gray-300 dark:text-gray-600 mb-3"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+                />
               </svg>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                {t('selectArtifact')}
-              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{t('selectArtifact')}</p>
             </div>
           )}
         </div>
@@ -232,15 +241,15 @@ export function ArtifactBrowserPanel() {
       {/* Delete Confirmation */}
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className={clsx(
-            'w-full max-w-sm rounded-xl p-6',
-            'bg-white dark:bg-gray-800',
-            'border border-gray-200 dark:border-gray-700',
-            'shadow-xl'
-          )}>
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-              {t('deleteArtifact')}
-            </h3>
+          <div
+            className={clsx(
+              'w-full max-w-sm rounded-xl p-6',
+              'bg-white dark:bg-gray-800',
+              'border border-gray-200 dark:border-gray-700',
+              'shadow-xl',
+            )}
+          >
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">{t('deleteArtifact')}</h3>
             <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
               {t('deleteConfirm', { name: deleteTarget })}
             </p>
@@ -251,7 +260,7 @@ export function ArtifactBrowserPanel() {
                   'px-4 py-2 rounded-lg text-sm font-medium',
                   'text-gray-700 dark:text-gray-300',
                   'hover:bg-gray-100 dark:hover:bg-gray-700',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 {t('cancel', { ns: 'common' })}
@@ -264,7 +273,7 @@ export function ArtifactBrowserPanel() {
                   'bg-red-600 hover:bg-red-700',
                   'text-white',
                   'disabled:opacity-50 disabled:cursor-not-allowed',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 {isDeleting ? t('deleting') : t('delete')}

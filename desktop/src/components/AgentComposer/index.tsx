@@ -97,7 +97,7 @@ export function AgentComposer() {
         className={clsx(
           'w-64 min-w-[16rem] p-4 overflow-auto',
           'border-r border-gray-200 dark:border-gray-700',
-          'bg-gray-50 dark:bg-gray-900'
+          'bg-gray-50 dark:bg-gray-900',
         )}
       >
         <AgentPipelineList />
@@ -111,20 +111,18 @@ export function AgentComposer() {
             <div
               className={clsx(
                 'flex items-center justify-between px-6 py-3',
-                'border-b border-gray-200 dark:border-gray-700'
+                'border-b border-gray-200 dark:border-gray-700',
               )}
             >
               <div className="flex items-center gap-3 min-w-0">
                 <input
                   type="text"
                   value={currentPipeline.name}
-                  onChange={(e) =>
-                    updateCurrentPipeline({ name: e.target.value })
-                  }
+                  onChange={(e) => updateCurrentPipeline({ name: e.target.value })}
                   className={clsx(
                     'text-lg font-semibold bg-transparent border-none outline-none',
                     'text-gray-900 dark:text-white',
-                    'focus:ring-1 focus:ring-primary-500 rounded px-1'
+                    'focus:ring-1 focus:ring-primary-500 rounded px-1',
                   )}
                   placeholder={t('agentComposer.pipelineName')}
                 />
@@ -142,7 +140,7 @@ export function AgentComposer() {
                     'px-3 py-1.5 text-xs font-medium rounded-lg transition-colors',
                     showRunner
                       ? 'bg-primary-100 dark:bg-primary-900 text-primary-600 dark:text-primary-400'
-                      : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+                      : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600',
                   )}
                 >
                   {t('agentComposer.runner')}
@@ -159,7 +157,7 @@ export function AgentComposer() {
                   className={clsx(
                     'px-4 py-1.5 text-xs font-medium rounded-lg transition-colors',
                     'bg-primary-600 text-white hover:bg-primary-700',
-                    'disabled:opacity-50 disabled:cursor-not-allowed'
+                    'disabled:opacity-50 disabled:cursor-not-allowed',
                   )}
                 >
                   {loading.save ? t('agentComposer.saving') : t('agentComposer.save')}
@@ -229,7 +227,7 @@ export function AgentComposer() {
                             'absolute top-full left-0 mt-1 z-10 w-64',
                             'bg-white dark:bg-gray-800 rounded-lg shadow-lg border',
                             'border-gray-200 dark:border-gray-700',
-                            'max-h-48 overflow-auto'
+                            'max-h-48 overflow-auto',
                           )}
                         >
                           {remoteAgents.map((agent) => (
@@ -239,15 +237,11 @@ export function AgentComposer() {
                               className={clsx(
                                 'w-full text-left px-3 py-2 text-xs',
                                 'hover:bg-gray-100 dark:hover:bg-gray-700',
-                                'border-b border-gray-100 dark:border-gray-700 last:border-b-0'
+                                'border-b border-gray-100 dark:border-gray-700 last:border-b-0',
                               )}
                             >
-                              <div className="font-medium text-gray-900 dark:text-white">
-                                {agent.name}
-                              </div>
-                              <div className="text-gray-500 dark:text-gray-400 truncate">
-                                {agent.description}
-                              </div>
+                              <div className="font-medium text-gray-900 dark:text-white">{agent.name}</div>
+                              <div className="text-gray-500 dark:text-gray-400 truncate">{agent.description}</div>
                             </button>
                           ))}
                         </div>
@@ -271,12 +265,7 @@ export function AgentComposer() {
                             <div className="w-0.5 h-4 bg-gray-300 dark:bg-gray-600" />
                           </div>
                         )}
-                        <AgentNode
-                          step={step}
-                          index={index}
-                          onUpdate={updateStep}
-                          onRemove={removeStep}
-                        />
+                        <AgentNode step={step} index={index} onUpdate={updateStep} onRemove={removeStep} />
                       </div>
                     ))}
                   </div>
@@ -289,7 +278,7 @@ export function AgentComposer() {
                   className={clsx(
                     'w-80 min-w-[20rem] p-4',
                     'border-l border-gray-200 dark:border-gray-700',
-                    'bg-gray-50 dark:bg-gray-900'
+                    'bg-gray-50 dark:bg-gray-900',
                   )}
                 >
                   <AgentPipelineRunner />
@@ -301,18 +290,14 @@ export function AgentComposer() {
           /* Empty state */
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-                {t('agentComposer.title')}
-              </h2>
-              <p className="text-gray-500 dark:text-gray-400 mb-4 max-w-md">
-                {t('agentComposer.description')}
-              </p>
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">{t('agentComposer.title')}</h2>
+              <p className="text-gray-500 dark:text-gray-400 mb-4 max-w-md">{t('agentComposer.description')}</p>
               <button
                 onClick={() => useAgentComposerStore.getState().startNewPipeline()}
                 className={clsx(
                   'px-4 py-2 text-sm font-medium rounded-lg',
                   'bg-primary-600 text-white hover:bg-primary-700',
-                  'transition-colors'
+                  'transition-colors',
                 )}
               >
                 {t('agentComposer.createFirst')}
@@ -334,9 +319,12 @@ interface AddStepButtonProps {
 function AddStepButton({ label, color, onClick }: AddStepButtonProps) {
   const colorClasses: Record<string, string> = {
     blue: 'border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20',
-    green: 'border-green-300 dark:border-green-700 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20',
-    purple: 'border-purple-300 dark:border-purple-700 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20',
-    amber: 'border-amber-300 dark:border-amber-700 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20',
+    green:
+      'border-green-300 dark:border-green-700 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20',
+    purple:
+      'border-purple-300 dark:border-purple-700 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20',
+    amber:
+      'border-amber-300 dark:border-amber-700 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20',
     teal: 'border-teal-300 dark:border-teal-700 text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20',
   };
 
@@ -345,7 +333,7 @@ function AddStepButton({ label, color, onClick }: AddStepButtonProps) {
       onClick={onClick}
       className={clsx(
         'px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors',
-        colorClasses[color] ?? colorClasses.blue
+        colorClasses[color] ?? colorClasses.blue,
       )}
     >
       {label}

@@ -43,9 +43,7 @@ function GuardrailToggle({
     >
       <div className="flex-1 min-w-0 mr-4">
         <div className="flex items-center gap-2">
-          <span className="font-medium text-gray-900 dark:text-white text-sm">
-            {name}
-          </span>
+          <span className="font-medium text-gray-900 dark:text-white text-sm">{name}</span>
           <span
             className={clsx(
               'text-xs px-1.5 py-0.5 rounded',
@@ -57,11 +55,7 @@ function GuardrailToggle({
             {guardrailType}
           </span>
         </div>
-        {description && (
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
-            {description}
-          </p>
-        )}
+        {description && <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">{description}</p>}
       </div>
       <div className="flex items-center gap-2 shrink-0">
         {guardrailType === 'custom' && onRemove && (
@@ -75,7 +69,12 @@ function GuardrailToggle({
             title={t('security.removeRule')}
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+              />
             </svg>
           </button>
         )}
@@ -86,9 +85,7 @@ function GuardrailToggle({
           className={clsx(
             'relative w-10 h-5 rounded-full transition-colors',
             'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-            enabled
-              ? 'bg-primary-600'
-              : 'bg-gray-300 dark:bg-gray-600',
+            enabled ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600',
           )}
         >
           <span
@@ -191,9 +188,7 @@ function AddCustomRuleForm({ onAdd }: { onAdd: (name: string, pattern: string, a
           </select>
         </div>
       </div>
-      {formError && (
-        <p className="text-xs text-red-500">{formError}</p>
-      )}
+      {formError && <p className="text-xs text-red-500">{formError}</p>}
       <button
         type="submit"
         disabled={isSubmitting}
@@ -222,10 +217,14 @@ function TriggerLogViewer() {
 
   const resultTypeColor = (type: string) => {
     switch (type) {
-      case 'block': return 'text-red-600 dark:text-red-400';
-      case 'redact': return 'text-yellow-600 dark:text-yellow-400';
-      case 'warn': return 'text-orange-600 dark:text-orange-400';
-      default: return 'text-gray-600 dark:text-gray-400';
+      case 'block':
+        return 'text-red-600 dark:text-red-400';
+      case 'redact':
+        return 'text-yellow-600 dark:text-yellow-400';
+      case 'warn':
+        return 'text-orange-600 dark:text-orange-400';
+      default:
+        return 'text-gray-600 dark:text-gray-400';
     }
   };
 
@@ -234,11 +233,7 @@ function TriggerLogViewer() {
   }
 
   if (triggerLog.length === 0) {
-    return (
-      <p className="text-sm text-gray-500 dark:text-gray-400">
-        {t('security.triggerLog.empty')}
-      </p>
-    );
+    return <p className="text-sm text-gray-500 dark:text-gray-400">{t('security.triggerLog.empty')}</p>;
   }
 
   return (
@@ -249,10 +244,7 @@ function TriggerLogViewer() {
         </span>
         <button
           onClick={() => clearTriggerLog()}
-          className={clsx(
-            'text-xs text-red-500 hover:text-red-700',
-            'dark:text-red-400 dark:hover:text-red-300',
-          )}
+          className={clsx('text-xs text-red-500 hover:text-red-700', 'dark:text-red-400 dark:hover:text-red-300')}
         >
           {t('security.triggerLog.clearLog')}
         </button>
@@ -261,11 +253,21 @@ function TriggerLogViewer() {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 dark:bg-gray-800">
             <tr>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{t('security.triggerLog.colTime')}</th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{t('security.triggerLog.colGuardrail')}</th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{t('security.triggerLog.colDirection')}</th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{t('security.triggerLog.colResult')}</th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{t('security.triggerLog.colContent')}</th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
+                {t('security.triggerLog.colTime')}
+              </th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
+                {t('security.triggerLog.colGuardrail')}
+              </th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
+                {t('security.triggerLog.colDirection')}
+              </th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
+                {t('security.triggerLog.colResult')}
+              </th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
+                {t('security.triggerLog.colContent')}
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -274,12 +276,8 @@ function TriggerLogViewer() {
                 <td className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
                   {new Date(entry.timestamp).toLocaleString()}
                 </td>
-                <td className="px-3 py-2 text-xs font-medium text-gray-900 dark:text-white">
-                  {entry.guardrail_name}
-                </td>
-                <td className="px-3 py-2 text-xs text-gray-600 dark:text-gray-300">
-                  {entry.direction}
-                </td>
+                <td className="px-3 py-2 text-xs font-medium text-gray-900 dark:text-white">{entry.guardrail_name}</td>
+                <td className="px-3 py-2 text-xs text-gray-600 dark:text-gray-300">{entry.direction}</td>
                 <td className={clsx('px-3 py-2 text-xs font-medium', resultTypeColor(entry.result_type))}>
                   {entry.result_type}
                 </td>
@@ -344,22 +342,15 @@ export function GuardrailSection() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-          {t('security.title')}
-        </h3>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          {t('security.description')}
-        </p>
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{t('security.title')}</h3>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('security.description')}</p>
       </div>
 
       {/* Error */}
       {error && (
         <div className="flex items-center justify-between p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
           <span className="text-sm text-red-700 dark:text-red-300">{error}</span>
-          <button
-            onClick={clearError}
-            className="text-xs text-red-500 hover:text-red-700"
-          >
+          <button onClick={clearError} className="text-xs text-red-500 hover:text-red-700">
             {t('security.dismiss')}
           </button>
         </div>
@@ -371,9 +362,7 @@ export function GuardrailSection() {
         <>
           {/* Built-in Guardrails */}
           <div className="space-y-3">
-            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-              {t('security.builtin.title')}
-            </h4>
+            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('security.builtin.title')}</h4>
             <div className="space-y-2">
               {builtinGuardrails.map((g) => (
                 <GuardrailToggle
@@ -385,17 +374,13 @@ export function GuardrailSection() {
                   onToggle={handleToggle}
                 />
               ))}
-              {builtinGuardrails.length === 0 && (
-                <p className="text-sm text-gray-400">{t('security.builtin.empty')}</p>
-              )}
+              {builtinGuardrails.length === 0 && <p className="text-sm text-gray-400">{t('security.builtin.empty')}</p>}
             </div>
           </div>
 
           {/* Custom Rules */}
           <div className="space-y-3">
-            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-              {t('security.custom.title')}
-            </h4>
+            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('security.custom.title')}</h4>
             <div className="space-y-2">
               {customGuardrails.map((g) => (
                 <GuardrailToggle
@@ -408,9 +393,7 @@ export function GuardrailSection() {
                   onRemove={handleRemove}
                 />
               ))}
-              {customGuardrails.length === 0 && (
-                <p className="text-sm text-gray-400">{t('security.custom.empty')}</p>
-              )}
+              {customGuardrails.length === 0 && <p className="text-sm text-gray-400">{t('security.custom.empty')}</p>}
             </div>
 
             {/* Add Custom Rule Form */}
@@ -424,9 +407,7 @@ export function GuardrailSection() {
 
           {/* Trigger Log */}
           <div className="space-y-3">
-            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-              {t('security.triggerLog.title')}
-            </h4>
+            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('security.triggerLog.title')}</h4>
             <TriggerLogViewer />
           </div>
         </>

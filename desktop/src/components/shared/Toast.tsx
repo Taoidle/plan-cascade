@@ -53,7 +53,12 @@ function SuccessIcon() {
 function ErrorIcon() {
   return (
     <svg className="w-4 h-4 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+      />
     </svg>
   );
 }
@@ -61,7 +66,12 @@ function ErrorIcon() {
 function InfoIcon() {
   return (
     <svg className="w-4 h-4 text-blue-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+      />
     </svg>
   );
 }
@@ -84,13 +94,7 @@ const TOAST_DURATION = 4000;
 // Single toast item
 // ---------------------------------------------------------------------------
 
-function ToastNotification({
-  toast,
-  onDismiss,
-}: {
-  toast: ToastItem;
-  onDismiss: (id: number) => void;
-}) {
+function ToastNotification({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: number) => void }) {
   const Icon = ICON_MAP[toast.type];
 
   useEffect(() => {
@@ -104,7 +108,7 @@ function ToastNotification({
         'flex items-center gap-2 px-4 py-2.5 rounded-lg shadow-lg border',
         'animate-[slideUp_0.3s_ease-out]',
         'max-w-sm',
-        BG_MAP[toast.type]
+        BG_MAP[toast.type],
       )}
     >
       <Icon />

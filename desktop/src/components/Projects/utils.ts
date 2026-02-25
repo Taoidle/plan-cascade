@@ -68,10 +68,7 @@ export function truncateText(text: string, maxLength: number): string {
 /**
  * Debounce a function call
  */
-export function debounce<Args extends unknown[]>(
-  func: (...args: Args) => void,
-  wait: number
-): (...args: Args) => void {
+export function debounce<Args extends unknown[]>(func: (...args: Args) => void, wait: number): (...args: Args) => void {
   let timeout: ReturnType<typeof setTimeout> | null = null;
 
   return (...args: Args) => {

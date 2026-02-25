@@ -26,7 +26,8 @@ vi.mock('react-i18next', () => ({
       };
       if (translations[key]) return translations[key];
       if (typeof defaultValueOrOpts === 'string') return defaultValueOrOpts;
-      if (typeof defaultValueOrOpts === 'object' && defaultValueOrOpts?.defaultValue) return defaultValueOrOpts.defaultValue;
+      if (typeof defaultValueOrOpts === 'object' && defaultValueOrOpts?.defaultValue)
+        return defaultValueOrOpts.defaultValue;
       return key;
     },
     i18n: { language: 'en' },
@@ -123,7 +124,7 @@ describe('ProjectSelector - Open File Manager Button', () => {
     const { container } = render(
       <div onClick={parentClickHandler}>
         <ProjectSelector />
-      </div>
+      </div>,
     );
 
     const openButton = container.querySelector('[title="Open in file manager"]')!;

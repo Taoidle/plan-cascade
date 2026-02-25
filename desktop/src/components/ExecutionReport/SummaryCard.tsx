@@ -8,12 +8,7 @@
  */
 
 import { clsx } from 'clsx';
-import {
-  CheckCircledIcon,
-  CrossCircledIcon,
-  ClockIcon,
-  LightningBoltIcon,
-} from '@radix-ui/react-icons';
+import { CheckCircledIcon, CrossCircledIcon, ClockIcon, LightningBoltIcon } from '@radix-ui/react-icons';
 import type { ReportSummary } from '../../store/executionReport';
 
 // ============================================================================
@@ -25,29 +20,22 @@ interface SummaryCardProps {
 }
 
 export function SummaryCard({ summary }: SummaryCardProps) {
-  const successColor = summary.successRate >= 80
-    ? 'text-green-600 dark:text-green-400'
-    : summary.successRate >= 50
-      ? 'text-amber-600 dark:text-amber-400'
-      : 'text-red-600 dark:text-red-400';
+  const successColor =
+    summary.successRate >= 80
+      ? 'text-green-600 dark:text-green-400'
+      : summary.successRate >= 50
+        ? 'text-amber-600 dark:text-amber-400'
+        : 'text-red-600 dark:text-red-400';
 
   return (
     <div
-      className={clsx(
-        'p-4 rounded-lg',
-        'border border-gray-200 dark:border-gray-700',
-        'bg-white dark:bg-gray-800'
-      )}
+      className={clsx('p-4 rounded-lg', 'border border-gray-200 dark:border-gray-700', 'bg-white dark:bg-gray-800')}
       data-testid="summary-card"
     >
-      <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3">
-        Execution Summary
-      </h3>
+      <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3">Execution Summary</h3>
 
       {/* Success rate banner */}
-      <div className={clsx('text-2xl font-bold mb-4', successColor)}>
-        {summary.successRate}% Success
-      </div>
+      <div className={clsx('text-2xl font-bold mb-4', successColor)}>{summary.successRate}% Success</div>
 
       {/* Stats grid */}
       <div className="grid grid-cols-2 gap-3">
@@ -56,9 +44,7 @@ export function SummaryCard({ summary }: SummaryCardProps) {
           <LightningBoltIcon className="w-4 h-4 text-blue-500" />
           <div>
             <p className="text-xs text-gray-500 dark:text-gray-400">Total Stories</p>
-            <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-              {summary.totalStories}
-            </p>
+            <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{summary.totalStories}</p>
           </div>
         </div>
 
@@ -67,9 +53,7 @@ export function SummaryCard({ summary }: SummaryCardProps) {
           <CheckCircledIcon className="w-4 h-4 text-green-500" />
           <div>
             <p className="text-xs text-gray-500 dark:text-gray-400">Passed</p>
-            <p className="text-sm font-semibold text-green-700 dark:text-green-300">
-              {summary.storiesPassed}
-            </p>
+            <p className="text-sm font-semibold text-green-700 dark:text-green-300">{summary.storiesPassed}</p>
           </div>
         </div>
 
@@ -78,9 +62,7 @@ export function SummaryCard({ summary }: SummaryCardProps) {
           <CrossCircledIcon className="w-4 h-4 text-red-500" />
           <div>
             <p className="text-xs text-gray-500 dark:text-gray-400">Failed</p>
-            <p className="text-sm font-semibold text-red-700 dark:text-red-300">
-              {summary.storiesFailed}
-            </p>
+            <p className="text-sm font-semibold text-red-700 dark:text-red-300">{summary.storiesFailed}</p>
           </div>
         </div>
 
@@ -98,9 +80,7 @@ export function SummaryCard({ summary }: SummaryCardProps) {
         {/* Tokens (if available) */}
         {summary.totalTokens !== null && (
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 flex items-center justify-center text-xs text-purple-500 font-bold">
-              T
-            </div>
+            <div className="w-4 h-4 flex items-center justify-center text-xs text-purple-500 font-bold">T</div>
             <div>
               <p className="text-xs text-gray-500 dark:text-gray-400">Tokens</p>
               <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">
@@ -113,9 +93,7 @@ export function SummaryCard({ summary }: SummaryCardProps) {
         {/* Cost (if available) */}
         {summary.estimatedCost !== null && (
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 flex items-center justify-center text-xs text-green-500 font-bold">
-              $
-            </div>
+            <div className="w-4 h-4 flex items-center justify-center text-xs text-green-500 font-bold">$</div>
             <div>
               <p className="text-xs text-gray-500 dark:text-gray-400">Est. Cost</p>
               <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">

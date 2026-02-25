@@ -27,12 +27,7 @@ export interface KeyboardShortcut {
   scope?: string;
 }
 
-export type ShortcutCategory =
-  | 'chat'
-  | 'navigation'
-  | 'editing'
-  | 'settings'
-  | 'general';
+export type ShortcutCategory = 'chat' | 'navigation' | 'editing' | 'settings' | 'general';
 
 export interface ShortcutRegistry {
   shortcuts: KeyboardShortcut[];
@@ -175,10 +170,7 @@ interface ShortcutProviderProps {
   initialShortcuts?: KeyboardShortcut[];
 }
 
-export function ShortcutProvider({
-  children,
-  initialShortcuts = [],
-}: ShortcutProviderProps) {
+export function ShortcutProvider({ children, initialShortcuts = [] }: ShortcutProviderProps) {
   const [shortcuts, setShortcuts] = useState<KeyboardShortcut[]>(initialShortcuts);
   const [enabledState, setEnabledState] = useState<Record<string, boolean>>({});
 
@@ -202,7 +194,7 @@ export function ShortcutProvider({
     (category: ShortcutCategory) => {
       return shortcuts.filter((s) => s.category === category);
     },
-    [shortcuts]
+    [shortcuts],
   );
 
   const getShortcutKeys = useCallback(
@@ -211,14 +203,14 @@ export function ShortcutProvider({
       if (!shortcut) return '';
       return formatShortcut(getHotkeyString(shortcut));
     },
-    [shortcuts]
+    [shortcuts],
   );
 
   const isEnabled = useCallback(
     (id: string) => {
       return enabledState[id] !== false;
     },
-    [enabledState]
+    [enabledState],
   );
 
   const setEnabled = useCallback((id: string, enabled: boolean) => {
@@ -235,22 +227,10 @@ export function ShortcutProvider({
       isEnabled,
       setEnabled,
     }),
-    [
-      shortcuts,
-      registerShortcut,
-      unregisterShortcut,
-      getShortcutsByCategory,
-      getShortcutKeys,
-      isEnabled,
-      setEnabled,
-    ]
+    [shortcuts, registerShortcut, unregisterShortcut, getShortcutsByCategory, getShortcutKeys, isEnabled, setEnabled],
   );
 
-  return (
-    <ShortcutContext.Provider value={registry}>
-      {children}
-    </ShortcutContext.Provider>
-  );
+  return <ShortcutContext.Provider value={registry}>{children}</ShortcutContext.Provider>;
 }
 
 // Need to import useState
@@ -266,17 +246,8 @@ interface UseKeyboardShortcutOptions extends Omit<HotkeyOptions, 'enabled'> {
   category?: ShortcutCategory;
 }
 
-export function useKeyboardShortcut(
-  keys: string,
-  callback: () => void,
-  options: UseKeyboardShortcutOptions = {}
-) {
-  const {
-    enabled = true,
-    description = '',
-    category = 'general',
-    ...hotkeyOptions
-  } = options;
+export function useKeyboardShortcut(keys: string, callback: () => void, options: UseKeyboardShortcutOptions = {}) {
+  const { enabled = true, description = '', category = 'general', ...hotkeyOptions } = options;
 
   useHotkeys(
     keys,
@@ -289,7 +260,7 @@ export function useKeyboardShortcut(
       enableOnFormTags: false,
       ...hotkeyOptions,
     },
-    [callback, enabled]
+    [callback, enabled],
   );
 }
 
@@ -311,7 +282,7 @@ interface ChatShortcutsCallbacks {
 
 export function useChatShortcuts(
   callbacks: Partial<ChatShortcutsCallbacks>,
-  options: { enabled?: boolean; inputEmpty?: boolean; isStreaming?: boolean } = {}
+  options: { enabled?: boolean; inputEmpty?: boolean; isStreaming?: boolean } = {},
 ) {
   const { enabled = true, inputEmpty = true, isStreaming = false } = options;
 
@@ -323,7 +294,7 @@ export function useChatShortcuts(
       callbacks.onSendMessage?.();
     },
     { enabled: enabled && !!callbacks.onSendMessage },
-    [callbacks.onSendMessage, enabled]
+    [callbacks.onSendMessage, enabled],
   );
 
   // Cancel generation - Escape or Ctrl/Cmd + C (when streaming)
@@ -338,7 +309,7 @@ export function useChatShortcuts(
       }
     },
     { enabled: enabled && (!!callbacks.onCancelGeneration || !!callbacks.onClearInput) },
-    [callbacks.onCancelGeneration, callbacks.onClearInput, enabled, isStreaming]
+    [callbacks.onCancelGeneration, callbacks.onClearInput, enabled, isStreaming],
   );
 
   // Edit last message - Up arrow when input is empty
@@ -351,7 +322,7 @@ export function useChatShortcuts(
       }
     },
     { enabled: enabled && inputEmpty && !!callbacks.onEditLastMessage },
-    [callbacks.onEditLastMessage, enabled, inputEmpty]
+    [callbacks.onEditLastMessage, enabled, inputEmpty],
   );
 
   // Clear chat - Ctrl/Cmd + L
@@ -362,7 +333,7 @@ export function useChatShortcuts(
       callbacks.onClearChat?.();
     },
     { enabled: enabled && !!callbacks.onClearChat },
-    [callbacks.onClearChat, enabled]
+    [callbacks.onClearChat, enabled],
   );
 
   // Command palette - Ctrl/Cmd + /
@@ -373,7 +344,7 @@ export function useChatShortcuts(
       callbacks.onOpenCommandPalette?.();
     },
     { enabled: enabled && !!callbacks.onOpenCommandPalette },
-    [callbacks.onOpenCommandPalette, enabled]
+    [callbacks.onOpenCommandPalette, enabled],
   );
 
   // Toggle sidebar - Ctrl/Cmd + B
@@ -384,7 +355,7 @@ export function useChatShortcuts(
       callbacks.onToggleSidebar?.();
     },
     { enabled: enabled && !!callbacks.onToggleSidebar },
-    [callbacks.onToggleSidebar, enabled]
+    [callbacks.onToggleSidebar, enabled],
   );
 
   // Export conversation - Ctrl/Cmd + E
@@ -395,7 +366,7 @@ export function useChatShortcuts(
       callbacks.onExportConversation?.();
     },
     { enabled: enabled && !!callbacks.onExportConversation },
-    [callbacks.onExportConversation, enabled]
+    [callbacks.onExportConversation, enabled],
   );
 
   // Focus input - Ctrl/Cmd + I
@@ -406,7 +377,7 @@ export function useChatShortcuts(
       callbacks.onFocusInput?.();
     },
     { enabled: enabled && !!callbacks.onFocusInput },
-    [callbacks.onFocusInput, enabled]
+    [callbacks.onFocusInput, enabled],
   );
 }
 
@@ -446,28 +417,19 @@ export function ShortcutsHelpDialog({ isOpen, onClose }: ShortcutsHelpDialogProp
   if (!isOpen) return null;
 
   return (
-    <div
-      className={clsx(
-        'fixed inset-0 z-50',
-        'flex items-center justify-center',
-        'bg-black/50'
-      )}
-      onClick={onClose}
-    >
+    <div className={clsx('fixed inset-0 z-50', 'flex items-center justify-center', 'bg-black/50')} onClick={onClose}>
       <div
         className={clsx(
           'w-full max-w-lg max-h-[80vh] overflow-auto',
           'bg-white dark:bg-gray-900',
           'rounded-lg shadow-xl',
-          'animate-in fade-in-0 zoom-in-95'
+          'animate-in fade-in-0 zoom-in-95',
         )}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="sticky top-0 px-6 py-4 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            {t('shortcuts.title')}
-          </h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t('shortcuts.title')}</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             Press <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-xs">Esc</kbd> to close
           </p>
@@ -481,29 +443,22 @@ export function ShortcutsHelpDialog({ isOpen, onClose }: ShortcutsHelpDialogProp
                 {category.label}
               </h3>
               <div className="space-y-2">
-                {DEFAULT_SHORTCUTS.filter((s) => s.category === category.id).map(
-                  (shortcut) => (
-                    <div
-                      key={shortcut.id}
-                      className="flex items-center justify-between py-2"
+                {DEFAULT_SHORTCUTS.filter((s) => s.category === category.id).map((shortcut) => (
+                  <div key={shortcut.id} className="flex items-center justify-between py-2">
+                    <span className="text-sm text-gray-700 dark:text-gray-300">{shortcut.description}</span>
+                    <kbd
+                      className={clsx(
+                        'px-2 py-1 rounded',
+                        'bg-gray-100 dark:bg-gray-800',
+                        'text-xs font-mono',
+                        'text-gray-700 dark:text-gray-300',
+                        'border border-gray-200 dark:border-gray-700',
+                      )}
                     >
-                      <span className="text-sm text-gray-700 dark:text-gray-300">
-                        {shortcut.description}
-                      </span>
-                      <kbd
-                        className={clsx(
-                          'px-2 py-1 rounded',
-                          'bg-gray-100 dark:bg-gray-800',
-                          'text-xs font-mono',
-                          'text-gray-700 dark:text-gray-300',
-                          'border border-gray-200 dark:border-gray-700'
-                        )}
-                      >
-                        {formatShortcut(getHotkeyString(shortcut as KeyboardShortcut))}
-                      </kbd>
-                    </div>
-                  )
-                )}
+                      {formatShortcut(getHotkeyString(shortcut as KeyboardShortcut))}
+                    </kbd>
+                  </div>
+                ))}
               </div>
             </div>
           ))}
@@ -522,10 +477,7 @@ interface KeyboardShortcutHintProps {
   className?: string;
 }
 
-export function KeyboardShortcutHint({
-  shortcut,
-  className,
-}: KeyboardShortcutHintProps) {
+export function KeyboardShortcutHint({ shortcut, className }: KeyboardShortcutHintProps) {
   const formatted = formatShortcut(shortcut);
   const keys = formatted.split(' + ');
 
@@ -540,7 +492,7 @@ export function KeyboardShortcutHint({
               'bg-gray-100 dark:bg-gray-800',
               'text-xs font-mono',
               'text-gray-500 dark:text-gray-400',
-              'border border-gray-200 dark:border-gray-700'
+              'border border-gray-200 dark:border-gray-700',
             )}
           >
             {key}

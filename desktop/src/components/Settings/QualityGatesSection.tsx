@@ -36,19 +36,13 @@ export function QualityGatesSection() {
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-          {t('quality.title')}
-        </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {t('quality.description')}
-        </p>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">{t('quality.title')}</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('quality.description')}</p>
       </div>
 
       {/* Quality Gate Toggles */}
       <section className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('quality.enabledGates')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('quality.enabledGates')}</h3>
         <div className="space-y-3">
           {qualityGates.map((gate) => (
             <div
@@ -56,7 +50,7 @@ export function QualityGatesSection() {
               className={clsx(
                 'flex items-start gap-4 p-4 rounded-lg border',
                 'border-gray-200 dark:border-gray-700',
-                'bg-white dark:bg-gray-800'
+                'bg-white dark:bg-gray-800',
               )}
             >
               <div
@@ -65,7 +59,7 @@ export function QualityGatesSection() {
                   'text-sm font-bold',
                   gateSettings[gate.id]
                     ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
-                    : 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
+                    : 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500',
                 )}
               >
                 {gate.icon}
@@ -90,7 +84,7 @@ export function QualityGatesSection() {
                       'bg-gray-200 dark:bg-gray-700',
                       'data-[state=checked]:bg-primary-600',
                       'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                      'dark:focus:ring-offset-gray-800'
+                      'dark:focus:ring-offset-gray-800',
                     )}
                   >
                     <Switch.Thumb
@@ -98,7 +92,7 @@ export function QualityGatesSection() {
                         'block w-5 h-5 bg-white rounded-full shadow',
                         'transition-transform',
                         'data-[state=checked]:translate-x-[18px]',
-                        'data-[state=unchecked]:translate-x-[2px]'
+                        'data-[state=unchecked]:translate-x-[2px]',
                       )}
                     />
                   </Switch.Root>
@@ -112,9 +106,7 @@ export function QualityGatesSection() {
       {/* Custom Script Input (shown when custom is enabled) */}
       {gateSettings.custom && (
         <section className="space-y-4">
-          <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-            {t('quality.customScript.label')}
-          </h3>
+          <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('quality.customScript.label')}</h3>
           <div>
             <input
               type="text"
@@ -126,25 +118,19 @@ export function QualityGatesSection() {
                 'border-gray-200 dark:border-gray-700',
                 'bg-white dark:bg-gray-800',
                 'text-gray-900 dark:text-white font-mono text-sm',
-                'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                'focus:outline-none focus:ring-2 focus:ring-primary-500',
               )}
             />
-            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-              {t('quality.customScript.help')}
-            </p>
+            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{t('quality.customScript.help')}</p>
           </div>
         </section>
       )}
 
       {/* Retry Settings */}
       <section className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('quality.retry.label')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('quality.retry.label')}</h3>
         <div className="max-w-xs">
-          <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
-            {t('quality.retry.maxRetries')}
-          </label>
+          <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">{t('quality.retry.maxRetries')}</label>
           <input
             type="number"
             min={0}
@@ -161,30 +147,24 @@ export function QualityGatesSection() {
               'border-gray-200 dark:border-gray-700',
               'bg-white dark:bg-gray-800',
               'text-gray-900 dark:text-white',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500'
+              'focus:outline-none focus:ring-2 focus:ring-primary-500',
             )}
           />
-          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-            {t('quality.retry.help')}
-          </p>
+          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{t('quality.retry.help')}</p>
         </div>
       </section>
 
       {/* Summary */}
       <section className="space-y-2">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('quality.summary.label')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('quality.summary.label')}</h3>
         <div
           className={clsx(
             'p-4 rounded-lg',
             'bg-gray-50 dark:bg-gray-800/50',
-            'border border-gray-200 dark:border-gray-700'
+            'border border-gray-200 dark:border-gray-700',
           )}
         >
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            {getGateSummary(gateSettings, t)}
-          </p>
+          <p className="text-sm text-gray-600 dark:text-gray-400">{getGateSummary(gateSettings, t)}</p>
         </div>
       </section>
     </div>
@@ -199,7 +179,7 @@ function getGateSummary(
     custom: boolean;
     maxRetries: number;
   },
-  t: (key: string, options?: Record<string, unknown>) => string
+  t: (key: string, options?: Record<string, unknown>) => string,
 ): string {
   const enabled = [];
   if (gates.typecheck) enabled.push(t('quality.summary.typecheck'));
@@ -211,13 +191,15 @@ function getGateSummary(
     return t('quality.summary.noGates');
   }
 
-  const gateList = enabled.length === 1
-    ? enabled[0]
-    : enabled.slice(0, -1).join(', ') + ' and ' + enabled[enabled.length - 1];
+  const gateList =
+    enabled.length === 1 ? enabled[0] : enabled.slice(0, -1).join(', ') + ' and ' + enabled[enabled.length - 1];
 
-  const retryMessage = gates.maxRetries > 0
-    ? t(gates.maxRetries === 1 ? 'quality.summary.retryMessage' : 'quality.summary.retryMessage_plural', { count: gates.maxRetries })
-    : t('quality.summary.noRetries');
+  const retryMessage =
+    gates.maxRetries > 0
+      ? t(gates.maxRetries === 1 ? 'quality.summary.retryMessage' : 'quality.summary.retryMessage_plural', {
+          count: gates.maxRetries,
+        })
+      : t('quality.summary.noRetries');
 
   return t('quality.summary.mustPass', { gates: gateList, retryMessage });
 }

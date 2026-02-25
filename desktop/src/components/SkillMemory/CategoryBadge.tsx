@@ -51,7 +51,7 @@ export function CategoryBadge({ category, className, compact = false }: Category
         compact ? 'px-1.5 py-0.5 text-2xs' : 'px-2 py-0.5 text-xs',
         style.bg,
         style.text,
-        className
+        className,
       )}
     >
       {label}

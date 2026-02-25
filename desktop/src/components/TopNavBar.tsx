@@ -102,7 +102,7 @@ export function TopNavBar({ onOpenCommandPalette }: TopNavBarProps) {
         className={clsx(
           'shrink-0 flex items-center justify-between h-10 px-3',
           'border-b border-gray-200 dark:border-gray-800',
-          'bg-white dark:bg-gray-900'
+          'bg-white dark:bg-gray-900',
         )}
         aria-label="Main navigation"
         data-testid="top-nav-bar"
@@ -120,7 +120,7 @@ export function TopNavBar({ onOpenCommandPalette }: TopNavBarProps) {
                   'hover:bg-gray-100 dark:hover:bg-gray-800',
                   'hover:text-gray-900 dark:hover:text-white',
                   'transition-colors duration-150',
-                  'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1'
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1',
                 )}
               >
                 <HamburgerMenuIcon className="w-5 h-5" />
@@ -135,7 +135,7 @@ export function TopNavBar({ onOpenCommandPalette }: TopNavBarProps) {
                   'border border-gray-200 dark:border-gray-700',
                   'shadow-lg z-50',
                   'animate-in fade-in-0 zoom-in-95 duration-200',
-                  'data-[side=bottom]:slide-in-from-top-2'
+                  'data-[side=bottom]:slide-in-from-top-2',
                 )}
                 sideOffset={5}
                 align="start"
@@ -157,28 +157,22 @@ export function TopNavBar({ onOpenCommandPalette }: TopNavBarProps) {
                       className={clsx(
                         'flex items-start gap-3 px-3 py-2.5 rounded-md',
                         'outline-none transition-colors duration-150',
-                        isDisabled
-                          ? 'opacity-50 cursor-not-allowed'
-                          : 'cursor-pointer',
+                        isDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
                         isSelected
                           ? 'bg-primary-50 dark:bg-primary-900/30'
-                          : !isDisabled && 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                          : !isDisabled && 'hover:bg-gray-100 dark:hover:bg-gray-700',
                       )}
                     >
                       <div
                         className={clsx(
                           'p-1.5 rounded-md transition-colors duration-150',
-                          isSelected
-                            ? 'bg-primary-100 dark:bg-primary-900/50'
-                            : 'bg-gray-100 dark:bg-gray-700'
+                          isSelected ? 'bg-primary-100 dark:bg-primary-900/50' : 'bg-gray-100 dark:bg-gray-700',
                         )}
                       >
                         <Icon
                           className={clsx(
                             'w-4 h-4 transition-colors duration-150',
-                            isSelected
-                              ? 'text-primary-600 dark:text-primary-400'
-                              : 'text-gray-500 dark:text-gray-400'
+                            isSelected ? 'text-primary-600 dark:text-primary-400' : 'text-gray-500 dark:text-gray-400',
                           )}
                         />
                       </div>
@@ -187,9 +181,7 @@ export function TopNavBar({ onOpenCommandPalette }: TopNavBarProps) {
                         <div
                           className={clsx(
                             'font-medium text-sm transition-colors duration-150',
-                            isSelected
-                              ? 'text-primary-700 dark:text-primary-300'
-                              : 'text-gray-900 dark:text-white'
+                            isSelected ? 'text-primary-700 dark:text-primary-300' : 'text-gray-900 dark:text-white',
                           )}
                         >
                           {getModeLabel(modeOption)}
@@ -211,14 +203,10 @@ export function TopNavBar({ onOpenCommandPalette }: TopNavBarProps) {
 
           {/* Current mode icon + name */}
           <CurrentIcon className="w-4 h-4 text-primary-600 dark:text-primary-400" />
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            {getModeLabel(mode)}
-          </span>
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{getModeLabel(mode)}</span>
 
           {/* Running pulse indicator */}
-          {isRunning && (
-            <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-          )}
+          {isRunning && <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />}
         </div>
 
         {/* Right: Search + Settings */}
@@ -235,7 +223,7 @@ export function TopNavBar({ onOpenCommandPalette }: TopNavBarProps) {
                   'hover:bg-gray-100 dark:hover:bg-gray-800',
                   'hover:text-gray-900 dark:hover:text-white',
                   'transition-colors duration-150',
-                  'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1'
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1',
                 )}
               >
                 <MagnifyingGlassIcon className="w-5 h-5" />
@@ -249,7 +237,7 @@ export function TopNavBar({ onOpenCommandPalette }: TopNavBarProps) {
                   'px-3 py-1.5 rounded-md text-sm',
                   'bg-gray-900 dark:bg-gray-100',
                   'text-white dark:text-gray-900',
-                  'shadow-lg z-50'
+                  'shadow-lg z-50',
                 )}
               >
                 {t('topNavBar.searchTooltip')}
@@ -270,7 +258,7 @@ export function TopNavBar({ onOpenCommandPalette }: TopNavBarProps) {
                   'hover:bg-gray-100 dark:hover:bg-gray-800',
                   'hover:text-gray-900 dark:hover:text-white',
                   'transition-colors duration-150',
-                  'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1'
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1',
                 )}
               >
                 {isDark ? <SunIcon className="w-5 h-5" /> : <MoonIcon className="w-5 h-5" />}
@@ -284,7 +272,7 @@ export function TopNavBar({ onOpenCommandPalette }: TopNavBarProps) {
                   'px-3 py-1.5 rounded-md text-sm',
                   'bg-gray-900 dark:bg-gray-100',
                   'text-white dark:text-gray-900',
-                  'shadow-lg z-50'
+                  'shadow-lg z-50',
                 )}
               >
                 {t('topNavBar.themeTooltip')}
@@ -305,7 +293,7 @@ export function TopNavBar({ onOpenCommandPalette }: TopNavBarProps) {
                   'hover:bg-gray-100 dark:hover:bg-gray-800',
                   'hover:text-gray-900 dark:hover:text-white',
                   'transition-colors duration-150',
-                  'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1'
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1',
                 )}
               >
                 <GearIcon className="w-5 h-5" />
@@ -319,7 +307,7 @@ export function TopNavBar({ onOpenCommandPalette }: TopNavBarProps) {
                   'px-3 py-1.5 rounded-md text-sm',
                   'bg-gray-900 dark:bg-gray-100',
                   'text-white dark:text-gray-900',
-                  'shadow-lg z-50'
+                  'shadow-lg z-50',
                 )}
               >
                 {t('topNavBar.settingsTooltip')}

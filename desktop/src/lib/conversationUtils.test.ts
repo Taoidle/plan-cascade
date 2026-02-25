@@ -39,10 +39,7 @@ describe('deriveConversationTurns', () => {
   });
 
   it('returns empty array when no info lines exist', () => {
-    const lines: StreamLine[] = [
-      makeLine('text', 'some assistant text'),
-      makeLine('text', 'more text'),
-    ];
+    const lines: StreamLine[] = [makeLine('text', 'some assistant text'), makeLine('text', 'more text')];
     expect(deriveConversationTurns(lines)).toEqual([]);
   });
 
@@ -108,10 +105,10 @@ describe('deriveConversationTurns', () => {
 
   it('sets correct assistantStartIndex and assistantEndIndex', () => {
     const lines: StreamLine[] = [
-      makeLine('info', 'User prompt'),   // index 0
-      makeLine('text', 'A'),              // index 1
-      makeLine('tool', 'T'),              // index 2
-      makeLine('text', 'B'),              // index 3
+      makeLine('info', 'User prompt'), // index 0
+      makeLine('text', 'A'), // index 1
+      makeLine('tool', 'T'), // index 2
+      makeLine('text', 'B'), // index 3
     ];
     const turns = deriveConversationTurns(lines);
     expect(turns[0].assistantStartIndex).toBe(1);
@@ -131,9 +128,7 @@ describe('rebuildStandaloneTurns', () => {
   });
 
   it('returns empty array when no info lines exist', () => {
-    const lines: StreamLine[] = [
-      makeLine('text', 'orphan text'),
-    ];
+    const lines: StreamLine[] = [makeLine('text', 'orphan text')];
     expect(rebuildStandaloneTurns(lines)).toEqual([]);
   });
 

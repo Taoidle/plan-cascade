@@ -53,10 +53,7 @@ export const PROMPT_CATEGORIES = [
 ] as const;
 
 /** Substitute {{variable}} placeholders in a template string */
-export function substituteVariables(
-  template: string,
-  values: Record<string, string>
-): string {
+export function substituteVariables(template: string, values: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (match, name) => {
     return values[name] !== undefined ? values[name] : match;
   });

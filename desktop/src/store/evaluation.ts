@@ -286,9 +286,7 @@ export const useEvaluationStore = create<EvaluationState>((set, get) => ({
 
   updateTestCase: (id, updates) => {
     set((s) => ({
-      testCases: s.testCases.map((tc) =>
-        tc.id === id ? { ...tc, ...updates } : tc
-      ),
+      testCases: s.testCases.map((tc) => (tc.id === id ? { ...tc, ...updates } : tc)),
     }));
   },
 

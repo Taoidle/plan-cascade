@@ -37,18 +37,12 @@ export function Preview({ content, className }: PreviewProps) {
         components={{
           // Custom heading components with anchor links
           h1: ({ children, ...props }) => (
-            <h1
-              className="text-2xl font-bold mt-6 mb-4 pb-2 border-b border-gray-200 dark:border-gray-700"
-              {...props}
-            >
+            <h1 className="text-2xl font-bold mt-6 mb-4 pb-2 border-b border-gray-200 dark:border-gray-700" {...props}>
               {children}
             </h1>
           ),
           h2: ({ children, ...props }) => (
-            <h2
-              className="text-xl font-bold mt-5 mb-3 pb-1 border-b border-gray-200 dark:border-gray-700"
-              {...props}
-            >
+            <h2 className="text-xl font-bold mt-5 mb-3 pb-1 border-b border-gray-200 dark:border-gray-700" {...props}>
               {children}
             </h2>
           ),
@@ -158,10 +152,7 @@ export function Preview({ content, className }: PreviewProps) {
 
           // Pre (code block container)
           pre: ({ children, ...props }) => (
-            <pre
-              className="my-4 p-4 rounded-lg bg-gray-900 overflow-x-auto text-sm"
-              {...props}
-            >
+            <pre className="my-4 p-4 rounded-lg bg-gray-900 overflow-x-auto text-sm" {...props}>
               {children}
             </pre>
           ),
@@ -187,9 +178,7 @@ export function Preview({ content, className }: PreviewProps) {
               {children}
             </tbody>
           ),
-          tr: ({ children, ...props }) => (
-            <tr {...props}>{children}</tr>
-          ),
+          tr: ({ children, ...props }) => <tr {...props}>{children}</tr>,
           th: ({ children, ...props }) => (
             <th
               className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider"
@@ -205,9 +194,7 @@ export function Preview({ content, className }: PreviewProps) {
           ),
 
           // Horizontal rule
-          hr: (props) => (
-            <hr className="my-6 border-gray-200 dark:border-gray-700" {...props} />
-          ),
+          hr: (props) => <hr className="my-6 border-gray-200 dark:border-gray-700" {...props} />,
 
           // Strong and emphasis
           strong: ({ children, ...props }) => (
@@ -230,13 +217,7 @@ export function Preview({ content, className }: PreviewProps) {
 
           // Images
           img: ({ src, alt, ...props }) => (
-            <img
-              src={src}
-              alt={alt}
-              className="max-w-full h-auto my-4 rounded-lg"
-              loading="lazy"
-              {...props}
-            />
+            <img src={src} alt={alt} className="max-w-full h-auto my-4 rounded-lg" loading="lazy" {...props} />
           ),
         }}
       >
@@ -249,9 +230,7 @@ export function Preview({ content, className }: PreviewProps) {
     <div className={clsx('h-full flex flex-col', className)}>
       {/* Header */}
       <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-          {t('markdownEditor.preview.title')}
-        </h3>
+        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('markdownEditor.preview.title')}</h3>
       </div>
 
       {/* Content */}

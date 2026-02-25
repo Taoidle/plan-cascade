@@ -43,13 +43,7 @@ function AppContent() {
   const { detectIncompleteTasks, initializeListener, cleanupListener } = useRecoveryStore();
 
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const {
-    forceShowWizard,
-    clearWizardTrigger,
-    tourActive,
-    startTour,
-    endTour,
-  } = useOnboardingStore();
+  const { forceShowWizard, clearWizardTrigger, tourActive, startTour, endTour } = useOnboardingStore();
   // ShortcutOverlay manages its own open/close state via mod+shift+/ hotkey
 
   const initCalled = useRef(false);
@@ -111,10 +105,7 @@ function AppContent() {
       />
 
       {/* Feature Tour (triggered after wizard or from Settings) */}
-      <FeatureTour
-        active={tourActive}
-        onFinish={endTour}
-      />
+      <FeatureTour active={tourActive} onFinish={endTour} />
 
       {/* Top Navigation Bar */}
       <TopNavBar onOpenCommandPalette={openCommandPalette} />
@@ -122,21 +113,46 @@ function AppContent() {
       {/* Main Content with animated transitions */}
       <main className="flex-1 overflow-hidden flex flex-col min-w-0">
         <AnimatedModeContent mode={mode}>
-          {mode === 'simple' && <div data-tour="mode-simple" className="h-full"><SimpleMode /></div>}
-          {mode === 'expert' && <div data-tour="mode-expert" className="h-full"><ExpertMode /></div>}
-          {mode === 'claude-code' && <div data-tour="mode-claude-code" className="h-full"><ClaudeCodeMode /></div>}
-          {mode === 'projects' && <div data-tour="mode-projects" className="h-full"><Projects /></div>}
-          {mode === 'analytics' && <div data-tour="mode-analytics" className="h-full"><Dashboard /></div>}
-          {mode === 'knowledge' && <div data-tour="mode-knowledge" className="h-full"><KnowledgeBasePanel /></div>}
-          {mode === 'artifacts' && <div data-tour="mode-artifacts" className="h-full"><ArtifactBrowserPanel /></div>}
+          {mode === 'simple' && (
+            <div data-tour="mode-simple" className="h-full">
+              <SimpleMode />
+            </div>
+          )}
+          {mode === 'expert' && (
+            <div data-tour="mode-expert" className="h-full">
+              <ExpertMode />
+            </div>
+          )}
+          {mode === 'claude-code' && (
+            <div data-tour="mode-claude-code" className="h-full">
+              <ClaudeCodeMode />
+            </div>
+          )}
+          {mode === 'projects' && (
+            <div data-tour="mode-projects" className="h-full">
+              <Projects />
+            </div>
+          )}
+          {mode === 'analytics' && (
+            <div data-tour="mode-analytics" className="h-full">
+              <Dashboard />
+            </div>
+          )}
+          {mode === 'knowledge' && (
+            <div data-tour="mode-knowledge" className="h-full">
+              <KnowledgeBasePanel />
+            </div>
+          )}
+          {mode === 'artifacts' && (
+            <div data-tour="mode-artifacts" className="h-full">
+              <ArtifactBrowserPanel />
+            </div>
+          )}
         </AnimatedModeContent>
       </main>
 
       {/* Keyboard Shortcuts Help Dialog (legacy, from Story 004) */}
-      <ShortcutsHelpDialog
-        isOpen={showShortcuts}
-        onClose={() => setShowShortcuts(false)}
-      />
+      <ShortcutsHelpDialog isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
 
       {/* Shortcut Overlay (Story 005) - toggled via Ctrl+Shift+/ */}
       <ShortcutOverlay />

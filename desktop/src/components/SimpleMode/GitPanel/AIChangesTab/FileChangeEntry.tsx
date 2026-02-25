@@ -42,12 +42,10 @@ export function FileChangeEntry({ change, sessionId, projectRoot }: FileChangeEn
       return;
     }
     setLoadingDiff(true);
-    fetchDiff(sessionId, projectRoot, change.id, change.before_hash, change.after_hash).then(
-      (diff) => {
-        setDiffContent(diff);
-        setLoadingDiff(false);
-      },
-    );
+    fetchDiff(sessionId, projectRoot, change.id, change.before_hash, change.after_hash).then((diff) => {
+      setDiffContent(diff);
+      setLoadingDiff(false);
+    });
   }, [expanded, change, sessionId, projectRoot, fetchDiff, diffCache]);
 
   return (
@@ -76,9 +74,7 @@ export function FileChangeEntry({ change, sessionId, projectRoot }: FileChangeEn
         </span>
 
         {/* File path */}
-        <span className="text-xs font-mono text-gray-700 dark:text-gray-300 truncate flex-1">
-          {change.file_path}
-        </span>
+        <span className="text-xs font-mono text-gray-700 dark:text-gray-300 truncate flex-1">{change.file_path}</span>
 
         {/* Description (short) */}
         <span className="text-2xs text-gray-400 dark:text-gray-500 shrink-0 hidden sm:inline">

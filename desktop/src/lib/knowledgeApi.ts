@@ -113,9 +113,7 @@ export async function ragQuery(
 /**
  * List all knowledge collections for a project.
  */
-export async function ragListCollections(
-  projectId: string,
-): Promise<CommandResponse<KnowledgeCollection[]>> {
+export async function ragListCollections(projectId: string): Promise<CommandResponse<KnowledgeCollection[]>> {
   try {
     return await invoke<CommandResponse<KnowledgeCollection[]>>('rag_list_collections', {
       projectId,

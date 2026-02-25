@@ -48,10 +48,8 @@ export function DiffViewer({ diffContent, maxLines, showTruncation, className }:
         <div
           key={i}
           className={clsx(
-            line.startsWith('+') &&
-              'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20',
-            line.startsWith('-') &&
-              'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20',
+            line.startsWith('+') && 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20',
+            line.startsWith('-') && 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20',
           )}
         >
           {line}

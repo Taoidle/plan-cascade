@@ -8,10 +8,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import {
-  CheckCircledIcon,
-  CrossCircledIcon,
-} from '@radix-ui/react-icons';
+import { CheckCircledIcon, CrossCircledIcon } from '@radix-ui/react-icons';
 import { useProxyStore } from '../../store/proxy';
 import type { ProxyConfig, ProxyProtocol, ProxyStrategy } from '../../lib/proxyApi';
 
@@ -113,12 +110,15 @@ export function NetworkSection() {
     }
   }, [statusMessage]);
 
-  const buildProxyConfig = useCallback((): ProxyConfig => ({
-    protocol,
-    host,
-    port,
-    username: authEnabled && username ? username : undefined,
-  }), [protocol, host, port, authEnabled, username]);
+  const buildProxyConfig = useCallback(
+    (): ProxyConfig => ({
+      protocol,
+      host,
+      port,
+      username: authEnabled && username ? username : undefined,
+    }),
+    [protocol, host, port, authEnabled, username],
+  );
 
   const handleSaveGlobal = useCallback(async () => {
     if (!enabled) {
@@ -159,19 +159,17 @@ export function NetworkSection() {
     <div className="space-y-8">
       {/* Title */}
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-          {t('network.title')}
-        </h2>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          {t('network.description')}
-        </p>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t('network.title')}</h2>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t('network.description')}</p>
       </div>
 
       {/* Error banner */}
       {error && (
         <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300 flex items-center justify-between">
           <span>{error}</span>
-          <button onClick={clearError} className="text-red-500 hover:text-red-700 ml-2">&times;</button>
+          <button onClick={clearError} className="text-red-500 hover:text-red-700 ml-2">
+            &times;
+          </button>
         </div>
       )}
 
@@ -193,9 +191,7 @@ export function NetworkSection() {
       {/* ─── Global Proxy ─── */}
       <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-medium text-gray-900 dark:text-white">
-            {t('network.globalProxy.title')}
-          </h3>
+          <h3 className="text-base font-medium text-gray-900 dark:text-white">{t('network.globalProxy.title')}</h3>
           <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
@@ -203,9 +199,7 @@ export function NetworkSection() {
               onChange={(e) => setEnabled(e.target.checked)}
               className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
             />
-            <span className="text-sm text-gray-600 dark:text-gray-400">
-              {t('network.globalProxy.enable')}
-            </span>
+            <span className="text-sm text-gray-600 dark:text-gray-400">{t('network.globalProxy.enable')}</span>
           </label>
         </div>
 
@@ -284,9 +278,7 @@ export function NetworkSection() {
                   onChange={(e) => setAuthEnabled(e.target.checked)}
                   className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                 />
-                <span className="text-sm text-gray-600 dark:text-gray-400">
-                  {t('network.globalProxy.auth')}
-                </span>
+                <span className="text-sm text-gray-600 dark:text-gray-400">{t('network.globalProxy.auth')}</span>
               </label>
 
               {authEnabled && (
@@ -379,10 +371,7 @@ export function NetworkSection() {
                     ? `${t('network.testResult.success')}${testResult.latency_ms ? ` — ${t('network.testResult.latency', { ms: testResult.latency_ms })}` : ''}`
                     : `${t('network.testResult.failed')}${testResult.error ? `: ${testResult.error}` : ''}`}
                 </span>
-                <button
-                  onClick={clearTestResult}
-                  className="ml-auto text-gray-400 hover:text-gray-600"
-                >
+                <button onClick={clearTestResult} className="ml-auto text-gray-400 hover:text-gray-600">
                   &times;
                 </button>
               </div>
@@ -391,17 +380,13 @@ export function NetworkSection() {
         )}
 
         {!enabled && (
-          <p className="text-sm text-gray-400 dark:text-gray-500 italic">
-            {t('network.globalProxy.disabled')}
-          </p>
+          <p className="text-sm text-gray-400 dark:text-gray-500 italic">{t('network.globalProxy.disabled')}</p>
         )}
       </div>
 
       {/* ─── Provider Proxy Settings ─── */}
       <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-6">
-        <h3 className="text-base font-medium text-gray-900 dark:text-white">
-          {t('network.providerProxy.title')}
-        </h3>
+        <h3 className="text-base font-medium text-gray-900 dark:text-white">{t('network.providerProxy.title')}</h3>
 
         {/* LLM Providers */}
         <div>
@@ -438,9 +423,7 @@ export function NetworkSection() {
             ))}
             {/* TF-IDF - always local */}
             <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-gray-50 dark:bg-gray-800/50">
-              <span className="text-sm text-gray-600 dark:text-gray-400">
-                {t('network.providers.embedding_tfidf')}
-              </span>
+              <span className="text-sm text-gray-600 dark:text-gray-400">{t('network.providers.embedding_tfidf')}</span>
               <span className="text-xs text-gray-400 dark:text-gray-500 italic">
                 {t('network.providerProxy.localNote')}
               </span>
@@ -501,9 +484,7 @@ function ProviderStrategyRow({ providerId, strategy, onStrategyChange, t }: Prov
 
   return (
     <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-gray-50 dark:bg-gray-800/50">
-      <span className="text-sm text-gray-700 dark:text-gray-300">
-        {t(`network.providers.${providerId}`)}
-      </span>
+      <span className="text-sm text-gray-700 dark:text-gray-300">{t(`network.providers.${providerId}`)}</span>
       <select
         value={currentStrategy}
         onChange={(e) => onStrategyChange(providerId, e.target.value as ProxyStrategy)}

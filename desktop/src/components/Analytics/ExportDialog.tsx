@@ -74,7 +74,7 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
             'w-full max-w-md',
             'bg-white dark:bg-gray-900 rounded-xl shadow-xl',
             'p-6',
-            'focus:outline-none'
+            'focus:outline-none',
           )}
         >
           {/* Header */}
@@ -87,7 +87,7 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
                 className={clsx(
                   'p-2 rounded-lg',
                   'hover:bg-gray-100 dark:hover:bg-gray-800',
-                  'focus:outline-none focus:ring-2 focus:ring-primary-500'
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500',
                 )}
                 aria-label="Close"
               >
@@ -116,7 +116,7 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
                       'border transition-colors',
                       exportType === option.value
                         ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                        : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                        : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800',
                     )}
                   >
                     <input
@@ -130,14 +130,10 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
                     <span
                       className={clsx(
                         'w-4 h-4 rounded-full border-2 flex items-center justify-center',
-                        exportType === option.value
-                          ? 'border-primary-500'
-                          : 'border-gray-300 dark:border-gray-600'
+                        exportType === option.value ? 'border-primary-500' : 'border-gray-300 dark:border-gray-600',
                       )}
                     >
-                      {exportType === option.value && (
-                        <span className="w-2 h-2 rounded-full bg-primary-500" />
-                      )}
+                      {exportType === option.value && <span className="w-2 h-2 rounded-full bg-primary-500" />}
                     </span>
                     <span className="text-sm text-gray-900 dark:text-white">{option.label}</span>
                   </label>
@@ -162,7 +158,7 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
                       'border transition-colors',
                       format === option.value
                         ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                        : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                        : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800',
                     )}
                   >
                     <input
@@ -173,9 +169,7 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
                       onChange={(e) => setFormat(e.target.value as ExportFormat)}
                       className="sr-only"
                     />
-                    <span className="text-sm font-medium text-gray-900 dark:text-white">
-                      {option.label}
-                    </span>
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">{option.label}</span>
                   </label>
                 ))}
               </div>
@@ -191,7 +185,7 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
                   className={clsx(
                     'w-4 h-4 rounded',
                     'border-gray-300 dark:border-gray-600',
-                    'text-primary-600 focus:ring-primary-500'
+                    'text-primary-600 focus:ring-primary-500',
                   )}
                 />
                 <span className="text-sm text-gray-700 dark:text-gray-300">
@@ -209,7 +203,7 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
                   'px-4 py-2 rounded-lg',
                   'bg-gray-100 dark:bg-gray-800',
                   'text-gray-700 dark:text-gray-300',
-                  'hover:bg-gray-200 dark:hover:bg-gray-700'
+                  'hover:bg-gray-200 dark:hover:bg-gray-700',
                 )}
               >
                 {t('exportDialog.cancel', 'Cancel')}
@@ -223,7 +217,7 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
                 'bg-primary-600 text-white',
                 'hover:bg-primary-700',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
-                'flex items-center gap-2'
+                'flex items-center gap-2',
               )}
             >
               {isExporting && (
@@ -244,9 +238,7 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
                   />
                 </svg>
               )}
-              {isExporting
-                ? t('exportDialog.exporting', 'Exporting...')
-                : t('exportDialog.export', 'Export')}
+              {isExporting ? t('exportDialog.exporting', 'Exporting...') : t('exportDialog.export', 'Export')}
             </button>
           </div>
         </Dialog.Content>

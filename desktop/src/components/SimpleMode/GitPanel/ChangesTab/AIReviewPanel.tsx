@@ -84,7 +84,12 @@ const SEVERITY_CONFIG = {
   error: {
     icon: (
       <svg className="w-3.5 h-3.5 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+        />
       </svg>
     ),
     bg: 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-800/50',
@@ -94,7 +99,12 @@ const SEVERITY_CONFIG = {
   warning: {
     icon: (
       <svg className="w-3.5 h-3.5 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+        />
       </svg>
     ),
     bg: 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800/50',
@@ -104,7 +114,12 @@ const SEVERITY_CONFIG = {
   info: {
     icon: (
       <svg className="w-3.5 h-3.5 text-blue-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+        />
       </svg>
     ),
     bg: 'bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800/50',
@@ -143,10 +158,7 @@ export function AIReviewPanel({ reviewText, onDismiss }: AIReviewPanelProps) {
             </svg>
             {t('aiReviewPanel.allDismissed')}
           </div>
-          <button
-            onClick={onDismiss}
-            className="text-2xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-          >
+          <button onClick={onDismiss} className="text-2xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
             {t('aiReviewPanel.close')}
           </button>
         </div>
@@ -172,13 +184,19 @@ export function AIReviewPanel({ reviewText, onDismiss }: AIReviewPanelProps) {
           </span>
           <div className="flex items-center gap-2 text-2xs">
             {errorCount > 0 && (
-              <span className="text-red-600 dark:text-red-400 font-medium">{t('aiReviewPanel.issues', { count: errorCount })}</span>
+              <span className="text-red-600 dark:text-red-400 font-medium">
+                {t('aiReviewPanel.issues', { count: errorCount })}
+              </span>
             )}
             {warningCount > 0 && (
-              <span className="text-amber-600 dark:text-amber-400 font-medium">{t('aiReviewPanel.warnings', { count: warningCount })}</span>
+              <span className="text-amber-600 dark:text-amber-400 font-medium">
+                {t('aiReviewPanel.warnings', { count: warningCount })}
+              </span>
             )}
             {infoCount > 0 && (
-              <span className="text-blue-600 dark:text-blue-400 font-medium">{t('aiReviewPanel.notes', { count: infoCount })}</span>
+              <span className="text-blue-600 dark:text-blue-400 font-medium">
+                {t('aiReviewPanel.notes', { count: infoCount })}
+              </span>
             )}
           </div>
         </div>
@@ -200,10 +218,7 @@ export function AIReviewPanel({ reviewText, onDismiss }: AIReviewPanelProps) {
           return (
             <div
               key={note.id}
-              className={clsx(
-                'flex items-start gap-2 px-2.5 py-1.5 rounded-md border text-xs',
-                config.bg
-              )}
+              className={clsx('flex items-start gap-2 px-2.5 py-1.5 rounded-md border text-xs', config.bg)}
             >
               {config.icon}
               <span className={clsx('flex-1', config.text)}>{note.text}</span>

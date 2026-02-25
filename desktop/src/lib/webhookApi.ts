@@ -14,9 +14,7 @@ import type { CommandResponse } from './tauri';
 
 export type WebhookChannelType = 'Slack' | 'Feishu' | 'Telegram' | 'Discord' | 'Custom';
 
-export type WebhookScope =
-  | 'Global'
-  | { Sessions: string[] };
+export type WebhookScope = 'Global' | { Sessions: string[] };
 
 export type WebhookEventType =
   | 'TaskComplete'
@@ -159,9 +157,7 @@ export async function updateWebhookChannel(
 /**
  * Delete a webhook channel.
  */
-export async function deleteWebhookChannel(
-  id: string,
-): Promise<CommandResponse<null>> {
+export async function deleteWebhookChannel(id: string): Promise<CommandResponse<null>> {
   try {
     return await invoke<CommandResponse<null>>('delete_webhook_channel', { id });
   } catch (error) {
@@ -176,9 +172,7 @@ export async function deleteWebhookChannel(
 /**
  * Test a webhook channel by sending a test notification.
  */
-export async function testWebhookChannel(
-  id: string,
-): Promise<CommandResponse<WebhookTestResult>> {
+export async function testWebhookChannel(id: string): Promise<CommandResponse<WebhookTestResult>> {
   try {
     return await invoke<CommandResponse<WebhookTestResult>>('test_webhook_channel', { id });
   } catch (error) {
@@ -216,9 +210,7 @@ export async function getWebhookDeliveries(
 /**
  * Retry a failed delivery.
  */
-export async function retryWebhookDelivery(
-  deliveryId: string,
-): Promise<CommandResponse<WebhookDelivery>> {
+export async function retryWebhookDelivery(deliveryId: string): Promise<CommandResponse<WebhookDelivery>> {
   try {
     return await invoke<CommandResponse<WebhookDelivery>>('retry_webhook_delivery', {
       delivery_id: deliveryId,

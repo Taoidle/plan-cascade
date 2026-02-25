@@ -17,7 +17,7 @@ export function InterviewAnswerCard({ data }: { data: InterviewAnswerCardData })
           'max-w-[82%] px-3 py-2 rounded-2xl rounded-br-sm text-sm',
           data.skipped
             ? 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 italic'
-            : 'bg-violet-600 text-white'
+            : 'bg-violet-600 text-white',
         )}
       >
         {data.skipped ? t('workflow.interview.skipped') : data.answer}

@@ -22,15 +22,8 @@ export function Dashboard() {
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'details'>('overview');
 
-  const {
-    summary,
-    isLoading,
-    error,
-    initialize,
-    fetchDashboardSummary,
-    fetchPricing,
-    clearError,
-  } = useAnalyticsStore();
+  const { summary, isLoading, error, initialize, fetchDashboardSummary, fetchPricing, clearError } =
+    useAnalyticsStore();
 
   // Initialize and fetch data on mount
   useEffect(() => {
@@ -61,13 +54,11 @@ export function Dashboard() {
           'flex items-center justify-between px-6 py-4',
           'border-b border-gray-200 dark:border-gray-800',
           'bg-white dark:bg-gray-900',
-          'shrink-0'
+          'shrink-0',
         )}
       >
         <div>
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
-            {t('title', 'Usage Analytics')}
-          </h2>
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{t('title', 'Usage Analytics')}</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             {t('subtitle', 'Track your API usage and costs')}
           </p>
@@ -84,7 +75,7 @@ export function Dashboard() {
               'text-gray-700 dark:text-gray-300',
               'hover:bg-gray-200 dark:hover:bg-gray-700',
               'focus:outline-none focus:ring-2 focus:ring-primary-500',
-              'transition-colors'
+              'transition-colors',
             )}
           >
             {t('export', 'Export')}
@@ -98,7 +89,7 @@ export function Dashboard() {
           'flex border-b border-gray-200 dark:border-gray-800',
           'bg-white dark:bg-gray-900',
           'px-6',
-          'shrink-0'
+          'shrink-0',
         )}
       >
         <button
@@ -108,7 +99,7 @@ export function Dashboard() {
             'border-b-2 transition-colors',
             activeTab === 'overview'
               ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-              : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+              : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300',
           )}
         >
           {t('tabs.overview', 'Overview')}
@@ -120,7 +111,7 @@ export function Dashboard() {
             'border-b-2 transition-colors',
             activeTab === 'details'
               ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-              : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+              : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300',
           )}
         >
           {t('tabs.details', 'Detailed Records')}
@@ -136,16 +127,11 @@ export function Dashboard() {
               'mb-6 p-4 rounded-lg',
               'bg-red-50 dark:bg-red-900/20',
               'border border-red-200 dark:border-red-800',
-              'flex items-center justify-between'
+              'flex items-center justify-between',
             )}
           >
             <div className="flex items-center gap-3">
-              <svg
-                className="w-5 h-5 text-red-500"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
+              <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -161,7 +147,7 @@ export function Dashboard() {
                 'px-3 py-1 rounded',
                 'bg-red-100 dark:bg-red-800',
                 'text-red-700 dark:text-red-200',
-                'hover:bg-red-200 dark:hover:bg-red-700'
+                'hover:bg-red-200 dark:hover:bg-red-700',
               )}
             >
               {t('retry', 'Retry')}
@@ -185,7 +171,7 @@ export function Dashboard() {
                 className={clsx(
                   'bg-white dark:bg-gray-900 rounded-xl',
                   'border border-gray-200 dark:border-gray-800',
-                  'p-6'
+                  'p-6',
                 )}
               >
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
@@ -199,7 +185,7 @@ export function Dashboard() {
                 className={clsx(
                   'bg-white dark:bg-gray-900 rounded-xl',
                   'border border-gray-200 dark:border-gray-800',
-                  'p-6'
+                  'p-6',
                 )}
               >
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
@@ -215,7 +201,7 @@ export function Dashboard() {
                 className={clsx(
                   'bg-white dark:bg-gray-900 rounded-xl',
                   'border border-gray-200 dark:border-gray-800',
-                  'p-6'
+                  'p-6',
                 )}
               >
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
@@ -267,19 +253,12 @@ function ModelTable({ models }: ModelTableProps) {
         </thead>
         <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
           {models.map((model) => (
-            <tr
-              key={`${model.provider}-${model.model_name}`}
-              className="text-gray-900 dark:text-white"
-            >
+            <tr key={`${model.provider}-${model.model_name}`} className="text-gray-900 dark:text-white">
               <td className="py-3 font-medium">{model.model_name}</td>
               <td className="py-3 capitalize">{model.provider}</td>
               <td className="py-3 text-right">{model.stats.request_count.toLocaleString()}</td>
-              <td className="py-3 text-right">
-                {(model.stats.total_input_tokens / 1000).toFixed(1)}K
-              </td>
-              <td className="py-3 text-right">
-                {(model.stats.total_output_tokens / 1000).toFixed(1)}K
-              </td>
+              <td className="py-3 text-right">{(model.stats.total_input_tokens / 1000).toFixed(1)}K</td>
+              <td className="py-3 text-right">{(model.stats.total_output_tokens / 1000).toFixed(1)}K</td>
               <td className="py-3 text-right font-medium">
                 ${(model.stats.total_cost_microdollars / 1_000_000).toFixed(4)}
               </td>
