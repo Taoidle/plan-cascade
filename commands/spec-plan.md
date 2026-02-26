@@ -29,7 +29,7 @@ Parse:
 Run:
 
 ```bash
-uv run plan-cascade spec plan "<desc>" \
+uv run --project "${CLAUDE_PLUGIN_ROOT}" plan-cascade spec plan "<desc>" \
   --output-dir "<output-dir>" \
   --flow <flow> \
   --mode on \
@@ -43,7 +43,7 @@ uv run plan-cascade spec plan "<desc>" \
 If `--compile`:
 
 ```bash
-uv run plan-cascade spec compile \
+uv run --project "${CLAUDE_PLUGIN_ROOT}" plan-cascade spec compile \
   --output-dir "<output-dir>" \
   --flow <flow> \
   --tdd <tdd> \

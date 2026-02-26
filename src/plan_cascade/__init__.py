@@ -85,17 +85,34 @@ from .llm import (
 )
 
 # Settings management (from feature-004)
-from .settings import (
-    AgentConfig,
-    BackendType,
-    ConfigMigration,
-    ConfigValidator,
-    QualityGateConfig,
-    Settings,
-    SettingsStorage,
-    SetupWizard,
-    ValidationResult,
-)
+# Graceful degradation: keyring or other optional deps may not be installed
+# when running from a directory without plan-cascade dependencies.
+try:
+    from .settings import (
+        AgentConfig,
+        BackendType,
+        ConfigMigration,
+        ConfigValidator,
+        QualityGateConfig,
+        Settings,
+        SettingsStorage,
+        SetupWizard,
+        ValidationResult,
+    )
+    _SETTINGS_AVAILABLE = True
+except ImportError:
+    _SETTINGS_AVAILABLE = False
+    # Provide placeholder values so downstream imports don't break immediately.
+    # The CLI entry point checks _SETTINGS_AVAILABLE and exits gracefully.
+    AgentConfig = None  # type: ignore[assignment,misc]
+    BackendType = None  # type: ignore[assignment,misc]
+    ConfigMigration = None  # type: ignore[assignment,misc]
+    ConfigValidator = None  # type: ignore[assignment,misc]
+    QualityGateConfig = None  # type: ignore[assignment,misc]
+    Settings = None  # type: ignore[assignment,misc]
+    SettingsStorage = None  # type: ignore[assignment,misc]
+    SetupWizard = None  # type: ignore[assignment,misc]
+    ValidationResult = None  # type: ignore[assignment,misc]
 from .state.context_filter import ContextFilter
 from .state.mega_state import MegaStateManager
 
@@ -168,6 +185,7 @@ __all__ = [
     "Tool",
     "ToolResult",
     # Settings
+    "_SETTINGS_AVAILABLE",
     "BackendType",
     "AgentConfig",
     "QualityGateConfig",
