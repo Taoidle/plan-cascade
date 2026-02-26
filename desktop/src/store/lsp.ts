@@ -25,6 +25,9 @@ export interface LspState {
   // Preference
   autoEnrich: boolean;
 
+  // Incremental enrichment debounce (ms)
+  enrichmentDebounceMs: number;
+
   // UI state
   error: string | null;
 
@@ -34,6 +37,7 @@ export interface LspState {
   enrich: (projectPath: string) => Promise<void>;
   fetchReport: () => Promise<void>;
   setAutoEnrich: (enabled: boolean) => void;
+  setEnrichmentDebounceMs: (ms: number) => void;
   clearError: () => void;
 }
 
@@ -47,6 +51,7 @@ const DEFAULT_STATE = {
   enrichmentReport: null,
   isEnriching: false,
   autoEnrich: false,
+  enrichmentDebounceMs: 3000,
   error: null,
 };
 
@@ -129,14 +134,34 @@ export const useLspStore = create<LspState>()((set) => ({
     }
   },
 
+  setEnrichmentDebounceMs: (ms: number) => {
+    set({ enrichmentDebounceMs: ms });
+    try {
+      localStorage.setItem('plan-cascade-lsp-enrichment-debounce', JSON.stringify(ms));
+    } catch {
+      // Ignore storage errors
+    }
+  },
+
   clearError: () => set({ error: null }),
 }));
 
-// Hydrate autoEnrich preference from localStorage on module load
+// Hydrate preferences from localStorage on module load
 try {
   const stored = localStorage.getItem('plan-cascade-lsp-auto-enrich');
   if (stored !== null) {
     useLspStore.setState({ autoEnrich: JSON.parse(stored) });
+  }
+} catch {
+  // Ignore parse/storage errors
+}
+try {
+  const debounce = localStorage.getItem('plan-cascade-lsp-enrichment-debounce');
+  if (debounce !== null) {
+    const ms = JSON.parse(debounce);
+    if (typeof ms === 'number' && ms > 0) {
+      useLspStore.setState({ enrichmentDebounceMs: ms });
+    }
   }
 } catch {
   // Ignore parse/storage errors

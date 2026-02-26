@@ -44,12 +44,14 @@ export function LspSection() {
     enrichmentReport,
     isEnriching,
     autoEnrich,
+    enrichmentDebounceMs,
     error,
     detect,
     fetchStatus,
     enrich,
     fetchReport,
     setAutoEnrich,
+    setEnrichmentDebounceMs,
     clearError,
   } = useLspStore();
 
@@ -186,6 +188,34 @@ export function LspSection() {
             <p className="text-xs text-gray-500 dark:text-gray-400">{t('lsp.enrichment.autoEnrichHelp')}</p>
           </div>
         </label>
+
+        {/* Incremental enrichment debounce */}
+        <div className="flex items-center gap-3 pl-7">
+          <label htmlFor="enrichment-debounce" className="text-sm text-gray-700 dark:text-gray-300 shrink-0">
+            {t('lsp.enrichment.incrementalDebounce')}
+          </label>
+          <select
+            id="enrichment-debounce"
+            value={enrichmentDebounceMs}
+            onChange={(e) => setEnrichmentDebounceMs(Number(e.target.value))}
+            className={clsx(
+              'px-2 py-1 rounded-md text-sm',
+              'bg-gray-100 dark:bg-gray-800',
+              'text-gray-900 dark:text-white',
+              'border border-gray-200 dark:border-gray-700',
+              'focus:outline-none focus:ring-2 focus:ring-primary-500',
+            )}
+          >
+            <option value={1000}>1s</option>
+            <option value={2000}>2s</option>
+            <option value={3000}>3s</option>
+            <option value={5000}>5s</option>
+            <option value={10000}>10s</option>
+          </select>
+          <span className="text-xs text-gray-500 dark:text-gray-400">
+            {t('lsp.enrichment.incrementalDebounceHelp')}
+          </span>
+        </div>
       </section>
 
       {/* Manual Enrichment */}

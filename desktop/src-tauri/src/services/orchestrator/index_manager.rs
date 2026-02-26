@@ -19,7 +19,11 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
-use super::background_indexer::{BackgroundIndexer, BatchCompleteCallback, IndexProgressCallback};
+use super::background_indexer::{
+    BackgroundIndexer, BatchCompleteCallback, EnrichmentCallback, IndexProgressCallback,
+};
+use super::lsp_enricher::LspEnricher;
+use super::lsp_registry::LspServerRegistry;
 use super::embedding_manager::{EmbeddingManager, EmbeddingManagerConfig};
 use super::embedding_provider::{
     EmbeddingProviderConfig, EmbeddingProviderType, PersistedEmbeddingConfig,
@@ -100,6 +104,12 @@ pub struct IndexManager {
     /// Guard against concurrent `ensure_indexed` calls for the same project.
     /// Prevents duplicate indexer spawns from any caller.
     trigger_guard: tokio::sync::Mutex<HashSet<String>>,
+    /// Per-project persistent `LspEnricher` for incremental enrichment.
+    lsp_enrichers: RwLock<HashMap<String, Arc<LspEnricher>>>,
+    /// Guard against concurrent full + incremental enrichment per project.
+    enrichment_locks: RwLock<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Cached flag: whether a project has enrichment data (avoid re-querying DB).
+    enrichment_enabled: RwLock<HashMap<String, bool>>,
 }
 
 impl IndexManager {
@@ -115,6 +125,9 @@ impl IndexManager {
             embedding_managers: RwLock::new(HashMap::new()),
             hnsw_indexes: RwLock::new(HashMap::new()),
             trigger_guard: tokio::sync::Mutex::new(HashSet::new()),
+            lsp_enrichers: RwLock::new(HashMap::new()),
+            enrichment_locks: RwLock::new(HashMap::new()),
+            enrichment_enabled: RwLock::new(HashMap::new()),
         }
     }
 
@@ -353,6 +366,11 @@ impl IndexManager {
         let (change_tx, change_rx, watcher, overflow_flag) =
             Self::create_file_watcher(project_path);
 
+        // Build enrichment pipeline (debounce loop + callback) for incremental LSP enrichment.
+        let enrichment_cb = self
+            .build_enrichment_pipeline(project_path, 3000)
+            .await;
+
         // Capture provider display name before embedding_mgr is moved into the indexer.
         let provider_display_name = embedding_mgr.display_name().to_string();
 
@@ -403,7 +421,8 @@ impl IndexManager {
                 .with_hnsw_index(hnsw_idx)
                 .with_change_receiver(change_rx)
                 .with_channel_overflow_flag(overflow_flag)
-                .with_batch_callback(batch_cb);
+                .with_batch_callback(batch_cb)
+                .with_enrichment_callback(enrichment_cb);
 
             let join = indexer.start().await;
             let result = join.await;
@@ -695,6 +714,69 @@ impl IndexManager {
             let mut indexes = self.hnsw_indexes.write().await;
             indexes.remove(project_path);
         }
+        {
+            let mut enrichers = self.lsp_enrichers.write().await;
+            enrichers.remove(project_path);
+        }
+        {
+            let mut locks = self.enrichment_locks.write().await;
+            locks.remove(project_path);
+        }
+        {
+            let mut enabled = self.enrichment_enabled.write().await;
+            enabled.remove(project_path);
+        }
+    }
+
+    /// Get (or create) the enrichment lock for a project.
+    ///
+    /// Shared between full enrichment (`trigger_lsp_enrichment`) and
+    /// incremental enrichment so they are mutually exclusive.
+    pub async fn get_enrichment_lock(&self, project_path: &str) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self.enrichment_locks.write().await;
+        locks
+            .entry(project_path.to_string())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    }
+
+    /// Get (or create) a persistent `LspEnricher` for a project.
+    pub async fn get_or_create_lsp_enricher(&self, project_path: &str) -> Arc<LspEnricher> {
+        {
+            let enrichers = self.lsp_enrichers.read().await;
+            if let Some(e) = enrichers.get(project_path) {
+                return e.clone();
+            }
+        }
+        let enricher = Arc::new(LspEnricher::new(
+            Arc::new(LspServerRegistry::new()),
+            self.index_store.clone(),
+        ));
+        let mut enrichers = self.lsp_enrichers.write().await;
+        enrichers
+            .entry(project_path.to_string())
+            .or_insert(enricher)
+            .clone()
+    }
+
+    /// Cache whether a project has enrichment data.
+    pub async fn set_enrichment_enabled(&self, project_path: &str, enabled: bool) {
+        let mut map = self.enrichment_enabled.write().await;
+        map.insert(project_path.to_string(), enabled);
+    }
+
+    /// Check cached enrichment-enabled flag, falling back to DB query.
+    pub async fn is_enrichment_enabled(&self, project_path: &str) -> bool {
+        {
+            let map = self.enrichment_enabled.read().await;
+            if let Some(&v) = map.get(project_path) {
+                return v;
+            }
+        }
+        let enabled = self.index_store.has_enrichment_data(project_path).unwrap_or(false);
+        let mut map = self.enrichment_enabled.write().await;
+        map.insert(project_path.to_string(), enabled);
+        enabled
     }
 
     // -----------------------------------------------------------------------
@@ -853,10 +935,16 @@ impl IndexManager {
             }
         });
 
+        // Build enrichment pipeline for incremental LSP enrichment.
+        let enrichment_cb = self
+            .build_enrichment_pipeline(project_path, 3000)
+            .await;
+
         let mut indexer = BackgroundIndexer::new(project_root, index_store)
             .with_change_receiver(change_rx)
             .with_channel_overflow_flag(overflow_flag)
-            .with_batch_callback(batch_cb);
+            .with_batch_callback(batch_cb)
+            .with_enrichment_callback(enrichment_cb);
         if let Some(svc) = embedding_svc {
             indexer = indexer.with_embedding_service(svc);
         }
@@ -1054,6 +1142,41 @@ impl IndexManager {
         }
     }
 
+    /// Build an enrichment callback + spawn the debounce loop for a project.
+    ///
+    /// Returns the `EnrichmentCallback` that should be attached to the
+    /// `BackgroundIndexer` via `with_enrichment_callback`.
+    async fn build_enrichment_pipeline(
+        &self,
+        project_path: &str,
+        debounce_ms: u64,
+    ) -> EnrichmentCallback {
+        let (enrichment_tx, enrichment_rx) =
+            tokio::sync::mpsc::channel::<Vec<String>>(256);
+
+        let enricher = self.get_or_create_lsp_enricher(project_path).await;
+        let lock = self.get_enrichment_lock(project_path).await;
+        let index_store = self.index_store.clone();
+        let pp = project_path.to_string();
+        let debounce = Duration::from_millis(debounce_ms);
+
+        tokio::spawn(async move {
+            run_enrichment_debounce_loop(
+                enrichment_rx,
+                &pp,
+                &enricher,
+                &lock,
+                &index_store,
+                debounce,
+            )
+            .await;
+        });
+
+        Arc::new(move |paths| {
+            let _ = enrichment_tx.try_send(paths);
+        })
+    }
+
     /// Compute a project hash (SHA-256 truncated to 16 hex chars) for HNSW
     /// index directory naming.
     fn project_hash(project_path: &str) -> String {
@@ -1193,6 +1316,87 @@ impl IndexManager {
             let _ = app.emit(INDEX_PROGRESS_EVENT, &event);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Enrichment debounce loop
+// ---------------------------------------------------------------------------
+
+/// Debounced enrichment loop: collects changed paths from the channel,
+/// waits for a configurable debounce window, then triggers incremental
+/// enrichment if the project has enrichment data and no full enrichment
+/// is running.
+async fn run_enrichment_debounce_loop(
+    mut rx: tokio::sync::mpsc::Receiver<Vec<String>>,
+    project_path: &str,
+    enricher: &LspEnricher,
+    lock: &tokio::sync::Mutex<()>,
+    index_store: &IndexStore,
+    debounce: Duration,
+) {
+    use std::collections::HashSet as StdHashSet;
+
+    loop {
+        // 1. Wait for first batch of changed paths.
+        let first = match rx.recv().await {
+            Some(paths) => paths,
+            None => break, // channel closed
+        };
+        let mut pending: StdHashSet<String> = first.into_iter().collect();
+
+        // 2. Fixed-window debounce: collect more within the window.
+        let deadline = tokio::time::Instant::now() + debounce;
+        loop {
+            tokio::select! {
+                more = rx.recv() => {
+                    match more {
+                        Some(paths) => pending.extend(paths),
+                        None => return, // channel closed
+                    }
+                }
+                _ = tokio::time::sleep_until(deadline) => break,
+            }
+        }
+
+        // 3. Check idle timeout — shutdown clients if idle > 5 min.
+        enricher.shutdown_if_idle(Duration::from_secs(300)).await;
+
+        // 4. Check if project has enrichment data (lightweight).
+        if !index_store.has_enrichment_data(project_path).unwrap_or(false) {
+            continue;
+        }
+
+        // 5. Try to acquire enrichment lock (non-blocking).
+        let _guard = match lock.try_lock() {
+            Ok(g) => g,
+            Err(_) => {
+                debug!(
+                    project = %project_path,
+                    "index manager: skipping incremental enrichment — full enrichment in progress"
+                );
+                continue; // Full enrichment running, skip this round
+            }
+        };
+
+        // 6. Run incremental enrichment.
+        let file_paths: Vec<String> = pending.drain().collect();
+        info!(
+            project = %project_path,
+            files = file_paths.len(),
+            "index manager: triggering incremental LSP enrichment"
+        );
+        if let Err(e) = enricher.enrich_files(project_path, &file_paths).await {
+            warn!(
+                project = %project_path,
+                error = %e,
+                "index manager: incremental LSP enrichment failed"
+            );
+        }
+    }
+    debug!(
+        project = %project_path,
+        "index manager: enrichment debounce loop ended"
+    );
 }
 
 // ---------------------------------------------------------------------------

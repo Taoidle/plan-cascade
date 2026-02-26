@@ -22,6 +22,9 @@ pub struct LspState {
     pub registry: Arc<LspServerRegistry>,
     pub enricher: Arc<RwLock<Option<LspEnricher>>>,
     pub last_report: Arc<RwLock<Option<EnrichmentReport>>>,
+    /// Guard against concurrent full enrichment + incremental enrichment.
+    /// Shared with `IndexManager`'s debounce loop via `get_enrichment_lock`.
+    pub enrichment_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl LspState {
@@ -30,6 +33,7 @@ impl LspState {
             registry: Arc::new(LspServerRegistry::new()),
             enricher: Arc::new(RwLock::new(None)),
             last_report: Arc::new(RwLock::new(None)),
+            enrichment_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 }
@@ -118,6 +122,15 @@ pub async fn trigger_lsp_enrichment(
         }
     };
 
+    // Acquire enrichment lock from IndexManager (shared with incremental debounce loop).
+    // Fall back to the local lock if IndexManager is not available yet.
+    let lock = if let Some(mgr) = &*standalone_state.index_manager.read().await {
+        mgr.get_enrichment_lock(&project_path).await
+    } else {
+        Arc::clone(&lsp_state.enrichment_lock)
+    };
+    let _guard = lock.lock().await;
+
     // Emit "enriching" status
     if let Some(mgr) = &*standalone_state.index_manager.read().await {
         mgr.set_lsp_enrichment_status(&project_path, "enriching").await;
@@ -132,9 +145,10 @@ pub async fn trigger_lsp_enrichment(
             let mut last = lsp_state.last_report.write().await;
             *last = Some(report.clone());
 
-            // Emit "enriched" status
+            // Emit "enriched" status and update cached enrichment flag
             if let Some(mgr) = &*standalone_state.index_manager.read().await {
                 mgr.set_lsp_enrichment_status(&project_path, "enriched").await;
+                mgr.set_enrichment_enabled(&project_path, true).await;
             }
 
             Ok(CommandResponse {
@@ -168,6 +182,20 @@ pub async fn get_enrichment_report(
     Ok(CommandResponse {
         success: true,
         data: Some(report),
+        error: None,
+    })
+}
+
+/// Get the current enrichment debounce time in milliseconds.
+///
+/// This is a read-only query; the actual debounce value is managed by the
+/// enrichment pipeline in `IndexManager` and persisted via frontend localStorage.
+#[tauri::command]
+pub async fn get_enrichment_debounce() -> Result<CommandResponse<u64>, String> {
+    // Default: 3000ms. The frontend owns persistence for this setting.
+    Ok(CommandResponse {
+        success: true,
+        data: Some(3000),
         error: None,
     })
 }

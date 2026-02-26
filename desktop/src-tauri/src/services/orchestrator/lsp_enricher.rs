@@ -36,6 +36,9 @@ pub struct LspEnricher {
     index_store: Arc<IndexStore>,
     /// Active LSP client connections, one per language.
     clients: RwLock<HashMap<String, Arc<LspClient>>>,
+    /// Timestamp of the last enrichment activity.
+    /// Used by [`shutdown_if_idle`] to decide when to reclaim idle clients.
+    last_activity: RwLock<Option<Instant>>,
 }
 
 impl LspEnricher {
@@ -45,6 +48,7 @@ impl LspEnricher {
             registry,
             index_store,
             clients: RwLock::new(HashMap::new()),
+            last_activity: RwLock::new(None),
         }
     }
 
@@ -324,6 +328,10 @@ impl LspEnricher {
             }
         }
 
+        // Record activity timestamp (full enrichment is a one-shot operation
+        // but we still track it for consistency).
+        *self.last_activity.write().await = Some(Instant::now());
+
         // Step 6: Shutdown all clients
         self.shutdown_all().await;
 
@@ -337,6 +345,346 @@ impl LspEnricher {
         );
 
         Ok(report)
+    }
+
+    /// Ensure LSP clients are started for all detected languages.
+    ///
+    /// Reuses existing clients if still alive, otherwise starts new ones.
+    /// Returns the list of active language identifiers.
+    async fn ensure_clients_started(&self, project_path: &str) -> Vec<String> {
+        let detected = self.registry.detect_all();
+        if detected.is_empty() {
+            return Vec::new();
+        }
+
+        let mut active_languages = Vec::new();
+        for (language, _server_name) in &detected {
+            // Check if a client already exists and is presumably alive.
+            {
+                let clients = self.clients.read().await;
+                if clients.contains_key(language.as_str()) {
+                    active_languages.push(language.clone());
+                    continue;
+                }
+            }
+
+            // Start a new client.
+            let adapter = match self.registry.get_adapter(language) {
+                Some(a) => a,
+                None => continue,
+            };
+
+            let (cmd, args) = adapter.command();
+            let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+            match LspClient::start(cmd, &args_refs, project_path).await {
+                Ok(client) => {
+                    let mut clients = self.clients.write().await;
+                    clients.insert(language.clone(), Arc::new(client));
+                    active_languages.push(language.clone());
+                }
+                Err(e) => {
+                    warn!(
+                        language = language.as_str(),
+                        error = %e,
+                        "Failed to start LSP client for incremental enrichment"
+                    );
+                }
+            }
+        }
+
+        *self.last_activity.write().await = Some(Instant::now());
+        active_languages
+    }
+
+    /// Run incremental enrichment for specific changed files only.
+    ///
+    /// Reuses persistent LSP clients (started on demand, kept alive for
+    /// subsequent calls).  Only queries symbols belonging to the changed
+    /// files, and clears stale cross-references before re-enriching.
+    pub async fn enrich_files(
+        &self,
+        project_path: &str,
+        file_paths: &[String],
+    ) -> anyhow::Result<EnrichmentReport> {
+        let start = Instant::now();
+        let mut report = EnrichmentReport {
+            languages_enriched: Vec::new(),
+            symbols_enriched: 0,
+            references_found: 0,
+            duration_ms: 0,
+        };
+
+        if file_paths.is_empty() {
+            report.duration_ms = start.elapsed().as_millis() as u64;
+            return Ok(report);
+        }
+
+        // Step 1: Ensure clients are running.
+        let active_languages = self.ensure_clients_started(project_path).await;
+        if active_languages.is_empty() {
+            info!("No LSP clients available, skipping incremental enrichment");
+            report.duration_ms = start.elapsed().as_millis() as u64;
+            return Ok(report);
+        }
+
+        // Step 2: Clear stale cross-references for changed files.
+        let file_refs: Vec<&str> = file_paths.iter().map(|s| s.as_str()).collect();
+        if let Err(e) = self
+            .index_store
+            .delete_cross_references_for_files(project_path, &file_refs)
+        {
+            warn!(error = %e, "Failed to clear stale cross-references for incremental enrichment");
+        }
+
+        // Map language names in our index to LSP language identifiers
+        let language_map: HashMap<&str, &str> = [
+            ("rust", "rust"),
+            ("python", "python"),
+            ("go", "go"),
+            ("typescript", "typescript"),
+            ("javascript", "typescript"),
+            ("java", "java"),
+        ]
+        .into_iter()
+        .collect();
+
+        // Step 3: For each language, enrich symbols from changed files.
+        for language in &active_languages {
+            let index_language = language_map
+                .iter()
+                .find_map(|(&k, &v)| {
+                    if v == language.as_str() {
+                        Some(k)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(language.as_str());
+
+            let symbols = match self
+                .index_store
+                .get_symbols_for_enrichment_by_files(project_path, index_language, &file_refs)
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!(
+                        language = language.as_str(),
+                        error = %e,
+                        "Failed to get symbols for incremental enrichment"
+                    );
+                    continue;
+                }
+            };
+
+            if symbols.is_empty() {
+                continue;
+            }
+
+            let clients = self.clients.read().await;
+            let client = match clients.get(language.as_str()) {
+                Some(c) => Arc::clone(c),
+                None => continue,
+            };
+            drop(clients);
+
+            if !report.languages_enriched.contains(language) {
+                report.languages_enriched.push(language.clone());
+            }
+
+            // Group symbols by file_path
+            let mut files: HashMap<String, Vec<(i64, String, i64)>> = HashMap::new();
+            for (rowid, file_path, symbol_name, line, _lang) in &symbols {
+                files.entry(file_path.clone()).or_default().push((
+                    *rowid,
+                    symbol_name.clone(),
+                    *line,
+                ));
+            }
+
+            // Rate limiting
+            let mut request_count = 0u32;
+            let mut window_start = Instant::now();
+
+            for (file_path, file_symbols) in &files {
+                let file_uri = if file_path.starts_with('/') {
+                    format!("file://{}", file_path)
+                } else {
+                    format!("file://{}/{}", project_path, file_path)
+                };
+
+                let uri = match lsp_types::Uri::from_str(&file_uri) {
+                    Ok(u) => u,
+                    Err(_) => continue,
+                };
+
+                let full_path = if file_path.starts_with('/') {
+                    file_path.clone()
+                } else {
+                    format!("{}/{}", project_path, file_path)
+                };
+
+                let content = match tokio::fs::read_to_string(&full_path).await {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                };
+
+                let lang_id = language_map
+                    .get(language.as_str())
+                    .copied()
+                    .unwrap_or(language.as_str());
+
+                if let Err(e) = client
+                    .notify::<lsp_types::notification::DidOpenTextDocument>(
+                        lsp_types::DidOpenTextDocumentParams {
+                            text_document: lsp_types::TextDocumentItem {
+                                uri: uri.clone(),
+                                language_id: lang_id.to_string(),
+                                version: 1,
+                                text: content,
+                            },
+                        },
+                    )
+                    .await
+                {
+                    debug!(file = file_path.as_str(), error = %e, "didOpen failed");
+                    continue;
+                }
+
+                for (rowid, _symbol_name, line) in file_symbols {
+                    request_count += 1;
+                    if request_count >= MAX_REQUESTS_PER_SECOND {
+                        let elapsed = window_start.elapsed();
+                        if elapsed < Duration::from_secs(1) {
+                            sleep(Duration::from_secs(1) - elapsed).await;
+                        }
+                        request_count = 0;
+                        window_start = Instant::now();
+                    }
+
+                    let position = lsp_types::Position {
+                        line: (*line as u32).saturating_sub(1),
+                        character: 0,
+                    };
+
+                    // Hover → extract type
+                    match client
+                        .request::<lsp_types::request::HoverRequest>(lsp_types::HoverParams {
+                            text_document_position_params: lsp_types::TextDocumentPositionParams {
+                                text_document: lsp_types::TextDocumentIdentifier {
+                                    uri: uri.clone(),
+                                },
+                                position,
+                            },
+                            work_done_progress_params: lsp_types::WorkDoneProgressParams {
+                                work_done_token: None,
+                            },
+                        })
+                        .await
+                    {
+                        Ok(Some(hover)) => {
+                            if let Some(type_str) = extract_type_from_hover(&hover) {
+                                let _ = self.index_store.update_symbol_type(*rowid, &type_str);
+                                report.symbols_enriched += 1;
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(_) => {}
+                    }
+
+                    // References → count + cross-refs
+                    match client
+                        .request::<lsp_types::request::References>(lsp_types::ReferenceParams {
+                            text_document_position: lsp_types::TextDocumentPositionParams {
+                                text_document: lsp_types::TextDocumentIdentifier {
+                                    uri: uri.clone(),
+                                },
+                                position,
+                            },
+                            work_done_progress_params: lsp_types::WorkDoneProgressParams {
+                                work_done_token: None,
+                            },
+                            partial_result_params: lsp_types::PartialResultParams {
+                                partial_result_token: None,
+                            },
+                            context: lsp_types::ReferenceContext {
+                                include_declaration: false,
+                            },
+                        })
+                        .await
+                    {
+                        Ok(Some(locations)) => {
+                            let count = locations.len() as i64;
+                            let _ = self.index_store.update_reference_count(*rowid, count);
+                            report.references_found += locations.len();
+
+                            for location in &locations {
+                                let uri_str = location.uri.as_str();
+                                let target_path =
+                                    uri_to_relative_path(uri_str, project_path);
+
+                                let _ = self.index_store.insert_cross_reference(
+                                    project_path,
+                                    file_path,
+                                    *line,
+                                    Some(_symbol_name),
+                                    &target_path,
+                                    (location.range.start.line + 1) as i64,
+                                    None,
+                                    "usage",
+                                );
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(_) => {}
+                    }
+                }
+
+                // didClose
+                let _ = client
+                    .notify::<lsp_types::notification::DidCloseTextDocument>(
+                        lsp_types::DidCloseTextDocumentParams {
+                            text_document: lsp_types::TextDocumentIdentifier { uri },
+                        },
+                    )
+                    .await;
+            }
+        }
+
+        // Update activity timestamp — do NOT shutdown (keep clients alive).
+        *self.last_activity.write().await = Some(Instant::now());
+
+        report.duration_ms = start.elapsed().as_millis() as u64;
+        info!(
+            languages = ?report.languages_enriched,
+            symbols = report.symbols_enriched,
+            references = report.references_found,
+            files = file_paths.len(),
+            duration_ms = report.duration_ms,
+            "Incremental LSP enrichment complete"
+        );
+
+        Ok(report)
+    }
+
+    /// Shutdown clients if they have been idle for longer than the given duration.
+    ///
+    /// Returns `true` if clients were shut down.
+    pub async fn shutdown_if_idle(&self, idle_timeout: Duration) -> bool {
+        let last = *self.last_activity.read().await;
+        match last {
+            Some(ts) if ts.elapsed() > idle_timeout => {
+                let clients = self.clients.read().await;
+                if clients.is_empty() {
+                    return false;
+                }
+                drop(clients);
+                info!("Shutting down idle LSP clients (idle for {:?})", ts.elapsed());
+                self.shutdown_all().await;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Shutdown all active LSP clients.

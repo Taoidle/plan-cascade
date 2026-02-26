@@ -1411,6 +1411,67 @@ impl IndexStore {
         Ok(rows)
     }
 
+    /// Get symbols for LSP enrichment filtered by specific file paths.
+    ///
+    /// Same as [`get_symbols_for_enrichment`] but restricted to a set of
+    /// relative file paths.  Used by incremental enrichment to avoid
+    /// re-querying the entire project.
+    pub fn get_symbols_for_enrichment_by_files(
+        &self,
+        project_path: &str,
+        language: &str,
+        file_paths: &[&str],
+    ) -> AppResult<Vec<(i64, String, String, i64, String)>> {
+        if file_paths.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let conn = self.get_connection()?;
+
+        // Build SQL IN clause with dynamic parameter binding.
+        let placeholders: Vec<String> = (0..file_paths.len())
+            .map(|i| format!("?{}", i + 3))
+            .collect();
+        let in_clause = placeholders.join(", ");
+
+        let sql = format!(
+            "SELECT fs.id, fi.file_path, fs.name, fs.line_number, fi.language
+             FROM file_symbols fs
+             JOIN file_index fi ON fi.id = fs.file_index_id
+             WHERE fi.project_path = ?1 AND fi.language = ?2
+               AND fi.file_path IN ({})
+             ORDER BY fi.file_path, fs.line_number",
+            in_clause
+        );
+
+        let mut stmt = conn.prepare(&sql)?;
+
+        // Bind parameters: ?1 = project_path, ?2 = language, ?3.. = file_paths
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        params_vec.push(Box::new(project_path.to_string()));
+        params_vec.push(Box::new(language.to_string()));
+        for fp in file_paths {
+            params_vec.push(Box::new(fp.to_string()));
+        }
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+
+        let rows = stmt
+            .query_map(param_refs.as_slice(), |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
+    }
+
     /// Clear all enrichment data for a project.
     ///
     /// Resets resolved_type, reference_count, is_exported columns and deletes
@@ -1432,6 +1493,47 @@ impl IndexStore {
             "DELETE FROM cross_references WHERE project_path = ?1",
             params![project_path],
         )?;
+
+        Ok(())
+    }
+
+    /// Delete cross-references involving specific files (as source OR target).
+    ///
+    /// Used by incremental enrichment to clear stale cross-references before
+    /// re-enriching changed files, and by the background indexer to clean up
+    /// references for deleted files.
+    pub fn delete_cross_references_for_files(
+        &self,
+        project_path: &str,
+        file_paths: &[&str],
+    ) -> AppResult<()> {
+        if file_paths.is_empty() {
+            return Ok(());
+        }
+
+        let conn = self.get_connection()?;
+
+        // Build IN clause for dynamic parameter binding.
+        let placeholders: Vec<String> = (0..file_paths.len())
+            .map(|i| format!("?{}", i + 2))
+            .collect();
+        let in_clause = placeholders.join(", ");
+
+        let sql = format!(
+            "DELETE FROM cross_references
+             WHERE project_path = ?1
+               AND (source_file IN ({in_clause}) OR target_file IN ({in_clause}))"
+        );
+
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        params_vec.push(Box::new(project_path.to_string()));
+        for fp in file_paths {
+            params_vec.push(Box::new(fp.to_string()));
+        }
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+
+        conn.execute(&sql, param_refs.as_slice())?;
 
         Ok(())
     }

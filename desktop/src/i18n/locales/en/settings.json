@@ -587,7 +587,9 @@
       "enrichButton": "Run Enrichment",
       "enriching": "Enriching...",
       "noWorkspace": "Open a workspace first",
-      "noServers": "No servers detected — run detection first"
+      "noServers": "No servers detected — run detection first",
+      "incrementalDebounce": "Incremental enrichment delay",
+      "incrementalDebounceHelp": "Time to wait after file changes before running incremental LSP enrichment"
     },
 
     "report": {

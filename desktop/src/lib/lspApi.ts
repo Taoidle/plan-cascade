@@ -95,3 +95,22 @@ export async function getEnrichmentReport(): Promise<CommandResponse<EnrichmentR
     };
   }
 }
+
+// ---------------------------------------------------------------------------
+// get_enrichment_debounce
+// ---------------------------------------------------------------------------
+
+/**
+ * Get the default enrichment debounce time in milliseconds.
+ */
+export async function getEnrichmentDebounce(): Promise<CommandResponse<number>> {
+  try {
+    return await invoke<CommandResponse<number>>('get_enrichment_debounce');
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}

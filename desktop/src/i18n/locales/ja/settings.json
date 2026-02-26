@@ -587,7 +587,9 @@
       "enrichButton": "エンリッチメントを実行",
       "enriching": "エンリッチ中...",
       "noWorkspace": "先にワークスペースを開いてください",
-      "noServers": "サーバーが検出されていません — 先に検出を実行してください"
+      "noServers": "サーバーが検出されていません — 先に検出を実行してください",
+      "incrementalDebounce": "増分エンリッチメント遅延",
+      "incrementalDebounceHelp": "ファイル変更後に増分LSPエンリッチメントを実行するまでの待機時間"
     },
 
     "report": {

@@ -36,6 +36,11 @@ pub type IndexProgressCallback = Arc<dyn Fn(usize, usize) + Send + Sync>;
 /// so that file/symbol/embedding counts stay up to date.
 pub type BatchCompleteCallback = Arc<dyn Fn() + Send + Sync>;
 
+/// Callback invoked after each incremental batch with changed file relative paths.
+///
+/// Used to trigger incremental LSP enrichment for modified/deleted files.
+pub type EnrichmentCallback = Arc<dyn Fn(Vec<String>) + Send + Sync>;
+
 /// Statistics from a managed embedding pass.
 ///
 /// Used by `IndexManager` to determine the final status (e.g.
@@ -99,6 +104,9 @@ pub struct BackgroundIndexer {
     channel_overflow: Option<Arc<AtomicBool>>,
     /// Callback invoked after each incremental batch to update frontend status.
     batch_callback: Option<BatchCompleteCallback>,
+    /// Callback invoked after each incremental batch with changed file paths.
+    /// Used to trigger incremental LSP enrichment.
+    enrichment_callback: Option<EnrichmentCallback>,
 }
 
 impl BackgroundIndexer {
@@ -114,6 +122,7 @@ impl BackgroundIndexer {
             progress_callback: None,
             channel_overflow: None,
             batch_callback: None,
+            enrichment_callback: None,
         }
     }
 
@@ -185,6 +194,15 @@ impl BackgroundIndexer {
         self
     }
 
+    /// Attach a callback that is invoked after each incremental batch with
+    /// the relative paths of files that changed.
+    ///
+    /// Used by `IndexManager` to trigger incremental LSP enrichment.
+    pub fn with_enrichment_callback(mut self, cb: EnrichmentCallback) -> Self {
+        self.enrichment_callback = Some(cb);
+        self
+    }
+
     /// Spawn the background indexing task and return its `JoinHandle`.
     ///
     /// The task:
@@ -204,6 +222,7 @@ impl BackgroundIndexer {
         let progress_callback = self.progress_callback;
         let channel_overflow = self.channel_overflow;
         let batch_callback = self.batch_callback;
+        let enrichment_callback = self.enrichment_callback;
 
         tokio::spawn(async move {
             // --- Phase 1: Full index ---
@@ -286,6 +305,7 @@ impl BackgroundIndexer {
                     gitignore,
                     channel_overflow.as_ref().map(|f| f.as_ref()),
                     batch_callback.as_ref(),
+                    enrichment_callback.as_ref(),
                 )
                 .await;
             }
@@ -307,6 +327,7 @@ impl BackgroundIndexer {
         let change_rx = self.change_rx;
         let channel_overflow = self.channel_overflow;
         let batch_callback = self.batch_callback;
+        let enrichment_callback = self.enrichment_callback;
 
         tokio::spawn(async move {
             if let Some(mut rx) = change_rx {
@@ -325,6 +346,7 @@ impl BackgroundIndexer {
                     gitignore,
                     channel_overflow.as_ref().map(|f| f.as_ref()),
                     batch_callback.as_ref(),
+                    enrichment_callback.as_ref(),
                 )
                 .await;
             }
@@ -345,6 +367,7 @@ impl BackgroundIndexer {
         let change_rx = self.change_rx;
         let channel_overflow = self.channel_overflow;
         let batch_callback = self.batch_callback;
+        let enrichment_callback = self.enrichment_callback;
 
         tokio::spawn(async move {
             let gitignore = build_gitignore_matcher(&project_root);
@@ -375,6 +398,7 @@ impl BackgroundIndexer {
                     gitignore,
                     channel_overflow.as_ref().map(|f| f.as_ref()),
                     batch_callback.as_ref(),
+                    enrichment_callback.as_ref(),
                 )
                 .await;
             }
@@ -476,6 +500,7 @@ async fn run_incremental_loop(
     mut gitignore: Gitignore,
     channel_overflow: Option<&AtomicBool>,
     batch_callback: Option<&BatchCompleteCallback>,
+    enrichment_callback: Option<&EnrichmentCallback>,
 ) {
     let project_path = project_root.to_string_lossy().to_string();
 
@@ -507,6 +532,7 @@ async fn run_incremental_loop(
         let unique: HashSet<PathBuf> = batch.into_iter().collect();
 
         let mut batch_had_changes = false;
+        let mut changed_rel_paths: Vec<String> = Vec::new();
 
         for changed_path in unique {
             if is_ignored_by_gitignore(&gitignore, project_root, &changed_path) {
@@ -528,6 +554,9 @@ async fn run_incremental_loop(
                         }
                     }
                     let _ = index_store.delete_embeddings_for_file(&project_path, &rel_path);
+                    // Clean up stale cross-references for deleted files.
+                    let _ = index_store.delete_cross_references_for_files(&project_path, &[&rel_path]);
+                    changed_rel_paths.push(rel_path);
                     batch_had_changes = true;
                 }
                 Ok(IncrementalResult::DirectoryDeleted { child_rel_paths }) => {
@@ -544,7 +573,9 @@ async fn run_incremental_loop(
                             }
                         }
                         let _ = index_store.delete_embeddings_for_file(&project_path, rel_path);
+                        let _ = index_store.delete_cross_references_for_files(&project_path, &[rel_path.as_str()]);
                     }
+                    changed_rel_paths.extend(child_rel_paths);
                     batch_had_changes = true;
                 }
                 Ok(IncrementalResult::Skipped) => {}
@@ -592,6 +623,7 @@ async fn run_incremental_loop(
                             );
                         }
                     }
+                    changed_rel_paths.push(rel_path);
                     batch_had_changes = true;
                 }
                 Err(e) => {
@@ -622,6 +654,13 @@ async fn run_incremental_loop(
         if batch_had_changes {
             if let Some(cb) = batch_callback {
                 cb();
+            }
+        }
+
+        // Notify enrichment callback with changed file paths.
+        if !changed_rel_paths.is_empty() {
+            if let Some(cb) = enrichment_callback {
+                cb(changed_rel_paths);
             }
         }
 

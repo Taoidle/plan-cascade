@@ -587,7 +587,9 @@
       "enrichButton": "运行增强",
       "enriching": "增强中...",
       "noWorkspace": "请先打开工作区",
-      "noServers": "未检测到服务器 — 请先运行检测"
+      "noServers": "未检测到服务器 — 请先运行检测",
+      "incrementalDebounce": "增量增强延迟",
+      "incrementalDebounceHelp": "文件变更后等待多久再执行增量 LSP 增强"
     },
 
     "report": {
