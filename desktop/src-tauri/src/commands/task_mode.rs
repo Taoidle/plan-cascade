@@ -23,7 +23,9 @@ use crate::services::task_mode::batch_executor::{
     ExecutionConfig, StoryContext, StoryExecutionContext, StoryExecutionOutcome,
     StoryExecutionState, TaskModeProgressEvent, TASK_MODE_EVENT_CHANNEL,
 };
-use crate::services::task_mode::exploration::{self, ExplorationResult};
+use crate::services::task_mode::exploration::{
+    self, ExplorationResult, SummaryQuality, SummarySource,
+};
 use crate::services::task_mode::prd_generator;
 
 use crate::state::AppState;
@@ -306,13 +308,75 @@ pub struct ReviewConcern {
 /// A suggested PRD modification from the architect.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PrdModificationPayloadStory {
+    /// Optional story ID (generated if absent)
+    #[serde(default)]
+    pub id: Option<String>,
+    /// Story title
+    pub title: String,
+    /// Story description
+    pub description: String,
+    /// Story priority
+    pub priority: String,
+    /// Story dependencies
+    #[serde(default)]
+    pub dependencies: Vec<String>,
+    /// Story acceptance criteria
+    #[serde(default)]
+    pub acceptance_criteria: Vec<String>,
+}
+
+/// Structured payload describing how to patch the PRD.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrdModificationPayload {
+    /// Updated title (for update/merge)
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Updated description (for update/merge)
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Updated priority (for update/merge)
+    #[serde(default)]
+    pub priority: Option<String>,
+    /// Updated dependencies (for update/merge)
+    #[serde(default)]
+    pub dependencies: Option<Vec<String>>,
+    /// Updated acceptance criteria (for update/merge)
+    #[serde(default)]
+    pub acceptance_criteria: Option<Vec<String>>,
+    /// Single story payload (for add/update)
+    #[serde(default)]
+    pub story: Option<PrdModificationPayloadStory>,
+    /// Multi-story payload (for split)
+    #[serde(default)]
+    pub stories: Vec<PrdModificationPayloadStory>,
+    /// Dependency remap map used by split operations
+    #[serde(default)]
+    pub dependency_remap: HashMap<String, Vec<String>>,
+}
+
+/// A suggested PRD modification from the architect.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PrdModification {
-    /// Story ID to modify (or "new" for new story suggestion)
-    pub story_id: String,
-    /// Action: "modify", "add", "remove", "split"
-    pub action: String,
+    /// Stable operation ID for this suggestion
+    pub operation_id: String,
+    /// Operation type: update_story, add_story, remove_story, split_story, merge_story
+    #[serde(rename = "type")]
+    pub modification_type: String,
+    /// Target story ID when applicable
+    #[serde(default)]
+    pub target_story_id: Option<String>,
+    /// Structured payload that frontend can apply directly
+    #[serde(default)]
+    pub payload: PrdModificationPayload,
+    /// One-line preview shown in the card
+    pub preview: String,
     /// Reason for the modification
     pub reason: String,
+    /// Confidence score in [0,1]
+    pub confidence: f64,
 }
 
 /// Result of the architecture review phase (SoftwareArchitect persona).
@@ -612,6 +676,7 @@ pub async fn explore_project(
     apiKey: Option<String>,
     base_url: Option<String>,
     baseUrl: Option<String>,
+    locale: Option<String>,
     state: tauri::State<'_, TaskModeState>,
     app_state: tauri::State<'_, AppState>,
     standalone_state: tauri::State<'_, crate::commands::standalone::StandaloneState>,
@@ -663,6 +728,9 @@ pub async fn explore_project(
             components: vec![],
             patterns: vec![],
             llm_summary: None,
+            summary_quality: SummaryQuality::Empty,
+            summary_source: SummarySource::DeterministicOnly,
+            summary_notes: None,
             duration_ms: 0,
             used_llm_exploration: false,
         };
@@ -715,6 +783,9 @@ pub async fn explore_project(
         components: vec![],
         patterns: vec![],
         llm_summary: None,
+        summary_quality: SummaryQuality::Empty,
+        summary_source: SummarySource::DeterministicOnly,
+        summary_notes: None,
         duration_ms: 0,
         used_llm_exploration: false,
     });
@@ -765,6 +836,7 @@ pub async fn explore_project(
         match resolve_provider_config(
             &resolved_provider,
             &resolved_model,
+            api_key.or(apiKey),
             base_url.or(baseUrl),
             &app_state,
         )
@@ -780,13 +852,17 @@ pub async fn explore_project(
                 );
 
                 // Create coordinator OrchestratorService
-                let coordinator_prompt =
-                    exploration::build_coordinator_exploration_prompt(&task_description, &result);
+                let locale_tag = normalize_locale(locale.as_deref());
+                let coordinator_prompt = exploration::build_coordinator_exploration_prompt(
+                    &task_description,
+                    &result,
+                    Some(locale_tag),
+                );
 
                 let config = crate::services::orchestrator::OrchestratorConfig {
                     provider: provider_config,
                     system_prompt: Some(coordinator_prompt),
-                    max_iterations: 8,
+                    max_iterations: 14,
                     max_total_tokens: 200_000,
                     project_root: project_path.clone(),
                     analysis_artifacts_root: dirs::home_dir()
@@ -843,12 +919,72 @@ pub async fn explore_project(
                     )
                     .await;
 
-                if coordinator_result.success {
-                    if let Some(response) = coordinator_result.response {
-                        result.llm_summary = exploration::parse_coordinator_summary(&response);
-                        result.used_llm_exploration = true;
+                result.used_llm_exploration = true;
+
+                let parsed_summary = coordinator_result
+                    .response
+                    .as_deref()
+                    .and_then(exploration::parse_coordinator_summary);
+                let short_or_incomplete = parsed_summary
+                    .as_deref()
+                    .map(exploration::is_summary_incomplete)
+                    .unwrap_or(true);
+                let has_error = coordinator_result.error.is_some() || !coordinator_result.success;
+
+                if let Some(summary) = parsed_summary {
+                    if has_error || short_or_incomplete {
+                        let synthesized = exploration::synthesize_summary_from_deterministic(
+                            &task_description,
+                            &result,
+                            Some(locale_tag),
+                        );
+                        result.llm_summary = synthesized.or(Some(summary));
+                        result.summary_quality = SummaryQuality::Partial;
+                        result.summary_source = SummarySource::FallbackSynthesized;
+                        result.summary_notes = Some(
+                            "LLM summary was partial or interrupted; supplemented with deterministic synthesis."
+                                .to_string(),
+                        );
+                    } else {
+                        result.llm_summary = Some(summary);
+                        result.summary_quality = SummaryQuality::Complete;
+                        result.summary_source = SummarySource::Llm;
+                        result.summary_notes = None;
+                    }
+                } else if has_error {
+                    result.llm_summary = exploration::synthesize_summary_from_deterministic(
+                        &task_description,
+                        &result,
+                        Some(locale_tag),
+                    );
+                    if result.llm_summary.is_some() {
+                        result.summary_quality = SummaryQuality::Partial;
+                        result.summary_source = SummarySource::FallbackSynthesized;
+                        result.summary_notes =
+                            Some("LLM exploration failed; used deterministic synthesized summary.".to_string());
+                    } else {
+                        result.summary_quality = SummaryQuality::Empty;
+                        result.summary_source = SummarySource::DeterministicOnly;
+                        result.summary_notes =
+                            Some("LLM exploration failed and no synthesized summary could be generated.".to_string());
                     }
                 } else {
+                    result.llm_summary = exploration::synthesize_summary_from_deterministic(
+                        &task_description,
+                        &result,
+                        Some(locale_tag),
+                    );
+                    if result.llm_summary.is_some() {
+                        result.summary_quality = SummaryQuality::Partial;
+                        result.summary_source = SummarySource::FallbackSynthesized;
+                        result.summary_notes = Some(
+                            "LLM exploration returned no summary text; synthesized deterministic summary."
+                                .to_string(),
+                        );
+                    }
+                }
+
+                if !coordinator_result.success {
                     eprintln!(
                         "[explore_project] LLM exploration failed: {:?}",
                         coordinator_result.error
@@ -982,6 +1118,7 @@ pub(crate) async fn resolve_llm_provider(
 async fn resolve_provider_config(
     provider_name: &str,
     model: &str,
+    explicit_api_key: Option<String>,
     explicit_base_url: Option<String>,
     app_state: &tauri::State<'_, AppState>,
 ) -> Result<crate::services::llm::types::ProviderConfig, String> {
@@ -1002,10 +1139,13 @@ async fn resolve_provider_config(
         _ => return Err(format!("Unsupported provider: {}", canonical)),
     };
 
-    let api_key = {
-        let keyring = KeyringService::new();
-        keyring.get_api_key(canonical).ok().flatten()
-    };
+    let api_key = explicit_api_key
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .or_else(|| {
+            let keyring = KeyringService::new();
+            keyring.get_api_key(canonical).ok().flatten()
+        });
 
     if provider_type != ProviderType::Ollama && api_key.is_none() {
         return Err(format!(
@@ -1143,7 +1283,9 @@ pub async fn approve_task_prd(
             // Resolve LLM provider config if provider/model specified
             let provider_config: Option<crate::services::llm::types::ProviderConfig> =
                 if let (Some(ref prov), Some(ref mdl)) = (&provider, &model) {
-                    match resolve_provider_config(prov, mdl, base_url.clone(), &app_state).await {
+                    match resolve_provider_config(prov, mdl, None, base_url.clone(), &app_state)
+                        .await
+                    {
                         Ok(cfg) => Some(cfg),
                         Err(e) => {
                             eprintln!(
@@ -1649,6 +1791,340 @@ pub async fn exit_task_mode(
 // Requirement Analysis & Architecture Review
 // ============================================================================
 
+fn normalize_locale(locale: Option<&str>) -> &'static str {
+    let normalized = locale.unwrap_or("en").to_lowercase();
+    if normalized.starts_with("zh") {
+        "zh"
+    } else if normalized.starts_with("ja") {
+        "ja"
+    } else {
+        "en"
+    }
+}
+
+fn locale_instruction(locale_tag: &str) -> &'static str {
+    match locale_tag {
+        "zh" => {
+            "CRITICAL: Your final answer MUST be in Simplified Chinese. Keep code symbols, identifiers, and file paths unchanged."
+        }
+        "ja" => {
+            "CRITICAL: Your final answer MUST be in Japanese. Keep code symbols, identifiers, and file paths unchanged."
+        }
+        _ => "CRITICAL: Your final answer MUST be in English. Keep code symbols, identifiers, and file paths unchanged.",
+    }
+}
+
+fn value_to_string_array(value: Option<&serde_json::Value>) -> Vec<String> {
+    value
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_payload_story(value: &serde_json::Value) -> Option<PrdModificationPayloadStory> {
+    let title = value.get("title").and_then(|v| v.as_str())?.trim().to_string();
+    if title.is_empty() {
+        return None;
+    }
+
+    Some(PrdModificationPayloadStory {
+        id: value
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        title,
+        description: value
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        priority: value
+            .get("priority")
+            .and_then(|v| v.as_str())
+            .unwrap_or("medium")
+            .to_string(),
+        dependencies: value_to_string_array(value.get("dependencies")),
+        acceptance_criteria: value_to_string_array(
+            value
+                .get("acceptance_criteria")
+                .or_else(|| value.get("acceptanceCriteria")),
+        ),
+    })
+}
+
+fn parse_prd_modification_payload(
+    value: Option<&serde_json::Value>,
+) -> PrdModificationPayload {
+    let mut payload = PrdModificationPayload::default();
+    let Some(obj) = value.and_then(|v| v.as_object()) else {
+        return payload;
+    };
+
+    payload.title = obj
+        .get("title")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    payload.description = obj
+        .get("description")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    payload.priority = obj
+        .get("priority")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    if let Some(v) = obj.get("dependencies") {
+        payload.dependencies = Some(value_to_string_array(Some(v)));
+    }
+    if let Some(v) = obj
+        .get("acceptance_criteria")
+        .or_else(|| obj.get("acceptanceCriteria"))
+    {
+        payload.acceptance_criteria = Some(value_to_string_array(Some(v)));
+    }
+
+    payload.story = obj.get("story").and_then(parse_payload_story);
+    payload.stories = obj
+        .get("stories")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(parse_payload_story).collect())
+        .unwrap_or_default();
+
+    payload.dependency_remap = obj
+        .get("dependency_remap")
+        .or_else(|| obj.get("dependencyRemap"))
+        .and_then(|v| v.as_object())
+        .map(|map| {
+            map.iter()
+                .map(|(key, value)| (key.clone(), value_to_string_array(Some(value))))
+                .collect::<HashMap<_, _>>()
+        })
+        .unwrap_or_default();
+
+    payload
+}
+
+fn normalize_modification_type(raw: &str) -> String {
+    match raw.trim().to_lowercase().as_str() {
+        "modify" | "update" | "update_story" => "update_story".to_string(),
+        "add" | "add_story" => "add_story".to_string(),
+        "remove" | "delete" | "remove_story" => "remove_story".to_string(),
+        "split" | "split_story" => "split_story".to_string(),
+        "merge" | "merge_story" => "merge_story".to_string(),
+        _ => "update_story".to_string(),
+    }
+}
+
+fn truncate_for_preview(input: &str, max_len: usize) -> String {
+    let trimmed = input.trim();
+    if trimmed.chars().count() <= max_len {
+        return trimmed.to_string();
+    }
+    let mut out = trimmed.chars().take(max_len).collect::<String>();
+    out.push_str("...");
+    out
+}
+
+fn build_modification_preview(
+    modification_type: &str,
+    target_story_id: Option<&str>,
+    payload: &PrdModificationPayload,
+    reason: &str,
+) -> String {
+    let target = target_story_id.unwrap_or("N/A");
+    match modification_type {
+        "add_story" => {
+            let title = payload
+                .story
+                .as_ref()
+                .map(|s| s.title.as_str())
+                .or(payload.title.as_deref())
+                .unwrap_or("New story");
+            format!("Add story: {}", truncate_for_preview(title, 80))
+        }
+        "remove_story" => format!("Remove story {}", target),
+        "split_story" => {
+            if payload.stories.is_empty() {
+                format!("Split story {}", target)
+            } else {
+                let names = payload
+                    .stories
+                    .iter()
+                    .map(|s| s.title.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("Split {} into: {}", target, truncate_for_preview(&names, 100))
+            }
+        }
+        "merge_story" => {
+            let title = payload.title.as_deref().unwrap_or("Merged story");
+            format!("Merge into {}: {}", target, truncate_for_preview(title, 80))
+        }
+        _ => {
+            let title = payload
+                .story
+                .as_ref()
+                .map(|s| s.title.as_str())
+                .or(payload.title.as_deref())
+                .unwrap_or(reason);
+            if target_story_id.is_some() {
+                format!(
+                    "Update {}: {}",
+                    target,
+                    truncate_for_preview(title, 100)
+                )
+            } else {
+                format!("Update story: {}", truncate_for_preview(title, 100))
+            }
+        }
+    }
+}
+
+fn parse_single_prd_modification(
+    value: &serde_json::Value,
+    index: usize,
+) -> Option<PrdModification> {
+    let modification_type = normalize_modification_type(
+        value
+            .get("type")
+            .or_else(|| value.get("modification_type"))
+            .or_else(|| value.get("action"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("update_story"),
+    );
+    let target_story_id = value
+        .get("target_story_id")
+        .or_else(|| value.get("targetStoryId"))
+        .or_else(|| value.get("story_id"))
+        .or_else(|| value.get("storyId"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let reason = value
+        .get("reason")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "No reason provided".to_string());
+
+    let mut payload = parse_prd_modification_payload(value.get("payload"));
+
+    // Backward compatibility for old formatter output where fields are top-level.
+    if payload.story.is_none() {
+        payload.story = value.get("story").and_then(parse_payload_story);
+    }
+    if payload.stories.is_empty() {
+        payload.stories = value
+            .get("stories")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(parse_payload_story).collect())
+            .unwrap_or_default();
+    }
+    if payload.title.is_none() {
+        payload.title = value
+            .get("title")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+    }
+    if payload.description.is_none() {
+        payload.description = value
+            .get("description")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+    }
+    if payload.priority.is_none() {
+        payload.priority = value
+            .get("priority")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+    }
+    if payload.dependencies.is_none() && value.get("dependencies").is_some() {
+        payload.dependencies = Some(value_to_string_array(value.get("dependencies")));
+    }
+    if payload.acceptance_criteria.is_none()
+        && (value.get("acceptance_criteria").is_some()
+            || value.get("acceptanceCriteria").is_some())
+    {
+        payload.acceptance_criteria = Some(value_to_string_array(
+            value
+                .get("acceptance_criteria")
+                .or_else(|| value.get("acceptanceCriteria")),
+        ));
+    }
+
+    if modification_type == "add_story" && payload.story.is_none() {
+        payload.story = Some(PrdModificationPayloadStory {
+            id: None,
+            title: payload
+                .title
+                .clone()
+                .unwrap_or_else(|| "New Story".to_string()),
+            description: payload
+                .description
+                .clone()
+                .unwrap_or_else(|| reason.clone()),
+            priority: payload
+                .priority
+                .clone()
+                .unwrap_or_else(|| "medium".to_string()),
+            dependencies: payload.dependencies.clone().unwrap_or_default(),
+            acceptance_criteria: payload.acceptance_criteria.clone().unwrap_or_default(),
+        });
+    }
+
+    let operation_id = value
+        .get("operation_id")
+        .or_else(|| value.get("operationId"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("arch_mod_{:03}", index + 1));
+    let preview = value
+        .get("preview")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            build_modification_preview(
+                &modification_type,
+                target_story_id.as_deref(),
+                &payload,
+                &reason,
+            )
+        });
+    let confidence = value
+        .get("confidence")
+        .and_then(|v| v.as_f64())
+        .map(|v| v.clamp(0.0, 1.0))
+        .unwrap_or(0.7);
+
+    Some(PrdModification {
+        operation_id,
+        modification_type,
+        target_story_id,
+        payload,
+        preview,
+        reason,
+        confidence,
+    })
+}
+
+fn parse_prd_modifications(structured: &serde_json::Value) -> Vec<PrdModification> {
+    structured
+        .get("prd_modifications")
+        .or_else(|| structured.get("modifications"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .enumerate()
+                .filter_map(|(index, value)| parse_single_prd_modification(value, index))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
 /// Run requirement analysis using the ProductManager persona.
 ///
 /// Uses the Expert+Formatter pipeline to produce a structured analysis of
@@ -1668,6 +2144,7 @@ pub async fn run_requirement_analysis(
     apiKey: Option<String>,
     base_url: Option<String>,
     baseUrl: Option<String>,
+    locale: Option<String>,
     app_state: tauri::State<'_, AppState>,
     state: tauri::State<'_, TaskModeState>,
 ) -> Result<CommandResponse<RequirementAnalysisResult>, String> {
@@ -1729,6 +2206,9 @@ pub async fn run_requirement_analysis(
 
     let persona = PersonaRegistry::get(PersonaRole::ProductManager);
 
+    let locale_tag = normalize_locale(locale.as_deref());
+    let language_instruction = locale_instruction(locale_tag);
+
     // Build phase instructions for the PM expert
     let phase_instructions = format!(
         r#"Analyze the following task and produce a thorough requirements analysis.
@@ -1736,6 +2216,9 @@ pub async fn run_requirement_analysis(
 ## Task Description
 {task_description}
 {}{}
+
+## Output Language
+{language_instruction}
 
 ## Your Analysis Should Cover
 1. **Key Requirements**: List the essential functional and non-functional requirements
@@ -1753,6 +2236,7 @@ Be specific and actionable. Reference concrete technical details when available.
             .as_ref()
             .map(|e| format!("\n\n## Project Context\n{}", e))
             .unwrap_or_default(),
+        language_instruction = language_instruction,
     );
 
     let target_schema = r#"{
@@ -1775,6 +2259,7 @@ Be specific and actionable. Reference concrete technical details when available.
         &persona,
         &phase_instructions,
         exploration_context.as_deref(),
+        Some(locale_tag),
         user_messages,
         target_schema,
         None,
@@ -1836,6 +2321,7 @@ pub async fn run_architecture_review(
     apiKey: Option<String>,
     base_url: Option<String>,
     baseUrl: Option<String>,
+    locale: Option<String>,
     app_state: tauri::State<'_, AppState>,
     state: tauri::State<'_, TaskModeState>,
 ) -> Result<CommandResponse<ArchitectureReviewResult>, String> {
@@ -1896,6 +2382,8 @@ pub async fn run_architecture_review(
     };
 
     let persona = PersonaRegistry::get(PersonaRole::SoftwareArchitect);
+    let locale_tag = normalize_locale(locale.as_deref());
+    let language_instruction = locale_instruction(locale_tag);
 
     // Build phase instructions for the architect expert
     let phase_instructions = format!(
@@ -1910,22 +2398,58 @@ pub async fn run_architecture_review(
    - Severity levels: "high" (blocking), "medium" (should address), "low" (nice to have)
 2. **Improvement Suggestions**: General architectural improvements
 3. **PRD Modifications**: Specific changes to stories if needed
-   - Actions: "modify" (change existing story), "add" (new story needed), "remove" (unnecessary), "split" (too large)
+   - Types: "update_story", "add_story", "remove_story", "split_story", "merge_story"
+   - Provide structured payload details so frontend can apply patches directly.
 4. **Overall Assessment**: Whether the PRD is architecturally sound
 
 Consider: scalability, maintainability, separation of concerns, error handling,
-testing strategy, dependency management, and integration patterns."#,
+testing strategy, dependency management, and integration patterns.
+
+## Output Language
+{language_instruction}"#,
         exploration_context
             .as_ref()
             .map(|e| format!("\n\n## Project Context\n{}", e))
             .unwrap_or_default(),
+        language_instruction = language_instruction,
     );
 
     let target_schema = r#"{
   "analysis": "string - Natural language architecture analysis in markdown",
   "concerns": [{"severity": "high|medium|low", "description": "string"}],
   "suggestions": ["string - Each improvement suggestion"],
-  "prd_modifications": [{"story_id": "string", "action": "modify|add|remove|split", "reason": "string"}],
+  "prd_modifications": [{
+    "operation_id": "string - Stable unique ID for this modification",
+    "type": "update_story|add_story|remove_story|split_story|merge_story",
+    "target_story_id": "string|null - story ID to modify/remove/split/merge (null for add)",
+    "preview": "string - one-line summary for UI",
+    "reason": "string - why this change is needed",
+    "confidence": "number - 0 to 1",
+    "payload": {
+      "title": "string|null",
+      "description": "string|null",
+      "priority": "high|medium|low|null",
+      "dependencies": ["string"],
+      "acceptance_criteria": ["string"],
+      "story": {
+        "id": "string|null",
+        "title": "string",
+        "description": "string",
+        "priority": "high|medium|low",
+        "dependencies": ["string"],
+        "acceptance_criteria": ["string"]
+      },
+      "stories": [{
+        "id": "string|null",
+        "title": "string",
+        "description": "string",
+        "priority": "high|medium|low",
+        "dependencies": ["string"],
+        "acceptance_criteria": ["string"]
+      }],
+      "dependency_remap": {"story_id": ["replacement_story_id"]}
+    }
+  }],
   "approved": "boolean - Whether the PRD is architecturally sound as-is"
 }"#;
 
@@ -1942,6 +2466,7 @@ testing strategy, dependency management, and integration patterns."#,
         &persona,
         &phase_instructions,
         exploration_context.as_deref(),
+        Some(locale_tag),
         user_messages,
         target_schema,
         None,
@@ -1983,33 +2508,7 @@ testing strategy, dependency management, and integration patterns."#,
                             .collect()
                     })
                     .unwrap_or_default(),
-                prd_modifications: structured
-                    .get("prd_modifications")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| {
-                                Some(PrdModification {
-                                    story_id: v
-                                        .get("story_id")
-                                        .and_then(|s| s.as_str())
-                                        .unwrap_or("")
-                                        .to_string(),
-                                    action: v
-                                        .get("action")
-                                        .and_then(|s| s.as_str())
-                                        .unwrap_or("modify")
-                                        .to_string(),
-                                    reason: v
-                                        .get("reason")
-                                        .and_then(|s| s.as_str())
-                                        .unwrap_or("")
-                                        .to_string(),
-                                })
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default(),
+                prd_modifications: parse_prd_modifications(structured),
                 approved: structured
                     .get("approved")
                     .and_then(|v| v.as_bool())

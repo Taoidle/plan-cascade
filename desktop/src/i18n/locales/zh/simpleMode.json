@@ -331,6 +331,20 @@
       "patterns": "模式",
       "decisions": "决策",
       "featureMappings": "功能映射",
+      "systemOverview": "系统概览",
+      "dataFlow": "数据流",
+      "infrastructure": "基础设施",
+      "existingServices": "现有服务",
+      "newServices": "新增服务",
+      "responsibilities": "职责",
+      "dependencies": "依赖",
+      "features": "功能",
+      "rationale": "理由",
+      "appliesTo": "适用范围",
+      "status": "状态",
+      "context": "背景",
+      "decision": "决策",
+      "alternatives": "备选方案",
       "savedTo": "已保存到 {{path}}"
     },
 
@@ -344,7 +358,12 @@
       "deterministic": "确定性",
       "aiAssisted": "AI 辅助",
       "duration": "{{ms}}ms",
-      "fileCount": "{{count}} 个文件"
+      "fileCount": "{{count}} 个文件",
+      "summaryComplete": "完整",
+      "summaryPartial": "部分",
+      "summaryEmpty": "无 AI 摘要",
+      "summaryUnavailable": "AI 摘要不可用，已使用确定性探索结果。",
+      "summarySynthesized": "摘要由确定性探索数据合成生成。"
     },
 
     "persona": {
@@ -375,6 +394,10 @@
       "approve": "接受并继续",
       "requestChanges": "应用选中项并修改 PRD",
       "approved": "已批准"
+    },
+
+    "common": {
+      "processing": "处理中..."
     },
 
     "progress": {
@@ -510,6 +533,7 @@
       "architectureReviewFailed": "架构审查未能完成，继续执行...",
       "architectureApproved": "架构审查已通过。正在生成设计文档...",
       "architectureRevisionRequested": "正在应用 {{count}} 个架构建议。返回 PRD 审查...",
+      "architectureApplyFailed": "无法自动应用架构建议。请手动编辑 PRD。",
       "architectureReviewMaxRounds": "架构审查已达上限（3轮）。使用当前 PRD 继续。"
     }
   },

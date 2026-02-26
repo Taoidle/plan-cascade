@@ -32,10 +32,34 @@ pub struct ExplorationResult {
     pub patterns: Vec<String>,
     /// LLM-generated exploration summary (None for deterministic-only)
     pub llm_summary: Option<String>,
+    /// Quality label for the summary completeness
+    pub summary_quality: SummaryQuality,
+    /// Source category for the summary text
+    pub summary_source: SummarySource,
+    /// Additional notes about summary generation/fallback behavior
+    pub summary_notes: Option<String>,
     /// Total exploration duration in milliseconds
     pub duration_ms: u64,
     /// Whether LLM exploration was used (true for full flow)
     pub used_llm_exploration: bool,
+}
+
+/// Completeness quality of an exploration summary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SummaryQuality {
+    Complete,
+    Partial,
+    Empty,
+}
+
+/// Source kind for exploration summary text.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SummarySource {
+    Llm,
+    FallbackSynthesized,
+    DeterministicOnly,
 }
 
 /// Technology stack summary extracted from project analysis.
@@ -134,6 +158,9 @@ pub fn deterministic_explore(
         components,
         patterns,
         llm_summary: None,
+        summary_quality: SummaryQuality::Empty,
+        summary_source: SummarySource::DeterministicOnly,
+        summary_notes: None,
         duration_ms: duration.as_millis() as u64,
         used_llm_exploration: false,
     }
@@ -319,6 +346,7 @@ fn detect_patterns(summary: &ProjectIndexSummary, project_root: &Path) -> Vec<St
 pub fn build_coordinator_exploration_prompt(
     task_description: &str,
     deterministic_result: &ExplorationResult,
+    locale: Option<&str>,
 ) -> String {
     let tech_stack_info = format!(
         "Languages: {}\nFrameworks: {}\nBuild tools: {}\nTest frameworks: {}\nPackage manager: {}",
@@ -350,6 +378,18 @@ pub fn build_coordinator_exploration_prompt(
 
     let persona = PersonaRegistry::get(PersonaRole::SeniorEngineer);
 
+    let locale_instruction = match locale.unwrap_or("en") {
+        "zh" => {
+            "Language Requirement:\n- Write the final exploration summary in Simplified Chinese.\n- Keep code symbols, file paths, and identifiers in original form."
+        }
+        "ja" => {
+            "Language Requirement:\n- Write the final exploration summary in Japanese.\n- Keep code symbols, file paths, and identifiers in original form."
+        }
+        _ => {
+            "Language Requirement:\n- Write the final exploration summary in English.\n- Keep code symbols, file paths, and identifiers in original form."
+        }
+    };
+
     format!(
         r#"{persona_prompt}
 
@@ -359,6 +399,8 @@ Your job is to explore the codebase to gather context that will help generate a 
 
 ## Task Description
 {task_description}
+
+## {locale_instruction}
 
 ## Known Project Context
 {tech_stack_info}
@@ -409,17 +451,213 @@ pub fn parse_coordinator_summary(coordinator_output: &str) -> Option<String> {
         return None;
     }
 
-    // Try to find the "## Exploration Summary" section
-    if let Some(idx) = coordinator_output.find("## Exploration Summary") {
-        let summary = &coordinator_output[idx..];
-        Some(summary.to_string())
-    } else if let Some(idx) = coordinator_output.find("# Exploration Summary") {
-        let summary = &coordinator_output[idx..];
-        Some(summary.to_string())
-    } else {
-        // Use the full output as summary
-        Some(coordinator_output.to_string())
+    let markers = [
+        "## Exploration Summary",
+        "# Exploration Summary",
+        "## AI Exploration Summary",
+        "# AI Exploration Summary",
+        "## 探索摘要",
+        "## 探索总结",
+        "# 探索摘要",
+        "# 探索总结",
+        "## 探索サマリー",
+        "## 調査サマリー",
+        "# 探索サマリー",
+        "# 調査サマリー",
+    ];
+
+    for marker in markers {
+        if let Some(idx) = coordinator_output.find(marker) {
+            return Some(coordinator_output[idx..].trim().to_string());
+        }
     }
+
+    // Use the full output as summary
+    Some(coordinator_output.trim().to_string())
+}
+
+/// Heuristic check for LLM summary quality.
+///
+/// Returns `true` when the summary looks incomplete (very short, no structure,
+/// or likely an unfinished opening sentence).
+pub fn is_summary_incomplete(summary: &str) -> bool {
+    let trimmed = summary.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+
+    let char_len = trimmed.chars().count();
+    let non_empty_lines = trimmed
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count();
+    let has_sections = trimmed.contains("##") || trimmed.contains("###");
+    let has_bullets = trimmed.contains("\n- ") || trimmed.contains("\n• ");
+    let ends_abruptly = trimmed.ends_with(':') || trimmed.ends_with('：');
+
+    if char_len < 140 || non_empty_lines <= 1 {
+        return true;
+    }
+
+    if !has_sections && !has_bullets && char_len < 260 {
+        return true;
+    }
+
+    ends_abruptly
+}
+
+/// Build a deterministic fallback exploration summary when LLM output is missing
+/// or appears incomplete.
+pub fn synthesize_summary_from_deterministic(
+    task_description: &str,
+    deterministic_result: &ExplorationResult,
+    locale: Option<&str>,
+) -> Option<String> {
+    let locale_tag = locale.unwrap_or("en").to_lowercase();
+
+    let key_files = deterministic_result
+        .key_files
+        .iter()
+        .take(8)
+        .map(|f| format!("- `{}` [{}]: {}", f.path, f.file_type, f.relevance))
+        .collect::<Vec<_>>();
+    let components = deterministic_result
+        .components
+        .iter()
+        .take(8)
+        .map(|c| format!("- {} ({} files): {}", c.name, c.file_count, c.description))
+        .collect::<Vec<_>>();
+    let patterns = deterministic_result
+        .patterns
+        .iter()
+        .take(8)
+        .map(|p| format!("- {}", p))
+        .collect::<Vec<_>>();
+
+    let languages = if deterministic_result.tech_stack.languages.is_empty() {
+        "unknown".to_string()
+    } else {
+        deterministic_result.tech_stack.languages.join(", ")
+    };
+    let frameworks = if deterministic_result.tech_stack.frameworks.is_empty() {
+        "none".to_string()
+    } else {
+        deterministic_result.tech_stack.frameworks.join(", ")
+    };
+    let package_manager = deterministic_result
+        .tech_stack
+        .package_manager
+        .as_deref()
+        .unwrap_or("unknown");
+
+    let summary = if locale_tag.starts_with("zh") {
+        format!(
+            "## 探索摘要\n\
+             ### 相关现有代码\n\
+             任务目标：{task}\n\
+             {key_files}\n\n\
+             ### 架构洞察\n\
+             - 语言栈：{languages}\n\
+             - 框架：{frameworks}\n\
+             - 组件结构：\n\
+             {components}\n\
+             - 识别到的模式：\n\
+             {patterns}\n\n\
+             ### 对 PRD 的建议\n\
+             - 对齐现有组件边界与命名约定，避免重复抽象。\n\
+             - 明确依赖与接口改动范围，优先复用已有模块。\n\
+             - 在验收标准中补充测试与错误处理要求。\n\
+             - 包管理/构建基线：{package_manager}",
+            task = task_description,
+            key_files = if key_files.is_empty() {
+                "- 暂未识别到关键文件".to_string()
+            } else {
+                key_files.join("\n")
+            },
+            components = if components.is_empty() {
+                "- 暂未识别到组件".to_string()
+            } else {
+                components.join("\n")
+            },
+            patterns = if patterns.is_empty() {
+                "- 暂未识别到明显模式".to_string()
+            } else {
+                patterns.join("\n")
+            },
+        )
+    } else if locale_tag.starts_with("ja") {
+        format!(
+            "## 探索サマリー\n\
+             ### 関連する既存コード\n\
+             タスク目的: {task}\n\
+             {key_files}\n\n\
+             ### アーキテクチャ洞察\n\
+             - 言語: {languages}\n\
+             - フレームワーク: {frameworks}\n\
+             - コンポーネント構造:\n\
+             {components}\n\
+             - 検出されたパターン:\n\
+             {patterns}\n\n\
+             ### PRDへの提案\n\
+             - 既存コンポーネント境界と命名規約に合わせる。\n\
+             - 依存関係とインターフェース変更範囲を明確化する。\n\
+             - 受け入れ基準にテストとエラーハンドリングを含める。\n\
+             - パッケージ管理/ビルド基盤: {package_manager}",
+            task = task_description,
+            key_files = if key_files.is_empty() {
+                "- 主要ファイルは未検出".to_string()
+            } else {
+                key_files.join("\n")
+            },
+            components = if components.is_empty() {
+                "- コンポーネントは未検出".to_string()
+            } else {
+                components.join("\n")
+            },
+            patterns = if patterns.is_empty() {
+                "- 明確なパターンは未検出".to_string()
+            } else {
+                patterns.join("\n")
+            },
+        )
+    } else {
+        format!(
+            "## Exploration Summary\n\
+             ### Relevant Existing Code\n\
+             Task target: {task}\n\
+             {key_files}\n\n\
+             ### Architecture Insights\n\
+             - Languages: {languages}\n\
+             - Frameworks: {frameworks}\n\
+             - Component structure:\n\
+             {components}\n\
+             - Detected patterns:\n\
+             {patterns}\n\n\
+             ### Recommendations for PRD\n\
+             - Align stories to existing component boundaries and naming conventions.\n\
+             - Call out dependency/interface changes explicitly in story scope.\n\
+             - Add testing and error-handling requirements to acceptance criteria.\n\
+             - Package/build baseline: {package_manager}",
+            task = task_description,
+            key_files = if key_files.is_empty() {
+                "- No key files identified yet".to_string()
+            } else {
+                key_files.join("\n")
+            },
+            components = if components.is_empty() {
+                "- No components identified yet".to_string()
+            } else {
+                components.join("\n")
+            },
+            patterns = if patterns.is_empty() {
+                "- No obvious patterns identified yet".to_string()
+            } else {
+                patterns.join("\n")
+            },
+        )
+    };
+
+    Some(summary)
 }
 
 // ============================================================================
@@ -504,6 +742,13 @@ pub fn format_exploration_context(result: &ExplorationResult) -> String {
     if let Some(ref summary) = result.llm_summary {
         parts.push("## AI Exploration Summary".to_string());
         parts.push(summary.clone());
+        parts.push(format!(
+            "Summary quality: {:?}, source: {:?}",
+            result.summary_quality, result.summary_source
+        ));
+        if let Some(notes) = &result.summary_notes {
+            parts.push(format!("Summary notes: {}", notes));
+        }
         parts.push(String::new());
     }
 
@@ -599,6 +844,9 @@ mod tests {
             components: vec![],
             patterns: vec![],
             llm_summary: Some("The project uses a service-oriented architecture.".to_string()),
+            summary_quality: SummaryQuality::Complete,
+            summary_source: SummarySource::Llm,
+            summary_notes: None,
             duration_ms: 100,
             used_llm_exploration: true,
         };
@@ -643,6 +891,52 @@ mod tests {
     }
 
     #[test]
+    fn test_is_summary_incomplete() {
+        assert!(is_summary_incomplete("Let me explore this project:"));
+        assert!(!is_summary_incomplete(
+            "## Exploration Summary\n### Relevant Existing Code\n- src/main.rs\n### Architecture Insights\n- modular structure\n### Recommendations for PRD\n- add tests"
+        ));
+    }
+
+    #[test]
+    fn test_synthesize_summary_from_deterministic() {
+        let result = ExplorationResult {
+            tech_stack: TechStackSummary {
+                languages: vec!["Rust".to_string()],
+                frameworks: vec!["Tauri".to_string()],
+                build_tools: vec!["cargo".to_string()],
+                test_frameworks: vec![],
+                package_manager: Some("cargo".to_string()),
+            },
+            key_files: vec![KeyFileEntry {
+                path: "src/main.rs".to_string(),
+                file_type: "entry_point".to_string(),
+                relevance: "entry point".to_string(),
+            }],
+            components: vec![ComponentSummary {
+                name: "services".to_string(),
+                path: "src/services".to_string(),
+                description: "business logic".to_string(),
+                file_count: 12,
+            }],
+            patterns: vec!["Modular architecture".to_string()],
+            llm_summary: None,
+            summary_quality: SummaryQuality::Empty,
+            summary_source: SummarySource::DeterministicOnly,
+            summary_notes: None,
+            duration_ms: 0,
+            used_llm_exploration: false,
+        };
+
+        let synthesized = synthesize_summary_from_deterministic("Add auth", &result, Some("en"));
+        assert!(synthesized.is_some());
+        let text = synthesized.unwrap();
+        assert!(text.contains("Exploration Summary"));
+        assert!(text.contains("src/main.rs"));
+        assert!(text.contains("Rust"));
+    }
+
+    #[test]
     fn test_build_coordinator_prompt_contains_task() {
         let result = ExplorationResult {
             tech_stack: TechStackSummary {
@@ -665,11 +959,14 @@ mod tests {
             }],
             patterns: vec![],
             llm_summary: None,
+            summary_quality: SummaryQuality::Empty,
+            summary_source: SummarySource::DeterministicOnly,
+            summary_notes: None,
             duration_ms: 0,
             used_llm_exploration: false,
         };
 
-        let prompt = build_coordinator_exploration_prompt("Add user authentication", &result);
+        let prompt = build_coordinator_exploration_prompt("Add user authentication", &result, Some("en"));
         assert!(prompt.contains("Add user authentication"));
         assert!(prompt.contains("Rust"));
         assert!(prompt.contains("Tauri"));

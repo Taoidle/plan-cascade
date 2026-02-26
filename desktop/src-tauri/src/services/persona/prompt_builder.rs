@@ -13,6 +13,19 @@ pub fn build_expert_system_prompt(
     phase_instructions: &str,
     project_context: Option<&str>,
 ) -> String {
+    build_expert_system_prompt_with_locale(persona, phase_instructions, project_context, None)
+}
+
+/// Build the system prompt for the expert step with optional locale guidance.
+///
+/// When locale is provided, the prompt explicitly requires response language alignment
+/// while preserving original code symbols and file paths.
+pub fn build_expert_system_prompt_with_locale(
+    persona: &Persona,
+    phase_instructions: &str,
+    project_context: Option<&str>,
+    locale: Option<&str>,
+) -> String {
     let mut parts = Vec::with_capacity(5);
 
     // Persona identity
@@ -42,6 +55,12 @@ pub fn build_expert_system_prompt(
         parts.push(format!("\n## Project Context\n{}", ctx));
     }
 
+    // Response language guidance
+    parts.push(format!(
+        "\n## Response Language\n{}",
+        locale_response_instruction(locale)
+    ));
+
     // Phase-specific instructions
     parts.push(format!("\n## Your Task\n{}", phase_instructions));
 
@@ -54,6 +73,17 @@ pub fn build_expert_system_prompt(
     );
 
     parts.join("\n")
+}
+
+fn locale_response_instruction(locale: Option<&str>) -> &'static str {
+    let normalized = locale.unwrap_or("en").to_lowercase();
+    if normalized.starts_with("zh") {
+        "Respond in Simplified Chinese. Keep code symbols, identifiers, and file paths in original form."
+    } else if normalized.starts_with("ja") {
+        "Respond in Japanese. Keep code symbols, identifiers, and file paths in original form."
+    } else {
+        "Respond in English. Keep code symbols, identifiers, and file paths in original form."
+    }
 }
 
 /// Build the system prompt for the formatter step.
@@ -120,6 +150,21 @@ mod tests {
         assert!(prompt.contains("Project Context"));
         assert!(prompt.contains("Rust, TypeScript"));
         assert!(prompt.contains("Review this PRD."));
+    }
+
+    #[test]
+    fn test_build_expert_system_prompt_with_locale() {
+        let persona = PersonaRegistry::get(PersonaRole::ProductManager);
+        let prompt = build_expert_system_prompt_with_locale(
+            &persona,
+            "Analyze requirements.",
+            None,
+            Some("zh-CN"),
+        );
+
+        assert!(prompt.contains("Response Language"));
+        assert!(prompt.contains("Simplified Chinese"));
+        assert!(prompt.contains("Analyze requirements."));
     }
 
     #[test]

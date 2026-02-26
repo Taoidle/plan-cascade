@@ -331,6 +331,20 @@
       "patterns": "パターン",
       "decisions": "決定",
       "featureMappings": "機能マッピング",
+      "systemOverview": "システム概要",
+      "dataFlow": "データフロー",
+      "infrastructure": "インフラ",
+      "existingServices": "既存サービス",
+      "newServices": "新規サービス",
+      "responsibilities": "責務",
+      "dependencies": "依存関係",
+      "features": "機能",
+      "rationale": "理由",
+      "appliesTo": "適用対象",
+      "status": "状態",
+      "context": "背景",
+      "decision": "決定",
+      "alternatives": "代替案",
       "savedTo": "保存先: {{path}}"
     },
 
@@ -344,7 +358,12 @@
       "deterministic": "確定的",
       "aiAssisted": "AI支援",
       "duration": "{{ms}}ms",
-      "fileCount": "{{count}} ファイル"
+      "fileCount": "{{count}} ファイル",
+      "summaryComplete": "完全",
+      "summaryPartial": "部分的",
+      "summaryEmpty": "AIサマリーなし",
+      "summaryUnavailable": "AIサマリーが利用できないため、確定的探索結果を使用します。",
+      "summarySynthesized": "サマリーは確定的探索データから合成されました。"
     },
 
     "persona": {
@@ -375,6 +394,10 @@
       "approve": "承認して続行",
       "requestChanges": "選択した項目を適用してPRDを修正",
       "approved": "承認済み"
+    },
+
+    "common": {
+      "processing": "処理中..."
     },
 
     "progress": {
@@ -510,6 +533,7 @@
       "architectureReviewFailed": "アーキテクチャレビューを完了できませんでした。続行します...",
       "architectureApproved": "アーキテクチャレビューが承認されました。設計ドキュメントを生成中...",
       "architectureRevisionRequested": "{{count}} 件のアーキテクチャ提案を適用中。PRDレビューに戻ります...",
+      "architectureApplyFailed": "アーキテクチャ提案を自動適用できませんでした。PRDを手動で編集してください。",
       "architectureReviewMaxRounds": "アーキテクチャレビューの上限に達しました（3ラウンド）。現在のPRDで続行します。"
     }
   },

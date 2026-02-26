@@ -331,6 +331,20 @@
       "patterns": "Patterns",
       "decisions": "Decisions",
       "featureMappings": "Feature Mappings",
+      "systemOverview": "System Overview",
+      "dataFlow": "Data Flow",
+      "infrastructure": "Infrastructure",
+      "existingServices": "Existing Services",
+      "newServices": "New Services",
+      "responsibilities": "Responsibilities",
+      "dependencies": "Dependencies",
+      "features": "Features",
+      "rationale": "Rationale",
+      "appliesTo": "Applies To",
+      "status": "Status",
+      "context": "Context",
+      "decision": "Decision",
+      "alternatives": "Alternatives",
       "savedTo": "Saved to {{path}}"
     },
 
@@ -344,7 +358,12 @@
       "deterministic": "Deterministic",
       "aiAssisted": "AI-Assisted",
       "duration": "{{ms}}ms",
-      "fileCount": "{{count}} files"
+      "fileCount": "{{count}} files",
+      "summaryComplete": "Complete",
+      "summaryPartial": "Partial",
+      "summaryEmpty": "No AI Summary",
+      "summaryUnavailable": "AI summary unavailable, using deterministic exploration results.",
+      "summarySynthesized": "Summary synthesized from deterministic exploration data."
     },
 
     "persona": {
@@ -375,6 +394,10 @@
       "approve": "Accept & Continue",
       "requestChanges": "Apply Selected & Revise PRD",
       "approved": "Approved"
+    },
+
+    "common": {
+      "processing": "Processing..."
     },
 
     "progress": {
@@ -510,6 +533,7 @@
       "architectureReviewFailed": "Architecture review could not be completed. Continuing...",
       "architectureApproved": "Architecture review accepted. Generating design document...",
       "architectureRevisionRequested": "Applying {{count}} architectural suggestions. Returning to PRD review...",
+      "architectureApplyFailed": "Could not apply architecture suggestions automatically. Please edit PRD manually.",
       "architectureReviewMaxRounds": "Architecture review limit reached (3 rounds). Proceeding with current PRD."
     }
   },

@@ -39,6 +39,7 @@ pub struct ExpertFormatterResult<T> {
 /// * `persona` - The persona guiding the expert step
 /// * `phase_instructions` - Phase-specific instructions for the expert
 /// * `project_context` - Optional project context from exploration
+/// * `locale` - Optional locale tag for response language guidance
 /// * `user_messages` - User messages to include in the conversation
 /// * `target_json_schema` - JSON schema description for the formatter
 /// * `config` - Optional pipeline configuration overrides
@@ -48,13 +49,18 @@ pub async fn run_expert_formatter<T: DeserializeOwned>(
     persona: &Persona,
     phase_instructions: &str,
     project_context: Option<&str>,
+    locale: Option<&str>,
     user_messages: Vec<Message>,
     target_json_schema: &str,
     _config: Option<&PersonaConfig>,
 ) -> Result<ExpertFormatterResult<T>, String> {
     // === Step 1: Expert Analysis ===
-    let expert_system_prompt =
-        prompt_builder::build_expert_system_prompt(persona, phase_instructions, project_context);
+    let expert_system_prompt = prompt_builder::build_expert_system_prompt_with_locale(
+        persona,
+        phase_instructions,
+        project_context,
+        locale,
+    );
 
     let expert_options = LlmRequestOptions {
         temperature_override: Some(persona.expert_temperature),

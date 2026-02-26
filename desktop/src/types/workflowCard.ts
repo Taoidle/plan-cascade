@@ -213,12 +213,48 @@ export interface WorkflowErrorData {
 export interface DesignDocCardData {
   title: string;
   summary: string;
+  systemOverview: string;
+  dataFlow: string;
+  infrastructure: {
+    existingServices: string[];
+    newServices: string[];
+  };
   componentsCount: number;
   componentNames: string[];
+  components: Array<{
+    name: string;
+    description: string;
+    responsibilities: string[];
+    dependencies: string[];
+    features: string[];
+  }>;
   patternsCount: number;
   patternNames: string[];
+  patterns: Array<{
+    name: string;
+    description: string;
+    rationale: string;
+    appliesTo: string[];
+  }>;
   decisionsCount: number;
+  decisions: Array<{
+    id: string;
+    title: string;
+    context: string;
+    decision: string;
+    rationale: string;
+    alternatives: string[];
+    status: string;
+    appliesTo: string[];
+  }>;
   featureMappingsCount: number;
+  featureMappings: Array<{
+    featureId: string;
+    description: string;
+    components: string[];
+    patterns: string[];
+    decisions: string[];
+  }>;
   savedPath: string | null;
 }
 
@@ -235,6 +271,9 @@ export interface ExplorationCardData {
   components: Array<{ name: string; path: string; description: string; fileCount: number }>;
   patterns: string[];
   llmSummary: string | null;
+  summaryQuality: 'complete' | 'partial' | 'empty';
+  summarySource: 'llm' | 'fallback_synthesized' | 'deterministic_only';
+  summaryNotes: string | null;
   durationMs: number;
   usedLlmExploration: boolean;
 }
@@ -290,7 +329,38 @@ export interface ArchitectureReviewCardData {
   analysis: string;
   concerns: Array<{ severity: string; description: string }>;
   suggestions: string[];
-  prdModifications: Array<{ storyId: string; action: string; reason: string }>;
+  prdModifications: Array<{
+    operationId: string;
+    type: 'update_story' | 'add_story' | 'remove_story' | 'split_story' | 'merge_story';
+    targetStoryId: string | null;
+    payload: {
+      title?: string;
+      description?: string;
+      priority?: string;
+      dependencies?: string[];
+      acceptanceCriteria?: string[];
+      story?: {
+        id?: string;
+        title: string;
+        description: string;
+        priority: string;
+        dependencies: string[];
+        acceptanceCriteria: string[];
+      };
+      stories?: Array<{
+        id?: string;
+        title: string;
+        description: string;
+        priority: string;
+        dependencies: string[];
+        acceptanceCriteria: string[];
+      }>;
+      dependencyRemap?: Record<string, string[]>;
+    };
+    preview: string;
+    reason: string;
+    confidence: number;
+  }>;
   approved: boolean;
 }
 

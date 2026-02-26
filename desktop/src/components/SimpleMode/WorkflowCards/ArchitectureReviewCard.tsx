@@ -29,7 +29,9 @@ export function ArchitectureReviewCard({
   const [expanded, setExpanded] = useState(false);
   const [selectedMods, setSelectedMods] = useState<Set<number>>(() => new Set(data.prdModifications.map((_, i) => i)));
   const [acted, setActed] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const approveArchitecture = useWorkflowOrchestratorStore((s) => s.approveArchitecture);
+  const phase = useWorkflowOrchestratorStore((s) => s.phase);
 
   const toggleMod = (index: number) => {
     setSelectedMods((prev) => {
@@ -40,18 +42,30 @@ export function ArchitectureReviewCard({
     });
   };
 
-  const handleAccept = () => {
+  const handleAccept = async () => {
+    if (acted || isSubmitting) return;
     setActed(true);
-    approveArchitecture?.(true, []);
+    setIsSubmitting(true);
+    try {
+      await approveArchitecture?.(true, []);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleRevise = () => {
+  const handleRevise = async () => {
+    if (acted || isSubmitting) return;
     setActed(true);
+    setIsSubmitting(true);
     const selected = data.prdModifications.filter((_, i) => selectedMods.has(i));
-    approveArchitecture?.(false, selected);
+    try {
+      await approveArchitecture?.(false, selected);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const isInteractive = interactive && !acted;
+  const isInteractive = interactive && phase === 'architecture_review' && !acted && !isSubmitting;
 
   return (
     <div className="rounded-lg border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-900/20 overflow-hidden">
@@ -143,11 +157,12 @@ export function ArchitectureReviewCard({
                     <span className="text-cyan-400 dark:text-cyan-500 shrink-0 mt-px">•</span>
                   )}
                   <span>
-                    <span className="font-medium">[{mod.action}]</span>
-                    {mod.storyId !== 'new' && (
-                      <span className="text-cyan-500 dark:text-cyan-400 ml-1">#{mod.storyId}</span>
+                    <span className="font-medium">[{mod.type}]</span>
+                    {mod.targetStoryId && (
+                      <span className="text-cyan-500 dark:text-cyan-400 ml-1">#{mod.targetStoryId}</span>
                     )}
-                    <span className="ml-1">{mod.reason}</span>
+                    <span className="ml-1">{mod.preview}</span>
+                    <span className="ml-1 text-cyan-500/80 dark:text-cyan-400/80">({mod.reason})</span>
                   </span>
                 </label>
               ))}
@@ -172,16 +187,22 @@ export function ArchitectureReviewCard({
           <div className="pt-2 flex items-center gap-2 border-t border-cyan-200 dark:border-cyan-800">
             <button
               onClick={handleAccept}
+              disabled={isSubmitting}
               className="text-2xs px-3 py-1 rounded bg-green-600 hover:bg-green-700 text-white transition-colors"
             >
-              {t('workflow.architectureReview.approve')}
+              {isSubmitting
+                ? t('workflow.common.processing', { defaultValue: 'Processing...' })
+                : t('workflow.architectureReview.approve')}
             </button>
             {data.prdModifications.length > 0 && (
               <button
                 onClick={handleRevise}
+                disabled={isSubmitting}
                 className="text-2xs px-3 py-1 rounded bg-amber-600 hover:bg-amber-700 text-white transition-colors"
               >
-                {t('workflow.architectureReview.requestChanges')}
+                {isSubmitting
+                  ? t('workflow.common.processing', { defaultValue: 'Processing...' })
+                  : t('workflow.architectureReview.requestChanges')}
               </button>
             )}
           </div>

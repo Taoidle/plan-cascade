@@ -21,6 +21,19 @@ export function ExplorationCard({ data }: { data: ExplorationCardData }) {
 
   if (!hasContent && !data.llmSummary) return null;
 
+  const summaryBadgeClass =
+    data.summaryQuality === 'complete'
+      ? 'bg-green-200 dark:bg-green-800 text-green-700 dark:text-green-300'
+      : data.summaryQuality === 'partial'
+        ? 'bg-amber-200 dark:bg-amber-800 text-amber-700 dark:text-amber-300'
+        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300';
+  const summaryBadgeLabel =
+    data.summaryQuality === 'complete'
+      ? t('workflow.exploration.summaryComplete', { defaultValue: 'Complete' })
+      : data.summaryQuality === 'partial'
+        ? t('workflow.exploration.summaryPartial', { defaultValue: 'Partial' })
+        : t('workflow.exploration.summaryEmpty', { defaultValue: 'No AI summary' });
+
   return (
     <div className="rounded-lg border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20 overflow-hidden">
       {/* Header */}
@@ -152,14 +165,35 @@ export function ExplorationCard({ data }: { data: ExplorationCardData }) {
             )}
 
             {/* LLM Summary */}
-            {data.llmSummary && (
+            {(data.llmSummary || data.summaryQuality !== 'complete') && (
               <div>
-                <span className="text-2xs font-medium text-violet-600 dark:text-violet-400">
-                  {t('workflow.exploration.llmSummary')}
-                </span>
-                <div className="mt-0.5 text-2xs text-violet-700/80 dark:text-violet-300/80 whitespace-pre-wrap">
-                  {data.llmSummary}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-2xs font-medium text-violet-600 dark:text-violet-400">
+                    {t('workflow.exploration.llmSummary')}
+                  </span>
+                  <span className={clsx('text-2xs px-1.5 py-0.5 rounded', summaryBadgeClass)}>{summaryBadgeLabel}</span>
                 </div>
+                {data.llmSummary ? (
+                  <div className="mt-0.5 text-2xs text-violet-700/80 dark:text-violet-300/80 whitespace-pre-wrap">
+                    {data.llmSummary}
+                  </div>
+                ) : (
+                  <div className="mt-0.5 text-2xs text-violet-600/80 dark:text-violet-300/80">
+                    {t('workflow.exploration.summaryUnavailable', {
+                      defaultValue: 'AI summary unavailable, using deterministic exploration results.',
+                    })}
+                  </div>
+                )}
+                {data.summaryNotes && (
+                  <div className="mt-0.5 text-2xs text-violet-500/80 dark:text-violet-400/80">{data.summaryNotes}</div>
+                )}
+                {!data.llmSummary && data.summarySource === 'fallback_synthesized' && (
+                  <div className="mt-0.5 text-2xs text-violet-500/80 dark:text-violet-400/80">
+                    {t('workflow.exploration.summarySynthesized', {
+                      defaultValue: 'Summary synthesized from deterministic exploration data.',
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </div>
