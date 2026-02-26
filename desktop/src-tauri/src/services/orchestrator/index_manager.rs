@@ -288,31 +288,33 @@ impl IndexManager {
         let statuses_for_cb = statuses.clone();
         let app_for_cb = app_handle_opt.clone();
         let progress_cb: IndexProgressCallback = Arc::new(move |done, total| {
-            // Preserve existing lsp_enrichment so indexing events don't
-            // overwrite an in-progress or completed enrichment status.
-            let prev_lsp = statuses_for_cb
-                .try_read()
-                .ok()
-                .and_then(|map| map.get(&pp_for_cb).map(|e| e.lsp_enrichment.clone()))
-                .unwrap_or_else(|| "none".to_string());
-            let event = IndexStatusEvent {
-                project_path: pp_for_cb.clone(),
-                status: "indexing".to_string(),
-                indexed_files: done,
-                total_files: total,
-                error_message: None,
-                total_symbols: 0,
-                embedding_chunks: 0,
-                embedding_provider_name: None,
-                lsp_enrichment: prev_lsp,
-            };
-            // Update statuses map (blocking write is fine in the sync callback
-            // because contention is low and the lock is only briefly held).
-            if let Ok(mut map) = statuses_for_cb.try_write() {
+            // Atomic read-modify-write under a single write lock to prevent
+            // TOCTOU races with set_lsp_enrichment_status.
+            let event_to_emit = if let Ok(mut map) = statuses_for_cb.try_write() {
+                let prev_lsp = map
+                    .get(&pp_for_cb)
+                    .map(|e| e.lsp_enrichment.clone())
+                    .unwrap_or_else(|| "none".to_string());
+                let event = IndexStatusEvent {
+                    project_path: pp_for_cb.clone(),
+                    status: "indexing".to_string(),
+                    indexed_files: done,
+                    total_files: total,
+                    error_message: None,
+                    total_symbols: 0,
+                    embedding_chunks: 0,
+                    embedding_provider_name: None,
+                    lsp_enrichment: prev_lsp,
+                };
                 map.insert(pp_for_cb.clone(), event.clone());
-            }
-            if let Some(ref app) = app_for_cb {
-                let _ = app.emit(INDEX_PROGRESS_EVENT, &event);
+                Some(event)
+            } else {
+                None
+            };
+            if let Some(event) = event_to_emit {
+                if let Some(ref app) = app_for_cb {
+                    let _ = app.emit(INDEX_PROGRESS_EVENT, &event);
+                }
             }
         });
 
@@ -363,27 +365,33 @@ impl IndexManager {
             let provider_name_for_batch = provider_display_name.clone();
             let batch_cb: BatchCompleteCallback = Arc::new(move || {
                 if let Ok(summary) = store_for_batch.get_project_summary(&pp_for_batch) {
-                    let prev_lsp = statuses_for_batch
-                        .try_read()
-                        .ok()
-                        .and_then(|map| map.get(&pp_for_batch).map(|e| e.lsp_enrichment.clone()))
-                        .unwrap_or_else(|| "none".to_string());
-                    let event = IndexStatusEvent {
-                        project_path: pp_for_batch.clone(),
-                        status: "indexed".to_string(),
-                        indexed_files: summary.total_files,
-                        total_files: summary.total_files,
-                        error_message: None,
-                        total_symbols: summary.total_symbols,
-                        embedding_chunks: summary.embedding_chunks,
-                        embedding_provider_name: Some(provider_name_for_batch.clone()),
-                        lsp_enrichment: prev_lsp,
-                    };
-                    if let Ok(mut map) = statuses_for_batch.try_write() {
+                    // Atomic read-modify-write under a single write lock to prevent
+                    // TOCTOU races with set_lsp_enrichment_status.
+                    let event_to_emit = if let Ok(mut map) = statuses_for_batch.try_write() {
+                        let prev_lsp = map
+                            .get(&pp_for_batch)
+                            .map(|e| e.lsp_enrichment.clone())
+                            .unwrap_or_else(|| "none".to_string());
+                        let event = IndexStatusEvent {
+                            project_path: pp_for_batch.clone(),
+                            status: "indexed".to_string(),
+                            indexed_files: summary.total_files,
+                            total_files: summary.total_files,
+                            error_message: None,
+                            total_symbols: summary.total_symbols,
+                            embedding_chunks: summary.embedding_chunks,
+                            embedding_provider_name: Some(provider_name_for_batch.clone()),
+                            lsp_enrichment: prev_lsp,
+                        };
                         map.insert(pp_for_batch.clone(), event.clone());
-                    }
-                    if let Some(ref app) = app_for_batch {
-                        let _ = app.emit(INDEX_PROGRESS_EVENT, &event);
+                        Some(event)
+                    } else {
+                        None
+                    };
+                    if let Some(event) = event_to_emit {
+                        if let Some(ref app) = app_for_batch {
+                            let _ = app.emit(INDEX_PROGRESS_EVENT, &event);
+                        }
                     }
                 }
             });
@@ -401,15 +409,8 @@ impl IndexManager {
             let result = join.await;
 
             // Determine final status.
-            // Preserve lsp_enrichment from cached status so indexing completion
-            // does not overwrite an in-progress or completed enrichment state.
-            let prev_lsp = statuses_for_task
-                .read()
-                .await
-                .get(&pp_for_task)
-                .map(|e| e.lsp_enrichment.clone())
-                .unwrap_or_else(|| "none".to_string());
-
+            // Build the event data first, then atomically read prev_lsp +
+            // insert under a single write lock to prevent TOCTOU races.
             let final_event = match result {
                 Ok(embedding_stats) => {
                     let summary = index_store
@@ -449,7 +450,14 @@ impl IndexManager {
                         ("indexed".to_string(), err)
                     };
 
-                    IndexStatusEvent {
+                    // Atomic read-modify-write: read prev_lsp and insert
+                    // under the same write lock.
+                    let mut map = statuses_for_task.write().await;
+                    let prev_lsp = map
+                        .get(&pp_for_task)
+                        .map(|e| e.lsp_enrichment.clone())
+                        .unwrap_or_else(|| "none".to_string());
+                    let event = IndexStatusEvent {
                         project_path: pp_for_task.clone(),
                         status,
                         indexed_files: summary.total_files,
@@ -458,26 +466,31 @@ impl IndexManager {
                         total_symbols: summary.total_symbols,
                         embedding_chunks: summary.embedding_chunks,
                         embedding_provider_name: Some(provider_display_name.clone()),
-                        lsp_enrichment: prev_lsp.clone(),
-                    }
+                        lsp_enrichment: prev_lsp,
+                    };
+                    map.insert(pp_for_task.clone(), event.clone());
+                    drop(map);
+                    event
                 }
-                Err(_) => IndexStatusEvent {
-                    project_path: pp_for_task.clone(),
-                    status: "error".to_string(),
-                    indexed_files: 0,
-                    total_files: 0,
-                    error_message: Some("Background indexer task failed".to_string()),
-                    total_symbols: 0,
-                    embedding_chunks: 0,
-                    embedding_provider_name: None,
-                    lsp_enrichment: "none".to_string(),
-                },
+                Err(_) => {
+                    let mut map = statuses_for_task.write().await;
+                    let event = IndexStatusEvent {
+                        project_path: pp_for_task.clone(),
+                        status: "error".to_string(),
+                        indexed_files: 0,
+                        total_files: 0,
+                        error_message: Some("Background indexer task failed".to_string()),
+                        total_symbols: 0,
+                        embedding_chunks: 0,
+                        embedding_provider_name: None,
+                        lsp_enrichment: "none".to_string(),
+                    };
+                    map.insert(pp_for_task.clone(), event.clone());
+                    drop(map);
+                    event
+                }
             };
 
-            {
-                let mut map = statuses_for_task.write().await;
-                map.insert(pp_for_task.clone(), final_event.clone());
-            }
             if let Some(ref app) = app_for_task {
                 let _ = app.emit(INDEX_PROGRESS_EVENT, &final_event);
             }
@@ -588,10 +601,30 @@ impl IndexManager {
     ///
     /// Called by the `trigger_lsp_enrichment` command to keep the frontend
     /// status badge in sync with the enrichment lifecycle.
+    ///
+    /// Uses atomic in-place update under a single write lock to prevent
+    /// TOCTOU races with batch callbacks that also read+write the status map.
     pub async fn set_lsp_enrichment_status(&self, project_path: &str, state: &str) {
-        let mut event = self.get_status(project_path).await;
-        event.lsp_enrichment = state.to_string();
-        self.set_status_and_emit(project_path, event).await;
+        let event = {
+            let mut map = self.statuses.write().await;
+            if let Some(entry) = map.get_mut(project_path) {
+                entry.lsp_enrichment = state.to_string();
+                entry.clone()
+            } else {
+                // No cached status yet (rare — called before ensure_indexed).
+                // Build from DB outside the lock, then re-acquire to insert.
+                drop(map);
+                let mut event = self.get_status(project_path).await;
+                event.lsp_enrichment = state.to_string();
+                let mut map = self.statuses.write().await;
+                map.insert(project_path.to_string(), event.clone());
+                event
+            }
+        };
+        let app_guard = self.app_handle.read().await;
+        if let Some(ref app) = *app_guard {
+            let _ = app.emit(INDEX_PROGRESS_EVENT, &event);
+        }
     }
 
     /// Push a file-change notification to the running indexer for a project.
@@ -789,27 +822,33 @@ impl IndexManager {
         };
         let batch_cb: BatchCompleteCallback = Arc::new(move || {
             if let Ok(summary) = store_for_batch.get_project_summary(&pp_for_batch) {
-                let prev_lsp = statuses_for_batch
-                    .try_read()
-                    .ok()
-                    .and_then(|map| map.get(&pp_for_batch).map(|e| e.lsp_enrichment.clone()))
-                    .unwrap_or_else(|| "none".to_string());
-                let event = IndexStatusEvent {
-                    project_path: pp_for_batch.clone(),
-                    status: "indexed".to_string(),
-                    indexed_files: summary.total_files,
-                    total_files: summary.total_files,
-                    error_message: None,
-                    total_symbols: summary.total_symbols,
-                    embedding_chunks: summary.embedding_chunks,
-                    embedding_provider_name: Some(provider_name_for_batch.clone()),
-                    lsp_enrichment: prev_lsp,
-                };
-                if let Ok(mut map) = statuses_for_batch.try_write() {
+                // Atomic read-modify-write under a single write lock to prevent
+                // TOCTOU races with set_lsp_enrichment_status.
+                let event_to_emit = if let Ok(mut map) = statuses_for_batch.try_write() {
+                    let prev_lsp = map
+                        .get(&pp_for_batch)
+                        .map(|e| e.lsp_enrichment.clone())
+                        .unwrap_or_else(|| "none".to_string());
+                    let event = IndexStatusEvent {
+                        project_path: pp_for_batch.clone(),
+                        status: "indexed".to_string(),
+                        indexed_files: summary.total_files,
+                        total_files: summary.total_files,
+                        error_message: None,
+                        total_symbols: summary.total_symbols,
+                        embedding_chunks: summary.embedding_chunks,
+                        embedding_provider_name: Some(provider_name_for_batch.clone()),
+                        lsp_enrichment: prev_lsp,
+                    };
                     map.insert(pp_for_batch.clone(), event.clone());
-                }
-                if let Some(ref app) = app_for_batch {
-                    let _ = app.emit(INDEX_PROGRESS_EVENT, &event);
+                    Some(event)
+                } else {
+                    None
+                };
+                if let Some(event) = event_to_emit {
+                    if let Some(ref app) = app_for_batch {
+                        let _ = app.emit(INDEX_PROGRESS_EVENT, &event);
+                    }
                 }
             }
         });
