@@ -42,7 +42,7 @@ try:
 except ImportError:
     HAS_TYPER = False
 
-from .. import __version__
+from .. import __version__, _SETTINGS_AVAILABLE
 from .context import CLIContext
 from .output import OutputManager
 
@@ -3692,8 +3692,91 @@ else:
     app = None
 
 
+def _ensure_correct_env():
+    """Ensure we are running in plan-cascade's own project environment.
+
+    When invoked from a different directory (e.g. user project), ``uv``
+    resolves dependencies from that project's venv which may not include
+    plan-cascade's deps (keyring, etc.).  Rather than waiting for an
+    ImportError, we **always** check whether the current Python
+    interpreter lives inside plan-cascade's own venv.  If not, re-exec
+    with ``uv run --project <plan-cascade-root> plan-cascade ...``.
+    """
+    import os
+    import shutil
+    import subprocess
+
+    # Avoid infinite re-exec loop
+    if os.environ.get("_PLAN_CASCADE_REEXEC"):
+        return
+
+    # main.py → src/plan_cascade/cli/main.py → project root is 4 levels up
+    project_root = Path(__file__).resolve().parent.parent.parent.parent
+    pyproject = project_root / "pyproject.toml"
+
+    if not pyproject.exists() or not shutil.which("uv"):
+        return  # Cannot re-exec; continue with current environment
+
+    # Validate this is actually plan-cascade's pyproject.toml, not a random
+    # ancestor (important when installed via pip into site-packages).
+    try:
+        if 'name = "plan-cascade"' not in pyproject.read_text():
+            return
+    except OSError:
+        return
+
+    # Check whether the current interpreter is inside our project venv.
+    # If it is, we are already in the correct environment.
+    # NOTE: Do NOT resolve() the interpreter path — it may be a symlink
+    # (e.g. .venv/bin/python3 → /usr/bin/python3.13) and resolving would
+    # point outside the venv.
+    venv_dir = project_root / ".venv"
+    interpreter = Path(sys.executable)
+    try:
+        interpreter.relative_to(venv_dir)
+        return  # Already in the correct venv – nothing to do
+    except ValueError:
+        pass  # Not in our venv – need to re-exec
+
+    # Filter out any existing --project from user args to prevent override
+    user_args = []
+    skip_next = False
+    for arg in sys.argv[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--project":
+            skip_next = True
+            continue
+        if arg.startswith("--project="):
+            continue
+        user_args.append(arg)
+
+    cmd = ["uv", "run", "--project", str(project_root), "plan-cascade"] + user_args
+    # Pass full environment — intentional: the subprocess IS the same CLI,
+    # just in the correct venv.
+    env = {**os.environ, "_PLAN_CASCADE_REEXEC": "1"}
+    try:
+        sys.exit(subprocess.call(cmd, env=env))
+    except OSError as e:
+        print(f"Warning: Failed to re-exec with uv: {e}", file=sys.stderr)
+        # Fall through to continue with current environment
+
+
 def main():
     """CLI entry point."""
+    import os
+
+    _ensure_correct_env()
+    # Clean up re-exec guard so it doesn't leak to child processes
+    os.environ.pop("_PLAN_CASCADE_REEXEC", None)
+
+    if not _SETTINGS_AVAILABLE:
+        # If we get here, _ensure_correct_env either couldn't re-exec
+        # (no uv / no pyproject) or re-exec itself failed.
+        print("Error: Plan Cascade is missing required dependencies.", file=sys.stderr)
+        print("Install manually: pip install plan-cascade[all]", file=sys.stderr)
+        sys.exit(1)
     if HAS_TYPER:
         app()
     else:

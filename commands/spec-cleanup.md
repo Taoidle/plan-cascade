@@ -9,7 +9,7 @@ Remove spec interview state files.
 ## Run Cleanup (CLI)
 
 ```bash
-uv run plan-cascade spec cleanup --output-dir "<output-dir>" [--all]
+uv run --project "${CLAUDE_PLUGIN_ROOT}" plan-cascade spec cleanup --output-dir "<output-dir>" [--all]
 ```
 
 `--all` also deletes `spec.json` and `spec.md`.

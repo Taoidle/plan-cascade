@@ -9,6 +9,6 @@ Resume an in-progress spec interview in the current directory (or `--output-dir`
 ## Step 1: Run Resume (CLI)
 
 ```bash
-uv run plan-cascade spec resume --output-dir "<output-dir>" --flow <flow>
+uv run --project "${CLAUDE_PLUGIN_ROOT}" plan-cascade spec resume --output-dir "<output-dir>" --flow <flow>
 ```
 
