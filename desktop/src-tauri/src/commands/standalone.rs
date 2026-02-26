@@ -132,7 +132,7 @@ pub fn normalize_provider_name(provider: &str) -> Option<&'static str> {
     }
 }
 
-fn provider_type_from_name(provider: &str) -> Option<ProviderType> {
+pub(crate) fn provider_type_from_name(provider: &str) -> Option<ProviderType> {
     match provider {
         "anthropic" => Some(ProviderType::Anthropic),
         "openai" => Some(ProviderType::OpenAI),

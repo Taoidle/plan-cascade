@@ -1260,6 +1260,8 @@ mod tests {
             plugin_hooks,
             "test".to_string(),
             "/tmp/plugin".to_string(),
+            None,
+            None,
         );
 
         let ctx = test_hook_context();

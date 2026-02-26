@@ -26,7 +26,7 @@ use tokio::sync::RwLock;
 use crate::commands::proxy::resolve_provider_proxy;
 use crate::models::response::CommandResponse;
 use crate::services::remote::gateway::RemoteGatewayService;
-use crate::services::remote::session_bridge::SessionBridge;
+use crate::services::remote::session_bridge::{BridgeServices, SessionBridge};
 use crate::services::remote::types::{
     GatewayStatus, RemoteAuditEntry, RemoteGatewayConfig, RemoteSessionMapping,
     TelegramAdapterConfig, UpdateRemoteConfigRequest, UpdateTelegramConfigRequest,
@@ -148,8 +148,16 @@ pub async fn start_remote_gateway(
         Err(e) => return Ok(CommandResponse::err(e.to_string())),
     };
 
-    // Create session bridge
-    let bridge = Arc::new(SessionBridge::new(db.clone()));
+    // Create BridgeServices for real orchestrator creation
+    let services = BridgeServices {
+        keyring: Arc::new(KeyringService::new()),
+        orchestrators: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        allowed_paths: vec![],
+        rate_limit_interval_ms: 2000,
+    };
+
+    // Create session bridge with services
+    let bridge = Arc::new(SessionBridge::new_with_services(db.clone(), services));
 
     // Load existing mappings from DB
     if let Err(e) = bridge.load_mappings_from_db().await {
@@ -579,8 +587,16 @@ pub async fn try_auto_start_gateway(
         }
     };
 
-    // Create session bridge and load existing mappings
-    let bridge = Arc::new(SessionBridge::new(db.clone()));
+    // Create BridgeServices for real orchestrator creation
+    let services = BridgeServices {
+        keyring: Arc::new(KeyringService::new()),
+        orchestrators: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        allowed_paths: vec![],
+        rate_limit_interval_ms: 2000,
+    };
+
+    // Create session bridge with services and load existing mappings
+    let bridge = Arc::new(SessionBridge::new_with_services(db.clone(), services));
     if let Err(e) = bridge.load_mappings_from_db().await {
         tracing::warn!("Failed to load session mappings for auto-start: {}", e);
         // Continue anyway -- gateway can still function

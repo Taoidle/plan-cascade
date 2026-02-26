@@ -90,6 +90,7 @@ mod tests {
             text: "Hello world".to_string(),
             thinking: None,
             tool_summary: None,
+            already_sent: false,
         };
         let formatted = ResponseMapper::format_response(&response);
         assert_eq!(formatted, "Hello world");
@@ -101,6 +102,7 @@ mod tests {
             text: "Answer".to_string(),
             thinking: Some("Let me think about this...".to_string()),
             tool_summary: None,
+            already_sent: false,
         };
         let formatted = ResponseMapper::format_response(&response);
         assert!(formatted.contains("Answer"));
@@ -113,6 +115,7 @@ mod tests {
             text: "Result".to_string(),
             thinking: None,
             tool_summary: Some("[Grep]: found matches\n[Read]: read file".to_string()),
+            already_sent: false,
         };
         let formatted = ResponseMapper::format_response(&response);
         assert!(formatted.contains("Result"));
@@ -149,6 +152,7 @@ mod tests {
             created_at: "2026-02-18T14:30:00Z".to_string(),
             adapter_type_name: Some("Telegram".to_string()),
             username: Some("testuser".to_string()),
+            project_path: None,
         }];
         let formatted = ResponseMapper::format_session_list(&mappings);
         assert!(formatted.contains("123"));
@@ -165,6 +169,7 @@ mod tests {
             created_at: "2026-02-18T14:30:00Z".to_string(),
             adapter_type_name: None,
             username: None,
+            project_path: None,
         };
         let gateway = GatewayStatus {
             running: true,

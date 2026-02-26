@@ -1,8 +1,8 @@
 //! Telegram Adapter
 //!
-//! Telegram Bot adapter using teloxide for long-polling message reception.
-//! Implements the RemoteAdapter trait with proxy support, authorization checks,
-//! and message splitting for Telegram's 4096 character limit.
+//! Telegram Bot adapter using teloxide 0.17 for long-polling message reception.
+//! Implements the RemoteAdapter trait with proxy support (via `Bot::with_client`),
+//! authorization checks, and message splitting for Telegram's 4096 character limit.
 
 use super::RemoteAdapter;
 use crate::services::proxy::ProxyConfig;
@@ -23,11 +23,8 @@ pub struct TelegramAdapter {
 impl TelegramAdapter {
     /// Create a new Telegram adapter with proxy-aware HTTP client.
     ///
-    /// Note: teloxide uses its own reqwest 0.11 internally, which differs from
-    /// the project's reqwest 0.12. We use `Bot::new()` which creates its own
-    /// reqwest client. For proxy support, the proxy URL is set via the
-    /// `TELOXIDE_PROXY` environment variable before creating the bot, or we
-    /// configure it via teloxide's `net::default_reqwest_settings()` approach.
+    /// Since teloxide 0.17 uses reqwest 0.12 internally (matching the project's reqwest
+    /// version), we inject a custom reqwest::Client via `Bot::with_client()` for proxy support.
     pub fn new(
         config: TelegramAdapterConfig,
         proxy: Option<&ProxyConfig>,
@@ -37,16 +34,21 @@ impl TelegramAdapter {
             .as_ref()
             .ok_or_else(|| RemoteError::ConfigError("Bot token is required".to_string()))?;
 
-        // Configure proxy for teloxide's internal reqwest client via env var.
-        // teloxide reads HTTPS_PROXY/HTTP_PROXY when building its client.
-        if let Some(proxy_cfg) = proxy {
+        // Build a reqwest 0.12 client with optional proxy, then inject into teloxide Bot
+        let bot = if let Some(proxy_cfg) = proxy {
             let proxy_url = proxy_cfg.url_with_auth();
-            std::env::set_var("HTTPS_PROXY", &proxy_url);
-            std::env::set_var("HTTP_PROXY", &proxy_url);
-        }
-
-        // Create teloxide Bot (uses its own internal reqwest 0.11 client)
-        let bot = teloxide::Bot::new(bot_token);
+            let proxy = reqwest::Proxy::all(&proxy_url)
+                .map_err(|e| RemoteError::ConfigError(format!("Invalid proxy URL: {}", e)))?;
+            let client = reqwest::Client::builder()
+                .proxy(proxy)
+                .build()
+                .map_err(|e| {
+                    RemoteError::ConfigError(format!("Failed to build HTTP client: {}", e))
+                })?;
+            teloxide::Bot::with_client(bot_token, client)
+        } else {
+            teloxide::Bot::new(bot_token)
+        };
 
         Ok(Self {
             config,
@@ -188,6 +190,22 @@ impl RemoteAdapter for TelegramAdapter {
                 .map_err(|e| RemoteError::SendFailed(e.to_string()))?;
         }
         Ok(())
+    }
+
+    async fn send_message_returning_id(
+        &self,
+        chat_id: i64,
+        text: &str,
+    ) -> Result<i64, RemoteError> {
+        use teloxide::prelude::*;
+        use teloxide::types::ChatId;
+
+        let msg = self
+            .bot
+            .send_message(ChatId(chat_id), text)
+            .await
+            .map_err(|e| RemoteError::SendFailed(e.to_string()))?;
+        Ok(msg.id.0 as i64)
     }
 
     async fn edit_message(

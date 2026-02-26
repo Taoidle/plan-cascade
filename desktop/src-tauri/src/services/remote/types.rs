@@ -211,6 +211,9 @@ pub struct RemoteSessionMapping {
     /// Username of the remote user who created this session (e.g., "@testuser")
     #[serde(default)]
     pub username: Option<String>,
+    /// Project path associated with this session
+    #[serde(default)]
+    pub project_path: Option<String>,
 }
 
 /// Session type for remote-created sessions
@@ -253,6 +256,10 @@ pub struct RemoteResponse {
     pub text: String,
     pub thinking: Option<String>,
     pub tool_summary: Option<String>,
+    /// When true, the bridge has already sent the response via adapter (streaming modes).
+    /// The gateway should NOT send the response text again.
+    #[serde(default)]
+    pub already_sent: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +308,15 @@ pub enum RemoteError {
 
     #[error("Configuration error: {0}")]
     ConfigError(String),
+
+    #[error("Rate limited: {0}")]
+    RateLimited(String),
+
+    #[error("Path sandbox violation: {0}")]
+    PathSandboxViolation(String),
+
+    #[error("Session busy: {0}")]
+    SessionBusy(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -582,12 +598,17 @@ mod tests {
             created_at: "2026-02-18T14:30:00Z".to_string(),
             adapter_type_name: Some("Telegram".to_string()),
             username: Some("testuser".to_string()),
+            project_path: Some("/home/user/project".to_string()),
         };
         let json = serde_json::to_string(&mapping).unwrap();
         let parsed: RemoteSessionMapping = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.chat_id, 123456789);
         assert_eq!(parsed.user_id, 111222333);
         assert_eq!(parsed.local_session_id, Some("session-abc-123".to_string()));
+        assert_eq!(
+            parsed.project_path,
+            Some("/home/user/project".to_string())
+        );
     }
 
     #[test]
@@ -600,6 +621,7 @@ mod tests {
             created_at: "2026-02-18T14:30:00Z".to_string(),
             adapter_type_name: Some("Telegram".to_string()),
             username: Some("testuser".to_string()),
+            project_path: None,
         };
         let json = serde_json::to_string(&mapping).unwrap();
         assert!(json.contains("Telegram"));
@@ -611,7 +633,7 @@ mod tests {
 
     #[test]
     fn test_remote_session_mapping_backward_compat() {
-        // Old JSON without adapter_type_name and username should deserialize with None defaults
+        // Old JSON without adapter_type_name, username, and project_path should deserialize with None defaults
         let old_json = r#"{
             "chat_id": 123,
             "user_id": 456,
@@ -623,6 +645,7 @@ mod tests {
         assert_eq!(parsed.chat_id, 123);
         assert!(parsed.adapter_type_name.is_none());
         assert!(parsed.username.is_none());
+        assert!(parsed.project_path.is_none());
     }
 
     #[test]
@@ -631,11 +654,34 @@ mod tests {
             text: "Hello world".to_string(),
             thinking: Some("Let me think...".to_string()),
             tool_summary: Some("[Grep]: found 5 matches".to_string()),
+            already_sent: false,
         };
         let json = serde_json::to_string(&response).unwrap();
         let parsed: RemoteResponse = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.text, "Hello world");
         assert_eq!(parsed.thinking, Some("Let me think...".to_string()));
+        assert!(!parsed.already_sent);
+    }
+
+    #[test]
+    fn test_remote_response_already_sent() {
+        let response = RemoteResponse {
+            text: "Streamed".to_string(),
+            thinking: None,
+            tool_summary: None,
+            already_sent: true,
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        let parsed: RemoteResponse = serde_json::from_str(&json).unwrap();
+        assert!(parsed.already_sent);
+    }
+
+    #[test]
+    fn test_remote_response_backward_compat() {
+        // Old JSON without already_sent should default to false
+        let old_json = r#"{"text":"hi","thinking":null,"tool_summary":null}"#;
+        let parsed: RemoteResponse = serde_json::from_str(old_json).unwrap();
+        assert!(!parsed.already_sent);
     }
 
     #[test]
@@ -669,6 +715,9 @@ mod tests {
             RemoteError::ExecutionFailed("compilation error".to_string()),
             RemoteError::Unauthorized,
             RemoteError::ConfigError("missing bot token".to_string()),
+            RemoteError::RateLimited("too fast".to_string()),
+            RemoteError::PathSandboxViolation("/etc/passwd".to_string()),
+            RemoteError::SessionBusy("execution in progress".to_string()),
         ];
 
         // All errors should implement Display
@@ -689,6 +738,15 @@ mod tests {
         assert!(RemoteError::SessionNotFound("sess-123".to_string())
             .to_string()
             .contains("sess-123"));
+        assert!(RemoteError::RateLimited("too fast".to_string())
+            .to_string()
+            .contains("too fast"));
+        assert!(RemoteError::PathSandboxViolation("/etc".to_string())
+            .to_string()
+            .contains("/etc"));
+        assert!(RemoteError::SessionBusy("busy".to_string())
+            .to_string()
+            .contains("busy"));
     }
 
     #[test]

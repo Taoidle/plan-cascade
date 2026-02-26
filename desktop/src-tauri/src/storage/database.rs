@@ -849,6 +849,17 @@ impl Database {
             [],
         )?;
 
+        // Migration: add project_path column to remote_session_mappings
+        {
+            let has_column =
+                Self::table_has_column(&conn, "remote_session_mappings", "project_path");
+            if !has_column {
+                let _ = conn.execute_batch(
+                    "ALTER TABLE remote_session_mappings ADD COLUMN project_path TEXT;",
+                );
+            }
+        }
+
         // ====================================================================
         // A2A Remote Agents: registered remote agents for pipeline integration
         // ====================================================================

@@ -52,6 +52,19 @@ pub trait RemoteAdapter: Send + Sync {
     /// Send a typing indicator to show the bot is processing.
     async fn send_typing(&self, chat_id: i64) -> Result<(), RemoteError>;
 
+    /// Send a text response and return the platform message ID.
+    ///
+    /// Used by LiveEdit streaming mode to obtain the message ID for subsequent edits.
+    /// Default implementation delegates to `send_message()` and returns 0.
+    async fn send_message_returning_id(
+        &self,
+        chat_id: i64,
+        text: &str,
+    ) -> Result<i64, RemoteError> {
+        self.send_message(chat_id, text).await?;
+        Ok(0)
+    }
+
     /// Check adapter health/connectivity.
     ///
     /// For Telegram, this calls the getMe API to verify the bot token.

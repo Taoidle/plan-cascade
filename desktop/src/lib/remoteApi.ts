@@ -51,6 +51,7 @@ export interface RemoteSessionMapping {
   local_session_id: string | null;
   session_type: string;
   created_at: string;
+  project_path?: string | null;
 }
 
 export interface RemoteAuditEntry {

@@ -961,7 +961,7 @@ mod tests {
             let c = counter_clone.clone();
             Box::pin(async move {
                 c.fetch_add(1, Ordering::SeqCst);
-                Ok(())
+                Ok(AfterToolResult::default())
             })
         }));
 

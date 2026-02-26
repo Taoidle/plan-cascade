@@ -117,6 +117,7 @@ impl RemoteGatewayService {
         let cancel = self.cancel_token.clone();
         let require_password = telegram_config.require_password;
         let access_password = telegram_config.access_password.clone();
+        let streaming_mode = telegram_config.streaming_mode.clone();
         let authenticated_chats = self.authenticated_chats.clone();
         let webhook_service = self.webhook_service.clone();
 
@@ -132,6 +133,7 @@ impl RemoteGatewayService {
                             &db_ref,
                             require_password,
                             access_password.as_deref(),
+                            &streaming_mode,
                             &authenticated_chats,
                             webhook_service.as_ref(),
                         ).await;
@@ -161,6 +163,7 @@ impl RemoteGatewayService {
         db: &Database,
         require_password: bool,
         access_password: Option<&str>,
+        streaming_mode: &super::types::StreamingMode,
         authenticated_chats: &RwLock<HashSet<i64>>,
         webhook_service: Option<&Arc<WebhookService>>,
     ) {
@@ -239,6 +242,8 @@ impl RemoteGatewayService {
         // Track whether this is a task-producing command for webhook dispatch
         let mut should_dispatch_webhook = false;
         let mut webhook_event_type = WebhookEventType::TaskComplete;
+        // Track whether the bridge already sent the response via adapter (streaming modes)
+        let mut already_sent_by_bridge = false;
 
         // Process command through SessionBridge
         let response = match command {
@@ -264,11 +269,20 @@ impl RemoteGatewayService {
                 }
             }
             RemoteCommand::SendMessage { content } => {
-                match bridge.send_message(msg.chat_id, &content).await {
+                // Pass adapter ref for streaming modes that send directly
+                let adapter_ref: &dyn super::adapters::RemoteAdapter = &**adapter;
+                match bridge
+                    .send_message(msg.chat_id, &content, streaming_mode, Some(adapter_ref))
+                    .await
+                {
                     Ok(resp) => {
                         // Task completed via remote command -- dispatch webhook
                         should_dispatch_webhook = true;
                         webhook_event_type = WebhookEventType::TaskComplete;
+                        if resp.already_sent {
+                            // Bridge already sent the response via adapter (streaming modes)
+                            already_sent_by_bridge = true;
+                        }
                         ResponseMapper::format_response(&resp)
                     }
                     Err(RemoteError::NoActiveSession) => {
@@ -301,14 +315,16 @@ impl RemoteGatewayService {
             RemoteCommand::Help => HELP_TEXT.to_string(),
         };
 
-        // Send response
+        // Send response (skip if bridge already sent via streaming mode)
         let result_status = if response.contains("Error:") {
             "error"
         } else {
             "success"
         };
 
-        let _ = adapter.send_message(msg.chat_id, &response).await;
+        if !already_sent_by_bridge {
+            let _ = adapter.send_message(msg.chat_id, &response).await;
+        }
 
         // Write audit log
         Self::write_audit_log(db, msg, command_type, result_status, None);

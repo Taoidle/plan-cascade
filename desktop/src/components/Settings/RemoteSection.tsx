@@ -10,6 +10,7 @@ import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { CheckCircledIcon, CrossCircledIcon, TrashIcon, PlusIcon } from '@radix-ui/react-icons';
 import { useRemoteStore } from '../../store/remote';
+import type { UpdateTelegramConfigRequest } from '../../lib/remoteApi';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -106,7 +107,7 @@ export function RemoteSection() {
   }, [enabled, autoStart, saveConfig, t]);
 
   const handleSaveTelegramConfig = useCallback(async () => {
-    const request: Record<string, unknown> = {
+    const request: UpdateTelegramConfigRequest = {
       allowed_chat_ids: chatIds,
       allowed_user_ids: userIds,
       require_password: requirePassword,
@@ -117,7 +118,7 @@ export function RemoteSection() {
     if (accessPassword && accessPassword !== '***') {
       request.access_password = accessPassword;
     }
-    const success = await saveTelegramConfig(request as any);
+    const success = await saveTelegramConfig(request);
     if (success) {
       setBotToken('');
       setAccessPassword('');
@@ -505,6 +506,7 @@ export function RemoteSection() {
                   <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Chat {session.chat_id}</div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">
                     Session: {session.local_session_id ?? 'N/A'} | Type: {session.session_type}
+                    {session.project_path && <span className="ml-1">| Path: {session.project_path}</span>}
                   </div>
                 </div>
                 <button

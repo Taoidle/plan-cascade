@@ -154,7 +154,7 @@ lsp-types = "0.97"
 dashmap = "6"
 
 # Remote control - Telegram bot
-teloxide = { version = "0.13", features = ["macros"] }
+teloxide = { version = "0.17", features = ["macros"] }
 
 # Tree-sitter parsing for accurate symbol extraction
 tree-sitter = "0.24"
