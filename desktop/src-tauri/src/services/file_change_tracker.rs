@@ -11,6 +11,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter};
 
+use crate::utils::paths::plan_cascade_dir;
+
 /// Maximum file size to store in CAS (10 MB).
 const MAX_CAS_FILE_SIZE: usize = 10 * 1024 * 1024;
 
@@ -65,6 +67,10 @@ struct FileChangeEvent {
 pub struct FileChangeTracker {
     session_id: String,
     project_root: PathBuf,
+    /// Root directory for CAS blobs and change records.
+    /// Stored under the app data directory (`~/.plan-cascade/file-changes/<project-hash>/`),
+    /// NOT inside the user's project directory.
+    data_dir: PathBuf,
     cas_dir: PathBuf,
     changes: Vec<FileChange>,
     current_turn_index: u32,
@@ -72,21 +78,81 @@ pub struct FileChangeTracker {
     app_handle: Option<AppHandle>,
 }
 
+/// Compute a short (8-char) hex hash of a project path for use as a directory name.
+fn project_path_hash(project_root: &Path) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(project_root.to_string_lossy().as_bytes());
+    let hash = format!("{:x}", hasher.finalize());
+    hash[..8].to_string()
+}
+
+/// Resolve the data directory for file change tracking.
+///
+/// Uses `~/.plan-cascade/file-changes/<project-hash>/` to keep data out of the
+/// user's project directory. Falls back to `<project-root>/.plan-cascade/` only
+/// if the home directory cannot be determined (should never happen in practice).
+fn resolve_data_dir(project_root: &Path) -> PathBuf {
+    let hash = project_path_hash(project_root);
+    match plan_cascade_dir() {
+        Ok(base) => base.join("file-changes").join(hash),
+        Err(_) => {
+            // Fallback: store in project root (legacy behavior)
+            eprintln!(
+                "[FileChangeTracker] WARNING: Could not resolve ~/.plan-cascade, \
+                 falling back to project-local storage"
+            );
+            project_root.join(".plan-cascade")
+        }
+    }
+}
+
 impl FileChangeTracker {
     /// Create a new tracker for a session.
+    ///
+    /// Data (CAS blobs, change records) is stored under
+    /// `~/.plan-cascade/file-changes/<project-hash>/`, keeping the user's
+    /// project directory clean.
     pub fn new(session_id: impl Into<String>, project_root: impl Into<PathBuf>) -> Self {
         let root: PathBuf = project_root.into();
-        let cas_dir = root.join(".plan-cascade").join("cas");
+        let data_dir = resolve_data_dir(&root);
+        let cas_dir = data_dir.join("cas");
         let sid = session_id.into();
         let mut tracker = Self {
             session_id: sid.clone(),
             project_root: root,
+            data_dir,
             cas_dir,
             changes: Vec::new(),
             current_turn_index: 0,
             app_handle: None,
         };
         // Attempt to load persisted changes
+        tracker.load_silent();
+        tracker
+    }
+
+    /// Create a new tracker with an explicit data directory.
+    ///
+    /// Used primarily by tests that need to control storage location.
+    #[cfg(test)]
+    pub fn new_with_data_dir(
+        session_id: impl Into<String>,
+        project_root: impl Into<PathBuf>,
+        data_dir: impl Into<PathBuf>,
+    ) -> Self {
+        let root: PathBuf = project_root.into();
+        let dd: PathBuf = data_dir.into();
+        let cas_dir = dd.join("cas");
+        let sid = session_id.into();
+        let mut tracker = Self {
+            session_id: sid.clone(),
+            project_root: root,
+            data_dir: dd,
+            cas_dir,
+            changes: Vec::new(),
+            current_turn_index: 0,
+            app_handle: None,
+        };
         tracker.load_silent();
         tracker
     }
@@ -334,8 +400,7 @@ impl FileChangeTracker {
     // ── Persistence ─────────────────────────────────────────────────────
 
     fn changes_file_path(&self) -> PathBuf {
-        self.project_root
-            .join(".plan-cascade")
+        self.data_dir
             .join("changes")
             .join(format!("{}.json", self.session_id))
     }
@@ -438,7 +503,9 @@ mod tests {
     use tempfile::TempDir;
 
     fn make_tracker(dir: &Path) -> FileChangeTracker {
-        FileChangeTracker::new("test-session", dir)
+        // Use the project dir as both project root and data dir in tests
+        // to keep everything inside the temp directory.
+        FileChangeTracker::new_with_data_dir("test-session", dir, dir)
     }
 
     #[test]
