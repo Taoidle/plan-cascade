@@ -1907,7 +1907,26 @@ Otherwise, respond with ONLY the JSON object. No formatting, no preamble, no mar
             trimmed
         };
 
-        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_candidate) {
+        // Try full-text JSON parse first, then try extracting embedded JSON object
+        let parsed_json = serde_json::from_str::<serde_json::Value>(json_candidate)
+            .ok()
+            .or_else(|| {
+                // LLM may return preamble text before the JSON object, e.g.:
+                //   "Let me ask you a question:\n{ \"question\": \"...\", ... }"
+                // Find the first '{' and last '}' and try parsing that substring.
+                let first_brace = json_candidate.find('{')?;
+                let last_brace = json_candidate.rfind('}')?;
+                if first_brace < last_brace {
+                    let substr = &json_candidate[first_brace..=last_brace];
+                    serde_json::from_str::<serde_json::Value>(substr)
+                        .ok()
+                        .filter(|v| v.get("question").is_some())
+                } else {
+                    None
+                }
+            });
+
+        if let Some(parsed) = parsed_json {
             let question_text = parsed
                 .get("question")
                 .and_then(|v| v.as_str())
