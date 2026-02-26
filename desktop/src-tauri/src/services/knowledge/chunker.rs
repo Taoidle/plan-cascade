@@ -14,6 +14,7 @@
 //! ```
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -376,14 +377,21 @@ impl Chunker for TokenChunker {
             return Ok(Vec::new());
         }
 
-        // Tokenize by whitespace, preserving positions
-        let tokens: Vec<(usize, &str)> = content
-            .split_whitespace()
-            .map(|word| {
-                let offset = word.as_ptr() as usize - content.as_ptr() as usize;
-                (offset, word)
-            })
-            .collect();
+        // Tokenize by whitespace, preserving byte offsets.
+        // Uses explicit offset tracking via `find()` instead of pointer
+        // arithmetic, which is safe for multi-byte (e.g. CJK) content.
+        let tokens: Vec<(usize, &str)> = {
+            let mut result = Vec::new();
+            let mut byte_offset = 0;
+            for segment in content.split_whitespace() {
+                if let Some(pos) = content[byte_offset..].find(segment) {
+                    let abs_pos = pos + byte_offset;
+                    result.push((abs_pos, segment));
+                    byte_offset = abs_pos + segment.len();
+                }
+            }
+            result
+        };
 
         if tokens.is_empty() {
             return Ok(Vec::new());
@@ -442,6 +450,10 @@ pub struct SemanticChunker {
     threshold: f32,
     min_sentences: usize,
     embedding_service: Option<Arc<EmbeddingService>>,
+    /// Whether `build_vocabulary` has already been called on the
+    /// EmbeddingService. Only builds on first invocation so that
+    /// the vocabulary remains stable across multiple documents.
+    vocabulary_built: AtomicBool,
 }
 
 impl SemanticChunker {
@@ -451,6 +463,7 @@ impl SemanticChunker {
             threshold: threshold.clamp(0.0, 1.0),
             min_sentences: min_sentences.max(1),
             embedding_service: None,
+            vocabulary_built: AtomicBool::new(false),
         }
     }
 
@@ -464,6 +477,7 @@ impl SemanticChunker {
             threshold: threshold.clamp(0.0, 1.0),
             min_sentences: min_sentences.max(1),
             embedding_service: Some(service),
+            vocabulary_built: AtomicBool::new(false),
         }
     }
 
@@ -475,8 +489,11 @@ impl SemanticChunker {
     fn compute_embeddings(&self, sentences: &[(usize, &str)]) -> Vec<Vec<f32>> {
         if let Some(service) = &self.embedding_service {
             let texts: Vec<&str> = sentences.iter().map(|(_, s)| *s).collect();
-            // Build vocabulary from this document's sentences, then embed
-            service.build_vocabulary(&texts);
+            // Only build vocabulary on first invocation to keep it stable
+            // across multiple documents processed by the same chunker.
+            if !self.vocabulary_built.swap(true, Ordering::Relaxed) {
+                service.build_vocabulary(&texts);
+            }
             texts.iter().map(|s| service.embed_text(s)).collect()
         } else {
             sentences
@@ -846,6 +863,20 @@ mod tests {
         assert_eq!(chunks[0].char_offset, 0);
         // Second chunk starts at "bar" which is at some offset
         assert!(chunks[1].char_offset > 0);
+    }
+
+    #[test]
+    fn token_chunker_cjk_offsets() {
+        let chunker = TokenChunker::new(2, 0);
+        // CJK characters are multi-byte in UTF-8
+        let doc = Document::new("d1", "你好 世界 测试 数据");
+        let chunks = chunker.chunk(&doc).unwrap();
+        assert!(chunks.len() >= 2, "Should produce at least 2 chunks");
+        // First chunk at offset 0
+        assert_eq!(chunks[0].char_offset, 0);
+        // Second chunk at the correct byte offset (after "你好 世界 ")
+        // "你好" = 6 bytes, " " = 1 byte, "世界" = 6 bytes, " " = 1 byte = 14
+        assert_eq!(chunks[1].char_offset, 14);
     }
 
     // ======================================================================

@@ -127,18 +127,49 @@ Respond with ONLY a JSON array of numbers, one per chunk:
     }
 
     /// Parse the LLM response into a vector of scores.
+    ///
+    /// Hardened against malformed responses: validates `end > start`,
+    /// logs parse failures, and clamps scores to `[0.0, 1.0]`.
     fn parse_scores(response: &str, expected_count: usize) -> Option<Vec<f32>> {
         // Find the JSON array in the response
         let start = response.find('[')?;
         let end = response.rfind(']')?;
-        let json_str = &response[start..=end];
-        let scores: Vec<f32> = serde_json::from_str(json_str).ok()?;
 
-        if scores.len() == expected_count {
-            Some(scores)
-        } else {
-            None
+        // Guard against malformed response where ']' comes before '['
+        if end <= start {
+            tracing::warn!(
+                "Reranker parse_scores: end ({}) <= start ({}), malformed response",
+                end,
+                start
+            );
+            return None;
         }
+
+        let json_str = &response[start..=end];
+        let scores: Vec<f32> = match serde_json::from_str(json_str) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(
+                    "Reranker parse_scores: JSON parse failed: {}. Input: {:?}",
+                    e,
+                    &json_str[..json_str.len().min(200)]
+                );
+                return None;
+            }
+        };
+
+        if scores.len() != expected_count {
+            tracing::warn!(
+                "Reranker parse_scores: expected {} scores, got {}",
+                expected_count,
+                scores.len()
+            );
+            return None;
+        }
+
+        // Clamp all scores to [0.0, 1.0]
+        let clamped: Vec<f32> = scores.into_iter().map(|s| s.clamp(0.0, 1.0)).collect();
+        Some(clamped)
     }
 
     /// Apply heuristic-based reranking (keyword overlap).
@@ -311,5 +342,43 @@ mod tests {
     fn score_relevance_empty_query() {
         let score = LlmReranker::score_relevance_heuristic("", "some text");
         assert_eq!(score, 0.0);
+    }
+
+    #[test]
+    fn parse_scores_clamps_range() {
+        // Scores outside [0.0, 1.0] should be clamped
+        let response = "[1.5, -0.3, 0.5]";
+        let scores = LlmReranker::parse_scores(response, 3).unwrap();
+        assert_eq!(scores.len(), 3);
+        assert!((scores[0] - 1.0).abs() < 0.001, "1.5 should clamp to 1.0");
+        assert!((scores[1] - 0.0).abs() < 0.001, "-0.3 should clamp to 0.0");
+        assert!((scores[2] - 0.5).abs() < 0.001, "0.5 should stay as 0.5");
+    }
+
+    #[test]
+    fn parse_scores_malformed_returns_none() {
+        // No JSON array at all
+        assert!(LlmReranker::parse_scores("no json here", 2).is_none());
+
+        // Empty brackets
+        assert!(LlmReranker::parse_scores("[]", 2).is_none());
+
+        // Wrong count
+        assert!(LlmReranker::parse_scores("[0.5]", 2).is_none());
+
+        // Malformed JSON inside brackets
+        assert!(LlmReranker::parse_scores("[abc, def]", 2).is_none());
+
+        // Bracket order reversed — ']' before '['
+        assert!(LlmReranker::parse_scores("] some text [", 1).is_none());
+    }
+
+    #[test]
+    fn parse_scores_extracts_from_preamble() {
+        // LLM may include preamble text before the JSON array
+        let response = "Here are the scores:\n[0.9, 0.1, 0.5]\nDone.";
+        let scores = LlmReranker::parse_scores(response, 3).unwrap();
+        assert_eq!(scores.len(), 3);
+        assert!((scores[0] - 0.9).abs() < 0.001);
     }
 }

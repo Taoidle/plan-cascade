@@ -5,9 +5,10 @@
  * Supports PDF, DOCX, XLSX, Markdown, and plain text files.
  */
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
+import { listen } from '@tauri-apps/api/event';
 import { useKnowledgeStore } from '../../store/knowledge';
 import type { DocumentInput } from '../../lib/knowledgeApi';
 
@@ -37,6 +38,19 @@ export function DocumentUploader({ projectId, collectionName }: DocumentUploader
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Listen for real-time ingest progress events from the backend
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<{ stage: string; progress: number; detail: string }>('knowledge:ingest-progress', (event) => {
+      useKnowledgeStore.setState({ uploadProgress: event.payload.progress });
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 
   const isAcceptedFile = (file: File): boolean => {
     const ext = '.' + file.name.split('.').pop()?.toLowerCase();
@@ -90,17 +104,41 @@ export function DocumentUploader({ projectId, collectionName }: DocumentUploader
     setUploadError(null);
 
     try {
+      // Binary file types that need base64 encoding
+      const BINARY_EXTENSIONS = ['pdf', 'docx', 'xlsx'];
+
       // Read files and convert to DocumentInput
       const documents: DocumentInput[] = await Promise.all(
         selectedFiles.map(async (file): Promise<DocumentInput> => {
-          const text = await file.text();
           const ext = file.name.split('.').pop()?.toLowerCase() ?? 'txt';
-          return {
-            id: `${file.name}-${Date.now()}`,
-            content: text,
-            source_path: file.name,
-            source_type: ext,
-          };
+          const isBinary = BINARY_EXTENSIONS.includes(ext);
+
+          if (isBinary) {
+            // Binary files: read as ArrayBuffer → base64
+            const buffer = await file.arrayBuffer();
+            const bytes = new Uint8Array(buffer);
+            let binary = '';
+            for (let i = 0; i < bytes.length; i++) {
+              binary += String.fromCharCode(bytes[i]);
+            }
+            const base64 = btoa(binary);
+            return {
+              id: `${file.name}-${Date.now()}`,
+              content: '',
+              content_base64: base64,
+              source_path: file.name,
+              source_type: ext,
+            };
+          } else {
+            // Text files: read as text
+            const text = await file.text();
+            return {
+              id: `${file.name}-${Date.now()}`,
+              content: text,
+              source_path: file.name,
+              source_type: ext,
+            };
+          }
         }),
       );
 

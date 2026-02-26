@@ -288,7 +288,8 @@ impl HnswIndex {
                 .file_dump(&index_dir, HNSW_BASENAME)
                 .map_err(|e| format!("HNSW file_dump failed: {}", e))?;
 
-            // Write metadata sidecar for dimension and stale ID tracking
+            // Write metadata sidecar atomically (temp-file + rename)
+            // to prevent corruption if the process crashes mid-write.
             let meta = HnswMetadata {
                 dimension,
                 vector_count,
@@ -296,8 +297,19 @@ impl HnswIndex {
             };
             if let Ok(json) = serde_json::to_string_pretty(&meta) {
                 let meta_path = index_dir.join(HNSW_META_FILENAME);
-                if let Err(e) = std::fs::write(&meta_path, json) {
-                    warn!(error = %e, "failed to write HNSW metadata sidecar");
+                let tmp_path = meta_path.with_extension("json.tmp");
+                match std::fs::write(&tmp_path, &json) {
+                    Ok(()) => {
+                        if let Err(e) = std::fs::rename(&tmp_path, &meta_path) {
+                            warn!(error = %e, "failed to rename HNSW metadata temp file");
+                            // Clean up temp file on rename failure
+                            let _ = std::fs::remove_file(&tmp_path);
+                        }
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "failed to write HNSW metadata temp file");
+                        let _ = std::fs::remove_file(&tmp_path);
+                    }
                 }
             }
 
@@ -407,17 +419,32 @@ impl HnswIndex {
 
         let query_vec = query.to_vec();
 
-        let result: Result<Vec<(usize, f32)>, _> = tokio::task::spawn_blocking(move || {
-            // Request extra results to compensate for stale ID filtering
-            let ef = EF_SEARCH.max(top_k * 2);
-            let request_k = top_k + stale_snapshot.len();
-            let neighbours = inner.hnsw.search(&query_vec, request_k, ef);
+        let total_count = self.count.load(Ordering::Relaxed);
 
-            let mut results: Vec<(usize, f32)> = neighbours
-                .into_iter()
-                .filter(|n| !stale_snapshot.contains(&n.d_id))
-                .map(|n| (n.d_id, n.distance))
-                .collect();
+        let result: Result<Vec<(usize, f32)>, _> = tokio::task::spawn_blocking(move || {
+            // Adaptive loop: start with a generous request_k, double if
+            // too many results are filtered by stale IDs.
+            let ef = EF_SEARCH.max(top_k * 2);
+            let mut request_k = (top_k * 3).min(total_count).max(top_k);
+            let mut results: Vec<(usize, f32)>;
+
+            loop {
+                let neighbours = inner.hnsw.search(&query_vec, request_k, ef);
+
+                results = neighbours
+                    .into_iter()
+                    .filter(|n| !stale_snapshot.contains(&n.d_id))
+                    .map(|n| (n.d_id, n.distance))
+                    .collect();
+
+                // If we have enough results or can't request more, stop
+                if results.len() >= top_k || request_k >= total_count {
+                    break;
+                }
+
+                // Double request_k and retry, capped at total_count
+                request_k = (request_k * 2).min(total_count);
+            }
 
             results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
             results.truncate(top_k);
@@ -1058,5 +1085,79 @@ mod tests {
             .expect("rebuild with empty should succeed");
         assert_eq!(idx.get_count().await, 0);
         assert!(idx.is_ready().await, "index should still be initialized");
+    }
+
+    // -----------------------------------------------------------------------
+    // save_to_disk metadata is atomic (no .tmp files linger)
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn save_to_disk_metadata_atomic() {
+        let dir = tempdir().expect("tempdir");
+        let index_dir = dir.path().join("hnsw_atomic_meta");
+        let dim = 16;
+
+        let idx = HnswIndex::new(&index_dir, dim);
+        idx.initialize().await;
+        for i in 0..3 {
+            idx.insert(i, &make_embedding(dim, i)).await;
+        }
+
+        idx.save_to_disk().await.expect("save should succeed");
+
+        // Verify metadata file exists
+        let meta_path = index_dir.join(super::HNSW_META_FILENAME);
+        assert!(meta_path.exists(), "metadata file should exist");
+
+        // Verify no .tmp files linger
+        let tmp_path = meta_path.with_extension("json.tmp");
+        assert!(
+            !tmp_path.exists(),
+            "temporary metadata file should not exist after save"
+        );
+
+        // Verify metadata is valid JSON with correct fields
+        let meta_json = std::fs::read_to_string(&meta_path).expect("read meta");
+        let meta: super::HnswMetadata =
+            serde_json::from_str(&meta_json).expect("parse meta");
+        assert_eq!(meta.dimension, dim);
+        assert_eq!(meta.vector_count, 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // search with many stale IDs still returns top_k (P1-4)
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn search_with_many_stale_ids_returns_top_k() {
+        let dir = tempdir().expect("tempdir");
+        let dim = 16;
+        let idx = HnswIndex::new(dir.path().join("hnsw_stale_adaptive"), dim);
+        idx.initialize().await;
+
+        // Insert 100 vectors
+        for i in 0..100 {
+            idx.insert(i, &make_embedding(dim, i)).await;
+        }
+
+        // Mark 80 as stale (IDs 0..80)
+        for i in 0..80 {
+            idx.mark_stale(i).await;
+        }
+
+        // Search for top_k=15 — should still return up to 15 results from the 20 non-stale
+        let query = make_embedding(dim, 85);
+        let results = idx.search(&query, 15).await;
+
+        assert!(
+            results.len() >= 15,
+            "Should return at least 15 results from 20 non-stale, got {}",
+            results.len()
+        );
+
+        // All returned IDs should be >= 80 (non-stale)
+        for (id, _) in &results {
+            assert!(*id >= 80, "Result ID {} should be >= 80 (non-stale)", id);
+        }
     }
 }

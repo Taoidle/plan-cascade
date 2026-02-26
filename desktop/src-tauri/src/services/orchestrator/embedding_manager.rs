@@ -81,19 +81,23 @@ fn default_cache_max_entries() -> usize {
 // Cache key
 // ---------------------------------------------------------------------------
 
-/// Cache key combining provider type, model name, and a SHA-256 text hash.
+/// Cache key combining provider type, model name, dimension, and a SHA-256
+/// text hash.
 ///
-/// Two embedding requests with identical (provider, model, text) produce the
-/// same cache key, avoiding redundant provider calls.
+/// Two embedding requests with identical (provider, model, dimension, text)
+/// produce the same cache key, avoiding redundant provider calls.
+/// Including `dimension` ensures that switching embedding dimensions (e.g.
+/// after a provider config change) does not serve stale cached vectors.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct CacheKey {
     provider: EmbeddingProviderType,
     model: String,
+    dimension: usize,
     text_hash: [u8; 32],
 }
 
 impl CacheKey {
-    fn new(provider: EmbeddingProviderType, model: &str, text: &str) -> Self {
+    fn new(provider: EmbeddingProviderType, model: &str, text: &str, dimension: usize) -> Self {
         let mut hasher = Sha256::new();
         hasher.update(text.as_bytes());
         let hash: [u8; 32] = hasher.finalize().into();
@@ -101,6 +105,7 @@ impl CacheKey {
         Self {
             provider,
             model: model.to_string(),
+            dimension,
             text_hash: hash,
         }
     }
@@ -444,6 +449,7 @@ impl EmbeddingManager {
     ) -> EmbeddingResult<Vec<Vec<f32>>> {
         let provider_type = provider.provider_type();
         let model = provider.display_name().to_string();
+        let expected_dim = provider.dimension();
 
         // Phase 1: Check cache for each document
         let mut results: Vec<Option<Vec<f32>>> = Vec::with_capacity(documents.len());
@@ -451,7 +457,7 @@ impl EmbeddingManager {
         let mut uncached_texts: Vec<&str> = Vec::new();
 
         for (i, &doc) in documents.iter().enumerate() {
-            if let Some(cached) = self.cache_get(provider_type, &model, doc) {
+            if let Some(cached) = self.cache_get(provider_type, &model, doc, expected_dim) {
                 results.push(Some(cached));
             } else {
                 results.push(None);
@@ -495,9 +501,10 @@ impl EmbeddingManager {
     ) -> EmbeddingResult<Vec<f32>> {
         let provider_type = provider.provider_type();
         let model = provider.display_name().to_string();
+        let expected_dim = provider.dimension();
 
         // Check cache
-        if let Some(cached) = self.cache_get(provider_type, &model, query) {
+        if let Some(cached) = self.cache_get(provider_type, &model, query, expected_dim) {
             return Ok(cached);
         }
 
@@ -511,15 +518,30 @@ impl EmbeddingManager {
     }
 
     /// Look up a cached embedding for the given (provider, model, text).
+    ///
+    /// Includes the expected dimension in the cache key to avoid serving
+    /// stale vectors after a provider dimension change. On cache hit,
+    /// verifies the cached vector length matches `expected_dimension`.
     fn cache_get(
         &self,
         provider: EmbeddingProviderType,
         model: &str,
         text: &str,
+        expected_dimension: usize,
     ) -> Option<Vec<f32>> {
         self.cache.as_ref().and_then(|c| {
-            let key = CacheKey::new(provider, model, text);
-            c.get(&key)
+            let key = CacheKey::new(provider, model, text, expected_dimension);
+            let cached = c.get(&key)?;
+            // Reject if the cached vector dimension doesn't match
+            if expected_dimension > 0 && cached.len() != expected_dimension {
+                tracing::warn!(
+                    cached_dim = cached.len(),
+                    expected_dim = expected_dimension,
+                    "Embedding cache hit rejected: dimension mismatch"
+                );
+                return None;
+            }
+            Some(cached)
         })
     }
 
@@ -532,7 +554,8 @@ impl EmbeddingManager {
         embedding: Vec<f32>,
     ) {
         if let Some(ref cache) = self.cache {
-            let key = CacheKey::new(provider, model, text);
+            let dimension = embedding.len();
+            let key = CacheKey::new(provider, model, text, dimension);
             cache.insert(key, embedding);
         }
     }
@@ -1177,31 +1200,38 @@ mod tests {
 
     #[test]
     fn cache_key_deterministic() {
-        let k1 = CacheKey::new(EmbeddingProviderType::TfIdf, "model-a", "hello");
-        let k2 = CacheKey::new(EmbeddingProviderType::TfIdf, "model-a", "hello");
+        let k1 = CacheKey::new(EmbeddingProviderType::TfIdf, "model-a", "hello", 128);
+        let k2 = CacheKey::new(EmbeddingProviderType::TfIdf, "model-a", "hello", 128);
         assert_eq!(k1, k2);
         assert_eq!(k1.text_hash, k2.text_hash);
     }
 
     #[test]
     fn cache_key_different_text() {
-        let k1 = CacheKey::new(EmbeddingProviderType::TfIdf, "model-a", "hello");
-        let k2 = CacheKey::new(EmbeddingProviderType::TfIdf, "model-a", "world");
+        let k1 = CacheKey::new(EmbeddingProviderType::TfIdf, "model-a", "hello", 128);
+        let k2 = CacheKey::new(EmbeddingProviderType::TfIdf, "model-a", "world", 128);
         assert_ne!(k1, k2);
     }
 
     #[test]
     fn cache_key_different_model() {
-        let k1 = CacheKey::new(EmbeddingProviderType::TfIdf, "model-a", "hello");
-        let k2 = CacheKey::new(EmbeddingProviderType::TfIdf, "model-b", "hello");
+        let k1 = CacheKey::new(EmbeddingProviderType::TfIdf, "model-a", "hello", 128);
+        let k2 = CacheKey::new(EmbeddingProviderType::TfIdf, "model-b", "hello", 128);
         assert_ne!(k1, k2);
     }
 
     #[test]
     fn cache_key_different_provider() {
-        let k1 = CacheKey::new(EmbeddingProviderType::TfIdf, "model-a", "hello");
-        let k2 = CacheKey::new(EmbeddingProviderType::Ollama, "model-a", "hello");
+        let k1 = CacheKey::new(EmbeddingProviderType::TfIdf, "model-a", "hello", 128);
+        let k2 = CacheKey::new(EmbeddingProviderType::Ollama, "model-a", "hello", 128);
         assert_ne!(k1, k2);
+    }
+
+    #[test]
+    fn cache_key_different_dimensions_not_equal() {
+        let k1 = CacheKey::new(EmbeddingProviderType::TfIdf, "model-a", "hello", 128);
+        let k2 = CacheKey::new(EmbeddingProviderType::TfIdf, "model-a", "hello", 768);
+        assert_ne!(k1, k2, "Different dimensions should produce different cache keys");
     }
 
     // =====================================================================

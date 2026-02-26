@@ -23,6 +23,13 @@
 
   "chunks": "{{count}} chunks",
 
+  "documents": {
+    "title": "{{count}} document(s)",
+    "chunks": "{{count}} chunks",
+    "deleteConfirm": "Delete document \"{{id}}\"?",
+    "noDocuments": "No documents in this collection"
+  },
+
   "tabs": {
     "details": "Details",
     "upload": "Upload",

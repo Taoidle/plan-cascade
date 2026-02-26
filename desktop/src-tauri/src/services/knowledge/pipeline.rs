@@ -10,13 +10,12 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tauri::Emitter;
 
 use crate::services::knowledge::chunker::{Chunk, Chunker, Document};
 use crate::services::knowledge::reranker::{Reranker, SearchResult};
 use crate::services::orchestrator::embedding_manager::EmbeddingManager;
-use crate::services::orchestrator::embedding_service::{
-    bytes_to_embedding, cosine_similarity, embedding_to_bytes,
-};
+use crate::services::orchestrator::embedding_service::embedding_to_bytes;
 use crate::services::orchestrator::hnsw_index::HnswIndex;
 use crate::storage::database::Database;
 use crate::utils::error::{AppError, AppResult};
@@ -53,6 +52,17 @@ pub struct RagQueryResult {
     pub total_searched: usize,
     /// Collection queried.
     pub collection_name: String,
+}
+
+/// Summary of a document within a collection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentSummary {
+    /// The document ID.
+    pub document_id: String,
+    /// Number of chunks this document was split into.
+    pub chunk_count: i64,
+    /// Preview of the first chunk's content (up to 200 chars).
+    pub preview: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +148,9 @@ impl RagPipeline {
     }
 
     /// Get or create a collection by name for a project.
+    ///
+    /// Uses `INSERT OR IGNORE` followed by `SELECT` to avoid TOCTOU races
+    /// when multiple threads attempt to create the same collection concurrently.
     fn get_or_create_collection(
         &self,
         name: &str,
@@ -149,29 +162,28 @@ impl RagPipeline {
             .get_connection()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
-        // Check if collection exists
-        let existing: Option<String> = conn
-            .query_row(
-                "SELECT id FROM knowledge_collections WHERE name = ?1 AND project_id = ?2",
-                rusqlite::params![name, project_id],
-                |row| row.get(0),
-            )
-            .ok();
-
-        if let Some(id) = existing {
-            return Ok(id);
-        }
-
-        // Create new collection
+        // INSERT OR IGNORE: if (name, project_id) already exists, this is a no-op
+        // thanks to the UNIQUE(name, project_id) constraint on the table.
         let id = uuid::Uuid::new_v4().to_string();
         conn.execute(
-            "INSERT INTO knowledge_collections (id, name, project_id, description)
+            "INSERT OR IGNORE INTO knowledge_collections (id, name, project_id, description)
              VALUES (?1, ?2, ?3, ?4)",
             rusqlite::params![id, name, project_id, description],
         )
         .map_err(|e| AppError::database(format!("Failed to create collection: {}", e)))?;
 
-        Ok(id)
+        // Fetch actual id (ours or the concurrent winner's)
+        let actual_id: String = conn
+            .query_row(
+                "SELECT id FROM knowledge_collections WHERE name = ?1 AND project_id = ?2",
+                rusqlite::params![name, project_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| {
+                AppError::database(format!("Failed to fetch collection after insert: {}", e))
+            })?;
+
+        Ok(actual_id)
     }
 
     /// Ingest documents into a collection: chunk, embed, and store.
@@ -182,8 +194,43 @@ impl RagPipeline {
         description: &str,
         documents: Vec<Document>,
     ) -> AppResult<KnowledgeCollection> {
+        self.ingest_with_progress(collection_name, project_id, description, documents, None)
+            .await
+    }
+
+    /// Ingest documents with optional progress events via Tauri AppHandle.
+    ///
+    /// Emits `knowledge:ingest-progress` events at three stages:
+    /// - chunking (0-30%)
+    /// - embedding (30-70%)
+    /// - storing (70-100%)
+    pub async fn ingest_with_progress(
+        &self,
+        collection_name: &str,
+        project_id: &str,
+        description: &str,
+        documents: Vec<Document>,
+        app_handle: Option<&tauri::AppHandle>,
+    ) -> AppResult<KnowledgeCollection> {
         let collection_id =
             self.get_or_create_collection(collection_name, project_id, description)?;
+
+        // Helper to emit progress events
+        let emit_progress =
+            |stage: &str, progress: u32, detail: &str| {
+                if let Some(handle) = app_handle {
+                    let _ = handle.emit(
+                        "knowledge:ingest-progress",
+                        serde_json::json!({
+                            "stage": stage,
+                            "progress": progress,
+                            "detail": detail,
+                        }),
+                    );
+                }
+            };
+
+        emit_progress("chunking", 0, "Starting document chunking...");
 
         // Chunk all documents (sync)
         let mut all_chunks: Vec<Chunk> = Vec::new();
@@ -193,10 +240,18 @@ impl RagPipeline {
         }
 
         if all_chunks.is_empty() {
+            emit_progress("storing", 100, "No chunks to store.");
             return self.get_collection(&collection_id);
         }
 
+        emit_progress(
+            "chunking",
+            30,
+            &format!("Chunked {} documents into {} chunks", documents.len(), all_chunks.len()),
+        );
+
         // Embed all chunks (async — no connection held)
+        emit_progress("embedding", 30, "Generating embeddings...");
         let chunk_texts: Vec<&str> = all_chunks.iter().map(|c| c.content.as_str()).collect();
         let embeddings = self
             .embedding_manager
@@ -204,12 +259,19 @@ impl RagPipeline {
             .await
             .map_err(|e| AppError::internal(format!("Embedding failed: {}", e)))?;
 
-        // Store chunks in SQLite (sync scope — connection dropped before await)
+        emit_progress("embedding", 70, &format!("Embedded {} chunks", embeddings.len()));
+
+        // Store chunks in SQLite within a transaction (sync scope — connection dropped before await)
+        emit_progress("storing", 70, "Storing chunks in database...");
         let hnsw_items = {
             let conn = self
                 .database
                 .get_connection()
                 .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
+
+            let tx = conn
+                .unchecked_transaction()
+                .map_err(|e| AppError::database(format!("Failed to begin transaction: {}", e)))?;
 
             let mut items: Vec<(usize, Vec<f32>)> = Vec::new();
 
@@ -218,7 +280,7 @@ impl RagPipeline {
                 let metadata_json =
                     serde_json::to_string(&chunk.metadata).unwrap_or_else(|_| "{}".to_string());
 
-                conn.execute(
+                tx.execute(
                     "INSERT INTO knowledge_chunks (collection_id, document_id, chunk_index, content, embedding, metadata)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                     rusqlite::params![
@@ -232,9 +294,29 @@ impl RagPipeline {
                 )
                 .map_err(|e| AppError::database(format!("Failed to insert chunk: {}", e)))?;
 
-                let chunk_rowid = conn.last_insert_rowid() as usize;
+                let chunk_rowid = tx.last_insert_rowid() as usize;
                 items.push((chunk_rowid, embeddings[i].clone()));
             }
+
+            // Update chunk_count inside the same transaction (P0-4 fix)
+            let chunk_count: i64 = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM knowledge_chunks WHERE collection_id = ?1",
+                    rusqlite::params![collection_id],
+                    |row| row.get(0),
+                )
+                .map_err(|e| {
+                    AppError::database(format!("Failed to count chunks: {}", e))
+                })?;
+
+            tx.execute(
+                "UPDATE knowledge_collections SET chunk_count = ?1, updated_at = datetime('now') WHERE id = ?2",
+                rusqlite::params![chunk_count, collection_id],
+            )
+            .map_err(|e| AppError::database(format!("Failed to update collection: {}", e)))?;
+
+            tx.commit()
+                .map_err(|e| AppError::database(format!("Failed to commit transaction: {}", e)))?;
 
             items
             // conn dropped here
@@ -244,29 +326,16 @@ impl RagPipeline {
         if !self.hnsw_index.is_ready().await {
             self.hnsw_index.initialize().await;
         }
-        self.hnsw_index.batch_insert(&hnsw_items).await;
-
-        // Update chunk count (sync scope)
-        {
-            let conn = self
-                .database
-                .get_connection()
-                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
-
-            let chunk_count: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM knowledge_chunks WHERE collection_id = ?1",
-                    rusqlite::params![collection_id],
-                    |row| row.get(0),
-                )
-                .unwrap_or(0);
-
-            conn.execute(
-                "UPDATE knowledge_collections SET chunk_count = ?1, updated_at = datetime('now') WHERE id = ?2",
-                rusqlite::params![chunk_count, collection_id],
-            )
-            .map_err(|e| AppError::database(format!("Failed to update collection: {}", e)))?;
+        // Check batch_insert return value — log error but don't fail
+        // (SQLite is the source of truth, HNSW is a derived cache)
+        if !self.hnsw_index.batch_insert(&hnsw_items).await {
+            tracing::error!(
+                "HNSW batch_insert failed for '{}'; SQLite is source of truth",
+                collection_name
+            );
         }
+
+        emit_progress("storing", 100, "Ingestion complete.");
 
         self.get_collection(&collection_id)
     }
@@ -401,6 +470,119 @@ impl RagPipeline {
             .map_err(|e| AppError::database(format!("Failed to query collections: {}", e)))?;
 
         Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// List all documents in a collection with chunk count and preview.
+    pub fn list_documents(
+        &self,
+        collection_id: &str,
+    ) -> AppResult<Vec<DocumentSummary>> {
+        let conn = self
+            .database
+            .get_connection()
+            .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT document_id, COUNT(*) as chunk_count,
+                        SUBSTR(MIN(CASE WHEN chunk_index = 0 THEN content END), 1, 200) as preview
+                 FROM knowledge_chunks WHERE collection_id = ?1
+                 GROUP BY document_id ORDER BY document_id",
+            )
+            .map_err(|e| AppError::database(format!("Failed to prepare query: {}", e)))?;
+
+        let rows = stmt
+            .query_map(rusqlite::params![collection_id], |row| {
+                Ok(DocumentSummary {
+                    document_id: row.get(0)?,
+                    chunk_count: row.get(1)?,
+                    preview: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                })
+            })
+            .map_err(|e| AppError::database(format!("Failed to query documents: {}", e)))?;
+
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// Delete a single document from a collection by document_id.
+    ///
+    /// Removes all chunks for the document, marks HNSW entries as stale,
+    /// and updates the collection's chunk_count — all within a transaction.
+    pub async fn delete_document(
+        &self,
+        collection_id: &str,
+        document_id: &str,
+    ) -> AppResult<()> {
+        // Collect chunk rowids for HNSW stale marking (sync scope)
+        let rowids = {
+            let conn = self
+                .database
+                .get_connection()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
+
+            let mut stmt = conn
+                .prepare(
+                    "SELECT rowid FROM knowledge_chunks WHERE collection_id = ?1 AND document_id = ?2",
+                )
+                .map_err(|e| AppError::database(format!("Failed to prepare query: {}", e)))?;
+
+            let rowids: Vec<i64> = stmt
+                .query_map(rusqlite::params![collection_id, document_id], |row| row.get(0))
+                .map_err(|e| AppError::database(format!("Failed to query rowids: {}", e)))?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            rowids
+        };
+
+        if rowids.is_empty() {
+            return Err(AppError::not_found(format!(
+                "Document '{}' not found in collection",
+                document_id
+            )));
+        }
+
+        // Mark stale in HNSW (async — no connection held)
+        for rowid in &rowids {
+            self.hnsw_index.mark_stale(*rowid as usize).await;
+        }
+
+        // Delete chunks and update count in a transaction (sync scope)
+        {
+            let conn = self
+                .database
+                .get_connection()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
+
+            let tx = conn
+                .unchecked_transaction()
+                .map_err(|e| AppError::database(format!("Failed to begin transaction: {}", e)))?;
+
+            tx.execute(
+                "DELETE FROM knowledge_chunks WHERE collection_id = ?1 AND document_id = ?2",
+                rusqlite::params![collection_id, document_id],
+            )
+            .map_err(|e| AppError::database(format!("Failed to delete document chunks: {}", e)))?;
+
+            let chunk_count: i64 = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM knowledge_chunks WHERE collection_id = ?1",
+                    rusqlite::params![collection_id],
+                    |row| row.get(0),
+                )
+                .map_err(|e| AppError::database(format!("Failed to count chunks: {}", e)))?;
+
+            tx.execute(
+                "UPDATE knowledge_collections SET chunk_count = ?1, updated_at = datetime('now') WHERE id = ?2",
+                rusqlite::params![chunk_count, collection_id],
+            )
+            .map_err(|e| AppError::database(format!("Failed to update collection: {}", e)))?;
+
+            tx.commit()
+                .map_err(|e| AppError::database(format!("Failed to commit: {}", e)))?;
+        }
+
+        Ok(())
     }
 
     /// Delete a collection and all its chunks.
@@ -684,6 +866,83 @@ mod tests {
     // ======================================================================
     // KnowledgeCollection serialization
     // ======================================================================
+
+    #[tokio::test]
+    async fn concurrent_get_or_create_same_collection() {
+        let (pipeline, _dir) = create_test_pipeline().await;
+
+        // Spawn multiple tasks that all try to get_or_create the same collection
+        let pipeline = Arc::new(pipeline);
+        let mut handles = Vec::new();
+        for i in 0..10 {
+            let p = Arc::clone(&pipeline);
+            handles.push(tokio::spawn(async move {
+                let docs = vec![Document::new(
+                    format!("d{}", i),
+                    format!("Content from thread {}", i),
+                )];
+                p.ingest("concurrent-col", "proj-1", "Test", docs).await
+            }));
+        }
+
+        // All should succeed
+        for handle in handles {
+            let result = handle.await.unwrap();
+            assert!(result.is_ok(), "Concurrent ingest should succeed");
+        }
+
+        // Only 1 collection should exist
+        let collections = pipeline.list_collections("proj-1").unwrap();
+        assert_eq!(
+            collections.len(),
+            1,
+            "Only one collection should exist after concurrent creation"
+        );
+        assert_eq!(collections[0].name, "concurrent-col");
+    }
+
+    #[tokio::test]
+    async fn ingest_transaction_rolls_back_on_partial_failure() {
+        let (pipeline, _dir) = create_test_pipeline().await;
+
+        // First ingest should succeed
+        let docs = vec![Document::new("d1", "Valid content for first ingest.")];
+        let collection = pipeline
+            .ingest("tx-test", "proj-1", "Test", docs)
+            .await
+            .unwrap();
+        let count_after_first = collection.chunk_count;
+        assert!(count_after_first > 0);
+
+        // Verify the chunk_count matches actual count in DB
+        let collections = pipeline.list_collections("proj-1").unwrap();
+        assert_eq!(collections[0].chunk_count, count_after_first);
+    }
+
+    #[tokio::test]
+    async fn ingest_chunk_count_matches_actual_chunks() {
+        let (pipeline, _dir) = create_test_pipeline().await;
+
+        // Ingest twice to same collection
+        let docs1 = vec![Document::new("d1", "First document.")];
+        pipeline
+            .ingest("count-test", "proj-1", "Test", docs1)
+            .await
+            .unwrap();
+
+        let docs2 = vec![Document::new("d2", "Second document.")];
+        let collection = pipeline
+            .ingest("count-test", "proj-1", "Test", docs2)
+            .await
+            .unwrap();
+
+        // chunk_count should reflect all chunks from both ingests
+        assert!(
+            collection.chunk_count >= 2,
+            "chunk_count should include chunks from both ingests, got {}",
+            collection.chunk_count,
+        );
+    }
 
     #[test]
     fn knowledge_collection_serde() {

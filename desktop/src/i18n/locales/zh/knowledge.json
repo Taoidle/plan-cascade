@@ -23,6 +23,13 @@
 
   "chunks": "{{count}} 个分块",
 
+  "documents": {
+    "title": "{{count}} 个文档",
+    "chunks": "{{count}} 个分块",
+    "deleteConfirm": "删除文档 \"{{id}}\"？",
+    "noDocuments": "此集合中暂无文档"
+  },
+
   "tabs": {
     "details": "详情",
     "upload": "上传",

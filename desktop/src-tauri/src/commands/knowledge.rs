@@ -10,7 +10,9 @@ use tokio::sync::RwLock;
 
 use crate::models::response::CommandResponse;
 use crate::services::knowledge::chunker::{Chunker, Document, ParagraphChunker};
-use crate::services::knowledge::pipeline::{KnowledgeCollection, RagPipeline, RagQueryResult};
+use crate::services::knowledge::pipeline::{
+    DocumentSummary, KnowledgeCollection, RagPipeline, RagQueryResult,
+};
 use crate::services::knowledge::reranker::{NoopReranker, Reranker, SearchResult};
 use crate::services::orchestrator::embedding_manager::{EmbeddingManager, EmbeddingManagerConfig};
 use crate::services::orchestrator::embedding_provider::{
@@ -117,10 +119,17 @@ pub struct IngestRequest {
 }
 
 /// Document input from frontend.
+///
+/// For text files (.md, .txt), the content is sent as plain text in `content`.
+/// For binary files (PDF, DOCX, XLSX), the raw file bytes are base64-encoded
+/// and sent in `content_base64`. The backend decodes, writes to a temp file,
+/// and uses the existing file parsers to extract text.
 #[derive(Debug, Deserialize)]
 pub struct DocumentInput {
     pub id: String,
     pub content: String,
+    /// Base64-encoded binary content (for PDF/DOCX/XLSX files).
+    pub content_base64: Option<String>,
     pub source_path: Option<String>,
     pub source_type: Option<String>,
 }
@@ -159,6 +168,7 @@ async fn ensure_initialized(
 /// Ingest documents into a knowledge collection.
 #[tauri::command]
 pub async fn rag_ingest_documents(
+    app_handle: tauri::AppHandle,
     knowledge_state: State<'_, KnowledgeState>,
     app_state: State<'_, crate::state::AppState>,
     collection_name: String,
@@ -179,7 +189,7 @@ pub async fn rag_ingest_documents(
     let desc = description.as_deref().unwrap_or("");
 
     match pipeline
-        .ingest(&collection_name, &project_id, desc, docs)
+        .ingest_with_progress(&collection_name, &project_id, desc, docs, Some(&app_handle))
         .await
     {
         Ok(collection) => Ok(CommandResponse::ok(collection)),
@@ -259,15 +269,136 @@ pub async fn rag_delete_collection(
     }
 }
 
+/// List documents in a knowledge collection.
+#[tauri::command]
+pub async fn rag_list_documents(
+    knowledge_state: State<'_, KnowledgeState>,
+    app_state: State<'_, crate::state::AppState>,
+    collection_id: String,
+) -> Result<CommandResponse<Vec<DocumentSummary>>, String> {
+    ensure_initialized(&knowledge_state, &app_state).await?;
+
+    let pipeline = match knowledge_state.get_pipeline().await {
+        Ok(p) => p,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+
+    match pipeline.list_documents(&collection_id) {
+        Ok(documents) => Ok(CommandResponse::ok(documents)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Delete a single document from a knowledge collection.
+#[tauri::command]
+pub async fn rag_delete_document(
+    knowledge_state: State<'_, KnowledgeState>,
+    app_state: State<'_, crate::state::AppState>,
+    collection_id: String,
+    document_id: String,
+) -> Result<CommandResponse<bool>, String> {
+    ensure_initialized(&knowledge_state, &app_state).await?;
+
+    let pipeline = match knowledge_state.get_pipeline().await {
+        Ok(p) => p,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+
+    match pipeline.delete_document(&collection_id, &document_id).await {
+        Ok(()) => Ok(CommandResponse::ok(true)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
 /// Helper: convert a DocumentInput to a chunker::Document.
 impl DocumentInput {
     /// Convert frontend DocumentInput to the internal chunker Document type.
+    ///
+    /// For binary files (PDF/DOCX/XLSX), decodes base64 content, writes to a
+    /// temp file, and uses file parsers to extract text. Falls back to the
+    /// `content` field if base64 decoding or parsing fails.
     pub fn into_document(self) -> Document {
+        // Try binary path if content_base64 is provided
+        if let Some(ref b64) = self.content_base64 {
+            if let Some(ref source_type) = self.source_type {
+                match Self::parse_binary_content(b64, source_type) {
+                    Ok(parsed_text) => {
+                        let sp = self.source_path.unwrap_or_default();
+                        return Document::from_parsed_content(
+                            self.id,
+                            parsed_text,
+                            sp,
+                            source_type.clone(),
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            id = %self.id,
+                            source_type = %source_type,
+                            "Failed to parse binary content, falling back to text: {}",
+                            e
+                        );
+                    }
+                }
+            }
+        }
+
+        // Text path (default)
         if let (Some(source_path), Some(source_type)) = (self.source_path, self.source_type) {
             Document::from_parsed_content(self.id, self.content, source_path, source_type)
         } else {
             Document::new(self.id, self.content)
         }
+    }
+
+    /// Decode base64 binary content, write to a temp file, and parse using
+    /// the appropriate file parser based on source_type.
+    fn parse_binary_content(b64: &str, source_type: &str) -> Result<String, String> {
+        use base64::Engine;
+        use std::io::Write;
+
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .map_err(|e| format!("Base64 decode failed: {}", e))?;
+
+        // Write to temp file with appropriate extension
+        let ext = match source_type {
+            "pdf" => ".pdf",
+            "docx" => ".docx",
+            "xlsx" => ".xlsx",
+            _ => return Err(format!("Unsupported binary source type: {}", source_type)),
+        };
+
+        let mut tmp = tempfile::Builder::new()
+            .suffix(ext)
+            .tempfile()
+            .map_err(|e| format!("Failed to create temp file: {}", e))?;
+
+        tmp.write_all(&bytes)
+            .map_err(|e| format!("Failed to write temp file: {}", e))?;
+        tmp.flush()
+            .map_err(|e| format!("Failed to flush temp file: {}", e))?;
+
+        let tmp_path = tmp.path().to_path_buf();
+
+        let parsed = match source_type {
+            "pdf" => {
+                crate::services::tools::file_parsers::parse_pdf(&tmp_path, None)
+                    .map_err(|e| format!("PDF parse failed: {}", e))?
+            }
+            "docx" => {
+                crate::services::tools::file_parsers::parse_docx(&tmp_path)
+                    .map_err(|e| format!("DOCX parse failed: {}", e))?
+            }
+            "xlsx" => {
+                crate::services::tools::file_parsers::parse_xlsx(&tmp_path)
+                    .map_err(|e| format!("XLSX parse failed: {}", e))?
+            }
+            _ => return Err(format!("Unsupported binary source type: {}", source_type)),
+        };
+
+        // tmp file is automatically deleted when `tmp` drops
+        Ok(parsed)
     }
 }
 
@@ -395,6 +526,7 @@ mod tests {
         let input = DocumentInput {
             id: "doc-1".to_string(),
             content: "Hello world".to_string(),
+            content_base64: None,
             source_path: None,
             source_type: None,
         };
@@ -409,6 +541,7 @@ mod tests {
         let input = DocumentInput {
             id: "doc-2".to_string(),
             content: "Rust code".to_string(),
+            content_base64: None,
             source_path: Some("/src/main.rs".to_string()),
             source_type: Some("rust".to_string()),
         };
@@ -473,12 +606,14 @@ mod tests {
             DocumentInput {
                 id: "doc-1".to_string(),
                 content: "Rust programming is fast and safe.".to_string(),
+                content_base64: None,
                 source_path: Some("/docs/rust.md".to_string()),
                 source_type: Some("markdown".to_string()),
             },
             DocumentInput {
                 id: "doc-2".to_string(),
                 content: "Python is great for scripting.".to_string(),
+                content_base64: None,
                 source_path: None,
                 source_type: None,
             },
@@ -616,5 +751,55 @@ mod tests {
 
         let block = KnowledgeContextProvider::format_context_block(&[]);
         assert!(block.is_empty());
+    }
+
+    // ======================================================================
+    // P1-1: Binary document input tests
+    // ======================================================================
+
+    #[test]
+    fn document_input_base64_fallback_on_invalid() {
+        // Invalid base64 should fall back to text content
+        let input = DocumentInput {
+            id: "doc-b64-bad".to_string(),
+            content: "fallback text content".to_string(),
+            content_base64: Some("not-valid-base64!!!".to_string()),
+            source_path: Some("test.pdf".to_string()),
+            source_type: Some("pdf".to_string()),
+        };
+        let doc = input.into_document();
+        assert_eq!(doc.id, "doc-b64-bad");
+        // Should have fallen back to text content since base64 is invalid
+        assert_eq!(doc.content, "fallback text content");
+    }
+
+    #[test]
+    fn document_input_no_base64_uses_text_content() {
+        let input = DocumentInput {
+            id: "doc-text".to_string(),
+            content: "plain text content".to_string(),
+            content_base64: None,
+            source_path: Some("readme.md".to_string()),
+            source_type: Some("md".to_string()),
+        };
+        let doc = input.into_document();
+        assert_eq!(doc.content, "plain text content");
+        assert_eq!(doc.metadata.get("source_type"), Some(&"md".to_string()));
+    }
+
+    #[test]
+    fn document_input_unsupported_binary_type_falls_back() {
+        use base64::Engine;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(b"some binary data");
+        let input = DocumentInput {
+            id: "doc-unsupported".to_string(),
+            content: "fallback".to_string(),
+            content_base64: Some(b64),
+            source_path: Some("file.unknown".to_string()),
+            source_type: Some("unknown".to_string()),
+        };
+        let doc = input.into_document();
+        // Unsupported binary type should fall back to text content
+        assert_eq!(doc.content, "fallback");
     }
 }

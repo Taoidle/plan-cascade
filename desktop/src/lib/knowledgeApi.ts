@@ -28,6 +28,8 @@ export interface KnowledgeCollection {
 export interface DocumentInput {
   id: string;
   content: string;
+  /** Base64-encoded binary content (for PDF/DOCX/XLSX files). */
+  content_base64?: string;
   source_path?: string;
   source_type?: string;
 }
@@ -39,6 +41,13 @@ export interface SearchResult {
   collection_name: string;
   score: number;
   metadata: Record<string, string>;
+}
+
+/** Summary of a document within a collection. */
+export interface DocumentSummary {
+  document_id: string;
+  chunk_count: number;
+  preview: string;
 }
 
 /** Result of a RAG query. */
@@ -142,6 +151,49 @@ export async function ragDeleteCollection(
     return await invoke<CommandResponse<boolean>>('rag_delete_collection', {
       collectionName,
       projectId,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// rag_list_documents
+// ---------------------------------------------------------------------------
+
+/**
+ * List all documents in a knowledge collection.
+ */
+export async function ragListDocuments(collectionId: string): Promise<CommandResponse<DocumentSummary[]>> {
+  try {
+    return await invoke<CommandResponse<DocumentSummary[]>>('rag_list_documents', {
+      collectionId,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// rag_delete_document
+// ---------------------------------------------------------------------------
+
+/**
+ * Delete a single document from a knowledge collection.
+ */
+export async function ragDeleteDocument(collectionId: string, documentId: string): Promise<CommandResponse<boolean>> {
+  try {
+    return await invoke<CommandResponse<boolean>>('rag_delete_document', {
+      collectionId,
+      documentId,
     });
   } catch (error) {
     return {

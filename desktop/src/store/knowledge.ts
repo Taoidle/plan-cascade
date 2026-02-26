@@ -7,8 +7,15 @@
  */
 
 import { create } from 'zustand';
-import type { KnowledgeCollection, DocumentInput, SearchResult } from '../lib/knowledgeApi';
-import { ragListCollections, ragIngestDocuments, ragQuery, ragDeleteCollection } from '../lib/knowledgeApi';
+import type { KnowledgeCollection, DocumentInput, DocumentSummary, SearchResult } from '../lib/knowledgeApi';
+import {
+  ragListCollections,
+  ragIngestDocuments,
+  ragQuery,
+  ragDeleteCollection,
+  ragListDocuments,
+  ragDeleteDocument,
+} from '../lib/knowledgeApi';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -20,6 +27,9 @@ export interface KnowledgeState {
 
   /** Currently selected collection. */
   activeCollection: KnowledgeCollection | null;
+
+  /** Documents in the active collection. */
+  documents: DocumentSummary[];
 
   /** Query results from the last search. */
   queryResults: SearchResult[];
@@ -53,6 +63,8 @@ export interface KnowledgeState {
   ) => Promise<boolean>;
   deleteCollection: (projectId: string, collectionName: string) => Promise<boolean>;
   ingestDocuments: (projectId: string, collectionName: string, documents: DocumentInput[]) => Promise<boolean>;
+  fetchDocuments: (collectionId: string) => Promise<void>;
+  deleteDocument: (collectionId: string, documentId: string) => Promise<boolean>;
   queryCollection: (projectId: string, collectionName: string, query: string, topK?: number) => Promise<void>;
   setSearchQuery: (query: string) => void;
   clearQueryResults: () => void;
@@ -66,6 +78,7 @@ export interface KnowledgeState {
 const DEFAULT_STATE = {
   collections: [],
   activeCollection: null,
+  documents: [],
   queryResults: [],
   totalSearched: 0,
   searchQuery: '',
@@ -107,6 +120,7 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, _get) => ({
   selectCollection: (collection: KnowledgeCollection | null) => {
     set({
       activeCollection: collection,
+      documents: [],
       queryResults: [],
       totalSearched: 0,
       searchQuery: '',
@@ -201,6 +215,40 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, _get) => ({
         uploadProgress: 0,
         error: err instanceof Error ? err.message : String(err),
       });
+      return false;
+    }
+  },
+
+  fetchDocuments: async (collectionId: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      const result = await ragListDocuments(collectionId);
+      if (result.success && result.data) {
+        set({ documents: result.data, isLoading: false });
+      } else {
+        set({ isLoading: false, error: result.error ?? 'Failed to fetch documents' });
+      }
+    } catch (err) {
+      set({ isLoading: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+
+  deleteDocument: async (collectionId: string, documentId: string) => {
+    set({ isDeleting: true, error: null });
+    try {
+      const result = await ragDeleteDocument(collectionId, documentId);
+      if (result.success) {
+        set((state) => ({
+          documents: state.documents.filter((d) => d.document_id !== documentId),
+          isDeleting: false,
+        }));
+        return true;
+      } else {
+        set({ isDeleting: false, error: result.error ?? 'Failed to delete document' });
+        return false;
+      }
+    } catch (err) {
+      set({ isDeleting: false, error: err instanceof Error ? err.message : String(err) });
       return false;
     }
   },

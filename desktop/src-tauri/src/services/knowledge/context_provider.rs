@@ -13,6 +13,7 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -96,19 +97,34 @@ impl KnowledgeContextProvider {
             return Ok(Vec::new());
         }
 
-        // Query each collection
-        let mut all_chunks: Vec<ContextChunk> = Vec::new();
+        // Query all collections in parallel
         let top_k = config.max_context_chunks * 2; // Fetch more for dedup
+        let min_score = config.minimum_relevance_score;
 
-        for collection in &collections {
-            match self
-                .pipeline
-                .query(&collection.name, project_id, query, top_k)
-                .await
-            {
-                Ok(result) => {
-                    for search_result in result.results {
-                        if search_result.score >= config.minimum_relevance_score {
+        let futures: Vec<_> = collections
+            .iter()
+            .map(|collection| {
+                let pipeline = Arc::clone(&self.pipeline);
+                let name = collection.name.clone();
+                let pid = project_id.to_string();
+                let q = query.to_string();
+                async move {
+                    let result = pipeline.query(&name, &pid, &q, top_k).await;
+                    (name, result)
+                }
+            })
+            .collect();
+
+        let results = futures_util::future::join_all(futures).await;
+
+        let mut all_chunks: Vec<ContextChunk> = Vec::new();
+        let mut failed_collections: Vec<String> = Vec::new();
+
+        for (name, result) in results {
+            match result {
+                Ok(query_result) => {
+                    for search_result in query_result.results {
+                        if search_result.score >= min_score {
                             all_chunks.push(ContextChunk {
                                 content: search_result.chunk_text,
                                 source_document: search_result.document_id,
@@ -119,10 +135,19 @@ impl KnowledgeContextProvider {
                     }
                 }
                 Err(e) => {
-                    // Log error but continue with other collections
-                    tracing::warn!("Failed to query collection '{}': {}", collection.name, e);
+                    tracing::warn!("Failed to query collection '{}': {}", name, e);
+                    failed_collections.push(name);
                 }
             }
+        }
+
+        if !failed_collections.is_empty() {
+            tracing::warn!(
+                "Knowledge context: {}/{} collections failed: {:?}",
+                failed_collections.len(),
+                collections.len(),
+                failed_collections,
+            );
         }
 
         // Sort by relevance score descending
@@ -132,11 +157,13 @@ impl KnowledgeContextProvider {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // Deduplicate by content (keep highest-scored version)
-        let mut seen = HashSet::new();
+        // Deduplicate by content hash (keep highest-scored version).
+        // Uses SHA-256 instead of a 200-char prefix to avoid false
+        // dedup of chunks that share a prefix but differ later.
+        let mut seen: HashSet<[u8; 32]> = HashSet::new();
         all_chunks.retain(|chunk| {
-            let key = chunk.content.chars().take(200).collect::<String>();
-            seen.insert(key)
+            let hash: [u8; 32] = Sha256::digest(chunk.content.as_bytes()).into();
+            seen.insert(hash)
         });
 
         // Truncate to max_context_chunks

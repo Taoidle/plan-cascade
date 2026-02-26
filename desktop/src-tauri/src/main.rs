@@ -351,6 +351,8 @@ fn main() {
             plan_cascade_desktop::commands::knowledge::rag_query,
             plan_cascade_desktop::commands::knowledge::rag_list_collections,
             plan_cascade_desktop::commands::knowledge::rag_delete_collection,
+            plan_cascade_desktop::commands::knowledge::rag_list_documents,
+            plan_cascade_desktop::commands::knowledge::rag_delete_document,
             // Git Source Control commands
             plan_cascade_desktop::commands::git::git_full_status,
             plan_cascade_desktop::commands::git::git_stage_files,
