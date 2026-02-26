@@ -592,7 +592,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         const interviewConfig = {
           description: state.taskDescription,
           flow_level: config.flowLevel,
-          max_questions: config.flowLevel === 'quick' ? 5 : config.flowLevel === 'full' ? 15 : 10,
+          max_questions: config.flowLevel === 'quick' ? 10 : config.flowLevel === 'full' ? 25 : 18,
           first_principles: false,
           project_path: workspacePath,
           exploration_context: explorationResult ? JSON.stringify(explorationResult) : null,

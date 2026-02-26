@@ -258,17 +258,24 @@ impl InterviewManager {
         let interview_id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
 
+        // Store hard_cap in conversation_context so it persists across updates.
+        // max_questions will be dynamically adjusted by LLM estimates, but never exceed hard_cap.
         let conversation_context = if let Some(ref ctx) = config.exploration_context {
             serde_json::json!({
                 "exploration_context": ctx,
-                "mode": "llm_driven"
+                "mode": "llm_driven",
+                "hard_cap": config.max_questions
             })
             .to_string()
         } else {
-            serde_json::json!({ "mode": "llm_driven" }).to_string()
+            serde_json::json!({
+                "mode": "llm_driven",
+                "hard_cap": config.max_questions
+            })
+            .to_string()
         };
 
-        let state = PersistedInterviewState {
+        let mut state = PersistedInterviewState {
             id: interview_id.clone(),
             status: "in_progress".to_string(),
             phase: "overview".to_string(),
@@ -288,9 +295,24 @@ impl InterviewManager {
         self.state_manager.create_interview(&state)?;
 
         // Generate first question using LLM BA
-        let first_question = self
+        let (first_question, estimated_total) = self
             .generate_next_question_llm(&state, &[], &llm_provider)
             .await?;
+
+        // Apply LLM's estimated total (clamped to hard cap)
+        let hard_cap = config.max_questions;
+        let effective_max = if let Some(est) = estimated_total {
+            est.max(1).min(hard_cap)
+        } else {
+            hard_cap
+        };
+
+        // Persist the updated max_questions
+        if effective_max != hard_cap {
+            state.max_questions = effective_max;
+            state.updated_at = Utc::now().to_rfc3339();
+            self.state_manager.update_interview(&state)?;
+        }
 
         Ok(InterviewSession {
             id: interview_id,
@@ -299,7 +321,7 @@ impl InterviewManager {
             flow_level: config.flow_level,
             description: config.description,
             question_cursor: 0,
-            max_questions: config.max_questions,
+            max_questions: effective_max,
             current_question: Some(first_question),
             locale: config.locale,
             progress: 0.0,
@@ -436,8 +458,18 @@ impl InterviewManager {
         self.state_manager.add_turn(&turn)?;
         state.question_cursor += 1;
 
-        // Check if max questions reached
-        let force_complete = state.question_cursor >= state.max_questions;
+        // Retrieve hard cap from conversation_context (set at interview creation)
+        let hard_cap = {
+            let ctx: serde_json::Value =
+                serde_json::from_str(&state.conversation_context).unwrap_or(serde_json::json!({}));
+            ctx.get("hard_cap")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32)
+                .unwrap_or(state.max_questions)
+        };
+
+        // Check if hard cap reached — force complete regardless of LLM opinion
+        let force_complete = state.question_cursor >= hard_cap;
 
         // Load all turns for BA context
         let all_turns = self.state_manager.get_turns(interview_id)?;
@@ -452,7 +484,10 @@ impl InterviewManager {
                 .generate_next_question_llm(&state, &all_turns, &llm_provider)
                 .await
             {
-                Ok(q) => BaQuestionResult::Question(q),
+                Ok((q, est)) => BaQuestionResult::Question {
+                    question: q,
+                    estimated_total: est,
+                },
                 Err(e) if e.to_string().contains("INTERVIEW_COMPLETE") => {
                     // BA determined interview has sufficient information
                     BaQuestionResult::Complete {
@@ -464,7 +499,10 @@ impl InterviewManager {
                     // Real error — fall back to deterministic question generation
                     debug!(error = %e, "LLM BA question generation failed, using deterministic fallback");
                     match self.generate_next_question(&state) {
-                        Ok(q) => BaQuestionResult::Question(q),
+                        Ok(q) => BaQuestionResult::Question {
+                            question: q,
+                            estimated_total: None,
+                        },
                         Err(_) => BaQuestionResult::Complete {
                             summary: "Interview complete (fallback).".to_string(),
                         },
@@ -474,7 +512,17 @@ impl InterviewManager {
         };
 
         let (next_question, is_complete) = match ba_result {
-            BaQuestionResult::Question(q) => (Some(q), false),
+            BaQuestionResult::Question {
+                question: q,
+                estimated_total,
+            } => {
+                // Dynamically update max_questions from LLM's estimate (clamped to hard cap)
+                if let Some(est) = estimated_total {
+                    let clamped = est.max(state.question_cursor + 1).min(hard_cap);
+                    state.max_questions = clamped;
+                }
+                (Some(q), false)
+            }
             BaQuestionResult::Complete { summary } => {
                 // Extract structured spec_data from conversation
                 if let Ok(spec_data) = self
@@ -1678,7 +1726,7 @@ impl InterviewManager {
         state: &PersistedInterviewState,
         turns: &[InterviewTurn],
         provider: &Arc<dyn LlmProvider>,
-    ) -> AppResult<InterviewQuestion> {
+    ) -> AppResult<(InterviewQuestion, Option<i32>)> {
         let persona = PersonaRegistry::get(PersonaRole::BusinessAnalyst);
 
         // Extract exploration context from conversation_context
@@ -1694,8 +1742,12 @@ impl InterviewManager {
             r#"You are conducting a requirements interview for the following project:
 "{description}"
 
-Flow level: {flow_level} (quick = fewer questions, standard = balanced, full = comprehensive)
-Questions answered so far: {cursor} / {max}
+Flow level: {flow_level}
+- quick: aim for 4-8 questions total, focus on essential requirements only
+- standard: aim for 6-12 questions total, balanced coverage of all areas
+- full: aim for 10-20 questions total, comprehensive and detailed coverage
+
+This is question #{next_cursor} in the interview.
 
 Based on the conversation so far, ask the next most valuable question to better understand the project requirements. Your question should:
 - Build on previous answers and not repeat what's already been discussed
@@ -1703,14 +1755,23 @@ Based on the conversation so far, ask the next most valuable question to better 
 - Be specific and actionable
 - Help create a complete project specification covering: goals, scope, requirements, interfaces, and stories
 
+IMPORTANT: Do NOT ask questions just to fill a quota. Stop as soon as you have gathered enough information for a complete specification. Quality over quantity.
+
 When asking a question, respond in this JSON format:
 {{
   "question": "your question text",
   "input_type": "text" | "textarea" | "single_select" | "multi_select",
   "options": ["option1", "option2"],
   "allow_custom": true,
-  "hint": "optional hint text or null"
+  "hint": "optional hint text or null",
+  "estimated_total": <number>
 }}
+
+The "estimated_total" field is your current estimate of how many total questions (including already asked ones) this interview will need. Reassess this each time based on:
+- The complexity of the project revealed so far
+- How much information you still need
+- The flow level guidelines above
+You may revise this number up or down as you learn more about the project.
 
 Guidelines for question format:
 - Use single_select when user should choose one from a set of options
@@ -1726,8 +1787,7 @@ Followed by a brief summary of the key findings.
 Otherwise, respond with ONLY the JSON object. No formatting, no preamble, no markdown code fences."#,
             description = state.description,
             flow_level = state.flow_level,
-            cursor = state.question_cursor,
-            max = state.max_questions,
+            next_cursor = state.question_cursor + 1,
         );
 
         // Inject locale instruction for non-English locales
@@ -1884,17 +1944,25 @@ Otherwise, respond with ONLY the JSON object. No formatting, no preamble, no mar
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
 
-            return Ok(InterviewQuestion {
-                id: Uuid::new_v4().to_string(),
-                question: question_text,
-                phase: InterviewPhase::from_str(&state.phase),
-                hint,
-                required: false,
-                input_type,
-                field_name: "ba_response".to_string(),
-                options,
-                allow_custom,
-            });
+            let estimated_total = parsed
+                .get("estimated_total")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32);
+
+            return Ok((
+                InterviewQuestion {
+                    id: Uuid::new_v4().to_string(),
+                    question: question_text,
+                    phase: InterviewPhase::from_str(&state.phase),
+                    hint,
+                    required: false,
+                    input_type,
+                    field_name: "ba_response".to_string(),
+                    options,
+                    allow_custom,
+                },
+                estimated_total,
+            ));
         }
 
         // Fallback: plain text response
@@ -1909,17 +1977,20 @@ Otherwise, respond with ONLY the JSON object. No formatting, no preamble, no mar
             return Err(AppError::parse("BA returned empty question".to_string()));
         }
 
-        Ok(InterviewQuestion {
-            id: Uuid::new_v4().to_string(),
-            question: question_text,
-            phase: InterviewPhase::from_str(&state.phase),
-            hint: None,
-            required: false,
-            input_type: "textarea".to_string(),
-            field_name: "ba_response".to_string(),
-            options: vec![],
-            allow_custom: false,
-        })
+        Ok((
+            InterviewQuestion {
+                id: Uuid::new_v4().to_string(),
+                question: question_text,
+                phase: InterviewPhase::from_str(&state.phase),
+                hint: None,
+                required: false,
+                input_type: "textarea".to_string(),
+                field_name: "ba_response".to_string(),
+                options: vec![],
+                allow_custom: false,
+            },
+            None,
+        ))
     }
 
     /// Translate a deterministic-mode question to the target locale using LLM.
@@ -2112,8 +2183,11 @@ Otherwise, respond with ONLY the JSON object. No formatting, no preamble, no mar
 
 /// Result from BA question generation
 enum BaQuestionResult {
-    /// BA generated a follow-up question
-    Question(InterviewQuestion),
+    /// BA generated a follow-up question, with optional estimated total questions
+    Question {
+        question: InterviewQuestion,
+        estimated_total: Option<i32>,
+    },
     /// BA determined interview is complete
     Complete { summary: String },
 }
