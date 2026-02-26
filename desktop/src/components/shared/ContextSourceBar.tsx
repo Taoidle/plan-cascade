@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { ChevronUpIcon } from '@radix-ui/react-icons';
 import { useContextSourcesStore } from '../../store/contextSources';
 import { useSettingsStore } from '../../store/settings';
+import { useProjectsStore } from '../../store/projects';
 import { KnowledgeSourcePicker } from './KnowledgeSourcePicker';
 import { MemorySourcePicker } from './MemorySourcePicker';
 import { SkillsSourcePicker } from './SkillsSourcePicker';
@@ -66,6 +67,8 @@ export function ContextSourceBar() {
   } = useContextSourcesStore();
 
   const workspacePath = useSettingsStore((s) => s.workspacePath);
+  const selectedProject = useProjectsStore((s) => s.selectedProject);
+  const projectId = selectedProject?.id ?? 'default';
 
   const [openPopover, setOpenPopover] = useState<PopoverType>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -92,23 +95,23 @@ export function ContextSourceBar() {
   const handleKnowledgeClick = useCallback(() => {
     if (!knowledgeEnabled) {
       toggleKnowledge(true);
-      if (workspacePath) loadCollections(workspacePath);
+      loadCollections(projectId);
     } else {
       toggleKnowledge(false);
       if (openPopover === 'knowledge') setOpenPopover(null);
     }
-  }, [knowledgeEnabled, toggleKnowledge, workspacePath, loadCollections, openPopover]);
+  }, [knowledgeEnabled, toggleKnowledge, projectId, loadCollections, openPopover]);
 
   const handleKnowledgeChevron = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
       if (!knowledgeEnabled) {
         toggleKnowledge(true);
-        if (workspacePath) loadCollections(workspacePath);
+        loadCollections(projectId);
       }
       setOpenPopover((prev) => (prev === 'knowledge' ? null : 'knowledge'));
     },
-    [knowledgeEnabled, toggleKnowledge, workspacePath, loadCollections],
+    [knowledgeEnabled, toggleKnowledge, projectId, loadCollections],
   );
 
   // --- Memory handlers ---
