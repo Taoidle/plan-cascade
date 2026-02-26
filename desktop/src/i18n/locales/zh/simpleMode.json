@@ -3,6 +3,7 @@
 
   "input": {
     "placeholder": "描述你想要构建的内容...",
+    "followUpPlaceholder": "输入消息...",
     "submitTitle": "提交 (Cmd+Enter)",
     "previewMarkdown": "预览 Markdown",
     "switchToEdit": "切换到编辑"
@@ -179,6 +180,7 @@
 
   "workflowMode": {
     "chat": "对话",
+    "plan": "计划",
     "task": "任务"
   },
 
@@ -273,6 +275,7 @@
     "clear": "清除",
     "contextCleared": "上下文已清除",
     "historyCleared": "对话历史已清除",
+    "switchToPlanWithContext": "切换到计划模式，携带对话上下文",
     "switchToTaskWithContext": "切换到任务模式，携带对话上下文",
     "switchToChatWithTaskContext": "切换到对话模式，携带任务上下文",
     "contextReset": "已为新任务清除上下文"
@@ -491,7 +494,8 @@
       "configuringPlaceholder": "输入配置（如\"6个并行，启用TDD\"）或点击上方的继续按钮...",
       "interviewPlaceholder": "输入你的回答...",
       "prdFeedbackPlaceholder": "添加反馈或在 PRD 卡片上点击批准...",
-      "waitingPlaceholder": "等待响应中..."
+      "waitingPlaceholder": "等待响应中...",
+      "planPlaceholder": "描述一个要分解执行的任务（写作、研究等）..."
     },
 
     "fileChange": {

@@ -1,0 +1,78 @@
+{
+  "analysis": {
+    "title": "Plan Analysis",
+    "complexity": "Complexity",
+    "adapter": "Adapter",
+    "steps": "steps",
+    "approach": "Approach",
+    "needsClarification": "Some details need clarification"
+  },
+
+  "plan": {
+    "title": "Plan",
+    "steps": "steps",
+    "step": "step",
+    "batches": "batches",
+    "batch": "Batch",
+    "completionCriteria": "Completion Criteria",
+    "deps": "deps",
+    "expectedOutput": "Expected output",
+    "approveAndExecute": "Approve & Execute"
+  },
+
+  "execution": {
+    "batchStarted": "Batch Started",
+    "stepStarted": "Step Started",
+    "stepCompleted": "Step Completed",
+    "stepFailed": "Step Failed",
+    "batchComplete": "Batch Complete",
+    "batchLabel": "Batch {{current}}/{{total}}"
+  },
+
+  "output": {
+    "passed": "passed",
+    "partial": "partial",
+    "criteria": "Criteria"
+  },
+
+  "completion": {
+    "success": "Success",
+    "failed": "Failed",
+    "totalSteps": "Total",
+    "completed": "Completed",
+    "duration": "Duration",
+    "stepSummaries": "Step Summaries"
+  },
+
+  "clarify": {
+    "question": "Clarification Question",
+    "hint": "Hint",
+    "skipped": "Skipped",
+    "submit": "Submit",
+    "skipQuestion": "Skip",
+    "skipAll": "Skip All",
+    "generatingQuestion": "Generating clarification question...",
+    "inputPlaceholder": "Type your answer..."
+  },
+
+  "orchestrator": {
+    "analyzingTask": "Analyzing task...",
+    "analysisFailed": "Analysis Failed",
+    "needsClarification": "Some details need clarification before planning.",
+    "generatingPlan": "Generating plan...",
+    "generatingQuestion": "Generating next question...",
+    "clarificationComplete": "Clarification complete.",
+    "clarificationSkipped": "Clarification skipped.",
+    "clarificationFailed": "Clarification failed, proceeding to planning.",
+    "planFailed": "Plan Generation Failed",
+    "planApproved": "Plan approved! Starting execution...",
+    "cancelled": "Plan mode cancelled."
+  },
+
+  "personas": {
+    "planner": "Planner",
+    "analyst": "Analyst",
+    "executor": "Executor",
+    "reviewer": "Reviewer"
+  }
+}

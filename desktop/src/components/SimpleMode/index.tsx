@@ -33,6 +33,7 @@ import {
   EventGroupLine,
 } from '../shared/StreamingOutput';
 import { useWorkflowOrchestratorStore } from '../../store/workflowOrchestrator';
+import { usePlanOrchestratorStore } from '../../store/planOrchestrator';
 import { WorkflowCardRenderer } from './WorkflowCards/WorkflowCardRenderer';
 import { InterviewInputPanel } from './InterviewInputPanel';
 import { ToolPermissionOverlay } from './ToolPermissionOverlay';
@@ -48,7 +49,7 @@ import {
 import type { CardPayload } from '../../types/workflowCard';
 import { useToast } from '../shared/Toast';
 
-type WorkflowMode = 'chat' | 'task';
+type WorkflowMode = 'chat' | 'plan' | 'task';
 
 export function SimpleMode() {
   const { t } = useTranslation('simpleMode');
@@ -117,6 +118,11 @@ export function SimpleMode() {
       if (newMode === 'task' && hasChatHistory) {
         showToast(
           t('contextBridge.switchToTaskWithContext', { defaultValue: 'Switching to Task mode with chat context' }),
+          'info',
+        );
+      } else if (newMode === 'plan' && hasChatHistory) {
+        showToast(
+          t('contextBridge.switchToPlanWithContext', { defaultValue: 'Switching to Plan mode with chat context' }),
           'info',
         );
       } else if (newMode === 'chat' && hasPendingTaskContext) {
@@ -189,6 +195,16 @@ export function SimpleMode() {
   const isInterviewSubmitting =
     useWorkflowOrchestratorStore((s) => s.phase === 'interviewing') && pendingQuestion === null;
 
+  // Plan mode orchestrator
+  const planPhase = usePlanOrchestratorStore((s) => s.phase);
+  const pendingClarifyQuestion = usePlanOrchestratorStore((s) => s.pendingClarifyQuestion);
+  const planIsBusy = usePlanOrchestratorStore((s) => s.isBusy);
+  const startPlanWorkflow = usePlanOrchestratorStore((s) => s.startPlanWorkflow);
+  const submitPlanClarification = usePlanOrchestratorStore((s) => s.submitClarification);
+  const skipPlanClarification = usePlanOrchestratorStore((s) => s.skipClarification);
+  const cancelPlanWorkflow = usePlanOrchestratorStore((s) => s.cancelWorkflow);
+  const resetPlanWorkflow = usePlanOrchestratorStore((s) => s.resetWorkflow);
+
   // Tool permission state
   const permissionRequest = useToolPermissionStore((s) => s.pendingRequest);
   const permissionQueueSize = useToolPermissionStore((s) => s.requestQueue.length);
@@ -207,9 +223,16 @@ export function SimpleMode() {
       return;
     }
 
+    if (workflowMode === 'plan') {
+      // Route Plan mode through the plan orchestrator
+      await startPlanWorkflow(description);
+      setDescription('');
+      return;
+    }
+
     await start(description, 'simple');
     setDescription('');
-  }, [description, isAnalyzingStrategy, isSubmitting, start, startWorkflow, workflowMode]);
+  }, [description, isAnalyzingStrategy, isSubmitting, start, startWorkflow, startPlanWorkflow, workflowMode]);
 
   const handleFollowUp = useCallback(async () => {
     if (!description.trim() || isSubmitting) return;
@@ -227,13 +250,35 @@ export function SimpleMode() {
       return;
     }
 
+    // Route plan clarification through plan orchestrator
+    if (workflowMode === 'plan' && planPhase === 'clarifying' && pendingClarifyQuestion) {
+      await submitPlanClarification({
+        questionId: pendingClarifyQuestion.questionId,
+        answer: prompt,
+        skipped: false,
+      });
+      return;
+    }
+
     await sendFollowUp(prompt);
-  }, [description, isSubmitting, sendFollowUp, workflowMode, workflowPhase, overrideConfigNatural, addPrdFeedback]);
+  }, [
+    description,
+    isSubmitting,
+    sendFollowUp,
+    workflowMode,
+    workflowPhase,
+    planPhase,
+    pendingClarifyQuestion,
+    overrideConfigNatural,
+    addPrdFeedback,
+    submitPlanClarification,
+  ]);
 
   const handleNewTask = useCallback(() => {
     const hasContext = streamingOutput.length > 0 || useExecutionStore.getState()._pendingTaskContext;
 
     resetWorkflow();
+    resetPlanWorkflow();
     reset();
     clearStrategyAnalysis();
     setDescription('');
@@ -241,7 +286,7 @@ export function SimpleMode() {
     if (hasContext) {
       showToast(t('contextBridge.contextReset', { defaultValue: 'Context cleared for new task' }), 'info');
     }
-  }, [reset, clearStrategyAnalysis, resetWorkflow, streamingOutput, showToast, t]);
+  }, [reset, clearStrategyAnalysis, resetWorkflow, resetPlanWorkflow, streamingOutput, showToast, t]);
 
   const handleRestoreHistory = useCallback(
     (historyId: string) => {
@@ -362,7 +407,14 @@ export function SimpleMode() {
                 workflowPhase !== 'failed' &&
                 workflowPhase !== 'cancelled'
               }
-              onCancelWorkflow={cancelWorkflow}
+              planWorkflowActive={
+                workflowMode === 'plan' &&
+                planPhase !== 'idle' &&
+                planPhase !== 'completed' &&
+                planPhase !== 'failed' &&
+                planPhase !== 'cancelled'
+              }
+              onCancelWorkflow={workflowMode === 'plan' ? cancelPlanWorkflow : cancelWorkflow}
               onExportImage={handleExportImage}
               isExportDisabled={streamingOutput.length === 0}
               isCapturing={isCapturing}
@@ -408,6 +460,47 @@ export function SimpleMode() {
                   </svg>
                   <span>{t('workflow.interview.generating', { defaultValue: 'Generating next question...' })}</span>
                 </div>
+              ) : /* Priority 4: Plan clarification input (with question + hint) */
+              workflowMode === 'plan' && planPhase === 'clarifying' && pendingClarifyQuestion ? (
+                <PlanClarifyInputArea
+                  question={pendingClarifyQuestion}
+                  onSubmit={(text) =>
+                    submitPlanClarification({
+                      questionId: pendingClarifyQuestion.questionId,
+                      answer: text,
+                      skipped: false,
+                    })
+                  }
+                  onSkip={() =>
+                    submitPlanClarification({
+                      questionId: pendingClarifyQuestion.questionId,
+                      answer: '',
+                      skipped: true,
+                    })
+                  }
+                  onSkipAll={skipPlanClarification}
+                  loading={planIsBusy}
+                />
+              ) : /* Priority 5: Plan clarification loading state */
+              workflowMode === 'plan' && planPhase === 'clarifying' && !pendingClarifyQuestion ? (
+                <div className="px-4 py-3 flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
+                  <svg
+                    className="animate-spin h-4 w-4"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    />
+                  </svg>
+                  <span>
+                    {t('planMode:clarify.generatingQuestion', { defaultValue: 'Generating clarification question...' })}
+                  </span>
+                </div>
               ) : (
                 <div className="p-4">
                   <InputBox
@@ -415,7 +508,9 @@ export function SimpleMode() {
                     value={description}
                     onChange={setDescription}
                     onSubmit={
-                      isChatSession || (workflowMode === 'task' && workflowPhase !== 'idle')
+                      isChatSession ||
+                      (workflowMode === 'task' && workflowPhase !== 'idle') ||
+                      (workflowMode === 'plan' && planPhase !== 'idle')
                         ? handleFollowUp
                         : handleStart
                     }
@@ -437,9 +532,14 @@ export function SimpleMode() {
                               ? t('workflow.input.taskPlaceholder', {
                                   defaultValue: 'Describe a task (implementation / analysis / refactor)...',
                                 })
-                              : t('input.followUpPlaceholder', {
-                                  defaultValue: 'Type a normal chat message...',
-                                })
+                              : workflowMode === 'plan'
+                                ? t('workflow.input.planPlaceholder', {
+                                    defaultValue:
+                                      'Describe a task to decompose and execute (writing, research, etc.)...',
+                                  })
+                                : t('input.followUpPlaceholder', {
+                                    defaultValue: 'Type a normal chat message...',
+                                  })
                     }
                     isLoading={isRunning}
                     attachments={attachments}
@@ -913,6 +1013,95 @@ function ChatThinkingSection({ lines }: { lines: StreamLine[] }) {
           {content}
         </div>
       </Collapsible>
+    </div>
+  );
+}
+
+/** Plan clarification input area — shown during plan clarifying phase */
+function PlanClarifyInputArea({
+  question,
+  onSubmit,
+  onSkip,
+  onSkipAll,
+  loading,
+}: {
+  question: { questionId: string; question: string; hint: string | null; inputType: string };
+  onSubmit: (text: string) => void;
+  onSkip: () => void;
+  onSkipAll: () => void;
+  loading: boolean;
+}) {
+  const { t } = useTranslation('planMode');
+  const [value, setValue] = useState('');
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-focus on question change
+  useEffect(() => {
+    inputRef.current?.focus();
+    setValue('');
+  }, [question.questionId]);
+
+  const handleSubmit = useCallback(() => {
+    if (!value.trim() || loading) return;
+    onSubmit(value.trim());
+    setValue('');
+  }, [value, loading, onSubmit]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleSubmit();
+      }
+    },
+    [handleSubmit],
+  );
+
+  return (
+    <div className="px-4 py-3 space-y-2">
+      {/* Question display */}
+      <div className="flex items-start gap-2">
+        <span className="text-amber-500 dark:text-amber-400 mt-0.5">&#10067;</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-amber-700 dark:text-amber-300">{question.question}</p>
+          {question.hint && <p className="text-xs text-amber-500/80 dark:text-amber-400/70 mt-0.5">{question.hint}</p>}
+        </div>
+      </div>
+
+      {/* Input + buttons */}
+      <div className="flex items-end gap-2">
+        <textarea
+          ref={inputRef}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={handleKeyDown}
+          disabled={loading}
+          rows={question.inputType === 'textarea' ? 3 : 1}
+          className="flex-1 min-w-0 resize-none rounded-lg border border-amber-300 dark:border-amber-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-amber-400 dark:focus:ring-amber-600 disabled:opacity-50"
+          placeholder={t('clarify.inputPlaceholder', { defaultValue: 'Type your answer...' }) as string}
+        />
+        <button
+          onClick={handleSubmit}
+          disabled={!value.trim() || loading}
+          className="shrink-0 px-3 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 disabled:bg-gray-300 dark:disabled:bg-gray-700 text-white text-sm font-medium transition-colors disabled:cursor-not-allowed"
+        >
+          {t('clarify.submit', { defaultValue: 'Submit' })}
+        </button>
+        <button
+          onClick={onSkip}
+          disabled={loading}
+          className="shrink-0 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm transition-colors disabled:opacity-50"
+        >
+          {t('clarify.skipQuestion', { defaultValue: 'Skip' })}
+        </button>
+        <button
+          onClick={onSkipAll}
+          disabled={loading}
+          className="shrink-0 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm transition-colors disabled:opacity-50"
+        >
+          {t('clarify.skipAll', { defaultValue: 'Skip All' })}
+        </button>
+      </div>
     </div>
   );
 }

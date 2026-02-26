@@ -1,0 +1,78 @@
+{
+  "analysis": {
+    "title": "プラン分析",
+    "complexity": "複雑度",
+    "adapter": "アダプター",
+    "steps": "ステップ",
+    "approach": "アプローチ",
+    "needsClarification": "一部の詳細を確認する必要があります"
+  },
+
+  "plan": {
+    "title": "プラン",
+    "steps": "ステップ",
+    "step": "ステップ",
+    "batches": "バッチ",
+    "batch": "バッチ",
+    "completionCriteria": "完了基準",
+    "deps": "依存",
+    "expectedOutput": "期待される出力",
+    "approveAndExecute": "承認して実行"
+  },
+
+  "execution": {
+    "batchStarted": "バッチ開始",
+    "stepStarted": "ステップ開始",
+    "stepCompleted": "ステップ完了",
+    "stepFailed": "ステップ失敗",
+    "batchComplete": "バッチ完了",
+    "batchLabel": "バッチ {{current}}/{{total}}"
+  },
+
+  "output": {
+    "passed": "合格",
+    "partial": "一部合格",
+    "criteria": "基準"
+  },
+
+  "completion": {
+    "success": "成功",
+    "failed": "失敗",
+    "totalSteps": "合計",
+    "completed": "完了",
+    "duration": "所要時間",
+    "stepSummaries": "ステップ概要"
+  },
+
+  "clarify": {
+    "question": "確認質問",
+    "hint": "ヒント",
+    "skipped": "スキップ",
+    "submit": "送信",
+    "skipQuestion": "スキップ",
+    "skipAll": "全てスキップ",
+    "generatingQuestion": "確認質問を生成中...",
+    "inputPlaceholder": "回答を入力..."
+  },
+
+  "orchestrator": {
+    "analyzingTask": "タスクを分析中...",
+    "analysisFailed": "分析失敗",
+    "needsClarification": "計画作成前に確認が必要な詳細があります。",
+    "generatingPlan": "プランを生成中...",
+    "generatingQuestion": "次の質問を生成中...",
+    "clarificationComplete": "確認完了。",
+    "clarificationSkipped": "確認をスキップしました。",
+    "clarificationFailed": "確認に失敗しました。計画作成に進みます。",
+    "planFailed": "プラン生成失敗",
+    "planApproved": "プランが承認されました！実行を開始します...",
+    "cancelled": "プランモードがキャンセルされました。"
+  },
+
+  "personas": {
+    "planner": "プランナー",
+    "analyst": "アナリスト",
+    "executor": "エグゼキューター",
+    "reviewer": "レビュアー"
+  }
+}

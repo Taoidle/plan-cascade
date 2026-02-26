@@ -29,6 +29,7 @@ pub mod memory;
 pub mod orchestrator;
 pub mod persona;
 pub mod phase;
+pub mod plan_mode;
 pub mod plugins;
 pub mod project;
 pub mod prompt;

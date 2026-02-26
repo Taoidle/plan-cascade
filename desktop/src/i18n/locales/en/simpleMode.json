@@ -3,6 +3,7 @@
 
   "input": {
     "placeholder": "Describe what you want to build...",
+    "followUpPlaceholder": "Type a message...",
     "submitTitle": "Submit (Cmd+Enter)",
     "previewMarkdown": "Preview markdown",
     "switchToEdit": "Switch to edit"
@@ -179,6 +180,7 @@
 
   "workflowMode": {
     "chat": "Chat",
+    "plan": "Plan",
     "task": "Task"
   },
 
@@ -273,6 +275,7 @@
     "clear": "Clear",
     "contextCleared": "Context cleared",
     "historyCleared": "Conversation history cleared",
+    "switchToPlanWithContext": "Switching to Plan mode with chat context",
     "switchToTaskWithContext": "Switching to Task mode with chat context",
     "switchToChatWithTaskContext": "Switching to Chat mode with task context",
     "contextReset": "Context cleared for new task"
@@ -491,7 +494,8 @@
       "configuringPlaceholder": "Type config overrides (e.g. \"6 parallel, enable TDD\") or click Continue above...",
       "interviewPlaceholder": "Type your answer...",
       "prdFeedbackPlaceholder": "Add feedback or press Approve on the PRD card...",
-      "waitingPlaceholder": "Waiting for response..."
+      "waitingPlaceholder": "Waiting for response...",
+      "planPlaceholder": "Describe a task to decompose and execute (writing, research, etc.)..."
     },
 
     "fileChange": {

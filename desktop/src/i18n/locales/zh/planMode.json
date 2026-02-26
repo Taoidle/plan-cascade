@@ -1,0 +1,78 @@
+{
+  "analysis": {
+    "title": "计划分析",
+    "complexity": "复杂度",
+    "adapter": "适配器",
+    "steps": "步骤",
+    "approach": "方案",
+    "needsClarification": "部分细节需要澄清"
+  },
+
+  "plan": {
+    "title": "计划",
+    "steps": "步骤",
+    "step": "步骤",
+    "batches": "批次",
+    "batch": "批次",
+    "completionCriteria": "完成标准",
+    "deps": "依赖",
+    "expectedOutput": "预期输出",
+    "approveAndExecute": "批准并执行"
+  },
+
+  "execution": {
+    "batchStarted": "批次已开始",
+    "stepStarted": "步骤已开始",
+    "stepCompleted": "步骤已完成",
+    "stepFailed": "步骤失败",
+    "batchComplete": "批次完成",
+    "batchLabel": "批次 {{current}}/{{total}}"
+  },
+
+  "output": {
+    "passed": "通过",
+    "partial": "部分通过",
+    "criteria": "标准"
+  },
+
+  "completion": {
+    "success": "成功",
+    "failed": "失败",
+    "totalSteps": "总计",
+    "completed": "已完成",
+    "duration": "耗时",
+    "stepSummaries": "步骤摘要"
+  },
+
+  "clarify": {
+    "question": "澄清问题",
+    "hint": "提示",
+    "skipped": "已跳过",
+    "submit": "提交",
+    "skipQuestion": "跳过",
+    "skipAll": "全部跳过",
+    "generatingQuestion": "正在生成澄清问题...",
+    "inputPlaceholder": "输入您的答案..."
+  },
+
+  "orchestrator": {
+    "analyzingTask": "正在分析任务...",
+    "analysisFailed": "分析失败",
+    "needsClarification": "在规划之前需要澄清一些细节。",
+    "generatingPlan": "正在生成计划...",
+    "generatingQuestion": "正在生成下一个问题...",
+    "clarificationComplete": "澄清完成。",
+    "clarificationSkipped": "已跳过澄清。",
+    "clarificationFailed": "澄清失败，继续进行规划。",
+    "planFailed": "计划生成失败",
+    "planApproved": "计划已批准！开始执行...",
+    "cancelled": "计划模式已取消。"
+  },
+
+  "personas": {
+    "planner": "规划者",
+    "analyst": "分析师",
+    "executor": "执行者",
+    "reviewer": "审核者"
+  }
+}

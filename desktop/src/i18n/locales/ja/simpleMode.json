@@ -3,6 +3,7 @@
 
   "input": {
     "placeholder": "作りたいものを説明してください...",
+    "followUpPlaceholder": "メッセージを入力...",
     "submitTitle": "送信 (Cmd+Enter)",
     "previewMarkdown": "Markdownプレビュー",
     "switchToEdit": "編集に切替"
@@ -179,6 +180,7 @@
 
   "workflowMode": {
     "chat": "チャット",
+    "plan": "プラン",
     "task": "タスク"
   },
 
@@ -273,6 +275,7 @@
     "clear": "クリア",
     "contextCleared": "コンテキストがクリアされました",
     "historyCleared": "会話履歴がクリアされました",
+    "switchToPlanWithContext": "チャットコンテキスト付きでプランモードに切り替え",
     "switchToTaskWithContext": "チャットコンテキスト付きでタスクモードに切り替え",
     "switchToChatWithTaskContext": "タスクコンテキスト付きでチャットモードに切り替え",
     "contextReset": "新しいタスクのためにコンテキストをクリアしました"
@@ -491,7 +494,8 @@
       "configuringPlaceholder": "設定を入力（例：「6並列、TDD有効」）するか、上のカードで続行をクリック...",
       "interviewPlaceholder": "回答を入力...",
       "prdFeedbackPlaceholder": "フィードバックを追加するか、PRDカードの承認ボタンを押してください...",
-      "waitingPlaceholder": "応答を待っています..."
+      "waitingPlaceholder": "応答を待っています...",
+      "planPlaceholder": "分解して実行するタスクを説明してください（ライティング、リサーチなど）..."
     },
 
     "fileChange": {

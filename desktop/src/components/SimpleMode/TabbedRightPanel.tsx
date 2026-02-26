@@ -20,7 +20,7 @@ interface TabbedRightPanelProps {
   activeTab: RightPanelTab;
   onTabChange: (tab: RightPanelTab) => void;
   // Output tab props
-  workflowMode: 'chat' | 'task';
+  workflowMode: 'chat' | 'plan' | 'task';
   workflowPhase: string;
   logs: string[];
   analysisCoverage: AnalysisCoverageSnapshot | null;

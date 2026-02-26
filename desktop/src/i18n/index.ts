@@ -18,6 +18,7 @@ import enWizard from './locales/en/wizard.json';
 import enAnalytics from './locales/en/analytics.json';
 import enAgents from './locales/en/agents.json';
 import enTaskMode from './locales/en/taskMode.json';
+import enPlanMode from './locales/en/planMode.json';
 import enKnowledge from './locales/en/knowledge.json';
 import enArtifacts from './locales/en/artifacts.json';
 import enGit from './locales/en/git.json';
@@ -32,6 +33,7 @@ import zhWizard from './locales/zh/wizard.json';
 import zhAnalytics from './locales/zh/analytics.json';
 import zhAgents from './locales/zh/agents.json';
 import zhTaskMode from './locales/zh/taskMode.json';
+import zhPlanMode from './locales/zh/planMode.json';
 import zhKnowledge from './locales/zh/knowledge.json';
 import zhArtifacts from './locales/zh/artifacts.json';
 import zhGit from './locales/zh/git.json';
@@ -46,6 +48,7 @@ import jaWizard from './locales/ja/wizard.json';
 import jaAnalytics from './locales/ja/analytics.json';
 import jaAgents from './locales/ja/agents.json';
 import jaTaskMode from './locales/ja/taskMode.json';
+import jaPlanMode from './locales/ja/planMode.json';
 import jaGit from './locales/ja/git.json';
 
 export const resources = {
@@ -59,6 +62,7 @@ export const resources = {
     analytics: enAnalytics,
     agents: enAgents,
     taskMode: enTaskMode,
+    planMode: enPlanMode,
     knowledge: enKnowledge,
     artifacts: enArtifacts,
     git: enGit,
@@ -73,6 +77,7 @@ export const resources = {
     analytics: zhAnalytics,
     agents: zhAgents,
     taskMode: zhTaskMode,
+    planMode: zhPlanMode,
     knowledge: zhKnowledge,
     artifacts: zhArtifacts,
     git: zhGit,
@@ -87,6 +92,7 @@ export const resources = {
     analytics: jaAnalytics,
     agents: jaAgents,
     taskMode: jaTaskMode,
+    planMode: jaPlanMode,
     knowledge: enKnowledge,
     artifacts: enArtifacts,
     git: jaGit,
@@ -119,6 +125,7 @@ i18n
       'analytics',
       'agents',
       'taskMode',
+      'planMode',
       'knowledge',
       'artifacts',
       'git',

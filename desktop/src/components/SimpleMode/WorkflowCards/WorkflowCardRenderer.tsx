@@ -20,6 +20,23 @@ import { TurnChangeSummaryCard } from './TurnChangeSummaryCard';
 import { RequirementAnalysisCard } from './RequirementAnalysisCard';
 import { ArchitectureReviewCard } from './ArchitectureReviewCard';
 import { PersonaIndicatorCard } from './PersonaIndicatorCard';
+import { PlanAnalysisCard } from './PlanAnalysisCard';
+import { PlanCard } from './PlanCard';
+import { PlanStepUpdateCard } from './PlanStepUpdateCard';
+import { PlanStepOutputCard } from './PlanStepOutputCard';
+import { PlanCompletionCard } from './PlanCompletionCard';
+import { PlanClarifyQuestionCard } from './PlanClarifyQuestionCard';
+import { PlanClarifyAnswerCard } from './PlanClarifyAnswerCard';
+import type {
+  PlanAnalysisCardData,
+  PlanCardData,
+  PlanStepUpdateCardData,
+  PlanStepOutputCardData,
+  PlanCompletionCardData,
+  PlanClarifyQuestionCardData,
+  PlanClarifyAnswerCardData,
+  PlanPersonaIndicatorData,
+} from '../../../types/planModeCard';
 import type {
   StrategyCardData,
   ConfigCardData,
@@ -78,6 +95,25 @@ export function WorkflowCardRenderer({ payload }: { payload: CardPayload }) {
       );
     case 'persona_indicator':
       return <PersonaIndicatorCard data={payload.data as PersonaIndicatorData} />;
+    // Plan Mode cards
+    case 'plan_analysis_card':
+      return <PlanAnalysisCard data={payload.data as PlanAnalysisCardData} />;
+    case 'plan_card':
+      return <PlanCard data={payload.data as PlanCardData} interactive={payload.interactive} />;
+    case 'plan_step_update':
+      return <PlanStepUpdateCard data={payload.data as PlanStepUpdateCardData} />;
+    case 'plan_step_output':
+      return <PlanStepOutputCard data={payload.data as PlanStepOutputCardData} />;
+    case 'plan_completion_card':
+      return <PlanCompletionCard data={payload.data as PlanCompletionCardData} />;
+    case 'plan_clarify_question':
+      return <PlanClarifyQuestionCard data={payload.data as PlanClarifyQuestionCardData} />;
+    case 'plan_clarify_answer':
+      return <PlanClarifyAnswerCard data={payload.data as PlanClarifyAnswerCardData} />;
+    case 'plan_persona_indicator':
+      return (
+        <PersonaIndicatorCard data={payload.data as PlanPersonaIndicatorData as unknown as PersonaIndicatorData} />
+      );
     default:
       return null;
   }

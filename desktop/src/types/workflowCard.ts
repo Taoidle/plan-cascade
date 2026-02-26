@@ -47,7 +47,16 @@ export type CardType =
   | 'turn_change_summary'
   | 'requirement_analysis_card'
   | 'architecture_review_card'
-  | 'persona_indicator';
+  | 'persona_indicator'
+  // Plan Mode card types
+  | 'plan_analysis_card'
+  | 'plan_clarify_question'
+  | 'plan_clarify_answer'
+  | 'plan_card'
+  | 'plan_step_update'
+  | 'plan_step_output'
+  | 'plan_completion_card'
+  | 'plan_persona_indicator';
 
 // ============================================================================
 // Card Payload (stored in StreamLine.content as JSON)
@@ -80,6 +89,15 @@ export interface CardDataMap {
   requirement_analysis_card: RequirementAnalysisCardData;
   architecture_review_card: ArchitectureReviewCardData;
   persona_indicator: PersonaIndicatorData;
+  // Plan Mode card data (uses types from planModeCard.ts)
+  plan_analysis_card: import('../types/planModeCard').PlanAnalysisCardData;
+  plan_clarify_question: import('../types/planModeCard').PlanClarifyQuestionCardData;
+  plan_clarify_answer: import('../types/planModeCard').PlanClarifyAnswerCardData;
+  plan_card: import('../types/planModeCard').PlanCardData;
+  plan_step_update: import('../types/planModeCard').PlanStepUpdateCardData;
+  plan_step_output: import('../types/planModeCard').PlanStepOutputCardData;
+  plan_completion_card: import('../types/planModeCard').PlanCompletionCardData;
+  plan_persona_indicator: import('../types/planModeCard').PlanPersonaIndicatorData;
 }
 
 // ============================================================================

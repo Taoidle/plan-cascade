@@ -12,7 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { FilePlusIcon, PauseIcon, PlayIcon, Cross2Icon, CameraIcon } from '@radix-ui/react-icons';
 import { ContextSourceBar } from '../shared/ContextSourceBar';
 
-type WorkflowMode = 'chat' | 'task';
+type WorkflowMode = 'chat' | 'plan' | 'task';
 
 interface ChatToolbarProps {
   // Mode toggle
@@ -28,6 +28,7 @@ interface ChatToolbarProps {
   onCancel: () => void;
   // Task workflow controls
   taskWorkflowActive?: boolean;
+  planWorkflowActive?: boolean;
   onCancelWorkflow?: () => void;
   // Export image
   onExportImage: () => void;
@@ -50,6 +51,7 @@ export function ChatToolbar({
   onResume,
   onCancel,
   taskWorkflowActive,
+  planWorkflowActive,
   onCancelWorkflow,
   onExportImage,
   isExportDisabled,
@@ -86,6 +88,17 @@ export function ChatToolbar({
             {t('workflowMode.chat', { defaultValue: 'Chat' })}
           </button>
           <button
+            onClick={() => onWorkflowModeChange('plan')}
+            className={clsx(
+              'px-3 py-1.5 text-xs font-medium transition-colors',
+              workflowMode === 'plan'
+                ? 'bg-primary-600 text-white'
+                : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800',
+            )}
+          >
+            {t('workflowMode.plan', { defaultValue: 'Plan' })}
+          </button>
+          <button
             onClick={() => onWorkflowModeChange('task')}
             className={clsx(
               'px-3 py-1.5 text-xs font-medium transition-colors',
@@ -120,7 +133,7 @@ export function ChatToolbar({
       </div>
 
       {/* Center group: execution controls (chat running/paused OR task workflow active) */}
-      {(isExecuting || taskWorkflowActive) && (
+      {(isExecuting || taskWorkflowActive || planWorkflowActive) && (
         <div className="flex items-center gap-1">
           {isExecuting && executionStatus === 'running' && (
             <button
@@ -167,7 +180,7 @@ export function ChatToolbar({
               <Cross2Icon className="w-4 h-4" />
             </button>
           )}
-          {taskWorkflowActive && !isExecuting && onCancelWorkflow && (
+          {(taskWorkflowActive || planWorkflowActive) && !isExecuting && onCancelWorkflow && (
             <button
               onClick={onCancelWorkflow}
               className={clsx(

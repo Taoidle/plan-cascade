@@ -19,6 +19,7 @@ use plan_cascade_desktop::commands::remote::RemoteState;
 use plan_cascade_desktop::commands::spec_interview::SpecInterviewState;
 use plan_cascade_desktop::commands::standalone::StandaloneState;
 use plan_cascade_desktop::commands::task_mode::TaskModeState;
+use plan_cascade_desktop::commands::plan_mode::PlanModeState;
 use plan_cascade_desktop::commands::webhook::WebhookState;
 use plan_cascade_desktop::commands::worktree::WorktreeState;
 use plan_cascade_desktop::state::AppState;
@@ -43,6 +44,7 @@ fn main() {
         .manage(WebhookState::new_empty())
         .manage(RemoteState::new())
         .manage(TaskModeState::new())
+        .manage(PlanModeState::new())
         .manage(ExecutionRegistry::new())
         .manage(KnowledgeState::new())
         .manage(ArtifactState::new())
@@ -216,6 +218,18 @@ fn main() {
             plan_cascade_desktop::commands::task_mode::prepare_design_doc_for_task,
             plan_cascade_desktop::commands::task_mode::run_requirement_analysis,
             plan_cascade_desktop::commands::task_mode::run_architecture_review,
+            // Plan Mode commands
+            plan_cascade_desktop::commands::plan_mode::enter_plan_mode,
+            plan_cascade_desktop::commands::plan_mode::submit_plan_clarification,
+            plan_cascade_desktop::commands::plan_mode::skip_plan_clarification,
+            plan_cascade_desktop::commands::plan_mode::generate_plan,
+            plan_cascade_desktop::commands::plan_mode::approve_plan,
+            plan_cascade_desktop::commands::plan_mode::get_plan_execution_status,
+            plan_cascade_desktop::commands::plan_mode::cancel_plan_execution,
+            plan_cascade_desktop::commands::plan_mode::get_plan_execution_report,
+            plan_cascade_desktop::commands::plan_mode::get_step_output,
+            plan_cascade_desktop::commands::plan_mode::exit_plan_mode,
+            plan_cascade_desktop::commands::plan_mode::list_plan_adapters,
             // Spec Interview commands
             plan_cascade_desktop::commands::spec_interview::start_spec_interview,
             plan_cascade_desktop::commands::spec_interview::submit_interview_answer,
