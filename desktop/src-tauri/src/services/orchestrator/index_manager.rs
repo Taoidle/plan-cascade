@@ -288,6 +288,13 @@ impl IndexManager {
         let statuses_for_cb = statuses.clone();
         let app_for_cb = app_handle_opt.clone();
         let progress_cb: IndexProgressCallback = Arc::new(move |done, total| {
+            // Preserve existing lsp_enrichment so indexing events don't
+            // overwrite an in-progress or completed enrichment status.
+            let prev_lsp = statuses_for_cb
+                .try_read()
+                .ok()
+                .and_then(|map| map.get(&pp_for_cb).map(|e| e.lsp_enrichment.clone()))
+                .unwrap_or_else(|| "none".to_string());
             let event = IndexStatusEvent {
                 project_path: pp_for_cb.clone(),
                 status: "indexing".to_string(),
@@ -297,7 +304,7 @@ impl IndexManager {
                 total_symbols: 0,
                 embedding_chunks: 0,
                 embedding_provider_name: None,
-                lsp_enrichment: "none".to_string(),
+                lsp_enrichment: prev_lsp,
             };
             // Update statuses map (blocking write is fine in the sync callback
             // because contention is low and the lock is only briefly held).
@@ -356,6 +363,11 @@ impl IndexManager {
             let provider_name_for_batch = provider_display_name.clone();
             let batch_cb: BatchCompleteCallback = Arc::new(move || {
                 if let Ok(summary) = store_for_batch.get_project_summary(&pp_for_batch) {
+                    let prev_lsp = statuses_for_batch
+                        .try_read()
+                        .ok()
+                        .and_then(|map| map.get(&pp_for_batch).map(|e| e.lsp_enrichment.clone()))
+                        .unwrap_or_else(|| "none".to_string());
                     let event = IndexStatusEvent {
                         project_path: pp_for_batch.clone(),
                         status: "indexed".to_string(),
@@ -365,7 +377,7 @@ impl IndexManager {
                         total_symbols: summary.total_symbols,
                         embedding_chunks: summary.embedding_chunks,
                         embedding_provider_name: Some(provider_name_for_batch.clone()),
-                        lsp_enrichment: "none".to_string(),
+                        lsp_enrichment: prev_lsp,
                     };
                     if let Ok(mut map) = statuses_for_batch.try_write() {
                         map.insert(pp_for_batch.clone(), event.clone());
@@ -389,6 +401,15 @@ impl IndexManager {
             let result = join.await;
 
             // Determine final status.
+            // Preserve lsp_enrichment from cached status so indexing completion
+            // does not overwrite an in-progress or completed enrichment state.
+            let prev_lsp = statuses_for_task
+                .read()
+                .await
+                .get(&pp_for_task)
+                .map(|e| e.lsp_enrichment.clone())
+                .unwrap_or_else(|| "none".to_string());
+
             let final_event = match result {
                 Ok(embedding_stats) => {
                     let summary = index_store
@@ -437,7 +458,7 @@ impl IndexManager {
                         total_symbols: summary.total_symbols,
                         embedding_chunks: summary.embedding_chunks,
                         embedding_provider_name: Some(provider_display_name.clone()),
-                        lsp_enrichment: "none".to_string(),
+                        lsp_enrichment: prev_lsp.clone(),
                     }
                 }
                 Err(_) => IndexStatusEvent {
@@ -768,6 +789,11 @@ impl IndexManager {
         };
         let batch_cb: BatchCompleteCallback = Arc::new(move || {
             if let Ok(summary) = store_for_batch.get_project_summary(&pp_for_batch) {
+                let prev_lsp = statuses_for_batch
+                    .try_read()
+                    .ok()
+                    .and_then(|map| map.get(&pp_for_batch).map(|e| e.lsp_enrichment.clone()))
+                    .unwrap_or_else(|| "none".to_string());
                 let event = IndexStatusEvent {
                     project_path: pp_for_batch.clone(),
                     status: "indexed".to_string(),
@@ -777,7 +803,7 @@ impl IndexManager {
                     total_symbols: summary.total_symbols,
                     embedding_chunks: summary.embedding_chunks,
                     embedding_provider_name: Some(provider_name_for_batch.clone()),
-                    lsp_enrichment: "none".to_string(),
+                    lsp_enrichment: prev_lsp,
                 };
                 if let Ok(mut map) = statuses_for_batch.try_write() {
                     map.insert(pp_for_batch.clone(), event.clone());
