@@ -12,6 +12,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '../../store/settings';
+import { useLspStore } from '../../store/lsp';
 
 interface IndexStatusEvent {
   project_path: string;
@@ -53,6 +54,10 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
   const [embeddingChunks, setEmbeddingChunks] = useState(0);
   const [embeddingProviderName, setEmbeddingProviderName] = useState<string | null>(null);
   const [lspEnrichment, setLspEnrichment] = useState<'none' | 'enriching' | 'enriched'>('none');
+
+  const autoEnrich = useLspStore((s) => s.autoEnrich);
+  const isEnriching = useLspStore((s) => s.isEnriching);
+  const enrichAction = useLspStore((s) => s.enrich);
 
   const applyEvent = useCallback((evt: IndexStatusEvent) => {
     setStatus(evt.status);
@@ -143,6 +148,19 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
       }
     };
   }, [workspacePath, applyEvent]);
+
+  // Auto-trigger LSP enrichment when index completes and autoEnrich is enabled
+  useEffect(() => {
+    if (
+      (status === 'indexed' || status === 'indexed_no_embedding') &&
+      autoEnrich &&
+      !isEnriching &&
+      workspacePath &&
+      lspEnrichment === 'none'
+    ) {
+      enrichAction(workspacePath);
+    }
+  }, [status, autoEnrich, isEnriching, workspacePath, lspEnrichment, enrichAction]);
 
   const handleReindex = useCallback(() => {
     invoke<CommandResponse<boolean>>('trigger_reindex', {

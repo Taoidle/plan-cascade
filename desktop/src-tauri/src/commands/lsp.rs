@@ -10,8 +10,9 @@ use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use crate::commands::standalone::StandaloneState;
 use crate::models::response::CommandResponse;
-use crate::services::orchestrator::index_store::{IndexStore, LspServerInfo};
+use crate::services::orchestrator::index_store::IndexStore;
 use crate::services::orchestrator::lsp_enricher::{EnrichmentReport, LspEnricher};
 use crate::services::orchestrator::lsp_registry::LspServerRegistry;
 use crate::state::AppState;
@@ -103,6 +104,7 @@ pub async fn trigger_lsp_enrichment(
     project_path: String,
     lsp_state: State<'_, LspState>,
     app_state: State<'_, AppState>,
+    standalone_state: State<'_, StandaloneState>,
 ) -> Result<CommandResponse<EnrichmentReport>, String> {
     // Get the IndexStore from app state
     let pool = match app_state.with_database(|db| Ok(db.pool().clone())).await {
@@ -116,6 +118,11 @@ pub async fn trigger_lsp_enrichment(
         }
     };
 
+    // Emit "enriching" status
+    if let Some(mgr) = &*standalone_state.index_manager.read().await {
+        mgr.set_lsp_enrichment_status(&project_path, "enriching").await;
+    }
+
     let index_store = Arc::new(IndexStore::new(pool));
     let enricher = LspEnricher::new(Arc::clone(&lsp_state.registry), index_store);
 
@@ -125,17 +132,29 @@ pub async fn trigger_lsp_enrichment(
             let mut last = lsp_state.last_report.write().await;
             *last = Some(report.clone());
 
+            // Emit "enriched" status
+            if let Some(mgr) = &*standalone_state.index_manager.read().await {
+                mgr.set_lsp_enrichment_status(&project_path, "enriched").await;
+            }
+
             Ok(CommandResponse {
                 success: true,
                 data: Some(report),
                 error: None,
             })
         }
-        Err(e) => Ok(CommandResponse {
-            success: false,
-            data: None,
-            error: Some(format!("Enrichment failed: {}", e)),
-        }),
+        Err(e) => {
+            // Reset to "none" on failure
+            if let Some(mgr) = &*standalone_state.index_manager.read().await {
+                mgr.set_lsp_enrichment_status(&project_path, "none").await;
+            }
+
+            Ok(CommandResponse {
+                success: false,
+                data: None,
+                error: Some(format!("Enrichment failed: {}", e)),
+            })
+        }
     }
 }
 

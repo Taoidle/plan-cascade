@@ -176,6 +176,12 @@ impl CodebaseSearchTool {
             if let Some(sim) = result.semantic_similarity {
                 line.push_str(&format!("    similarity: {:.3}\n", sim));
             }
+            if let Some(ref rtype) = result.resolved_type {
+                line.push_str(&format!("    type: {}\n", rtype));
+            }
+            if result.reference_count > 0 {
+                line.push_str(&format!("    refs: {}\n", result.reference_count));
+            }
             output.push_str(&line);
         }
         if results.len() > 30 {
@@ -248,6 +254,12 @@ impl CodebaseSearchTool {
                                 doc.clone()
                             };
                             section.push_str(&format!("    doc: {}\n", truncated));
+                        }
+                        if let Some(ref rtype) = sym.resolved_type {
+                            section.push_str(&format!("    type: {}\n", rtype));
+                        }
+                        if sym.reference_count > 0 {
+                            section.push_str(&format!("    refs: {}\n", sym.reference_count));
                         }
                     }
                     if filtered.len() > 50 {

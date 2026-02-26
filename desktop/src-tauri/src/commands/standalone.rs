@@ -768,6 +768,7 @@ pub async fn get_index_status(
             total_symbols: 0,
             embedding_chunks: 0,
             embedding_provider_name: None,
+            lsp_enrichment: "none".to_string(),
         }));
     }
 
@@ -789,6 +790,7 @@ pub async fn get_index_status(
             total_symbols: 0,
             embedding_chunks: 0,
             embedding_provider_name: None,
+            lsp_enrichment: "none".to_string(),
         }))
     }
 }

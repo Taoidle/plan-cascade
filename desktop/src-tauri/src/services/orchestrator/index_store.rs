@@ -33,6 +33,12 @@ pub struct SymbolMatch {
     /// End line of the symbol
     #[serde(default)]
     pub end_line: usize,
+    /// LSP-resolved type information (e.g. "fn() -> Result<(), Error>")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_type: Option<String>,
+    /// Number of references found by LSP
+    #[serde(default)]
+    pub reference_count: i64,
 }
 
 /// Component entry in a project summary.
@@ -236,7 +242,8 @@ impl IndexStore {
 
         let mut stmt = conn.prepare(
             "SELECT fi.file_path, fi.project_path, fs.name, fs.kind, fs.line_number,
-                    fs.parent_symbol, fs.signature, fs.doc_comment, fs.end_line
+                    fs.parent_symbol, fs.signature, fs.doc_comment, fs.end_line,
+                    fs.resolved_type, fs.reference_count
              FROM file_symbols fs
              JOIN file_index fi ON fi.id = fs.file_index_id
              WHERE fs.name LIKE ?1
@@ -255,6 +262,8 @@ impl IndexStore {
                     signature: row.get(6)?,
                     doc_comment: row.get(7)?,
                     end_line: row.get::<_, i64>(8).unwrap_or(0) as usize,
+                    resolved_type: row.get(9)?,
+                    reference_count: row.get::<_, i64>(10).unwrap_or(0),
                 })
             })?
             .filter_map(|r| r.ok())
@@ -1211,7 +1220,8 @@ impl IndexStore {
         // must join back to the source tables.
         let mut stmt = conn.prepare(
             "SELECT fi.file_path, fi.project_path, fs.name, fs.kind, fs.line_number,
-                    fs.parent_symbol, fs.signature, fs.doc_comment, fs.end_line
+                    fs.parent_symbol, fs.signature, fs.doc_comment, fs.end_line,
+                    fs.resolved_type, fs.reference_count
              FROM symbol_fts
              JOIN file_symbols fs ON fs.id = symbol_fts.rowid
              JOIN file_index fi ON fi.id = fs.file_index_id
@@ -1232,6 +1242,8 @@ impl IndexStore {
                     signature: row.get(6)?,
                     doc_comment: row.get(7)?,
                     end_line: row.get::<_, i64>(8).unwrap_or(0) as usize,
+                    resolved_type: row.get(9)?,
+                    reference_count: row.get::<_, i64>(10).unwrap_or(0),
                 })
             })?
             .filter_map(|r| r.ok())
@@ -1422,6 +1434,27 @@ impl IndexStore {
         )?;
 
         Ok(())
+    }
+
+    /// Check whether any LSP enrichment data exists for a project.
+    ///
+    /// Returns `true` if at least one symbol has a non-NULL `resolved_type`
+    /// or a `reference_count > 0`. This is a lightweight query used by
+    /// `IndexManager` to populate the `lsp_enrichment` field in status events.
+    pub fn has_enrichment_data(&self, project_path: &str) -> AppResult<bool> {
+        let conn = self.get_connection()?;
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM file_symbols fs
+                 JOIN file_index fi ON fi.id = fs.file_index_id
+                 WHERE fi.project_path = ?1
+                   AND (fs.resolved_type IS NOT NULL OR fs.reference_count > 0)
+                 LIMIT 1",
+                params![project_path],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        Ok(count > 0)
     }
 
     /// Get cross-references for a specific file in a project.

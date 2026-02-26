@@ -90,6 +90,12 @@ pub struct HybridSearchResult {
     /// Optional: the semantic similarity score from the Semantic channel.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub semantic_similarity: Option<f32>,
+    /// LSP-resolved type information (from enrichment).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_type: Option<String>,
+    /// Number of references found by LSP (from enrichment).
+    #[serde(default)]
+    pub reference_count: i64,
 }
 
 /// Outcome of a hybrid search, wrapping results with degradation metadata.
@@ -332,6 +338,8 @@ impl HybridSearchEngine {
                         symbol_name: Some(sym.symbol_name),
                         chunk_text: None,
                         semantic_similarity: None,
+                        resolved_type: sym.resolved_type,
+                        reference_count: sym.reference_count,
                     })
                     .collect();
                 return Ok(entries);
@@ -356,6 +364,8 @@ impl HybridSearchEngine {
                 symbol_name: Some(sym.symbol_name),
                 chunk_text: None,
                 semantic_similarity: None,
+                resolved_type: sym.resolved_type,
+                reference_count: sym.reference_count,
             })
             .collect();
 
@@ -381,6 +391,8 @@ impl HybridSearchEngine {
                         symbol_name: None,
                         chunk_text: None,
                         semantic_similarity: None,
+                        resolved_type: None,
+                        reference_count: 0,
                     })
                     .collect();
                 return Ok(entries);
@@ -407,6 +419,8 @@ impl HybridSearchEngine {
                 symbol_name: None,
                 chunk_text: None,
                 semantic_similarity: None,
+                resolved_type: None,
+                reference_count: 0,
             })
             .collect();
 
@@ -460,6 +474,8 @@ impl HybridSearchEngine {
                 symbol_name: None,
                 chunk_text: Some(r.chunk_text),
                 semantic_similarity: Some(r.similarity),
+                resolved_type: None,
+                reference_count: 0,
             })
             .collect();
 
@@ -502,6 +518,8 @@ impl HybridSearchEngine {
                             symbol_name: None,
                             chunk_text: Some(chunk_text.clone()),
                             semantic_similarity: Some(similarity),
+                            resolved_type: None,
+                            reference_count: 0,
                         }
                     })
             })
@@ -543,6 +561,8 @@ impl HybridSearchEngine {
                             symbol_name: None,
                             chunk_text: None,
                             semantic_similarity: None,
+                            resolved_type: None,
+                            reference_count: 0,
                         });
 
                 acc.score += rrf_contribution;
@@ -562,6 +582,11 @@ impl HybridSearchEngine {
                 if entry.semantic_similarity.is_some() && acc.semantic_similarity.is_none() {
                     acc.semantic_similarity = entry.semantic_similarity;
                 }
+                // Merge enrichment data: take first non-None resolved_type, max reference_count
+                if entry.resolved_type.is_some() && acc.resolved_type.is_none() {
+                    acc.resolved_type = entry.resolved_type.clone();
+                }
+                acc.reference_count = acc.reference_count.max(entry.reference_count);
             }
         }
 
@@ -575,6 +600,8 @@ impl HybridSearchEngine {
                 symbol_name: acc.symbol_name,
                 chunk_text: acc.chunk_text,
                 semantic_similarity: acc.semantic_similarity,
+                resolved_type: acc.resolved_type,
+                reference_count: acc.reference_count,
             })
             .collect();
 
@@ -602,6 +629,8 @@ struct ChannelEntry {
     symbol_name: Option<String>,
     chunk_text: Option<String>,
     semantic_similarity: Option<f32>,
+    resolved_type: Option<String>,
+    reference_count: i64,
 }
 
 /// Accumulator used during RRF fusion to aggregate scores across channels.
@@ -612,6 +641,8 @@ struct FusionAccumulator {
     symbol_name: Option<String>,
     chunk_text: Option<String>,
     semantic_similarity: Option<f32>,
+    resolved_type: Option<String>,
+    reference_count: i64,
 }
 
 // ---------------------------------------------------------------------------
@@ -933,12 +964,16 @@ mod tests {
                         symbol_name: Some("main".to_string()),
                         chunk_text: None,
                         semantic_similarity: None,
+                        resolved_type: None,
+                        reference_count: 0,
                     },
                     ChannelEntry {
                         file_path: "src/lib.rs".to_string(),
                         symbol_name: Some("init".to_string()),
                         chunk_text: None,
                         semantic_similarity: None,
+                        resolved_type: None,
+                        reference_count: 0,
                     },
                 ],
             ),
@@ -950,12 +985,16 @@ mod tests {
                         symbol_name: None,
                         chunk_text: Some("fn main() { ... }".to_string()),
                         semantic_similarity: Some(0.95),
+                        resolved_type: None,
+                        reference_count: 0,
                     },
                     ChannelEntry {
                         file_path: "src/utils.rs".to_string(),
                         symbol_name: None,
                         chunk_text: Some("utility functions".to_string()),
                         semantic_similarity: Some(0.80),
+                        resolved_type: None,
+                        reference_count: 0,
                     },
                 ],
             ),
@@ -1032,6 +1071,8 @@ mod tests {
                 symbol_name: Some(format!("sym_{}", i)),
                 chunk_text: None,
                 semantic_similarity: None,
+                resolved_type: None,
+                reference_count: 0,
             })
             .collect();
 
@@ -1071,18 +1112,24 @@ mod tests {
                 symbol_name: None,
                 chunk_text: Some("first chunk".to_string()),
                 semantic_similarity: Some(0.99),
+                resolved_type: None,
+                reference_count: 0,
             },
             ChannelEntry {
                 file_path: "second.rs".to_string(),
                 symbol_name: None,
                 chunk_text: Some("second chunk".to_string()),
                 semantic_similarity: Some(0.85),
+                resolved_type: None,
+                reference_count: 0,
             },
             ChannelEntry {
                 file_path: "third.rs".to_string(),
                 symbol_name: None,
                 chunk_text: Some("third chunk".to_string()),
                 semantic_similarity: Some(0.70),
+                resolved_type: None,
+                reference_count: 0,
             },
         ];
 
@@ -1219,6 +1266,8 @@ mod tests {
             symbol_name: Some("main".to_string()),
             chunk_text: None,
             semantic_similarity: Some(0.92),
+            resolved_type: None,
+            reference_count: 0,
         };
 
         let json = serde_json::to_string(&result).unwrap();

@@ -57,6 +57,13 @@ pub struct IndexStatusEvent {
     /// Active embedding provider display name, `None` when not configured.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub embedding_provider_name: Option<String>,
+    /// LSP enrichment state: "none", "enriching", or "enriched".
+    #[serde(default = "default_lsp_enrichment_none")]
+    pub lsp_enrichment: String,
+}
+
+fn default_lsp_enrichment_none() -> String {
+    "none".into()
 }
 
 /// Internal bookkeeping for a running indexer.
@@ -216,6 +223,11 @@ impl IndexManager {
                         .get(project_path)
                         .map(|m| m.display_name().to_string())
                 };
+                let lsp_enrichment = if self.index_store.has_enrichment_data(project_path).unwrap_or(false) {
+                    "enriched".to_string()
+                } else {
+                    "none".to_string()
+                };
                 let event = IndexStatusEvent {
                     project_path: project_path.to_string(),
                     status: "indexed".to_string(),
@@ -225,6 +237,7 @@ impl IndexManager {
                     total_symbols: summary.total_symbols,
                     embedding_chunks: summary.embedding_chunks,
                     embedding_provider_name,
+                    lsp_enrichment,
                 };
                 self.set_status_and_emit(project_path, event).await;
 
@@ -266,6 +279,7 @@ impl IndexManager {
             total_symbols: 0,
             embedding_chunks: 0,
             embedding_provider_name: None,
+            lsp_enrichment: "none".to_string(),
         };
         self.set_status_and_emit(project_path, initial_event).await;
 
@@ -283,6 +297,7 @@ impl IndexManager {
                 total_symbols: 0,
                 embedding_chunks: 0,
                 embedding_provider_name: None,
+                lsp_enrichment: "none".to_string(),
             };
             // Update statuses map (blocking write is fine in the sync callback
             // because contention is low and the lock is only briefly held).
@@ -350,6 +365,7 @@ impl IndexManager {
                         total_symbols: summary.total_symbols,
                         embedding_chunks: summary.embedding_chunks,
                         embedding_provider_name: Some(provider_name_for_batch.clone()),
+                        lsp_enrichment: "none".to_string(),
                     };
                     if let Ok(mut map) = statuses_for_batch.try_write() {
                         map.insert(pp_for_batch.clone(), event.clone());
@@ -421,6 +437,7 @@ impl IndexManager {
                         total_symbols: summary.total_symbols,
                         embedding_chunks: summary.embedding_chunks,
                         embedding_provider_name: Some(provider_display_name.clone()),
+                        lsp_enrichment: "none".to_string(),
                     }
                 }
                 Err(_) => IndexStatusEvent {
@@ -432,6 +449,7 @@ impl IndexManager {
                     total_symbols: 0,
                     embedding_chunks: 0,
                     embedding_provider_name: None,
+                    lsp_enrichment: "none".to_string(),
                 },
             };
 
@@ -514,6 +532,11 @@ impl IndexManager {
                         .get(project_path)
                         .map(|m| m.display_name().to_string())
                 };
+                let lsp_enrichment = if self.index_store.has_enrichment_data(project_path).unwrap_or(false) {
+                    "enriched".to_string()
+                } else {
+                    "none".to_string()
+                };
                 IndexStatusEvent {
                     project_path: project_path.to_string(),
                     status: "indexed".to_string(),
@@ -523,6 +546,7 @@ impl IndexManager {
                     total_symbols: summary.total_symbols,
                     embedding_chunks: summary.embedding_chunks,
                     embedding_provider_name,
+                    lsp_enrichment,
                 }
             }
             _ => IndexStatusEvent {
@@ -534,8 +558,19 @@ impl IndexManager {
                 total_symbols: 0,
                 embedding_chunks: 0,
                 embedding_provider_name: None,
+                lsp_enrichment: "none".to_string(),
             },
         }
+    }
+
+    /// Update the LSP enrichment status for a project and emit the event.
+    ///
+    /// Called by the `trigger_lsp_enrichment` command to keep the frontend
+    /// status badge in sync with the enrichment lifecycle.
+    pub async fn set_lsp_enrichment_status(&self, project_path: &str, state: &str) {
+        let mut event = self.get_status(project_path).await;
+        event.lsp_enrichment = state.to_string();
+        self.set_status_and_emit(project_path, event).await;
     }
 
     /// Push a file-change notification to the running indexer for a project.
@@ -742,6 +777,7 @@ impl IndexManager {
                     total_symbols: summary.total_symbols,
                     embedding_chunks: summary.embedding_chunks,
                     embedding_provider_name: Some(provider_name_for_batch.clone()),
+                    lsp_enrichment: "none".to_string(),
                 };
                 if let Ok(mut map) = statuses_for_batch.try_write() {
                     map.insert(pp_for_batch.clone(), event.clone());
@@ -1199,6 +1235,7 @@ mod tests {
                     total_symbols: 0,
                     embedding_chunks: 0,
                     embedding_provider_name: None,
+                    lsp_enrichment: "none".to_string(),
                 },
             );
         }
