@@ -213,7 +213,11 @@ const nodeFilter = (node: HTMLElement) => {
   return true;
 };
 
-export async function captureElementToBlob(element: HTMLElement, format: 'png' | 'jpeg'): Promise<Blob> {
+export async function captureElementToBlob(
+  element: HTMLElement,
+  format: 'png' | 'jpeg',
+  options?: { backgroundColor?: string },
+): Promise<Blob> {
   const htmlToImage = await import('html-to-image');
 
   const restore = expandForCapture(element);
@@ -228,7 +232,7 @@ export async function captureElementToBlob(element: HTMLElement, format: 'png' |
 
     const opts = {
       pixelRatio,
-      backgroundColor: '#030712',
+      backgroundColor: options?.backgroundColor ?? '#030712',
       filter: nodeFilter,
       width: w,
       height: h,

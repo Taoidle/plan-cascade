@@ -617,7 +617,10 @@
     "toggleOutput": "出力",
     "pause": "一時停止",
     "resume": "再開",
-    "cancel": "キャンセル"
+    "cancel": "キャンセル",
+    "exportImage": "画像としてエクスポート",
+    "exportImageSuccess": "画像のエクスポートに成功しました",
+    "exportImageFailed": "画像のエクスポートに失敗しました"
   },
   "rightPanel": {
     "outputTab": "出力",

@@ -9,7 +9,7 @@
 
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import { FilePlusIcon, PauseIcon, PlayIcon, Cross2Icon } from '@radix-ui/react-icons';
+import { FilePlusIcon, PauseIcon, PlayIcon, Cross2Icon, CameraIcon } from '@radix-ui/react-icons';
 
 type WorkflowMode = 'chat' | 'task';
 
@@ -28,6 +28,10 @@ interface ChatToolbarProps {
   // Task workflow controls
   taskWorkflowActive?: boolean;
   onCancelWorkflow?: () => void;
+  // Export image
+  onExportImage: () => void;
+  isExportDisabled: boolean;
+  isCapturing: boolean;
   // Right panel
   rightPanelOpen: boolean;
   rightPanelTab: 'output' | 'git';
@@ -46,6 +50,9 @@ export function ChatToolbar({
   onCancel,
   taskWorkflowActive,
   onCancelWorkflow,
+  onExportImage,
+  isExportDisabled,
+  isCapturing,
   rightPanelOpen,
   rightPanelTab,
   onToggleOutput,
@@ -175,8 +182,35 @@ export function ChatToolbar({
         </div>
       )}
 
-      {/* Right group: Output toggle */}
-      <div className="flex items-center">
+      {/* Right group: Export image + Output toggle */}
+      <div className="flex items-center gap-1">
+        {/* Export chat as image */}
+        <button
+          onClick={onExportImage}
+          disabled={isExportDisabled || isCapturing}
+          className={clsx(
+            'flex items-center justify-center',
+            'w-7 h-7 rounded-md',
+            'text-gray-500 dark:text-gray-400',
+            'hover:bg-gray-100 dark:hover:bg-gray-700',
+            'disabled:opacity-50 disabled:cursor-not-allowed',
+            'transition-colors',
+          )}
+          title={t('chatToolbar.exportImage', { defaultValue: 'Export as image' })}
+        >
+          {isCapturing ? (
+            <svg className="animate-spin w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              />
+            </svg>
+          ) : (
+            <CameraIcon className="w-4 h-4" />
+          )}
+        </button>
         <button
           onClick={onToggleOutput}
           className={clsx(

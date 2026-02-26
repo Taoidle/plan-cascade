@@ -617,7 +617,10 @@
     "toggleOutput": "Output",
     "pause": "Pause",
     "resume": "Resume",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "exportImage": "Export as image",
+    "exportImageSuccess": "Image exported successfully",
+    "exportImageFailed": "Failed to export image"
   },
   "rightPanel": {
     "outputTab": "Output",

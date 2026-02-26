@@ -39,6 +39,12 @@ import { ToolPermissionOverlay } from './ToolPermissionOverlay';
 import { useToolPermissionStore } from '../../store/toolPermission';
 import { useAgentsStore } from '../../store/agents';
 import { createFileChangeCardBridge } from '../../lib/fileChangeCardBridge';
+import {
+  captureElementToBlob,
+  blobToBase64,
+  saveBinaryWithDialog,
+  localTimestampForFilename,
+} from '../../lib/exportUtils';
 import type { CardPayload } from '../../types/workflowCard';
 import { useToast } from '../shared/Toast';
 
@@ -94,6 +100,9 @@ export function SimpleMode() {
 
   // Ref for InputBox to call pickFile externally
   const inputBoxRef = useRef<InputBoxHandle>(null);
+  // Ref for ChatTranscript scroll container (used for image export)
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const [isCapturing, setIsCapturing] = useState(false);
 
   // Handle workflow mode changes with context inheritance notifications
   const handleWorkflowModeChange = useCallback(
@@ -243,6 +252,30 @@ export function SimpleMode() {
     [restoreFromHistory, handleWorkflowModeChange],
   );
 
+  const handleExportImage = useCallback(async () => {
+    const el = chatScrollRef.current;
+    if (!el) return;
+
+    setIsCapturing(true);
+    try {
+      const isDark = document.documentElement.classList.contains('dark');
+      const blob = await captureElementToBlob(el, 'png', {
+        backgroundColor: isDark ? '#111827' : '#ffffff',
+      });
+      const base64 = await blobToBase64(blob);
+      const ts = localTimestampForFilename();
+      const saved = await saveBinaryWithDialog(`chat-export-${ts}.png`, base64);
+      if (saved) {
+        showToast(t('chatToolbar.exportImageSuccess', { defaultValue: 'Image exported successfully' }), 'success');
+      }
+    } catch (err) {
+      console.error('Export image failed:', err);
+      showToast(t('chatToolbar.exportImageFailed', { defaultValue: 'Failed to export image' }), 'error');
+    } finally {
+      setIsCapturing(false);
+    }
+  }, [showToast, t]);
+
   const isRunning = status === 'running' || status === 'paused';
   const isDisabled = isRunning || isSubmitting || isAnalyzingStrategy;
 
@@ -309,7 +342,7 @@ export function SimpleMode() {
 
             {/* Chat transcript */}
             <div className="flex-1 min-h-0">
-              <ChatTranscript lines={streamingOutput} status={status} />
+              <ChatTranscript lines={streamingOutput} status={status} scrollRef={chatScrollRef} />
             </div>
 
             {/* Chat toolbar */}
@@ -330,6 +363,9 @@ export function SimpleMode() {
                 workflowPhase !== 'cancelled'
               }
               onCancelWorkflow={cancelWorkflow}
+              onExportImage={handleExportImage}
+              isExportDisabled={streamingOutput.length === 0}
+              isCapturing={isCapturing}
               rightPanelOpen={rightPanelOpen}
               rightPanelTab={rightPanelTab}
               onToggleOutput={handleToggleOutput}
@@ -472,12 +508,25 @@ interface RichTurn {
 function ChatTranscript({
   lines,
   status,
+  scrollRef,
 }: {
   lines: StreamLine[];
   status: 'idle' | 'running' | 'paused' | 'completed' | 'failed';
+  scrollRef?: React.RefObject<HTMLDivElement | null>;
 }) {
   const { t } = useTranslation('simpleMode');
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Sync containerRef to the external scrollRef so the parent can access it
+  const setRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      (containerRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
+      if (scrollRef) {
+        (scrollRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
+      }
+    },
+    [scrollRef],
+  );
   const [editingLineId, setEditingLineId] = useState<number | null>(null);
 
   // Derive rich conversation turns from ALL lines (not just text)
@@ -584,7 +633,7 @@ function ChatTranscript({
 
   return (
     <div className="relative h-full">
-      <div ref={containerRef} onScroll={handleScroll} className="h-full overflow-y-auto px-4 py-4 space-y-4">
+      <div ref={setRef} onScroll={handleScroll} className="h-full overflow-y-auto px-4 py-4 space-y-4">
         {richTurns.map((turn) => {
           const isLastTurn = turn.turnIndex === lastTurnIndex;
 

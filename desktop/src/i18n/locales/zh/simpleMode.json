@@ -617,7 +617,10 @@
     "toggleOutput": "输出",
     "pause": "暂停",
     "resume": "继续",
-    "cancel": "取消"
+    "cancel": "取消",
+    "exportImage": "导出为图片",
+    "exportImageSuccess": "图片导出成功",
+    "exportImageFailed": "图片导出失败"
   },
   "rightPanel": {
     "outputTab": "输出",
