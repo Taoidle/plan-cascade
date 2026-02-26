@@ -7,6 +7,7 @@
 
 pub mod agent_resolver;
 pub mod batch_executor;
+pub mod context_provider;
 pub mod exploration;
 pub mod prd_generator;
 
@@ -19,4 +20,8 @@ pub use batch_executor::{
     ExecutableStory, ExecutionBatch, ExecutionConfig, RetryContext, StoryContext,
     StoryExecutionContext, StoryExecutionOutcome, StoryExecutionState, TaskModeProgressEvent,
     TASK_MODE_EVENT_CHANNEL,
+};
+pub use context_provider::{
+    ContextSourceConfig, EnrichedContext, KnowledgeSourceConfig, MemorySourceConfig,
+    SkillsSourceConfig,
 };

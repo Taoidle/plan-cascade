@@ -1468,6 +1468,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         // Resolve provider-specific base URL override (e.g. GLM Coding endpoint)
         const baseUrl = resolveProviderBaseUrl(provider, settings);
 
+        const contextSources =
+          (await import('./contextSources')).useContextSourcesStore.getState().buildConfig() ?? null;
         const result = await invoke<CommandResponse<unknown>>('execute_standalone', {
           message: enrichedMessage,
           provider,
@@ -1482,6 +1484,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           maxIterations: settings.maxIterations ?? undefined,
           maxConcurrentSubagents: settings.maxConcurrentSubagents || undefined,
           systemPrompt: activeAgent?.system_prompt ?? null,
+          contextSources,
         });
 
         if (!result.success || !result.data) {
@@ -2925,6 +2928,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       const standaloneSessionId = get().standaloneSessionId;
 
       try {
+        const regenContextSources =
+          (await import('./contextSources')).useContextSourcesStore.getState().buildConfig() ?? null;
         const result = await invoke<CommandResponse<unknown>>('execute_standalone', {
           message: messageToSend,
           provider,
@@ -2938,6 +2943,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           enableThinking: settingsSnapshot.enableThinking ?? false,
           maxIterations: settingsSnapshot.maxIterations ?? undefined,
           maxConcurrentSubagents: settingsSnapshot.maxConcurrentSubagents || undefined,
+          contextSources: regenContextSources,
         });
 
         if (!result.success || !result.data) {
@@ -3110,6 +3116,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       const standaloneSessionId = get().standaloneSessionId;
 
       try {
+        const editContextSources =
+          (await import('./contextSources')).useContextSourcesStore.getState().buildConfig() ?? null;
         const result = await invoke<CommandResponse<unknown>>('execute_standalone', {
           message: messageToSend,
           provider,
@@ -3123,6 +3131,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           enableThinking: settingsSnapshot.enableThinking ?? false,
           maxIterations: settingsSnapshot.maxIterations ?? undefined,
           maxConcurrentSubagents: settingsSnapshot.maxConcurrentSubagents || undefined,
+          contextSources: editContextSources,
         });
 
         if (!result.success || !result.data) {

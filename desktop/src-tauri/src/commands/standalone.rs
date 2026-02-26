@@ -1029,9 +1029,11 @@ pub async fn execute_standalone(
     max_total_tokens: Option<u32>,
     max_iterations: Option<u32>,
     max_concurrent_subagents: Option<u32>,
+    context_sources: Option<crate::services::task_mode::context_provider::ContextSourceConfig>,
     app: AppHandle,
     app_state: State<'_, AppState>,
     standalone_state: State<'_, StandaloneState>,
+    knowledge_state: State<'_, super::knowledge::KnowledgeState>,
     file_changes_state: State<'_, super::file_changes::FileChangesState>,
     analytics_state: State<'_, super::analytics::AnalyticsState>,
     plugin_state: State<'_, super::plugins::PluginState>,
@@ -1130,6 +1132,42 @@ pub async fn execute_standalone(
 
     // Clone session_id before it's moved into orchestrator_config
     let event_session_id = analysis_session_id.clone().unwrap_or_default();
+
+    // Query domain context based on user-selected sources (if any)
+    let system_prompt = if let Some(ref cs) = context_sources {
+        let enriched = crate::services::task_mode::context_provider::query_selected_context(
+            cs,
+            &knowledge_state,
+            &app_state,
+            &project_path,
+            &project_path,
+            &message,
+            crate::services::skills::model::InjectionPhase::Implementation,
+        )
+        .await;
+        let domain_context = crate::services::task_mode::context_provider::merge_enriched_context(
+            None,
+            &enriched.knowledge_block,
+            &enriched.memory_block,
+        );
+        let skills_ctx = if enriched.skills_block.is_empty() {
+            None
+        } else {
+            Some(enriched.skills_block)
+        };
+        match (system_prompt, domain_context, skills_ctx) {
+            (Some(sp), Some(dc), Some(sk)) => Some(format!("{}\n\n{}\n\n{}", sp, dc, sk)),
+            (Some(sp), Some(dc), None) => Some(format!("{}\n\n{}", sp, dc)),
+            (Some(sp), None, Some(sk)) => Some(format!("{}\n\n{}", sp, sk)),
+            (None, Some(dc), Some(sk)) => Some(format!("{}\n\n{}", dc, sk)),
+            (Some(sp), None, None) => Some(sp),
+            (None, Some(dc), None) => Some(dc),
+            (None, None, Some(sk)) => Some(sk),
+            (None, None, None) => None,
+        }
+    } else {
+        system_prompt
+    };
 
     let orchestrator_config = OrchestratorConfig {
         provider: config,

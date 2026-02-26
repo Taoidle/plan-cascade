@@ -308,6 +308,33 @@ impl PluginManager {
             .iter()
             .any(|p| p.manifest.name == name && p.enabled)
     }
+
+    /// Collect quality gate definitions from enabled plugins.
+    ///
+    /// Iterates all enabled plugins, finds hooks with `QualityGateRegistration` event,
+    /// and parses their `command` field as JSON `PluginQualityGate` definitions.
+    pub fn collect_quality_gates(&self) -> Vec<PluginQualityGate> {
+        let mut gates = Vec::new();
+        for plugin in &self.plugins {
+            if !plugin.enabled {
+                continue;
+            }
+            for hook in &plugin.hooks {
+                if hook.event == HookEvent::QualityGateRegistration {
+                    match serde_json::from_str::<PluginQualityGate>(&hook.command) {
+                        Ok(gate) => gates.push(gate),
+                        Err(e) => {
+                            eprintln!(
+                                "[plugins] Failed to parse quality gate from plugin '{}': {}",
+                                plugin.manifest.name, e
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        gates
+    }
 }
 
 /// Register plugin hooks into AgenticHooks.

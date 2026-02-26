@@ -10,6 +10,7 @@
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { FilePlusIcon, PauseIcon, PlayIcon, Cross2Icon, CameraIcon } from '@radix-ui/react-icons';
+import { ContextSourceBar } from '../shared/ContextSourceBar';
 
 type WorkflowMode = 'chat' | 'task';
 
@@ -96,6 +97,9 @@ export function ChatToolbar({
             {t('workflowMode.task', { defaultValue: 'Task' })}
           </button>
         </div>
+
+        {/* Context source toggles */}
+        <ContextSourceBar />
 
         {/* File attach button */}
         <button

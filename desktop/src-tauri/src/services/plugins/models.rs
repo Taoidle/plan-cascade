@@ -123,7 +123,7 @@ impl Default for PluginManifest {
 
 /// Claude Code lifecycle hook events.
 ///
-/// These 14 events cover the full lifecycle of a Claude Code session,
+/// These events cover the full lifecycle of a Claude Code session,
 /// from session start through tool use, compilation, and session end.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -156,6 +156,10 @@ pub enum HookEvent {
     Error,
     /// Fired on session end (cleanup)
     SessionEnd,
+    /// Fired during quality gate registration to allow plugins to add custom gates.
+    /// Plugin hooks of this type should define `command` as JSON:
+    /// `{ "gate_id": "...", "gate_name": "...", "command": "...", "timeout_ms": 30000 }`
+    QualityGateRegistration,
 }
 
 impl HookEvent {
@@ -180,11 +184,14 @@ impl HookEvent {
             "Notification" | "notification" => Some(Self::Notification),
             "Error" | "error" => Some(Self::Error),
             "SessionEnd" | "session_end" | "sessionEnd" => Some(Self::SessionEnd),
+            "QualityGateRegistration" | "quality_gate_registration" | "qualityGateRegistration" => {
+                Some(Self::QualityGateRegistration)
+            }
             _ => None,
         }
     }
 
-    /// Get all 14 hook event variants.
+    /// Get all hook event variants.
     pub fn all_variants() -> Vec<Self> {
         vec![
             Self::SessionStart,
@@ -201,6 +208,7 @@ impl HookEvent {
             Self::Notification,
             Self::Error,
             Self::SessionEnd,
+            Self::QualityGateRegistration,
         ]
     }
 }
@@ -243,6 +251,31 @@ pub struct PluginHook {
 
 fn default_hook_timeout() -> u64 {
     10_000
+}
+
+/// A plugin-defined quality gate configuration.
+///
+/// Plugins can register domain-specific quality gates (e.g., HIPAA compliance,
+/// security scanning) via the `QualityGateRegistration` hook event. The hook
+/// `command` field should contain a JSON-serialized `PluginQualityGate`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginQualityGate {
+    /// Unique gate identifier (e.g., "hipaa-compliance-check")
+    pub gate_id: String,
+    /// Display name (e.g., "HIPAA Compliance Check")
+    pub gate_name: String,
+    /// Shell command to execute for validation.
+    /// Receives env vars: STORY_ID, STORY_TITLE, PROJECT_PATH, DIFF_FILE.
+    /// Exit code 0 = pass, non-zero = fail.
+    /// Stdout should be JSON: `{ "message": "...", "findings": ["..."] }`
+    pub command: String,
+    /// Timeout in milliseconds (default: 30000)
+    #[serde(default = "default_quality_gate_timeout")]
+    pub timeout_ms: u64,
+}
+
+fn default_quality_gate_timeout() -> u64 {
+    30_000
 }
 
 // ============================================================================
@@ -776,7 +809,7 @@ mod tests {
     #[test]
     fn test_hook_event_all_14_variants() {
         let all = HookEvent::all_variants();
-        assert_eq!(all.len(), 14, "Should have exactly 14 hook event variants");
+        assert_eq!(all.len(), 15, "Should have exactly 15 hook event variants");
     }
 
     #[test]

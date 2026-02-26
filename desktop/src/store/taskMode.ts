@@ -361,6 +361,8 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
           : finalProvider
             ? resolveProviderBaseUrl(finalProvider, { glmEndpoint, qwenEndpoint, minimaxEndpoint })
             : undefined;
+      const { buildConfig: buildContextConfig } = (await import('./contextSources')).useContextSourcesStore.getState();
+      const contextSources = buildContextConfig() ?? null;
       const result = await invoke<CommandResponse<TaskPrd>>('generate_task_prd', {
         sessionId,
         provider: finalProvider || null,
@@ -368,6 +370,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
         baseUrl: finalBaseUrl || null,
         conversationHistory: conversationHistory || [],
         maxContextTokens: maxContextTokens ?? null,
+        contextSources,
       });
       if (result.success && result.data) {
         set({
@@ -397,6 +400,8 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
       const baseUrl = provider
         ? resolveProviderBaseUrl(provider, { glmEndpoint, qwenEndpoint, minimaxEndpoint })
         : undefined;
+      const { buildConfig: buildCtxConfig } = (await import('./contextSources')).useContextSourcesStore.getState();
+      const contextSources = buildCtxConfig() ?? null;
       const result = await invoke<CommandResponse<boolean>>('approve_task_prd', {
         sessionId,
         prd,
@@ -404,6 +409,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
         model: model || null,
         baseUrl: baseUrl || null,
         phaseConfigs,
+        contextSources,
       });
       if (result.success) {
         set({

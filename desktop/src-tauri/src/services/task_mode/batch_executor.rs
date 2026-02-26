@@ -86,6 +86,9 @@ pub struct ExecutionConfig {
     /// Skip code review gate
     #[serde(default)]
     pub skip_review: bool,
+    /// Plugin-provided quality gate definitions
+    #[serde(default)]
+    pub plugin_quality_gates: Vec<crate::services::plugins::models::PluginQualityGate>,
 }
 
 fn default_max_parallel() -> usize {
@@ -118,6 +121,7 @@ impl Default for ExecutionConfig {
             dod_mode: default_dod_mode(),
             skip_verification: false,
             skip_review: false,
+            plugin_quality_gates: vec![],
         }
     }
 }
@@ -860,6 +864,7 @@ impl BatchExecutor {
                 let retry_enabled = self.config.retry_enabled;
                 let dor_mode = self.config.dor_mode;
                 let dod_mode = self.config.dod_mode;
+                let plugin_gates = self.config.plugin_quality_gates.clone();
                 let cancel_token = self.cancellation_token.clone();
                 let state_ref = self.state.clone();
                 let resolver_config = agent_resolver.config().clone();
@@ -888,6 +893,7 @@ impl BatchExecutor {
                         retry_enabled,
                         dor_mode,
                         dod_mode,
+                        plugin_gates.clone(),
                         cancel_token,
                         state_ref,
                         resolver_config,
@@ -956,6 +962,7 @@ impl BatchExecutor {
         retry_enabled: bool,
         dor_mode: GateMode,
         dod_mode: GateMode,
+        plugin_quality_gates: Vec<crate::services::plugins::models::PluginQualityGate>,
         cancel_token: CancellationToken,
         state: Arc<RwLock<BatchExecutionState>>,
         agents_config: crate::services::task_mode::agent_resolver::AgentsConfig,
@@ -1238,6 +1245,80 @@ impl BatchExecutor {
                 );
             }
 
+            // Register plugin-provided domain quality gates
+            for gate_def in &plugin_quality_gates {
+                let cmd = gate_def.command.clone();
+                let gate_id = gate_def.gate_id.clone();
+                let gate_id_key = gate_id.clone();
+                let gate_name = gate_def.gate_name.clone();
+                let timeout = gate_def.timeout_ms;
+                let story_id_for_gate = story_id.clone();
+                let story_title_for_gate = story.title.clone();
+                let proj_path = project_path.to_path_buf();
+                let diff = diff_content.clone();
+
+                pipeline.register_gate(
+                    &gate_id_key,
+                    Box::new(move || {
+                        let cmd = cmd.clone();
+                        let gate_id = gate_id.clone();
+                        let gate_name = gate_name.clone();
+                        let story_id = story_id_for_gate.clone();
+                        let story_title = story_title_for_gate.clone();
+                        let proj_path = proj_path.clone();
+                        let diff = diff.clone();
+                        Box::pin(async move {
+                            // Write diff to temp file for gate command
+                            let diff_file =
+                                std::env::temp_dir().join(format!("gate-{}.diff", gate_id));
+                            let _ = tokio::fs::write(&diff_file, &diff).await;
+
+                            let mut env = std::collections::HashMap::new();
+                            env.insert("STORY_ID".to_string(), story_id);
+                            env.insert("STORY_TITLE".to_string(), story_title);
+                            env.insert(
+                                "PROJECT_PATH".to_string(),
+                                proj_path.to_string_lossy().to_string(),
+                            );
+                            env.insert(
+                                "DIFF_FILE".to_string(),
+                                diff_file.to_string_lossy().to_string(),
+                            );
+
+                            let start = std::time::Instant::now();
+                            let shell_result = crate::services::plugins::dispatcher::execute_shell_hook(
+                                &cmd, &env, None, timeout,
+                            )
+                            .await;
+                            let duration_ms = start.elapsed().as_millis() as u64;
+
+                            // Clean up temp file
+                            let _ = tokio::fs::remove_file(&diff_file).await;
+
+                            if shell_result.exit_code == 0 {
+                                PipelineGateResult::passed(
+                                    &gate_id,
+                                    &gate_name,
+                                    GatePhase::PostValidation,
+                                    duration_ms,
+                                )
+                            } else {
+                                let (message, findings) =
+                                    parse_plugin_gate_output(&shell_result.stdout);
+                                PipelineGateResult::failed(
+                                    &gate_id,
+                                    &gate_name,
+                                    GatePhase::PostValidation,
+                                    duration_ms,
+                                    message,
+                                    findings,
+                                )
+                            }
+                        })
+                    }),
+                );
+            }
+
             let gate_result = pipeline.execute().await;
 
             match gate_result {
@@ -1403,6 +1484,38 @@ impl BatchExecutor {
             last_gate_results,
             0.0,
         ));
+    }
+}
+
+/// Parse plugin gate stdout as JSON `{ "message": "...", "findings": ["..."] }`.
+///
+/// Falls back to using the first line of stdout as the message if JSON parsing fails.
+fn parse_plugin_gate_output(stdout: &str) -> (String, Vec<String>) {
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(stdout) {
+        let message = parsed
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Plugin gate failed")
+            .to_string();
+        let findings = parsed
+            .get("findings")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        (message, findings)
+    } else {
+        (
+            stdout
+                .lines()
+                .next()
+                .unwrap_or("Plugin gate failed")
+                .to_string(),
+            vec![],
+        )
     }
 }
 

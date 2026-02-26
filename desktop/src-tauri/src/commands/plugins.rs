@@ -89,6 +89,17 @@ impl PluginState {
             }
         }
     }
+
+    /// Collect quality gate definitions from all enabled plugins.
+    pub async fn collect_quality_gates(
+        &self,
+    ) -> Vec<crate::services::plugins::models::PluginQualityGate> {
+        let guard = self.inner.read().await;
+        match &*guard {
+            Some(manager) => manager.collect_quality_gates(),
+            None => vec![],
+        }
+    }
 }
 
 impl Default for PluginState {

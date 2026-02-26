@@ -636,6 +636,47 @@
     "jpgExported": "JPGをエクスポートしました。"
   },
 
+  "contextSources": {
+    "knowledge": "ナレッジ",
+    "memory": "メモリ",
+    "skills": "スキル",
+    "knowledgePicker": {
+      "title": "ナレッジソース",
+      "loading": "読み込み中...",
+      "chunks": "チャンク",
+      "noCollections": "利用可能なナレッジコレクションがありません",
+      "searchPlaceholder": "コレクションを検索...",
+      "noResults": "一致するコレクションがありません"
+    },
+    "memoryPicker": {
+      "title": "メモリソース",
+      "searchPlaceholder": "メモリを検索...",
+      "noMemories": "利用可能なメモリがありません",
+      "noResults": "一致するメモリがありません",
+      "categories": {
+        "preference": "設定",
+        "convention": "規約",
+        "pattern": "パターン",
+        "correction": "修正",
+        "fact": "事実"
+      }
+    },
+    "skillsPicker": {
+      "title": "スキルソース",
+      "searchPlaceholder": "スキルを検索...",
+      "noSkills": "利用可能なスキルがありません",
+      "noResults": "一致するスキルがありません",
+      "groups": {
+        "detected": "自動検出",
+        "external": "外部",
+        "project_local": "プロジェクト",
+        "builtin": "ビルトイン",
+        "user": "ユーザー",
+        "generated": "生成済み"
+      }
+    }
+  },
+
   "chatToolbar": {
     "attachFile": "ファイルを添付",
     "toggleOutput": "出力",

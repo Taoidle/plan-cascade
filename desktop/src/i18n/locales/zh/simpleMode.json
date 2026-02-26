@@ -636,6 +636,47 @@
     "jpgExported": "JPG 已导出。"
   },
 
+  "contextSources": {
+    "knowledge": "知识库",
+    "memory": "记忆",
+    "skills": "技能",
+    "knowledgePicker": {
+      "title": "知识源",
+      "loading": "加载中...",
+      "chunks": "个片段",
+      "noCollections": "没有可用的知识集合",
+      "searchPlaceholder": "搜索集合...",
+      "noResults": "没有匹配的集合"
+    },
+    "memoryPicker": {
+      "title": "记忆源",
+      "searchPlaceholder": "搜索记忆...",
+      "noMemories": "没有可用的记忆",
+      "noResults": "没有匹配的记忆",
+      "categories": {
+        "preference": "偏好",
+        "convention": "约定",
+        "pattern": "模式",
+        "correction": "纠正",
+        "fact": "事实"
+      }
+    },
+    "skillsPicker": {
+      "title": "技能源",
+      "searchPlaceholder": "搜索技能...",
+      "noSkills": "没有可用的技能",
+      "noResults": "没有匹配的技能",
+      "groups": {
+        "detected": "自动检测",
+        "external": "外部",
+        "project_local": "项目",
+        "builtin": "内置",
+        "user": "用户",
+        "generated": "生成"
+      }
+    }
+  },
+
   "chatToolbar": {
     "attachFile": "附加文件",
     "toggleOutput": "输出",

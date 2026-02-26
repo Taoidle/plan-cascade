@@ -1076,6 +1076,7 @@ async function requirementAnalysisPhase(set: SetFn, get: GetFn) {
     const specStore = useSpecInterviewStore.getState();
     const interviewResult = specStore.compiledSpec ? JSON.stringify(specStore.compiledSpec) : null;
 
+    const contextSources = (await import('./contextSources')).useContextSourcesStore.getState().buildConfig() ?? null;
     const result = await invoke<{
       success: boolean;
       data: RequirementAnalysisCardData | null;
@@ -1090,6 +1091,7 @@ async function requirementAnalysisPhase(set: SetFn, get: GetFn) {
       apiKey: null,
       baseUrl: reqResolved.baseUrl || null,
       locale: i18n.language,
+      contextSources,
     });
 
     if (result.success && result.data) {
@@ -1159,6 +1161,8 @@ async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd) {
   try {
     const explorationContext = explorationResult ? JSON.stringify(explorationResult) : null;
 
+    const archContextSources =
+      (await import('./contextSources')).useContextSourcesStore.getState().buildConfig() ?? null;
     const result = await invoke<{
       success: boolean;
       data: ArchitectureReviewCardData | null;
@@ -1172,6 +1176,7 @@ async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd) {
       apiKey: null,
       baseUrl: archResolved.baseUrl || null,
       locale: i18n.language,
+      contextSources: archContextSources,
     });
 
     if (result.success && result.data) {

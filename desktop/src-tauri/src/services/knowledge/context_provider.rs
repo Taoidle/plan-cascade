@@ -46,6 +46,12 @@ pub struct KnowledgeContextConfig {
     pub max_context_chunks: usize,
     /// Minimum relevance score for inclusion.
     pub minimum_relevance_score: f32,
+    /// Optional: only query these collection IDs. `None` = query all.
+    #[serde(default)]
+    pub collection_ids: Option<Vec<String>>,
+    /// Optional: only keep results from these document IDs. `None` = keep all.
+    #[serde(default)]
+    pub document_ids: Option<Vec<String>>,
 }
 
 impl Default for KnowledgeContextConfig {
@@ -54,6 +60,8 @@ impl Default for KnowledgeContextConfig {
             enabled: true,
             max_context_chunks: 5,
             minimum_relevance_score: 0.3,
+            collection_ids: None,
+            document_ids: None,
         }
     }
 }
@@ -91,13 +99,24 @@ impl KnowledgeContextProvider {
         }
 
         // List all collections for the project
-        let collections = self.pipeline.list_collections(project_id)?;
+        let mut collections = self.pipeline.list_collections(project_id)?;
 
         if collections.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Query all collections in parallel
+        // Filter by collection_ids if specified
+        if let Some(ref ids) = config.collection_ids {
+            if !ids.is_empty() {
+                let id_set: HashSet<&str> = ids.iter().map(|s| s.as_str()).collect();
+                collections.retain(|c| id_set.contains(c.id.as_str()));
+                if collections.is_empty() {
+                    return Ok(Vec::new());
+                }
+            }
+        }
+
+        // Query collections in parallel
         let top_k = config.max_context_chunks * 2; // Fetch more for dedup
         let min_score = config.minimum_relevance_score;
 
@@ -148,6 +167,14 @@ impl KnowledgeContextProvider {
                 collections.len(),
                 failed_collections,
             );
+        }
+
+        // Filter by document_ids if specified
+        if let Some(ref doc_ids) = config.document_ids {
+            if !doc_ids.is_empty() {
+                let doc_id_set: HashSet<&str> = doc_ids.iter().map(|s| s.as_str()).collect();
+                all_chunks.retain(|chunk| doc_id_set.contains(chunk.source_document.as_str()));
+            }
         }
 
         // Sort by relevance score descending

@@ -502,8 +502,10 @@ pub async fn generate_task_prd(
     compiled_spec: Option<serde_json::Value>,
     conversation_history: Option<Vec<ConversationTurnInput>>,
     max_context_tokens: Option<usize>,
+    context_sources: Option<crate::services::task_mode::context_provider::ContextSourceConfig>,
     state: tauri::State<'_, TaskModeState>,
     app_state: tauri::State<'_, AppState>,
+    knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
 ) -> Result<CommandResponse<TaskPrd>, String> {
     // Validate and extract session
     let (description, status) = {
@@ -620,12 +622,30 @@ pub async fn generate_task_prd(
             .map(exploration::format_exploration_context)
     };
 
+    // Query domain knowledge for PRD generation (only if user enabled sources)
+    let project_path_str = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .to_string_lossy()
+        .to_string();
+    let project_id = project_path_str.clone();
+    let enriched = if let Some(ref cs) = context_sources {
+        crate::services::task_mode::context_provider::query_selected_context(
+            cs, &knowledge_state, &app_state, &project_id, &project_path_str,
+            &description, crate::services::skills::model::InjectionPhase::Planning,
+        ).await
+    } else {
+        crate::services::task_mode::context_provider::EnrichedContext::default()
+    };
+    let combined_context = crate::services::task_mode::context_provider::merge_enriched_context(
+        exploration_context_str.as_deref(), &enriched.knowledge_block, &enriched.memory_block,
+    );
+
     let prd = match prd_generator::generate_prd_with_llm(
         llm_provider,
         &description,
         &history,
         context_budget,
-        exploration_context_str.as_deref(),
+        combined_context.as_deref(),
     )
     .await
     {
@@ -1201,12 +1221,15 @@ pub async fn approve_task_prd(
     prd: TaskPrd,
     state: tauri::State<'_, TaskModeState>,
     app_state: tauri::State<'_, AppState>,
+    knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
+    plugin_state: tauri::State<'_, crate::commands::plugins::PluginState>,
     provider: Option<String>,
     model: Option<String>,
     base_url: Option<String>,
     execution_mode: Option<StoryExecutionMode>,
     workflow_config: Option<TaskWorkflowConfig>,
     phase_configs: Option<HashMap<String, PhaseConfigInput>>,
+    context_sources: Option<crate::services::task_mode::context_provider::ContextSourceConfig>,
 ) -> Result<CommandResponse<bool>, String> {
     let mut session_guard = state.session.write().await;
     let session = match session_guard.as_mut() {
@@ -1321,6 +1344,27 @@ pub async fn approve_task_prd(
                 None
             };
 
+            // Pre-compute domain context before tokio::spawn (needs Tauri State access)
+            // Only query sources the user explicitly enabled via context_sources
+            let project_path_str = std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                .to_string_lossy()
+                .to_string();
+            let project_id = project_path_str.clone();
+            let enriched_ctx = if let Some(ref cs) = context_sources {
+                crate::services::task_mode::context_provider::query_selected_context(
+                    cs, &knowledge_state, &app_state, &project_id, &project_path_str,
+                    &session.description, crate::services::skills::model::InjectionPhase::Implementation,
+                ).await
+            } else {
+                crate::services::task_mode::context_provider::EnrichedContext::default()
+            };
+            let knowledge_block = enriched_ctx.knowledge_block;
+            let memory_block = enriched_ctx.memory_block;
+            let skills_block = enriched_ctx.skills_block;
+            let plugin_quality_gates = plugin_state.collect_quality_gates().await;
+            config.plugin_quality_gates = plugin_quality_gates;
+
             // Spawn background tokio task for batch execution
             let exec_config = config;
             tokio::spawn(async move {
@@ -1347,7 +1391,7 @@ pub async fn approve_task_prd(
                 // Create story executor that delegates to the appropriate backend.
                 // In CLI mode, spawns external CLI tools. In LLM mode, uses OrchestratorService.
                 let story_executor =
-                    build_story_executor(app_handle.clone(), mode, provider_config, db_pool);
+                    build_story_executor(app_handle.clone(), mode, provider_config, db_pool, knowledge_block, memory_block, skills_block);
 
                 let result = executor
                     .execute(&sid, &resolver, project_path, emit, story_executor)
@@ -2145,8 +2189,10 @@ pub async fn run_requirement_analysis(
     base_url: Option<String>,
     baseUrl: Option<String>,
     locale: Option<String>,
+    context_sources: Option<crate::services::task_mode::context_provider::ContextSourceConfig>,
     app_state: tauri::State<'_, AppState>,
     state: tauri::State<'_, TaskModeState>,
+    knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
 ) -> Result<CommandResponse<RequirementAnalysisResult>, String> {
     use crate::services::persona::{PersonaRegistry, PersonaRole};
 
@@ -2204,13 +2250,39 @@ pub async fn run_requirement_analysis(
         Err(e) => return Ok(CommandResponse::err(e)),
     };
 
+    // Query domain knowledge for requirement analysis (only if user enabled sources)
+    let project_path_str = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .to_string_lossy()
+        .to_string();
+    let project_id = project_path_str.clone();
+    let enriched = if let Some(ref cs) = context_sources {
+        crate::services::task_mode::context_provider::query_selected_context(
+            cs, &knowledge_state, &app_state, &project_id, &project_path_str,
+            &task_description, crate::services::skills::model::InjectionPhase::Planning,
+        ).await
+    } else {
+        crate::services::task_mode::context_provider::EnrichedContext::default()
+    };
+    let knowledge_block = &enriched.knowledge_block;
+    let memory_block = &enriched.memory_block;
+    let skills_block = &enriched.skills_block;
+    let skill_expertise = enriched.skill_expertise;
+
     let persona = PersonaRegistry::get(PersonaRole::ProductManager);
+    let persona = if !skill_expertise.is_empty() {
+        let mut p = persona.clone();
+        p.expertise.extend(skill_expertise);
+        p
+    } else {
+        persona
+    };
 
     let locale_tag = normalize_locale(locale.as_deref());
     let language_instruction = locale_instruction(locale_tag);
 
     // Build phase instructions for the PM expert
-    let phase_instructions = format!(
+    let mut phase_instructions = format!(
         r#"Analyze the following task and produce a thorough requirements analysis.
 
 ## Task Description
@@ -2238,6 +2310,14 @@ Be specific and actionable. Reference concrete technical details when available.
             .unwrap_or_default(),
         language_instruction = language_instruction,
     );
+    if !skills_block.is_empty() {
+        phase_instructions.push_str("\n\n");
+        phase_instructions.push_str(&skills_block);
+    }
+
+    let enriched_context = crate::services::task_mode::context_provider::merge_enriched_context(
+        exploration_context.as_deref(), &knowledge_block, &memory_block,
+    );
 
     let target_schema = r#"{
   "analysis": "string - Natural language analysis in markdown format",
@@ -2258,7 +2338,7 @@ Be specific and actionable. Reference concrete technical details when available.
         None,
         &persona,
         &phase_instructions,
-        exploration_context.as_deref(),
+        enriched_context.as_deref(),
         Some(locale_tag),
         user_messages,
         target_schema,
@@ -2322,8 +2402,10 @@ pub async fn run_architecture_review(
     base_url: Option<String>,
     baseUrl: Option<String>,
     locale: Option<String>,
+    context_sources: Option<crate::services::task_mode::context_provider::ContextSourceConfig>,
     app_state: tauri::State<'_, AppState>,
     state: tauri::State<'_, TaskModeState>,
+    knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
 ) -> Result<CommandResponse<ArchitectureReviewResult>, String> {
     use crate::services::persona::{PersonaRegistry, PersonaRole};
 
@@ -2381,12 +2463,39 @@ pub async fn run_architecture_review(
         Err(e) => return Ok(CommandResponse::err(e)),
     };
 
+    // Query domain knowledge for architecture review (only if user enabled sources)
+    let project_path_str = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .to_string_lossy()
+        .to_string();
+    let project_id = project_path_str.clone();
+    let enriched = if let Some(ref cs) = context_sources {
+        crate::services::task_mode::context_provider::query_selected_context(
+            cs, &knowledge_state, &app_state, &project_id, &project_path_str,
+            &prd_json, crate::services::skills::model::InjectionPhase::Planning,
+        ).await
+    } else {
+        crate::services::task_mode::context_provider::EnrichedContext::default()
+    };
+    let knowledge_block = &enriched.knowledge_block;
+    let memory_block = &enriched.memory_block;
+    let skills_block = &enriched.skills_block;
+    let skill_expertise = enriched.skill_expertise;
+
     let persona = PersonaRegistry::get(PersonaRole::SoftwareArchitect);
+    let persona = if !skill_expertise.is_empty() {
+        let mut p = persona.clone();
+        p.expertise.extend(skill_expertise);
+        p
+    } else {
+        persona
+    };
+
     let locale_tag = normalize_locale(locale.as_deref());
     let language_instruction = locale_instruction(locale_tag);
 
     // Build phase instructions for the architect expert
-    let phase_instructions = format!(
+    let mut phase_instructions = format!(
         r#"Review the following PRD (Product Requirements Document) from an architectural perspective.
 
 ## PRD
@@ -2412,6 +2521,14 @@ testing strategy, dependency management, and integration patterns.
             .map(|e| format!("\n\n## Project Context\n{}", e))
             .unwrap_or_default(),
         language_instruction = language_instruction,
+    );
+    if !skills_block.is_empty() {
+        phase_instructions.push_str("\n\n");
+        phase_instructions.push_str(&skills_block);
+    }
+
+    let enriched_context = crate::services::task_mode::context_provider::merge_enriched_context(
+        exploration_context.as_deref(), &knowledge_block, &memory_block,
     );
 
     let target_schema = r#"{
@@ -2465,7 +2582,7 @@ testing strategy, dependency management, and integration patterns.
         None,
         &persona,
         &phase_instructions,
-        exploration_context.as_deref(),
+        enriched_context.as_deref(),
         Some(locale_tag),
         user_messages,
         target_schema,
@@ -2633,6 +2750,9 @@ fn build_story_executor(
     mode: StoryExecutionMode,
     provider_config: Option<crate::services::llm::types::ProviderConfig>,
     db_pool: Option<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>>,
+    knowledge_block: String,
+    memory_block: String,
+    skills_block: String,
 ) -> impl Fn(StoryExecutionContext) -> Pin<Box<dyn Future<Output = StoryExecutionOutcome> + Send>>
        + Send
        + Sync
@@ -2643,6 +2763,9 @@ fn build_story_executor(
         let mode = mode.clone();
         let provider_config = provider_config.clone();
         let db_pool = db_pool.clone();
+        let knowledge_block = knowledge_block.clone();
+        let memory_block = memory_block.clone();
+        let skills_block = skills_block.clone();
         Box::pin(async move {
             eprintln!(
                 "[INFO] Executing story '{}' (attempt {}) with agent '{}' in {} [mode: {:?}]",
@@ -2680,7 +2803,7 @@ fn build_story_executor(
             }
 
             // Build execution prompt from story context
-            let prompt = build_story_prompt(&ctx);
+            let prompt = build_story_prompt(&ctx, &knowledge_block, &memory_block, &skills_block);
 
             match mode {
                 StoryExecutionMode::Cli => {
@@ -2694,6 +2817,9 @@ fn build_story_executor(
                         &prompt,
                         &ctx.project_path,
                         db_pool.as_ref(),
+                        &knowledge_block,
+                        &memory_block,
+                        &skills_block,
                     )
                     .await
                 }
@@ -2800,6 +2926,9 @@ async fn execute_story_via_llm(
     prompt: &str,
     project_path: &std::path::Path,
     db_pool: Option<&r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>>,
+    knowledge_block: &str,
+    memory_block: &str,
+    skills_block: &str,
 ) -> StoryExecutionOutcome {
     use crate::services::orchestrator::{OrchestratorConfig, OrchestratorService};
     use crate::services::streaming::UnifiedStreamEvent;
@@ -2819,14 +2948,27 @@ async fn execute_story_via_llm(
         .join(".plan-cascade")
         .join("analysis-runs");
 
+    let mut system_prompt = String::from(
+        "You are an expert software engineer executing a story task. \
+         Use the provided tools to implement the required changes. \
+         Read relevant files, make code changes, and run tests to verify."
+    );
+    if !skills_block.is_empty() {
+        system_prompt.push_str("\n\n");
+        system_prompt.push_str(skills_block);
+    }
+    if !knowledge_block.is_empty() {
+        system_prompt.push_str("\n\n");
+        system_prompt.push_str(knowledge_block);
+    }
+    if !memory_block.is_empty() {
+        system_prompt.push_str("\n\n");
+        system_prompt.push_str(memory_block);
+    }
+
     let config = OrchestratorConfig {
         provider: provider_config,
-        system_prompt: Some(
-            "You are an expert software engineer executing a story task. \
-             Use the provided tools to implement the required changes. \
-             Read relevant files, make code changes, and run tests to verify."
-                .to_string(),
-        ),
+        system_prompt: Some(system_prompt),
         max_iterations: 50,
         max_total_tokens: 1_000_000,
         project_root: project_path.to_path_buf(),
@@ -2886,7 +3028,7 @@ async fn execute_story_via_llm(
 }
 
 /// Build an execution prompt from story context for the LLM agent.
-fn build_story_prompt(ctx: &StoryExecutionContext) -> String {
+fn build_story_prompt(ctx: &StoryExecutionContext, knowledge_block: &str, memory_block: &str, skills_block: &str) -> String {
     let criteria = ctx
         .acceptance_criteria
         .iter()
@@ -2931,6 +3073,19 @@ fn build_story_prompt(ctx: &StoryExecutionContext) -> String {
         if let Some(ref extra) = story_ctx.additional_context {
             prompt.push_str(&format!("\n### Additional Context\n{}\n", extra));
         }
+    }
+
+    if !knowledge_block.is_empty() {
+        prompt.push_str("\n\n");
+        prompt.push_str(knowledge_block);
+    }
+    if !memory_block.is_empty() {
+        prompt.push_str("\n\n");
+        prompt.push_str(memory_block);
+    }
+    if !skills_block.is_empty() {
+        prompt.push_str("\n\n");
+        prompt.push_str(skills_block);
     }
 
     if let Some(ref retry) = ctx.retry_context {
@@ -3524,7 +3679,7 @@ mod tests {
     #[test]
     fn test_build_story_prompt_without_context() {
         let ctx = make_story_ctx(None);
-        let prompt = build_story_prompt(&ctx);
+        let prompt = build_story_prompt(&ctx, "", "", "");
 
         assert!(prompt.contains("Add Login Feature"));
         assert!(prompt.contains("story-001"));
@@ -3544,7 +3699,7 @@ mod tests {
             additional_context: Some("Must support Google and GitHub".to_string()),
         };
         let ctx = make_story_ctx(Some(story_ctx));
-        let prompt = build_story_prompt(&ctx);
+        let prompt = build_story_prompt(&ctx, "", "", "");
 
         // Standard prompt parts
         assert!(prompt.contains("Add Login Feature"));
@@ -3573,7 +3728,7 @@ mod tests {
             additional_context: None,
         };
         let ctx = make_story_ctx(Some(story_ctx));
-        let prompt = build_story_prompt(&ctx);
+        let prompt = build_story_prompt(&ctx, "", "", "");
 
         assert!(prompt.contains("## Relevant Context"));
         assert!(prompt.contains("### Relevant Files"));

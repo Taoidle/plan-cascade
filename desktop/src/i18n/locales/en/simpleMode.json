@@ -636,6 +636,47 @@
     "jpgExported": "JPG exported."
   },
 
+  "contextSources": {
+    "knowledge": "Knowledge",
+    "memory": "Memory",
+    "skills": "Skills",
+    "knowledgePicker": {
+      "title": "Knowledge Sources",
+      "loading": "Loading...",
+      "chunks": "chunks",
+      "noCollections": "No knowledge collections available",
+      "searchPlaceholder": "Search collections...",
+      "noResults": "No matching collections"
+    },
+    "memoryPicker": {
+      "title": "Memory Sources",
+      "searchPlaceholder": "Search memories...",
+      "noMemories": "No memories available",
+      "noResults": "No matching memories",
+      "categories": {
+        "preference": "Preferences",
+        "convention": "Conventions",
+        "pattern": "Patterns",
+        "correction": "Corrections",
+        "fact": "Facts"
+      }
+    },
+    "skillsPicker": {
+      "title": "Skills Sources",
+      "searchPlaceholder": "Search skills...",
+      "noSkills": "No skills available",
+      "noResults": "No matching skills",
+      "groups": {
+        "detected": "Auto-Detected",
+        "external": "External",
+        "project_local": "Project",
+        "builtin": "Built-in",
+        "user": "User",
+        "generated": "Generated"
+      }
+    }
+  },
+
   "chatToolbar": {
     "attachFile": "Attach file",
     "toggleOutput": "Output",
