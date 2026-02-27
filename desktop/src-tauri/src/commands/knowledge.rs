@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::State;
 use tokio::sync::RwLock;
+use tracing::{info, warn};
 
 use crate::models::response::CommandResponse;
 use crate::services::knowledge::chunker::{Chunker, Document, ParagraphChunker};
@@ -75,17 +76,39 @@ impl KnowledgeState {
             .unwrap_or_else(|| std::env::temp_dir())
             .join(".plan-cascade")
             .join("knowledge-hnsw");
-        let hnsw_index = Arc::new(HnswIndex::new(hnsw_dir, emb_dim));
+        let hnsw_index = Arc::new(HnswIndex::new(&hnsw_dir, emb_dim));
+
+        // Try loading persisted HNSW from disk (survives app restart)
+        if hnsw_index.load_from_disk().await {
+            info!("Knowledge HNSW loaded from disk");
+        } else {
+            // No persisted index — will be rebuilt from SQLite after pipeline creation
+            info!("Knowledge HNSW not found on disk, will try rebuilding from SQLite");
+        }
 
         let reranker: Option<Arc<dyn Reranker>> = Some(Arc::new(NoopReranker));
 
         let pipeline = RagPipeline::new(
             chunker,
             Arc::clone(&embedding_manager),
-            hnsw_index,
+            hnsw_index.clone(),
             reranker,
-            database,
+            database.clone(),
         )?;
+
+        // If HNSW is still empty after load_from_disk, try rebuilding from SQLite embeddings
+        if !hnsw_index.is_ready().await || hnsw_index.get_count().await == 0 {
+            let rebuilt = rebuild_hnsw_from_sqlite(&database, &hnsw_index).await;
+            if rebuilt > 0 {
+                info!(vectors = rebuilt, "Knowledge HNSW rebuilt from SQLite");
+                if let Err(e) = hnsw_index.save_to_disk().await {
+                    warn!(error = %e, "Failed to save rebuilt knowledge HNSW to disk");
+                }
+            } else {
+                // No embeddings yet — initialize empty
+                hnsw_index.initialize().await;
+            }
+        }
 
         // If using TF-IDF, try to restore persisted vocabulary from disk
         if is_tfidf {
@@ -257,6 +280,74 @@ fn is_tfidf_pipeline(pipeline: &RagPipeline) -> bool {
         .as_any()
         .downcast_ref::<TfIdfEmbeddingProvider>()
         .is_some()
+}
+
+// ---------------------------------------------------------------------------
+// HNSW rebuild from SQLite
+// ---------------------------------------------------------------------------
+
+use crate::services::orchestrator::embedding_service::bytes_to_embedding;
+
+/// Rebuild the knowledge HNSW index from embeddings stored in SQLite.
+///
+/// Reads all `(rowid, embedding)` pairs from `knowledge_chunks` where
+/// embedding is non-empty, and batch-inserts them into the HNSW index.
+/// Returns the number of vectors inserted.
+async fn rebuild_hnsw_from_sqlite(database: &Database, hnsw_index: &HnswIndex) -> usize {
+    let items: Vec<(usize, Vec<f32>)> = {
+        let conn = match database.get_connection() {
+            Ok(c) => c,
+            Err(e) => {
+                warn!(error = %e, "knowledge: failed to get DB connection for HNSW rebuild");
+                return 0;
+            }
+        };
+
+        let mut stmt = match conn.prepare(
+            "SELECT rowid, embedding FROM knowledge_chunks WHERE embedding IS NOT NULL AND length(embedding) > 0"
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(error = %e, "knowledge: failed to prepare HNSW rebuild query");
+                return 0;
+            }
+        };
+
+        let rows = stmt.query_map([], |row| {
+            let rowid: i64 = row.get(0)?;
+            let emb_bytes: Vec<u8> = row.get(1)?;
+            Ok((rowid as usize, emb_bytes))
+        });
+
+        match rows {
+            Ok(mapped) => mapped
+                .filter_map(|r| r.ok())
+                .map(|(rowid, bytes)| (rowid, bytes_to_embedding(&bytes)))
+                .filter(|(_, emb)| !emb.is_empty())
+                .collect(),
+            Err(e) => {
+                warn!(error = %e, "knowledge: failed to query embeddings for HNSW rebuild");
+                return 0;
+            }
+        }
+        // conn dropped here
+    };
+
+    if items.is_empty() {
+        return 0;
+    }
+
+    // Initialize HNSW if not ready
+    if !hnsw_index.is_ready().await {
+        hnsw_index.initialize().await;
+    }
+
+    if hnsw_index.batch_insert(&items).await {
+        items.len()
+    } else {
+        warn!("knowledge: HNSW batch_insert failed during rebuild from SQLite");
+        0
+    }
 }
 
 // ---------------------------------------------------------------------------

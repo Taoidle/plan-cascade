@@ -355,6 +355,15 @@ impl RagPipeline {
                 "HNSW batch_insert failed for '{}'; SQLite is source of truth",
                 collection_name
             );
+        } else {
+            // Persist HNSW to disk so the index survives app restart
+            if let Err(e) = self.hnsw_index.save_to_disk().await {
+                tracing::warn!(
+                    error = %e,
+                    "HNSW save_to_disk failed after ingest for '{}'; index will be rebuilt on next startup",
+                    collection_name
+                );
+            }
         }
 
         emit_progress("storing", 100, "Ingestion complete.");
@@ -605,6 +614,11 @@ impl RagPipeline {
                 .map_err(|e| AppError::database(format!("Failed to commit: {}", e)))?;
         }
 
+        // Persist stale IDs to disk so HNSW filtering survives restart
+        if let Err(e) = self.hnsw_index.save_to_disk().await {
+            tracing::warn!(error = %e, "HNSW save_to_disk failed after delete_document");
+        }
+
         Ok(())
     }
 
@@ -668,6 +682,11 @@ impl RagPipeline {
                 rusqlite::params![collection_id],
             )
             .map_err(|e| AppError::database(format!("Failed to delete collection: {}", e)))?;
+        }
+
+        // Persist stale IDs to disk so HNSW filtering survives restart
+        if let Err(e) = self.hnsw_index.save_to_disk().await {
+            tracing::warn!(error = %e, "HNSW save_to_disk failed after delete_collection");
         }
 
         Ok(())
