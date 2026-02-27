@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use crate::services::file_change_tracker::FileChangeTracker;
+use crate::services::knowledge::pipeline::RagPipeline;
 use crate::services::orchestrator::embedding_manager::EmbeddingManager;
 use crate::services::orchestrator::embedding_service::EmbeddingService;
 use crate::services::orchestrator::hnsw_index::HnswIndex;
@@ -203,6 +204,14 @@ pub struct ToolExecutor {
     /// Cancellation token propagated from the orchestrator.
     /// Used by `build_tool_context()` so that tools can respond to cancellation.
     cancellation_token: tokio_util::sync::CancellationToken,
+    /// Optional knowledge base pipeline for SearchKnowledge tool.
+    knowledge_pipeline: Option<Arc<RagPipeline>>,
+    /// Project ID for knowledge base queries.
+    knowledge_project_id: Option<String>,
+    /// Optional filter: only search within these collection IDs.
+    knowledge_collection_filter: Option<Vec<String>>,
+    /// Optional filter: only return results from these document IDs.
+    knowledge_document_filter: Option<Vec<String>>,
 }
 
 impl ToolExecutor {
@@ -231,6 +240,7 @@ impl ToolExecutor {
         registry.register(Arc::new(WebSearchTool::new()));
         registry.register(Arc::new(NotebookEditTool::new()));
         registry.register(Arc::new(CodebaseSearchTool::new()));
+        registry.register(Arc::new(SearchKnowledgeTool::new()));
         // BrowserTool is always registered (unconditional). Runtime detection
         // and graceful degradation handle the case when no browser is available.
         registry.register(Arc::new(BrowserTool::new()));
@@ -256,6 +266,10 @@ impl ToolExecutor {
             file_change_tracker: None,
             permission_gate: None,
             cancellation_token: tokio_util::sync::CancellationToken::new(),
+            knowledge_pipeline: None,
+            knowledge_project_id: None,
+            knowledge_collection_filter: None,
+            knowledge_document_filter: None,
         }
     }
 
@@ -284,6 +298,10 @@ impl ToolExecutor {
             file_change_tracker: None,
             permission_gate: None,
             cancellation_token: tokio_util::sync::CancellationToken::new(),
+            knowledge_pipeline: None,
+            knowledge_project_id: None,
+            knowledge_collection_filter: None,
+            knowledge_document_filter: None,
         }
     }
 
@@ -386,6 +404,46 @@ impl ToolExecutor {
         self.permission_gate = Some(gate);
     }
 
+    /// Set the knowledge pipeline for SearchKnowledge tool.
+    pub fn set_knowledge_pipeline(&mut self, pipeline: Arc<RagPipeline>) {
+        self.knowledge_pipeline = Some(pipeline);
+    }
+
+    /// Set the project ID for knowledge base queries.
+    pub fn set_knowledge_project_id(&mut self, id: String) {
+        self.knowledge_project_id = Some(id);
+    }
+
+    /// Set collection and document filters for knowledge queries.
+    pub fn set_knowledge_filters(
+        &mut self,
+        collections: Option<Vec<String>>,
+        documents: Option<Vec<String>>,
+    ) {
+        self.knowledge_collection_filter = collections;
+        self.knowledge_document_filter = documents;
+    }
+
+    /// Get the knowledge pipeline Arc (if set), for sharing with sub-agents.
+    pub fn get_knowledge_pipeline(&self) -> Option<Arc<RagPipeline>> {
+        self.knowledge_pipeline.clone()
+    }
+
+    /// Get the knowledge project ID (if set).
+    pub fn get_knowledge_project_id(&self) -> Option<String> {
+        self.knowledge_project_id.clone()
+    }
+
+    /// Get the knowledge collection filter (if set).
+    pub fn get_knowledge_collection_filter(&self) -> Option<Vec<String>> {
+        self.knowledge_collection_filter.clone()
+    }
+
+    /// Get the knowledge document filter (if set).
+    pub fn get_knowledge_document_filter(&self) -> Option<Vec<String>> {
+        self.knowledge_document_filter.clone()
+    }
+
     /// Get a reference to the tool registry.
     ///
     /// Use this to inspect available tools, generate definitions, or
@@ -445,6 +503,10 @@ impl ToolExecutor {
             core_context: None, // Set by callers who have OrchestratorContext
             file_change_tracker: self.file_change_tracker.clone(),
             permission_gate: self.permission_gate.clone(),
+            knowledge_pipeline: self.knowledge_pipeline.clone(),
+            knowledge_project_id: self.knowledge_project_id.clone(),
+            knowledge_collection_filter: self.knowledge_collection_filter.clone(),
+            knowledge_document_filter: self.knowledge_document_filter.clone(),
         }
     }
 

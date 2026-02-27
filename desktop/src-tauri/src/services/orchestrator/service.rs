@@ -388,6 +388,10 @@ pub struct OrchestratorService {
     /// Cached knowledge context block, populated at the start of execution.
     /// This avoids re-querying the knowledge base on every LLM call iteration.
     cached_knowledge_block: Mutex<Option<String>>,
+    /// Pre-built knowledge awareness section for system prompt injection.
+    /// When set, injected into the system prompt to tell the AI about
+    /// available knowledge collections without pre-loading content.
+    knowledge_awareness_section: Option<String>,
     /// Optional composer registry for agent transfer support.
     /// When present, the agentic loop can transfer execution to named agents
     /// via the `TransferHandler` when `apply_actions` returns a `transfer_target`.
@@ -439,6 +443,16 @@ struct OrchestratorTaskSpawner {
     memories_snapshot: Vec<crate::services::memory::store::MemoryEntry>,
     /// Pre-built knowledge RAG context block (already truncated for sub-agents).
     knowledge_block_snapshot: Option<String>,
+    /// Shared knowledge pipeline for sub-agent SearchKnowledge tool.
+    shared_knowledge_pipeline: Option<Arc<crate::services::knowledge::pipeline::RagPipeline>>,
+    /// Knowledge project ID for sub-agent queries.
+    knowledge_project_id: Option<String>,
+    /// Knowledge collection filter for sub-agent queries.
+    knowledge_collection_filter: Option<Vec<String>>,
+    /// Knowledge document filter for sub-agent queries.
+    knowledge_document_filter: Option<Vec<String>>,
+    /// Pre-built knowledge awareness section for sub-agent system prompts.
+    knowledge_awareness_snapshot: Option<String>,
     /// Shared analytics tracking channel from the parent orchestrator.
     shared_analytics_tx: Option<mpsc::Sender<crate::services::analytics::TrackerMessage>>,
     /// Shared cost calculator from the parent orchestrator.

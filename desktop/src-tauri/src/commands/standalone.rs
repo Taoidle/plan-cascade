@@ -1133,17 +1133,18 @@ pub async fn execute_standalone(
     // Clone session_id before it's moved into orchestrator_config
     let event_session_id = analysis_session_id.clone().unwrap_or_default();
 
-    // Query domain context based on user-selected sources (if any)
+    // Query Memory + Skills context (knowledge is now tool-driven via SearchKnowledge)
     let system_prompt = if let Some(ref cs) = context_sources {
-        let enriched = crate::services::task_mode::context_provider::query_selected_context(
-            cs,
-            &knowledge_state,
-            &app_state,
-            &project_path,
-            &message,
-            crate::services::skills::model::InjectionPhase::Implementation,
-        )
-        .await;
+        let enriched =
+            crate::services::task_mode::context_provider::query_selected_context_without_knowledge(
+                cs,
+                &app_state,
+                &project_path,
+                &message,
+                crate::services::skills::model::InjectionPhase::Implementation,
+            )
+            .await;
+        // Only memory + skills are pre-injected; knowledge_block is always empty here
         let domain_context = crate::services::task_mode::context_provider::merge_enriched_context(
             None,
             &enriched.knowledge_block,
@@ -1232,6 +1233,61 @@ pub async fn execute_standalone(
             orchestrator = orchestrator
                 .with_analytics_tracker(tx)
                 .with_analytics_cost_calculator(analytics_state.cost_calculator());
+        }
+    }
+
+    // Wire knowledge tool for on-demand SearchKnowledge (replaces pre-injection)
+    if let Some(ref cs) = context_sources {
+        if cs.knowledge.as_ref().map_or(false, |k| k.enabled) {
+            crate::services::task_mode::context_provider::ensure_knowledge_initialized_public(
+                &knowledge_state,
+                &app_state,
+            )
+            .await;
+            if let Ok(pipeline) = knowledge_state.get_pipeline().await {
+                let pid = if cs.project_id.is_empty() {
+                    "default".to_string()
+                } else {
+                    cs.project_id.clone()
+                };
+                // Build lightweight awareness section listing available collections
+                let collections = pipeline.list_collections(&pid).unwrap_or_default();
+                let language =
+                    crate::services::tools::system_prompt::detect_language(&message);
+                let summaries: Vec<
+                    crate::services::tools::system_prompt::KnowledgeCollectionSummary,
+                > = collections
+                    .iter()
+                    .map(|c| {
+                        crate::services::tools::system_prompt::KnowledgeCollectionSummary {
+                            name: c.name.clone(),
+                            document_count: pipeline
+                                .list_documents(&c.id)
+                                .map(|d| d.len())
+                                .unwrap_or(0),
+                            chunk_count: c.chunk_count as usize,
+                        }
+                    })
+                    .collect();
+                let awareness =
+                    crate::services::tools::system_prompt::build_knowledge_awareness_section(
+                        &summaries, language,
+                    );
+                // Extract user-selected filters
+                let k = cs.knowledge.as_ref().unwrap();
+                let col_filter = if k.selected_collections.is_empty() {
+                    None
+                } else {
+                    Some(k.selected_collections.clone())
+                };
+                let doc_filter = if k.selected_documents.is_empty() {
+                    None
+                } else {
+                    Some(k.selected_documents.clone())
+                };
+                orchestrator =
+                    orchestrator.with_knowledge_tool(pipeline, pid, col_filter, doc_filter, awareness);
+            }
         }
     }
 

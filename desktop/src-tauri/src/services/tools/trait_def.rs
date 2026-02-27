@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::services::file_change_tracker::FileChangeTracker;
+use crate::services::knowledge::pipeline::RagPipeline;
 use crate::services::llm::types::{ParameterSchema, ToolDefinition};
 use crate::services::orchestrator::embedding_manager::EmbeddingManager;
 use crate::services::orchestrator::embedding_service::EmbeddingService;
@@ -83,6 +84,17 @@ pub struct ToolExecutionContext {
     /// When set, tool calls are checked against the session's permission level
     /// before execution. When None, all tools execute without approval.
     pub permission_gate: Option<Arc<PermissionGate>>,
+
+    /// Optional knowledge base pipeline for SearchKnowledge tool.
+    /// When set, the SearchKnowledge tool can query project knowledge collections.
+    pub knowledge_pipeline: Option<Arc<RagPipeline>>,
+    /// Project ID for knowledge base queries (e.g. "default" or UUID).
+    pub knowledge_project_id: Option<String>,
+    /// Optional filter: only search within these collection IDs.
+    /// Empty/None = search all collections.
+    pub knowledge_collection_filter: Option<Vec<String>>,
+    /// Optional filter: only return results from these document IDs.
+    pub knowledge_document_filter: Option<Vec<String>>,
 }
 
 impl ToolExecutionContext {
@@ -504,6 +516,10 @@ mod tests {
             core_context: None,
             file_change_tracker: None,
             permission_gate: None,
+            knowledge_pipeline: None,
+            knowledge_project_id: None,
+            knowledge_collection_filter: None,
+            knowledge_document_filter: None,
         }
     }
 

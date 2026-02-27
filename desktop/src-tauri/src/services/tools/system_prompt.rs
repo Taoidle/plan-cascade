@@ -439,6 +439,68 @@ pub fn build_memory_section(memories: Option<&[MemoryEntry]>) -> String {
     }
 }
 
+/// Summary of a knowledge collection for system prompt awareness injection.
+pub struct KnowledgeCollectionSummary {
+    /// Human-readable collection name.
+    pub name: String,
+    /// Number of documents in the collection.
+    pub document_count: usize,
+    /// Number of indexed chunks in the collection.
+    pub chunk_count: usize,
+}
+
+/// Build a lightweight knowledge awareness section for the system prompt.
+///
+/// This tells the AI which knowledge collections are available without
+/// injecting any actual content. The AI uses the SearchKnowledge tool
+/// to query on demand.
+///
+/// Returns an empty string if no collections are provided.
+pub fn build_knowledge_awareness_section(
+    collections: &[KnowledgeCollectionSummary],
+    language: &str,
+) -> String {
+    if collections.is_empty() {
+        return String::new();
+    }
+
+    let mut section = String::new();
+
+    match language {
+        "zh" => {
+            section.push_str("\n\n## 知识库\n");
+            section.push_str("你可以使用 SearchKnowledge 工具搜索以下知识集合：\n");
+            for col in collections {
+                section.push_str(&format!(
+                    "- {} ({} documents, {} chunks)\n",
+                    col.name, col.document_count, col.chunk_count,
+                ));
+            }
+            section.push_str(
+                "\n当你需要参考文档、规范、或项目相关知识时，请主动使用 SearchKnowledge 工具查询。",
+            );
+        }
+        _ => {
+            section.push_str("\n\n## Knowledge Base\n");
+            section.push_str(
+                "You can search the following knowledge collections using the SearchKnowledge tool:\n",
+            );
+            for col in collections {
+                section.push_str(&format!(
+                    "- {} ({} documents, {} chunks)\n",
+                    col.name, col.document_count, col.chunk_count,
+                ));
+            }
+            section.push_str(
+                "\nWhen you need reference documentation, standards, or project-specific knowledge, \
+                 proactively use the SearchKnowledge tool to query.",
+            );
+        }
+    }
+
+    section
+}
+
 /// Merge the tool system prompt with a user-provided system prompt.
 ///
 /// The tool prompt is placed first, followed by the user prompt separated by a delimiter.

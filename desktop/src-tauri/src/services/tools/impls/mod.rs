@@ -19,6 +19,7 @@ pub mod ls;
 pub mod notebook_edit;
 pub mod read;
 mod scan_utils;
+pub mod search_knowledge;
 pub mod task;
 #[cfg(test)]
 pub(crate) mod test_helpers;
@@ -41,6 +42,7 @@ pub use grep::GrepTool;
 pub use ls::LsTool;
 pub use notebook_edit::NotebookEditTool;
 pub use read::ReadTool;
+pub use search_knowledge::SearchKnowledgeTool;
 pub use task::TaskTool;
 pub use web_fetch::WebFetchTool;
 pub use web_search::WebSearchTool;

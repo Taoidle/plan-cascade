@@ -532,6 +532,11 @@ impl OrchestratorService {
                 }
             }
 
+            // Inject knowledge awareness section (tool-driven knowledge)
+            if let Some(ref section) = self.knowledge_awareness_section {
+                parts.push(section.clone());
+            }
+
             // Inject plugin instructions for sub-agents
             if let Some(ref instructions) = self.plugin_instructions {
                 let section = build_plugin_instructions_section(instructions);
@@ -1827,6 +1832,11 @@ impl OrchestratorService {
             skills_snapshot,
             memories_snapshot,
             knowledge_block_snapshot,
+            shared_knowledge_pipeline: self.tool_executor.get_knowledge_pipeline(),
+            knowledge_project_id: self.tool_executor.get_knowledge_project_id(),
+            knowledge_collection_filter: self.tool_executor.get_knowledge_collection_filter(),
+            knowledge_document_filter: self.tool_executor.get_knowledge_document_filter(),
+            knowledge_awareness_snapshot: self.knowledge_awareness_section.clone(),
             shared_analytics_tx: self.analytics_tx.clone(),
             shared_analytics_cost_calculator: self.analytics_cost_calculator.clone(),
             shared_permission_gate: self.permission_gate.clone(),
@@ -3800,6 +3810,11 @@ impl OrchestratorService {
                 prompt.push_str("\n\n");
                 prompt.push_str(block);
             }
+        }
+
+        // Inject knowledge awareness section (tool-driven knowledge)
+        if let Some(ref section) = self.knowledge_awareness_section {
+            prompt.push_str(section);
         }
 
         // Determine effective fallback mode:

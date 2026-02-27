@@ -23,6 +23,8 @@
   "updating": "Updating...",
   "workspacePath": "Workspace Path",
   "workspacePathPlaceholder": "Optional: select a project directory",
+  "browse": "Browse",
+  "clearPath": "Clear",
 
   "deleteCollection": "Delete Collection",
   "deleteConfirm": "Are you sure you want to delete the collection \"{{name}}\"? This will remove all documents and indexed data.",

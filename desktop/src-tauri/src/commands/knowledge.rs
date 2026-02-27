@@ -67,12 +67,15 @@ impl KnowledgeState {
                 AppError::internal(format!("Failed to create EmbeddingManager: {}", e))
             })?);
 
-        // Store HNSW index under ~/.plan-cascade/knowledge-hnsw
+        // Use the actual provider dimension for the HNSW index.
+        // TF-IDF has dynamic dimension (0 until vocabulary is built), so we
+        // default to 0 and let HNSW accept the first insert's dimension.
+        let emb_dim = embedding_manager.dimension();
         let hnsw_dir = dirs::home_dir()
             .unwrap_or_else(|| std::env::temp_dir())
             .join(".plan-cascade")
             .join("knowledge-hnsw");
-        let hnsw_index = Arc::new(HnswIndex::new(hnsw_dir, 8192));
+        let hnsw_index = Arc::new(HnswIndex::new(hnsw_dir, emb_dim));
 
         let reranker: Option<Arc<dyn Reranker>> = Some(Arc::new(NoopReranker));
 

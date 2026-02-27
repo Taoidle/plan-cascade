@@ -45,8 +45,11 @@ const DEFAULT_MODEL: &str = "text-embedding-v3";
 /// Default dimension for text-embedding-v4.
 const DEFAULT_DIMENSION: usize = 1024;
 
-/// Maximum batch size for DashScope embedding requests.
-const MAX_BATCH_SIZE: usize = 25;
+/// Default maximum batch size for DashScope embedding requests (v2 and below).
+const DEFAULT_MAX_BATCH_SIZE: usize = 25;
+
+/// Maximum batch size for v3 / v4 Matryoshka models.
+const MATRYOSHKA_MAX_BATCH_SIZE: usize = 10;
 
 // ---------------------------------------------------------------------------
 // DashScope API request/response types
@@ -131,6 +134,8 @@ pub struct QwenEmbeddingProvider {
     dimension: usize,
     /// Human-readable display name for this provider instance.
     display_name: String,
+    /// Model-specific maximum batch size.
+    max_batch_size: usize,
 }
 
 impl QwenEmbeddingProvider {
@@ -166,6 +171,19 @@ impl QwenEmbeddingProvider {
         let initial_dimension = config.dimension.unwrap_or(DEFAULT_DIMENSION);
         let display_name = format!("Qwen ({})", model);
 
+        // v3 and v4 Matryoshka models have a stricter batch size limit (10)
+        let api_limit = if model.contains("v3") || model.contains("v4") {
+            MATRYOSHKA_MAX_BATCH_SIZE
+        } else {
+            DEFAULT_MAX_BATCH_SIZE
+        };
+        // Respect the user's configured batch_size (from Settings), capped by API limit
+        let max_batch_size = if config.batch_size > 0 {
+            config.batch_size.min(api_limit)
+        } else {
+            api_limit
+        };
+
         let client = build_http_client(config.proxy.as_ref());
 
         Self {
@@ -175,6 +193,7 @@ impl QwenEmbeddingProvider {
             base_url,
             dimension: initial_dimension,
             display_name,
+            max_batch_size,
         }
     }
 
@@ -433,11 +452,11 @@ impl EmbeddingProvider for QwenEmbeddingProvider {
             return Ok(Vec::new());
         }
 
-        // Enforce batch size limit
-        if documents.len() > MAX_BATCH_SIZE {
+        // Enforce model-specific batch size limit
+        if documents.len() > self.max_batch_size {
             return Err(EmbeddingError::BatchSizeLimitExceeded {
                 requested: documents.len(),
-                max_allowed: MAX_BATCH_SIZE,
+                max_allowed: self.max_batch_size,
             });
         }
 
@@ -490,7 +509,7 @@ impl EmbeddingProvider for QwenEmbeddingProvider {
     }
 
     fn max_batch_size(&self) -> usize {
-        MAX_BATCH_SIZE
+        self.max_batch_size
     }
 
     fn provider_type(&self) -> EmbeddingProviderType {

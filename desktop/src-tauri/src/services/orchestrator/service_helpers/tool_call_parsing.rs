@@ -366,6 +366,7 @@ pub(super) fn canonical_tool_name(name: &str) -> Option<&'static str> {
         "websearch" => Some("WebSearch"),
         "notebookedit" => Some("NotebookEdit"),
         "codebasesearch" => Some("CodebaseSearch"),
+        "searchknowledge" => Some("SearchKnowledge"),
         _ => None,
     }
 }

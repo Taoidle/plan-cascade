@@ -23,6 +23,8 @@
   "updating": "更新中...",
   "workspacePath": "工作区路径",
   "workspacePathPlaceholder": "可选：选择项目目录",
+  "browse": "浏览",
+  "clearPath": "清除",
 
   "deleteCollection": "删除集合",
   "deleteConfirm": "确定要删除集合 \"{{name}}\" 吗？这将移除所有文档和索引数据。",

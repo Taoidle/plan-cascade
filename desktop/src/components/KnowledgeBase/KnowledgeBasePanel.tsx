@@ -17,6 +17,95 @@ import { DocumentUploader } from './DocumentUploader';
 import { KnowledgeQuery } from './KnowledgeQuery';
 
 // ---------------------------------------------------------------------------
+// WorkspacePathPicker
+// ---------------------------------------------------------------------------
+
+interface WorkspacePathPickerProps {
+  value: string;
+  onChange: (path: string) => void;
+  placeholder: string;
+  label: string;
+  browseLabel: string;
+  clearLabel: string;
+}
+
+function WorkspacePathPicker({
+  value,
+  onChange,
+  placeholder,
+  label,
+  browseLabel,
+  clearLabel,
+}: WorkspacePathPickerProps) {
+  const handleBrowse = useCallback(async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: label,
+        defaultPath: value || undefined,
+      });
+      if (selected && typeof selected === 'string') {
+        onChange(selected);
+      }
+    } catch (err) {
+      console.error('Failed to open directory picker:', err);
+    }
+  }, [value, onChange, label]);
+
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{label}</label>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={value}
+          readOnly
+          placeholder={placeholder}
+          onClick={handleBrowse}
+          className={clsx(
+            'flex-1 min-w-0 px-3 py-2 rounded-lg cursor-pointer',
+            'border border-gray-300 dark:border-gray-600',
+            'bg-gray-50 dark:bg-gray-700',
+            'text-gray-900 dark:text-white',
+            'text-sm truncate',
+            'hover:border-primary-400 dark:hover:border-primary-500',
+            'transition-colors',
+          )}
+        />
+        <button
+          type="button"
+          onClick={handleBrowse}
+          className={clsx(
+            'px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap',
+            'border border-gray-300 dark:border-gray-600',
+            'bg-white dark:bg-gray-700',
+            'text-gray-700 dark:text-gray-300',
+            'hover:bg-gray-50 dark:hover:bg-gray-600',
+            'transition-colors',
+          )}
+        >
+          {browseLabel}
+        </button>
+        {value && (
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-2"
+            title={clearLabel}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // CreateCollectionDialog
 // ---------------------------------------------------------------------------
 
@@ -32,7 +121,6 @@ function CreateCollectionDialog({ isOpen, onClose, onSubmit, isLoading }: Create
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [workspacePath, setWorkspacePath] = useState('');
-  const { projects } = useProjectsStore();
 
   if (!isOpen) return null;
 
@@ -86,35 +174,14 @@ function CreateCollectionDialog({ isOpen, onClose, onSubmit, isLoading }: Create
               )}
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              {t('workspacePath')}
-            </label>
-            <input
-              type="text"
-              value={workspacePath}
-              onChange={(e) => setWorkspacePath(e.target.value)}
-              placeholder={t('workspacePathPlaceholder')}
-              list="workspace-paths-create"
-              className={clsx(
-                'w-full px-3 py-2 rounded-lg',
-                'border border-gray-300 dark:border-gray-600',
-                'bg-white dark:bg-gray-700',
-                'text-gray-900 dark:text-white',
-                'focus:ring-2 focus:ring-primary-500 focus:border-transparent',
-                'text-sm',
-              )}
-            />
-            {projects.length > 0 && (
-              <datalist id="workspace-paths-create">
-                {projects.map((p) => (
-                  <option key={p.id} value={p.path}>
-                    {p.name}
-                  </option>
-                ))}
-              </datalist>
-            )}
-          </div>
+          <WorkspacePathPicker
+            value={workspacePath}
+            onChange={setWorkspacePath}
+            placeholder={t('workspacePathPlaceholder')}
+            label={t('workspacePath')}
+            browseLabel={t('browse')}
+            clearLabel={t('clearPath')}
+          />
         </div>
         <div className="flex justify-end gap-3 mt-6">
           <button
@@ -168,7 +235,6 @@ function EditCollectionDialog({ isOpen, collection, onClose, onSubmit, isLoading
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [workspacePath, setWorkspacePath] = useState('');
-  const { projects } = useProjectsStore();
 
   useEffect(() => {
     if (collection) {
@@ -230,35 +296,14 @@ function EditCollectionDialog({ isOpen, collection, onClose, onSubmit, isLoading
               )}
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              {t('workspacePath')}
-            </label>
-            <input
-              type="text"
-              value={workspacePath}
-              onChange={(e) => setWorkspacePath(e.target.value)}
-              placeholder={t('workspacePathPlaceholder')}
-              list="workspace-paths-edit"
-              className={clsx(
-                'w-full px-3 py-2 rounded-lg',
-                'border border-gray-300 dark:border-gray-600',
-                'bg-white dark:bg-gray-700',
-                'text-gray-900 dark:text-white',
-                'focus:ring-2 focus:ring-primary-500 focus:border-transparent',
-                'text-sm',
-              )}
-            />
-            {projects.length > 0 && (
-              <datalist id="workspace-paths-edit">
-                {projects.map((p) => (
-                  <option key={p.id} value={p.path}>
-                    {p.name}
-                  </option>
-                ))}
-              </datalist>
-            )}
-          </div>
+          <WorkspacePathPicker
+            value={workspacePath}
+            onChange={setWorkspacePath}
+            placeholder={t('workspacePathPlaceholder')}
+            label={t('workspacePath')}
+            browseLabel={t('browse')}
+            clearLabel={t('clearPath')}
+          />
         </div>
         <div className="flex justify-end gap-3 mt-6">
           <button
@@ -493,14 +538,23 @@ export function KnowledgeBasePanel() {
               ) : (
                 <div className="divide-y divide-gray-200 dark:divide-gray-700">
                   {collections.map((collection) => (
-                    <button
+                    <div
                       key={collection.id}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => {
                         selectCollection(collection);
                         setActiveTab('details');
                       }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          selectCollection(collection);
+                          setActiveTab('details');
+                        }
+                      }}
                       className={clsx(
-                        'w-full text-left px-4 py-3',
+                        'w-full text-left px-4 py-3 cursor-pointer',
                         'hover:bg-gray-100 dark:hover:bg-gray-800',
                         'transition-colors',
                         activeCollection?.id === collection.id &&
@@ -558,7 +612,7 @@ export function KnowledgeBasePanel() {
                           </span>
                         )}
                       </div>
-                    </button>
+                    </div>
                   ))}
                 </div>
               )}

@@ -91,6 +91,62 @@ pub struct EnrichedContext {
 }
 
 // ---------------------------------------------------------------------------
+// Knowledge pipeline initialization helper
+// ---------------------------------------------------------------------------
+
+/// Ensure the knowledge pipeline is initialized before querying.
+///
+/// This is needed because `execute_standalone` and task mode commands do not
+/// call the `ensure_initialized` function from `commands/knowledge.rs` (which
+/// is private to that module). Without this, `get_pipeline()` returns `Err`
+/// and knowledge queries silently return empty strings.
+async fn ensure_knowledge_initialized(
+    knowledge_state: &KnowledgeState,
+    app_state: &AppState,
+) {
+    if knowledge_state.is_initialized().await {
+        return;
+    }
+    tracing::info!("[ContextSource] Knowledge pipeline not initialized, attempting init...");
+    let db = match app_state
+        .with_database(|db| Ok(std::sync::Arc::new(db.clone())))
+        .await
+    {
+        Ok(db) => db,
+        Err(e) => {
+            tracing::warn!("[ContextSource] Failed to access database for knowledge init: {}", e);
+            return;
+        }
+    };
+
+    let (emb_config, is_tfidf) = match app_state
+        .with_keyring(|keyring| {
+            let (config, _dim, is_tfidf) =
+                crate::services::orchestrator::embedding_config_builder::build_embedding_config_from_settings(
+                    &db, keyring,
+                );
+            Ok((config, is_tfidf))
+        })
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("[ContextSource] Failed to build embedding config: {}", e);
+            return;
+        }
+    };
+
+    if let Err(e) = knowledge_state
+        .initialize_with_config(db, emb_config, is_tfidf)
+        .await
+    {
+        tracing::warn!("[ContextSource] Knowledge pipeline initialization failed: {}", e);
+    } else {
+        tracing::info!("[ContextSource] Knowledge pipeline initialized successfully");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Conditional query entry point
 // ---------------------------------------------------------------------------
 
@@ -106,6 +162,13 @@ pub async fn query_selected_context(
     query: &str,
     phase: InjectionPhase,
 ) -> EnrichedContext {
+    tracing::info!(
+        "[ContextSource] query_selected_context called — knowledge={:?}, memory={:?}, skills={:?}, project_id={}",
+        config.knowledge.as_ref().map(|k| k.enabled),
+        config.memory.as_ref().map(|m| m.enabled),
+        config.skills.as_ref().map(|s| s.enabled),
+        config.project_id,
+    );
     let pid = if config.project_id.is_empty() {
         "default"
     } else {
@@ -117,14 +180,25 @@ pub async fn query_selected_context(
         .map_or(false, |k| k.enabled)
     {
         let k = config.knowledge.as_ref().unwrap();
-        query_knowledge_for_task_filtered(
+        tracing::info!(
+            "[ContextSource] Querying knowledge — project_id={}, collections={:?}, documents={:?}",
+            pid, k.selected_collections, k.selected_documents,
+        );
+        // Ensure knowledge pipeline is initialized before querying
+        ensure_knowledge_initialized(knowledge_state, app_state).await;
+        let block = query_knowledge_for_task_filtered(
             knowledge_state,
             pid,
             query,
             &k.selected_collections,
             &k.selected_documents,
         )
-        .await
+        .await;
+        tracing::info!(
+            "[ContextSource] Knowledge query result: {} chars",
+            block.len(),
+        );
+        block
     } else {
         String::new()
     };
@@ -164,6 +238,69 @@ pub async fn query_selected_context(
         skills_block,
         skill_expertise,
     }
+}
+
+/// Like `query_selected_context` but skips knowledge (handled via tool).
+///
+/// Used when knowledge is on-demand via SearchKnowledge tool.
+/// Only queries Memory + Skills; `knowledge_block` is always empty.
+pub async fn query_selected_context_without_knowledge(
+    config: &ContextSourceConfig,
+    app_state: &AppState,
+    project_path: &str,
+    query: &str,
+    phase: InjectionPhase,
+) -> EnrichedContext {
+    tracing::info!(
+        "[ContextSource] query_selected_context_without_knowledge — memory={:?}, skills={:?}, project_id={}",
+        config.memory.as_ref().map(|m| m.enabled),
+        config.skills.as_ref().map(|s| s.enabled),
+        config.project_id,
+    );
+
+    let memory_block = if config.memory.as_ref().map_or(false, |m| m.enabled) {
+        let m = config.memory.as_ref().unwrap();
+        query_memories_for_task_filtered(
+            app_state,
+            project_path,
+            query,
+            &m.selected_categories,
+            &m.selected_memory_ids,
+        )
+        .await
+    } else {
+        String::new()
+    };
+
+    let (skills_block, skill_expertise) =
+        if config.skills.as_ref().map_or(false, |s| s.enabled) {
+            let s = config.skills.as_ref().unwrap();
+            select_skills_for_task_filtered(
+                app_state,
+                project_path,
+                query,
+                phase,
+                &s.selected_skill_ids,
+            )
+            .await
+        } else {
+            (String::new(), vec![])
+        };
+
+    EnrichedContext {
+        knowledge_block: String::new(), // Knowledge handled via SearchKnowledge tool
+        memory_block,
+        skills_block,
+        skill_expertise,
+    }
+}
+
+/// Re-export ensure_knowledge_initialized for use by standalone/task_mode commands.
+pub async fn ensure_knowledge_initialized_public(
+    knowledge_state: &KnowledgeState,
+    app_state: &AppState,
+) {
+    ensure_knowledge_initialized(knowledge_state, app_state).await;
 }
 
 /// Query the Knowledge Base and return a formatted markdown context block.

@@ -250,6 +250,22 @@ impl TaskSpawner for OrchestratorTaskSpawner {
                 .set_permission_gate(Arc::clone(gate));
             sub_agent.permission_gate = Some(Arc::clone(gate));
         }
+        // Propagate knowledge tool to sub-agent so SearchKnowledge works
+        if let Some(ref pipeline) = self.shared_knowledge_pipeline {
+            sub_agent
+                .tool_executor
+                .set_knowledge_pipeline(Arc::clone(pipeline));
+        }
+        if let Some(ref pid) = self.knowledge_project_id {
+            sub_agent
+                .tool_executor
+                .set_knowledge_project_id(pid.clone());
+        }
+        sub_agent.tool_executor.set_knowledge_filters(
+            self.knowledge_collection_filter.clone(),
+            self.knowledge_document_filter.clone(),
+        );
+        sub_agent.knowledge_awareness_section = self.knowledge_awareness_snapshot.clone();
 
         let result = sub_agent.execute_story(&effective_prompt, &tools, tx).await;
 
@@ -449,6 +465,7 @@ impl OrchestratorService {
             knowledge_context: None,
             knowledge_context_config: KnowledgeContextConfig::default(),
             cached_knowledge_block: Mutex::new(None),
+            knowledge_awareness_section: None,
             composer_registry: None,
             analytics_tx: None,
             analytics_cost_calculator: None,
@@ -519,6 +536,7 @@ impl OrchestratorService {
             knowledge_context: None,
             knowledge_context_config: KnowledgeContextConfig::default(),
             cached_knowledge_block: Mutex::new(None),
+            knowledge_awareness_section: None,
             composer_registry: None,
             analytics_tx: None,
             analytics_cost_calculator: None,
@@ -618,6 +636,7 @@ impl OrchestratorService {
             knowledge_context: None,
             knowledge_context_config: KnowledgeContextConfig::default(),
             cached_knowledge_block: Mutex::new(knowledge_block_snapshot),
+            knowledge_awareness_section: None,
             composer_registry: None,
             analytics_tx: None,
             analytics_cost_calculator: None,
@@ -814,6 +833,31 @@ impl OrchestratorService {
     ) -> Self {
         self.knowledge_context = Some(provider);
         self.knowledge_context_config = config;
+        self
+    }
+
+    /// Configure the knowledge base tool for on-demand AI querying.
+    ///
+    /// This passes the RAG pipeline to the tool executor so that the
+    /// SearchKnowledge tool can query knowledge collections at runtime.
+    /// Also stores the awareness section for system prompt injection.
+    pub fn with_knowledge_tool(
+        mut self,
+        pipeline: Arc<crate::services::knowledge::pipeline::RagPipeline>,
+        project_id: String,
+        collection_filter: Option<Vec<String>>,
+        document_filter: Option<Vec<String>>,
+        awareness_section: String,
+    ) -> Self {
+        self.tool_executor
+            .set_knowledge_pipeline(Arc::clone(&pipeline));
+        self.tool_executor
+            .set_knowledge_project_id(project_id);
+        self.tool_executor
+            .set_knowledge_filters(collection_filter, document_filter);
+        if !awareness_section.is_empty() {
+            self.knowledge_awareness_section = Some(awareness_section);
+        }
         self
     }
 

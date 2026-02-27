@@ -23,6 +23,8 @@
   "updating": "更新中...",
   "workspacePath": "ワークスペースパス",
   "workspacePathPlaceholder": "任意：プロジェクトディレクトリを選択",
+  "browse": "参照",
+  "clearPath": "クリア",
 
   "deleteCollection": "コレクションを削除",
   "deleteConfirm": "コレクション「{{name}}」を削除してもよろしいですか？すべてのドキュメントとインデックスデータが削除されます。",
