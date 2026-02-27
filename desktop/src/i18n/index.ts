@@ -20,6 +20,7 @@ import enAgents from './locales/en/agents.json';
 import enTaskMode from './locales/en/taskMode.json';
 import enPlanMode from './locales/en/planMode.json';
 import enKnowledge from './locales/en/knowledge.json';
+import enCodebase from './locales/en/codebase.json';
 import enArtifacts from './locales/en/artifacts.json';
 import enGit from './locales/en/git.json';
 
@@ -35,6 +36,7 @@ import zhAgents from './locales/zh/agents.json';
 import zhTaskMode from './locales/zh/taskMode.json';
 import zhPlanMode from './locales/zh/planMode.json';
 import zhKnowledge from './locales/zh/knowledge.json';
+import zhCodebase from './locales/zh/codebase.json';
 import zhArtifacts from './locales/zh/artifacts.json';
 import zhGit from './locales/zh/git.json';
 
@@ -50,6 +52,7 @@ import jaAgents from './locales/ja/agents.json';
 import jaTaskMode from './locales/ja/taskMode.json';
 import jaPlanMode from './locales/ja/planMode.json';
 import jaKnowledge from './locales/ja/knowledge.json';
+import jaCodebase from './locales/ja/codebase.json';
 import jaGit from './locales/ja/git.json';
 
 export const resources = {
@@ -65,6 +68,7 @@ export const resources = {
     taskMode: enTaskMode,
     planMode: enPlanMode,
     knowledge: enKnowledge,
+    codebase: enCodebase,
     artifacts: enArtifacts,
     git: enGit,
   },
@@ -80,6 +84,7 @@ export const resources = {
     taskMode: zhTaskMode,
     planMode: zhPlanMode,
     knowledge: zhKnowledge,
+    codebase: zhCodebase,
     artifacts: zhArtifacts,
     git: zhGit,
   },
@@ -95,6 +100,7 @@ export const resources = {
     taskMode: jaTaskMode,
     planMode: jaPlanMode,
     knowledge: jaKnowledge,
+    codebase: jaCodebase,
     artifacts: enArtifacts,
     git: jaGit,
   },
@@ -128,6 +134,7 @@ i18n
       'taskMode',
       'planMode',
       'knowledge',
+      'codebase',
       'artifacts',
       'git',
     ],

@@ -79,6 +79,10 @@
       "name": "Knowledge",
       "description": "Project knowledge base with RAG search"
     },
+    "codebase": {
+      "name": "Codebase",
+      "description": "Browse and manage workspace codebase indexes"
+    },
     "artifacts": {
       "name": "Artifacts",
       "description": "Browse and manage versioned artifacts"

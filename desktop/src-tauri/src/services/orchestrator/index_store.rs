@@ -1660,6 +1660,129 @@ impl IndexStore {
         }
     }
 
+    /// List all distinct indexed project paths with file counts.
+    pub fn list_indexed_projects(&self) -> AppResult<Vec<IndexedProjectEntry>> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT project_path, COUNT(*) as cnt, MAX(indexed_at) as last_at
+             FROM file_index
+             GROUP BY project_path
+             ORDER BY last_at DESC",
+        )?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(IndexedProjectEntry {
+                    project_path: row.get(0)?,
+                    file_count: row.get::<_, i64>(1)? as usize,
+                    last_indexed_at: row.get(2)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
+    }
+
+    /// Get language breakdown for a project (language → file count).
+    pub fn get_language_breakdown(&self, project_path: &str) -> AppResult<Vec<LanguageBreakdown>> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT language, COUNT(*) as cnt FROM file_index
+             WHERE project_path = ?1 AND language != ''
+             GROUP BY language
+             ORDER BY cnt DESC",
+        )?;
+
+        let rows = stmt
+            .query_map(params![project_path], |row| {
+                Ok(LanguageBreakdown {
+                    language: row.get(0)?,
+                    count: row.get::<_, i64>(1)? as usize,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
+    }
+
+    /// List files for a project with optional language filter and pagination.
+    ///
+    /// Returns `(files, total_count)`.
+    pub fn list_project_files(
+        &self,
+        project_path: &str,
+        language_filter: Option<&str>,
+        search_pattern: Option<&str>,
+        offset: usize,
+        limit: usize,
+    ) -> AppResult<(Vec<FileIndexRow>, usize)> {
+        let conn = self.get_connection()?;
+
+        // Build WHERE clause dynamically
+        let mut conditions = vec!["project_path = ?1".to_string()];
+        let mut param_idx = 2;
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> =
+            vec![Box::new(project_path.to_string())];
+
+        if let Some(lang) = language_filter {
+            conditions.push(format!("language = ?{}", param_idx));
+            params_vec.push(Box::new(lang.to_string()));
+            param_idx += 1;
+        }
+
+        if let Some(pattern) = search_pattern {
+            if !pattern.is_empty() {
+                conditions.push(format!("file_path LIKE ?{}", param_idx));
+                params_vec.push(Box::new(format!("%{}%", pattern)));
+            }
+        }
+
+        let where_clause = conditions.join(" AND ");
+
+        // Get total count
+        let count_sql = format!("SELECT COUNT(*) FROM file_index WHERE {}", where_clause);
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+        let total: usize = conn
+            .query_row(&count_sql, params_refs.as_slice(), |row| {
+                row.get::<_, i64>(0).map(|v| v as usize)
+            })
+            .unwrap_or(0);
+
+        // Get paginated rows
+        let query_sql = format!(
+            "SELECT id, project_path, file_path, component, language, extension,
+                    size_bytes, line_count, is_test, content_hash, indexed_at
+             FROM file_index WHERE {} ORDER BY file_path ASC LIMIT {} OFFSET {}",
+            where_clause, limit, offset
+        );
+        let params_refs2: Vec<&dyn rusqlite::types::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&query_sql)?;
+        let rows: Vec<FileIndexRow> = stmt
+            .query_map(params_refs2.as_slice(), |row| {
+                Ok(FileIndexRow {
+                    id: row.get(0)?,
+                    project_path: row.get(1)?,
+                    file_path: row.get(2)?,
+                    component: row.get(3)?,
+                    language: row.get(4)?,
+                    extension: row.get(5)?,
+                    size_bytes: row.get::<_, i64>(6)? as u64,
+                    line_count: row.get::<_, i64>(7)? as usize,
+                    is_test: row.get::<_, i32>(8)? != 0,
+                    content_hash: row.get(9)?,
+                    indexed_at: row.get(10)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok((rows, total))
+    }
+
     fn get_connection(
         &self,
     ) -> AppResult<r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>> {
@@ -1727,6 +1850,21 @@ pub struct FileIndexRow {
     pub is_test: bool,
     pub content_hash: String,
     pub indexed_at: Option<String>,
+}
+
+/// An entry representing a distinct indexed project with aggregate stats.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexedProjectEntry {
+    pub project_path: String,
+    pub file_count: usize,
+    pub last_indexed_at: Option<String>,
+}
+
+/// Language breakdown for an indexed project.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LanguageBreakdown {
+    pub language: String,
+    pub count: usize,
 }
 
 fn symbol_kind_to_str(kind: &SymbolKind) -> &'static str {

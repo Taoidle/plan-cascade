@@ -10,10 +10,27 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export type Mode = 'simple' | 'expert' | 'claude-code' | 'projects' | 'analytics' | 'knowledge' | 'artifacts';
+export type Mode =
+  | 'simple'
+  | 'expert'
+  | 'claude-code'
+  | 'projects'
+  | 'analytics'
+  | 'knowledge'
+  | 'codebase'
+  | 'artifacts';
 
 /** All available modes in order */
-export const MODES: Mode[] = ['simple', 'expert', 'claude-code', 'projects', 'analytics', 'knowledge', 'artifacts'];
+export const MODES: Mode[] = [
+  'simple',
+  'expert',
+  'claude-code',
+  'projects',
+  'analytics',
+  'knowledge',
+  'codebase',
+  'artifacts',
+];
 
 /** Mode display names */
 export const MODE_LABELS: Record<Mode, string> = {
@@ -23,6 +40,7 @@ export const MODE_LABELS: Record<Mode, string> = {
   projects: 'Projects',
   analytics: 'Analytics',
   knowledge: 'Knowledge',
+  codebase: 'Codebase',
   artifacts: 'Artifacts',
 };
 
@@ -34,6 +52,7 @@ export const MODE_DESCRIPTIONS: Record<Mode, string> = {
   projects: 'Browse and resume Claude Code sessions',
   analytics: 'Track usage, costs, and API analytics',
   knowledge: 'Project knowledge base with RAG search',
+  codebase: 'Browse and manage workspace codebase indexes',
   artifacts: 'Browse and manage versioned artifacts',
 };
 

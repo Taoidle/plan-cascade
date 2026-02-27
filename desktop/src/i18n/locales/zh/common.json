@@ -79,6 +79,10 @@
       "name": "知识库",
       "description": "项目知识库与RAG搜索"
     },
+    "codebase": {
+      "name": "代码库",
+      "description": "浏览和管理工作区代码库索引"
+    },
     "artifacts": {
       "name": "产物",
       "description": "浏览和管理版本化产物"

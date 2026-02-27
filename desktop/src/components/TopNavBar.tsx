@@ -22,6 +22,7 @@ import {
   FileIcon,
   BarChartIcon,
   ReaderIcon,
+  StackIcon,
   ArchiveIcon,
   SunIcon,
   MoonIcon,
@@ -42,6 +43,7 @@ const MODE_ICONS: Record<Mode, typeof LightningBoltIcon> = {
   projects: FileIcon,
   analytics: BarChartIcon,
   knowledge: ReaderIcon,
+  codebase: StackIcon,
   artifacts: ArchiveIcon,
 };
 
@@ -78,6 +80,7 @@ export function TopNavBar({ onOpenCommandPalette }: TopNavBarProps) {
       projects: t('modeSwitch.projects.name'),
       analytics: t('modeSwitch.analytics.name'),
       knowledge: t('modeSwitch.knowledge.name'),
+      codebase: t('modeSwitch.codebase.name'),
       artifacts: t('modeSwitch.artifacts.name'),
     };
     return labels[m];
@@ -91,6 +94,7 @@ export function TopNavBar({ onOpenCommandPalette }: TopNavBarProps) {
       projects: t('modeSwitch.projects.description'),
       analytics: t('modeSwitch.analytics.description'),
       knowledge: t('modeSwitch.knowledge.description'),
+      codebase: t('modeSwitch.codebase.description'),
       artifacts: t('modeSwitch.artifacts.description'),
     };
     return descriptions[m];

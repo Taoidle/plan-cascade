@@ -19,6 +19,7 @@ import { ClaudeCodeMode } from './components/ClaudeCodeMode';
 import { Projects } from './components/Projects';
 import { Dashboard } from './components/Analytics';
 import { KnowledgeBasePanel } from './components/KnowledgeBase';
+import { CodebasePanel } from './components/Codebase';
 import { ArtifactBrowserPanel } from './components/ArtifactBrowser';
 import { SetupWizard } from './components/Settings';
 import { FeatureTour } from './components/shared/FeatureTour';
@@ -141,6 +142,11 @@ function AppContent() {
           {mode === 'knowledge' && (
             <div data-tour="mode-knowledge" className="h-full">
               <KnowledgeBasePanel />
+            </div>
+          )}
+          {mode === 'codebase' && (
+            <div data-tour="mode-codebase" className="h-full">
+              <CodebasePanel />
             </div>
           )}
           {mode === 'artifacts' && (

@@ -16,6 +16,7 @@ import {
   FileIcon,
   BarChartIcon,
   ReaderIcon,
+  StackIcon,
   ArchiveIcon,
   MagnifyingGlassIcon,
   GearIcon,
@@ -35,6 +36,7 @@ const MODE_ICONS: Record<Mode, typeof LightningBoltIcon> = {
   projects: FileIcon,
   analytics: BarChartIcon,
   knowledge: ReaderIcon,
+  codebase: StackIcon,
   artifacts: ArchiveIcon,
 };
 
@@ -194,6 +196,7 @@ export function IconRail({ onOpenCommandPalette }: IconRailProps) {
       projects: t('modeSwitch.projects.name'),
       analytics: t('modeSwitch.analytics.name'),
       knowledge: t('modeSwitch.knowledge.name'),
+      codebase: t('modeSwitch.codebase.name'),
       artifacts: t('modeSwitch.artifacts.name'),
     };
     return labels[m];
@@ -207,6 +210,7 @@ export function IconRail({ onOpenCommandPalette }: IconRailProps) {
       projects: t('modeSwitch.projects.description'),
       analytics: t('modeSwitch.analytics.description'),
       knowledge: t('modeSwitch.knowledge.description'),
+      codebase: t('modeSwitch.codebase.description'),
       artifacts: t('modeSwitch.artifacts.description'),
     };
     return descriptions[m];

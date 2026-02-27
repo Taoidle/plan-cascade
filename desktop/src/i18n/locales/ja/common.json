@@ -79,6 +79,10 @@
       "name": "ナレッジ",
       "description": "プロジェクトナレッジベースとRAG検索"
     },
+    "codebase": {
+      "name": "コードベース",
+      "description": "ワークスペースのコードベースインデックスの閲覧と管理"
+    },
     "artifacts": {
       "name": "アーティファクト",
       "description": "バージョン管理されたアーティファクトの閲覧と管理"

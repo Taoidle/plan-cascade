@@ -199,6 +199,12 @@ fn main() {
             plan_cascade_desktop::commands::standalone::get_index_status,
             plan_cascade_desktop::commands::standalone::trigger_reindex,
             plan_cascade_desktop::commands::standalone::semantic_search,
+            // Codebase Index Management commands
+            plan_cascade_desktop::commands::codebase::codebase_list_projects,
+            plan_cascade_desktop::commands::codebase::codebase_get_project_detail,
+            plan_cascade_desktop::commands::codebase::codebase_list_files,
+            plan_cascade_desktop::commands::codebase::codebase_delete_project,
+            plan_cascade_desktop::commands::codebase::codebase_search,
             // Strategy commands
             plan_cascade_desktop::commands::strategy::analyze_task_strategy,
             plan_cascade_desktop::commands::strategy::get_strategy_options,
