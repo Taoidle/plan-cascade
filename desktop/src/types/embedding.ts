@@ -115,3 +115,21 @@ export const CLOUD_EMBEDDING_PROVIDERS: EmbeddingProviderType[] = ['qwen', 'glm'
 
 /** Local embedding providers that do not require API keys. */
 export const LOCAL_EMBEDDING_PROVIDERS: EmbeddingProviderType[] = ['tf_idf', 'ollama'];
+
+// ---------------------------------------------------------------------------
+// Codebase Index Config Types
+// ---------------------------------------------------------------------------
+
+/** Response from `get_codebase_index_config`. */
+export interface CodebaseIndexConfigResponse {
+  builtin_excluded_dirs: string[];
+  builtin_excluded_extensions: string[];
+  extra_excluded_dirs: string[];
+  extra_excluded_extensions: string[];
+}
+
+/** Request payload for `set_codebase_index_config`. */
+export interface SetCodebaseIndexConfigRequest {
+  extra_excluded_dirs: string[];
+  extra_excluded_extensions: string[];
+}

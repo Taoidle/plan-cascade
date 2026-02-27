@@ -15,7 +15,9 @@ use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 use super::analysis_index::{
-    build_file_inventory, detect_component, extract_symbols_from_str, is_test_path, AnalysisLimits,
+    build_file_inventory, build_file_inventory_with_limits, default_excluded_roots,
+    detect_component, detect_language, extract_symbols_from_str, is_binary_extension, is_test_path,
+    AnalysisLimits,
 };
 use super::embedding_manager::EmbeddingManager;
 use super::embedding_provider::EmbeddingProviderType;
@@ -107,6 +109,10 @@ pub struct BackgroundIndexer {
     /// Callback invoked after each incremental batch with changed file paths.
     /// Used to trigger incremental LSP enrichment.
     enrichment_callback: Option<EnrichmentCallback>,
+    /// User-added extra directories to exclude (beyond built-in defaults).
+    extra_excluded_dirs: Vec<String>,
+    /// User-added extra file extensions to exclude (beyond built-in defaults).
+    extra_excluded_extensions: Vec<String>,
 }
 
 impl BackgroundIndexer {
@@ -123,7 +129,20 @@ impl BackgroundIndexer {
             channel_overflow: None,
             batch_callback: None,
             enrichment_callback: None,
+            extra_excluded_dirs: Vec::new(),
+            extra_excluded_extensions: Vec::new(),
         }
+    }
+
+    /// Attach user-configured extra exclusions for directories and file extensions.
+    pub fn with_extra_exclusions(
+        mut self,
+        dirs: Vec<String>,
+        extensions: Vec<String>,
+    ) -> Self {
+        self.extra_excluded_dirs = dirs;
+        self.extra_excluded_extensions = extensions;
+        self
     }
 
     /// Attach an embedding service for generating vector embeddings after indexing.
@@ -223,6 +242,8 @@ impl BackgroundIndexer {
         let channel_overflow = self.channel_overflow;
         let batch_callback = self.batch_callback;
         let enrichment_callback = self.enrichment_callback;
+        let extra_excluded_dirs = self.extra_excluded_dirs;
+        let extra_excluded_extensions = self.extra_excluded_extensions;
 
         tokio::spawn(async move {
             // --- Phase 1: Full index ---
@@ -230,7 +251,7 @@ impl BackgroundIndexer {
                 project = %project_root.display(),
                 "background indexer: starting full index"
             );
-            if let Err(e) = run_full_index(&project_root, &index_store, progress_callback.as_ref())
+            if let Err(e) = run_full_index(&project_root, &index_store, progress_callback.as_ref(), &extra_excluded_dirs, &extra_excluded_extensions)
             {
                 warn!(
                     error = %e,
@@ -306,6 +327,8 @@ impl BackgroundIndexer {
                     channel_overflow.as_ref().map(|f| f.as_ref()),
                     batch_callback.as_ref(),
                     enrichment_callback.as_ref(),
+                    &extra_excluded_dirs,
+                    &extra_excluded_extensions,
                 )
                 .await;
             }
@@ -328,6 +351,8 @@ impl BackgroundIndexer {
         let channel_overflow = self.channel_overflow;
         let batch_callback = self.batch_callback;
         let enrichment_callback = self.enrichment_callback;
+        let extra_excluded_dirs = self.extra_excluded_dirs;
+        let extra_excluded_extensions = self.extra_excluded_extensions;
 
         tokio::spawn(async move {
             if let Some(mut rx) = change_rx {
@@ -347,6 +372,8 @@ impl BackgroundIndexer {
                     channel_overflow.as_ref().map(|f| f.as_ref()),
                     batch_callback.as_ref(),
                     enrichment_callback.as_ref(),
+                    &extra_excluded_dirs,
+                    &extra_excluded_extensions,
                 )
                 .await;
             }
@@ -368,6 +395,8 @@ impl BackgroundIndexer {
         let channel_overflow = self.channel_overflow;
         let batch_callback = self.batch_callback;
         let enrichment_callback = self.enrichment_callback;
+        let extra_excluded_dirs = self.extra_excluded_dirs;
+        let extra_excluded_extensions = self.extra_excluded_extensions;
 
         tokio::spawn(async move {
             let gitignore = build_gitignore_matcher(&project_root);
@@ -384,6 +413,8 @@ impl BackgroundIndexer {
                 embedding_service.as_ref(),
                 hnsw_index.as_ref(),
                 batch_callback.as_ref(),
+                &extra_excluded_dirs,
+                &extra_excluded_extensions,
             )
             .await;
 
@@ -399,6 +430,8 @@ impl BackgroundIndexer {
                     channel_overflow.as_ref().map(|f| f.as_ref()),
                     batch_callback.as_ref(),
                     enrichment_callback.as_ref(),
+                    &extra_excluded_dirs,
+                    &extra_excluded_extensions,
                 )
                 .await;
             }
@@ -441,6 +474,17 @@ fn build_gitignore_matcher(project_root: &Path) -> Gitignore {
         .git_exclude(true)
         .git_global(true)
         .max_depth(Some(15))
+        .filter_entry(|entry| {
+            // Block `.git` directory descent — it's never useful for .gitignore discovery
+            if entry.file_type().is_some_and(|ft| ft.is_dir()) {
+                if let Some(name) = entry.file_name().to_str() {
+                    if name == ".git" {
+                        return false;
+                    }
+                }
+            }
+            true
+        })
         .build();
 
     for entry in walker {
@@ -484,6 +528,47 @@ fn is_ignored_by_gitignore(gitignore: &Gitignore, project_root: &Path, path: &Pa
         .is_ignore()
 }
 
+/// Check whether a path falls under a hardcoded excluded root directory
+/// (e.g. `.git`, `node_modules`, `target`) or user-added extra directories.
+///
+/// Strips the project root prefix and checks the first path component against
+/// `default_excluded_roots()` plus any user-supplied extras.
+fn is_hardcoded_excluded(project_root: &Path, path: &Path, extra_dirs: &[String]) -> bool {
+    let rel = match path.strip_prefix(project_root) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+    // Check the first component of the relative path
+    if let Some(first) = rel.components().next() {
+        let name = first.as_os_str().to_string_lossy();
+        if default_excluded_roots()
+            .iter()
+            .any(|&root| root == name.as_ref())
+        {
+            return true;
+        }
+        if extra_dirs.iter().any(|d| d == name.as_ref()) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check whether a file extension is excluded (built-in binary or user-added).
+fn is_extra_excluded_extension(path: &Path, extra_extensions: &[String]) -> bool {
+    if extra_extensions.is_empty() {
+        return false;
+    }
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase());
+    match ext {
+        Some(e) => extra_extensions.iter().any(|x| x == &e),
+        None => false,
+    }
+}
+
 /// Shared Phase-2 incremental loop used by both `start()` and `start_watch_only()`.
 ///
 /// Uses a batch-drain pattern: waits for the first event, then drains all
@@ -501,6 +586,8 @@ async fn run_incremental_loop(
     channel_overflow: Option<&AtomicBool>,
     batch_callback: Option<&BatchCompleteCallback>,
     enrichment_callback: Option<&EnrichmentCallback>,
+    extra_excluded_dirs: &[String],
+    extra_excluded_extensions: &[String],
 ) {
     let project_path = project_root.to_string_lossy().to_string();
 
@@ -535,8 +622,11 @@ async fn run_incremental_loop(
         let mut changed_rel_paths: Vec<String> = Vec::new();
 
         for changed_path in unique {
-            if is_ignored_by_gitignore(&gitignore, project_root, &changed_path) {
-                debug!(path = %changed_path.display(), "background indexer: skipping gitignored path");
+            if is_hardcoded_excluded(project_root, &changed_path, extra_excluded_dirs)
+                || is_ignored_by_gitignore(&gitignore, project_root, &changed_path)
+                || is_extra_excluded_extension(&changed_path, extra_excluded_extensions)
+            {
+                debug!(path = %changed_path.display(), "background indexer: skipping excluded/gitignored path");
                 continue;
             }
             match run_incremental_index(project_root, index_store, &changed_path) {
@@ -676,6 +766,8 @@ async fn run_incremental_loop(
                     embedding_service,
                     hnsw_index,
                     batch_callback,
+                    extra_excluded_dirs,
+                    extra_excluded_extensions,
                 )
                 .await;
             }
@@ -749,6 +841,8 @@ async fn run_catchup_sync(
     embedding_service: Option<&Arc<EmbeddingService>>,
     hnsw_index: Option<&Arc<HnswIndex>>,
     batch_callback: Option<&BatchCompleteCallback>,
+    extra_excluded_dirs: &[String],
+    extra_excluded_extensions: &[String],
 ) {
     let project_path = project_root.to_string_lossy().to_string();
 
@@ -761,8 +855,12 @@ async fn run_catchup_sync(
         for rel_path in &indexed_paths {
             let abs_path = project_root.join(rel_path);
 
-            // Remove if deleted or now gitignored
-            if !abs_path.is_file() || is_ignored_by_gitignore(gitignore, project_root, &abs_path) {
+            // Remove if deleted, hardcoded-excluded, extra-excluded, or now gitignored
+            if !abs_path.is_file()
+                || is_hardcoded_excluded(project_root, &abs_path, extra_excluded_dirs)
+                || is_ignored_by_gitignore(gitignore, project_root, &abs_path)
+                || is_extra_excluded_extension(&abs_path, extra_excluded_extensions)
+            {
                 // Mark HNSW entries stale before deleting from SQLite
                 if let Some(hnsw) = hnsw_index {
                     if hnsw.is_ready().await {
@@ -839,6 +937,16 @@ async fn run_catchup_sync(
             .git_ignore(true)
             .git_exclude(true)
             .git_global(true)
+            .filter_entry(|entry| {
+                if entry.file_type().is_some_and(|ft| ft.is_dir()) {
+                    if let Some(name) = entry.file_name().to_str() {
+                        if name == ".git" {
+                            return false;
+                        }
+                    }
+                }
+                true
+            })
             .build();
 
         let mut new_files = 0usize;
@@ -848,7 +956,18 @@ async fn run_catchup_sync(
             if !abs_path.is_file() {
                 continue;
             }
-            if is_ignored_by_gitignore(gitignore, project_root, &abs_path) {
+            if is_hardcoded_excluded(project_root, &abs_path, extra_excluded_dirs)
+                || is_ignored_by_gitignore(gitignore, project_root, &abs_path)
+                || is_extra_excluded_extension(&abs_path, extra_excluded_extensions)
+            {
+                continue;
+            }
+            // Skip binary files
+            let ext = abs_path
+                .extension()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_ascii_lowercase());
+            if is_binary_extension(ext.as_deref()) {
                 continue;
             }
 
@@ -935,8 +1054,16 @@ fn run_full_index(
     project_root: &Path,
     index_store: &IndexStore,
     progress_callback: Option<&IndexProgressCallback>,
+    extra_excluded_dirs: &[String],
+    extra_excluded_extensions: &[String],
 ) -> Result<(), String> {
-    let inventory = build_file_inventory(project_root, &[]).map_err(|e| e.to_string())?;
+    let inventory = build_file_inventory_with_limits(
+        project_root,
+        &extra_excluded_dirs.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+        extra_excluded_extensions,
+        &AnalysisLimits::default(),
+    )
+    .map_err(|e| e.to_string())?;
 
     let project_path = project_root.to_string_lossy().to_string();
     let total_files = inventory.items.len();
@@ -1077,7 +1204,7 @@ fn run_incremental_index(
         .extension()
         .and_then(|s| s.to_str())
         .map(|s| s.to_ascii_lowercase());
-    let language = detect_language_simple(ext.as_deref());
+    let language = detect_language(ext.as_deref());
 
     let limits = AnalysisLimits::default();
     let symbols = extract_symbols_from_str(&content, &language, limits.max_symbols_per_file);
@@ -1128,21 +1255,7 @@ fn compute_content_hash(path: &Path) -> String {
     }
 }
 
-/// Minimal language detection mirroring `analysis_index::detect_language`.
-fn detect_language_simple(ext: Option<&str>) -> String {
-    match ext {
-        Some("py") => "python",
-        Some("rs") => "rust",
-        Some("ts") | Some("tsx") => "typescript",
-        Some("js") | Some("jsx") => "javascript",
-        Some("go") => "go",
-        Some("java") => "java",
-        Some("json") | Some("toml") | Some("yaml") | Some("yml") => "config",
-        Some("md") => "markdown",
-        _ => "other",
-    }
-    .to_string()
-}
+// Language detection delegated to `analysis_index::detect_language()`.
 
 // ---------------------------------------------------------------------------
 // Chunking — splits source files into semantic pieces for embedding
@@ -1450,7 +1563,7 @@ async fn run_incremental_embedding(
         .extension()
         .and_then(|s| s.to_str())
         .map(|s| s.to_ascii_lowercase());
-    let language = detect_language_simple(ext.as_deref());
+    let language = detect_language(ext.as_deref());
 
     // Mark old embeddings for this file as stale in HNSW before deleting from SQLite.
     // We need to capture the ROWIDs before deleting.
@@ -1895,7 +2008,7 @@ async fn run_incremental_embedding_managed(
         .extension()
         .and_then(|s| s.to_str())
         .map(|s| s.to_ascii_lowercase());
-    let language = detect_language_simple(ext.as_deref());
+    let language = detect_language(ext.as_deref());
 
     // Mark old embeddings for this file as stale in HNSW before deleting from SQLite
     if let Some(hnsw) = hnsw_index {
@@ -2338,7 +2451,7 @@ mod tests {
         fs::write(dir.path().join("src/lib.rs"), "pub struct Config;\n").expect("write");
 
         let store = test_store();
-        run_full_index(dir.path(), &store, None).expect("full index");
+        run_full_index(dir.path(), &store, None, &[], &[]).expect("full index");
 
         let project_path = dir.path().to_string_lossy().to_string();
         let summary = store.get_project_summary(&project_path).expect("summary");
@@ -2358,7 +2471,7 @@ mod tests {
         let store = test_store();
 
         // Full index first
-        run_full_index(dir.path(), &store, None).expect("full index");
+        run_full_index(dir.path(), &store, None, &[], &[]).expect("full index");
 
         let project_path = dir.path().to_string_lossy().to_string();
 
@@ -2384,7 +2497,7 @@ mod tests {
         fs::write(&file, "def old_func():\n    pass\n").expect("write");
 
         let store = test_store();
-        run_full_index(dir.path(), &store, None).expect("full index");
+        run_full_index(dir.path(), &store, None, &[], &[]).expect("full index");
 
         let project_path = dir.path().to_string_lossy().to_string();
         let symbols_v1 = store
@@ -2413,7 +2526,7 @@ mod tests {
         fs::write(&file, "x = 1\n").expect("write");
 
         let store = test_store();
-        run_full_index(dir.path(), &store, None).expect("full index");
+        run_full_index(dir.path(), &store, None, &[], &[]).expect("full index");
 
         // Delete the file
         fs::remove_file(&file).expect("remove");
@@ -2448,7 +2561,7 @@ mod tests {
             calls_clone.lock().unwrap().push((done, total));
         });
 
-        run_full_index(dir.path(), &store, Some(&cb)).expect("full index");
+        run_full_index(dir.path(), &store, Some(&cb), &[], &[]).expect("full index");
 
         let recorded = calls.lock().unwrap();
         // Should have calls at 10, 20, and final (25)
@@ -2480,7 +2593,7 @@ mod tests {
             calls_clone.lock().unwrap().push((done, total));
         });
 
-        run_full_index(dir.path(), &store, Some(&cb)).expect("full index");
+        run_full_index(dir.path(), &store, Some(&cb), &[], &[]).expect("full index");
 
         let recorded = calls.lock().unwrap();
         // Final callback with (0, 0) is expected
@@ -2654,7 +2767,7 @@ pub fn process_config(config: &Config) -> String {
 
         let store = test_store();
         // First run full index so files are in file_index table
-        run_full_index(dir.path(), &store, None).expect("full index");
+        run_full_index(dir.path(), &store, None, &[], &[]).expect("full index");
 
         let emb_svc = EmbeddingService::new();
         run_embedding_pass(dir.path(), &store, &emb_svc, None)
@@ -2699,7 +2812,7 @@ pub fn process_config(config: &Config) -> String {
         .expect("write");
 
         let store = test_store();
-        run_full_index(dir.path(), &store, None).expect("full index");
+        run_full_index(dir.path(), &store, None, &[], &[]).expect("full index");
 
         let emb_svc = EmbeddingService::new();
         run_embedding_pass(dir.path(), &store, &emb_svc, None)
@@ -2751,7 +2864,7 @@ pub fn process_config(config: &Config) -> String {
         let project_path = dir.path().to_string_lossy().to_string();
 
         // First: full index + embedding pass to build and save vocabulary
-        run_full_index(dir.path(), &store, None).expect("full index");
+        run_full_index(dir.path(), &store, None, &[], &[]).expect("full index");
         let emb_svc1 = EmbeddingService::new();
         run_embedding_pass(dir.path(), &store, &emb_svc1, None)
             .await
@@ -2806,7 +2919,7 @@ pub fn process_config(config: &Config) -> String {
         let store = test_store();
 
         // Full index but NO embedding pass — so no vocab in DB
-        run_full_index(dir.path(), &store, None).expect("full index");
+        run_full_index(dir.path(), &store, None, &[], &[]).expect("full index");
 
         let emb_svc = EmbeddingService::new();
         assert!(!emb_svc.is_ready());
@@ -2885,7 +2998,7 @@ pub fn process_config(config: &Config) -> String {
         .expect("write");
 
         let store = test_store();
-        run_full_index(dir.path(), &store, None).expect("full index");
+        run_full_index(dir.path(), &store, None, &[], &[]).expect("full index");
 
         let manager = test_tfidf_manager();
         run_embedding_pass_managed(dir.path(), &store, &manager, None)
@@ -2925,7 +3038,7 @@ pub fn process_config(config: &Config) -> String {
         .expect("write");
 
         let store = test_store();
-        run_full_index(dir.path(), &store, None).expect("full index");
+        run_full_index(dir.path(), &store, None, &[], &[]).expect("full index");
 
         let manager = test_tfidf_manager();
         run_embedding_pass_managed(dir.path(), &store, &manager, None)
@@ -2959,7 +3072,7 @@ pub fn process_config(config: &Config) -> String {
         let project_path = dir.path().to_string_lossy().to_string();
 
         // Full index + managed embedding pass to build and save vocabulary
-        run_full_index(dir.path(), &store, None).expect("full index");
+        run_full_index(dir.path(), &store, None, &[], &[]).expect("full index");
         let manager = test_tfidf_manager();
         run_embedding_pass_managed(dir.path(), &store, &manager, None)
             .await
@@ -3021,7 +3134,7 @@ pub fn process_config(config: &Config) -> String {
         let store = test_store();
 
         // Full index but NO embedding pass — so no vocab in DB
-        run_full_index(dir.path(), &store, None).expect("full index");
+        run_full_index(dir.path(), &store, None, &[], &[]).expect("full index");
 
         let manager = test_tfidf_manager();
         let primary = manager.primary_provider();
@@ -3135,7 +3248,7 @@ pub fn process_config(config: &Config) -> String {
         let project_path = dir.path().to_string_lossy().to_string();
 
         // Full index + embedding pass
-        run_full_index(dir.path(), &store, None).expect("full index");
+        run_full_index(dir.path(), &store, None, &[], &[]).expect("full index");
         let emb_svc = EmbeddingService::new();
         run_embedding_pass(dir.path(), &store, &emb_svc, None)
             .await
@@ -3265,7 +3378,7 @@ pub fn process_config(config: &Config) -> String {
         let project_path = dir.path().to_string_lossy().to_string();
 
         // Full index + embedding pass
-        run_full_index(dir.path(), &store, None).expect("full index");
+        run_full_index(dir.path(), &store, None, &[], &[]).expect("full index");
         let emb_svc = EmbeddingService::new();
         run_embedding_pass(dir.path(), &store, &emb_svc, None)
             .await
@@ -3383,7 +3496,7 @@ pub fn process_config(config: &Config) -> String {
         let project_path = dir.path().to_string_lossy().to_string();
 
         // Full index + embedding pass
-        run_full_index(dir.path(), &store, None).expect("full index");
+        run_full_index(dir.path(), &store, None, &[], &[]).expect("full index");
         let emb_svc = EmbeddingService::new();
         run_embedding_pass(dir.path(), &store, &emb_svc, None)
             .await
@@ -3620,5 +3733,36 @@ pub fn process_config(config: &Config) -> String {
             nm_symbols.is_empty(),
             "gitignored file should not be indexed"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // is_hardcoded_excluded
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_is_hardcoded_excluded() {
+        let root = Path::new("/project");
+        let no_extras: &[String] = &[];
+
+        // Excluded directories
+        assert!(is_hardcoded_excluded(root, Path::new("/project/.git/objects/pack"), no_extras));
+        assert!(is_hardcoded_excluded(root, Path::new("/project/node_modules/lodash/index.js"), no_extras));
+        assert!(is_hardcoded_excluded(root, Path::new("/project/target/debug/app"), no_extras));
+        assert!(is_hardcoded_excluded(root, Path::new("/project/dist/bundle.js"), no_extras));
+        assert!(is_hardcoded_excluded(root, Path::new("/project/.venv/lib/python3.10"), no_extras));
+
+        // Not excluded
+        assert!(!is_hardcoded_excluded(root, Path::new("/project/src/main.rs"), no_extras));
+        assert!(!is_hardcoded_excluded(root, Path::new("/project/tests/test_app.py"), no_extras));
+        assert!(!is_hardcoded_excluded(root, Path::new("/project/README.md"), no_extras));
+
+        // Path not under project root — should return false
+        assert!(!is_hardcoded_excluded(root, Path::new("/other/node_modules/pkg"), no_extras));
+
+        // Extra excluded dirs
+        let extras = vec!["vendor".to_string(), "tmp".to_string()];
+        assert!(is_hardcoded_excluded(root, Path::new("/project/vendor/lib.js"), &extras));
+        assert!(is_hardcoded_excluded(root, Path::new("/project/tmp/cache.dat"), &extras));
+        assert!(!is_hardcoded_excluded(root, Path::new("/project/src/main.rs"), &extras));
     }
 }

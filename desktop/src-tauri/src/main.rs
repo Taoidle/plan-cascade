@@ -280,6 +280,8 @@ fn main() {
             plan_cascade_desktop::commands::embedding::check_embedding_provider_health,
             plan_cascade_desktop::commands::embedding::set_embedding_api_key,
             plan_cascade_desktop::commands::embedding::get_embedding_api_key,
+            plan_cascade_desktop::commands::embedding::get_codebase_index_config,
+            plan_cascade_desktop::commands::embedding::set_codebase_index_config,
             // Prompt commands
             plan_cascade_desktop::commands::prompts::list_prompts,
             plan_cascade_desktop::commands::prompts::create_prompt,

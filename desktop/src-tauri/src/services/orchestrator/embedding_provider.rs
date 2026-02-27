@@ -468,6 +468,25 @@ pub struct PersistedEmbeddingConfig {
 /// Database setting key for persisted embedding config.
 pub const EMBEDDING_CONFIG_SETTING_KEY: &str = "embedding_config";
 
+/// User-configurable codebase index exclusions.
+///
+/// The `extra_*` fields are user-added and persist to the settings table.
+/// Built-in exclusions from `default_excluded_roots()` and `binary_extensions()`
+/// are always applied and not stored here.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CodebaseIndexConfig {
+    /// Additional directory names to exclude (beyond built-in defaults).
+    #[serde(default)]
+    pub extra_excluded_dirs: Vec<String>,
+    /// Additional file extensions to exclude (beyond built-in defaults).
+    /// Stored without leading dot, lowercase (e.g. "log", "tmp").
+    #[serde(default)]
+    pub extra_excluded_extensions: Vec<String>,
+}
+
+/// Database setting key for codebase index exclusion config.
+pub const CODEBASE_INDEX_CONFIG_KEY: &str = "codebase_index_config";
+
 // ---------------------------------------------------------------------------
 // Provider capability metadata
 // ---------------------------------------------------------------------------

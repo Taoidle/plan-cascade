@@ -18,9 +18,11 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::models::response::CommandResponse;
+use crate::services::orchestrator::analysis_index::{binary_extensions, default_excluded_roots};
 use crate::services::orchestrator::embedding_provider::{
-    EmbeddingProvider, EmbeddingProviderCapability, EmbeddingProviderConfig, EmbeddingProviderType,
-    PersistedEmbeddingConfig, EMBEDDING_CONFIG_SETTING_KEY,
+    CodebaseIndexConfig, EmbeddingProvider, EmbeddingProviderCapability, EmbeddingProviderConfig,
+    EmbeddingProviderType, PersistedEmbeddingConfig, CODEBASE_INDEX_CONFIG_KEY,
+    EMBEDDING_CONFIG_SETTING_KEY,
 };
 use crate::state::AppState;
 use crate::storage::KeyringService;
@@ -623,6 +625,126 @@ pub async fn get_embedding_api_key(
             e
         )),
     }
+}
+
+// ---------------------------------------------------------------------------
+// IPC-007: get_codebase_index_config
+// ---------------------------------------------------------------------------
+
+/// Response for `get_codebase_index_config` (IPC-007).
+///
+/// Returns both built-in exclusions (read-only for display) and user-added
+/// extras (editable).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodebaseIndexConfigResponse {
+    /// Built-in excluded dirs (read-only for frontend display).
+    pub builtin_excluded_dirs: Vec<String>,
+    /// Built-in binary extensions (read-only for frontend display).
+    pub builtin_excluded_extensions: Vec<String>,
+    /// User-added extra excluded dirs (editable).
+    pub extra_excluded_dirs: Vec<String>,
+    /// User-added extra excluded extensions (editable).
+    pub extra_excluded_extensions: Vec<String>,
+}
+
+/// Retrieve the current codebase index exclusion configuration.
+///
+/// Returns built-in exclusion lists (always applied, not editable) alongside
+/// any user-added extras from the database settings store.
+#[tauri::command]
+pub async fn get_codebase_index_config(
+    state: State<'_, AppState>,
+) -> Result<CommandResponse<CodebaseIndexConfigResponse>, String> {
+    let user_config = state
+        .with_database(|db| match db.get_setting(CODEBASE_INDEX_CONFIG_KEY) {
+            Ok(Some(json_str)) => {
+                Ok(serde_json::from_str::<CodebaseIndexConfig>(&json_str).unwrap_or_default())
+            }
+            Ok(None) => Ok(CodebaseIndexConfig::default()),
+            Err(e) => Err(e),
+        })
+        .await
+        .unwrap_or_default();
+
+    Ok(CommandResponse::ok(CodebaseIndexConfigResponse {
+        builtin_excluded_dirs: default_excluded_roots()
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+        builtin_excluded_extensions: binary_extensions()
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+        extra_excluded_dirs: user_config.extra_excluded_dirs,
+        extra_excluded_extensions: user_config.extra_excluded_extensions,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// IPC-008: set_codebase_index_config
+// ---------------------------------------------------------------------------
+
+/// Request for `set_codebase_index_config` (IPC-008).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetCodebaseIndexConfigRequest {
+    pub extra_excluded_dirs: Vec<String>,
+    pub extra_excluded_extensions: Vec<String>,
+}
+
+/// Update the codebase index exclusion configuration.
+///
+/// Normalizes inputs (lowercase extensions, trim dir names, dedup, remove
+/// entries that duplicate builtins) and persists to the settings table.
+#[tauri::command]
+pub async fn set_codebase_index_config(
+    request: SetCodebaseIndexConfigRequest,
+    state: State<'_, AppState>,
+) -> Result<CommandResponse<bool>, String> {
+    let builtin_dirs: std::collections::HashSet<&str> =
+        default_excluded_roots().iter().copied().collect();
+    let builtin_exts: std::collections::HashSet<&str> =
+        binary_extensions().iter().copied().collect();
+
+    // Normalize dirs: trim, dedup, remove builtins
+    let mut dirs: Vec<String> = request
+        .extra_excluded_dirs
+        .iter()
+        .map(|d| d.trim().to_string())
+        .filter(|d| !d.is_empty() && !builtin_dirs.contains(d.as_str()))
+        .collect();
+    dirs.sort();
+    dirs.dedup();
+
+    // Normalize extensions: strip leading dot, lowercase, dedup, remove builtins
+    let mut exts: Vec<String> = request
+        .extra_excluded_extensions
+        .iter()
+        .map(|e| e.trim().trim_start_matches('.').to_ascii_lowercase())
+        .filter(|e| !e.is_empty() && !builtin_exts.contains(e.as_str()))
+        .collect();
+    exts.sort();
+    exts.dedup();
+
+    let config = CodebaseIndexConfig {
+        extra_excluded_dirs: dirs,
+        extra_excluded_extensions: exts,
+    };
+
+    let json_str = serde_json::to_string(&config)
+        .map_err(|e| format!("Failed to serialize codebase index config: {}", e))?;
+
+    let persist_result = state
+        .with_database(|db| db.set_setting(CODEBASE_INDEX_CONFIG_KEY, &json_str))
+        .await;
+
+    if let Err(e) = persist_result {
+        return Ok(CommandResponse::err(format!(
+            "Failed to persist codebase index config: {}",
+            e
+        )));
+    }
+
+    Ok(CommandResponse::ok(true))
 }
 
 // ---------------------------------------------------------------------------

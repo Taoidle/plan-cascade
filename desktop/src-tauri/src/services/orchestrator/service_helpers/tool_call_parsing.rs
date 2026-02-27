@@ -372,20 +372,8 @@ pub(super) fn canonical_tool_name(name: &str) -> Option<&'static str> {
 }
 
 pub(super) fn analysis_excluded_roots() -> &'static [&'static str] {
-    &[
-        ".git",
-        "node_modules",
-        "target",
-        "dist",
-        "build",
-        "coverage",
-        ".venv",
-        ".pytest_cache",
-        ".mypy_cache",
-        ".ruff_cache",
-        "claude-code",
-        "codex",
-    ]
+    // Delegate to the single source of truth in analysis_index.
+    crate::services::orchestrator::analysis_index::default_excluded_roots()
 }
 
 pub(super) fn is_analysis_excluded_path(path: &str) -> bool {

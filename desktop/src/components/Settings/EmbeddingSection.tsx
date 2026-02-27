@@ -16,6 +16,9 @@ import {
   EyeNoneIcon,
   ReloadIcon,
   InfoCircledIcon,
+  Cross2Icon,
+  LockClosedIcon,
+  PlusIcon,
 } from '@radix-ui/react-icons';
 import { useEmbeddingStore } from '../../store/embedding';
 import type { EmbeddingProviderType, EmbeddingProviderCapability } from '../../types/embedding';
@@ -55,6 +58,11 @@ export function EmbeddingSection() {
     batchSize,
     fallbackProvider,
     providers,
+    builtinExcludedDirs,
+    builtinExcludedExtensions,
+    extraExcludedDirs,
+    extraExcludedExtensions,
+    exclusionsLoading,
     loading,
     saving,
     healthChecking,
@@ -63,6 +71,7 @@ export function EmbeddingSection() {
     reindexRequired,
     fetchConfig,
     fetchProviders,
+    fetchIndexConfig,
     setProvider,
     setModel,
     setBaseUrl,
@@ -73,6 +82,11 @@ export function EmbeddingSection() {
     checkHealth,
     saveApiKey,
     loadApiKey,
+    addExcludedDir,
+    removeExcludedDir,
+    addExcludedExtension,
+    removeExcludedExtension,
+    saveIndexConfig,
     clearError,
     clearHealthResult,
     clearReindexRequired,
@@ -91,11 +105,16 @@ export function EmbeddingSection() {
   // Custom model input (when "custom" is selected from the dropdown)
   const [customModelInput, setCustomModelInput] = useState('');
 
+  // Index exclusion inputs
+  const [newDirInput, setNewDirInput] = useState('');
+  const [newExtInput, setNewExtInput] = useState('');
+
   // Load config and providers on mount
   useEffect(() => {
     void fetchConfig();
     void fetchProviders();
-  }, [fetchConfig, fetchProviders]);
+    void fetchIndexConfig();
+  }, [fetchConfig, fetchProviders, fetchIndexConfig]);
 
   // Clear API key input when provider changes
   useEffect(() => {
@@ -136,8 +155,9 @@ export function EmbeddingSection() {
     clearError();
     clearHealthResult();
     await saveConfig();
+    await saveIndexConfig();
     // On failure, the store sets `error` directly — no additional handling needed.
-  }, [saveConfig, clearError, clearHealthResult]);
+  }, [saveConfig, saveIndexConfig, clearError, clearHealthResult]);
 
   // Handle health check
   const handleHealthCheck = useCallback(async () => {
@@ -508,6 +528,212 @@ export function EmbeddingSection() {
           ))}
         </select>
         <p className="text-sm text-gray-500 dark:text-gray-400">{t('embedding.fallback.help')}</p>
+      </section>
+
+      {/* Index Exclusions */}
+      <section className="space-y-4">
+        <div>
+          <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('embedding.indexExclusions.title')}</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{t('embedding.indexExclusions.description')}</p>
+        </div>
+
+        {exclusionsLoading ? (
+          <div className="flex items-center gap-2 py-4">
+            <ReloadIcon className="w-4 h-4 animate-spin text-gray-400" />
+            <span className="text-sm text-gray-500 dark:text-gray-400">{t('embedding.loading')}</span>
+          </div>
+        ) : (
+          <>
+            {/* Excluded Directories */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                {t('embedding.indexExclusions.dirs.title')}
+              </h4>
+
+              {/* Built-in dirs */}
+              {builtinExcludedDirs.length > 0 && (
+                <div>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">
+                    {t('embedding.indexExclusions.dirs.builtin')}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {builtinExcludedDirs.map((dir) => (
+                      <span
+                        key={dir}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500"
+                      >
+                        <LockClosedIcon className="w-3 h-3" />
+                        {dir}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Custom dirs */}
+              <div>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">
+                  {t('embedding.indexExclusions.dirs.custom')}
+                </p>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {extraExcludedDirs.map((dir) => (
+                    <span
+                      key={dir}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400"
+                    >
+                      {dir}
+                      <button
+                        type="button"
+                        onClick={() => removeExcludedDir(dir)}
+                        className="hover:text-red-500 dark:hover:text-red-400"
+                      >
+                        <Cross2Icon className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                  {extraExcludedDirs.length === 0 && (
+                    <span className="text-xs text-gray-400 dark:text-gray-500 italic">—</span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newDirInput}
+                    onChange={(e) => setNewDirInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newDirInput.trim()) {
+                        addExcludedDir(newDirInput);
+                        setNewDirInput('');
+                      }
+                    }}
+                    placeholder={t('embedding.indexExclusions.dirs.placeholder')}
+                    className={clsx(
+                      'flex-1 max-w-xs px-3 py-1.5 rounded-lg border text-sm',
+                      'border-gray-200 dark:border-gray-700',
+                      'bg-white dark:bg-gray-800',
+                      'text-gray-900 dark:text-white',
+                      'focus:outline-none focus:ring-2 focus:ring-primary-500',
+                    )}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (newDirInput.trim()) {
+                        addExcludedDir(newDirInput);
+                        setNewDirInput('');
+                      }
+                    }}
+                    disabled={!newDirInput.trim()}
+                    className={clsx(
+                      'inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm',
+                      'bg-gray-100 dark:bg-gray-800',
+                      'text-gray-700 dark:text-gray-300',
+                      'hover:bg-gray-200 dark:hover:bg-gray-700',
+                      'disabled:opacity-50 disabled:cursor-not-allowed',
+                    )}
+                  >
+                    <PlusIcon className="w-3.5 h-3.5" />
+                    {t('embedding.indexExclusions.dirs.add')}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Excluded Extensions */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                {t('embedding.indexExclusions.extensions.title')}
+              </h4>
+
+              {/* Built-in extensions */}
+              {builtinExcludedExtensions.length > 0 && (
+                <div>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">
+                    {t('embedding.indexExclusions.extensions.builtin')}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {builtinExcludedExtensions.map((ext) => (
+                      <span
+                        key={ext}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500"
+                      >
+                        <LockClosedIcon className="w-3 h-3" />.{ext}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Custom extensions */}
+              <div>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">
+                  {t('embedding.indexExclusions.extensions.custom')}
+                </p>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {extraExcludedExtensions.map((ext) => (
+                    <span
+                      key={ext}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400"
+                    >
+                      .{ext}
+                      <button
+                        type="button"
+                        onClick={() => removeExcludedExtension(ext)}
+                        className="hover:text-red-500 dark:hover:text-red-400"
+                      >
+                        <Cross2Icon className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                  {extraExcludedExtensions.length === 0 && (
+                    <span className="text-xs text-gray-400 dark:text-gray-500 italic">—</span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newExtInput}
+                    onChange={(e) => setNewExtInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newExtInput.trim()) {
+                        addExcludedExtension(newExtInput);
+                        setNewExtInput('');
+                      }
+                    }}
+                    placeholder={t('embedding.indexExclusions.extensions.placeholder')}
+                    className={clsx(
+                      'flex-1 max-w-xs px-3 py-1.5 rounded-lg border text-sm',
+                      'border-gray-200 dark:border-gray-700',
+                      'bg-white dark:bg-gray-800',
+                      'text-gray-900 dark:text-white',
+                      'focus:outline-none focus:ring-2 focus:ring-primary-500',
+                    )}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (newExtInput.trim()) {
+                        addExcludedExtension(newExtInput);
+                        setNewExtInput('');
+                      }
+                    }}
+                    disabled={!newExtInput.trim()}
+                    className={clsx(
+                      'inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm',
+                      'bg-gray-100 dark:bg-gray-800',
+                      'text-gray-700 dark:text-gray-300',
+                      'hover:bg-gray-200 dark:hover:bg-gray-700',
+                      'disabled:opacity-50 disabled:cursor-not-allowed',
+                    )}
+                  >
+                    <PlusIcon className="w-3.5 h-3.5" />
+                    {t('embedding.indexExclusions.extensions.add')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
       </section>
 
       {/* Health Check */}

@@ -18,6 +18,8 @@ import type {
   GetEmbeddingApiKeyRequest,
   SetEmbeddingApiKeyRequest,
   SetEmbeddingApiKeyResponse,
+  CodebaseIndexConfigResponse,
+  SetCodebaseIndexConfigRequest,
 } from '../types/embedding';
 
 // ---------------------------------------------------------------------------
@@ -147,6 +149,52 @@ export async function setEmbeddingApiKey(
 ): Promise<CommandResponse<SetEmbeddingApiKeyResponse>> {
   try {
     return await invoke<CommandResponse<SetEmbeddingApiKeyResponse>>('set_embedding_api_key', {
+      request,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// IPC-007: get_codebase_index_config
+// ---------------------------------------------------------------------------
+
+/**
+ * Retrieve the current codebase index exclusion configuration.
+ *
+ * Returns built-in exclusions (read-only) and user-added extras.
+ */
+export async function getCodebaseIndexConfig(): Promise<CommandResponse<CodebaseIndexConfigResponse>> {
+  try {
+    return await invoke<CommandResponse<CodebaseIndexConfigResponse>>('get_codebase_index_config');
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// IPC-008: set_codebase_index_config
+// ---------------------------------------------------------------------------
+
+/**
+ * Update the codebase index exclusion configuration.
+ *
+ * Persists user-added extra exclusions to the settings table.
+ */
+export async function setCodebaseIndexConfig(
+  request: SetCodebaseIndexConfigRequest,
+): Promise<CommandResponse<boolean>> {
+  try {
+    return await invoke<CommandResponse<boolean>>('set_codebase_index_config', {
       request,
     });
   } catch (error) {

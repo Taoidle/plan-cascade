@@ -11,6 +11,82 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::Path;
+use std::sync::OnceLock;
+
+/// Hardcoded directory names that should always be excluded from indexing,
+/// regardless of `.gitignore` contents. Shared by both the analysis pipeline
+/// and the background indexer.
+pub fn default_excluded_roots() -> &'static [&'static str] {
+    &[
+        ".git",
+        "node_modules",
+        "target",
+        "dist",
+        "build",
+        "coverage",
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".tox",
+        ".nox",
+        ".cache",
+        ".parcel-cache",
+        ".next",
+        ".nuxt",
+        ".output",
+        ".svelte-kit",
+        ".turbo",
+        ".vercel",
+        "claude-code",
+        "codex",
+        ".idea",
+        ".vs",
+        ".gradle",
+        ".dart_tool",
+        ".pub-cache",
+        "Pods",
+    ]
+}
+
+/// File extensions that indicate binary content unsuitable for code indexing.
+pub fn binary_extensions() -> &'static [&'static str] {
+    &[
+        // Images
+        "png", "jpg", "jpeg", "gif", "bmp", "ico", "webp", "tiff", "psd", "svg",
+        // Audio/Video
+        "mp3", "mp4", "wav", "avi", "mov", "mkv", "flac", "ogg", "webm",
+        // Archives
+        "zip", "tar", "gz", "bz2", "xz", "7z", "rar", "zst",
+        // Compiled
+        "wasm", "dll", "so", "dylib", "exe", "bin", "o", "a", "lib", "obj", "class", "pyc",
+        "pyo",
+        // Packages
+        "jar", "war", "gem", "nupkg", "deb", "rpm", "apk", "dmg", "msi",
+        // Fonts
+        "ttf", "otf", "woff", "woff2", "eot",
+        // Data
+        "db", "sqlite", "sqlite3",
+        // Docs
+        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+        // Source maps
+        "map",
+    ]
+}
+
+/// Returns `true` if the given extension (lowercase, without dot) is binary.
+///
+/// Uses a `OnceLock`-backed `HashSet` for O(1) lookups.
+pub fn is_binary_extension(ext: Option<&str>) -> bool {
+    static BINARY_SET: OnceLock<HashSet<&'static str>> = OnceLock::new();
+    let set = BINARY_SET.get_or_init(|| binary_extensions().iter().copied().collect());
+    match ext {
+        Some(e) => set.contains(e),
+        None => false,
+    }
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AnalysisProfile {
@@ -179,16 +255,22 @@ pub fn build_file_inventory(
     project_root: &Path,
     excluded_roots: &[String],
 ) -> AppResult<FileInventory> {
-    build_file_inventory_with_limits(project_root, excluded_roots, &AnalysisLimits::default())
+    build_file_inventory_with_limits(project_root, excluded_roots, &[], &AnalysisLimits::default())
 }
 
 pub fn build_file_inventory_with_limits(
     project_root: &Path,
     excluded_roots: &[String],
+    excluded_extensions: &[String],
     limits: &AnalysisLimits,
 ) -> AppResult<FileInventory> {
     let max_symbol_file_size: u64 = 500_000; // 500KB threshold for symbol extraction
     let mut excluded = HashSet::new();
+    // Always apply default exclusions (`.git`, `node_modules`, etc.)
+    for root in default_excluded_roots() {
+        excluded.insert(root.to_string());
+    }
+    // Merge caller-supplied exclusions on top
     for root in excluded_roots {
         excluded.insert(root.trim().replace('\\', "/"));
     }
@@ -199,7 +281,18 @@ pub fn build_file_inventory_with_limits(
         .follow_links(false)
         .git_ignore(true)
         .git_exclude(true)
-        .git_global(true);
+        .git_global(true)
+        .filter_entry(|entry| {
+            // Block `.git` directory descent at the walker level as a safety net
+            if entry.file_type().is_some_and(|ft| ft.is_dir()) {
+                if let Some(name) = entry.file_name().to_str() {
+                    if name == ".git" {
+                        return false;
+                    }
+                }
+            }
+            true
+        });
 
     let mut items = Vec::new();
     for entry in builder.build() {
@@ -208,6 +301,18 @@ pub fn build_file_inventory_with_limits(
         };
         let path = entry.path();
         if !path.is_file() {
+            continue;
+        }
+        // Skip binary files early, before any disk I/O
+        let ext_lower = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_ascii_lowercase());
+        if is_binary_extension(ext_lower.as_deref())
+            || excluded_extensions
+                .iter()
+                .any(|e| ext_lower.as_deref() == Some(e.as_str()))
+        {
             continue;
         }
         let Ok(rel) = path.strip_prefix(project_root) else {
@@ -222,11 +327,7 @@ pub fn build_file_inventory_with_limits(
             Ok(meta) => meta,
             Err(_) => continue,
         };
-        let ext = path
-            .extension()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_ascii_lowercase());
-        let language = detect_language(ext.as_deref());
+        let language = detect_language(ext_lower.as_deref());
         let is_test = is_test_path(&rel_norm);
         let component = detect_component(&rel_norm);
         let line_count = estimate_line_count(path, metadata.len()).unwrap_or(0);
@@ -271,7 +372,7 @@ pub fn build_file_inventory_with_limits(
             path: rel_norm,
             component,
             language,
-            extension: ext,
+            extension: ext_lower,
             size_bytes: metadata.len(),
             line_count,
             is_test,
@@ -674,16 +775,51 @@ fn is_excluded(path: &str, excluded_roots: &HashSet<String>) -> bool {
     excluded_roots.contains(first)
 }
 
-fn detect_language(ext: Option<&str>) -> String {
+pub fn detect_language(ext: Option<&str>) -> String {
     match ext {
-        Some("py") => "python",
+        Some("py" | "pyi" | "pyw") => "python",
         Some("rs") => "rust",
-        Some("ts") | Some("tsx") => "typescript",
-        Some("js") | Some("jsx") => "javascript",
+        Some("ts" | "tsx" | "mts" | "cts") => "typescript",
+        Some("js" | "jsx" | "mjs" | "cjs") => "javascript",
         Some("go") => "go",
         Some("java") => "java",
-        Some("json") | Some("toml") | Some("yaml") | Some("yml") => "config",
-        Some("md") => "markdown",
+        Some("c" | "h") => "c",
+        Some("cpp" | "cc" | "cxx" | "hpp" | "hxx" | "hh") => "cpp",
+        Some("cs") => "csharp",
+        Some("swift") => "swift",
+        Some("kt" | "kts") => "kotlin",
+        Some("rb" | "erb") => "ruby",
+        Some("php") => "php",
+        Some("scala" | "sc") => "scala",
+        Some("dart") => "dart",
+        Some("zig") => "zig",
+        Some("lua") => "lua",
+        Some("r") => "r",
+        Some("ex" | "exs") => "elixir",
+        Some("erl" | "hrl") => "erlang",
+        Some("hs") => "haskell",
+        Some("ml" | "mli") => "ocaml",
+        Some("clj" | "cljs" | "cljc") => "clojure",
+        Some("pl" | "pm") => "perl",
+        Some("sh" | "bash" | "zsh" | "fish") => "shell",
+        Some("ps1" | "psm1") => "powershell",
+        Some("sql") => "sql",
+        Some("html" | "htm") => "html",
+        Some("css" | "scss" | "sass" | "less") => "css",
+        Some("vue") => "vue",
+        Some("svelte") => "svelte",
+        Some("proto") => "protobuf",
+        Some("graphql" | "gql") => "graphql",
+        Some("tf" | "hcl") => "hcl",
+        Some("nix") => "nix",
+        Some("json" | "toml" | "yaml" | "yml" | "ini" | "cfg" | "conf") => "config",
+        Some("xml" | "xsl" | "xslt") => "xml",
+        Some("md" | "mdx") => "markdown",
+        Some("rst") => "restructuredtext",
+        Some("tex" | "latex") => "latex",
+        Some("dockerfile") => "dockerfile",
+        Some("cmake") => "cmake",
+        Some("makefile") => "makefile",
         _ => "other",
     }
     .to_string()
@@ -1323,5 +1459,120 @@ class InternalHelper {
         let deserialized: SymbolInfo = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized.kind, SymbolKind::Function);
         assert_eq!(deserialized.name, "test_fn");
+    }
+
+    #[test]
+    fn default_exclusions_applied() {
+        let dir = tempdir().expect("temp dir");
+        fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+        fs::create_dir_all(dir.path().join("node_modules/lodash")).expect("mkdir");
+        fs::create_dir_all(dir.path().join(".git/objects")).expect("mkdir");
+
+        fs::write(dir.path().join("src/main.rs"), "fn main() {}\n").expect("write");
+        fs::write(
+            dir.path().join("node_modules/lodash/index.js"),
+            "module.exports = {};\n",
+        )
+        .expect("write");
+        fs::write(
+            dir.path().join(".git/objects/pack"),
+            "binary data\n",
+        )
+        .expect("write");
+
+        let inventory = build_file_inventory(dir.path(), &[]).expect("inventory");
+        let paths: Vec<&str> = inventory.items.iter().map(|i| i.path.as_str()).collect();
+        assert!(
+            paths.contains(&"src/main.rs"),
+            "src/main.rs should be included"
+        );
+        assert!(
+            !paths.iter().any(|p| p.starts_with("node_modules/")),
+            "node_modules should be excluded"
+        );
+        assert!(
+            !paths.iter().any(|p| p.starts_with(".git/")),
+            ".git should be excluded"
+        );
+    }
+
+    #[test]
+    fn binary_files_excluded() {
+        let dir = tempdir().expect("temp dir");
+        fs::write(dir.path().join("app.rs"), "fn main() {}\n").expect("write");
+        fs::write(dir.path().join("logo.png"), "fake png data\n").expect("write");
+        fs::write(dir.path().join("module.wasm"), "fake wasm\n").expect("write");
+
+        let inventory = build_file_inventory(dir.path(), &[]).expect("inventory");
+        let paths: Vec<&str> = inventory.items.iter().map(|i| i.path.as_str()).collect();
+        assert!(paths.contains(&"app.rs"), "app.rs should be included");
+        assert!(!paths.contains(&"logo.png"), "png should be excluded");
+        assert!(!paths.contains(&"module.wasm"), "wasm should be excluded");
+    }
+
+    #[test]
+    fn detect_language_expanded() {
+        assert_eq!(detect_language(Some("py")), "python");
+        assert_eq!(detect_language(Some("rs")), "rust");
+        assert_eq!(detect_language(Some("ts")), "typescript");
+        assert_eq!(detect_language(Some("tsx")), "typescript");
+        assert_eq!(detect_language(Some("js")), "javascript");
+        assert_eq!(detect_language(Some("go")), "go");
+        assert_eq!(detect_language(Some("java")), "java");
+        // New extensions
+        assert_eq!(detect_language(Some("c")), "c");
+        assert_eq!(detect_language(Some("cpp")), "cpp");
+        assert_eq!(detect_language(Some("cs")), "csharp");
+        assert_eq!(detect_language(Some("swift")), "swift");
+        assert_eq!(detect_language(Some("kt")), "kotlin");
+        assert_eq!(detect_language(Some("rb")), "ruby");
+        assert_eq!(detect_language(Some("php")), "php");
+        assert_eq!(detect_language(Some("sh")), "shell");
+        assert_eq!(detect_language(Some("sql")), "sql");
+        assert_eq!(detect_language(Some("html")), "html");
+        assert_eq!(detect_language(Some("css")), "css");
+        assert_eq!(detect_language(Some("vue")), "vue");
+        assert_eq!(detect_language(Some("svelte")), "svelte");
+        assert_eq!(detect_language(Some("proto")), "protobuf");
+        assert_eq!(detect_language(Some("graphql")), "graphql");
+        assert_eq!(detect_language(Some("tf")), "hcl");
+        assert_eq!(detect_language(Some("nix")), "nix");
+        assert_eq!(detect_language(Some("dart")), "dart");
+        assert_eq!(detect_language(Some("zig")), "zig");
+        assert_eq!(detect_language(None), "other");
+        assert_eq!(detect_language(Some("xyz")), "other");
+    }
+
+    #[test]
+    fn caller_exclusions_merged_with_defaults() {
+        let dir = tempdir().expect("temp dir");
+        fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+        fs::create_dir_all(dir.path().join("vendor/lib")).expect("mkdir");
+        fs::create_dir_all(dir.path().join("node_modules/pkg")).expect("mkdir");
+
+        fs::write(dir.path().join("src/lib.rs"), "pub fn hello() {}\n").expect("write");
+        fs::write(dir.path().join("vendor/lib/dep.rs"), "// dep\n").expect("write");
+        fs::write(
+            dir.path().join("node_modules/pkg/index.js"),
+            "module.exports = {};\n",
+        )
+        .expect("write");
+
+        // Pass "vendor" as an extra exclusion
+        let inventory =
+            build_file_inventory(dir.path(), &["vendor".to_string()]).expect("inventory");
+        let paths: Vec<&str> = inventory.items.iter().map(|i| i.path.as_str()).collect();
+        assert!(
+            paths.contains(&"src/lib.rs"),
+            "src/lib.rs should be included"
+        );
+        assert!(
+            !paths.iter().any(|p| p.starts_with("vendor/")),
+            "vendor should be excluded (caller exclusion)"
+        );
+        assert!(
+            !paths.iter().any(|p| p.starts_with("node_modules/")),
+            "node_modules should be excluded (default exclusion)"
+        );
     }
 }

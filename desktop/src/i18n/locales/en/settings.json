@@ -557,6 +557,25 @@
     "reindex": {
       "title": "Reindex Required",
       "message": "The embedding provider or model changed. A full reindex of the codebase is recommended to use the new embeddings."
+    },
+
+    "indexExclusions": {
+      "title": "Index Exclusions",
+      "description": "Configure which directories and file types are excluded from codebase indexing.",
+      "dirs": {
+        "title": "Excluded Directories",
+        "builtin": "Built-in (always excluded)",
+        "custom": "Custom exclusions",
+        "placeholder": "Directory name...",
+        "add": "Add"
+      },
+      "extensions": {
+        "title": "Excluded File Extensions",
+        "builtin": "Built-in (always excluded)",
+        "custom": "Custom exclusions",
+        "placeholder": "Extension (e.g. log)...",
+        "add": "Add"
+      }
     }
   },
 

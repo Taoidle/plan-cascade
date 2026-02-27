@@ -14,6 +14,8 @@ import {
   checkEmbeddingProviderHealth,
   getEmbeddingApiKey,
   setEmbeddingApiKey,
+  getCodebaseIndexConfig,
+  setCodebaseIndexConfig,
 } from '../lib/embeddingApi';
 
 // ---------------------------------------------------------------------------
@@ -32,6 +34,13 @@ export interface EmbeddingState {
   // Provider catalog
   providers: EmbeddingProviderCapability[];
 
+  // Index exclusion config
+  builtinExcludedDirs: string[];
+  builtinExcludedExtensions: string[];
+  extraExcludedDirs: string[];
+  extraExcludedExtensions: string[];
+  exclusionsLoading: boolean;
+
   // UI state
   loading: boolean;
   saving: boolean;
@@ -43,6 +52,7 @@ export interface EmbeddingState {
   // Actions
   fetchConfig: () => Promise<void>;
   fetchProviders: () => Promise<void>;
+  fetchIndexConfig: () => Promise<void>;
   setProvider: (provider: string) => void;
   setModel: (model: string) => void;
   setBaseUrl: (baseUrl: string) => void;
@@ -53,6 +63,11 @@ export interface EmbeddingState {
   checkHealth: () => Promise<void>;
   saveApiKey: (provider: string, apiKey: string) => Promise<boolean>;
   loadApiKey: (provider: string) => Promise<string | null>;
+  addExcludedDir: (dir: string) => void;
+  removeExcludedDir: (dir: string) => void;
+  addExcludedExtension: (ext: string) => void;
+  removeExcludedExtension: (ext: string) => void;
+  saveIndexConfig: () => Promise<boolean>;
   clearError: () => void;
   clearHealthResult: () => void;
   clearReindexRequired: () => void;
@@ -70,6 +85,11 @@ const DEFAULT_STATE = {
   batchSize: 32,
   fallbackProvider: '',
   providers: [],
+  builtinExcludedDirs: [] as string[],
+  builtinExcludedExtensions: [] as string[],
+  extraExcludedDirs: [] as string[],
+  extraExcludedExtensions: [] as string[],
+  exclusionsLoading: false,
   loading: false,
   saving: false,
   healthChecking: false,
@@ -125,6 +145,26 @@ export const useEmbeddingStore = create<EmbeddingState>()((set, get) => ({
       }
     } catch {
       // Silently fail — providers list is non-critical for initial render
+    }
+  },
+
+  fetchIndexConfig: async () => {
+    set({ exclusionsLoading: true });
+    try {
+      const result = await getCodebaseIndexConfig();
+      if (result.success && result.data) {
+        set({
+          builtinExcludedDirs: result.data.builtin_excluded_dirs,
+          builtinExcludedExtensions: result.data.builtin_excluded_extensions,
+          extraExcludedDirs: result.data.extra_excluded_dirs,
+          extraExcludedExtensions: result.data.extra_excluded_extensions,
+          exclusionsLoading: false,
+        });
+      } else {
+        set({ exclusionsLoading: false });
+      }
+    } catch {
+      set({ exclusionsLoading: false });
     }
   },
 
@@ -249,6 +289,52 @@ export const useEmbeddingStore = create<EmbeddingState>()((set, get) => ({
       return null;
     } catch {
       return null;
+    }
+  },
+
+  addExcludedDir: (dir: string) => {
+    const trimmed = dir.trim();
+    if (!trimmed) return;
+    const state = get();
+    if (state.extraExcludedDirs.includes(trimmed) || state.builtinExcludedDirs.includes(trimmed)) return;
+    set({ extraExcludedDirs: [...state.extraExcludedDirs, trimmed] });
+  },
+
+  removeExcludedDir: (dir: string) => {
+    set({ extraExcludedDirs: get().extraExcludedDirs.filter((d) => d !== dir) });
+  },
+
+  addExcludedExtension: (ext: string) => {
+    const normalized = ext.trim().replace(/^\./, '').toLowerCase();
+    if (!normalized) return;
+    const state = get();
+    if (state.extraExcludedExtensions.includes(normalized) || state.builtinExcludedExtensions.includes(normalized))
+      return;
+    set({ extraExcludedExtensions: [...state.extraExcludedExtensions, normalized] });
+  },
+
+  removeExcludedExtension: (ext: string) => {
+    set({ extraExcludedExtensions: get().extraExcludedExtensions.filter((e) => e !== ext) });
+  },
+
+  saveIndexConfig: async () => {
+    const state = get();
+    set({ saving: true, error: null });
+    try {
+      const result = await setCodebaseIndexConfig({
+        extra_excluded_dirs: state.extraExcludedDirs,
+        extra_excluded_extensions: state.extraExcludedExtensions,
+      });
+      if (result.success) {
+        set({ saving: false, reindexRequired: true });
+        return true;
+      } else {
+        set({ saving: false, error: result.error ?? 'Failed to save index exclusion config' });
+        return false;
+      }
+    } catch (err) {
+      set({ saving: false, error: err instanceof Error ? err.message : String(err) });
+      return false;
     }
   },
 

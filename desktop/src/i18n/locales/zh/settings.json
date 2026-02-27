@@ -557,6 +557,25 @@
     "reindex": {
       "title": "需要重新索引",
       "message": "嵌入提供商或模型已更改。建议对代码库进行完整重新索引以使用新的嵌入。"
+    },
+
+    "indexExclusions": {
+      "title": "索引排除",
+      "description": "配置从代码库索引中排除的目录和文件类型。",
+      "dirs": {
+        "title": "排除目录",
+        "builtin": "内置（始终排除）",
+        "custom": "自定义排除",
+        "placeholder": "目录名称...",
+        "add": "添加"
+      },
+      "extensions": {
+        "title": "排除文件扩展名",
+        "builtin": "内置（始终排除）",
+        "custom": "自定义排除",
+        "placeholder": "扩展名（如 log）...",
+        "add": "添加"
+      }
     }
   },
 

@@ -26,7 +26,9 @@ use super::lsp_enricher::LspEnricher;
 use super::lsp_registry::LspServerRegistry;
 use super::embedding_config_builder;
 use super::embedding_manager::{EmbeddingManager, EmbeddingManagerConfig};
-use super::embedding_provider::{EmbeddingProviderConfig, EmbeddingProviderType};
+use super::embedding_provider::{
+    CodebaseIndexConfig, EmbeddingProviderConfig, EmbeddingProviderType, CODEBASE_INDEX_CONFIG_KEY,
+};
 use super::embedding_provider_tfidf::TfIdfEmbeddingProvider;
 use super::embedding_service::EmbeddingService;
 use super::hnsw_index::HnswIndex;
@@ -370,6 +372,9 @@ impl IndexManager {
         // Capture provider display name before embedding_mgr is moved into the indexer.
         let provider_display_name = embedding_mgr.display_name().to_string();
 
+        // Load user-configured codebase index exclusions from DB.
+        let codebase_config = self.load_codebase_index_config();
+
         let handle = tokio::task::spawn(async move {
             // Build batch callback for incremental status refresh.
             let pp_for_batch = pp_for_task.clone();
@@ -418,7 +423,11 @@ impl IndexManager {
                 .with_change_receiver(change_rx)
                 .with_channel_overflow_flag(overflow_flag)
                 .with_batch_callback(batch_cb)
-                .with_enrichment_callback(enrichment_cb);
+                .with_enrichment_callback(enrichment_cb)
+                .with_extra_exclusions(
+                    codebase_config.extra_excluded_dirs,
+                    codebase_config.extra_excluded_extensions,
+                );
 
             let join = indexer.start().await;
             let result = join.await;
@@ -936,11 +945,18 @@ impl IndexManager {
             .build_enrichment_pipeline(project_path, 3000)
             .await;
 
+        // Load user-configured codebase index exclusions.
+        let codebase_config = self.load_codebase_index_config();
+
         let mut indexer = BackgroundIndexer::new(project_root, index_store)
             .with_change_receiver(change_rx)
             .with_channel_overflow_flag(overflow_flag)
             .with_batch_callback(batch_cb)
-            .with_enrichment_callback(enrichment_cb);
+            .with_enrichment_callback(enrichment_cb)
+            .with_extra_exclusions(
+                codebase_config.extra_excluded_dirs,
+                codebase_config.extra_excluded_extensions,
+            );
         if let Some(svc) = embedding_svc {
             indexer = indexer.with_embedding_service(svc);
         }
@@ -1042,6 +1058,19 @@ impl IndexManager {
     /// Delegates to the shared `embedding_config_builder` module.
     fn embedding_keyring_alias(provider: EmbeddingProviderType) -> Option<&'static str> {
         embedding_config_builder::embedding_keyring_alias(provider)
+    }
+
+    /// Load user-configured codebase index exclusions from the settings table.
+    ///
+    /// Returns defaults (empty lists) if no config has been saved or on error.
+    fn load_codebase_index_config(&self) -> CodebaseIndexConfig {
+        let db = Database::from_pool(self.db_pool.clone());
+        match db.get_setting(CODEBASE_INDEX_CONFIG_KEY) {
+            Ok(Some(json_str)) => {
+                serde_json::from_str::<CodebaseIndexConfig>(&json_str).unwrap_or_default()
+            }
+            _ => CodebaseIndexConfig::default(),
+        }
     }
 
     /// Abort and remove an active indexer for the given project path.
