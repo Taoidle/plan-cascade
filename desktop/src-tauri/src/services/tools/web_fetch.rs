@@ -191,7 +191,7 @@ impl WebFetchService {
         // Convert to markdown if HTML
         let result =
             if content_type.contains("text/html") || content_type.contains("application/xhtml") {
-                html2md::parse_html(&body)
+                htmd::convert(&body).unwrap_or_else(|_| body.clone())
             } else {
                 body
             };

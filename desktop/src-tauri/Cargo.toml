@@ -127,7 +127,7 @@ toml = "0.8"
 tracing = "0.1"
 
 # Web content
-html2md = "0.2"
+htmd = "0.5"
 url = "2"
 urlencoding = "2"
 

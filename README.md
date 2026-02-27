@@ -18,7 +18,7 @@
 | Claude Code Plugin | ![Stable](https://img.shields.io/badge/status-stable-brightgreen) |
 | MCP Server | ![Stable](https://img.shields.io/badge/status-stable-brightgreen) |
 | Standalone CLI | ![In Development](https://img.shields.io/badge/status-in%20development-yellow) |
-| Desktop App | ![In Development](https://img.shields.io/badge/status-in%20development-yellow) |
+| Desktop App | ![Beta](https://img.shields.io/badge/status-beta-blue) |
 
 [Features](#features) • [Quick Start](#quick-start) • [Documentation](#documentation) • [Architecture](#architecture)
 
@@ -156,9 +156,16 @@ plan-cascade run "Implement user authentication" --expert
 
 ### Option 3: Desktop App
 
-> **Note**: The desktop application is currently in active development. Stay tuned for updates.
+A cross-platform desktop application built with **Tauri 2.0** (Rust backend + React frontend). Provides a full GUI for all Plan Cascade capabilities plus standalone features like multi-provider LLM chat, knowledge base (RAG), analytics dashboard, and more.
 
-Download from [GitHub Releases](https://github.com/Taoidle/plan-cascade/releases) (coming soon).
+```bash
+cd desktop
+pnpm install
+pnpm tauri:dev        # Development mode with hot reload
+pnpm tauri:build      # Production build for current platform
+```
+
+See the [Desktop README](desktop/README.md) for full details, or jump to the [Desktop App](#desktop-app) section below.
 
 ## Usage Examples
 
@@ -194,6 +201,73 @@ Download from [GitHub Releases](https://github.com/Taoidle/plan-cascade/releases
 # → Uses aider for implementation, codex for retries
 ```
 
+## Desktop App
+
+The desktop application is a standalone AI programming platform that operates independently of the Python core. It provides a rich GUI with its own pure-Rust backend.
+
+### Execution Modes
+
+| Mode | Description |
+|------|-------------|
+| **Claude Code** | Interactive GUI for Claude Code CLI with tool visualization |
+| **Simple** | Direct LLM conversation with agentic tool use (file editing, shell, search) |
+| **Expert** | Interview-driven PRD generation with dependency graph visualization |
+| **Task** | PRD-driven autonomous multi-story execution with quality gates |
+| **Plan** | Multi-feature mega-plan orchestration |
+
+### LLM Providers
+
+Connects to **7+ providers** with streaming support and intelligent tool-calling fallback:
+
+| Provider | Tool Calling | Local |
+|----------|:---:|:---:|
+| Anthropic (Claude) | Native | |
+| OpenAI (GPT) | Native | |
+| DeepSeek | Dual-channel | |
+| Qwen (Alibaba) | Dual-channel | |
+| Zhipu GLM | Dual-channel | |
+| Ollama | Prompt-only | Yes |
+| MiniMax | Prompt-only | |
+
+### Key Features
+
+- **Agent Library** — Create reusable AI agents with custom prompts, tool constraints, and execution history
+- **Quality Gates** — Automated test, lint, and type-check validation after each code generation step
+- **Timeline & Checkpoints** — Session version control with branching, forking, and one-click rollback
+- **Git Integration** — Full GUI for staging, committing, branching, merging, conflict resolution, and AI-assisted commit messages (46 git commands)
+- **Knowledge Base (RAG)** — Semantic document search with HNSW vector indexing and multi-provider embeddings
+- **Codebase Index** — Tree-sitter symbol extraction (6 languages) with background indexing and semantic search
+- **MCP Integration** — Model Context Protocol server management and custom tool registration
+- **Analytics Dashboard** — Token usage, cost tracking, and model performance comparison with CSV/JSON export
+- **Agent Composer** — Visual canvas editor for multi-step agent pipelines (sequential, parallel, conditional)
+- **Graph Workflow** — DAG-based workflow editor with draggable nodes and SVG edges
+- **Plugins** — Framework skill injection (React, Vue, Rust) with marketplace support
+- **Guardrails** — Rule-based constraints for sensitive data detection, code security, and custom regex patterns
+- **Webhooks** — Event routing to Slack, Feishu, Discord, Telegram, or custom endpoints
+- **Remote Control** — Telegram bot gateway and A2A (Agent-to-Agent) protocol
+- **i18n** — English, Chinese (Simplified), Japanese
+
+### Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 18 + TypeScript + Zustand + Radix UI + Tailwind CSS + Monaco Editor |
+| Backend | Rust + Tauri 2.0 + Tokio + SQLite + AES-256-GCM keyring |
+| Code Analysis | Tree-sitter (Python, Rust, TypeScript, JavaScript, Go, Java) |
+| Vector Search | HNSW (hnsw_rs) for embeddings, hybrid search with BM25 reranking |
+
+### Build Targets
+
+```bash
+pnpm tauri:build:macos      # macOS Universal (Intel + Apple Silicon)
+pnpm tauri:build:windows    # Windows x64 MSI
+pnpm tauri:build:linux      # Linux x64 AppImage
+```
+
+For architecture details, development setup, and contribution guide, see the [Desktop README](desktop/README.md).
+
+---
+
 ## Documentation
 
 | Document | Description |
@@ -201,6 +275,7 @@ Download from [GitHub Releases](https://github.com/Taoidle/plan-cascade/releases
 | [Plugin Guide](docs/Plugin-Guide.md) | Claude Code plugin usage |
 | [CLI Guide](docs/CLI-Guide.md) | Standalone CLI usage |
 | [Desktop Guide](docs/Desktop-Guide.md) | Desktop application |
+| [Desktop README](desktop/README.md) | Desktop development and architecture |
 | [MCP Server Guide](docs/MCP-SERVER-GUIDE.md) | Integration with Cursor, Windsurf |
 | [System Architecture](docs/System-Architecture.md) | Technical architecture |
 
@@ -218,7 +293,16 @@ plan-cascade/
 ├── commands/               # Plugin commands
 ├── skills/                 # Plugin skills
 ├── mcp_server/             # MCP server
-└── desktop/                # Desktop app (Tauri + React)
+├── external-skills/        # Framework skills (React, Vue, Rust)
+└── desktop/                # Desktop app (Tauri 2.0 + React 18)
+    ├── src/                #   React frontend (283 components)
+    │   ├── components/     #     UI by domain (23 feature areas)
+    │   ├── store/          #     Zustand state (39 stores)
+    │   └── lib/            #     Tauri IPC wrappers (30+ files)
+    └── src-tauri/          #   Rust backend
+        ├── src/commands/   #     359 IPC commands (43 modules)
+        ├── src/services/   #     Business logic (150+ files)
+        └── crates/         #     Workspace crates (core, llm, tools, quality-gates)
 ```
 
 ### Supported LLM Backends
