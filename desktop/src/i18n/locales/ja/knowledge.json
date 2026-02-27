@@ -67,6 +67,27 @@
     "uploadAndIndex": "{{count}} 件のファイルをアップロード＆インデックス"
   },
 
+  "updates": {
+    "checkForUpdates": "更新を確認",
+    "checking": "確認中...",
+    "applyUpdates": "更新を適用",
+    "applying": "適用中...",
+    "updatesFound": "変更が検出されました",
+    "noUpdatesFound": "すべてのドキュメントは最新です",
+    "modifiedDocs": "{{count}} 件のドキュメントが変更されました",
+    "deletedDocs": "{{count}} 件のドキュメントがディスクから削除されました",
+    "newDocs": "{{count}} 件の新しいファイルが見つかりました",
+    "unchangedDocs": "{{count}} 件のドキュメントは変更なし",
+    "noTrackableDocs": "追跡可能なドキュメントがありません（ソースパスなし）"
+  },
+
+  "docs": {
+    "syncing": "ドキュメントを同期中...",
+    "syncComplete": "ドキュメントの同期が完了しました",
+    "changesDetected": "ドキュメントの変更が検出されました",
+    "syncDocs": "ドキュメントを同期"
+  },
+
   "query": {
     "title": "ナレッジ検索",
     "subtitle": "このコレクションから関連情報を検索します",

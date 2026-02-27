@@ -8,7 +8,7 @@ use plan_cascade_desktop::commands::claude_code::ClaudeCodeState;
 use plan_cascade_desktop::commands::file_changes::FileChangesState;
 use plan_cascade_desktop::commands::git::GitState;
 use plan_cascade_desktop::commands::guardrails::GuardrailState;
-use plan_cascade_desktop::commands::knowledge::KnowledgeState;
+use plan_cascade_desktop::commands::knowledge::{DocsIndexerState, KnowledgeState};
 use plan_cascade_desktop::commands::lsp::LspState;
 use plan_cascade_desktop::commands::mcp::McpRuntimeState;
 use plan_cascade_desktop::commands::permissions::PermissionState;
@@ -47,6 +47,7 @@ fn main() {
         .manage(PlanModeState::new())
         .manage(ExecutionRegistry::new())
         .manage(KnowledgeState::new())
+        .manage(DocsIndexerState::new())
         .manage(ArtifactState::new())
         .manage(GitState::new())
         .manage(FileChangesState::new())
@@ -376,6 +377,11 @@ fn main() {
             plan_cascade_desktop::commands::knowledge::rag_update_collection,
             plan_cascade_desktop::commands::knowledge::rag_list_documents,
             plan_cascade_desktop::commands::knowledge::rag_delete_document,
+            plan_cascade_desktop::commands::knowledge::rag_check_collection_updates,
+            plan_cascade_desktop::commands::knowledge::rag_apply_collection_updates,
+            plan_cascade_desktop::commands::knowledge::rag_ensure_docs_collection,
+            plan_cascade_desktop::commands::knowledge::rag_sync_docs_collection,
+            plan_cascade_desktop::commands::knowledge::rag_get_docs_status,
             // Git Source Control commands
             plan_cascade_desktop::commands::git::git_full_status,
             plan_cascade_desktop::commands::git::git_stage_files,

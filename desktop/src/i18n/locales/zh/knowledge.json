@@ -67,6 +67,27 @@
     "uploadAndIndex": "上传并索引 {{count}} 个文件"
   },
 
+  "updates": {
+    "checkForUpdates": "检查更新",
+    "checking": "检查中...",
+    "applyUpdates": "应用更新",
+    "applying": "应用中...",
+    "updatesFound": "检测到变更",
+    "noUpdatesFound": "所有文档均为最新",
+    "modifiedDocs": "{{count}} 个文档已修改",
+    "deletedDocs": "{{count}} 个文档已从磁盘删除",
+    "newDocs": "发现 {{count}} 个新文件",
+    "unchangedDocs": "{{count}} 个文档未变更",
+    "noTrackableDocs": "没有可追踪的文档（无源路径）"
+  },
+
+  "docs": {
+    "syncing": "正在同步文档...",
+    "syncComplete": "文档同步完成",
+    "changesDetected": "检测到文档变更",
+    "syncDocs": "同步文档"
+  },
+
   "query": {
     "title": "查询知识",
     "subtitle": "在此集合中搜索相关信息",

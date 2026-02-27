@@ -11,8 +11,9 @@ use tracing::{info, warn};
 
 use crate::models::response::CommandResponse;
 use crate::services::knowledge::chunker::{Chunker, Document, ParagraphChunker};
+use crate::services::knowledge::docs_indexer::{DocsIndexer, DocsKbStatus};
 use crate::services::knowledge::pipeline::{
-    DocumentSummary, KnowledgeCollection, RagPipeline, RagQueryResult,
+    CollectionUpdateCheck, DocumentSummary, KnowledgeCollection, RagPipeline, RagQueryResult,
 };
 use crate::services::knowledge::reranker::{NoopReranker, Reranker, SearchResult};
 use crate::services::orchestrator::embedding_config_builder;
@@ -569,6 +570,248 @@ pub async fn rag_delete_document(
         Ok(()) => Ok(CommandResponse::ok(true)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
+}
+
+/// Check a collection for changed/deleted documents by comparing content hashes.
+#[tauri::command]
+pub async fn rag_check_collection_updates(
+    knowledge_state: State<'_, KnowledgeState>,
+    app_state: State<'_, crate::state::AppState>,
+    collection_id: String,
+) -> Result<CommandResponse<CollectionUpdateCheck>, String> {
+    ensure_initialized(&knowledge_state, &app_state).await?;
+
+    let pipeline = match knowledge_state.get_pipeline().await {
+        Ok(p) => p,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+
+    match pipeline.check_collection_updates(&collection_id, None) {
+        Ok(check) => Ok(CommandResponse::ok(check)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Apply detected updates to a collection (reingest modified, delete removed).
+#[tauri::command]
+pub async fn rag_apply_collection_updates(
+    app_handle: tauri::AppHandle,
+    knowledge_state: State<'_, KnowledgeState>,
+    app_state: State<'_, crate::state::AppState>,
+    collection_id: String,
+) -> Result<CommandResponse<KnowledgeCollection>, String> {
+    ensure_initialized(&knowledge_state, &app_state).await?;
+
+    let pipeline = match knowledge_state.get_pipeline().await {
+        Ok(p) => p,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+
+    // Get fresh update state
+    let updates = match pipeline.check_collection_updates(&collection_id, None) {
+        Ok(u) => u,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+
+    match pipeline
+        .apply_collection_updates(&collection_id, &updates, Some(&app_handle))
+        .await
+    {
+        Ok(collection) => {
+            // Persist TF-IDF vocabulary after updates
+            if is_tfidf_pipeline(&pipeline) {
+                save_tfidf_vocab(pipeline.embedding_manager());
+            }
+            Ok(CommandResponse::ok(collection))
+        }
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Docs Indexer State & Commands
+// ---------------------------------------------------------------------------
+
+/// Tauri-managed state for the documentation file indexer.
+pub struct DocsIndexerState {
+    indexer: Arc<DocsIndexer>,
+}
+
+impl DocsIndexerState {
+    pub fn new() -> Self {
+        Self {
+            indexer: Arc::new(DocsIndexer::new()),
+        }
+    }
+}
+
+impl Default for DocsIndexerState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Ensure a docs-only knowledge collection exists for a workspace.
+///
+/// Creates a "[Docs] {dir_name}" collection if doc files exist and no
+/// such collection already exists. Starts a file watcher for changes.
+#[tauri::command]
+pub async fn rag_ensure_docs_collection(
+    app_handle: tauri::AppHandle,
+    knowledge_state: State<'_, KnowledgeState>,
+    app_state: State<'_, crate::state::AppState>,
+    docs_indexer_state: State<'_, DocsIndexerState>,
+    workspace_path: String,
+    project_id: String,
+) -> Result<CommandResponse<Option<KnowledgeCollection>>, String> {
+    ensure_initialized(&knowledge_state, &app_state).await?;
+
+    let pipeline = match knowledge_state.get_pipeline().await {
+        Ok(p) => p,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+
+    // Set app handle for event emission
+    docs_indexer_state
+        .indexer
+        .set_app_handle(app_handle.clone())
+        .await;
+
+    match docs_indexer_state
+        .indexer
+        .ensure_docs_collection(&pipeline, &workspace_path, &project_id, Some(&app_handle))
+        .await
+    {
+        Ok(collection) => {
+            // Persist TF-IDF vocabulary after indexing
+            if collection.is_some() && is_tfidf_pipeline(&pipeline) {
+                save_tfidf_vocab(pipeline.embedding_manager());
+            }
+            Ok(CommandResponse::ok(collection))
+        }
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Sync a docs collection with the workspace: check and apply updates.
+#[tauri::command]
+pub async fn rag_sync_docs_collection(
+    app_handle: tauri::AppHandle,
+    knowledge_state: State<'_, KnowledgeState>,
+    app_state: State<'_, crate::state::AppState>,
+    docs_indexer_state: State<'_, DocsIndexerState>,
+    workspace_path: String,
+    project_id: String,
+) -> Result<CommandResponse<Option<KnowledgeCollection>>, String> {
+    ensure_initialized(&knowledge_state, &app_state).await?;
+
+    let pipeline = match knowledge_state.get_pipeline().await {
+        Ok(p) => p,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+
+    let collection_name = DocsIndexer::collection_name_for_workspace(&workspace_path);
+
+    // Find the collection
+    let collections = match pipeline.list_collections(&project_id) {
+        Ok(c) => c,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+
+    let collection = match collections.iter().find(|c| c.name == collection_name) {
+        Some(c) => c,
+        None => return Ok(CommandResponse::ok(None)),
+    };
+
+    // Check for updates with scan_dir to detect new files too
+    let ws_path = std::path::Path::new(&workspace_path);
+    let updates = match pipeline.check_collection_updates(&collection.id, Some(ws_path)) {
+        Ok(u) => u,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+
+    if updates.modified.is_empty() && updates.deleted.is_empty() && updates.new_files.is_empty() {
+        return Ok(CommandResponse::ok(Some(collection.clone())));
+    }
+
+    match pipeline
+        .apply_collection_updates(&collection.id, &updates, Some(&app_handle))
+        .await
+    {
+        Ok(updated) => {
+            // Clear pending changes
+            docs_indexer_state
+                .indexer
+                .take_pending_changes(&workspace_path)
+                .await;
+
+            if is_tfidf_pipeline(&pipeline) {
+                save_tfidf_vocab(pipeline.embedding_manager());
+            }
+            Ok(CommandResponse::ok(Some(updated)))
+        }
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Get the status of a docs knowledge base for a workspace.
+#[tauri::command]
+pub async fn rag_get_docs_status(
+    knowledge_state: State<'_, KnowledgeState>,
+    app_state: State<'_, crate::state::AppState>,
+    docs_indexer_state: State<'_, DocsIndexerState>,
+    workspace_path: String,
+    project_id: String,
+) -> Result<CommandResponse<DocsKbStatus>, String> {
+    ensure_initialized(&knowledge_state, &app_state).await?;
+
+    let pipeline = match knowledge_state.get_pipeline().await {
+        Ok(p) => p,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+
+    let collection_name = DocsIndexer::collection_name_for_workspace(&workspace_path);
+
+    let collections = match pipeline.list_collections(&project_id) {
+        Ok(c) => c,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+
+    let collection = collections.iter().find(|c| c.name == collection_name);
+
+    let pending = docs_indexer_state
+        .indexer
+        .peek_pending_changes(&workspace_path)
+        .await;
+
+    let status = match collection {
+        None => DocsKbStatus {
+            collection_id: None,
+            collection_name: None,
+            total_docs: 0,
+            pending_changes: Vec::new(),
+            status: "none".to_string(),
+        },
+        Some(col) => {
+            let docs = pipeline.list_documents(&col.id).unwrap_or_default();
+
+            let status_str = if !pending.is_empty() {
+                "changes_pending"
+            } else {
+                "indexed"
+            };
+
+            DocsKbStatus {
+                collection_id: Some(col.id.clone()),
+                collection_name: Some(col.name.clone()),
+                total_docs: docs.len(),
+                pending_changes: pending,
+                status: status_str.to_string(),
+            }
+        }
+    };
+
+    Ok(CommandResponse::ok(status))
 }
 
 /// Helper: convert a DocumentInput to a chunker::Document.

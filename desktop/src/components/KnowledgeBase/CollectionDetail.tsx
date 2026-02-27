@@ -3,7 +3,7 @@
  *
  * Displays metadata for a selected knowledge collection including
  * chunk count, description, timestamps, and a document list with
- * per-document delete capability.
+ * per-document delete capability and batch update checking.
  */
 
 import { useEffect } from 'react';
@@ -18,7 +18,17 @@ interface CollectionDetailProps {
 
 export function CollectionDetail({ collection }: CollectionDetailProps) {
   const { t } = useTranslation('knowledge');
-  const { documents, fetchDocuments, deleteDocument, isDeleting } = useKnowledgeStore();
+  const {
+    documents,
+    fetchDocuments,
+    deleteDocument,
+    isDeleting,
+    pendingUpdates,
+    isCheckingUpdates,
+    isApplyingUpdates,
+    checkForUpdates,
+    applyUpdates,
+  } = useKnowledgeStore();
 
   useEffect(() => {
     fetchDocuments(collection.id);
@@ -40,15 +50,107 @@ export function CollectionDetail({ collection }: CollectionDetailProps) {
     }
   };
 
+  const hasChanges =
+    pendingUpdates &&
+    pendingUpdates.collection_id === collection.id &&
+    (pendingUpdates.modified.length > 0 || pendingUpdates.deleted.length > 0 || pendingUpdates.new_files.length > 0);
+
+  const isCurrentCheck = pendingUpdates && pendingUpdates.collection_id === collection.id;
+
   return (
     <div className="p-6 space-y-6">
-      {/* Collection Name */}
-      <div>
-        <h3 className="text-xl font-semibold text-gray-900 dark:text-white">{collection.name}</h3>
-        {collection.description && (
-          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{collection.description}</p>
-        )}
+      {/* Collection Name + Update Actions */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-xl font-semibold text-gray-900 dark:text-white">{collection.name}</h3>
+          {collection.description && (
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{collection.description}</p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => checkForUpdates(collection.id)}
+            disabled={isCheckingUpdates || isApplyingUpdates}
+            className={clsx(
+              'text-xs px-3 py-1.5 rounded-md font-medium transition-colors',
+              'bg-blue-50 text-blue-700 hover:bg-blue-100',
+              'dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50',
+              'disabled:opacity-50 disabled:cursor-not-allowed',
+            )}
+          >
+            {isCheckingUpdates ? t('updates.checking') : t('updates.checkForUpdates')}
+          </button>
+          {hasChanges && (
+            <button
+              onClick={() => applyUpdates(collection.id)}
+              disabled={isApplyingUpdates}
+              className={clsx(
+                'text-xs px-3 py-1.5 rounded-md font-medium transition-colors',
+                'bg-green-50 text-green-700 hover:bg-green-100',
+                'dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50',
+                'disabled:opacity-50 disabled:cursor-not-allowed',
+              )}
+            >
+              {isApplyingUpdates ? t('updates.applying') : t('updates.applyUpdates')}
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Update Summary Panel */}
+      {isCurrentCheck && pendingUpdates && (
+        <div
+          className={clsx(
+            'rounded-lg p-4',
+            'border',
+            hasChanges
+              ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-700'
+              : 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700',
+          )}
+        >
+          {hasChanges ? (
+            <div className="space-y-2">
+              <h4 className="text-sm font-medium text-amber-800 dark:text-amber-200">{t('updates.updatesFound')}</h4>
+              <div className="text-xs space-y-1 text-amber-700 dark:text-amber-300">
+                {pendingUpdates.modified.length > 0 && (
+                  <div>
+                    {t('updates.modifiedDocs', { count: pendingUpdates.modified.length })}
+                    <ul className="ml-4 list-disc">
+                      {pendingUpdates.modified.map((d) => (
+                        <li key={d.document_id} className="truncate">
+                          {d.source_path || d.document_id}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {pendingUpdates.deleted.length > 0 && (
+                  <div>
+                    {t('updates.deletedDocs', { count: pendingUpdates.deleted.length })}
+                    <ul className="ml-4 list-disc">
+                      {pendingUpdates.deleted.map((d) => (
+                        <li key={d.document_id} className="truncate">
+                          {d.source_path || d.document_id}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {pendingUpdates.new_files.length > 0 && (
+                  <div>{t('updates.newDocs', { count: pendingUpdates.new_files.length })}</div>
+                )}
+                <div className="text-gray-500 dark:text-gray-400">
+                  {t('updates.unchangedDocs', { count: pendingUpdates.unchanged })}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-green-700 dark:text-green-300">
+              {pendingUpdates.unchanged > 0 ? t('updates.noUpdatesFound') : t('updates.noTrackableDocs')}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">

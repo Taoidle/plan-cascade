@@ -7,7 +7,13 @@
  */
 
 import { create } from 'zustand';
-import type { KnowledgeCollection, DocumentInput, DocumentSummary, SearchResult } from '../lib/knowledgeApi';
+import type {
+  KnowledgeCollection,
+  DocumentInput,
+  DocumentSummary,
+  SearchResult,
+  CollectionUpdateCheck,
+} from '../lib/knowledgeApi';
 import {
   ragListCollections,
   ragIngestDocuments,
@@ -16,6 +22,8 @@ import {
   ragUpdateCollection,
   ragListDocuments,
   ragDeleteDocument,
+  ragCheckCollectionUpdates,
+  ragApplyCollectionUpdates,
 } from '../lib/knowledgeApi';
 
 // ---------------------------------------------------------------------------
@@ -50,6 +58,11 @@ export interface KnowledgeState {
   /** Upload progress (0 to 100). */
   uploadProgress: number;
 
+  /** Pending update check result. */
+  pendingUpdates: CollectionUpdateCheck | null;
+  isCheckingUpdates: boolean;
+  isApplyingUpdates: boolean;
+
   /** Error message. */
   error: string | null;
 
@@ -76,6 +89,8 @@ export interface KnowledgeState {
   setSearchQuery: (query: string) => void;
   clearQueryResults: () => void;
   clearError: () => void;
+  checkForUpdates: (collectionId: string) => Promise<void>;
+  applyUpdates: (collectionId: string) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +109,9 @@ const DEFAULT_STATE = {
   isQuerying: false,
   isDeleting: false,
   uploadProgress: 0,
+  pendingUpdates: null as CollectionUpdateCheck | null,
+  isCheckingUpdates: false,
+  isApplyingUpdates: false,
   error: null,
 };
 
@@ -325,6 +343,54 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, _get) => ({
   },
 
   clearError: () => set({ error: null }),
+
+  checkForUpdates: async (collectionId: string) => {
+    set({ isCheckingUpdates: true, pendingUpdates: null, error: null });
+    try {
+      const result = await ragCheckCollectionUpdates(collectionId);
+      if (result.success && result.data) {
+        set({ pendingUpdates: result.data, isCheckingUpdates: false });
+      } else {
+        set({
+          isCheckingUpdates: false,
+          error: result.error ?? 'Failed to check for updates',
+        });
+      }
+    } catch (err) {
+      set({
+        isCheckingUpdates: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+
+  applyUpdates: async (collectionId: string) => {
+    set({ isApplyingUpdates: true, error: null });
+    try {
+      const result = await ragApplyCollectionUpdates(collectionId);
+      if (result.success && result.data) {
+        set((state) => ({
+          collections: state.collections.map((c) => (c.id === collectionId ? result.data! : c)),
+          activeCollection: state.activeCollection?.id === collectionId ? result.data! : state.activeCollection,
+          isApplyingUpdates: false,
+          pendingUpdates: null,
+        }));
+        // Refresh documents
+        const store = useKnowledgeStore.getState();
+        store.fetchDocuments(collectionId);
+      } else {
+        set({
+          isApplyingUpdates: false,
+          error: result.error ?? 'Failed to apply updates',
+        });
+      }
+    } catch (err) {
+      set({
+        isApplyingUpdates: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
 }));
 
 export default useKnowledgeStore;

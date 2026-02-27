@@ -10,10 +10,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
+import { listen } from '@tauri-apps/api/event';
 import { ChevronUpIcon } from '@radix-ui/react-icons';
 import { useContextSourcesStore } from '../../store/contextSources';
 import { useSettingsStore } from '../../store/settings';
 import { useProjectsStore } from '../../store/projects';
+import { ragSyncDocsCollection } from '../../lib/knowledgeApi';
 import { KnowledgeSourcePicker } from './KnowledgeSourcePicker';
 import { MemorySourcePicker } from './MemorySourcePicker';
 import { SkillsSourcePicker } from './SkillsSourcePicker';
@@ -64,11 +66,50 @@ export function ContextSourceBar() {
     loadCollections,
     loadMemoryStats,
     loadAvailableSkills,
+    autoAssociateForWorkspace,
   } = useContextSourcesStore();
 
   const workspacePath = useSettingsStore((s) => s.workspacePath);
   const selectedProject = useProjectsStore((s) => s.selectedProject);
   const projectId = selectedProject?.id ?? 'default';
+
+  // Auto-associate knowledge collections when workspace changes
+  useEffect(() => {
+    if (workspacePath) {
+      autoAssociateForWorkspace(workspacePath, projectId);
+    }
+  }, [workspacePath, projectId, autoAssociateForWorkspace]);
+
+  // Docs change detection
+  const [docsChangePending, setDocsChangePending] = useState(false);
+  const [isSyncingDocs, setIsSyncingDocs] = useState(false);
+
+  useEffect(() => {
+    const unlisten = listen<{ workspace_path: string; changed_files: string[] }>(
+      'knowledge:docs-changes-detected',
+      (event) => {
+        if (!workspacePath) return;
+        const normalized = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
+        if (normalized(event.payload.workspace_path) === normalized(workspacePath)) {
+          setDocsChangePending(true);
+        }
+      },
+    );
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [workspacePath]);
+
+  const handleSyncDocs = useCallback(async () => {
+    if (!workspacePath) return;
+    setIsSyncingDocs(true);
+    try {
+      await ragSyncDocsCollection(workspacePath, projectId);
+      setDocsChangePending(false);
+    } finally {
+      setIsSyncingDocs(false);
+    }
+  }, [workspacePath, projectId]);
 
   const [openPopover, setOpenPopover] = useState<PopoverType>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -301,6 +342,30 @@ export function ContextSourceBar() {
           </div>
         )}
       </div>
+
+      {/* Docs sync indicator */}
+      {docsChangePending && (
+        <button
+          onClick={handleSyncDocs}
+          disabled={isSyncingDocs}
+          className={clsx(
+            'px-2 py-1 text-xs font-medium rounded-md transition-colors inline-flex items-center gap-1',
+            'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300',
+            'border border-orange-200 dark:border-orange-700',
+            'hover:bg-orange-200 dark:hover:bg-orange-900/60',
+            'disabled:opacity-50 disabled:cursor-not-allowed',
+          )}
+          title={t('contextSources.syncDocs', { defaultValue: 'Sync Docs' })}
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M2 8a6 6 0 0 1 10.5-4M14 8A6 6 0 0 1 3.5 12" />
+            <path d="M12.5 1v3h-3M3.5 15v-3h3" />
+          </svg>
+          {isSyncingDocs
+            ? t('contextSources.syncingDocs', { defaultValue: 'Syncing...' })
+            : t('contextSources.syncDocs', { defaultValue: 'Sync Docs' })}
+        </button>
+      )}
     </div>
   );
 }

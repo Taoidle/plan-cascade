@@ -9,7 +9,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import type { KnowledgeCollection, DocumentSummary } from '../lib/knowledgeApi';
-import { ragListCollections, ragListDocuments } from '../lib/knowledgeApi';
+import { ragListCollections, ragListDocuments, ragEnsureDocsCollection } from '../lib/knowledgeApi';
 import type { MemoryEntry, MemoryStats, MemorySearchResult, SkillSummary } from '../types/skillMemory';
 import { useProjectsStore } from './projects';
 
@@ -72,6 +72,14 @@ export interface ContextSourcesState {
   isLoadingSkills: boolean;
   skillPickerSearchQuery: string;
 
+  // === Knowledge Auto-Association ===
+  /** Tracks the last workspace path for which auto-association was performed. */
+  _autoAssociatedPath: string | null;
+  /** Auto-associate knowledge collections whose workspace_path matches the given workspace. */
+  autoAssociateForWorkspace: (workspacePath: string, projectId: string) => Promise<void>;
+  /** Reset auto-association guard so the next workspace change triggers re-association. */
+  resetAutoAssociation: () => void;
+
   // === Knowledge Actions ===
   toggleKnowledge: (enabled: boolean) => void;
   toggleCollection: (collectionId: string) => void;
@@ -114,6 +122,7 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
   collectionDocuments: {},
   isLoadingCollections: false,
   isLoadingDocuments: {},
+  _autoAssociatedPath: null,
 
   // === Memory State ===
   memoryEnabled: false,
@@ -133,6 +142,86 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
   availableSkills: [],
   isLoadingSkills: false,
   skillPickerSearchQuery: '',
+
+  // =========================================================================
+  // Knowledge Auto-Association
+  // =========================================================================
+
+  autoAssociateForWorkspace: async (workspacePath, projectId) => {
+    // Skip if already auto-associated for this workspace
+    if (get()._autoAssociatedPath === workspacePath) return;
+
+    try {
+      const result = await ragListCollections(projectId);
+      if (!result.success || !result.data) {
+        set({ _autoAssociatedPath: workspacePath });
+        return;
+      }
+
+      const collections = result.data;
+
+      // Normalize path for comparison: backslash→forward slash, strip trailing slash
+      const normalizePath = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
+
+      const normalizedWorkspace = normalizePath(workspacePath);
+
+      // Find collections whose workspace_path matches
+      const matching = collections.filter(
+        (c) => c.workspace_path && normalizePath(c.workspace_path) === normalizedWorkspace,
+      );
+
+      const docsPrefix = '[Docs] ';
+      const hasDocsCollection = collections.some(
+        (c) =>
+          c.name.startsWith(docsPrefix) && c.workspace_path && normalizePath(c.workspace_path) === normalizedWorkspace,
+      );
+
+      if (matching.length > 0) {
+        const matchingIds = matching.map((c) => c.id);
+        set({
+          knowledgeEnabled: true,
+          selectedCollections: matchingIds,
+          availableCollections: collections,
+          _autoAssociatedPath: workspacePath,
+        });
+      } else {
+        set({
+          availableCollections: collections,
+          _autoAssociatedPath: workspacePath,
+        });
+      }
+
+      // Trigger docs collection creation if none exists for this workspace
+      if (!hasDocsCollection) {
+        try {
+          const docsResult = await ragEnsureDocsCollection(workspacePath, projectId);
+          if (docsResult.success && docsResult.data) {
+            // Reload collections and auto-select the new docs collection
+            const refreshed = await ragListCollections(projectId);
+            if (refreshed.success && refreshed.data) {
+              const docsCol = refreshed.data.find((c) => c.id === docsResult.data!.id);
+              const currentSelected = get().selectedCollections;
+              const newSelected =
+                docsCol && !currentSelected.includes(docsCol.id) ? [...currentSelected, docsCol.id] : currentSelected;
+              set({
+                knowledgeEnabled: true,
+                availableCollections: refreshed.data,
+                selectedCollections: newSelected,
+              });
+            }
+          }
+        } catch {
+          // Non-critical: docs indexing failure shouldn't block workspace usage
+        }
+      }
+    } catch {
+      set({ _autoAssociatedPath: workspacePath });
+    }
+  },
+
+  resetAutoAssociation: () => {
+    set({ _autoAssociatedPath: null });
+  },
 
   // =========================================================================
   // Knowledge Actions

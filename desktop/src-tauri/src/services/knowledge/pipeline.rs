@@ -8,7 +8,9 @@
 //! collection-namespaced IDs.
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::Emitter;
 
@@ -66,6 +68,31 @@ pub struct DocumentSummary {
     pub chunk_count: i64,
     /// Preview of the first chunk's content (up to 200 chars).
     pub preview: String,
+}
+
+/// Information about a document that has changed relative to its stored hash.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocUpdateInfo {
+    pub document_id: String,
+    pub source_path: String,
+    pub source_type: String,
+    pub old_hash: String,
+    /// `None` if the file was deleted from disk.
+    pub new_hash: Option<String>,
+}
+
+/// Result of comparing stored document hashes with current disk state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectionUpdateCheck {
+    pub collection_id: String,
+    /// Documents whose content hash changed.
+    pub modified: Vec<DocUpdateInfo>,
+    /// Documents whose source file no longer exists.
+    pub deleted: Vec<DocUpdateInfo>,
+    /// Files in `scan_dir` that are not yet indexed (only populated when scan_dir is set).
+    pub new_files: Vec<String>,
+    /// Count of documents that are unchanged.
+    pub unchanged: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +280,19 @@ impl RagPipeline {
             };
 
         emit_progress("chunking", 0, "Starting document chunking...");
+
+        // Inject source_path and content_hash into document metadata so they survive chunking
+        let mut documents = documents;
+        for doc in &mut documents {
+            if let Some(ref sp) = doc.source_path {
+                doc.metadata
+                    .entry("source_path".to_string())
+                    .or_insert_with(|| sp.clone());
+            }
+            // Compute SHA-256 content hash for staleness detection
+            let hash = format!("{:x}", Sha256::digest(doc.content.as_bytes()));
+            doc.metadata.insert("content_hash".to_string(), hash);
+        }
 
         // Chunk all documents (sync)
         let mut all_chunks: Vec<Chunk> = Vec::new();
@@ -748,6 +788,307 @@ impl RagPipeline {
                 "Collection '{}' not found",
                 collection_id
             )));
+        }
+
+        self.get_collection(collection_id)
+    }
+
+    /// Re-ingest a single document: delete old chunks and re-ingest with fresh content.
+    ///
+    /// If `new_content` is `None`, reads from disk using the stored `source_path`.
+    pub async fn reingest_document(
+        &self,
+        collection_id: &str,
+        document_id: &str,
+        new_content: Option<String>,
+        app_handle: Option<&tauri::AppHandle>,
+    ) -> AppResult<KnowledgeCollection> {
+        // Recover metadata from the first chunk
+        let (source_path, source_type) = {
+            let conn = self
+                .database
+                .get_connection()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
+
+            let metadata_json: String = conn
+                .query_row(
+                    "SELECT metadata FROM knowledge_chunks WHERE collection_id = ?1 AND document_id = ?2 AND chunk_index = 0",
+                    rusqlite::params![collection_id, document_id],
+                    |row| row.get(0),
+                )
+                .map_err(|e| AppError::not_found(format!("Document '{}' not found: {}", document_id, e)))?;
+
+            let metadata: HashMap<String, String> =
+                serde_json::from_str(&metadata_json).unwrap_or_default();
+
+            (
+                metadata.get("source_path").cloned(),
+                metadata.get("source_type").cloned().unwrap_or_default(),
+            )
+        };
+
+        // Get content: from argument, or read from disk
+        let content = if let Some(c) = new_content {
+            c
+        } else {
+            let sp = source_path
+                .as_ref()
+                .ok_or_else(|| AppError::internal("No source_path to read from disk"))?;
+            let path = Path::new(sp);
+            if !path.exists() {
+                return Err(AppError::not_found(format!("File not found: {}", sp)));
+            }
+            Self::read_file_content(path, &source_type)?
+        };
+
+        // Delete old document
+        self.delete_document(collection_id, document_id).await?;
+
+        // Build new Document (content_hash will be computed in ingest_with_progress)
+        let doc = if let Some(ref sp) = source_path {
+            Document::from_parsed_content(document_id, content, sp.clone(), source_type)
+        } else {
+            Document::new(document_id, content)
+        };
+
+        // Look up collection name and project_id
+        let (name, project_id) = {
+            let conn = self
+                .database
+                .get_connection()
+                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
+
+            conn.query_row(
+                "SELECT name, project_id FROM knowledge_collections WHERE id = ?1",
+                rusqlite::params![collection_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .map_err(|e| AppError::not_found(format!("Collection not found: {}", e)))?
+        };
+
+        self.ingest_with_progress(&name, &project_id, "", vec![doc], app_handle)
+            .await
+    }
+
+    /// Read file content using appropriate parser based on source_type/extension.
+    pub fn read_file_content(path: &Path, source_type: &str) -> AppResult<String> {
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or(source_type);
+
+        match ext {
+            "pdf" => crate::services::tools::file_parsers::parse_pdf(path, None)
+                .map_err(|e| AppError::internal(format!("PDF parse failed: {}", e))),
+            "docx" => crate::services::tools::file_parsers::parse_docx(path)
+                .map_err(|e| AppError::internal(format!("DOCX parse failed: {}", e))),
+            "xlsx" => crate::services::tools::file_parsers::parse_xlsx(path)
+                .map_err(|e| AppError::internal(format!("XLSX parse failed: {}", e))),
+            _ => std::fs::read_to_string(path)
+                .map_err(|e| AppError::internal(format!("Failed to read file: {}", e))),
+        }
+    }
+
+    /// Compare stored content hashes with current disk files.
+    ///
+    /// Returns lists of modified, deleted, and (optionally) new documents.
+    /// When `scan_dir` is set, also scans for doc files not yet in the collection.
+    pub fn check_collection_updates(
+        &self,
+        collection_id: &str,
+        scan_dir: Option<&Path>,
+    ) -> AppResult<CollectionUpdateCheck> {
+        let conn = self
+            .database
+            .get_connection()
+            .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
+
+        // Get unique document_ids with their first chunk's metadata
+        let mut stmt = conn
+            .prepare(
+                "SELECT document_id, metadata FROM knowledge_chunks
+                 WHERE collection_id = ?1 AND chunk_index = 0
+                 ORDER BY document_id",
+            )
+            .map_err(|e| AppError::database(format!("Failed to prepare query: {}", e)))?;
+
+        let rows: Vec<(String, String)> = stmt
+            .query_map(rusqlite::params![collection_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| AppError::database(format!("Failed to query documents: {}", e)))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let mut modified = Vec::new();
+        let mut deleted = Vec::new();
+        let mut unchanged = 0usize;
+        let mut indexed_paths = std::collections::HashSet::new();
+
+        for (document_id, metadata_json) in &rows {
+            let metadata: HashMap<String, String> =
+                serde_json::from_str(metadata_json).unwrap_or_default();
+
+            let source_path = match metadata.get("source_path") {
+                Some(sp) if !sp.is_empty() => sp.clone(),
+                _ => {
+                    // No source_path — not trackable, skip
+                    unchanged += 1;
+                    continue;
+                }
+            };
+
+            let source_type = metadata
+                .get("source_type")
+                .cloned()
+                .unwrap_or_default();
+            let old_hash = metadata
+                .get("content_hash")
+                .cloned()
+                .unwrap_or_default();
+
+            indexed_paths.insert(source_path.clone());
+            let path = Path::new(&source_path);
+
+            if !path.exists() {
+                deleted.push(DocUpdateInfo {
+                    document_id: document_id.clone(),
+                    source_path,
+                    source_type,
+                    old_hash,
+                    new_hash: None,
+                });
+                continue;
+            }
+
+            // Read file and compute hash
+            match Self::read_file_content(path, &source_type) {
+                Ok(content) => {
+                    let new_hash = format!("{:x}", Sha256::digest(content.as_bytes()));
+                    if new_hash != old_hash {
+                        modified.push(DocUpdateInfo {
+                            document_id: document_id.clone(),
+                            source_path,
+                            source_type,
+                            old_hash,
+                            new_hash: Some(new_hash),
+                        });
+                    } else {
+                        unchanged += 1;
+                    }
+                }
+                Err(_) => {
+                    // Can't read — treat as unchanged
+                    unchanged += 1;
+                }
+            }
+        }
+
+        // Scan for new files not yet indexed (used by P1-2 docs indexer)
+        let mut new_files = Vec::new();
+        if let Some(dir) = scan_dir {
+            let doc_extensions = ["md", "mdx", "txt", "pdf", "doc", "docx"];
+            if dir.is_dir() {
+                let walker = ignore::WalkBuilder::new(dir)
+                    .hidden(true)
+                    .git_ignore(true)
+                    .build();
+
+                for entry in walker.flatten() {
+                    if entry.file_type().map_or(true, |ft| !ft.is_file()) {
+                        continue;
+                    }
+                    let ext = entry
+                        .path()
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("");
+                    if !doc_extensions.contains(&ext) {
+                        continue;
+                    }
+                    let abs_path = entry.path().to_string_lossy().to_string();
+                    if !indexed_paths.contains(&abs_path) {
+                        new_files.push(abs_path);
+                    }
+                }
+            }
+        }
+
+        Ok(CollectionUpdateCheck {
+            collection_id: collection_id.to_string(),
+            modified,
+            deleted,
+            new_files,
+            unchanged,
+        })
+    }
+
+    /// Apply detected updates: reingest modified docs, delete removed docs, ingest new files.
+    pub async fn apply_collection_updates(
+        &self,
+        collection_id: &str,
+        updates: &CollectionUpdateCheck,
+        app_handle: Option<&tauri::AppHandle>,
+    ) -> AppResult<KnowledgeCollection> {
+        // Reingest modified documents
+        for doc_info in &updates.modified {
+            self.reingest_document(collection_id, &doc_info.document_id, None, app_handle)
+                .await?;
+        }
+
+        // Delete removed documents
+        for doc_info in &updates.deleted {
+            self.delete_document(collection_id, &doc_info.document_id)
+                .await?;
+        }
+
+        // Ingest new files
+        if !updates.new_files.is_empty() {
+            let (name, project_id) = {
+                let conn = self
+                    .database
+                    .get_connection()
+                    .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
+
+                conn.query_row(
+                    "SELECT name, project_id FROM knowledge_collections WHERE id = ?1",
+                    rusqlite::params![collection_id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )
+                .map_err(|e| AppError::not_found(format!("Collection not found: {}", e)))?
+            };
+
+            let mut docs = Vec::new();
+            for file_path in &updates.new_files {
+                let path = PathBuf::from(file_path);
+                let ext = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("txt");
+
+                match Self::read_file_content(&path, ext) {
+                    Ok(content) => {
+                        let doc_id = path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("unknown");
+                        docs.push(Document::from_parsed_content(
+                            doc_id,
+                            content,
+                            file_path.clone(),
+                            ext.to_string(),
+                        ));
+                    }
+                    Err(e) => {
+                        tracing::warn!(path = %file_path, error = %e, "Skipping unreadable file");
+                    }
+                }
+            }
+
+            if !docs.is_empty() {
+                self.ingest_with_progress(&name, &project_id, "", docs, app_handle)
+                    .await?;
+            }
         }
 
         self.get_collection(collection_id)

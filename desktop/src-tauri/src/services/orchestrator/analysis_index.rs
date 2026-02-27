@@ -71,6 +71,8 @@ pub fn binary_extensions() -> &'static [&'static str] {
         "db", "sqlite", "sqlite3",
         // Docs
         "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+        // Markdown (indexed via Knowledge Base instead)
+        "md", "mdx",
         // Source maps
         "map",
     ]

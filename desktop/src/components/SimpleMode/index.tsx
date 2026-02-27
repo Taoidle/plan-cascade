@@ -48,6 +48,7 @@ import {
 } from '../../lib/exportUtils';
 import type { CardPayload } from '../../types/workflowCard';
 import { useToast } from '../shared/Toast';
+import { useContextSourcesStore } from '../../store/contextSources';
 
 type WorkflowMode = 'chat' | 'plan' | 'task';
 
@@ -150,6 +151,8 @@ export function SimpleMode() {
       reset();
       clearStrategyAnalysis();
       setDescription('');
+      // Reset knowledge auto-association so fresh workspace triggers re-association
+      useContextSourcesStore.getState().resetAutoAssociation();
     }
     prevPathRef.current = workspacePath;
   }, [workspacePath, isChatSession, reset, clearStrategyAnalysis]);

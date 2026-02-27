@@ -67,6 +67,27 @@
     "uploadAndIndex": "Upload & Index {{count}} file(s)"
   },
 
+  "updates": {
+    "checkForUpdates": "Check for Updates",
+    "checking": "Checking...",
+    "applyUpdates": "Apply Updates",
+    "applying": "Applying...",
+    "updatesFound": "Changes detected",
+    "noUpdatesFound": "All documents are up to date",
+    "modifiedDocs": "{{count}} document(s) modified",
+    "deletedDocs": "{{count}} document(s) deleted from disk",
+    "newDocs": "{{count}} new file(s) found",
+    "unchangedDocs": "{{count}} document(s) unchanged",
+    "noTrackableDocs": "No trackable documents (no source paths)"
+  },
+
+  "docs": {
+    "syncing": "Syncing documentation...",
+    "syncComplete": "Documentation sync complete",
+    "changesDetected": "Documentation changes detected",
+    "syncDocs": "Sync Docs"
+  },
+
   "query": {
     "title": "Query Knowledge",
     "subtitle": "Search this collection for relevant information",

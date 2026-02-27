@@ -59,6 +59,35 @@ export interface RagQueryResult {
   collection_name: string;
 }
 
+/** Information about a document whose content changed or was deleted. */
+export interface DocUpdateInfo {
+  document_id: string;
+  source_path: string;
+  source_type: string;
+  old_hash: string;
+  /** `null` if file was deleted from disk. */
+  new_hash: string | null;
+}
+
+/** Result of comparing stored hashes with disk state. */
+export interface CollectionUpdateCheck {
+  collection_id: string;
+  modified: DocUpdateInfo[];
+  deleted: DocUpdateInfo[];
+  new_files: string[];
+  unchanged: number;
+}
+
+/** Status of a docs knowledge base for a workspace. */
+export interface DocsKbStatus {
+  collection_id: string | null;
+  collection_name: string | null;
+  total_docs: number;
+  pending_changes: string[];
+  /** "none" | "indexing" | "indexed" | "changes_pending" */
+  status: string;
+}
+
 // ---------------------------------------------------------------------------
 // rag_ingest_documents
 // ---------------------------------------------------------------------------
@@ -225,6 +254,123 @@ export async function ragDeleteDocument(collectionId: string, documentId: string
     return await invoke<CommandResponse<boolean>>('rag_delete_document', {
       collectionId,
       documentId,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// rag_check_collection_updates
+// ---------------------------------------------------------------------------
+
+/**
+ * Check a collection for changed/deleted documents by comparing content hashes.
+ */
+export async function ragCheckCollectionUpdates(collectionId: string): Promise<CommandResponse<CollectionUpdateCheck>> {
+  try {
+    return await invoke<CommandResponse<CollectionUpdateCheck>>('rag_check_collection_updates', {
+      collectionId,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// rag_apply_collection_updates
+// ---------------------------------------------------------------------------
+
+/**
+ * Apply detected updates to a collection (reingest modified, delete removed).
+ */
+export async function ragApplyCollectionUpdates(collectionId: string): Promise<CommandResponse<KnowledgeCollection>> {
+  try {
+    return await invoke<CommandResponse<KnowledgeCollection>>('rag_apply_collection_updates', {
+      collectionId,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// rag_ensure_docs_collection
+// ---------------------------------------------------------------------------
+
+/**
+ * Ensure a docs-only knowledge collection exists for a workspace.
+ */
+export async function ragEnsureDocsCollection(
+  workspacePath: string,
+  projectId: string,
+): Promise<CommandResponse<KnowledgeCollection | null>> {
+  try {
+    return await invoke<CommandResponse<KnowledgeCollection | null>>('rag_ensure_docs_collection', {
+      workspacePath,
+      projectId,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// rag_sync_docs_collection
+// ---------------------------------------------------------------------------
+
+/**
+ * Sync a docs collection: check for changes and apply them.
+ */
+export async function ragSyncDocsCollection(
+  workspacePath: string,
+  projectId: string,
+): Promise<CommandResponse<KnowledgeCollection | null>> {
+  try {
+    return await invoke<CommandResponse<KnowledgeCollection | null>>('rag_sync_docs_collection', {
+      workspacePath,
+      projectId,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// rag_get_docs_status
+// ---------------------------------------------------------------------------
+
+/**
+ * Get the status of a docs knowledge base for a workspace.
+ */
+export async function ragGetDocsStatus(
+  workspacePath: string,
+  projectId: string,
+): Promise<CommandResponse<DocsKbStatus>> {
+  try {
+    return await invoke<CommandResponse<DocsKbStatus>>('rag_get_docs_status', {
+      workspacePath,
+      projectId,
     });
   } catch (error) {
     return {
