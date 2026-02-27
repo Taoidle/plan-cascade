@@ -61,6 +61,8 @@ pub struct SessionSummary {
     pub total_turns: u32,
     /// Whether the session completed successfully
     pub success: bool,
+    /// Conversation text content for LLM memory extraction (up to ~8000 chars)
+    pub conversation_content: String,
 }
 
 /// Result of an on_before_tool hook: can request skipping the tool call.
@@ -563,14 +565,14 @@ pub fn register_skill_hooks(
 ///
 /// This wires the ProjectMemoryStore into the agentic lifecycle:
 ///
-/// 1. **on_session_start**: Load relevant memories for the project and store
+/// 1. **on_session_start**: Load relevant memories (project + global) and store
 ///    them for system prompt injection.
 ///
-/// 2. **on_session_end**: Extract new memories from the session summary
-///    and persist them using the MemoryExtractor heuristic approach.
+/// 2. **on_session_end**: Extract new memories using LLM-driven extraction
+///    (with rule-based fallback when no provider is available).
 ///
-/// 3. **on_compaction**: Extract key information from compacted content
-///    snippets and store them as memories for future sessions.
+/// 3. **on_compaction**: Log-only (no memory writes — extraction is done at
+///    session end via LLM).
 ///
 /// The loaded memories are stored in the `Arc<RwLock<Vec<MemoryEntry>>>` shared
 /// state, which can be read by the system prompt builder.
@@ -578,8 +580,11 @@ pub fn register_memory_hooks(
     hooks: &mut AgenticHooks,
     memory_store: Arc<ProjectMemoryStore>,
     loaded_memories: Arc<RwLock<Vec<crate::services::memory::store::MemoryEntry>>>,
+    llm_provider: Option<Arc<dyn crate::services::llm::provider::LlmProvider>>,
 ) {
-    // on_session_start: load relevant memories for this project
+    use crate::services::memory::store::GLOBAL_PROJECT_PATH;
+
+    // on_session_start: load project + global memories
     let store_clone = memory_store.clone();
     let memories_out = loaded_memories.clone();
     hooks.register_on_session_start(Box::new(move |ctx| {
@@ -587,152 +592,280 @@ pub fn register_memory_hooks(
         let out = memories_out.clone();
         Box::pin(async move {
             let project_path = ctx.project_path.to_string_lossy().to_string();
-            let request = MemorySearchRequest {
-                project_path,
-                query: String::new(), // empty query = load by importance
+
+            // Load project-scoped memories
+            let project_request = MemorySearchRequest {
+                project_path: project_path.clone(),
+                query: String::new(),
                 categories: None,
                 top_k: 10,
                 min_importance: 0.1,
             };
-            match search_memories(&store, &request) {
+            let mut all_entries = Vec::new();
+            match search_memories(&store, &project_request) {
                 Ok(results) => {
-                    let count = results.len();
-                    let entries: Vec<_> = results.into_iter().map(|r| r.entry).collect();
-                    let mut w = out.write().await;
-                    *w = entries;
-                    eprintln!(
-                        "[hooks] Memory loaded: session={}, memories={}",
-                        ctx.session_id, count,
-                    );
+                    all_entries.extend(results.into_iter().map(|r| r.entry));
                 }
                 Err(e) => {
                     eprintln!(
-                        "[hooks] Memory load failed: session={}, error={}",
+                        "[hooks] Project memory load failed: session={}, error={}",
                         ctx.session_id, e,
                     );
                 }
             }
+
+            // Load global memories (cross-project user preferences)
+            let global_request = MemorySearchRequest {
+                project_path: GLOBAL_PROJECT_PATH.to_string(),
+                query: String::new(),
+                categories: None,
+                top_k: 5,
+                min_importance: 0.3,
+            };
+            match search_memories(&store, &global_request) {
+                Ok(results) => {
+                    all_entries.extend(results.into_iter().map(|r| r.entry));
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[hooks] Global memory load failed: session={}, error={}",
+                        ctx.session_id, e,
+                    );
+                }
+            }
+
+            let count = all_entries.len();
+            let mut w = out.write().await;
+            *w = all_entries;
+            eprintln!(
+                "[hooks] Memory loaded: session={}, memories={} (project+global)",
+                ctx.session_id, count,
+            );
             Ok(())
         })
     }));
 
-    // on_session_end: extract new memories from the session summary
+    // on_session_end: LLM-driven memory extraction with rule-based fallback
     let store_clone2 = memory_store.clone();
+    let provider_clone = llm_provider;
     hooks.register_on_session_end(Box::new(move |ctx, summary| {
         let store = store_clone2.clone();
+        let provider = provider_clone.clone();
         Box::pin(async move {
             let project_path = ctx.project_path.to_string_lossy().to_string();
 
-            // Build a simple conversation summary from the available data
-            let conversation_summary = format!(
-                "Task: {}. {} files read. {} key findings. {} tool calls across {} turns. Success: {}.",
-                summary.task_description,
-                summary.files_read.len(),
-                summary.key_findings.len(),
-                summary.tool_usage.values().sum::<usize>(),
-                summary.total_turns,
-                summary.success,
-            );
+            // Skip extraction for trivial sessions
+            if summary.total_turns < 3 || summary.conversation_content.len() < 100 {
+                eprintln!(
+                    "[hooks] Memory extraction skipped (trivial session): session={}, turns={}, content_len={}",
+                    ctx.session_id, summary.total_turns, summary.conversation_content.len(),
+                );
+                return Ok(());
+            }
 
-            // Load existing memories to avoid duplicates
+            // Load existing memories to inform LLM extraction (dedup)
             let existing = store
                 .list_memories(&project_path, None, 0, 100)
                 .unwrap_or_default();
+            let global_existing = store
+                .list_memories(GLOBAL_PROJECT_PATH, None, 0, 50)
+                .unwrap_or_default();
+            let all_existing: Vec<_> = existing.iter().chain(global_existing.iter()).cloned().collect();
 
-            // Use rule-based extraction from key_findings
-            // (LLM-based extraction requires an LLM call which is not available here)
-            let mut new_memories = Vec::new();
-            for finding in &summary.key_findings {
-                if finding.trim().is_empty() {
-                    continue;
-                }
-                // Skip if similar content already exists
-                let already_exists = existing.iter().any(|m| m.content.contains(finding.as_str()));
-                if already_exists {
-                    continue;
-                }
-                new_memories.push(NewMemoryEntry {
-                    project_path: project_path.clone(),
-                    category: MemoryCategory::Fact,
-                    content: finding.clone(),
-                    keywords: crate::services::memory::retrieval::extract_query_keywords(finding),
-                    importance: 0.5,
-                    source_session_id: Some(ctx.session_id.clone()),
-                    source_context: Some(conversation_summary.clone()),
-                });
-            }
+            if let Some(ref llm) = provider {
+                // ── LLM-driven extraction (2-stage) ──
+                use crate::services::memory::extraction::MemoryExtractor;
+                use crate::services::llm::types::{
+                    LlmRequestOptions, Message, MessageContent as LlmMessageContent,
+                    MessageRole as LlmMessageRole,
+                };
 
-            let count = new_memories.len();
-            if !new_memories.is_empty() {
-                match store.add_memories(new_memories) {
-                    Ok(_) => {
+                let content_for_extraction = &summary.conversation_content;
+
+                // Stage 1: Summarize if content is long
+                let summary_text = if content_for_extraction.len() > MemoryExtractor::SUMMARIZE_THRESHOLD {
+                    let summarize_prompt = MemoryExtractor::build_summarization_prompt(
+                        &summary.task_description,
+                        content_for_extraction,
+                    );
+                    let messages = vec![Message {
+                        role: LlmMessageRole::User,
+                        content: vec![LlmMessageContent::Text { text: summarize_prompt }],
+                    }];
+                    let opts = LlmRequestOptions {
+                        temperature_override: Some(0.2),
+                        ..Default::default()
+                    };
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(30),
+                        llm.send_message(messages, None, vec![], opts),
+                    )
+                    .await
+                    {
+                        Ok(Ok(resp)) => resp.content.unwrap_or_else(|| content_for_extraction.clone()),
+                        Ok(Err(e)) => {
+                            eprintln!(
+                                "[hooks] LLM summarization failed: session={}, error={}",
+                                ctx.session_id, e,
+                            );
+                            content_for_extraction.clone()
+                        }
+                        Err(_) => {
+                            eprintln!(
+                                "[hooks] LLM summarization timed out: session={}",
+                                ctx.session_id,
+                            );
+                            content_for_extraction.clone()
+                        }
+                    }
+                } else {
+                    content_for_extraction.clone()
+                };
+
+                // Stage 2: Extract structured memories
+                let extraction_prompt = MemoryExtractor::build_extraction_prompt(
+                    &summary.task_description,
+                    &summary.files_read,
+                    &summary.key_findings,
+                    &summary_text,
+                    &all_existing,
+                );
+                let messages = vec![Message {
+                    role: LlmMessageRole::User,
+                    content: vec![LlmMessageContent::Text { text: extraction_prompt }],
+                }];
+                let opts = LlmRequestOptions {
+                    temperature_override: Some(0.2),
+                    ..Default::default()
+                };
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    llm.send_message(messages, None, vec![], opts),
+                )
+                .await
+                {
+                    Ok(Ok(resp)) => {
+                        let response_text = resp.content.unwrap_or_default();
+
+                        let new_memories = MemoryExtractor::parse_extraction_response(
+                            &response_text,
+                            &project_path,
+                            Some(&ctx.session_id),
+                        );
+
+                        let mut inserted = 0u32;
+                        let mut merged = 0u32;
+                        for entry in new_memories {
+                            match store.upsert_memory(entry) {
+                                Ok(crate::services::memory::store::UpsertResult::Inserted(_)) => inserted += 1,
+                                Ok(crate::services::memory::store::UpsertResult::Merged { .. }) => merged += 1,
+                                Ok(crate::services::memory::store::UpsertResult::Skipped { .. }) => {}
+                                Err(e) => {
+                                    eprintln!(
+                                        "[hooks] Memory upsert failed: session={}, error={}",
+                                        ctx.session_id, e,
+                                    );
+                                }
+                            }
+                        }
                         eprintln!(
-                            "[hooks] Memory extracted: session={}, new_memories={}",
-                            ctx.session_id, count,
+                            "[hooks] LLM memory extraction: session={}, inserted={}, merged={}",
+                            ctx.session_id, inserted, merged,
                         );
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         eprintln!(
-                            "[hooks] Memory extraction failed: session={}, error={}",
+                            "[hooks] LLM extraction failed, falling back to rule-based: session={}, error={}",
                             ctx.session_id, e,
                         );
+                        rule_based_memory_extraction(&store, &ctx, &summary, &project_path, &existing);
+                    }
+                    Err(_) => {
+                        eprintln!(
+                            "[hooks] LLM extraction timed out, falling back to rule-based: session={}",
+                            ctx.session_id,
+                        );
+                        rule_based_memory_extraction(&store, &ctx, &summary, &project_path, &existing);
                     }
                 }
+            } else {
+                // ── Rule-based fallback (no LLM provider) ──
+                rule_based_memory_extraction(&store, &ctx, &summary, &project_path, &existing);
             }
+
             Ok(())
         })
     }));
 
-    // on_compaction: extract key information from compacted content
-    let store_clone3 = memory_store;
+    // on_compaction: log only (no memory writes)
     hooks.register_on_compaction(Box::new(move |ctx, snippets| {
-        let store = store_clone3.clone();
         Box::pin(async move {
-            let project_path = ctx.project_path.to_string_lossy().to_string();
+            eprintln!(
+                "[hooks] Context compaction: session={}, snippets={}",
+                ctx.session_id,
+                snippets.len(),
+            );
+            Ok(())
+        })
+    }));
+}
 
-            // Extract potential memories from compacted snippets
-            let mut new_memories = Vec::new();
-            for snippet in &snippets {
-                // Only extract from substantial snippets
-                if snippet.len() < 50 {
-                    continue;
-                }
-                // Limit each snippet contribution
-                let content = if snippet.len() > 200 {
-                    format!("{}...", &snippet[..200])
-                } else {
-                    snippet.clone()
-                };
-                new_memories.push(NewMemoryEntry {
-                    project_path: project_path.clone(),
-                    category: MemoryCategory::Fact,
-                    content,
-                    keywords: crate::services::memory::retrieval::extract_query_keywords(snippet),
-                    importance: 0.3, // lower importance for compacted content
-                    source_session_id: Some(ctx.session_id.clone()),
-                    source_context: Some("compaction".to_string()),
-                });
-            }
+/// Rule-based fallback memory extraction from key_findings.
+/// Used when no LLM provider is available or when LLM extraction fails.
+fn rule_based_memory_extraction(
+    store: &ProjectMemoryStore,
+    ctx: &HookContext,
+    summary: &SessionSummary,
+    project_path: &str,
+    existing: &[crate::services::memory::store::MemoryEntry],
+) {
+    let conversation_summary = format!(
+        "Task: {}. {} files read. {} key findings. {} tool calls across {} turns. Success: {}.",
+        summary.task_description,
+        summary.files_read.len(),
+        summary.key_findings.len(),
+        summary.tool_usage.values().sum::<usize>(),
+        summary.total_turns,
+        summary.success,
+    );
 
-            let count = new_memories.len();
-            if !new_memories.is_empty() {
-                // Use upsert to avoid duplicates
-                for entry in new_memories {
-                    if let Err(e) = store.upsert_memory(entry) {
-                        eprintln!(
-                            "[hooks] Compaction memory upsert failed: session={}, error={}",
-                            ctx.session_id, e,
-                        );
-                    }
-                }
+    let mut new_memories = Vec::new();
+    for finding in &summary.key_findings {
+        if finding.trim().is_empty() {
+            continue;
+        }
+        let already_exists = existing.iter().any(|m| m.content.contains(finding.as_str()));
+        if already_exists {
+            continue;
+        }
+        new_memories.push(NewMemoryEntry {
+            project_path: project_path.to_string(),
+            category: MemoryCategory::Fact,
+            content: finding.clone(),
+            keywords: crate::services::memory::retrieval::extract_query_keywords(finding),
+            importance: 0.5,
+            source_session_id: Some(ctx.session_id.clone()),
+            source_context: Some(conversation_summary.clone()),
+        });
+    }
+
+    let count = new_memories.len();
+    if !new_memories.is_empty() {
+        match store.add_memories(new_memories) {
+            Ok(_) => {
                 eprintln!(
-                    "[hooks] Compaction memory extracted: session={}, candidates={}",
+                    "[hooks] Rule-based memory extracted: session={}, new_memories={}",
                     ctx.session_id, count,
                 );
             }
-            Ok(())
-        })
-    }));
+            Err(e) => {
+                eprintln!(
+                    "[hooks] Rule-based memory extraction failed: session={}, error={}",
+                    ctx.session_id, e,
+                );
+            }
+        }
+    }
 }
 
 // ============================================================================
@@ -777,6 +910,7 @@ mod tests {
             },
             total_turns: 5,
             success: true,
+            conversation_content: String::new(),
         };
         assert_eq!(summary.task_description, "Fix the bug");
         assert_eq!(summary.files_read.len(), 1);
@@ -1034,6 +1168,7 @@ mod tests {
             tool_usage: HashMap::new(),
             total_turns: 42,
             success: true,
+            conversation_content: String::new(),
         };
         hooks.fire_on_session_end(&ctx, summary).await;
         assert_eq!(captured_turns.load(Ordering::SeqCst), 42);
@@ -1201,7 +1336,7 @@ mod tests {
         let store = create_test_memory_store();
         let loaded_memories = Arc::new(RwLock::new(Vec::new()));
 
-        register_memory_hooks(&mut hooks, store, loaded_memories);
+        register_memory_hooks(&mut hooks, store, loaded_memories, None);
 
         // Should register 3 hooks: on_session_start + on_session_end + on_compaction
         assert_eq!(hooks.total_hooks(), 3);
@@ -1215,7 +1350,7 @@ mod tests {
         let store = create_test_memory_store();
         let loaded_memories = Arc::new(RwLock::new(Vec::new()));
 
-        register_memory_hooks(&mut hooks, store, loaded_memories);
+        register_memory_hooks(&mut hooks, store, loaded_memories, None);
 
         // defaults(3) + memory hooks(3) = 6
         assert_eq!(hooks.total_hooks(), 6);
@@ -1229,7 +1364,7 @@ mod tests {
         let loaded_memories: Arc<RwLock<Vec<crate::services::memory::store::MemoryEntry>>> =
             Arc::new(RwLock::new(Vec::new()));
 
-        register_memory_hooks(&mut hooks, store, loaded_memories.clone());
+        register_memory_hooks(&mut hooks, store, loaded_memories.clone(), None);
 
         let ctx = test_context();
         // Should not panic, and should attempt to load memories (empty store -> empty result)
@@ -1246,9 +1381,12 @@ mod tests {
         let store = create_test_memory_store();
         let loaded_memories = Arc::new(RwLock::new(Vec::new()));
 
-        register_memory_hooks(&mut hooks, store.clone(), loaded_memories);
+        // No LLM provider -> falls back to rule-based extraction
+        register_memory_hooks(&mut hooks, store.clone(), loaded_memories, None);
 
         let ctx = test_context();
+        // conversation_content must be >= 100 chars and total_turns >= 3 to pass threshold
+        let conversation_content = "[User]: Fix the auth bug in src/auth.rs where tokens expire immediately. The JWT validation is being bypassed for admin routes.\n\n[Assistant]: I found two issues in the authentication module.".to_string();
         let summary = SessionSummary {
             task_description: "Fix authentication bug".to_string(),
             files_read: vec!["src/auth.rs".to_string()],
@@ -1259,11 +1397,12 @@ mod tests {
             tool_usage: HashMap::new(),
             total_turns: 5,
             success: true,
+            conversation_content,
         };
 
         hooks.fire_on_session_end(&ctx, summary).await;
 
-        // Verify memories were extracted from key_findings
+        // Verify memories were extracted from key_findings (rule-based fallback)
         let project_path = ctx.project_path.to_string_lossy().to_string();
         let memories = store
             .list_memories(&project_path, None, 0, 100)
@@ -1276,31 +1415,66 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_register_memory_hooks_compaction_fires() {
+    async fn test_register_memory_hooks_session_end_skips_trivial() {
         let mut hooks = AgenticHooks::new();
 
         let store = create_test_memory_store();
         let loaded_memories = Arc::new(RwLock::new(Vec::new()));
 
-        register_memory_hooks(&mut hooks, store.clone(), loaded_memories);
+        register_memory_hooks(&mut hooks, store.clone(), loaded_memories, None);
 
         let ctx = test_context();
-        let snippets = vec![
-            "The authentication module uses JWT tokens with RSA256 signing for stateless session management across microservices".to_string(),
-            "short".to_string(), // too short, should be skipped
-        ];
+        // Trivial session: only 2 turns and short content
+        let summary = SessionSummary {
+            task_description: "Quick question".to_string(),
+            files_read: vec![],
+            key_findings: vec!["Some finding".to_string()],
+            tool_usage: HashMap::new(),
+            total_turns: 2,
+            success: true,
+            conversation_content: "short".to_string(),
+        };
 
-        hooks.fire_on_compaction(&ctx, snippets).await;
+        hooks.fire_on_session_end(&ctx, summary).await;
 
-        // Only the substantial snippet should be stored
+        // Should skip extraction for trivial sessions
         let project_path = ctx.project_path.to_string_lossy().to_string();
         let memories = store
             .list_memories(&project_path, None, 0, 100)
             .unwrap_or_default();
         assert_eq!(
             memories.len(),
-            1,
-            "Should have extracted 1 memory from substantial snippet, skipping short one"
+            0,
+            "Should skip memory extraction for trivial sessions"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_register_memory_hooks_compaction_no_memory_writes() {
+        let mut hooks = AgenticHooks::new();
+
+        let store = create_test_memory_store();
+        let loaded_memories = Arc::new(RwLock::new(Vec::new()));
+
+        register_memory_hooks(&mut hooks, store.clone(), loaded_memories, None);
+
+        let ctx = test_context();
+        let snippets = vec![
+            "The authentication module uses JWT tokens with RSA256 signing for stateless session management across microservices".to_string(),
+            "short".to_string(),
+        ];
+
+        hooks.fire_on_compaction(&ctx, snippets).await;
+
+        // Compaction should NOT write any memories (log-only)
+        let project_path = ctx.project_path.to_string_lossy().to_string();
+        let memories = store
+            .list_memories(&project_path, None, 0, 100)
+            .unwrap_or_default();
+        assert_eq!(
+            memories.len(),
+            0,
+            "Compaction hook should not write memories (log-only)"
         );
     }
 
@@ -1318,7 +1492,7 @@ mod tests {
         // Register memory hooks
         let store = create_test_memory_store();
         let loaded_memories = Arc::new(RwLock::new(Vec::new()));
-        register_memory_hooks(&mut hooks, store, loaded_memories);
+        register_memory_hooks(&mut hooks, store, loaded_memories, None);
 
         // defaults(3) + skill(2) + memory(3) = 8
         assert_eq!(hooks.total_hooks(), 8);
@@ -1353,7 +1527,7 @@ mod tests {
         let store = create_test_memory_store();
         let loaded_memories: Arc<RwLock<Vec<crate::services::memory::store::MemoryEntry>>> =
             Arc::new(RwLock::new(Vec::new()));
-        register_memory_hooks(&mut hooks, store.clone(), loaded_memories.clone());
+        register_memory_hooks(&mut hooks, store.clone(), loaded_memories.clone(), None);
 
         assert_eq!(
             hooks.total_hooks(),
@@ -1383,7 +1557,8 @@ mod tests {
             "Message should not be modified"
         );
 
-        // 4. Fire session_end -> memories extracted
+        // 4. Fire session_end -> memories extracted (rule-based, no LLM provider)
+        let conversation_content = "[User]: Implement the authentication module with JWT RS256 signing and proper session management with 3600 second expiry.\n\n[Assistant]: I've implemented the auth module. Found that tokens use RS256 and sessions expire after 3600s.".to_string();
         let summary = SessionSummary {
             task_description: "Implement authentication module".to_string(),
             files_read: vec!["src/auth.rs".to_string(), "src/main.rs".to_string()],
@@ -1399,10 +1574,11 @@ mod tests {
             },
             total_turns: 8,
             success: true,
+            conversation_content,
         };
         hooks.fire_on_session_end(&ctx, summary).await;
 
-        // Verify memories were stored
+        // Verify memories were stored (rule-based extraction from key_findings)
         let project_path = ctx.project_path.to_string_lossy().to_string();
         let stored = store
             .list_memories(&project_path, None, 0, 100)
@@ -1413,7 +1589,7 @@ mod tests {
             "Should have stored 2 memories from key_findings"
         );
 
-        // 5. Fire compaction -> more memories
+        // 5. Fire compaction -> log-only, no memory writes
         let snippets = vec![
             "The database schema uses foreign key constraints with CASCADE delete for referential integrity across all entity tables".to_string(),
         ];
@@ -1424,8 +1600,8 @@ mod tests {
             .unwrap_or_default();
         assert_eq!(
             stored_after.len(),
-            3,
-            "Should now have 3 memories (2 from findings + 1 from compaction)"
+            2,
+            "Compaction should not add memories (log-only), still 2 from session_end"
         );
     }
 
@@ -1452,7 +1628,7 @@ mod tests {
 
         let store = create_test_memory_store();
         let loaded_memories = Arc::new(RwLock::new(Vec::new()));
-        register_memory_hooks(&mut hooks, store, loaded_memories);
+        register_memory_hooks(&mut hooks, store, loaded_memories, None);
 
         // Expected distribution:
         // on_session_start: 1 (default) + 1 (skill) + 1 (memory) = 3

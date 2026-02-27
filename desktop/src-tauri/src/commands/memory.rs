@@ -260,13 +260,17 @@ pub async fn extract_session_memories(
 
     // Skip short conversations
     if conversation_summary.len() < 50 {
+        eprintln!("[memory-extraction] Skipped: conversation too short ({} chars < 50)", conversation_summary.len());
         return Ok(CommandResponse::ok(zero_result));
     }
 
     // Resolve LLM provider from app config + keyring
     let provider = match resolve_extraction_provider(&state).await {
         Ok(p) => p,
-        Err(_) => return Ok(CommandResponse::ok(zero_result)),
+        Err(e) => {
+            eprintln!("[memory-extraction] Provider resolution failed: {}", e);
+            return Ok(CommandResponse::ok(zero_result));
+        }
     };
 
     use crate::services::llm::types::{LlmRequestOptions, Message};
@@ -282,7 +286,8 @@ pub async fn extract_session_memories(
             .await
         {
             Ok(resp) => resp.content.unwrap_or(conversation_summary.clone()),
-            Err(_) => {
+            Err(e) => {
+                eprintln!("[memory-extraction] Summarization LLM call failed: {}, falling back to truncation", e);
                 // Summarization failed — fall back to truncated raw content
                 conversation_summary
                     .chars()
@@ -318,9 +323,15 @@ pub async fn extract_session_memories(
     let response_text = match response {
         Ok(resp) => match resp.content {
             Some(text) => text,
-            None => return Ok(CommandResponse::ok(zero_result)),
+            None => {
+                eprintln!("[memory-extraction] Extraction LLM returned empty content");
+                return Ok(CommandResponse::ok(zero_result));
+            }
         },
-        Err(_) => return Ok(CommandResponse::ok(zero_result)),
+        Err(e) => {
+            eprintln!("[memory-extraction] Extraction LLM call failed: {}", e);
+            return Ok(CommandResponse::ok(zero_result));
+        }
     };
 
     // Parse extraction response
@@ -332,6 +343,7 @@ pub async fn extract_session_memories(
 
     let extracted_count = entries.len();
     if extracted_count == 0 {
+        eprintln!("[memory-extraction] LLM response parsed but yielded 0 entries");
         return Ok(CommandResponse::ok(zero_result));
     }
 
@@ -348,9 +360,17 @@ pub async fn extract_session_memories(
             Ok(UpsertResult::Inserted(_)) => inserted_count += 1,
             Ok(UpsertResult::Merged { .. }) => merged_count += 1,
             Ok(UpsertResult::Skipped { .. }) => skipped_count += 1,
-            Err(_) => skipped_count += 1,
+            Err(e) => {
+                eprintln!("[memory-extraction] Upsert failed: {}", e);
+                skipped_count += 1;
+            }
         }
     }
+
+    eprintln!(
+        "[memory-extraction] Done: extracted={}, inserted={}, merged={}, skipped={}",
+        extracted_count, inserted_count, merged_count, skipped_count
+    );
 
     Ok(CommandResponse::ok(MemoryExtractionResult {
         extracted_count,
@@ -399,6 +419,17 @@ async fn resolve_extraction_provider(
         return Err("No API key configured".into());
     }
 
+    // Resolve base_url from database settings
+    let resolved_base_url = {
+        let key = format!("provider_{}_base_url", canonical);
+        state
+            .with_database(|db| db.get_setting(&key))
+            .await
+            .ok()
+            .flatten()
+            .filter(|u| !u.is_empty())
+    };
+
     // Resolve proxy settings
     let proxy = state
         .with_database(|db| {
@@ -413,7 +444,7 @@ async fn resolve_extraction_provider(
     let config = ProviderConfig {
         provider: provider_type.clone(),
         api_key,
-        base_url: None,
+        base_url: resolved_base_url,
         model: app_config.default_model.clone(),
         max_tokens: 2048,
         temperature: 0.3,

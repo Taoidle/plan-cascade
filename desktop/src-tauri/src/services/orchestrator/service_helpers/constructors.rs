@@ -744,6 +744,7 @@ impl OrchestratorService {
             &mut self.hooks,
             memory_store,
             loaded_memories.clone(),
+            Some(self.provider.clone()),
         );
         self.loaded_memories = Some(loaded_memories);
         self

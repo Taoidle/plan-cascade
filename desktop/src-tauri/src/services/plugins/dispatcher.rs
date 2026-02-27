@@ -1191,6 +1191,7 @@ mod tests {
             tool_usage: HashMap::new(),
             total_turns: 1,
             success: true,
+            conversation_content: String::new(),
         };
         // Should not panic
         hooks.fire_on_session_end(&ctx, summary).await;

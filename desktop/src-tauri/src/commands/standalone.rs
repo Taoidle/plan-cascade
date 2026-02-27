@@ -1236,6 +1236,12 @@ pub async fn execute_standalone(
         }
     }
 
+    // Wire memory hooks for automatic memory loading and extraction
+    if let Ok(memory_store) = app_state.get_memory_store_arc().await {
+        let loaded_memories = std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new()));
+        orchestrator = orchestrator.with_memory_hooks(memory_store, loaded_memories);
+    }
+
     // Wire knowledge tool for on-demand SearchKnowledge (replaces pre-injection)
     if let Some(ref cs) = context_sources {
         if cs.knowledge.as_ref().map_or(false, |k| k.enabled) {
@@ -1299,6 +1305,16 @@ pub async fn execute_standalone(
         .wire_orchestrator(orchestrator, Some(tx.clone()))
         .await;
 
+    // Store orchestrator in StandaloneState so cancel/pause/resume can find it.
+    // Clone session_id before it's moved into the event-forwarding task.
+    let orchestrator = Arc::new(orchestrator);
+    let cleanup_session_id = event_session_id.clone();
+    if !cleanup_session_id.is_empty() {
+        standalone_state
+            .set_orchestrator(cleanup_session_id.clone(), orchestrator.clone())
+            .await;
+    }
+
     // Spawn task to forward events to frontend
     let app_clone = app.clone();
     tokio::spawn(async move {
@@ -1326,6 +1342,13 @@ pub async fn execute_standalone(
     } else {
         orchestrator.execute_single(message, tx).await
     };
+
+    // Clean up orchestrator from StandaloneState
+    if !cleanup_session_id.is_empty() {
+        standalone_state
+            .remove_orchestrator(&cleanup_session_id)
+            .await;
+    }
 
     Ok(CommandResponse::ok(result))
 }
@@ -1530,6 +1553,17 @@ pub async fn execute_standalone_with_session(
         )));
     }
 
+    // Resolve base_url from database settings
+    let resolved_base_url = {
+        let key = format!("provider_{}_base_url", canonical_provider);
+        app_state
+            .with_database(|db| db.get_setting(&key))
+            .await
+            .ok()
+            .flatten()
+            .filter(|u| !u.is_empty())
+    };
+
     // Resolve proxy for this provider
     let proxy = app_state
         .with_database(|db| Ok(resolve_provider_proxy(&keyring, db, &canonical_provider)))
@@ -1539,7 +1573,7 @@ pub async fn execute_standalone_with_session(
     let config = ProviderConfig {
         provider: provider_type,
         api_key,
-        base_url: None,
+        base_url: resolved_base_url,
         model: request.model.clone(),
         enable_thinking: request.enable_thinking.unwrap_or(false),
         proxy,
@@ -1608,6 +1642,12 @@ pub async fn execute_standalone_with_session(
                 .with_analytics_tracker(atx)
                 .with_analytics_cost_calculator(analytics_state.cost_calculator());
         }
+    }
+
+    // Wire memory hooks for automatic memory loading and extraction
+    if let Ok(memory_store) = app_state.get_memory_store_arc().await {
+        let loaded_memories = std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new()));
+        orchestrator = orchestrator.with_memory_hooks(memory_store, loaded_memories);
     }
 
     // Wire plugin context (instructions, skills, commands, hooks, permissions) from enabled plugins
@@ -2010,6 +2050,17 @@ pub async fn resume_standalone_execution(
         }
     };
 
+    // Resolve base_url from database settings
+    let resolved_base_url = {
+        let key = format!("provider_{}_base_url", canonical_provider);
+        app_state
+            .with_database(|db| db.get_setting(&key))
+            .await
+            .ok()
+            .flatten()
+            .filter(|u| !u.is_empty())
+    };
+
     // Resolve proxy for this provider
     let proxy = app_state
         .with_database(|db| Ok(resolve_provider_proxy(&keyring, db, &canonical_provider)))
@@ -2020,7 +2071,7 @@ pub async fn resume_standalone_execution(
     let config = ProviderConfig {
         provider: provider_type,
         api_key,
-        base_url: None,
+        base_url: resolved_base_url,
         model: session.model.clone(),
         proxy,
         ..Default::default()

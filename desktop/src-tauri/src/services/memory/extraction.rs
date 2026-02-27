@@ -10,7 +10,7 @@
 //! - Delete: "forget that...", "stop remembering...", "delete memory about..."
 //! - Query:  "what do you remember about...", "what are my preferences..."
 
-use crate::services::memory::store::{MemoryCategory, MemoryEntry, NewMemoryEntry};
+use crate::services::memory::store::{MemoryCategory, MemoryEntry, NewMemoryEntry, GLOBAL_PROJECT_PATH};
 
 /// Explicit memory commands detected from user messages
 #[derive(Debug, Clone, PartialEq)]
@@ -233,7 +233,8 @@ Return a JSON array:
     "category": "preference|convention|pattern|correction|fact",
     "content": "concise factual statement",
     "keywords": ["keyword1", "keyword2"],
-    "importance": 0.0-1.0
+    "importance": 0.0-1.0,
+    "scope": "project|global"
   }}
 ]
 
@@ -244,6 +245,8 @@ Rules:
 - "correction": mistakes to avoid (e.g., "editing executor.rs requires cargo check due to type complexity")
 - "fact": general project facts (e.g., "frontend uses Zustand for state management")
 - importance: 0.9+ for explicit user instructions, 0.5-0.8 for discovered patterns, 0.3-0.5 for general facts
+- scope: "global" for cross-project user-level preferences (communication language, coding style, tool preferences, personal habits); "project" for project-specific info (default)
+- Preferences about the user themselves (not the project) should be "global"
 - Return empty array [] if nothing worth extracting"#,
             task = task_description,
             files = files_section,
@@ -301,8 +304,16 @@ Rules:
                     return None;
                 }
 
+                // Route to global or project scope based on LLM output
+                let scope = item.get("scope").and_then(|v| v.as_str()).unwrap_or("project");
+                let effective_project_path = if scope == "global" {
+                    GLOBAL_PROJECT_PATH.to_string()
+                } else {
+                    project_path.to_string()
+                };
+
                 Some(NewMemoryEntry {
-                    project_path: project_path.to_string(),
+                    project_path: effective_project_path,
                     category,
                     content,
                     keywords,
@@ -595,6 +606,44 @@ mod tests {
         let response = r#"[{"category": "fact", "content": "", "importance": 0.5}]"#;
         let entries = MemoryExtractor::parse_extraction_response(response, "/test", None);
         assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_parse_extraction_response_global_scope() {
+        let response = r#"[
+            {
+                "category": "preference",
+                "content": "User prefers Chinese for communication",
+                "keywords": ["language", "chinese"],
+                "importance": 0.9,
+                "scope": "global"
+            },
+            {
+                "category": "fact",
+                "content": "Project uses Tauri 2",
+                "keywords": ["tauri"],
+                "importance": 0.5,
+                "scope": "project"
+            }
+        ]"#;
+
+        let entries = MemoryExtractor::parse_extraction_response(
+            response,
+            "/test/project",
+            Some("session-1"),
+        );
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].project_path, "__global__");
+        assert_eq!(entries[1].project_path, "/test/project");
+    }
+
+    #[test]
+    fn test_parse_extraction_response_default_scope_is_project() {
+        let response = r#"[{"category": "fact", "content": "test fact", "importance": 0.5}]"#;
+        let entries = MemoryExtractor::parse_extraction_response(response, "/test", None);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].project_path, "/test");
     }
 
     #[test]

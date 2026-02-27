@@ -1893,8 +1893,10 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
   reset: () => {
     const state = get();
 
-    // Auto-background running/paused session so backend events continue routing
-    if ((state.status === 'running' || state.status === 'paused') && (state.taskId || state.standaloneSessionId)) {
+    // Auto-background running/paused session so backend events continue routing.
+    // Don't require taskId/standaloneSessionId — Claude Code backend sets taskId
+    // asynchronously, so there's a window where status is 'running' but IDs are null.
+    if ((state.status === 'running' || state.status === 'paused') && hasMeaningfulForegroundContent(state)) {
       get().backgroundCurrentSession();
       // backgroundCurrentSession already resets foreground to idle;
       // now apply remaining reset fields
@@ -2226,13 +2228,31 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       }
     }
 
-    // If there's a ghost, update it with live foreground state before restoring
+    // Persist current foreground session before restoring history.
+    // This mirrors switchToSession's logic to prevent session loss.
     const currentState = get();
     let bgSessions = currentState.backgroundSessions;
     if (currentState.foregroundBgId && bgSessions[currentState.foregroundBgId]) {
+      // Ghost exists — update ghost snapshot with live foreground state.
+      // Preserve the ghost's original workspacePath because the caller (e.g. handleRestore)
+      // may have already changed settings.workspacePath to the target session's path.
       const curSettings = useSettingsStore.getState();
+      const originalWorkspacePath = bgSessions[currentState.foregroundBgId].workspacePath;
       const updatedGhost = createSessionSnapshotFromForeground(currentState, curSettings, currentState.foregroundBgId);
+      updatedGhost.workspacePath = originalWorkspacePath;
       bgSessions = { ...bgSessions, [currentState.foregroundBgId]: updatedGhost };
+    } else if (shouldPersistForegroundBeforeSwitch(currentState)) {
+      // No ghost — persist current foreground as a new background session
+      // so that running/meaningful sessions are not lost.
+      const curSettings = useSettingsStore.getState();
+      const newBgId =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? `bg-${crypto.randomUUID()}`
+          : `bg-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+      bgSessions = {
+        ...bgSessions,
+        [newBgId]: createSessionSnapshotFromForeground(currentState, curSettings, newBgId),
+      };
     }
 
     set({
@@ -4219,6 +4239,10 @@ function updateBackgroundSessionByTaskId(
  * Append a StreamLine to a background session's streamingOutput.
  * Each background session maintains its own streamLineCounter so IDs
  * stay unique within that snapshot.
+ *
+ * For 'text' and 'thinking' deltas, concatenates to the last line of the
+ * same type — mirroring the foreground appendStreamLine logic so that
+ * streaming tokens form coherent messages instead of one-per-line fragments.
  */
 function appendToBackgroundSession(
   state: ExecutionState,
@@ -4227,6 +4251,21 @@ function appendToBackgroundSession(
   type: StreamLineType,
 ): Partial<ExecutionState> {
   return updateBackgroundSessionByTaskId(state, sessionId, (snapshot) => {
+    const lines = snapshot.streamingOutput;
+    const last = lines.length > 0 ? lines[lines.length - 1] : null;
+
+    // For text and thinking deltas, concatenate to the last line of the same type
+    if ((type === 'text' || type === 'thinking') && last && last.type === type) {
+      const updated = { ...last, content: last.content + content };
+      const newLines = lines.slice();
+      newLines[newLines.length - 1] = updated;
+      return {
+        streamingOutput: newLines,
+        updatedAt: Date.now(),
+      };
+    }
+
+    // For other types or type transitions, append a new line
     const nextId = snapshot.streamLineCounter + 1;
     const newLine: StreamLine = {
       id: nextId,
@@ -4235,7 +4274,7 @@ function appendToBackgroundSession(
       timestamp: Date.now(),
     };
     return {
-      streamingOutput: [...snapshot.streamingOutput, newLine],
+      streamingOutput: [...lines, newLine],
       streamLineCounter: nextId,
       updatedAt: Date.now(),
     };

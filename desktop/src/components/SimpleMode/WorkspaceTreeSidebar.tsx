@@ -1035,14 +1035,16 @@ export function WorkspaceTreeSidebar({
     [setWorkspacePath, onNewTask],
   );
 
-  // Restore session and set workspace path to match
+  // Restore session and set workspace path to match.
+  // IMPORTANT: call onRestore first so that the current foreground session is
+  // persisted with its original workspacePath before we overwrite settings.
   const handleRestore = useCallback(
     (id: string) => {
+      onRestore(id);
       const session = history.find((h) => h.id === id);
       if (session?.workspacePath) {
         setWorkspacePath(session.workspacePath);
       }
-      onRestore(id);
     },
     [history, setWorkspacePath, onRestore],
   );

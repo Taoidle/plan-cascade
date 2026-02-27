@@ -1847,7 +1847,8 @@ describe('Execution Store - Event Routing to Background Sessions', () => {
     it('should maintain separate streamLineCounter per background session', async () => {
       await setupForegroundAndBackground();
 
-      // Send multiple events to background
+      // Send multiple text_delta events to background — these should concatenate
+      // into a single text line (mirroring foreground appendStreamLine behavior)
       emitEvent('claude_code:stream', {
         event: { type: 'text_delta', content: 'Line 1' },
         session_id: 'bg-session-1',
@@ -1858,14 +1859,19 @@ describe('Execution Store - Event Routing to Background Sessions', () => {
       });
 
       const bg = findBgByTaskId('bg-session-1');
-      // Original had 1 line (from setup) + 2 new lines = counter should be 3
-      expect(bg!.snapshot.streamLineCounter).toBe(3);
+      // Original had 1 line (info, from setup) + 1 concatenated text line = counter should be 2
+      expect(bg!.snapshot.streamLineCounter).toBe(2);
 
       // Each line should have a unique, incrementing ID
       const lines = bg!.snapshot.streamingOutput;
       const ids = lines.map((l) => l.id);
       const uniqueIds = new Set(ids);
       expect(uniqueIds.size).toBe(ids.length);
+
+      // The two text_delta chunks should be concatenated into one line
+      const textLines = lines.filter((l) => l.type === 'text');
+      expect(textLines).toHaveLength(1);
+      expect(textLines[0].content).toBe('Line 1Line 2');
     });
   });
 

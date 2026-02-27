@@ -20,7 +20,7 @@ pub struct AppState {
     /// Configuration service for app settings
     config: Arc<RwLock<Option<ConfigService>>>,
     /// Project memory store for cross-session persistent memory
-    memory_store: Arc<RwLock<Option<ProjectMemoryStore>>>,
+    memory_store: Arc<RwLock<Option<Arc<ProjectMemoryStore>>>>,
     /// Whether the state has been initialized
     initialized: Arc<RwLock<bool>>,
 }
@@ -70,7 +70,7 @@ impl AppState {
             let db_guard = self.database.read().await;
             if let Some(ref db) = *db_guard {
                 let embedding_service = Arc::new(EmbeddingService::new());
-                let store = ProjectMemoryStore::from_database(db, embedding_service);
+                let store = Arc::new(ProjectMemoryStore::from_database(db, embedding_service));
                 let mut store_lock = self.memory_store.write().await;
                 *store_lock = Some(store);
             }
@@ -233,6 +233,17 @@ impl AppState {
         let guard = self.memory_store.read().await;
         match &*guard {
             Some(store) => f(store),
+            None => Err(AppError::Internal(
+                "Memory store not initialized".to_string(),
+            )),
+        }
+    }
+
+    /// Get an Arc clone of the memory store for use with memory hooks
+    pub async fn get_memory_store_arc(&self) -> AppResult<Arc<ProjectMemoryStore>> {
+        let guard = self.memory_store.read().await;
+        match &*guard {
+            Some(store) => Ok(Arc::clone(store)),
             None => Err(AppError::Internal(
                 "Memory store not initialized".to_string(),
             )),

@@ -14,6 +14,14 @@ use crate::storage::database::{Database, DbPool};
 use crate::utils::error::{AppError, AppResult};
 
 // ============================================================================
+// Constants
+// ============================================================================
+
+/// Sentinel project path for global (cross-project) memories.
+/// Memories stored under this path are loaded for every project session.
+pub const GLOBAL_PROJECT_PATH: &str = "__global__";
+
+// ============================================================================
 // Data Types
 // ============================================================================
 

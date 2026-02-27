@@ -3283,6 +3283,44 @@ impl OrchestratorService {
                             }
                         })
                         .unwrap_or_default();
+                    // Build conversation_content for LLM memory extraction
+                    let conversation_content = {
+                        use crate::services::llm::types::MessageRole;
+                        let mut buf = String::new();
+                        const MAX_CONV_CHARS: usize = 8000;
+                        for msg in &messages {
+                            if buf.len() >= MAX_CONV_CHARS {
+                                break;
+                            }
+                            let role_label = match msg.role {
+                                MessageRole::User => "[User]",
+                                MessageRole::Assistant => "[Assistant]",
+                                _ => continue,
+                            };
+                            for content_block in &msg.content {
+                                if let MessageContent::Text { text } = content_block {
+                                    // Skip session memory injection blocks
+                                    if text.contains(SESSION_MEMORY_V1_MARKER) {
+                                        continue;
+                                    }
+                                    let remaining = MAX_CONV_CHARS.saturating_sub(buf.len());
+                                    if remaining == 0 {
+                                        break;
+                                    }
+                                    let snippet = if text.len() > remaining {
+                                        &text[..remaining]
+                                    } else {
+                                        text.as_str()
+                                    };
+                                    buf.push_str(role_label);
+                                    buf.push_str(": ");
+                                    buf.push_str(snippet);
+                                    buf.push_str("\n\n");
+                                }
+                            }
+                        }
+                        buf
+                    };
                     let summary = crate::services::orchestrator::hooks::SessionSummary {
                         task_description: task_desc,
                         files_read,
@@ -3290,6 +3328,7 @@ impl OrchestratorService {
                         tool_usage: std::collections::HashMap::new(),
                         total_turns: iterations,
                         success: true,
+                        conversation_content,
                     };
                     self.hooks.fire_on_session_end(&hook_ctx, summary).await;
                 }
