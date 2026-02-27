@@ -38,8 +38,10 @@ impl Tool for SearchKnowledgeTool {
 
     fn description(&self) -> &str {
         "Search the project knowledge base for relevant documents using semantic search. \
-         Use this tool when you need domain-specific information, documentation, \
-         standards, or reference material that may be stored in the knowledge base."
+         This is the HIGHEST PRIORITY search tool when the knowledge base is enabled. \
+         ALWAYS use this tool FIRST before CodebaseSearch or Grep when looking for \
+         documentation, specifications, design decisions, API references, standards, \
+         or any domain-specific knowledge."
     }
 
     fn parameters_schema(&self) -> ParameterSchema {

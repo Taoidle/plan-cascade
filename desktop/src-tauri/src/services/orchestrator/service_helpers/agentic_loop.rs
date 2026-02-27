@@ -532,9 +532,23 @@ impl OrchestratorService {
                 }
             }
 
-            // Inject knowledge awareness section (tool-driven knowledge)
+            // Inject knowledge awareness section (collection listing)
             if let Some(ref section) = self.knowledge_awareness_section {
                 parts.push(section.clone());
+            }
+
+            // Inject unified tool priority section for sub-agents
+            {
+                let has_knowledge = self.knowledge_awareness_section.is_some();
+                let has_codebase_search = self.index_store.is_some();
+                let priority_section = build_tool_priority_section(
+                    has_knowledge,
+                    has_codebase_search,
+                    &detect_language(&self.config.project_root.to_string_lossy()),
+                );
+                if !priority_section.is_empty() {
+                    parts.push(priority_section);
+                }
             }
 
             // Inject plugin instructions for sub-agents
@@ -3754,7 +3768,9 @@ impl OrchestratorService {
         let provider_name = self.provider.name();
         let model_name = self.provider.model();
         let detected_lang = self.detected_language.lock().unwrap();
-        let language = detected_lang.as_deref().unwrap_or("en");
+        let language: String = detected_lang.as_deref().unwrap_or("en").to_string();
+        drop(detected_lang);
+        let language = language.as_str();
 
         // Read loaded memories from shared state (populated by memory hooks)
         let memories_snapshot: Option<Vec<crate::services::memory::store::MemoryEntry>> =
@@ -3802,8 +3818,6 @@ impl OrchestratorService {
             ));
         }
 
-        drop(detected_lang);
-
         // Inject cached knowledge context (populated by populate_knowledge_context)
         if let Ok(cached) = self.cached_knowledge_block.lock() {
             if let Some(ref block) = *cached {
@@ -3812,9 +3826,27 @@ impl OrchestratorService {
             }
         }
 
-        // Inject knowledge awareness section (tool-driven knowledge)
+        // Inject knowledge awareness section (collection listing)
         if let Some(ref section) = self.knowledge_awareness_section {
             prompt.push_str(section);
+        }
+
+        // Inject unified tool priority section
+        // Priority is determined by which high-value tools are available:
+        //   knowledge + codebase: SearchKnowledge → CodebaseSearch → others
+        //   knowledge only:      SearchKnowledge → others
+        //   codebase only:       CodebaseSearch → others
+        {
+            let has_knowledge = self.knowledge_awareness_section.is_some();
+            let has_codebase_search = self.index_store.is_some();
+            let priority_section = build_tool_priority_section(
+                has_knowledge,
+                has_codebase_search,
+                language,
+            );
+            if !priority_section.is_empty() {
+                prompt.push_str(&priority_section);
+            }
         }
 
         // Determine effective fallback mode:

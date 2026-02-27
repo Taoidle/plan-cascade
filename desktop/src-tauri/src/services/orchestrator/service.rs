@@ -55,7 +55,8 @@ use crate::services::streaming::UnifiedStreamEvent;
 use crate::services::tools::{
     build_memory_section, build_plugin_instructions_section, build_plugin_skills_section,
     build_project_summary, build_skills_section, build_sub_agent_tool_guidance,
-    build_system_prompt_with_memories, build_tool_call_instructions, detect_language,
+    build_system_prompt_with_memories, build_tool_call_instructions, build_tool_priority_section,
+    detect_language,
     extract_text_without_tool_calls, format_tool_result, get_basic_tool_definitions_from_registry,
     get_tool_definitions_from_registry, merge_system_prompts, parse_tool_calls, ParsedToolCall,
     SubAgentType, TaskContext, TaskExecutionResult, TaskSpawner, ToolExecutor, MAX_SUB_AGENT_DEPTH,

@@ -35,6 +35,20 @@ use crate::storage::KeyringService;
 // Types
 // ============================================================================
 
+/// Bundled knowledge tool parameters for passing through closures/spawns.
+///
+/// When LLM mode story execution has knowledge enabled, these params are
+/// pre-computed before tokio::spawn and passed to `execute_story_via_llm`
+/// to wire SearchKnowledge on-demand tool access.
+#[derive(Clone)]
+struct KnowledgeToolParams {
+    pipeline: Arc<crate::services::knowledge::pipeline::RagPipeline>,
+    project_id: String,
+    collection_filter: Option<Vec<String>>,
+    document_filter: Option<Vec<String>>,
+    awareness_section: String,
+}
+
 /// Execution mode for story execution in Task Mode.
 ///
 /// Determines whether stories are executed via external CLI tools
@@ -696,9 +710,11 @@ pub async fn explore_project(
     base_url: Option<String>,
     baseUrl: Option<String>,
     locale: Option<String>,
+    context_sources: Option<crate::services::task_mode::context_provider::ContextSourceConfig>,
     state: tauri::State<'_, TaskModeState>,
     app_state: tauri::State<'_, AppState>,
     standalone_state: tauri::State<'_, crate::commands::standalone::StandaloneState>,
+    knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
     app_handle: tauri::AppHandle,
 ) -> Result<CommandResponse<ExplorationResult>, String> {
     use tauri::Emitter;
@@ -905,6 +921,59 @@ pub async fn explore_project(
                 // Wire database pool for CodebaseSearch
                 if let Ok(pool) = app_state.with_database(|db| Ok(db.pool().clone())).await {
                     coordinator = coordinator.with_database(pool);
+                }
+
+                // Wire SearchKnowledge tool for on-demand knowledge base access
+                if let Some(ref cs) = context_sources {
+                    if cs.knowledge.as_ref().map_or(false, |k| k.enabled) {
+                        crate::services::task_mode::context_provider::ensure_knowledge_initialized_public(
+                            &knowledge_state, &app_state,
+                        ).await;
+                        if let Ok(pipeline) = knowledge_state.get_pipeline().await {
+                            let pid = if cs.project_id.is_empty() {
+                                "default".to_string()
+                            } else {
+                                cs.project_id.clone()
+                            };
+                            let collections = pipeline.list_collections(&pid).unwrap_or_default();
+                            let language = crate::services::tools::system_prompt::detect_language(
+                                &task_description,
+                            );
+                            let summaries: Vec<
+                                crate::services::tools::system_prompt::KnowledgeCollectionSummary,
+                            > = collections
+                                .iter()
+                                .map(|c| {
+                                    crate::services::tools::system_prompt::KnowledgeCollectionSummary {
+                                        name: c.name.clone(),
+                                        document_count: pipeline
+                                            .list_documents(&c.id)
+                                            .map(|d| d.len())
+                                            .unwrap_or(0),
+                                        chunk_count: c.chunk_count as usize,
+                                    }
+                                })
+                                .collect();
+                            let awareness =
+                                crate::services::tools::system_prompt::build_knowledge_awareness_section(
+                                    &summaries, language,
+                                );
+                            let k = cs.knowledge.as_ref().unwrap();
+                            let col_filter = if k.selected_collections.is_empty() {
+                                None
+                            } else {
+                                Some(k.selected_collections.clone())
+                            };
+                            let doc_filter = if k.selected_documents.is_empty() {
+                                None
+                            } else {
+                                Some(k.selected_documents.clone())
+                            };
+                            coordinator = coordinator.with_knowledge_tool(
+                                pipeline, pid, col_filter, doc_filter, awareness,
+                            );
+                        }
+                    }
                 }
 
                 // Create event channel (drain events in background)
@@ -1350,16 +1419,93 @@ pub async fn approve_task_prd(
                 .to_string_lossy()
                 .to_string();
             let enriched_ctx = if let Some(ref cs) = context_sources {
-                crate::services::task_mode::context_provider::query_selected_context(
-                    cs, &knowledge_state, &app_state, &project_path_str,
-                    &session.description, crate::services::skills::model::InjectionPhase::Implementation,
-                ).await
+                if matches!(mode, StoryExecutionMode::Llm) {
+                    // LLM mode: skip knowledge pre-injection (handled by SearchKnowledge tool)
+                    crate::services::task_mode::context_provider::query_selected_context_without_knowledge(
+                        cs, &app_state, &project_path_str,
+                        &session.description, crate::services::skills::model::InjectionPhase::Implementation,
+                    ).await
+                } else {
+                    // CLI mode: full pre-injection including knowledge (no tools available)
+                    crate::services::task_mode::context_provider::query_selected_context(
+                        cs, &knowledge_state, &app_state, &project_path_str,
+                        &session.description, crate::services::skills::model::InjectionPhase::Implementation,
+                    ).await
+                }
             } else {
                 crate::services::task_mode::context_provider::EnrichedContext::default()
             };
             let knowledge_block = enriched_ctx.knowledge_block;
             let memory_block = enriched_ctx.memory_block;
             let skills_block = enriched_ctx.skills_block;
+
+            // Pre-compute knowledge tool params for LLM mode (needs Tauri State access)
+            let knowledge_tool_params: Option<KnowledgeToolParams> =
+                if matches!(mode, StoryExecutionMode::Llm) {
+                    if let Some(ref cs) = context_sources {
+                        if cs.knowledge.as_ref().map_or(false, |k| k.enabled) {
+                            crate::services::task_mode::context_provider::ensure_knowledge_initialized_public(
+                                &knowledge_state, &app_state,
+                            ).await;
+                            if let Ok(pipeline) = knowledge_state.get_pipeline().await {
+                                let pid = if cs.project_id.is_empty() {
+                                    "default".to_string()
+                                } else {
+                                    cs.project_id.clone()
+                                };
+                                let collections = pipeline.list_collections(&pid).unwrap_or_default();
+                                let language = crate::services::tools::system_prompt::detect_language(
+                                    &session.description,
+                                );
+                                let summaries: Vec<
+                                    crate::services::tools::system_prompt::KnowledgeCollectionSummary,
+                                > = collections
+                                    .iter()
+                                    .map(|c| {
+                                        crate::services::tools::system_prompt::KnowledgeCollectionSummary {
+                                            name: c.name.clone(),
+                                            document_count: pipeline
+                                                .list_documents(&c.id)
+                                                .map(|d| d.len())
+                                                .unwrap_or(0),
+                                            chunk_count: c.chunk_count as usize,
+                                        }
+                                    })
+                                    .collect();
+                                let awareness =
+                                    crate::services::tools::system_prompt::build_knowledge_awareness_section(
+                                        &summaries, language,
+                                    );
+                                let k = cs.knowledge.as_ref().unwrap();
+                                let col_filter = if k.selected_collections.is_empty() {
+                                    None
+                                } else {
+                                    Some(k.selected_collections.clone())
+                                };
+                                let doc_filter = if k.selected_documents.is_empty() {
+                                    None
+                                } else {
+                                    Some(k.selected_documents.clone())
+                                };
+                                Some(KnowledgeToolParams {
+                                    pipeline,
+                                    project_id: pid,
+                                    collection_filter: col_filter,
+                                    document_filter: doc_filter,
+                                    awareness_section: awareness,
+                                })
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
             let plugin_quality_gates = plugin_state.collect_quality_gates().await;
             config.plugin_quality_gates = plugin_quality_gates;
 
@@ -1389,7 +1535,7 @@ pub async fn approve_task_prd(
                 // Create story executor that delegates to the appropriate backend.
                 // In CLI mode, spawns external CLI tools. In LLM mode, uses OrchestratorService.
                 let story_executor =
-                    build_story_executor(app_handle.clone(), mode, provider_config, db_pool, knowledge_block, memory_block, skills_block);
+                    build_story_executor(app_handle.clone(), mode, provider_config, db_pool, knowledge_block, memory_block, skills_block, knowledge_tool_params);
 
                 let result = executor
                     .execute(&sid, &resolver, project_path, emit, story_executor)
@@ -2749,6 +2895,7 @@ fn build_story_executor(
     knowledge_block: String,
     memory_block: String,
     skills_block: String,
+    knowledge_tool_params: Option<KnowledgeToolParams>,
 ) -> impl Fn(StoryExecutionContext) -> Pin<Box<dyn Future<Output = StoryExecutionOutcome> + Send>>
        + Send
        + Sync
@@ -2762,6 +2909,7 @@ fn build_story_executor(
         let knowledge_block = knowledge_block.clone();
         let memory_block = memory_block.clone();
         let skills_block = skills_block.clone();
+        let knowledge_tool_params = knowledge_tool_params.clone();
         Box::pin(async move {
             eprintln!(
                 "[INFO] Executing story '{}' (attempt {}) with agent '{}' in {} [mode: {:?}]",
@@ -2816,6 +2964,7 @@ fn build_story_executor(
                         &knowledge_block,
                         &memory_block,
                         &skills_block,
+                        knowledge_tool_params.as_ref(),
                     )
                     .await
                 }
@@ -2925,6 +3074,7 @@ async fn execute_story_via_llm(
     knowledge_block: &str,
     memory_block: &str,
     skills_block: &str,
+    knowledge_tool_params: Option<&KnowledgeToolParams>,
 ) -> StoryExecutionOutcome {
     use crate::services::orchestrator::{OrchestratorConfig, OrchestratorService};
     use crate::services::streaming::UnifiedStreamEvent;
@@ -2953,7 +3103,9 @@ async fn execute_story_via_llm(
         system_prompt.push_str("\n\n");
         system_prompt.push_str(skills_block);
     }
-    if !knowledge_block.is_empty() {
+    // Only pre-inject knowledge_block when SearchKnowledge tool is NOT wired
+    // (i.e. CLI mode fallback path). When tool is wired, AI searches on demand.
+    if knowledge_tool_params.is_none() && !knowledge_block.is_empty() {
         system_prompt.push_str("\n\n");
         system_prompt.push_str(knowledge_block);
     }
@@ -2985,6 +3137,17 @@ async fn execute_story_via_llm(
     // Wire database pool for CodebaseSearch if available
     if let Some(pool) = db_pool {
         orchestrator = orchestrator.with_database(pool.clone());
+    }
+
+    // Wire SearchKnowledge tool for on-demand knowledge base access
+    if let Some(params) = knowledge_tool_params {
+        orchestrator = orchestrator.with_knowledge_tool(
+            Arc::clone(&params.pipeline),
+            params.project_id.clone(),
+            params.collection_filter.clone(),
+            params.document_filter.clone(),
+            params.awareness_section.clone(),
+        );
     }
 
     // Create channel for event collection (events are discarded for story execution)

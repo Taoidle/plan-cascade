@@ -47,7 +47,7 @@ pub use system_prompt::{
     build_memory_section, build_plugin_commands_section, build_plugin_instructions_section,
     build_plugin_skills_section, build_project_summary, build_skills_section,
     build_sub_agent_tool_guidance, build_system_prompt, build_system_prompt_with_memories,
-    detect_language, merge_system_prompts,
+    build_tool_priority_section, detect_language, merge_system_prompts,
 };
 pub use task_spawner::{
     SubAgentType, TaskContext, TaskExecutionResult, TaskSpawner, MAX_SUB_AGENT_DEPTH,

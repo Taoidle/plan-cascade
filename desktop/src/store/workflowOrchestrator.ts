@@ -1023,6 +1023,7 @@ async function explorePhase(set: SetFn, get: GetFn) {
       apiKey: null,
       baseUrl: explorationResolved.baseUrl || null,
       locale: i18n.language,
+      contextSources: (await import('./contextSources')).useContextSourcesStore.getState().buildConfig() ?? null,
     });
 
     if (result.success && result.data) {

@@ -451,9 +451,8 @@ pub struct KnowledgeCollectionSummary {
 
 /// Build a lightweight knowledge awareness section for the system prompt.
 ///
-/// This tells the AI which knowledge collections are available without
-/// injecting any actual content. The AI uses the SearchKnowledge tool
-/// to query on demand.
+/// Lists available knowledge collections so the AI knows what can be searched.
+/// Tool priority instructions are handled separately by `build_tool_priority_section()`.
 ///
 /// Returns an empty string if no collections are provided.
 pub fn build_knowledge_awareness_section(
@@ -469,21 +468,18 @@ pub fn build_knowledge_awareness_section(
     match language {
         "zh" => {
             section.push_str("\n\n## 知识库\n");
-            section.push_str("你可以使用 SearchKnowledge 工具搜索以下知识集合：\n");
+            section.push_str("以下知识集合可通过 SearchKnowledge 工具搜索：\n");
             for col in collections {
                 section.push_str(&format!(
                     "- {} ({} documents, {} chunks)\n",
                     col.name, col.document_count, col.chunk_count,
                 ));
             }
-            section.push_str(
-                "\n当你需要参考文档、规范、或项目相关知识时，请主动使用 SearchKnowledge 工具查询。",
-            );
         }
         _ => {
             section.push_str("\n\n## Knowledge Base\n");
             section.push_str(
-                "You can search the following knowledge collections using the SearchKnowledge tool:\n",
+                "The following knowledge collections are available via the SearchKnowledge tool:\n",
             );
             for col in collections {
                 section.push_str(&format!(
@@ -491,10 +487,222 @@ pub fn build_knowledge_awareness_section(
                     col.name, col.document_count, col.chunk_count,
                 ));
             }
+        }
+    }
+
+    section
+}
+
+/// Build a unified tool priority section for the system prompt.
+///
+/// Generates priority instructions based on which high-value tools are available:
+/// - Knowledge + Code project: `SearchKnowledge → CodebaseSearch → others`
+/// - Knowledge only:           `SearchKnowledge → others`
+/// - Code project only:        `CodebaseSearch → others`
+/// - Neither:                  returns empty string (no priority needed)
+///
+/// This is injected into both main agent and sub-agent system prompts by the
+/// orchestrator, which knows whether index_store and knowledge_pipeline are set.
+pub fn build_tool_priority_section(
+    has_knowledge: bool,
+    has_codebase_search: bool,
+    language: &str,
+) -> String {
+    if !has_knowledge && !has_codebase_search {
+        return String::new();
+    }
+
+    let mut section = String::new();
+
+    match language {
+        "zh" => {
+            section.push_str("\n\n## 工具选择指南（重要）\n\n");
+            section.push_str("根据你要完成的**任务场景**选择最合适的工具：\n\n");
+
+            // Scenario 1: domain knowledge lookup
+            if has_knowledge {
+                section.push_str(
+                    "### 查找文档/规范/设计/标准\n\
+                     → **SearchKnowledge**\n\
+                     当你需要查阅项目文档、设计规范、API 参考、编码标准、业务规则等领域知识时，\
+                     **首先使用 SearchKnowledge**。知识库基于语义搜索，能理解查询意图。\n\n",
+                );
+            }
+
+            // Scenario 2: code understanding
+            if has_codebase_search {
+                section.push_str(
+                    "### 理解代码架构 / 定位功能实现\n\
+                     → **CodebaseSearch**\n\
+                     当你不确定代码在哪里、需要理解「某个功能是怎么实现的」、或探索不熟悉的代码模块时，\
+                     使用 CodebaseSearch（基于预构建索引，比 Grep 更快更准确）。\n\
+                     - `scope=\"all\"` — 综合搜索（默认推荐）\n\
+                     - `scope=\"symbols\"` — 按名称查找函数/类/结构体定义\n\
+                     - `scope=\"semantic\"` — 用自然语言描述搜索概念\n\n",
+                );
+            }
+
+            // Scenario 3: precise matching
             section.push_str(
-                "\nWhen you need reference documentation, standards, or project-specific knowledge, \
-                 proactively use the SearchKnowledge tool to query.",
+                "### 搜索精确标识符 / 字符串 / 正则匹配\n\
+                 → **Grep**\n\
+                 当你已知确切的函数名、变量名、错误信息、字符串常量、或需要正则表达式匹配时，\
+                 使用 Grep。它逐文件扫描，精确匹配，适合查找所有引用点。\n\n",
             );
+
+            // Scenario 4: reading files
+            section.push_str(
+                "### 查看文件内容\n\
+                 → **Read**\n\
+                 当你已知文件路径，需要查看具体代码或文档内容时使用。\
+                 支持 PDF、DOCX、图片、Jupyter Notebook 等多格式。\n\n",
+            );
+
+            // Scenario 5: finding files by pattern
+            section.push_str(
+                "### 按路径/名称模式查找文件\n\
+                 → **Glob**\n\
+                 当你需要按文件名模式搜索（如 `**/*.rs`、`**/test_*.py`）时使用。\
+                 仅匹配路径，不搜索内容。\n\n",
+            );
+
+            // Scenario 6: browsing directory structure
+            section.push_str(
+                "### 浏览目录结构\n\
+                 → **LS**\n\
+                 当你需要查看某个目录下的文件和子目录列表时使用。\n\n",
+            );
+
+            // Scenario 7: web research
+            section.push_str(
+                "### 查找外部技术方案 / 第三方文档\n\
+                 → **WebSearch** + **WebFetch**\n\
+                 需要搜索互联网信息时用 WebSearch；需要获取特定 URL 内容时用 WebFetch。\n\n",
+            );
+
+            // Key principles
+            section.push_str("### 关键原则\n\n");
+
+            if has_knowledge && has_codebase_search {
+                section.push_str(
+                    "- 涉及**领域知识**（文档/规范/标准/设计）→ 优先 SearchKnowledge\n\
+                     - 涉及**代码搜索**（架构/实现/符号）→ 优先 CodebaseSearch\n\
+                     - SearchKnowledge 和 CodebaseSearch 可以**并行调用**以加速信息收集\n\
+                     - 知识库和代码库搜索不到时再用 Grep/Read/LS 精确定位\n\
+                     - 不要在可以使用 CodebaseSearch 的场景下用 Grep 逐文件扫描\n\
+                     - 即使你认为自己已经知道答案，也应先搜索知识库以获取最新信息\n",
+                );
+            } else if has_knowledge {
+                section.push_str(
+                    "- 涉及**领域知识**（文档/规范/标准/设计）→ 优先 SearchKnowledge\n\
+                     - 即使你认为自己已经知道答案，也应先搜索知识库以获取最新信息\n\
+                     - 知识库搜索不到时再用其他工具定位信息\n",
+                );
+            } else {
+                // has_codebase_search only
+                section.push_str(
+                    "- 涉及**代码搜索**（架构/实现/符号）→ 优先 CodebaseSearch\n\
+                     - 不要在可以使用 CodebaseSearch 的场景下用 Grep 逐文件扫描\n\
+                     - CodebaseSearch 不满足需求时再用 Grep 进行正则搜索\n",
+                );
+            }
+        }
+        _ => {
+            section.push_str("\n\n## Tool Selection Guide (IMPORTANT)\n\n");
+            section.push_str(
+                "Choose the most appropriate tool based on your **task scenario**:\n\n",
+            );
+
+            // Scenario 1: domain knowledge lookup
+            if has_knowledge {
+                section.push_str(
+                    "### Looking up documentation / specs / design / standards\n\
+                     → **SearchKnowledge**\n\
+                     When you need project docs, design specs, API references, coding standards, \
+                     or business rules, **use SearchKnowledge first**. \
+                     It uses semantic search and understands query intent.\n\n",
+                );
+            }
+
+            // Scenario 2: code understanding
+            if has_codebase_search {
+                section.push_str(
+                    "### Understanding code architecture / locating implementations\n\
+                     → **CodebaseSearch**\n\
+                     When you're unsure where code lives, need to understand how a feature is \
+                     implemented, or are exploring unfamiliar modules, use CodebaseSearch \
+                     (pre-built index, faster and more accurate than Grep).\n\
+                     - `scope=\"all\"` — comprehensive search (default, recommended)\n\
+                     - `scope=\"symbols\"` — find function/class/struct definitions by name\n\
+                     - `scope=\"semantic\"` — search concepts using natural language\n\n",
+                );
+            }
+
+            // Scenario 3: precise matching
+            section.push_str(
+                "### Searching for exact identifiers / strings / regex patterns\n\
+                 → **Grep**\n\
+                 When you know the exact function name, variable, error message, string constant, \
+                 or need regex matching, use Grep. It scans files for precise matches \
+                 and is ideal for finding all reference points.\n\n",
+            );
+
+            // Scenario 4: reading files
+            section.push_str(
+                "### Viewing file contents\n\
+                 → **Read**\n\
+                 When you know the file path and need to view specific code or document content. \
+                 Supports PDF, DOCX, images, Jupyter Notebooks, and more.\n\n",
+            );
+
+            // Scenario 5: finding files by pattern
+            section.push_str(
+                "### Finding files by path/name pattern\n\
+                 → **Glob**\n\
+                 When you need to search by filename pattern (e.g., `**/*.rs`, `**/test_*.py`). \
+                 Matches paths only, does not search file contents.\n\n",
+            );
+
+            // Scenario 6: browsing directory structure
+            section.push_str(
+                "### Browsing directory structure\n\
+                 → **LS**\n\
+                 When you need to list files and subdirectories in a folder.\n\n",
+            );
+
+            // Scenario 7: web research
+            section.push_str(
+                "### Looking up external solutions / third-party docs\n\
+                 → **WebSearch** + **WebFetch**\n\
+                 Use WebSearch for internet queries; WebFetch to retrieve specific URL content.\n\n",
+            );
+
+            // Key principles
+            section.push_str("### Key Principles\n\n");
+
+            if has_knowledge && has_codebase_search {
+                section.push_str(
+                    "- **Domain knowledge** (docs/specs/standards/design) → prefer SearchKnowledge\n\
+                     - **Code search** (architecture/implementation/symbols) → prefer CodebaseSearch\n\
+                     - SearchKnowledge and CodebaseSearch can be called **in parallel** to speed up gathering\n\
+                     - Fall back to Grep/Read/LS only when knowledge and code search are insufficient\n\
+                     - Do NOT use Grep to scan files when CodebaseSearch can answer the question\n\
+                     - Even if you think you know the answer, search the knowledge base for the latest info\n",
+                );
+            } else if has_knowledge {
+                section.push_str(
+                    "- **Domain knowledge** (docs/specs/standards/design) → prefer SearchKnowledge\n\
+                     - Even if you think you know the answer, search the knowledge base for the latest info\n\
+                     - Fall back to other tools only when knowledge search is insufficient\n",
+                );
+            } else {
+                // has_codebase_search only
+                section.push_str(
+                    "- **Code search** (architecture/implementation/symbols) → prefer CodebaseSearch\n\
+                     - Do NOT use Grep to scan files when CodebaseSearch can answer the question\n\
+                     - Fall back to Grep for regex search only when CodebaseSearch is insufficient\n",
+                );
+            }
         }
     }
 
@@ -513,127 +721,106 @@ pub fn merge_system_prompts(tool_prompt: &str, user_prompt: Option<&str>) -> Str
     }
 }
 
-/// Build a tool selection guidance section for sub-agents.
+/// Build a scenario-based tool selection guide for sub-agents.
 ///
-/// Sub-agents don't receive the full Decision Tree from the main agent's
-/// system prompt. This function provides a condensed but directive version
-/// that instructs the LLM to use CodebaseSearch as the primary exploration
-/// tool when the index is available.
+/// Sub-agents don't receive the full tool selection guide from the main agent's
+/// system prompt. This function provides a condensed scenario-based version
+/// so sub-agents choose the right tool for each task type.
 ///
 /// The `task_type` parameter differentiates guidance:
 /// - `Some("explore")`: LS and CodebaseSearch are equally recommended (broad exploration)
-/// - Other values / `None`: CodebaseSearch is preferred for initial file discovery
+/// - Other values / `None`: CodebaseSearch is preferred for code understanding tasks
 pub fn build_sub_agent_tool_guidance(
     has_index: bool,
     has_semantic: bool,
     task_type: Option<&str>,
 ) -> String {
     if !has_index {
-        // No index — CodebaseSearch won't work, so no special guidance needed.
         return String::new();
     }
 
     let mut lines = Vec::new();
-    lines.push("## Tool Selection Rules / 工具选择规则".to_string());
+    lines.push("## Tool Selection Guide / 工具选择指南".to_string());
+    lines.push(String::new());
+    lines.push(
+        "A pre-built codebase index is available. Choose tools based on your task:"
+            .to_string(),
+    );
+    lines.push("已有预构建的代码索引。请根据任务场景选择工具：".to_string());
     lines.push(String::new());
 
     match task_type {
         Some("explore") => {
-            // Exploration tasks: tools recommended based on goal, not rigid priority
             lines.push(
-                "A pre-built codebase index is available. Choose tools based on your goal:"
+                "- **Browse directory structure** → **LS** / 浏览目录结构 → LS".to_string(),
+            );
+            lines.push(
+                "- **Find symbols / locate files** → **CodebaseSearch** (scope=\"all\") / 查找符号、定位文件 → CodebaseSearch"
                     .to_string(),
             );
-            lines.push("已有预构建的代码索引。请根据目标选择工具：".to_string());
-            lines.push(String::new());
-            lines.push(
-                "- **LS** — Understand directory structure, list files in a folder.".to_string(),
-            );
-            lines.push("  使用 LS 了解目录结构、列出文件夹内容。".to_string());
-            lines.push(
-                "- **CodebaseSearch** (scope=\"all\") — Find symbols, locate files by keyword."
-                    .to_string(),
-            );
-            lines.push("  使用 CodebaseSearch 查找符号、按关键词定位文件。".to_string());
-
             if has_semantic {
                 lines.push(
-                    "- **CodebaseSearch** (scope=\"semantic\") — Natural-language conceptual queries."
+                    "- **Search by concept / natural language** → **CodebaseSearch** (scope=\"semantic\") / 自然语言搜索 → CodebaseSearch(semantic)"
                         .to_string(),
                 );
-                lines.push("  使用 scope=\"semantic\" 进行自然语言语义搜索。".to_string());
             }
-
-            lines.push("- **Read** — Read specific files after discovery.".to_string());
-            lines.push("  使用 Read 读取发现的具体文件。".to_string());
             lines.push(
-                "- **Grep** — Full-text regex search when CodebaseSearch doesn't cover it."
-                    .to_string(),
+                "- **Read specific files** → **Read** / 读取具体文件 → Read".to_string(),
             );
-            lines.push("  使用 Grep 进行 CodebaseSearch 无法覆盖的全文正则搜索。".to_string());
+            lines.push(
+                "- **Regex / exact string search** → **Grep** / 正则精确搜索 → Grep".to_string(),
+            );
             lines.push(String::new());
             lines.push(
-                "**Query tips**: Use short, focused queries (1-2 keywords). Make separate calls for different concepts."
+                "**Query tips / 查询技巧**: Use short, focused queries (1-2 keywords). 使用简短关键词（1-2个词）。"
                     .to_string(),
-            );
-            lines.push(
-                "**查询技巧**：使用简短关键词（每次1-2个词），不同概念分开查询。".to_string(),
             );
         }
         _ => {
-            // Analyze/implement/main agent: CodebaseSearch preferred
             lines.push(
-                "A pre-built codebase index is available. You MUST follow this priority order:"
-                    .to_string(),
-            );
-            lines.push("已有预构建的代码索引，你必须按以下优先级选择工具：".to_string());
-            lines.push(String::new());
-            lines.push(
-                "1. **CodebaseSearch** (scope=\"all\") — Use first for finding symbols, \
-                 locating files, and understanding project structure. It is faster and more accurate \
-                 than scanning files manually."
+                "- **Understand architecture / locate implementations** → **CodebaseSearch** (scope=\"all\")"
                     .to_string(),
             );
             lines.push(
-                "   优先使用 CodebaseSearch（scope=\"all\"）查找符号、定位文件和理解项目结构。"
+                "  理解架构、定位功能实现 → CodebaseSearch（综合搜索，比 Grep 更快更准确）"
                     .to_string(),
             );
             lines.push(
-                "2. **CodebaseSearch** (scope=\"symbols\") — Use to find specific function, class, \
-                 or struct definitions by name."
+                "- **Find function/class/struct definitions** → **CodebaseSearch** (scope=\"symbols\")"
                     .to_string(),
             );
-            lines.push("   使用 scope=\"symbols\" 按名称查找函数、类或结构体定义。".to_string());
-
+            lines.push(
+                "  按名称查找函数/类/结构体定义 → CodebaseSearch(symbols)".to_string(),
+            );
             if has_semantic {
                 lines.push(
-                    "3. **CodebaseSearch** (scope=\"semantic\") — Use for natural-language conceptual \
-                     queries when you need semantic matches."
+                    "- **Conceptual / natural language search** → **CodebaseSearch** (scope=\"semantic\")"
                         .to_string(),
                 );
-                lines.push("   使用 scope=\"semantic\" 进行自然语言语义搜索。".to_string());
+                lines.push(
+                    "  自然语言语义搜索 → CodebaseSearch(semantic)".to_string(),
+                );
             }
-
-            lines.push(String::new());
             lines.push(
-                "Use **Read** after CodebaseSearch to read specific files you discovered."
-                    .to_string(),
-            );
-            lines.push("使用 Read 读取通过 CodebaseSearch 发现的具体文件。".to_string());
-            lines.push(
-                "Use **Grep** ONLY for full-text regex search or when CodebaseSearch reports index unavailable."
+                "- **View file contents** → **Read** (after locating files via CodebaseSearch)"
                     .to_string(),
             );
             lines.push(
-                "仅在需要正则全文搜索或 CodebaseSearch 报告索引不可用时使用 Grep。".to_string(),
-            );
-            lines.push(
-                "Prefer CodebaseSearch over LS/Glob for initial file discovery — the index is faster and more comprehensive."
+                "  查看文件内容 → Read（先用 CodebaseSearch 定位，再用 Read 读取）"
                     .to_string(),
             );
             lines.push(
-                "建议优先使用 CodebaseSearch 而非 LS/Glob 进行初始文件发现——索引更快更全面。"
+                "- **Exact identifier / regex search** → **Grep** (when CodebaseSearch is insufficient)"
                     .to_string(),
+            );
+            lines.push(
+                "  精确标识符/正则搜索 → Grep（CodebaseSearch 不满足时使用）".to_string(),
+            );
+            lines.push(
+                "- **Find files by pattern** → **Glob** (e.g., `**/*.rs`)".to_string(),
+            );
+            lines.push(
+                "  按模式查找文件 → Glob".to_string(),
             );
         }
     }
