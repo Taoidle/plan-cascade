@@ -115,6 +115,16 @@
     "embeddingComplete": "{{count}} エンベディング"
   },
 
+  "docsIndexing": {
+    "scanning": "ドキュメントをスキャン中...",
+    "indexing": "ドキュメント {{progress}}%",
+    "indexed": "{{count}} ドキュメント",
+    "changesPending": "ドキュメント変更あり",
+    "syncing": "ドキュメントを同期中...",
+    "syncDocs": "同期",
+    "error": "ドキュメントエラー"
+  },
+
   "time": {
     "justNow": "たった今",
     "minutesAgo": "{{count}}分前",

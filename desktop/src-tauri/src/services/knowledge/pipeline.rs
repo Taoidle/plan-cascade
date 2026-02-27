@@ -271,6 +271,7 @@ impl RagPipeline {
                     let _ = handle.emit(
                         "knowledge:ingest-progress",
                         serde_json::json!({
+                            "collection_name": collection_name,
                             "stage": stage,
                             "progress": progress,
                             "detail": detail,

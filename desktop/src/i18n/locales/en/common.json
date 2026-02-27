@@ -118,6 +118,16 @@
     "lspEnrichmentUnavailable": "LSP unavailable"
   },
 
+  "docsIndexing": {
+    "scanning": "Scanning docs...",
+    "indexing": "Docs {{progress}}%",
+    "indexed": "{{count}} docs",
+    "changesPending": "Docs changed",
+    "syncing": "Syncing docs...",
+    "syncDocs": "Sync",
+    "error": "Docs error"
+  },
+
   "time": {
     "justNow": "Just now",
     "minutesAgo": "{{count}}m ago",

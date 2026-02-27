@@ -118,6 +118,16 @@
     "lspEnrichmentUnavailable": "LSP 不可用"
   },
 
+  "docsIndexing": {
+    "scanning": "扫描文档中...",
+    "indexing": "文档 {{progress}}%",
+    "indexed": "{{count}} 文档",
+    "changesPending": "文档已变更",
+    "syncing": "同步文档中...",
+    "syncDocs": "同步",
+    "error": "文档错误"
+  },
+
   "time": {
     "justNow": "刚刚",
     "minutesAgo": "{{count}}分钟前",

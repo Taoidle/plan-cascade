@@ -10,7 +10,7 @@ import { clsx } from 'clsx';
 import { ConnectionStatus } from './ConnectionStatus';
 import { ModelSwitcher } from './ModelSwitcher';
 import { PermissionSelector } from './PermissionSelector';
-import { ProjectSelector, IndexStatus } from '../shared';
+import { ProjectSelector, IndexStatus, DocsIndexStatus } from '../shared';
 import type { ConnectionStatus as ConnectionStatusType } from '../../lib/claudeCodeClient';
 import type { PermissionLevel } from '../../types/permission';
 
@@ -70,8 +70,9 @@ export function BottomStatusBar({
       {workspacePath && (
         <>
           <Divider />
-          <div className="hidden lg:flex">
+          <div className="hidden lg:flex items-center gap-2">
             <IndexStatus compact />
+            <DocsIndexStatus compact />
           </div>
         </>
       )}
