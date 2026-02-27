@@ -41,6 +41,9 @@ pub struct KnowledgeCollection {
     pub created_at: String,
     /// ISO 8601 last-update timestamp.
     pub updated_at: String,
+    /// Optional workspace path associating this collection with a project directory.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_path: Option<String>,
 }
 
 /// Query result from the RAG pipeline.
@@ -143,6 +146,25 @@ impl RagPipeline {
             [],
         )
         .map_err(|e| AppError::database(format!("Failed to create index: {}", e)))?;
+
+        // Migration: add workspace_path column if it doesn't exist
+        let has_workspace_path: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('knowledge_collections') WHERE name='workspace_path'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| AppError::database(format!("Failed to check column existence: {}", e)))?
+            > 0;
+        if !has_workspace_path {
+            conn.execute(
+                "ALTER TABLE knowledge_collections ADD COLUMN workspace_path TEXT DEFAULT NULL",
+                [],
+            )
+            .map_err(|e| {
+                AppError::database(format!("Failed to add workspace_path column: {}", e))
+            })?;
+        }
 
         Ok(())
     }
@@ -450,7 +472,7 @@ impl RagPipeline {
 
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, project_id, description, chunk_count, created_at, updated_at
+                "SELECT id, name, project_id, description, chunk_count, created_at, updated_at, workspace_path
                  FROM knowledge_collections WHERE project_id = ?1 ORDER BY name",
             )
             .map_err(|e| AppError::database(format!("Failed to prepare query: {}", e)))?;
@@ -465,6 +487,7 @@ impl RagPipeline {
                     chunk_count: row.get(4)?,
                     created_at: row.get(5)?,
                     updated_at: row.get(6)?,
+                    workspace_path: row.get(7)?,
                 })
             })
             .map_err(|e| AppError::database(format!("Failed to query collections: {}", e)))?;
@@ -650,6 +673,77 @@ impl RagPipeline {
         Ok(())
     }
 
+    /// Update a collection's metadata.
+    ///
+    /// Only the fields wrapped in `Some` are updated; `None` means "don't change".
+    /// For `workspace_path`, `Some(None)` clears the field and `Some(Some(x))` sets it.
+    pub fn update_collection(
+        &self,
+        collection_id: &str,
+        name: Option<&str>,
+        description: Option<&str>,
+        workspace_path: Option<Option<&str>>,
+    ) -> AppResult<KnowledgeCollection> {
+        let conn = self
+            .database
+            .get_connection()
+            .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
+
+        // Build SET clauses dynamically
+        let mut set_parts: Vec<String> = Vec::new();
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+        if let Some(n) = name {
+            set_parts.push("name = ?".to_string());
+            params.push(Box::new(n.to_string()));
+        }
+        if let Some(d) = description {
+            set_parts.push("description = ?".to_string());
+            params.push(Box::new(d.to_string()));
+        }
+        if let Some(wp) = workspace_path {
+            set_parts.push("workspace_path = ?".to_string());
+            params.push(Box::new(wp.map(|s| s.to_string())));
+        }
+
+        if set_parts.is_empty() {
+            return self.get_collection(collection_id);
+        }
+
+        set_parts.push("updated_at = datetime('now')".to_string());
+
+        let sql = format!(
+            "UPDATE knowledge_collections SET {} WHERE id = ?",
+            set_parts.join(", ")
+        );
+        params.push(Box::new(collection_id.to_string()));
+
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+
+        let rows_affected = conn
+            .execute(&sql, param_refs.as_slice())
+            .map_err(|e| AppError::database(format!("Failed to update collection: {}", e)))?;
+
+        if rows_affected == 0 {
+            return Err(AppError::not_found(format!(
+                "Collection '{}' not found",
+                collection_id
+            )));
+        }
+
+        self.get_collection(collection_id)
+    }
+
+    /// Returns a reference to the embedding manager used by this pipeline.
+    pub fn embedding_manager(&self) -> &Arc<EmbeddingManager> {
+        &self.embedding_manager
+    }
+
+    /// Returns a reference to the HNSW index used by this pipeline.
+    pub fn hnsw_index(&self) -> &Arc<HnswIndex> {
+        &self.hnsw_index
+    }
+
     /// Get a collection by ID.
     fn get_collection(&self, collection_id: &str) -> AppResult<KnowledgeCollection> {
         let conn = self
@@ -658,7 +752,7 @@ impl RagPipeline {
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         conn.query_row(
-            "SELECT id, name, project_id, description, chunk_count, created_at, updated_at
+            "SELECT id, name, project_id, description, chunk_count, created_at, updated_at, workspace_path
              FROM knowledge_collections WHERE id = ?1",
             rusqlite::params![collection_id],
             |row| {
@@ -670,6 +764,7 @@ impl RagPipeline {
                     chunk_count: row.get(4)?,
                     created_at: row.get(5)?,
                     updated_at: row.get(6)?,
+                    workspace_path: row.get(7)?,
                 })
             },
         )
@@ -954,10 +1049,90 @@ mod tests {
             chunk_count: 42,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
+            workspace_path: None,
         };
         let json = serde_json::to_string(&col).unwrap();
         let deserialized: KnowledgeCollection = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.name, "test");
         assert_eq!(deserialized.chunk_count, 42);
+        assert!(deserialized.workspace_path.is_none());
+    }
+
+    #[test]
+    fn knowledge_collection_serde_with_workspace_path() {
+        let col = KnowledgeCollection {
+            id: "id-2".to_string(),
+            name: "test-wp".to_string(),
+            project_id: "proj-2".to_string(),
+            description: "desc".to_string(),
+            chunk_count: 10,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+            workspace_path: Some("/home/user/project".to_string()),
+        };
+        let json = serde_json::to_string(&col).unwrap();
+        assert!(json.contains("workspace_path"));
+        let deserialized: KnowledgeCollection = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            deserialized.workspace_path,
+            Some("/home/user/project".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn update_collection_changes_fields() {
+        let (pipeline, _dir) = create_test_pipeline().await;
+
+        let docs = vec![Document::new("d1", "Content.")];
+        let col = pipeline
+            .ingest("update-test", "proj-1", "Old description", docs)
+            .await
+            .unwrap();
+
+        let updated = pipeline
+            .update_collection(
+                &col.id,
+                Some("new-name"),
+                Some("New description"),
+                Some(Some("/home/user/project")),
+            )
+            .unwrap();
+
+        assert_eq!(updated.name, "new-name");
+        assert_eq!(updated.description, "New description");
+        assert_eq!(
+            updated.workspace_path,
+            Some("/home/user/project".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn update_collection_clears_workspace_path() {
+        let (pipeline, _dir) = create_test_pipeline().await;
+
+        let docs = vec![Document::new("d1", "Content.")];
+        let col = pipeline
+            .ingest("clear-wp-test", "proj-1", "Test", docs)
+            .await
+            .unwrap();
+
+        // Set workspace_path
+        pipeline
+            .update_collection(&col.id, None, None, Some(Some("/some/path")))
+            .unwrap();
+
+        // Clear workspace_path
+        let updated = pipeline
+            .update_collection(&col.id, None, None, Some(None))
+            .unwrap();
+
+        assert!(updated.workspace_path.is_none());
+    }
+
+    #[tokio::test]
+    async fn update_nonexistent_collection_errors() {
+        let (pipeline, _dir) = create_test_pipeline().await;
+        let result = pipeline.update_collection("nonexistent-id", Some("x"), None, None);
+        assert!(result.is_err());
     }
 }

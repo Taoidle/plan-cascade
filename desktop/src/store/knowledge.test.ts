@@ -249,6 +249,75 @@ describe('Knowledge Store', () => {
   });
 
   // ========================================================================
+  // updateCollection
+  // ========================================================================
+
+  describe('updateCollection', () => {
+    it('updates collection in list on success', async () => {
+      const updated = {
+        ...MOCK_COLLECTION,
+        name: 'new-name',
+        description: 'new desc',
+        workspace_path: '/home/user/project',
+      };
+      useKnowledgeStore.setState({ collections: [MOCK_COLLECTION] });
+
+      mockInvoke.mockResolvedValueOnce({ success: true, data: updated, error: null });
+
+      const result = await useKnowledgeStore
+        .getState()
+        .updateCollection('col-1', 'new-name', 'new desc', '/home/user/project');
+
+      expect(result).toBe(true);
+      const state = useKnowledgeStore.getState();
+      expect(state.collections[0].name).toBe('new-name');
+      expect(state.collections[0].description).toBe('new desc');
+      expect(state.isLoading).toBe(false);
+    });
+
+    it('updates activeCollection if it matches', async () => {
+      const updated = { ...MOCK_COLLECTION, description: 'updated desc' };
+      useKnowledgeStore.setState({
+        collections: [MOCK_COLLECTION],
+        activeCollection: MOCK_COLLECTION,
+      });
+
+      mockInvoke.mockResolvedValueOnce({ success: true, data: updated, error: null });
+
+      await useKnowledgeStore.getState().updateCollection('col-1', undefined, 'updated desc');
+
+      expect(useKnowledgeStore.getState().activeCollection?.description).toBe('updated desc');
+    });
+
+    it('sets error on failure', async () => {
+      mockInvoke.mockResolvedValueOnce({
+        success: false,
+        data: null,
+        error: 'Update failed',
+      });
+
+      const result = await useKnowledgeStore.getState().updateCollection('col-1', 'new-name');
+
+      expect(result).toBe(false);
+      expect(useKnowledgeStore.getState().error).toBe('Update failed');
+    });
+
+    it('preserves other collections when updating one', async () => {
+      const updated = { ...MOCK_COLLECTION, description: 'changed' };
+      useKnowledgeStore.setState({ collections: [MOCK_COLLECTION, MOCK_COLLECTION_2] });
+
+      mockInvoke.mockResolvedValueOnce({ success: true, data: updated, error: null });
+
+      await useKnowledgeStore.getState().updateCollection('col-1', undefined, 'changed');
+
+      const state = useKnowledgeStore.getState();
+      expect(state.collections).toHaveLength(2);
+      expect(state.collections[0].description).toBe('changed');
+      expect(state.collections[1].name).toBe('second-collection');
+    });
+  });
+
+  // ========================================================================
   // ingestDocuments
   // ========================================================================
 

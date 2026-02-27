@@ -55,6 +55,11 @@ export function CollectionDetail({ collection }: CollectionDetailProps) {
         <StatCard label={t('detail.chunkCount')} value={String(collection.chunk_count)} />
         <StatCard label={t('detail.projectId')} value={collection.project_id} />
         <StatCard label={t('detail.collectionId')} value={collection.id} truncate />
+        <StatCard
+          label={t('detail.workspacePath')}
+          value={collection.workspace_path || t('detail.noWorkspacePath')}
+          truncate
+        />
       </div>
 
       {/* Document List */}

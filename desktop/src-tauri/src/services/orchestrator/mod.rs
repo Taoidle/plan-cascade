@@ -9,6 +9,7 @@ mod analysis_merge;
 mod analysis_scheduler;
 mod analysis_store;
 pub mod background_indexer;
+pub mod embedding_config_builder;
 pub mod embedding_manager;
 pub mod embedding_provider;
 pub mod embedding_provider_glm;

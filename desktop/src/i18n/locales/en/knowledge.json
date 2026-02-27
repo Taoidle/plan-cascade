@@ -18,6 +18,12 @@
   "description": "Description",
   "descriptionPlaceholder": "Brief description of this collection",
 
+  "editCollection": "Edit Collection",
+  "updateCollection": "Update Collection",
+  "updating": "Updating...",
+  "workspacePath": "Workspace Path",
+  "workspacePathPlaceholder": "Optional: select a project directory",
+
   "deleteCollection": "Delete Collection",
   "deleteConfirm": "Are you sure you want to delete the collection \"{{name}}\"? This will remove all documents and indexed data.",
 
@@ -40,6 +46,8 @@
     "chunkCount": "Chunk Count",
     "projectId": "Project ID",
     "collectionId": "Collection ID",
+    "workspacePath": "Workspace Path",
+    "noWorkspacePath": "Not linked to a project",
     "timestamps": "Timestamps",
     "createdAt": "Created",
     "updatedAt": "Last Updated"

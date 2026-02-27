@@ -24,17 +24,13 @@ use super::background_indexer::{
 };
 use super::lsp_enricher::LspEnricher;
 use super::lsp_registry::LspServerRegistry;
+use super::embedding_config_builder;
 use super::embedding_manager::{EmbeddingManager, EmbeddingManagerConfig};
-use super::embedding_provider::{
-    EmbeddingProviderConfig, EmbeddingProviderType, PersistedEmbeddingConfig,
-    EMBEDDING_CONFIG_SETTING_KEY,
-};
+use super::embedding_provider::{EmbeddingProviderConfig, EmbeddingProviderType};
 use super::embedding_provider_tfidf::TfIdfEmbeddingProvider;
 use super::embedding_service::EmbeddingService;
 use super::hnsw_index::HnswIndex;
 use super::index_store::IndexStore;
-use crate::commands::proxy::resolve_provider_proxy;
-use crate::services::proxy::ProxyConfig;
 use crate::storage::database::{Database, DbPool};
 use crate::storage::KeyringService;
 
@@ -976,27 +972,9 @@ impl IndexManager {
     /// Load the persisted embedding configuration from the `settings` table.
     ///
     /// Returns `None` if no config is stored or if deserialization fails.
-    fn load_persisted_embedding_config(&self) -> Option<PersistedEmbeddingConfig> {
-        match self.index_store.get_setting(EMBEDDING_CONFIG_SETTING_KEY) {
-            Ok(Some(json)) => match serde_json::from_str::<PersistedEmbeddingConfig>(&json) {
-                Ok(config) => Some(config),
-                Err(e) => {
-                    warn!(
-                        error = %e,
-                        "index manager: failed to parse persisted embedding config"
-                    );
-                    None
-                }
-            },
-            Ok(None) => None,
-            Err(e) => {
-                warn!(
-                    error = %e,
-                    "index manager: failed to read embedding config from DB"
-                );
-                None
-            }
-        }
+    fn load_persisted_embedding_config(&self) -> Option<super::embedding_provider::PersistedEmbeddingConfig> {
+        let db = Database::from_pool(self.db_pool.clone());
+        embedding_config_builder::load_persisted_embedding_config(&db)
     }
 
     /// Build an `EmbeddingManager` based on the persisted DB configuration.
@@ -1010,73 +988,29 @@ impl IndexManager {
         &self,
         embedding_svc: Arc<EmbeddingService>,
     ) -> (Arc<EmbeddingManager>, bool) {
-        let persisted = self.load_persisted_embedding_config();
+        let db = Database::from_pool(self.db_pool.clone());
+        let keyring = KeyringService::new();
+        let (config, _dimension, is_tfidf) =
+            embedding_config_builder::build_embedding_config_from_settings(&db, &keyring);
 
-        let persisted = match persisted {
-            Some(c) if c.provider != EmbeddingProviderType::TfIdf => c,
-            _ => {
-                // No config or TF-IDF configured → default path
-                return self.build_tfidf_manager(embedding_svc);
-            }
-        };
+        if is_tfidf {
+            return self.build_tfidf_manager(embedding_svc);
+        }
 
-        // Resolve API key from the OS keyring for cloud providers.
-        let api_key: Option<String> = match Self::embedding_keyring_alias(persisted.provider) {
-            Some(alias) => match KeyringService::new().get_api_key(alias) {
-                Ok(Some(key)) if !key.is_empty() => Some(key),
-                Ok(_) => {
-                    warn!(
-                        provider = ?persisted.provider,
-                        "index manager: API key is empty or missing, falling back to TF-IDF"
-                    );
-                    return self.build_tfidf_manager(embedding_svc);
-                }
-                Err(e) => {
-                    warn!(
-                        provider = ?persisted.provider,
-                        error = %e,
-                        "index manager: failed to get API key, falling back to TF-IDF"
-                    );
-                    return self.build_tfidf_manager(embedding_svc);
-                }
-            },
-            None => None, // Local providers (Ollama) don't need keys
-        };
-
-        // Build primary provider config.
-        let mut primary_config = EmbeddingProviderConfig::new(persisted.provider);
-        primary_config.model = persisted.model.clone();
-        primary_config.api_key = api_key;
-        primary_config.base_url = persisted.base_url.clone();
-        primary_config.dimension = persisted.dimension;
-        primary_config.batch_size = persisted.batch_size;
-        // Resolve proxy configuration from the database settings.
-        primary_config.proxy = self.resolve_embedding_proxy(persisted.provider);
-
-        // Build optional fallback config (TF-IDF fallback is common).
-        let fallback_config = persisted
-            .fallback_provider
-            .map(|fb_type| EmbeddingProviderConfig::new(fb_type));
-
-        let manager_config = EmbeddingManagerConfig {
-            primary: primary_config,
-            fallback: fallback_config,
-            cache_enabled: true,
-            cache_max_entries: 10_000,
-        };
-
-        match EmbeddingManager::from_config(manager_config) {
+        match EmbeddingManager::from_config(config) {
             Ok(mgr) => {
-                info!(
-                    provider = ?persisted.provider,
-                    model = %persisted.model,
-                    "index manager: using cloud embedding provider from DB config"
-                );
+                let persisted = self.load_persisted_embedding_config();
+                if let Some(ref p) = persisted {
+                    info!(
+                        provider = ?p.provider,
+                        model = %p.model,
+                        "index manager: using cloud embedding provider from DB config"
+                    );
+                }
                 (Arc::new(mgr), false)
             }
             Err(e) => {
                 warn!(
-                    provider = ?persisted.provider,
                     error = %e,
                     "index manager: failed to create cloud provider, falling back to TF-IDF"
                 );
@@ -1103,31 +1037,11 @@ impl IndexManager {
         )
     }
 
-    /// Resolve the proxy configuration for a given embedding provider type.
-    ///
-    /// Reads the per-provider proxy strategy from the database and resolves
-    /// it against the global proxy config (if any).
-    fn resolve_embedding_proxy(&self, provider: EmbeddingProviderType) -> Option<ProxyConfig> {
-        let alias = match provider {
-            EmbeddingProviderType::OpenAI => "embedding_openai",
-            EmbeddingProviderType::Qwen => "embedding_qwen",
-            EmbeddingProviderType::Glm => "embedding_glm",
-            EmbeddingProviderType::Ollama => "embedding_ollama",
-            EmbeddingProviderType::TfIdf => return None,
-        };
-        let keyring = KeyringService::new();
-        let db = Database::from_pool(self.db_pool.clone());
-        resolve_provider_proxy(&keyring, &db, alias)
-    }
-
     /// Return the keyring alias for a given embedding provider type.
+    ///
+    /// Delegates to the shared `embedding_config_builder` module.
     fn embedding_keyring_alias(provider: EmbeddingProviderType) -> Option<&'static str> {
-        match provider {
-            EmbeddingProviderType::Qwen => Some("qwen_embedding"),
-            EmbeddingProviderType::Glm => Some("glm_embedding"),
-            EmbeddingProviderType::OpenAI => Some("openai_embedding"),
-            EmbeddingProviderType::TfIdf | EmbeddingProviderType::Ollama => None,
-        }
+        embedding_config_builder::embedding_keyring_alias(provider)
     }
 
     /// Abort and remove an active indexer for the given project path.

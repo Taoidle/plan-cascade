@@ -1,0 +1,79 @@
+{
+  "title": "ナレッジベース",
+  "subtitle": "{{count}} 件のコレクション",
+  "newCollection": "新規コレクション",
+  "loading": "コレクションを読み込み中...",
+  "noCollections": "ナレッジコレクションがありません",
+  "noCollectionsHint": "コレクションを作成してドキュメントをアップロードしましょう",
+  "selectCollection": "コレクションを選択して詳細を表示",
+  "dismiss": "閉じる",
+  "delete": "削除",
+  "deleting": "削除中...",
+  "creating": "作成中...",
+  "create": "作成",
+
+  "createCollection": "コレクションを作成",
+  "collectionName": "コレクション名",
+  "collectionNamePlaceholder": "例：project-docs",
+  "description": "説明",
+  "descriptionPlaceholder": "このコレクションの簡単な説明",
+
+  "editCollection": "コレクションを編集",
+  "updateCollection": "コレクションを更新",
+  "updating": "更新中...",
+  "workspacePath": "ワークスペースパス",
+  "workspacePathPlaceholder": "任意：プロジェクトディレクトリを選択",
+
+  "deleteCollection": "コレクションを削除",
+  "deleteConfirm": "コレクション「{{name}}」を削除してもよろしいですか？すべてのドキュメントとインデックスデータが削除されます。",
+
+  "chunks": "{{count}} チャンク",
+
+  "documents": {
+    "title": "{{count}} 件のドキュメント",
+    "chunks": "{{count}} チャンク",
+    "deleteConfirm": "ドキュメント「{{id}}」を削除しますか？",
+    "noDocuments": "このコレクションにドキュメントがありません"
+  },
+
+  "tabs": {
+    "details": "詳細",
+    "upload": "アップロード",
+    "query": "検索"
+  },
+
+  "detail": {
+    "chunkCount": "チャンク数",
+    "projectId": "プロジェクト ID",
+    "collectionId": "コレクション ID",
+    "workspacePath": "ワークスペースパス",
+    "noWorkspacePath": "プロジェクト未関連",
+    "timestamps": "タイムスタンプ",
+    "createdAt": "作成日時",
+    "updatedAt": "最終更新日時"
+  },
+
+  "upload": {
+    "title": "ドキュメントをアップロード",
+    "subtitle": "ドキュメントをアップロードしてこのナレッジコレクションにインデックスします",
+    "dragOrClick": "ファイルをドラッグするか、クリックして選択",
+    "dropHere": "ここにファイルをドロップ",
+    "acceptedFormats": "対応形式：PDF、DOCX、XLSX、Markdown、プレーンテキスト",
+    "noValidFiles": "有効なファイルが見つかりません。対応形式：PDF、DOCX、XLSX、MD、TXT",
+    "selectedFiles": "{{count}} 件のファイルを選択中",
+    "ingesting": "ドキュメントをインデックス中...",
+    "uploadAndIndex": "{{count}} 件のファイルをアップロード＆インデックス"
+  },
+
+  "query": {
+    "title": "ナレッジ検索",
+    "subtitle": "このコレクションから関連情報を検索します",
+    "placeholder": "検索クエリを入力...",
+    "search": "検索",
+    "searching": "検索中...",
+    "topK": "結果数：",
+    "clearResults": "クリア",
+    "resultsFound": "{{total}} チャンクから {{count}} 件の結果",
+    "noResults": "一致する結果が見つかりません"
+  }
+}

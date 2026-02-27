@@ -22,6 +22,8 @@ export interface KnowledgeCollection {
   chunk_count: number;
   created_at: string;
   updated_at: string;
+  /** Optional workspace path associating this collection with a project directory. */
+  workspace_path?: string;
 }
 
 /** A document to ingest into a collection. */
@@ -151,6 +153,35 @@ export async function ragDeleteCollection(
     return await invoke<CommandResponse<boolean>>('rag_delete_collection', {
       collectionName,
       projectId,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// rag_update_collection
+// ---------------------------------------------------------------------------
+
+/**
+ * Update a knowledge collection's metadata (name, description, workspace path).
+ */
+export async function ragUpdateCollection(
+  collectionId: string,
+  name?: string,
+  description?: string,
+  workspacePath?: string | null,
+): Promise<CommandResponse<KnowledgeCollection>> {
+  try {
+    return await invoke<CommandResponse<KnowledgeCollection>>('rag_update_collection', {
+      collectionId,
+      name: name ?? null,
+      description: description ?? null,
+      workspacePath: workspacePath === undefined ? null : workspacePath,
     });
   } catch (error) {
     return {

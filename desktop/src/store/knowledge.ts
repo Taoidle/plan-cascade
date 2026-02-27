@@ -13,6 +13,7 @@ import {
   ragIngestDocuments,
   ragQuery,
   ragDeleteCollection,
+  ragUpdateCollection,
   ragListDocuments,
   ragDeleteDocument,
 } from '../lib/knowledgeApi';
@@ -62,6 +63,12 @@ export interface KnowledgeState {
     documents: DocumentInput[],
   ) => Promise<boolean>;
   deleteCollection: (projectId: string, collectionName: string) => Promise<boolean>;
+  updateCollection: (
+    collectionId: string,
+    name?: string,
+    description?: string,
+    workspacePath?: string | null,
+  ) => Promise<boolean>;
   ingestDocuments: (projectId: string, collectionName: string, documents: DocumentInput[]) => Promise<boolean>;
   fetchDocuments: (collectionId: string) => Promise<void>;
   deleteDocument: (collectionId: string, documentId: string) => Promise<boolean>;
@@ -182,6 +189,38 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, _get) => ({
     } catch (err) {
       set({
         isDeleting: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
+  },
+
+  updateCollection: async (
+    collectionId: string,
+    name?: string,
+    description?: string,
+    workspacePath?: string | null,
+  ) => {
+    set({ isLoading: true, error: null });
+    try {
+      const result = await ragUpdateCollection(collectionId, name, description, workspacePath);
+      if (result.success && result.data) {
+        set((state) => ({
+          collections: state.collections.map((c) => (c.id === collectionId ? result.data! : c)),
+          activeCollection: state.activeCollection?.id === collectionId ? result.data! : state.activeCollection,
+          isLoading: false,
+        }));
+        return true;
+      } else {
+        set({
+          isLoading: false,
+          error: result.error ?? 'Failed to update collection',
+        });
+        return false;
+      }
+    } catch (err) {
+      set({
+        isLoading: false,
         error: err instanceof Error ? err.message : String(err),
       });
       return false;

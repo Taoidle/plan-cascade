@@ -14,10 +14,12 @@ use crate::services::knowledge::pipeline::{
     DocumentSummary, KnowledgeCollection, RagPipeline, RagQueryResult,
 };
 use crate::services::knowledge::reranker::{NoopReranker, Reranker, SearchResult};
+use crate::services::orchestrator::embedding_config_builder;
 use crate::services::orchestrator::embedding_manager::{EmbeddingManager, EmbeddingManagerConfig};
 use crate::services::orchestrator::embedding_provider::{
     EmbeddingProviderConfig, EmbeddingProviderType,
 };
+use crate::services::orchestrator::embedding_provider_tfidf::TfIdfEmbeddingProvider;
 use crate::services::orchestrator::hnsw_index::HnswIndex;
 use crate::storage::Database;
 use crate::utils::error::{AppError, AppResult};
@@ -40,12 +42,19 @@ impl KnowledgeState {
         }
     }
 
-    /// Initialize the knowledge pipeline from a Database instance.
+    /// Initialize the knowledge pipeline with a pre-built embedding config.
     ///
-    /// Uses ParagraphChunker (default 1000 chars), TfIdf embeddings,
-    /// HNSW index, and NoopReranker as the default configuration.
+    /// Uses the provided `EmbeddingManagerConfig` (typically from
+    /// `embedding_config_builder::build_embedding_config_from_settings`).
+    /// When using TF-IDF, attempts to restore persisted vocabulary from disk.
+    ///
     /// Subsequent calls are no-ops if already initialized.
-    pub async fn initialize(&self, database: Arc<Database>) -> AppResult<()> {
+    pub async fn initialize_with_config(
+        &self,
+        database: Arc<Database>,
+        emb_config: EmbeddingManagerConfig,
+        is_tfidf: bool,
+    ) -> AppResult<()> {
         let mut guard = self.pipeline.write().await;
         if guard.is_some() {
             return Ok(());
@@ -53,12 +62,6 @@ impl KnowledgeState {
 
         let chunker: Arc<dyn Chunker> = Arc::new(ParagraphChunker::new(1000));
 
-        let emb_config = EmbeddingManagerConfig {
-            primary: EmbeddingProviderConfig::new(EmbeddingProviderType::TfIdf),
-            fallback: None,
-            cache_enabled: false,
-            cache_max_entries: 0,
-        };
         let embedding_manager =
             Arc::new(EmbeddingManager::from_config(emb_config).map_err(|e| {
                 AppError::internal(format!("Failed to create EmbeddingManager: {}", e))
@@ -73,11 +76,38 @@ impl KnowledgeState {
 
         let reranker: Option<Arc<dyn Reranker>> = Some(Arc::new(NoopReranker));
 
-        let pipeline =
-            RagPipeline::new(chunker, embedding_manager, hnsw_index, reranker, database)?;
+        let pipeline = RagPipeline::new(
+            chunker,
+            Arc::clone(&embedding_manager),
+            hnsw_index,
+            reranker,
+            database,
+        )?;
+
+        // If using TF-IDF, try to restore persisted vocabulary from disk
+        if is_tfidf {
+            load_tfidf_vocab(&embedding_manager);
+        }
+
         *guard = Some(Arc::new(pipeline));
 
         Ok(())
+    }
+
+    /// Initialize the knowledge pipeline from a Database instance.
+    ///
+    /// Convenience method that defaults to TF-IDF embeddings. Used by tests
+    /// and callers that don't need custom embedding configuration.
+    ///
+    /// Subsequent calls are no-ops if already initialized.
+    pub async fn initialize(&self, database: Arc<Database>) -> AppResult<()> {
+        let emb_config = EmbeddingManagerConfig {
+            primary: EmbeddingProviderConfig::new(EmbeddingProviderType::TfIdf),
+            fallback: None,
+            cache_enabled: false,
+            cache_max_entries: 0,
+        };
+        self.initialize_with_config(database, emb_config, true).await
     }
 
     /// Initialize the knowledge pipeline with an existing pipeline instance.
@@ -143,10 +173,98 @@ pub struct QueryRequest {
     pub top_k: Option<usize>,
 }
 
+// ---------------------------------------------------------------------------
+// TF-IDF Vocabulary Persistence
+// ---------------------------------------------------------------------------
+
+use std::path::PathBuf;
+
+/// Path to the persisted TF-IDF vocabulary file for the knowledge pipeline.
+fn vocab_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| std::env::temp_dir())
+        .join(".plan-cascade")
+        .join("knowledge-tfidf-vocab.json")
+}
+
+/// Save the current TF-IDF vocabulary to disk (if the primary provider is TF-IDF).
+fn save_tfidf_vocab(embedding_manager: &EmbeddingManager) {
+    let provider = embedding_manager.primary_provider();
+    if let Some(tfidf) = provider.as_any().downcast_ref::<TfIdfEmbeddingProvider>() {
+        if let Some(json) = tfidf.export_vocabulary() {
+            let path = vocab_path();
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            match std::fs::write(&path, &json) {
+                Ok(()) => {
+                    tracing::debug!("knowledge: saved TF-IDF vocabulary to {}", path.display());
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "knowledge: failed to save TF-IDF vocabulary"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Load persisted TF-IDF vocabulary from disk into the embedding manager.
+fn load_tfidf_vocab(embedding_manager: &EmbeddingManager) {
+    let path = vocab_path();
+    if !path.exists() {
+        return;
+    }
+    match std::fs::read_to_string(&path) {
+        Ok(json) => {
+            let provider = embedding_manager.primary_provider();
+            if let Some(tfidf) = provider.as_any().downcast_ref::<TfIdfEmbeddingProvider>() {
+                match tfidf.import_vocabulary(&json) {
+                    Ok(()) => {
+                        tracing::info!(
+                            "knowledge: restored TF-IDF vocabulary from {}",
+                            path.display()
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "knowledge: failed to import TF-IDF vocabulary"
+                        );
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "knowledge: failed to read TF-IDF vocabulary file"
+            );
+        }
+    }
+}
+
+/// Check if the pipeline's embedding manager uses TF-IDF as primary provider.
+fn is_tfidf_pipeline(pipeline: &RagPipeline) -> bool {
+    pipeline
+        .embedding_manager()
+        .primary_provider()
+        .as_any()
+        .downcast_ref::<TfIdfEmbeddingProvider>()
+        .is_some()
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline initialization helper
+// ---------------------------------------------------------------------------
+
 /// Ensure the knowledge pipeline is initialized, using AppState's database.
 ///
 /// This is the lazy initialization entry point. On first call, it clones the
-/// Database from AppState and uses it to construct the RagPipeline.
+/// Database from AppState, reads the keyring, and uses them to construct the
+/// RagPipeline with the user's configured embedding provider.
 async fn ensure_initialized(
     knowledge_state: &KnowledgeState,
     app_state: &crate::state::AppState,
@@ -158,8 +276,21 @@ async fn ensure_initialized(
         .with_database(|db| Ok(Arc::new(db.clone())))
         .await
         .map_err(|e| format!("Failed to access database: {}", e))?;
+
+    // Build embedding config using keyring for API key resolution.
+    // We use `with_keyring` to access the keyring while the lock is held,
+    // computing the config we need and then dropping the lock.
+    let (emb_config, is_tfidf) = app_state
+        .with_keyring(|keyring| {
+            let (config, _dim, is_tfidf) =
+                embedding_config_builder::build_embedding_config_from_settings(&db, keyring);
+            Ok((config, is_tfidf))
+        })
+        .await
+        .map_err(|e| format!("Failed to build embedding config: {}", e))?;
+
     knowledge_state
-        .initialize(db)
+        .initialize_with_config(db, emb_config, is_tfidf)
         .await
         .map_err(|e| format!("Failed to initialize knowledge pipeline: {}", e))?;
     Ok(())
@@ -192,7 +323,13 @@ pub async fn rag_ingest_documents(
         .ingest_with_progress(&collection_name, &project_id, desc, docs, Some(&app_handle))
         .await
     {
-        Ok(collection) => Ok(CommandResponse::ok(collection)),
+        Ok(collection) => {
+            // Persist TF-IDF vocabulary after successful ingest
+            if is_tfidf_pipeline(&pipeline) {
+                save_tfidf_vocab(pipeline.embedding_manager());
+            }
+            Ok(CommandResponse::ok(collection))
+        }
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
 }
@@ -285,6 +422,36 @@ pub async fn rag_list_documents(
 
     match pipeline.list_documents(&collection_id) {
         Ok(documents) => Ok(CommandResponse::ok(documents)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Update a knowledge collection's metadata.
+#[tauri::command]
+pub async fn rag_update_collection(
+    knowledge_state: State<'_, KnowledgeState>,
+    app_state: State<'_, crate::state::AppState>,
+    collection_id: String,
+    name: Option<String>,
+    description: Option<String>,
+    workspace_path: Option<Option<String>>,
+) -> Result<CommandResponse<KnowledgeCollection>, String> {
+    ensure_initialized(&knowledge_state, &app_state).await?;
+
+    let pipeline = match knowledge_state.get_pipeline().await {
+        Ok(p) => p,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+
+    match pipeline.update_collection(
+        &collection_id,
+        name.as_deref(),
+        description.as_deref(),
+        workspace_path
+            .as_ref()
+            .map(|wp| wp.as_deref()),
+    ) {
+        Ok(collection) => Ok(CommandResponse::ok(collection)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
 }

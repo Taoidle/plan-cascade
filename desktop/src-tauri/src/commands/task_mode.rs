@@ -627,10 +627,9 @@ pub async fn generate_task_prd(
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
         .to_string_lossy()
         .to_string();
-    let project_id = project_path_str.clone();
     let enriched = if let Some(ref cs) = context_sources {
         crate::services::task_mode::context_provider::query_selected_context(
-            cs, &knowledge_state, &app_state, &project_id, &project_path_str,
+            cs, &knowledge_state, &app_state, &project_path_str,
             &description, crate::services::skills::model::InjectionPhase::Planning,
         ).await
     } else {
@@ -1350,10 +1349,9 @@ pub async fn approve_task_prd(
                 .unwrap_or_else(|_| std::path::PathBuf::from("."))
                 .to_string_lossy()
                 .to_string();
-            let project_id = project_path_str.clone();
             let enriched_ctx = if let Some(ref cs) = context_sources {
                 crate::services::task_mode::context_provider::query_selected_context(
-                    cs, &knowledge_state, &app_state, &project_id, &project_path_str,
+                    cs, &knowledge_state, &app_state, &project_path_str,
                     &session.description, crate::services::skills::model::InjectionPhase::Implementation,
                 ).await
             } else {
@@ -2255,10 +2253,9 @@ pub async fn run_requirement_analysis(
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
         .to_string_lossy()
         .to_string();
-    let project_id = project_path_str.clone();
     let enriched = if let Some(ref cs) = context_sources {
         crate::services::task_mode::context_provider::query_selected_context(
-            cs, &knowledge_state, &app_state, &project_id, &project_path_str,
+            cs, &knowledge_state, &app_state, &project_path_str,
             &task_description, crate::services::skills::model::InjectionPhase::Planning,
         ).await
     } else {
@@ -2468,10 +2465,9 @@ pub async fn run_architecture_review(
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
         .to_string_lossy()
         .to_string();
-    let project_id = project_path_str.clone();
     let enriched = if let Some(ref cs) = context_sources {
         crate::services::task_mode::context_provider::query_selected_context(
-            cs, &knowledge_state, &app_state, &project_id, &project_path_str,
+            cs, &knowledge_state, &app_state, &project_path_str,
             &prd_json, crate::services::skills::model::InjectionPhase::Planning,
         ).await
     } else {

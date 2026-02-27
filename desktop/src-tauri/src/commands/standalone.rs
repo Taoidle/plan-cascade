@@ -1140,7 +1140,6 @@ pub async fn execute_standalone(
             &knowledge_state,
             &app_state,
             &project_path,
-            &project_path,
             &message,
             crate::services::skills::model::InjectionPhase::Implementation,
         )

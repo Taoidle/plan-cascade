@@ -49,6 +49,7 @@ import jaAnalytics from './locales/ja/analytics.json';
 import jaAgents from './locales/ja/agents.json';
 import jaTaskMode from './locales/ja/taskMode.json';
 import jaPlanMode from './locales/ja/planMode.json';
+import jaKnowledge from './locales/ja/knowledge.json';
 import jaGit from './locales/ja/git.json';
 
 export const resources = {
@@ -93,7 +94,7 @@ export const resources = {
     agents: jaAgents,
     taskMode: jaTaskMode,
     planMode: jaPlanMode,
-    knowledge: enKnowledge,
+    knowledge: jaKnowledge,
     artifacts: enArtifacts,
     git: jaGit,
   },

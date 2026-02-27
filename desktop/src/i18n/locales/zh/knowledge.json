@@ -18,6 +18,12 @@
   "description": "描述",
   "descriptionPlaceholder": "简要描述此集合",
 
+  "editCollection": "编辑集合",
+  "updateCollection": "更新集合",
+  "updating": "更新中...",
+  "workspacePath": "工作区路径",
+  "workspacePathPlaceholder": "可选：选择项目目录",
+
   "deleteCollection": "删除集合",
   "deleteConfirm": "确定要删除集合 \"{{name}}\" 吗？这将移除所有文档和索引数据。",
 
@@ -40,6 +46,8 @@
     "chunkCount": "分块数量",
     "projectId": "项目 ID",
     "collectionId": "集合 ID",
+    "workspacePath": "工作区路径",
+    "noWorkspacePath": "未关联项目",
     "timestamps": "时间信息",
     "createdAt": "创建时间",
     "updatedAt": "最后更新"

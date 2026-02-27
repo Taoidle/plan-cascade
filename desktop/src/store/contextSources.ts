@@ -11,6 +11,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { KnowledgeCollection, DocumentSummary } from '../lib/knowledgeApi';
 import { ragListCollections, ragListDocuments } from '../lib/knowledgeApi';
 import type { MemoryEntry, MemoryStats, MemorySearchResult, SkillSummary } from '../types/skillMemory';
+import { useProjectsStore } from './projects';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,6 +25,8 @@ interface CommandResponse<T> {
 
 /** Configuration sent to the backend for conditional context injection. */
 export interface ContextSourceConfig {
+  /** Project ID for knowledge base queries (e.g. "default" or a UUID). */
+  project_id: string;
   knowledge?: {
     enabled: boolean;
     selected_collections: string[];
@@ -465,7 +468,8 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
       return undefined;
     }
 
-    const config: ContextSourceConfig = {};
+    const projectId = useProjectsStore.getState().selectedProject?.id ?? 'default';
+    const config: ContextSourceConfig = { project_id: projectId };
 
     if (knowledgeEnabled) {
       config.knowledge = {

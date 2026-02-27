@@ -37,9 +37,17 @@ use crate::state::AppState;
 /// Passed from the frontend to conditionally inject domain knowledge.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ContextSourceConfig {
+    /// The project ID used for knowledge base queries (e.g. "default" or a UUID).
+    /// Falls back to `"default"` when not provided (backward-compatible).
+    #[serde(default = "default_project_id")]
+    pub project_id: String,
     pub knowledge: Option<KnowledgeSourceConfig>,
     pub memory: Option<MemorySourceConfig>,
     pub skills: Option<SkillsSourceConfig>,
+}
+
+fn default_project_id() -> String {
+    "default".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,11 +102,15 @@ pub async fn query_selected_context(
     config: &ContextSourceConfig,
     knowledge_state: &KnowledgeState,
     app_state: &AppState,
-    project_id: &str,
     project_path: &str,
     query: &str,
     phase: InjectionPhase,
 ) -> EnrichedContext {
+    let pid = if config.project_id.is_empty() {
+        "default"
+    } else {
+        &config.project_id
+    };
     let knowledge_block = if config
         .knowledge
         .as_ref()
@@ -107,7 +119,7 @@ pub async fn query_selected_context(
         let k = config.knowledge.as_ref().unwrap();
         query_knowledge_for_task_filtered(
             knowledge_state,
-            project_id,
+            pid,
             query,
             &k.selected_collections,
             &k.selected_documents,

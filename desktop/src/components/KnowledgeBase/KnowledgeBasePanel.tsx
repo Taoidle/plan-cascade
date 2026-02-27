@@ -9,6 +9,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
+import type { KnowledgeCollection } from '../../lib/knowledgeApi';
 import { useKnowledgeStore } from '../../store/knowledge';
 import { useProjectsStore } from '../../store/projects';
 import { CollectionDetail } from './CollectionDetail';
@@ -22,7 +23,7 @@ import { KnowledgeQuery } from './KnowledgeQuery';
 interface CreateCollectionDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (name: string, description: string) => void;
+  onSubmit: (name: string, description: string, workspacePath?: string) => void;
   isLoading: boolean;
 }
 
@@ -30,6 +31,8 @@ function CreateCollectionDialog({ isOpen, onClose, onSubmit, isLoading }: Create
   const { t } = useTranslation('knowledge');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [workspacePath, setWorkspacePath] = useState('');
+  const { projects } = useProjectsStore();
 
   if (!isOpen) return null;
 
@@ -83,6 +86,35 @@ function CreateCollectionDialog({ isOpen, onClose, onSubmit, isLoading }: Create
               )}
             />
           </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              {t('workspacePath')}
+            </label>
+            <input
+              type="text"
+              value={workspacePath}
+              onChange={(e) => setWorkspacePath(e.target.value)}
+              placeholder={t('workspacePathPlaceholder')}
+              list="workspace-paths-create"
+              className={clsx(
+                'w-full px-3 py-2 rounded-lg',
+                'border border-gray-300 dark:border-gray-600',
+                'bg-white dark:bg-gray-700',
+                'text-gray-900 dark:text-white',
+                'focus:ring-2 focus:ring-primary-500 focus:border-transparent',
+                'text-sm',
+              )}
+            />
+            {projects.length > 0 && (
+              <datalist id="workspace-paths-create">
+                {projects.map((p) => (
+                  <option key={p.id} value={p.path}>
+                    {p.name}
+                  </option>
+                ))}
+              </datalist>
+            )}
+          </div>
         </div>
         <div className="flex justify-end gap-3 mt-6">
           <button
@@ -99,7 +131,7 @@ function CreateCollectionDialog({ isOpen, onClose, onSubmit, isLoading }: Create
           <button
             onClick={() => {
               if (name.trim()) {
-                onSubmit(name.trim(), description.trim());
+                onSubmit(name.trim(), description.trim(), workspacePath.trim() || undefined);
               }
             }}
             disabled={!name.trim() || isLoading}
@@ -112,6 +144,151 @@ function CreateCollectionDialog({ isOpen, onClose, onSubmit, isLoading }: Create
             )}
           >
             {isLoading ? t('creating') : t('create')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// EditCollectionDialog
+// ---------------------------------------------------------------------------
+
+interface EditCollectionDialogProps {
+  isOpen: boolean;
+  collection: KnowledgeCollection | null;
+  onClose: () => void;
+  onSubmit: (collectionId: string, name: string, description: string, workspacePath?: string | null) => void;
+  isLoading: boolean;
+}
+
+function EditCollectionDialog({ isOpen, collection, onClose, onSubmit, isLoading }: EditCollectionDialogProps) {
+  const { t } = useTranslation('knowledge');
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [workspacePath, setWorkspacePath] = useState('');
+  const { projects } = useProjectsStore();
+
+  useEffect(() => {
+    if (collection) {
+      setName(collection.name);
+      setDescription(collection.description);
+      setWorkspacePath(collection.workspace_path ?? '');
+    }
+  }, [collection]);
+
+  if (!isOpen || !collection) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div
+        className={clsx(
+          'w-full max-w-md rounded-xl p-6',
+          'bg-white dark:bg-gray-800',
+          'border border-gray-200 dark:border-gray-700',
+          'shadow-xl',
+        )}
+      >
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t('editCollection')}</h3>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              {t('collectionName')}
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={t('collectionNamePlaceholder')}
+              className={clsx(
+                'w-full px-3 py-2 rounded-lg',
+                'border border-gray-300 dark:border-gray-600',
+                'bg-white dark:bg-gray-700',
+                'text-gray-900 dark:text-white',
+                'focus:ring-2 focus:ring-primary-500 focus:border-transparent',
+                'text-sm',
+              )}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              {t('description')}
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder={t('descriptionPlaceholder')}
+              rows={3}
+              className={clsx(
+                'w-full px-3 py-2 rounded-lg',
+                'border border-gray-300 dark:border-gray-600',
+                'bg-white dark:bg-gray-700',
+                'text-gray-900 dark:text-white',
+                'focus:ring-2 focus:ring-primary-500 focus:border-transparent',
+                'text-sm resize-none',
+              )}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              {t('workspacePath')}
+            </label>
+            <input
+              type="text"
+              value={workspacePath}
+              onChange={(e) => setWorkspacePath(e.target.value)}
+              placeholder={t('workspacePathPlaceholder')}
+              list="workspace-paths-edit"
+              className={clsx(
+                'w-full px-3 py-2 rounded-lg',
+                'border border-gray-300 dark:border-gray-600',
+                'bg-white dark:bg-gray-700',
+                'text-gray-900 dark:text-white',
+                'focus:ring-2 focus:ring-primary-500 focus:border-transparent',
+                'text-sm',
+              )}
+            />
+            {projects.length > 0 && (
+              <datalist id="workspace-paths-edit">
+                {projects.map((p) => (
+                  <option key={p.id} value={p.path}>
+                    {p.name}
+                  </option>
+                ))}
+              </datalist>
+            )}
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 mt-6">
+          <button
+            onClick={onClose}
+            className={clsx(
+              'px-4 py-2 rounded-lg text-sm font-medium',
+              'text-gray-700 dark:text-gray-300',
+              'hover:bg-gray-100 dark:hover:bg-gray-700',
+              'transition-colors',
+            )}
+          >
+            {t('cancel', { ns: 'common' })}
+          </button>
+          <button
+            onClick={() => {
+              if (name.trim()) {
+                const wp = workspacePath.trim();
+                onSubmit(collection.id, name.trim(), description.trim(), wp || null);
+              }
+            }}
+            disabled={!name.trim() || isLoading}
+            className={clsx(
+              'px-4 py-2 rounded-lg text-sm font-medium',
+              'bg-primary-600 hover:bg-primary-700',
+              'text-white',
+              'disabled:opacity-50 disabled:cursor-not-allowed',
+              'transition-colors',
+            )}
+          >
+            {isLoading ? t('updating') : t('updateCollection')}
           </button>
         </div>
       </div>
@@ -199,6 +376,7 @@ export function KnowledgeBasePanel() {
     selectCollection,
     createCollection,
     deleteCollection,
+    updateCollection,
     clearError,
   } = useKnowledgeStore();
 
@@ -206,6 +384,7 @@ export function KnowledgeBasePanel() {
   const projectId = selectedProject?.id ?? 'default';
 
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [editTarget, setEditTarget] = useState<KnowledgeCollection | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<RightTab>('details');
 
@@ -215,14 +394,32 @@ export function KnowledgeBasePanel() {
   }, [projectId, fetchCollections]);
 
   const handleCreate = useCallback(
-    async (name: string, description: string) => {
+    async (name: string, description: string, workspacePath?: string) => {
       const ok = await createCollection(projectId, name, description, []);
       if (ok) {
+        // If workspace path provided, update the newly created collection
+        if (workspacePath) {
+          const created = useKnowledgeStore.getState().collections.find((c) => c.name === name);
+          if (created) {
+            await updateCollection(created.id, undefined, undefined, workspacePath);
+          }
+        }
         setShowCreateDialog(false);
         fetchCollections(projectId);
       }
     },
-    [projectId, createCollection, fetchCollections],
+    [projectId, createCollection, updateCollection, fetchCollections],
+  );
+
+  const handleEdit = useCallback(
+    async (collectionId: string, name: string, description: string, workspacePath?: string | null) => {
+      const ok = await updateCollection(collectionId, name, description, workspacePath);
+      if (ok) {
+        setEditTarget(null);
+        fetchCollections(projectId);
+      }
+    },
+    [updateCollection, fetchCollections, projectId],
   );
 
   const handleDelete = useCallback(async () => {
@@ -314,23 +511,42 @@ export function KnowledgeBasePanel() {
                         <span className="text-sm font-medium text-gray-900 dark:text-white truncate">
                           {collection.name}
                         </span>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteTarget(collection.name);
-                          }}
-                          className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 p-1"
-                          title={t('delete')}
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                            />
-                          </svg>
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditTarget(collection);
+                            }}
+                            className="text-gray-400 hover:text-primary-500 dark:hover:text-primary-400 p-1"
+                            title={t('editCollection')}
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                              />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteTarget(collection.name);
+                            }}
+                            className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 p-1"
+                            title={t('delete')}
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                              />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
                       <div className="flex items-center gap-3 mt-1">
                         <span className="text-xs text-gray-500 dark:text-gray-400">
@@ -426,6 +642,13 @@ export function KnowledgeBasePanel() {
         onClose={() => setShowCreateDialog(false)}
         onSubmit={handleCreate}
         isLoading={isIngesting}
+      />
+      <EditCollectionDialog
+        isOpen={editTarget !== null}
+        collection={editTarget}
+        onClose={() => setEditTarget(null)}
+        onSubmit={handleEdit}
+        isLoading={isLoading}
       />
       <DeleteConfirmDialog
         isOpen={deleteTarget !== null}

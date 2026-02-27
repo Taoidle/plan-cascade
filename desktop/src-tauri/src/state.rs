@@ -129,6 +129,21 @@ impl AppState {
         }
     }
 
+    /// Execute a callback with read access to the keyring service.
+    ///
+    /// This is useful when callers need to pass the keyring to shared utility
+    /// modules (e.g. `embedding_config_builder`) that accept `&KeyringService`.
+    pub async fn with_keyring<F, T>(&self, f: F) -> AppResult<T>
+    where
+        F: FnOnce(&KeyringService) -> AppResult<T>,
+    {
+        let guard = self.keyring.read().await;
+        match &*guard {
+            Some(keyring) => f(keyring),
+            None => Err(AppError::keyring("Keyring service not initialized")),
+        }
+    }
+
     /// Get an API key from the keyring
     pub async fn get_api_key(&self, provider: &str) -> AppResult<Option<String>> {
         let guard = self.keyring.read().await;
