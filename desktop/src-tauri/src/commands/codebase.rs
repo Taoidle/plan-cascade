@@ -314,3 +314,47 @@ pub async fn codebase_search(
         ))),
     }
 }
+
+/// Trigger LLM-based component classification for a project.
+///
+/// Uses the configured LLM provider to analyze directory structure and
+/// derive meaningful component names.  Falls back to heuristic (top-level
+/// directory names) when no LLM is available.
+#[tauri::command]
+pub async fn classify_codebase_components(
+    project_path: String,
+    standalone_state: State<'_, StandaloneState>,
+) -> Result<CommandResponse<ClassifyComponentsResult>, String> {
+    let mgr_lock = standalone_state.index_manager.read().await;
+    let mgr = match &*mgr_lock {
+        Some(mgr) => mgr,
+        None => {
+            return Ok(CommandResponse::err(
+                "IndexManager not initialized".to_string(),
+            ))
+        }
+    };
+
+    let result = mgr.classify_components(&project_path).await;
+
+    Ok(CommandResponse::ok(ClassifyComponentsResult {
+        source: match result.source {
+            crate::services::orchestrator::component_classifier::ClassificationSource::Llm => {
+                "llm".to_string()
+            }
+            crate::services::orchestrator::component_classifier::ClassificationSource::Heuristic => {
+                "heuristic".to_string()
+            }
+        },
+        mappings_count: result.mappings.len(),
+        files_updated: result.files_updated,
+    }))
+}
+
+/// Result of a component classification operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClassifyComponentsResult {
+    pub source: String,
+    pub mappings_count: usize,
+    pub files_updated: usize,
+}

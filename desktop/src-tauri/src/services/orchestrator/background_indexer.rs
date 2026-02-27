@@ -16,9 +16,10 @@ use tracing::{debug, info, warn};
 
 use super::analysis_index::{
     build_file_inventory, build_file_inventory_with_limits, default_excluded_roots,
-    detect_component, detect_language, extract_symbols_from_str, is_binary_extension, is_test_path,
-    AnalysisLimits,
+    detect_component_heuristic, detect_language, extract_symbols_from_str, is_binary_extension,
+    is_test_path, AnalysisLimits,
 };
+use super::component_classifier::{self, ComponentMapping};
 use super::embedding_manager::EmbeddingManager;
 use super::embedding_provider::EmbeddingProviderType;
 use super::embedding_provider_tfidf::TfIdfEmbeddingProvider;
@@ -26,6 +27,7 @@ use super::embedding_service::{embedding_to_bytes, EmbeddingService};
 use super::hnsw_index::HnswIndex;
 use super::index_store::IndexStore;
 use super::tree_sitter_parser;
+use crate::services::llm::provider::LlmProvider;
 
 /// Callback type for reporting indexing progress.
 ///
@@ -113,6 +115,8 @@ pub struct BackgroundIndexer {
     extra_excluded_dirs: Vec<String>,
     /// User-added extra file extensions to exclude (beyond built-in defaults).
     extra_excluded_extensions: Vec<String>,
+    /// Optional LLM provider for component classification (Phase 1a).
+    llm_provider: Option<Arc<dyn LlmProvider>>,
 }
 
 impl BackgroundIndexer {
@@ -131,6 +135,7 @@ impl BackgroundIndexer {
             enrichment_callback: None,
             extra_excluded_dirs: Vec::new(),
             extra_excluded_extensions: Vec::new(),
+            llm_provider: None,
         }
     }
 
@@ -222,6 +227,21 @@ impl BackgroundIndexer {
         self
     }
 
+    /// Attach an LLM provider for component classification (Phase 1a).
+    ///
+    /// When set, the indexer will send the project's directory tree to the
+    /// LLM after the full index to derive meaningful component names.
+    pub fn with_llm_provider(mut self, provider: Arc<dyn LlmProvider>) -> Self {
+        self.llm_provider = Some(provider);
+        self
+    }
+
+    /// Optionally attach an LLM provider (no-op when `None`).
+    pub fn with_llm_provider_opt(mut self, provider: Option<Arc<dyn LlmProvider>>) -> Self {
+        self.llm_provider = provider;
+        self
+    }
+
     /// Spawn the background indexing task and return its `JoinHandle`.
     ///
     /// The task:
@@ -244,6 +264,7 @@ impl BackgroundIndexer {
         let enrichment_callback = self.enrichment_callback;
         let extra_excluded_dirs = self.extra_excluded_dirs;
         let extra_excluded_extensions = self.extra_excluded_extensions;
+        let llm_provider = self.llm_provider;
 
         tokio::spawn(async move {
             // --- Phase 1: Full index ---
@@ -260,6 +281,21 @@ impl BackgroundIndexer {
             } else {
                 info!("background indexer: full index complete");
             }
+
+            // --- Phase 1a: Component classification ---
+            let project_path_str = project_root.to_string_lossy().to_string();
+            let classification_result = component_classifier::classify_components(
+                &index_store,
+                &project_path_str,
+                llm_provider.as_ref(),
+            )
+            .await;
+            info!(
+                source = ?classification_result.source,
+                mappings = classification_result.mappings.len(),
+                files_updated = classification_result.files_updated,
+                "background indexer: component classification complete"
+            );
 
             // --- Phase 1b: Generate embeddings ---
             // Prefer EmbeddingManager over direct EmbeddingService when both are set.
@@ -591,6 +627,18 @@ async fn run_incremental_loop(
 ) {
     let project_path = project_root.to_string_lossy().to_string();
 
+    // Load cached component mappings for incremental classification.
+    let cached_mappings: Vec<ComponentMapping> = index_store
+        .get_component_mappings(&project_path)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(prefix, component_name, description, _source)| ComponentMapping {
+            prefix,
+            component: component_name,
+            description,
+        })
+        .collect();
+
     debug!("background indexer: listening for incremental changes");
     loop {
         // Wait for the first event (blocks until a path arrives or channel closes).
@@ -674,6 +722,16 @@ async fn run_incremental_loop(
                     language,
                     rel_path,
                 }) => {
+                    // Override heuristic component with cached mapping if available
+                    if !cached_mappings.is_empty() {
+                        let component =
+                            component_classifier::lookup_component(&cached_mappings, &rel_path);
+                        let _ = index_store.update_file_component(
+                            &project_path,
+                            &rel_path,
+                            &component,
+                        );
+                    }
                     if let Some(emb_mgr) = embedding_manager {
                         if let Err(e) = run_incremental_embedding_managed_with_content(
                             project_root,
@@ -1218,7 +1276,7 @@ fn run_incremental_index(
 
     let item = super::analysis_index::FileInventoryItem {
         path: rel_str.clone(),
-        component: detect_component(&rel_str),
+        component: detect_component_heuristic(&rel_str),
         language: language.clone(),
         extension: ext,
         size_bytes: file_size,

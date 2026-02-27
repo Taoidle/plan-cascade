@@ -6,15 +6,6 @@
 name: Desktop Tests
 
 on:
-  push:
-    branches:
-      - main
-      - master
-      - 'feature/**'
-      - 'release/**'
-    paths:
-      - 'desktop/**'
-      - '.github/workflows/desktop-tests.yml'
   pull_request:
     branches:
       - main

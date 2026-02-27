@@ -505,6 +505,28 @@ impl Database {
             [],
         )?;
 
+        // Create component_mappings table for caching LLM/heuristic-derived
+        // prefix→component classifications per project.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS component_mappings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_path TEXT NOT NULL,
+                prefix TEXT NOT NULL,
+                component_name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT 'heuristic',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(project_path, prefix)
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_component_mappings_project
+             ON component_mappings(project_path)",
+            [],
+        )?;
+
         // ====================================================================
         // Feature-003 (Phase 3): LSP Enhancement Layer
         // ====================================================================

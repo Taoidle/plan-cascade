@@ -6,6 +6,7 @@
 mod adaptive_scope;
 pub mod analysis_index;
 mod analysis_merge;
+pub mod component_classifier;
 mod analysis_scheduler;
 mod analysis_store;
 pub mod background_indexer;

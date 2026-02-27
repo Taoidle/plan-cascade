@@ -331,7 +331,7 @@ pub fn build_file_inventory_with_limits(
         };
         let language = detect_language(ext_lower.as_deref());
         let is_test = is_test_path(&rel_norm);
-        let component = detect_component(&rel_norm);
+        let component = detect_component_heuristic(&rel_norm);
         let line_count = estimate_line_count(path, metadata.len()).unwrap_or(0);
 
         // Single disk read: compute content hash and extract symbols from the
@@ -827,36 +827,30 @@ pub fn detect_language(ext: Option<&str>) -> String {
     .to_string()
 }
 
-pub(super) fn detect_component(path: &str) -> String {
-    if path == "pyproject.toml"
-        || path == "README.md"
-        || path == "README_zh.md"
-        || path == "README_zh-CN.md"
-        || path == "Cargo.toml"
-        || path == "package.json"
-    {
-        return "repo-meta".to_string();
+/// Generic heuristic component detection using top-level directory names.
+///
+/// Root-level files (no `/`) are classified as `"repo-root"`.
+/// Other files use their first path segment as the component, kebab-cased.
+/// This value serves as the initial classification before LLM-based
+/// component classification overwrites it.
+pub(super) fn detect_component_heuristic(path: &str) -> String {
+    if !path.contains('/') {
+        return "repo-root".to_string();
     }
-    if path.starts_with("src/plan_cascade/") {
-        return "python-core".to_string();
-    }
-    if path.starts_with("mcp_server/") {
-        return "mcp-server".to_string();
-    }
-    if path.starts_with("desktop/src-tauri/src/") {
-        return "desktop-rust".to_string();
-    }
-    if path.starts_with("desktop/src/") {
-        return "desktop-web".to_string();
-    }
-    if path.starts_with("tests/") {
-        return "python-tests".to_string();
-    }
-    if path.starts_with("desktop/src-tauri/tests/") {
-        return "rust-tests".to_string();
-    }
-    if path.starts_with("desktop/src/components/__tests__/") {
-        return "frontend-tests".to_string();
+    if let Some(slash_pos) = path.find('/') {
+        let first_segment = &path[..slash_pos];
+        // Convert to kebab-case: lowercase, replace underscores/dots with hyphens
+        let component: String = first_segment
+            .chars()
+            .map(|c| {
+                if c == '_' || c == '.' {
+                    '-'
+                } else {
+                    c.to_ascii_lowercase()
+                }
+            })
+            .collect();
+        return component;
     }
     "other".to_string()
 }

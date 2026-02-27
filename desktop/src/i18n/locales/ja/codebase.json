@@ -41,5 +41,7 @@
   "page": "ページ",
   "of": "/",
   "previous": "前へ",
-  "next": "次へ"
+  "next": "次へ",
+  "aiClassify": "AI 分類",
+  "classifying": "分類中..."
 }

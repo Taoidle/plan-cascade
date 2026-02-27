@@ -3,8 +3,8 @@ name: Release Python Package
 on:
   push:
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"
-      - "v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-python"
+      - "v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+-python"
 
 permissions:
   contents: write
@@ -95,7 +95,11 @@ jobs:
 
       - name: Extract version from tag
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: |
+          # Strip "refs/tags/v" prefix and "-python" suffix
+          VERSION=${GITHUB_REF#refs/tags/v}
+          VERSION=${VERSION%-python}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Check if prerelease
         id: prerelease

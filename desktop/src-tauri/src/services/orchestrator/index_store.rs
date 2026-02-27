@@ -1783,6 +1783,147 @@ impl IndexStore {
         Ok((rows, total))
     }
 
+    // -----------------------------------------------------------------------
+    // Component Mapping CRUD
+    // -----------------------------------------------------------------------
+
+    /// Replace all component mappings for a project (DELETE + INSERT in tx).
+    pub fn upsert_component_mappings(
+        &self,
+        project_path: &str,
+        mappings: &[(String, String, String)], // (prefix, component_name, description)
+        source: &str,
+    ) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        let tx = conn.unchecked_transaction()?;
+
+        tx.execute(
+            "DELETE FROM component_mappings WHERE project_path = ?1",
+            params![project_path],
+        )?;
+
+        let mut stmt = tx.prepare(
+            "INSERT INTO component_mappings (project_path, prefix, component_name, description, source)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )?;
+
+        for (prefix, component_name, description) in mappings {
+            stmt.execute(params![project_path, prefix, component_name, description, source])?;
+        }
+
+        drop(stmt);
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Load cached component mappings for a project.
+    /// Returns `Vec<(prefix, component_name, description, source)>`.
+    pub fn get_component_mappings(
+        &self,
+        project_path: &str,
+    ) -> AppResult<Vec<(String, String, String, String)>> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT prefix, component_name, description, source
+             FROM component_mappings
+             WHERE project_path = ?1
+             ORDER BY LENGTH(prefix) DESC",
+        )?;
+
+        let rows = stmt
+            .query_map(params![project_path], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
+    }
+
+    /// Batch-update the `component` column of `file_index` rows using
+    /// prefix→component mappings.  Processes longest prefix first so that
+    /// more specific paths win over generic ones.  Returns the number of
+    /// rows updated.
+    pub fn batch_update_components(
+        &self,
+        project_path: &str,
+        mappings: &[(String, String)], // (prefix, component_name), pre-sorted longest-first
+    ) -> AppResult<usize> {
+        let conn = self.get_connection()?;
+        let tx = conn.unchecked_transaction()?;
+
+        let mut total_updated: usize = 0;
+
+        // Process longest prefix first (caller guarantees order).
+        let mut stmt = tx.prepare(
+            "UPDATE file_index SET component = ?1
+             WHERE project_path = ?2 AND file_path LIKE ?3",
+        )?;
+
+        for (prefix, component_name) in mappings {
+            let like_pattern = if prefix.is_empty() {
+                // Root-level: match files with no directory separator
+                // Skip — handled separately below
+                continue;
+            } else {
+                format!("{}%", prefix)
+            };
+
+            let updated = stmt.execute(params![component_name, project_path, like_pattern])?;
+            total_updated += updated;
+        }
+
+        // Handle root-level mapping (prefix == "")
+        if let Some((_, component_name)) = mappings.iter().find(|(p, _)| p.is_empty()) {
+            let root_updated = tx.execute(
+                "UPDATE file_index SET component = ?1
+                 WHERE project_path = ?2 AND file_path NOT LIKE '%/%'",
+                params![component_name, project_path],
+            )?;
+            total_updated += root_updated;
+        }
+
+        drop(stmt);
+        tx.commit()?;
+        Ok(total_updated)
+    }
+
+    /// Update the component of a single file in the index.
+    pub fn update_file_component(
+        &self,
+        project_path: &str,
+        file_path: &str,
+        component: &str,
+    ) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "UPDATE file_index SET component = ?1
+             WHERE project_path = ?2 AND file_path = ?3",
+            params![component, project_path, file_path],
+        )?;
+        Ok(())
+    }
+
+    /// Get all file paths for a project (for building directory tree).
+    pub fn get_all_file_paths(&self, project_path: &str) -> AppResult<Vec<String>> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT file_path FROM file_index WHERE project_path = ?1 ORDER BY file_path",
+        )?;
+
+        let paths = stmt
+            .query_map(params![project_path], |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(paths)
+    }
+
     fn get_connection(
         &self,
     ) -> AppResult<r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>> {

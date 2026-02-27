@@ -32,7 +32,9 @@ use super::embedding_provider::{
 use super::embedding_provider_tfidf::TfIdfEmbeddingProvider;
 use super::embedding_service::EmbeddingService;
 use super::hnsw_index::HnswIndex;
+use super::component_classifier;
 use super::index_store::IndexStore;
+use crate::services::llm::provider::LlmProvider;
 use crate::storage::database::{Database, DbPool};
 use crate::storage::KeyringService;
 
@@ -108,6 +110,8 @@ pub struct IndexManager {
     enrichment_locks: RwLock<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// Cached flag: whether a project has enrichment data (avoid re-querying DB).
     enrichment_enabled: RwLock<HashMap<String, bool>>,
+    /// Optional LLM provider for component classification (Phase 1a).
+    llm_provider: RwLock<Option<Arc<dyn LlmProvider>>>,
 }
 
 impl IndexManager {
@@ -126,7 +130,14 @@ impl IndexManager {
             lsp_enrichers: RwLock::new(HashMap::new()),
             enrichment_locks: RwLock::new(HashMap::new()),
             enrichment_enabled: RwLock::new(HashMap::new()),
+            llm_provider: RwLock::new(None),
         }
+    }
+
+    /// Set or replace the LLM provider for component classification.
+    pub async fn set_llm_provider(&self, provider: Arc<dyn LlmProvider>) {
+        let mut guard = self.llm_provider.write().await;
+        *guard = Some(provider);
     }
 
     /// Provide a Tauri `AppHandle` for emitting events to the frontend.
@@ -375,6 +386,9 @@ impl IndexManager {
         // Load user-configured codebase index exclusions from DB.
         let codebase_config = self.load_codebase_index_config();
 
+        // Clone LLM provider for component classification (Phase 1a).
+        let llm_provider = self.llm_provider.read().await.clone();
+
         let handle = tokio::task::spawn(async move {
             // Build batch callback for incremental status refresh.
             let pp_for_batch = pp_for_task.clone();
@@ -417,6 +431,7 @@ impl IndexManager {
 
             let indexer = BackgroundIndexer::new(project_root, index_store.clone())
                 .with_progress_callback(progress_cb)
+                .with_llm_provider_opt(llm_provider)
                 .with_embedding_service(embedding_svc)
                 .with_embedding_manager(embedding_mgr)
                 .with_hnsw_index(hnsw_idx)
@@ -673,6 +688,20 @@ impl IndexManager {
     /// Get a reference to the inner `IndexStore`.
     pub fn index_store(&self) -> &IndexStore {
         &self.index_store
+    }
+
+    /// Manually trigger LLM-based component classification for a project.
+    ///
+    /// Uses the configured LLM provider to analyze the project's directory
+    /// structure and derive meaningful component names.  Falls back to
+    /// heuristic classification when no LLM is available.
+    pub async fn classify_components(
+        &self,
+        project_path: &str,
+    ) -> component_classifier::ClassificationResult {
+        let provider = self.llm_provider.read().await.clone();
+        component_classifier::classify_components(&self.index_store, project_path, provider.as_ref())
+            .await
     }
 
     /// Get the embedding service for a project directory, if one has been

@@ -178,3 +178,19 @@ export async function getIndexStatus(projectPath: string): Promise<CommandRespon
     return { success: false, data: null, error: String(e) };
   }
 }
+
+export interface ClassifyComponentsResult {
+  source: string;
+  mappings_count: number;
+  files_updated: number;
+}
+
+export async function classifyComponents(projectPath: string): Promise<CommandResponse<ClassifyComponentsResult>> {
+  try {
+    return await invoke<CommandResponse<ClassifyComponentsResult>>('classify_codebase_components', {
+      projectPath,
+    });
+  } catch (e) {
+    return { success: false, data: null, error: String(e) };
+  }
+}

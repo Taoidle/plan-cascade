@@ -15,7 +15,7 @@ use crate::models::orchestrator::{
     ExecutionStatus, ResumeExecutionRequest, StandaloneStatus,
 };
 use crate::models::CommandResponse;
-use crate::services::llm::{ProviderConfig, ProviderType};
+use crate::services::llm::{LlmProvider, ProviderConfig, ProviderType};
 use crate::services::orchestrator::index_manager::{IndexManager, IndexStatusEvent};
 use crate::services::orchestrator::{
     ExecutionResult, OrchestratorConfig, OrchestratorService, SessionExecutionResult,
@@ -143,6 +143,28 @@ pub(crate) fn provider_type_from_name(provider: &str) -> Option<ProviderType> {
         "ollama" => Some(ProviderType::Ollama),
         _ => None,
     }
+}
+
+/// Construct an `Arc<dyn LlmProvider>` from a `ProviderConfig`.
+///
+/// Returns `None` when the provider type is unknown.  Used to thread the
+/// current LLM provider into the `IndexManager` for component classification.
+fn build_llm_provider_from_config(config: &ProviderConfig) -> Option<Arc<dyn LlmProvider>> {
+    use crate::services::llm::{
+        AnthropicProvider, DeepSeekProvider, GlmProvider, MinimaxProvider, OllamaProvider,
+        OpenAIProvider, QwenProvider,
+    };
+
+    let provider: Arc<dyn LlmProvider> = match config.provider {
+        ProviderType::Anthropic => Arc::new(AnthropicProvider::new(config.clone())),
+        ProviderType::OpenAI => Arc::new(OpenAIProvider::new(config.clone())),
+        ProviderType::DeepSeek => Arc::new(DeepSeekProvider::new(config.clone())),
+        ProviderType::Glm => Arc::new(GlmProvider::new(config.clone())),
+        ProviderType::Qwen => Arc::new(QwenProvider::new(config.clone())),
+        ProviderType::Minimax => Arc::new(MinimaxProvider::new(config.clone())),
+        ProviderType::Ollama => Arc::new(OllamaProvider::new(config.clone())),
+    };
+    Some(provider)
 }
 
 fn provider_key_candidates(provider: &str) -> &'static [&'static str] {
@@ -1187,6 +1209,9 @@ pub async fn execute_standalone(
         sub_agent_depth: None,
     };
 
+    // Clone provider config before orchestrator_config is moved
+    let provider_config_for_index = orchestrator_config.provider.clone();
+
     let mut orchestrator = OrchestratorService::new(orchestrator_config);
 
     // Wire file change tracker for AI file modification tracking
@@ -1223,6 +1248,13 @@ pub async fn execute_standalone(
         }
         if let Some(emb_mgr) = manager.get_embedding_manager(&project_path).await {
             orchestrator = orchestrator.with_embedding_manager(emb_mgr);
+        }
+    }
+
+    // Set LLM provider on IndexManager for component classification (Phase 1a).
+    if let Some(ref manager) = *standalone_state.index_manager.read().await {
+        if let Some(llm) = build_llm_provider_from_config(&provider_config_for_index) {
+            manager.set_llm_provider(llm).await;
         }
     }
 
@@ -1606,6 +1638,9 @@ pub async fn execute_standalone_with_session(
         .await
         .map_err(|e| e.to_string())?;
 
+    // Clone provider config before orchestrator_config is moved
+    let provider_config_for_index = orchestrator_config.provider.clone();
+
     // Create orchestrator with database (IndexStore is auto-wired to ToolExecutor)
     let mut orchestrator = OrchestratorService::new(orchestrator_config)
         .with_database(pool)
@@ -1631,6 +1666,10 @@ pub async fn execute_standalone_with_session(
         }
         if let Some(emb_mgr) = manager.get_embedding_manager(&request.project_path).await {
             orchestrator = orchestrator.with_embedding_manager(emb_mgr);
+        }
+        // Set LLM provider on IndexManager for component classification.
+        if let Some(llm) = build_llm_provider_from_config(&provider_config_for_index) {
+            manager.set_llm_provider(llm).await;
         }
     }
 
@@ -2095,6 +2134,9 @@ pub async fn resume_standalone_execution(
         sub_agent_depth: None,
     };
 
+    // Clone provider config before orchestrator_config is moved
+    let provider_config_for_index = orchestrator_config.provider.clone();
+
     let mut orchestrator = OrchestratorService::new(orchestrator_config)
         .with_database(pool)
         .with_permission_gate(permission_state.gate.clone());
@@ -2119,6 +2161,10 @@ pub async fn resume_standalone_execution(
         }
         if let Some(emb_mgr) = manager.get_embedding_manager(&session.project_path).await {
             orchestrator = orchestrator.with_embedding_manager(emb_mgr);
+        }
+        // Set LLM provider on IndexManager for component classification.
+        if let Some(llm) = build_llm_provider_from_config(&provider_config_for_index) {
+            manager.set_llm_provider(llm).await;
         }
     }
 

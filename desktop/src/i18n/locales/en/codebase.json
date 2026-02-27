@@ -41,5 +41,7 @@
   "page": "Page",
   "of": "of",
   "previous": "Previous",
-  "next": "Next"
+  "next": "Next",
+  "aiClassify": "AI Classify",
+  "classifying": "Classifying..."
 }

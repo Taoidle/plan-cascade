@@ -206,6 +206,7 @@ fn main() {
             plan_cascade_desktop::commands::codebase::codebase_list_files,
             plan_cascade_desktop::commands::codebase::codebase_delete_project,
             plan_cascade_desktop::commands::codebase::codebase_search,
+            plan_cascade_desktop::commands::codebase::classify_codebase_components,
             // Strategy commands
             plan_cascade_desktop::commands::strategy::analyze_task_strategy,
             plan_cascade_desktop::commands::strategy::get_strategy_options,

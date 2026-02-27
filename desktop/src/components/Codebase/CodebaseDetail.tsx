@@ -11,6 +11,7 @@ import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { useCodebaseStore } from '../../store/codebase';
 import type { IndexStatusEvent } from '../../lib/codebaseApi';
+import { classifyComponents } from '../../lib/codebaseApi';
 import { CodebaseFileList } from './CodebaseFileList';
 import { CodebaseSearch } from './CodebaseSearch';
 
@@ -24,8 +25,9 @@ interface CodebaseDetailProps {
 
 export function CodebaseDetail({ projectPath, liveStatus, onBack }: CodebaseDetailProps) {
   const { t } = useTranslation('codebase');
-  const { projectDetail, detailLoading, reindexProject } = useCodebaseStore();
+  const { projectDetail, detailLoading, reindexProject, loadProjectDetail } = useCodebaseStore();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const [classifying, setClassifying] = useState(false);
 
   const detail = projectDetail;
   const status = liveStatus?.status ?? detail?.status?.status ?? 'idle';
@@ -86,6 +88,16 @@ export function CodebaseDetail({ projectPath, liveStatus, onBack }: CodebaseDeta
             status={status}
             liveStatus={liveStatus}
             onReindex={() => reindexProject(projectPath)}
+            classifying={classifying}
+            onClassify={async () => {
+              setClassifying(true);
+              try {
+                await classifyComponents(projectPath);
+                await loadProjectDetail(projectPath);
+              } finally {
+                setClassifying(false);
+              }
+            }}
             t={t}
           />
         ) : activeTab === 'files' ? (
@@ -139,13 +151,17 @@ function OverviewTab({
   status,
   liveStatus,
   onReindex,
+  classifying,
+  onClassify,
   t,
 }: {
   detail: ReturnType<typeof useCodebaseStore.getState>['projectDetail'];
   status: string;
   liveStatus?: IndexStatusEvent;
   onReindex: () => void;
-  t: (key: string, opts?: Record<string, unknown>) => string;
+  classifying: boolean;
+  onClassify: () => void;
+  t: ReturnType<typeof useTranslation>['t'];
 }) {
   if (!detail) {
     return <div className="p-8 text-center text-sm text-gray-500 dark:text-gray-400">{t('noDetail')}</div>;
@@ -273,8 +289,8 @@ function OverviewTab({
         )}
       </Section>
 
-      {/* Rebuild button */}
-      <div>
+      {/* Action buttons */}
+      <div className="flex gap-2">
         <button
           onClick={onReindex}
           disabled={status === 'indexing'}
@@ -287,6 +303,19 @@ function OverviewTab({
           )}
         >
           {status === 'indexing' ? t('reindexing') : t('reindex')}
+        </button>
+        <button
+          onClick={onClassify}
+          disabled={classifying || status === 'indexing'}
+          className={clsx(
+            'px-4 py-2 rounded-lg text-sm font-medium',
+            'bg-purple-600 hover:bg-purple-700',
+            'text-white',
+            'disabled:opacity-50 disabled:cursor-not-allowed',
+            'transition-colors',
+          )}
+        >
+          {classifying ? t('classifying') : t('aiClassify')}
         </button>
       </div>
     </div>
