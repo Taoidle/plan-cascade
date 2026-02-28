@@ -140,11 +140,7 @@ impl BackgroundIndexer {
     }
 
     /// Attach user-configured extra exclusions for directories and file extensions.
-    pub fn with_extra_exclusions(
-        mut self,
-        dirs: Vec<String>,
-        extensions: Vec<String>,
-    ) -> Self {
+    pub fn with_extra_exclusions(mut self, dirs: Vec<String>, extensions: Vec<String>) -> Self {
         self.extra_excluded_dirs = dirs;
         self.extra_excluded_extensions = extensions;
         self
@@ -272,8 +268,13 @@ impl BackgroundIndexer {
                 project = %project_root.display(),
                 "background indexer: starting full index"
             );
-            if let Err(e) = run_full_index(&project_root, &index_store, progress_callback.as_ref(), &extra_excluded_dirs, &extra_excluded_extensions)
-            {
+            if let Err(e) = run_full_index(
+                &project_root,
+                &index_store,
+                progress_callback.as_ref(),
+                &extra_excluded_dirs,
+                &extra_excluded_extensions,
+            ) {
                 warn!(
                     error = %e,
                     "background indexer: full index failed"
@@ -632,11 +633,13 @@ async fn run_incremental_loop(
         .get_component_mappings(&project_path)
         .unwrap_or_default()
         .into_iter()
-        .map(|(prefix, component_name, description, _source)| ComponentMapping {
-            prefix,
-            component: component_name,
-            description,
-        })
+        .map(
+            |(prefix, component_name, description, _source)| ComponentMapping {
+                prefix,
+                component: component_name,
+                description,
+            },
+        )
         .collect();
 
     debug!("background indexer: listening for incremental changes");
@@ -693,7 +696,8 @@ async fn run_incremental_loop(
                     }
                     let _ = index_store.delete_embeddings_for_file(&project_path, &rel_path);
                     // Clean up stale cross-references for deleted files.
-                    let _ = index_store.delete_cross_references_for_files(&project_path, &[&rel_path]);
+                    let _ =
+                        index_store.delete_cross_references_for_files(&project_path, &[&rel_path]);
                     changed_rel_paths.push(rel_path);
                     batch_had_changes = true;
                 }
@@ -711,7 +715,8 @@ async fn run_incremental_loop(
                             }
                         }
                         let _ = index_store.delete_embeddings_for_file(&project_path, rel_path);
-                        let _ = index_store.delete_cross_references_for_files(&project_path, &[rel_path.as_str()]);
+                        let _ = index_store
+                            .delete_cross_references_for_files(&project_path, &[rel_path.as_str()]);
                     }
                     changed_rel_paths.extend(child_rel_paths);
                     batch_had_changes = true;
@@ -726,11 +731,8 @@ async fn run_incremental_loop(
                     if !cached_mappings.is_empty() {
                         let component =
                             component_classifier::lookup_component(&cached_mappings, &rel_path);
-                        let _ = index_store.update_file_component(
-                            &project_path,
-                            &rel_path,
-                            &component,
-                        );
+                        let _ =
+                            index_store.update_file_component(&project_path, &rel_path, &component);
                     }
                     if let Some(emb_mgr) = embedding_manager {
                         if let Err(e) = run_incremental_embedding_managed_with_content(
@@ -1117,7 +1119,10 @@ fn run_full_index(
 ) -> Result<(), String> {
     let inventory = build_file_inventory_with_limits(
         project_root,
-        &extra_excluded_dirs.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+        &extra_excluded_dirs
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>(),
         extra_excluded_extensions,
         &AnalysisLimits::default(),
     )
@@ -3803,24 +3808,72 @@ pub fn process_config(config: &Config) -> String {
         let no_extras: &[String] = &[];
 
         // Excluded directories
-        assert!(is_hardcoded_excluded(root, Path::new("/project/.git/objects/pack"), no_extras));
-        assert!(is_hardcoded_excluded(root, Path::new("/project/node_modules/lodash/index.js"), no_extras));
-        assert!(is_hardcoded_excluded(root, Path::new("/project/target/debug/app"), no_extras));
-        assert!(is_hardcoded_excluded(root, Path::new("/project/dist/bundle.js"), no_extras));
-        assert!(is_hardcoded_excluded(root, Path::new("/project/.venv/lib/python3.10"), no_extras));
+        assert!(is_hardcoded_excluded(
+            root,
+            Path::new("/project/.git/objects/pack"),
+            no_extras
+        ));
+        assert!(is_hardcoded_excluded(
+            root,
+            Path::new("/project/node_modules/lodash/index.js"),
+            no_extras
+        ));
+        assert!(is_hardcoded_excluded(
+            root,
+            Path::new("/project/target/debug/app"),
+            no_extras
+        ));
+        assert!(is_hardcoded_excluded(
+            root,
+            Path::new("/project/dist/bundle.js"),
+            no_extras
+        ));
+        assert!(is_hardcoded_excluded(
+            root,
+            Path::new("/project/.venv/lib/python3.10"),
+            no_extras
+        ));
 
         // Not excluded
-        assert!(!is_hardcoded_excluded(root, Path::new("/project/src/main.rs"), no_extras));
-        assert!(!is_hardcoded_excluded(root, Path::new("/project/tests/test_app.py"), no_extras));
-        assert!(!is_hardcoded_excluded(root, Path::new("/project/README.md"), no_extras));
+        assert!(!is_hardcoded_excluded(
+            root,
+            Path::new("/project/src/main.rs"),
+            no_extras
+        ));
+        assert!(!is_hardcoded_excluded(
+            root,
+            Path::new("/project/tests/test_app.py"),
+            no_extras
+        ));
+        assert!(!is_hardcoded_excluded(
+            root,
+            Path::new("/project/README.md"),
+            no_extras
+        ));
 
         // Path not under project root — should return false
-        assert!(!is_hardcoded_excluded(root, Path::new("/other/node_modules/pkg"), no_extras));
+        assert!(!is_hardcoded_excluded(
+            root,
+            Path::new("/other/node_modules/pkg"),
+            no_extras
+        ));
 
         // Extra excluded dirs
         let extras = vec!["vendor".to_string(), "tmp".to_string()];
-        assert!(is_hardcoded_excluded(root, Path::new("/project/vendor/lib.js"), &extras));
-        assert!(is_hardcoded_excluded(root, Path::new("/project/tmp/cache.dat"), &extras));
-        assert!(!is_hardcoded_excluded(root, Path::new("/project/src/main.rs"), &extras));
+        assert!(is_hardcoded_excluded(
+            root,
+            Path::new("/project/vendor/lib.js"),
+            &extras
+        ));
+        assert!(is_hardcoded_excluded(
+            root,
+            Path::new("/project/tmp/cache.dat"),
+            &extras
+        ));
+        assert!(!is_hardcoded_excluded(
+            root,
+            Path::new("/project/src/main.rs"),
+            &extras
+        ));
     }
 }

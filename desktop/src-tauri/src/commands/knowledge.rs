@@ -134,7 +134,8 @@ impl KnowledgeState {
             cache_enabled: false,
             cache_max_entries: 0,
         };
-        self.initialize_with_config(database, emb_config, true).await
+        self.initialize_with_config(database, emb_config, true)
+            .await
     }
 
     /// Initialize the knowledge pipeline with an existing pipeline instance.
@@ -542,9 +543,7 @@ pub async fn rag_update_collection(
         &collection_id,
         name.as_deref(),
         description.as_deref(),
-        workspace_path
-            .as_ref()
-            .map(|wp| wp.as_deref()),
+        workspace_path.as_ref().map(|wp| wp.as_deref()),
     ) {
         Ok(collection) => Ok(CommandResponse::ok(collection)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
@@ -886,18 +885,12 @@ impl DocumentInput {
         let tmp_path = tmp.path().to_path_buf();
 
         let parsed = match source_type {
-            "pdf" => {
-                crate::services::tools::file_parsers::parse_pdf(&tmp_path, None)
-                    .map_err(|e| format!("PDF parse failed: {}", e))?
-            }
-            "docx" => {
-                crate::services::tools::file_parsers::parse_docx(&tmp_path)
-                    .map_err(|e| format!("DOCX parse failed: {}", e))?
-            }
-            "xlsx" => {
-                crate::services::tools::file_parsers::parse_xlsx(&tmp_path)
-                    .map_err(|e| format!("XLSX parse failed: {}", e))?
-            }
+            "pdf" => crate::services::tools::file_parsers::parse_pdf(&tmp_path, None)
+                .map_err(|e| format!("PDF parse failed: {}", e))?,
+            "docx" => crate::services::tools::file_parsers::parse_docx(&tmp_path)
+                .map_err(|e| format!("DOCX parse failed: {}", e))?,
+            "xlsx" => crate::services::tools::file_parsers::parse_xlsx(&tmp_path)
+                .map_err(|e| format!("XLSX parse failed: {}", e))?,
             _ => return Err(format!("Unsupported binary source type: {}", source_type)),
         };
 

@@ -260,7 +260,10 @@ pub async fn extract_session_memories(
 
     // Skip short conversations
     if conversation_summary.len() < 50 {
-        eprintln!("[memory-extraction] Skipped: conversation too short ({} chars < 50)", conversation_summary.len());
+        eprintln!(
+            "[memory-extraction] Skipped: conversation too short ({} chars < 50)",
+            conversation_summary.len()
+        );
         return Ok(CommandResponse::ok(zero_result));
     }
 

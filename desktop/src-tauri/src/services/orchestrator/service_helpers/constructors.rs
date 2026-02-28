@@ -852,8 +852,7 @@ impl OrchestratorService {
     ) -> Self {
         self.tool_executor
             .set_knowledge_pipeline(Arc::clone(&pipeline));
-        self.tool_executor
-            .set_knowledge_project_id(project_id);
+        self.tool_executor.set_knowledge_project_id(project_id);
         self.tool_executor
             .set_knowledge_filters(collection_filter, document_filter);
         if !awareness_section.is_empty() {

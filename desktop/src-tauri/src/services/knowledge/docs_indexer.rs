@@ -204,12 +204,7 @@ impl DocsIndexer {
                     collection = %col.name,
                     "Setting missing workspace_path on existing docs collection"
                 );
-                pipeline.update_collection(
-                    &col.id,
-                    None,
-                    None,
-                    Some(Some(workspace_path)),
-                )?
+                pipeline.update_collection(&col.id, None, None, Some(Some(workspace_path)))?
             } else {
                 col.clone()
             };
@@ -271,12 +266,8 @@ impl DocsIndexer {
         );
 
         // Set workspace_path on the collection
-        let collection = pipeline.update_collection(
-            &collection.id,
-            None,
-            None,
-            Some(Some(workspace_path)),
-        )?;
+        let collection =
+            pipeline.update_collection(&collection.id, None, None, Some(Some(workspace_path)))?;
 
         // Start file watcher
         self.start_doc_watcher(workspace_path).await;
@@ -316,10 +307,7 @@ impl DocsIndexer {
                         continue;
                     }
                     let path = &event.path;
-                    let ext = path
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .unwrap_or("");
+                    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
                     if !DOC_EXTENSIONS.contains(&ext) {
                         continue;
                     }

@@ -1290,22 +1290,21 @@ pub async fn execute_standalone(
                 };
                 // Build lightweight awareness section listing available collections
                 let collections = pipeline.list_collections(&pid).unwrap_or_default();
-                let language =
-                    crate::services::tools::system_prompt::detect_language(&message);
+                let language = crate::services::tools::system_prompt::detect_language(&message);
                 let summaries: Vec<
                     crate::services::tools::system_prompt::KnowledgeCollectionSummary,
                 > = collections
                     .iter()
-                    .map(|c| {
-                        crate::services::tools::system_prompt::KnowledgeCollectionSummary {
+                    .map(
+                        |c| crate::services::tools::system_prompt::KnowledgeCollectionSummary {
                             name: c.name.clone(),
                             document_count: pipeline
                                 .list_documents(&c.id)
                                 .map(|d| d.len())
                                 .unwrap_or(0),
                             chunk_count: c.chunk_count as usize,
-                        }
-                    })
+                        },
+                    )
                     .collect();
                 let awareness =
                     crate::services::tools::system_prompt::build_knowledge_awareness_section(
@@ -1323,8 +1322,8 @@ pub async fn execute_standalone(
                 } else {
                     Some(k.selected_documents.clone())
                 };
-                orchestrator =
-                    orchestrator.with_knowledge_tool(pipeline, pid, col_filter, doc_filter, awareness);
+                orchestrator = orchestrator
+                    .with_knowledge_tool(pipeline, pid, col_filter, doc_filter, awareness);
             }
         }
     }

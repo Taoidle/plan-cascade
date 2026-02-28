@@ -100,10 +100,7 @@ pub struct EnrichedContext {
 /// call the `ensure_initialized` function from `commands/knowledge.rs` (which
 /// is private to that module). Without this, `get_pipeline()` returns `Err`
 /// and knowledge queries silently return empty strings.
-async fn ensure_knowledge_initialized(
-    knowledge_state: &KnowledgeState,
-    app_state: &AppState,
-) {
+async fn ensure_knowledge_initialized(knowledge_state: &KnowledgeState, app_state: &AppState) {
     if knowledge_state.is_initialized().await {
         return;
     }
@@ -114,7 +111,10 @@ async fn ensure_knowledge_initialized(
     {
         Ok(db) => db,
         Err(e) => {
-            tracing::warn!("[ContextSource] Failed to access database for knowledge init: {}", e);
+            tracing::warn!(
+                "[ContextSource] Failed to access database for knowledge init: {}",
+                e
+            );
             return;
         }
     };
@@ -140,7 +140,10 @@ async fn ensure_knowledge_initialized(
         .initialize_with_config(db, emb_config, is_tfidf)
         .await
     {
-        tracing::warn!("[ContextSource] Knowledge pipeline initialization failed: {}", e);
+        tracing::warn!(
+            "[ContextSource] Knowledge pipeline initialization failed: {}",
+            e
+        );
     } else {
         tracing::info!("[ContextSource] Knowledge pipeline initialized successfully");
     }
@@ -174,34 +177,31 @@ pub async fn query_selected_context(
     } else {
         &config.project_id
     };
-    let knowledge_block = if config
-        .knowledge
-        .as_ref()
-        .map_or(false, |k| k.enabled)
-    {
-        let k = config.knowledge.as_ref().unwrap();
-        tracing::info!(
+    let knowledge_block =
+        if config.knowledge.as_ref().map_or(false, |k| k.enabled) {
+            let k = config.knowledge.as_ref().unwrap();
+            tracing::info!(
             "[ContextSource] Querying knowledge — project_id={}, collections={:?}, documents={:?}",
             pid, k.selected_collections, k.selected_documents,
         );
-        // Ensure knowledge pipeline is initialized before querying
-        ensure_knowledge_initialized(knowledge_state, app_state).await;
-        let block = query_knowledge_for_task_filtered(
-            knowledge_state,
-            pid,
-            query,
-            &k.selected_collections,
-            &k.selected_documents,
-        )
-        .await;
-        tracing::info!(
-            "[ContextSource] Knowledge query result: {} chars",
-            block.len(),
-        );
-        block
-    } else {
-        String::new()
-    };
+            // Ensure knowledge pipeline is initialized before querying
+            ensure_knowledge_initialized(knowledge_state, app_state).await;
+            let block = query_knowledge_for_task_filtered(
+                knowledge_state,
+                pid,
+                query,
+                &k.selected_collections,
+                &k.selected_documents,
+            )
+            .await;
+            tracing::info!(
+                "[ContextSource] Knowledge query result: {} chars",
+                block.len(),
+            );
+            block
+        } else {
+            String::new()
+        };
 
     let memory_block = if config.memory.as_ref().map_or(false, |m| m.enabled) {
         let m = config.memory.as_ref().unwrap();
@@ -217,20 +217,19 @@ pub async fn query_selected_context(
         String::new()
     };
 
-    let (skills_block, skill_expertise) =
-        if config.skills.as_ref().map_or(false, |s| s.enabled) {
-            let s = config.skills.as_ref().unwrap();
-            select_skills_for_task_filtered(
-                app_state,
-                project_path,
-                query,
-                phase,
-                &s.selected_skill_ids,
-            )
-            .await
-        } else {
-            (String::new(), vec![])
-        };
+    let (skills_block, skill_expertise) = if config.skills.as_ref().map_or(false, |s| s.enabled) {
+        let s = config.skills.as_ref().unwrap();
+        select_skills_for_task_filtered(
+            app_state,
+            project_path,
+            query,
+            phase,
+            &s.selected_skill_ids,
+        )
+        .await
+    } else {
+        (String::new(), vec![])
+    };
 
     EnrichedContext {
         knowledge_block,
@@ -272,20 +271,19 @@ pub async fn query_selected_context_without_knowledge(
         String::new()
     };
 
-    let (skills_block, skill_expertise) =
-        if config.skills.as_ref().map_or(false, |s| s.enabled) {
-            let s = config.skills.as_ref().unwrap();
-            select_skills_for_task_filtered(
-                app_state,
-                project_path,
-                query,
-                phase,
-                &s.selected_skill_ids,
-            )
-            .await
-        } else {
-            (String::new(), vec![])
-        };
+    let (skills_block, skill_expertise) = if config.skills.as_ref().map_or(false, |s| s.enabled) {
+        let s = config.skills.as_ref().unwrap();
+        select_skills_for_task_filtered(
+            app_state,
+            project_path,
+            query,
+            phase,
+            &s.selected_skill_ids,
+        )
+        .await
+    } else {
+        (String::new(), vec![])
+    };
 
     EnrichedContext {
         knowledge_block: String::new(), // Knowledge handled via SearchKnowledge tool
@@ -361,10 +359,7 @@ pub async fn query_knowledge_for_task_filtered(
         ..KnowledgeContextConfig::default()
     };
 
-    match provider
-        .query_for_context(project_id, query, &config)
-        .await
-    {
+    match provider.query_for_context(project_id, query, &config).await {
         Ok(chunks) => KnowledgeContextProvider::format_context_block(&chunks),
         Err(e) => {
             tracing::warn!("Knowledge filtered query for task mode failed: {}", e);
@@ -394,10 +389,7 @@ pub async fn query_memories_for_task(
         .with_memory_store(|store| search_memories(store, &request))
         .await
     {
-        Ok(results) => results
-            .into_iter()
-            .map(|r| r.entry)
-            .collect::<Vec<_>>(),
+        Ok(results) => results.into_iter().map(|r| r.entry).collect::<Vec<_>>(),
         Err(_) => return String::new(),
     };
 
@@ -455,7 +447,11 @@ pub async fn query_memories_for_task_filtered(
                 .iter()
                 .filter_map(|s| MemoryCategory::from_str(s).ok())
                 .collect();
-            if cats.is_empty() { None } else { Some(cats) }
+            if cats.is_empty() {
+                None
+            } else {
+                Some(cats)
+            }
         };
 
         let request = MemorySearchRequest {

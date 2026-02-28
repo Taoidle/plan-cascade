@@ -13,13 +13,13 @@ use plan_cascade_desktop::commands::lsp::LspState;
 use plan_cascade_desktop::commands::mcp::McpRuntimeState;
 use plan_cascade_desktop::commands::permissions::PermissionState;
 use plan_cascade_desktop::commands::pipeline_execution::ExecutionRegistry;
+use plan_cascade_desktop::commands::plan_mode::PlanModeState;
 use plan_cascade_desktop::commands::plugins::PluginState;
 use plan_cascade_desktop::commands::quality_gates::QualityGatesState;
 use plan_cascade_desktop::commands::remote::RemoteState;
 use plan_cascade_desktop::commands::spec_interview::SpecInterviewState;
 use plan_cascade_desktop::commands::standalone::StandaloneState;
 use plan_cascade_desktop::commands::task_mode::TaskModeState;
-use plan_cascade_desktop::commands::plan_mode::PlanModeState;
 use plan_cascade_desktop::commands::webhook::WebhookState;
 use plan_cascade_desktop::commands::worktree::WorktreeState;
 use plan_cascade_desktop::state::AppState;
@@ -61,6 +61,7 @@ fn main() {
             // Settings commands
             plan_cascade_desktop::commands::settings::get_settings,
             plan_cascade_desktop::commands::settings::update_settings,
+            plan_cascade_desktop::commands::settings::reset_all_settings,
             plan_cascade_desktop::commands::settings::export_all_settings,
             plan_cascade_desktop::commands::settings::import_all_settings,
             // Project commands

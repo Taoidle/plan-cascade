@@ -643,14 +643,21 @@ pub async fn generate_task_prd(
         .to_string();
     let enriched = if let Some(ref cs) = context_sources {
         crate::services::task_mode::context_provider::query_selected_context(
-            cs, &knowledge_state, &app_state, &project_path_str,
-            &description, crate::services::skills::model::InjectionPhase::Planning,
-        ).await
+            cs,
+            &knowledge_state,
+            &app_state,
+            &project_path_str,
+            &description,
+            crate::services::skills::model::InjectionPhase::Planning,
+        )
+        .await
     } else {
         crate::services::task_mode::context_provider::EnrichedContext::default()
     };
     let combined_context = crate::services::task_mode::context_provider::merge_enriched_context(
-        exploration_context_str.as_deref(), &enriched.knowledge_block, &enriched.memory_block,
+        exploration_context_str.as_deref(),
+        &enriched.knowledge_block,
+        &enriched.memory_block,
     );
 
     let prd = match prd_generator::generate_prd_with_llm(
@@ -1048,13 +1055,17 @@ pub async fn explore_project(
                     if result.llm_summary.is_some() {
                         result.summary_quality = SummaryQuality::Partial;
                         result.summary_source = SummarySource::FallbackSynthesized;
-                        result.summary_notes =
-                            Some("LLM exploration failed; used deterministic synthesized summary.".to_string());
+                        result.summary_notes = Some(
+                            "LLM exploration failed; used deterministic synthesized summary."
+                                .to_string(),
+                        );
                     } else {
                         result.summary_quality = SummaryQuality::Empty;
                         result.summary_source = SummarySource::DeterministicOnly;
-                        result.summary_notes =
-                            Some("LLM exploration failed and no synthesized summary could be generated.".to_string());
+                        result.summary_notes = Some(
+                            "LLM exploration failed and no synthesized summary could be generated."
+                                .to_string(),
+                        );
                     }
                 } else {
                     result.llm_summary = exploration::synthesize_summary_from_deterministic(
@@ -1428,9 +1439,14 @@ pub async fn approve_task_prd(
                 } else {
                     // CLI mode: full pre-injection including knowledge (no tools available)
                     crate::services::task_mode::context_provider::query_selected_context(
-                        cs, &knowledge_state, &app_state, &project_path_str,
-                        &session.description, crate::services::skills::model::InjectionPhase::Implementation,
-                    ).await
+                        cs,
+                        &knowledge_state,
+                        &app_state,
+                        &project_path_str,
+                        &session.description,
+                        crate::services::skills::model::InjectionPhase::Implementation,
+                    )
+                    .await
                 }
             } else {
                 crate::services::task_mode::context_provider::EnrichedContext::default()
@@ -1440,24 +1456,26 @@ pub async fn approve_task_prd(
             let skills_block = enriched_ctx.skills_block;
 
             // Pre-compute knowledge tool params for LLM mode (needs Tauri State access)
-            let knowledge_tool_params: Option<KnowledgeToolParams> =
-                if matches!(mode, StoryExecutionMode::Llm) {
-                    if let Some(ref cs) = context_sources {
-                        if cs.knowledge.as_ref().map_or(false, |k| k.enabled) {
-                            crate::services::task_mode::context_provider::ensure_knowledge_initialized_public(
+            let knowledge_tool_params: Option<KnowledgeToolParams> = if matches!(
+                mode,
+                StoryExecutionMode::Llm
+            ) {
+                if let Some(ref cs) = context_sources {
+                    if cs.knowledge.as_ref().map_or(false, |k| k.enabled) {
+                        crate::services::task_mode::context_provider::ensure_knowledge_initialized_public(
                                 &knowledge_state, &app_state,
                             ).await;
-                            if let Ok(pipeline) = knowledge_state.get_pipeline().await {
-                                let pid = if cs.project_id.is_empty() {
-                                    "default".to_string()
-                                } else {
-                                    cs.project_id.clone()
-                                };
-                                let collections = pipeline.list_collections(&pid).unwrap_or_default();
-                                let language = crate::services::tools::system_prompt::detect_language(
-                                    &session.description,
-                                );
-                                let summaries: Vec<
+                        if let Ok(pipeline) = knowledge_state.get_pipeline().await {
+                            let pid = if cs.project_id.is_empty() {
+                                "default".to_string()
+                            } else {
+                                cs.project_id.clone()
+                            };
+                            let collections = pipeline.list_collections(&pid).unwrap_or_default();
+                            let language = crate::services::tools::system_prompt::detect_language(
+                                &session.description,
+                            );
+                            let summaries: Vec<
                                     crate::services::tools::system_prompt::KnowledgeCollectionSummary,
                                 > = collections
                                     .iter()
@@ -1472,31 +1490,28 @@ pub async fn approve_task_prd(
                                         }
                                     })
                                     .collect();
-                                let awareness =
+                            let awareness =
                                     crate::services::tools::system_prompt::build_knowledge_awareness_section(
                                         &summaries, language,
                                     );
-                                let k = cs.knowledge.as_ref().unwrap();
-                                let col_filter = if k.selected_collections.is_empty() {
-                                    None
-                                } else {
-                                    Some(k.selected_collections.clone())
-                                };
-                                let doc_filter = if k.selected_documents.is_empty() {
-                                    None
-                                } else {
-                                    Some(k.selected_documents.clone())
-                                };
-                                Some(KnowledgeToolParams {
-                                    pipeline,
-                                    project_id: pid,
-                                    collection_filter: col_filter,
-                                    document_filter: doc_filter,
-                                    awareness_section: awareness,
-                                })
-                            } else {
+                            let k = cs.knowledge.as_ref().unwrap();
+                            let col_filter = if k.selected_collections.is_empty() {
                                 None
-                            }
+                            } else {
+                                Some(k.selected_collections.clone())
+                            };
+                            let doc_filter = if k.selected_documents.is_empty() {
+                                None
+                            } else {
+                                Some(k.selected_documents.clone())
+                            };
+                            Some(KnowledgeToolParams {
+                                pipeline,
+                                project_id: pid,
+                                collection_filter: col_filter,
+                                document_filter: doc_filter,
+                                awareness_section: awareness,
+                            })
                         } else {
                             None
                         }
@@ -1505,7 +1520,10 @@ pub async fn approve_task_prd(
                     }
                 } else {
                     None
-                };
+                }
+            } else {
+                None
+            };
             let plugin_quality_gates = plugin_state.collect_quality_gates().await;
             config.plugin_quality_gates = plugin_quality_gates;
 
@@ -1534,8 +1552,16 @@ pub async fn approve_task_prd(
 
                 // Create story executor that delegates to the appropriate backend.
                 // In CLI mode, spawns external CLI tools. In LLM mode, uses OrchestratorService.
-                let story_executor =
-                    build_story_executor(app_handle.clone(), mode, provider_config, db_pool, knowledge_block, memory_block, skills_block, knowledge_tool_params);
+                let story_executor = build_story_executor(
+                    app_handle.clone(),
+                    mode,
+                    provider_config,
+                    db_pool,
+                    knowledge_block,
+                    memory_block,
+                    skills_block,
+                    knowledge_tool_params,
+                );
 
                 let result = executor
                     .execute(&sid, &resolver, project_path, emit, story_executor)
@@ -2014,7 +2040,11 @@ fn value_to_string_array(value: Option<&serde_json::Value>) -> Vec<String> {
 }
 
 fn parse_payload_story(value: &serde_json::Value) -> Option<PrdModificationPayloadStory> {
-    let title = value.get("title").and_then(|v| v.as_str())?.trim().to_string();
+    let title = value
+        .get("title")
+        .and_then(|v| v.as_str())?
+        .trim()
+        .to_string();
     if title.is_empty() {
         return None;
     }
@@ -2044,9 +2074,7 @@ fn parse_payload_story(value: &serde_json::Value) -> Option<PrdModificationPaylo
     })
 }
 
-fn parse_prd_modification_payload(
-    value: Option<&serde_json::Value>,
-) -> PrdModificationPayload {
+fn parse_prd_modification_payload(value: Option<&serde_json::Value>) -> PrdModificationPayload {
     let mut payload = PrdModificationPayload::default();
     let Some(obj) = value.and_then(|v| v.as_object()) else {
         return payload;
@@ -2145,7 +2173,11 @@ fn build_modification_preview(
                     .map(|s| s.title.clone())
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("Split {} into: {}", target, truncate_for_preview(&names, 100))
+                format!(
+                    "Split {} into: {}",
+                    target,
+                    truncate_for_preview(&names, 100)
+                )
             }
         }
         "merge_story" => {
@@ -2160,11 +2192,7 @@ fn build_modification_preview(
                 .or(payload.title.as_deref())
                 .unwrap_or(reason);
             if target_story_id.is_some() {
-                format!(
-                    "Update {}: {}",
-                    target,
-                    truncate_for_preview(title, 100)
-                )
+                format!("Update {}: {}", target, truncate_for_preview(title, 100))
             } else {
                 format!("Update story: {}", truncate_for_preview(title, 100))
             }
@@ -2233,8 +2261,7 @@ fn parse_single_prd_modification(
         payload.dependencies = Some(value_to_string_array(value.get("dependencies")));
     }
     if payload.acceptance_criteria.is_none()
-        && (value.get("acceptance_criteria").is_some()
-            || value.get("acceptanceCriteria").is_some())
+        && (value.get("acceptance_criteria").is_some() || value.get("acceptanceCriteria").is_some())
     {
         payload.acceptance_criteria = Some(value_to_string_array(
             value
@@ -2401,9 +2428,14 @@ pub async fn run_requirement_analysis(
         .to_string();
     let enriched = if let Some(ref cs) = context_sources {
         crate::services::task_mode::context_provider::query_selected_context(
-            cs, &knowledge_state, &app_state, &project_path_str,
-            &task_description, crate::services::skills::model::InjectionPhase::Planning,
-        ).await
+            cs,
+            &knowledge_state,
+            &app_state,
+            &project_path_str,
+            &task_description,
+            crate::services::skills::model::InjectionPhase::Planning,
+        )
+        .await
     } else {
         crate::services::task_mode::context_provider::EnrichedContext::default()
     };
@@ -2459,7 +2491,9 @@ Be specific and actionable. Reference concrete technical details when available.
     }
 
     let enriched_context = crate::services::task_mode::context_provider::merge_enriched_context(
-        exploration_context.as_deref(), &knowledge_block, &memory_block,
+        exploration_context.as_deref(),
+        &knowledge_block,
+        &memory_block,
     );
 
     let target_schema = r#"{
@@ -2613,9 +2647,14 @@ pub async fn run_architecture_review(
         .to_string();
     let enriched = if let Some(ref cs) = context_sources {
         crate::services::task_mode::context_provider::query_selected_context(
-            cs, &knowledge_state, &app_state, &project_path_str,
-            &prd_json, crate::services::skills::model::InjectionPhase::Planning,
-        ).await
+            cs,
+            &knowledge_state,
+            &app_state,
+            &project_path_str,
+            &prd_json,
+            crate::services::skills::model::InjectionPhase::Planning,
+        )
+        .await
     } else {
         crate::services::task_mode::context_provider::EnrichedContext::default()
     };
@@ -2670,7 +2709,9 @@ testing strategy, dependency management, and integration patterns.
     }
 
     let enriched_context = crate::services::task_mode::context_provider::merge_enriched_context(
-        exploration_context.as_deref(), &knowledge_block, &memory_block,
+        exploration_context.as_deref(),
+        &knowledge_block,
+        &memory_block,
     );
 
     let target_schema = r#"{
@@ -3097,7 +3138,7 @@ async fn execute_story_via_llm(
     let mut system_prompt = String::from(
         "You are an expert software engineer executing a story task. \
          Use the provided tools to implement the required changes. \
-         Read relevant files, make code changes, and run tests to verify."
+         Read relevant files, make code changes, and run tests to verify.",
     );
     if !skills_block.is_empty() {
         system_prompt.push_str("\n\n");
@@ -3187,7 +3228,12 @@ async fn execute_story_via_llm(
 }
 
 /// Build an execution prompt from story context for the LLM agent.
-fn build_story_prompt(ctx: &StoryExecutionContext, knowledge_block: &str, memory_block: &str, skills_block: &str) -> String {
+fn build_story_prompt(
+    ctx: &StoryExecutionContext,
+    knowledge_block: &str,
+    memory_block: &str,
+    skills_block: &str,
+) -> String {
     let criteria = ctx
         .acceptance_criteria
         .iter()

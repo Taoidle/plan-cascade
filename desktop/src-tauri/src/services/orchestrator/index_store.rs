@@ -1808,7 +1808,13 @@ impl IndexStore {
         )?;
 
         for (prefix, component_name, description) in mappings {
-            stmt.execute(params![project_path, prefix, component_name, description, source])?;
+            stmt.execute(params![
+                project_path,
+                prefix,
+                component_name,
+                description,
+                source
+            ])?;
         }
 
         drop(stmt);

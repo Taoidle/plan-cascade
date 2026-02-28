@@ -6,10 +6,10 @@
 mod adaptive_scope;
 pub mod analysis_index;
 mod analysis_merge;
-pub mod component_classifier;
 mod analysis_scheduler;
 mod analysis_store;
 pub mod background_indexer;
+pub mod component_classifier;
 pub mod embedding_config_builder;
 pub mod embedding_manager;
 pub mod embedding_provider;

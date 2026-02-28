@@ -9,9 +9,7 @@ use async_trait::async_trait;
 
 use crate::services::llm::provider::LlmProvider;
 use crate::services::plan_mode::adapter::DomainAdapter;
-use crate::services::plan_mode::types::{
-    CriterionResult, Plan, PlanStep, StepOutput, TaskDomain,
-};
+use crate::services::plan_mode::types::{CriterionResult, Plan, PlanStep, StepOutput, TaskDomain};
 
 /// General-purpose adapter for any task domain.
 pub struct GeneralAdapter;
@@ -103,7 +101,10 @@ async fn llm_validate_criterion(
         ..Default::default()
     };
 
-    match provider.send_message(messages, Some(system), vec![], options).await {
+    match provider
+        .send_message(messages, Some(system), vec![], options)
+        .await
+    {
         Ok(response) => {
             // Try to parse JSON from response
             let text = response.content.as_deref().unwrap_or("").trim();
@@ -124,7 +125,8 @@ async fn llm_validate_criterion(
             CriterionResult {
                 criterion: criterion.to_string(),
                 met: true,
-                explanation: "Validation completed (could not parse structured response)".to_string(),
+                explanation: "Validation completed (could not parse structured response)"
+                    .to_string(),
             }
         }
         Err(_) => CriterionResult {
@@ -168,9 +170,11 @@ mod tests {
     #[test]
     fn test_extract_json_object() {
         assert_eq!(
-            extract_json_object(r#"```json
+            extract_json_object(
+                r#"```json
 {"met": true, "explanation": "ok"}
-```"#),
+```"#
+            ),
             Some(r#"{"met": true, "explanation": "ok"}"#.to_string())
         );
 

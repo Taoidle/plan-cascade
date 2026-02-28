@@ -265,20 +265,19 @@ impl RagPipeline {
             self.get_or_create_collection(collection_name, project_id, description)?;
 
         // Helper to emit progress events
-        let emit_progress =
-            |stage: &str, progress: u32, detail: &str| {
-                if let Some(handle) = app_handle {
-                    let _ = handle.emit(
-                        "knowledge:ingest-progress",
-                        serde_json::json!({
-                            "collection_name": collection_name,
-                            "stage": stage,
-                            "progress": progress,
-                            "detail": detail,
-                        }),
-                    );
-                }
-            };
+        let emit_progress = |stage: &str, progress: u32, detail: &str| {
+            if let Some(handle) = app_handle {
+                let _ = handle.emit(
+                    "knowledge:ingest-progress",
+                    serde_json::json!({
+                        "collection_name": collection_name,
+                        "stage": stage,
+                        "progress": progress,
+                        "detail": detail,
+                    }),
+                );
+            }
+        };
 
         emit_progress("chunking", 0, "Starting document chunking...");
 
@@ -310,7 +309,11 @@ impl RagPipeline {
         emit_progress(
             "chunking",
             30,
-            &format!("Chunked {} documents into {} chunks", documents.len(), all_chunks.len()),
+            &format!(
+                "Chunked {} documents into {} chunks",
+                documents.len(),
+                all_chunks.len()
+            ),
         );
 
         // Embed all chunks (async — no connection held)
@@ -322,7 +325,11 @@ impl RagPipeline {
             .await
             .map_err(|e| AppError::internal(format!("Embedding failed: {}", e)))?;
 
-        emit_progress("embedding", 70, &format!("Embedded {} chunks", embeddings.len()));
+        emit_progress(
+            "embedding",
+            70,
+            &format!("Embedded {} chunks", embeddings.len()),
+        );
 
         // Store chunks in SQLite within a transaction (sync scope — connection dropped before await)
         emit_progress("storing", 70, "Storing chunks in database...");
@@ -368,9 +375,7 @@ impl RagPipeline {
                     rusqlite::params![collection_id],
                     |row| row.get(0),
                 )
-                .map_err(|e| {
-                    AppError::database(format!("Failed to count chunks: {}", e))
-                })?;
+                .map_err(|e| AppError::database(format!("Failed to count chunks: {}", e)))?;
 
             tx.execute(
                 "UPDATE knowledge_collections SET chunk_count = ?1, updated_at = datetime('now') WHERE id = ?2",
@@ -546,10 +551,7 @@ impl RagPipeline {
     }
 
     /// List all documents in a collection with chunk count and preview.
-    pub fn list_documents(
-        &self,
-        collection_id: &str,
-    ) -> AppResult<Vec<DocumentSummary>> {
+    pub fn list_documents(&self, collection_id: &str) -> AppResult<Vec<DocumentSummary>> {
         let conn = self
             .database
             .get_connection()
@@ -581,11 +583,7 @@ impl RagPipeline {
     ///
     /// Removes all chunks for the document, marks HNSW entries as stale,
     /// and updates the collection's chunk_count — all within a transaction.
-    pub async fn delete_document(
-        &self,
-        collection_id: &str,
-        document_id: &str,
-    ) -> AppResult<()> {
+    pub async fn delete_document(&self, collection_id: &str, document_id: &str) -> AppResult<()> {
         // Collect chunk rowids for HNSW stale marking (sync scope)
         let rowids = {
             let conn = self
@@ -600,7 +598,9 @@ impl RagPipeline {
                 .map_err(|e| AppError::database(format!("Failed to prepare query: {}", e)))?;
 
             let rowids: Vec<i64> = stmt
-                .query_map(rusqlite::params![collection_id, document_id], |row| row.get(0))
+                .query_map(rusqlite::params![collection_id, document_id], |row| {
+                    row.get(0)
+                })
                 .map_err(|e| AppError::database(format!("Failed to query rowids: {}", e)))?
                 .filter_map(|r| r.ok())
                 .collect();
@@ -939,14 +939,8 @@ impl RagPipeline {
                 }
             };
 
-            let source_type = metadata
-                .get("source_type")
-                .cloned()
-                .unwrap_or_default();
-            let old_hash = metadata
-                .get("content_hash")
-                .cloned()
-                .unwrap_or_default();
+            let source_type = metadata.get("source_type").cloned().unwrap_or_default();
+            let old_hash = metadata.get("content_hash").cloned().unwrap_or_default();
 
             indexed_paths.insert(source_path.clone());
             let path = Path::new(&source_path);
@@ -1062,10 +1056,7 @@ impl RagPipeline {
             let mut docs = Vec::new();
             for file_path in &updates.new_files {
                 let path = PathBuf::from(file_path);
-                let ext = path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("txt");
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("txt");
 
                 match Self::read_file_content(&path, ext) {
                     Ok(content) => {

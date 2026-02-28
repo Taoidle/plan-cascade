@@ -57,23 +57,16 @@ pub fn binary_extensions() -> &'static [&'static str] {
         // Images
         "png", "jpg", "jpeg", "gif", "bmp", "ico", "webp", "tiff", "psd", "svg",
         // Audio/Video
-        "mp3", "mp4", "wav", "avi", "mov", "mkv", "flac", "ogg", "webm",
-        // Archives
-        "zip", "tar", "gz", "bz2", "xz", "7z", "rar", "zst",
-        // Compiled
-        "wasm", "dll", "so", "dylib", "exe", "bin", "o", "a", "lib", "obj", "class", "pyc",
-        "pyo",
+        "mp3", "mp4", "wav", "avi", "mov", "mkv", "flac", "ogg", "webm", // Archives
+        "zip", "tar", "gz", "bz2", "xz", "7z", "rar", "zst", // Compiled
+        "wasm", "dll", "so", "dylib", "exe", "bin", "o", "a", "lib", "obj", "class", "pyc", "pyo",
         // Packages
-        "jar", "war", "gem", "nupkg", "deb", "rpm", "apk", "dmg", "msi",
-        // Fonts
-        "ttf", "otf", "woff", "woff2", "eot",
-        // Data
-        "db", "sqlite", "sqlite3",
-        // Docs
+        "jar", "war", "gem", "nupkg", "deb", "rpm", "apk", "dmg", "msi", // Fonts
+        "ttf", "otf", "woff", "woff2", "eot", // Data
+        "db", "sqlite", "sqlite3", // Docs
         "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
         // Markdown (indexed via Knowledge Base instead)
-        "md", "mdx",
-        // Source maps
+        "md", "mdx", // Source maps
         "map",
     ]
 }
@@ -257,7 +250,12 @@ pub fn build_file_inventory(
     project_root: &Path,
     excluded_roots: &[String],
 ) -> AppResult<FileInventory> {
-    build_file_inventory_with_limits(project_root, excluded_roots, &[], &AnalysisLimits::default())
+    build_file_inventory_with_limits(
+        project_root,
+        excluded_roots,
+        &[],
+        &AnalysisLimits::default(),
+    )
 }
 
 pub fn build_file_inventory_with_limits(
@@ -1470,11 +1468,7 @@ class InternalHelper {
             "module.exports = {};\n",
         )
         .expect("write");
-        fs::write(
-            dir.path().join(".git/objects/pack"),
-            "binary data\n",
-        )
-        .expect("write");
+        fs::write(dir.path().join(".git/objects/pack"), "binary data\n").expect("write");
 
         let inventory = build_file_inventory(dir.path(), &[]).expect("inventory");
         let paths: Vec<&str> = inventory.items.iter().map(|i| i.path.as_str()).collect();

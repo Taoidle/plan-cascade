@@ -1118,8 +1118,7 @@ mod tests {
 
         // Verify metadata is valid JSON with correct fields
         let meta_json = std::fs::read_to_string(&meta_path).expect("read meta");
-        let meta: super::HnswMetadata =
-            serde_json::from_str(&meta_json).expect("parse meta");
+        let meta: super::HnswMetadata = serde_json::from_str(&meta_json).expect("parse meta");
         assert_eq!(meta.dimension, dim);
         assert_eq!(meta.vector_count, 3);
     }

@@ -7,9 +7,7 @@ use async_trait::async_trait;
 
 use crate::services::persona::types::Persona;
 use crate::services::plan_mode::adapter::{build_plan_persona, DomainAdapter};
-use crate::services::plan_mode::types::{
-    Plan, PlanStep, StepOutput, TaskDomain, PlanPersonaRole,
-};
+use crate::services::plan_mode::types::{Plan, PlanPersonaRole, PlanStep, StepOutput, TaskDomain};
 
 /// Writing-focused adapter for content creation tasks.
 pub struct WritingAdapter;
@@ -30,7 +28,8 @@ impl DomainAdapter for WritingAdapter {
 
     fn planning_persona(&self) -> Persona {
         let mut persona = build_plan_persona(PlanPersonaRole::Planner);
-        persona.identity_prompt = r#"You are a content strategist and writing planner. You excel at:
+        persona.identity_prompt =
+            r#"You are a content strategist and writing planner. You excel at:
 
 - **Content Structure**: Organizing ideas into clear, logical outlines
 - **Audience Analysis**: Tailoring content structure to the target audience
@@ -41,7 +40,8 @@ When planning writing tasks:
 1. Start with an outline/structure step
 2. Add research steps for facts and references if needed
 3. Break large content into section drafts
-4. Always include a review/polish step at the end"#.to_string();
+4. Always include a review/polish step at the end"#
+                .to_string();
         persona
     }
 
@@ -52,7 +52,10 @@ When planning writing tasks:
         if title_lower.contains("outline") || title_lower.contains("structure") {
             persona.identity_prompt = r#"You are an expert content outliner. Create clear, detailed outlines that serve as a solid foundation for writing. Include section headings, key points per section, and suggested flow."#.to_string();
             persona.expert_temperature = 0.6;
-        } else if title_lower.contains("review") || title_lower.contains("edit") || title_lower.contains("polish") {
+        } else if title_lower.contains("review")
+            || title_lower.contains("edit")
+            || title_lower.contains("polish")
+        {
             persona.identity_prompt = r#"You are a skilled editor and content reviewer. Review content for clarity, coherence, grammar, tone consistency, and completeness. Provide specific improvements, not just general feedback."#.to_string();
             persona.expert_temperature = 0.3;
         } else {
@@ -107,10 +110,7 @@ Respond in JSON format:
 
     fn available_tools(&self, step: &PlanStep) -> Vec<String> {
         let title_lower = step.title.to_lowercase();
-        let mut tools = vec![
-            "write_file".to_string(),
-            "read_file".to_string(),
-        ];
+        let mut tools = vec!["write_file".to_string(), "read_file".to_string()];
 
         if title_lower.contains("research") || title_lower.contains("gather") {
             tools.push("web_search".to_string());
@@ -125,9 +125,11 @@ Respond in JSON format:
             .iter()
             .rev()
             .find(|o| {
-                plan.steps
-                    .iter()
-                    .any(|s| s.id == o.step_id && (s.title.to_lowercase().contains("review") || s.title.to_lowercase().contains("polish")))
+                plan.steps.iter().any(|s| {
+                    s.id == o.step_id
+                        && (s.title.to_lowercase().contains("review")
+                            || s.title.to_lowercase().contains("polish"))
+                })
             })
             .or_else(|| outputs.last());
 
@@ -143,7 +145,10 @@ Respond in JSON format:
                     plan.title, preview
                 ))
             }
-            None => Some(format!("Writing plan '{}' completed with no output.", plan.title)),
+            None => Some(format!(
+                "Writing plan '{}' completed with no output.",
+                plan.title
+            )),
         }
     }
 }
@@ -162,8 +167,8 @@ mod tests {
 
     #[test]
     fn test_writing_execution_persona_varies() {
-        use std::collections::HashMap;
         use crate::services::plan_mode::types::StepPriority;
+        use std::collections::HashMap;
 
         let adapter = WritingAdapter;
 

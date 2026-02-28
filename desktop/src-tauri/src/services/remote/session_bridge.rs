@@ -5,9 +5,7 @@
 //! rate limiting, path sandboxing, and session lifecycle.
 
 use super::adapters::RemoteAdapter;
-use super::types::{
-    RemoteError, RemoteResponse, RemoteSessionMapping, SessionType, StreamingMode,
-};
+use super::types::{RemoteError, RemoteResponse, RemoteSessionMapping, SessionType, StreamingMode};
 use crate::commands::proxy::resolve_provider_proxy;
 use crate::commands::standalone::{
     get_api_key_with_aliases, normalize_provider_name, provider_type_from_name,
@@ -154,9 +152,7 @@ impl SessionBridge {
     /// Cancel execution for a chat's active session.
     pub async fn cancel_execution(&self, chat_id: i64) -> Result<(), RemoteError> {
         let sessions = self.sessions.read().await;
-        let mapping = sessions
-            .get(&chat_id)
-            .ok_or(RemoteError::NoActiveSession)?;
+        let mapping = sessions.get(&chat_id).ok_or(RemoteError::NoActiveSession)?;
         let session_id = mapping
             .local_session_id
             .as_deref()
@@ -200,11 +196,7 @@ impl SessionBridge {
     }
 
     /// Switch active session for a chat.
-    pub async fn switch_session(
-        &self,
-        chat_id: i64,
-        session_id: &str,
-    ) -> Result<(), RemoteError> {
+    pub async fn switch_session(&self, chat_id: i64, session_id: &str) -> Result<(), RemoteError> {
         // Verify the target session exists in orchestrators
         if let Some(ref svc) = self.services {
             let orchestrators = svc.orchestrators.read().await;
@@ -239,9 +231,7 @@ impl SessionBridge {
         self.check_rate_limit(chat_id)?;
 
         let sessions = self.sessions.read().await;
-        let mapping = sessions
-            .get(&chat_id)
-            .ok_or(RemoteError::NoActiveSession)?;
+        let mapping = sessions.get(&chat_id).ok_or(RemoteError::NoActiveSession)?;
         let session_id = mapping
             .local_session_id
             .clone()
@@ -250,10 +240,9 @@ impl SessionBridge {
         drop(sessions);
 
         // Check services availability
-        let svc = self
-            .services
-            .as_ref()
-            .ok_or_else(|| RemoteError::ConfigError("Bridge services not configured".to_string()))?;
+        let svc = self.services.as_ref().ok_or_else(|| {
+            RemoteError::ConfigError("Bridge services not configured".to_string())
+        })?;
 
         // Check busy
         {
@@ -294,18 +283,10 @@ impl SessionBridge {
 
         // Collect results based on streaming mode
         let result = match streaming_mode {
-            StreamingMode::WaitForComplete => {
-                self.collect_wait_for_complete(rx, exec_handle).await
-            }
+            StreamingMode::WaitForComplete => self.collect_wait_for_complete(rx, exec_handle).await,
             StreamingMode::PeriodicUpdate { interval_secs } => {
-                self.collect_periodic_update(
-                    rx,
-                    exec_handle,
-                    chat_id,
-                    *interval_secs,
-                    adapter,
-                )
-                .await
+                self.collect_periodic_update(rx, exec_handle, chat_id, *interval_secs, adapter)
+                    .await
             }
             StreamingMode::LiveEdit { throttle_ms } => {
                 self.collect_live_edit(rx, exec_handle, chat_id, *throttle_ms, adapter)
@@ -328,10 +309,8 @@ impl SessionBridge {
         provider: Option<&str>,
         model: Option<&str>,
     ) -> Result<String, RemoteError> {
-        self.create_session_with_source(
-            chat_id, user_id, project_path, provider, model, None, None,
-        )
-        .await
+        self.create_session_with_source(chat_id, user_id, project_path, provider, model, None, None)
+            .await
     }
 
     /// Create a new session with remote source tracking.
@@ -604,10 +583,7 @@ impl SessionBridge {
             RemoteError::ConfigError(format!("Unknown provider: '{}'", provider_str))
         })?;
         let provider_type = provider_type_from_name(canonical).ok_or_else(|| {
-            RemoteError::ConfigError(format!(
-                "Cannot resolve provider type for: '{}'",
-                canonical
-            ))
+            RemoteError::ConfigError(format!("Cannot resolve provider type for: '{}'", canonical))
         })?;
         let resolved_model = model.unwrap_or(DEFAULT_MODEL).to_string();
         Ok((canonical, provider_type, resolved_model))
@@ -653,8 +629,7 @@ impl SessionBridge {
         let (canonical_provider, provider_type, model) = match &mapping.session_type {
             SessionType::Standalone { provider, model } => {
                 let canonical = normalize_provider_name(provider).unwrap_or("anthropic");
-                let pt = provider_type_from_name(canonical)
-                    .unwrap_or(ProviderType::Anthropic);
+                let pt = provider_type_from_name(canonical).unwrap_or(ProviderType::Anthropic);
                 (canonical, pt, model.clone())
             }
             SessionType::ClaudeCode => {
@@ -732,10 +707,7 @@ impl SessionBridge {
     /// Persist a session mapping to the database.
     fn persist_mapping_to_db(&self, mapping: &RemoteSessionMapping) {
         let session_type_json = serde_json::to_string(&mapping.session_type).unwrap_or_default();
-        let adapter_type = mapping
-            .adapter_type_name
-            .as_deref()
-            .unwrap_or("unknown");
+        let adapter_type = mapping.adapter_type_name.as_deref().unwrap_or("unknown");
         let now = chrono::Utc::now().to_rfc3339();
 
         if let Ok(conn) = self.db.get_connection() {
@@ -804,7 +776,11 @@ impl SessionBridge {
                     arguments,
                     ..
                 } => {
-                    tool_summaries.push(format!("[{}]: {}", tool_name, truncate_str(&arguments, 100)));
+                    tool_summaries.push(format!(
+                        "[{}]: {}",
+                        tool_name,
+                        truncate_str(&arguments, 100)
+                    ));
                 }
                 UnifiedStreamEvent::Error { message, .. } => {
                     return Err(RemoteError::ExecutionFailed(message));
@@ -884,7 +860,11 @@ impl SessionBridge {
                     arguments,
                     ..
                 } => {
-                    tool_summaries.push(format!("[{}]: {}", tool_name, truncate_str(&arguments, 100)));
+                    tool_summaries.push(format!(
+                        "[{}]: {}",
+                        tool_name,
+                        truncate_str(&arguments, 100)
+                    ));
                 }
                 UnifiedStreamEvent::Error { message, .. } => {
                     return Err(RemoteError::ExecutionFailed(message));
@@ -972,7 +952,11 @@ impl SessionBridge {
                     arguments,
                     ..
                 } => {
-                    tool_summaries.push(format!("[{}]: {}", tool_name, truncate_str(&arguments, 100)));
+                    tool_summaries.push(format!(
+                        "[{}]: {}",
+                        tool_name,
+                        truncate_str(&arguments, 100)
+                    ));
                 }
                 UnifiedStreamEvent::Error { message, .. } => {
                     return Err(RemoteError::ExecutionFailed(message));
@@ -1086,9 +1070,7 @@ mod tests {
         let bridge = SessionBridge::new(db);
         // Without services, create_session still stores the mapping
         // but with project path validation — needs a real path
-        let result = bridge
-            .create_session(123, 456, "/tmp", None, None)
-            .await;
+        let result = bridge.create_session(123, 456, "/tmp", None, None).await;
         assert!(result.is_ok());
         assert_eq!(bridge.active_session_count().await, 1);
     }
@@ -1247,9 +1229,7 @@ mod tests {
     async fn test_get_status_text() {
         let db = Arc::new(Database::new_in_memory().unwrap());
         let bridge = SessionBridge::new(db);
-        let _ = bridge
-            .create_session(123, 456, "/tmp", None, None)
-            .await;
+        let _ = bridge.create_session(123, 456, "/tmp", None, None).await;
         let text = bridge.get_status_text(123).await;
         assert!(text.contains("Session:"));
         assert!(text.contains("Type:"));

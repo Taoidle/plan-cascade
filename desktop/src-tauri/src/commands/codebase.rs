@@ -225,8 +225,7 @@ pub async fn codebase_search(
                     if hnsw.is_ready().await {
                         let hnsw_hits = hnsw.search(&query_embedding, k).await;
                         if !hnsw_hits.is_empty() {
-                            let rowids: Vec<usize> =
-                                hnsw_hits.iter().map(|(id, _)| *id).collect();
+                            let rowids: Vec<usize> = hnsw_hits.iter().map(|(id, _)| *id).collect();
                             match index_store.get_embeddings_by_rowids(&rowids) {
                                 Ok(metadata) => {
                                     let results: Vec<SemanticSearchResult> = hnsw_hits

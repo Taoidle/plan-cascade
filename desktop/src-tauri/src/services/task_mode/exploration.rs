@@ -966,7 +966,8 @@ mod tests {
             used_llm_exploration: false,
         };
 
-        let prompt = build_coordinator_exploration_prompt("Add user authentication", &result, Some("en"));
+        let prompt =
+            build_coordinator_exploration_prompt("Add user authentication", &result, Some("en"));
         assert!(prompt.contains("Add user authentication"));
         assert!(prompt.contains("Rust"));
         assert!(prompt.contains("Tauri"));

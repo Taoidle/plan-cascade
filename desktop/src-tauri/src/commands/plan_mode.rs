@@ -96,15 +96,9 @@ pub async fn enter_plan_mode(
 
     // Run analysis if provider is specified
     if let (Some(ref prov), Some(ref mdl)) = (&provider, &model) {
-        let llm_provider = resolve_llm_provider(
-            prov,
-            mdl,
-            None,
-            base_url.clone(),
-            &app_state,
-        )
-        .await
-        .map_err(|e| format!("Failed to resolve LLM provider: {e}"))?;
+        let llm_provider = resolve_llm_provider(prov, mdl, None, base_url.clone(), &app_state)
+            .await
+            .map_err(|e| format!("Failed to resolve LLM provider: {e}"))?;
 
         let registry = state.adapter_registry.read().await;
 
@@ -222,28 +216,28 @@ pub async fn submit_plan_clarification(
         session.clarifications.push(enriched_answer);
         session.current_question = None;
 
-        let analysis = session.analysis.clone()
+        let analysis = session
+            .analysis
+            .clone()
             .ok_or_else(|| "No analysis available".to_string())?;
 
         (
             session.description.clone(),
             analysis,
             session.clarifications.clone(),
-            session.analysis.as_ref().map(|a| a.adapter_name.clone()).unwrap_or_default(),
+            session
+                .analysis
+                .as_ref()
+                .map(|a| a.adapter_name.clone())
+                .unwrap_or_default(),
         )
     };
 
     // Phase 2: Generate next question (requires LLM call, done outside session lock)
     let next_question = if let (Some(ref prov), Some(ref mdl)) = (&provider, &model) {
-        let llm_provider = resolve_llm_provider(
-            prov,
-            mdl,
-            None,
-            base_url,
-            &app_state,
-        )
-        .await
-        .map_err(|e| format!("Failed to resolve LLM provider: {e}"))?;
+        let llm_provider = resolve_llm_provider(prov, mdl, None, base_url, &app_state)
+            .await
+            .map_err(|e| format!("Failed to resolve LLM provider: {e}"))?;
 
         let registry = state.adapter_registry.read().await;
         let adapter = registry
@@ -457,8 +451,7 @@ pub async fn approve_plan(
     let lang_instruction = locale_instruction(locale_tag).to_string();
 
     tokio::spawn(async move {
-        let config =
-            crate::services::plan_mode::step_executor::StepExecutionConfig::default();
+        let config = crate::services::plan_mode::step_executor::StepExecutionConfig::default();
 
         let mut plan_mut = plan;
 
@@ -476,10 +469,7 @@ pub async fn approve_plan(
 
         // Update session with results
         let mut session_guard = session_arc.write().await;
-        if let Some(session) = session_guard
-            .as_mut()
-            .filter(|s| s.session_id == sid)
-        {
+        if let Some(session) = session_guard.as_mut().filter(|s| s.session_id == sid) {
             match result {
                 Ok((outputs, states)) => {
                     let failed = states

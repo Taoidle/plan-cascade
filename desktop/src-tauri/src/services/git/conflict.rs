@@ -585,7 +585,8 @@ theirs
 
     #[test]
     fn test_resolve_file_preserves_trailing_newline() {
-        let content = "before\n<<<<<<< HEAD\nour line\n=======\ntheir line\n>>>>>>> branch\nafter\n";
+        let content =
+            "before\n<<<<<<< HEAD\nour line\n=======\ntheir line\n>>>>>>> branch\nafter\n";
         let resolved = resolve_file(content, ConflictStrategy::Ours);
         assert!(resolved.ends_with('\n'), "Should preserve trailing newline");
         assert_eq!(resolved, "before\nour line\nafter\n");
@@ -595,7 +596,10 @@ theirs
     fn test_resolve_file_no_trailing_newline_when_original_lacks_it() {
         let content = "before\n<<<<<<< HEAD\nour line\n=======\ntheir line\n>>>>>>> branch\nafter";
         let resolved = resolve_file(content, ConflictStrategy::Ours);
-        assert!(!resolved.ends_with('\n'), "Should not add trailing newline when original lacks it");
+        assert!(
+            !resolved.ends_with('\n'),
+            "Should not add trailing newline when original lacks it"
+        );
         assert_eq!(resolved, "before\nour line\nafter");
     }
 

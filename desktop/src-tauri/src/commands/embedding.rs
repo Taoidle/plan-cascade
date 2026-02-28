@@ -671,10 +671,7 @@ pub async fn get_codebase_index_config(
             .iter()
             .map(|s| s.to_string())
             .collect(),
-        builtin_excluded_extensions: binary_extensions()
-            .iter()
-            .map(|s| s.to_string())
-            .collect(),
+        builtin_excluded_extensions: binary_extensions().iter().map(|s| s.to_string()).collect(),
         extra_excluded_dirs: user_config.extra_excluded_dirs,
         extra_excluded_extensions: user_config.extra_excluded_extensions,
     }))

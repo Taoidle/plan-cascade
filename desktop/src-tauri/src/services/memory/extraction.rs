@@ -10,7 +10,9 @@
 //! - Delete: "forget that...", "stop remembering...", "delete memory about..."
 //! - Query:  "what do you remember about...", "what are my preferences..."
 
-use crate::services::memory::store::{MemoryCategory, MemoryEntry, NewMemoryEntry, GLOBAL_PROJECT_PATH};
+use crate::services::memory::store::{
+    MemoryCategory, MemoryEntry, NewMemoryEntry, GLOBAL_PROJECT_PATH,
+};
 
 /// Explicit memory commands detected from user messages
 #[derive(Debug, Clone, PartialEq)]
@@ -305,7 +307,10 @@ Rules:
                 }
 
                 // Route to global or project scope based on LLM output
-                let scope = item.get("scope").and_then(|v| v.as_str()).unwrap_or("project");
+                let scope = item
+                    .get("scope")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("project");
                 let effective_project_path = if scope == "global" {
                     GLOBAL_PROJECT_PATH.to_string()
                 } else {

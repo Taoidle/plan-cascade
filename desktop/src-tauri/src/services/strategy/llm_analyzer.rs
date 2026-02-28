@@ -146,12 +146,7 @@ pub async fn enhance_strategy_analysis(
             retry_messages.push(Message::user(&repair_message));
 
             let retry_response = provider
-                .send_message(
-                    retry_messages,
-                    Some(system_prompt),
-                    vec![],
-                    options,
-                )
+                .send_message(retry_messages, Some(system_prompt), vec![], options)
                 .await
                 .map_err(|e| format!("LLM strategy analysis retry failed: {}", e))?;
 

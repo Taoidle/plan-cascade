@@ -103,6 +103,17 @@ export async function updateSettings(update: SettingsUpdate): Promise<AppConfig>
 }
 
 /**
+ * Reset all settings (frontend + backend persisted state)
+ */
+export async function resetAllSettings(): Promise<boolean> {
+  const result = await invoke<CommandResponse<boolean>>('reset_all_settings');
+  if (!result.success || result.data !== true) {
+    throw new Error(result.error || 'Failed to reset settings');
+  }
+  return true;
+}
+
+/**
  * Export all settings (frontend + backend + optionally encrypted API keys)
  */
 export async function exportAllSettings(
@@ -143,6 +154,7 @@ export function isTauriAvailable(): boolean {
 export default {
   getSettings,
   updateSettings,
+  resetAllSettings,
   exportAllSettings,
   importAllSettings,
   isTauriAvailable,

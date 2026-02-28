@@ -51,7 +51,10 @@ pub async fn execute_plan(
     language_instruction: String,
     app_handle: tauri::AppHandle,
     cancellation_token: CancellationToken,
-) -> AppResult<(HashMap<String, StepOutput>, HashMap<String, StepExecutionState>)> {
+) -> AppResult<(
+    HashMap<String, StepOutput>,
+    HashMap<String, StepExecutionState>,
+)> {
     // Lifecycle hook
     adapter.before_execution(plan);
 
@@ -73,11 +76,8 @@ pub async fn execute_plan(
     let semaphore = Arc::new(Semaphore::new(config.max_parallel));
 
     // Build step lookup
-    let step_map: HashMap<String, &super::types::PlanStep> = plan
-        .steps
-        .iter()
-        .map(|s| (s.id.clone(), s))
-        .collect();
+    let step_map: HashMap<String, &super::types::PlanStep> =
+        plan.steps.iter().map(|s| (s.id.clone(), s)).collect();
 
     for (batch_idx, batch) in plan.batches.iter().enumerate() {
         if cancellation_token.is_cancelled() {
@@ -106,7 +106,12 @@ pub async fn execute_plan(
 
         emit_event(
             &app_handle,
-            PlanModeProgressEvent::batch_started(session_id, batch_idx, total_batches, progress_pct),
+            PlanModeProgressEvent::batch_started(
+                session_id,
+                batch_idx,
+                total_batches,
+                progress_pct,
+            ),
         );
 
         // Execute all steps in this batch in parallel
@@ -157,7 +162,13 @@ pub async fn execute_plan(
                 let pct = (completed_count as f64 / total_s as f64) * 100.0;
                 emit_event(
                     &handle,
-                    PlanModeProgressEvent::step_started(&session, batch_index, total_b, &step.id, pct),
+                    PlanModeProgressEvent::step_started(
+                        &session,
+                        batch_index,
+                        total_b,
+                        &step.id,
+                        pct,
+                    ),
                 );
 
                 let start = Instant::now();
@@ -181,15 +192,31 @@ pub async fn execute_plan(
                 };
 
                 // Truncate dependency outputs to fit budget
-                let dep_outputs = truncate_dep_outputs(dep_outputs, cfg.max_dep_output_chars, cfg.max_total_dep_chars);
+                let dep_outputs = truncate_dep_outputs(
+                    dep_outputs,
+                    cfg.max_dep_output_chars,
+                    cfg.max_total_dep_chars,
+                );
 
                 // Execute the step
-                match execute_single_step(&step, &dep_outputs, &plan_clone, adapter.as_ref(), provider.as_ref(), &lang_inst).await {
+                match execute_single_step(
+                    &step,
+                    &dep_outputs,
+                    &plan_clone,
+                    adapter.as_ref(),
+                    provider.as_ref(),
+                    &lang_inst,
+                )
+                .await
+                {
                     Ok(output) => {
                         let duration_ms = start.elapsed().as_millis() as u64;
                         {
                             let mut s = states.write().await;
-                            s.insert(step.id.clone(), StepExecutionState::Completed { duration_ms });
+                            s.insert(
+                                step.id.clone(),
+                                StepExecutionState::Completed { duration_ms },
+                            );
                         }
                         {
                             let mut outs = outputs.write().await;
@@ -205,14 +232,25 @@ pub async fn execute_plan(
                         let pct = (completed_count as f64 / total_s as f64) * 100.0;
                         emit_event(
                             &handle,
-                            PlanModeProgressEvent::step_completed(&session, batch_index, total_b, &step.id, pct),
+                            PlanModeProgressEvent::step_completed(
+                                &session,
+                                batch_index,
+                                total_b,
+                                &step.id,
+                                pct,
+                            ),
                         );
                     }
                     Err(e) => {
                         let reason = format!("{e}");
                         {
                             let mut s = states.write().await;
-                            s.insert(step.id.clone(), StepExecutionState::Failed { reason: reason.clone() });
+                            s.insert(
+                                step.id.clone(),
+                                StepExecutionState::Failed {
+                                    reason: reason.clone(),
+                                },
+                            );
                         }
 
                         let completed_count = {
@@ -224,7 +262,14 @@ pub async fn execute_plan(
                         let pct = (completed_count as f64 / total_s as f64) * 100.0;
                         emit_event(
                             &handle,
-                            PlanModeProgressEvent::step_failed(&session, batch_index, total_b, &step.id, &reason, pct),
+                            PlanModeProgressEvent::step_failed(
+                                &session,
+                                batch_index,
+                                total_b,
+                                &step.id,
+                                &reason,
+                                pct,
+                            ),
                         );
                     }
                 }
@@ -406,8 +451,16 @@ mod tests {
     #[test]
     fn test_build_progress() {
         let mut states = HashMap::new();
-        states.insert("s1".to_string(), StepExecutionState::Completed { duration_ms: 100 });
-        states.insert("s2".to_string(), StepExecutionState::Failed { reason: "err".to_string() });
+        states.insert(
+            "s1".to_string(),
+            StepExecutionState::Completed { duration_ms: 100 },
+        );
+        states.insert(
+            "s2".to_string(),
+            StepExecutionState::Failed {
+                reason: "err".to_string(),
+            },
+        );
         states.insert("s3".to_string(), StepExecutionState::Pending);
 
         let progress = build_progress(&states, 1, 2, 3);

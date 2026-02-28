@@ -2,6 +2,8 @@
 //!
 //! Commands for reading and updating application settings.
 
+use std::collections::HashMap;
+
 use tauri::State;
 
 use crate::models::export::{SettingsImportResult, UnifiedSettingsExport};
@@ -31,6 +33,48 @@ pub async fn update_settings(
         Ok(config) => Ok(CommandResponse::ok(config)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
+}
+
+/// Reset all settings to defaults (frontend callers should also reset local state).
+#[tauri::command]
+pub async fn reset_all_settings(
+    state: State<'_, AppState>,
+) -> Result<CommandResponse<bool>, String> {
+    if let Err(e) = state
+        .with_config_mut(|config_service| {
+            config_service.reset()?;
+            Ok(())
+        })
+        .await
+    {
+        return Ok(CommandResponse::err(format!(
+            "Failed to reset config: {}",
+            e
+        )));
+    }
+
+    if let Err(e) = state.with_database(reset_backend_settings).await {
+        return Ok(CommandResponse::err(format!(
+            "Failed to reset backend settings: {}",
+            e
+        )));
+    }
+
+    if let Err(e) = state.import_all_secrets(&HashMap::new()).await {
+        return Ok(CommandResponse::err(format!(
+            "Failed to reset secrets: {}",
+            e
+        )));
+    }
+
+    if let Err(e) = clear_plugin_settings_file() {
+        return Ok(CommandResponse::err(format!(
+            "Failed to reset plugin settings: {}",
+            e
+        )));
+    }
+
+    Ok(CommandResponse::ok(true))
 }
 
 /// Export all settings (frontend + backend + optionally encrypted secrets)
@@ -157,23 +201,18 @@ pub async fn import_all_settings(
                 Some(pw) if !pw.is_empty() => {
                     match settings_export::decrypt_with_password(encrypted, pw) {
                         Ok(decrypted_json) => {
-                            match serde_json::from_str::<
-                                std::collections::HashMap<String, String>,
-                            >(&decrypted_json)
-                            {
+                            match serde_json::from_str::<std::collections::HashMap<String, String>>(
+                                &decrypted_json,
+                            ) {
                                 Ok(secrets) => {
                                     if let Err(e) = state.import_all_secrets(&secrets).await {
-                                        secret_warnings.push(format!(
-                                            "Failed to import secrets: {}",
-                                            e
-                                        ));
+                                        secret_warnings
+                                            .push(format!("Failed to import secrets: {}", e));
                                     }
                                 }
                                 Err(e) => {
-                                    secret_warnings.push(format!(
-                                        "Failed to parse decrypted secrets: {}",
-                                        e
-                                    ));
+                                    secret_warnings
+                                        .push(format!("Failed to parse decrypted secrets: {}", e));
                                 }
                             }
                         }
@@ -248,9 +287,7 @@ pub async fn import_all_settings(
         .await
     {
         Ok(()) => result.imported_sections.push("config".to_string()),
-        Err(e) => result
-            .errors
-            .push(format!("config: {}", e)),
+        Err(e) => result.errors.push(format!("config: {}", e)),
     }
 
     // Merge secret warnings
@@ -435,6 +472,53 @@ fn import_mcp_servers(
             Some(_) => db.update_mcp_server(&server)?,
             None => db.insert_mcp_server(&server)?,
         }
+    }
+    Ok(())
+}
+
+fn reset_backend_settings(db: &crate::storage::Database) -> crate::utils::error::AppResult<()> {
+    use crate::services::orchestrator::embedding_provider::{
+        CODEBASE_INDEX_CONFIG_KEY, EMBEDDING_CONFIG_SETTING_KEY,
+    };
+
+    for key in [
+        EMBEDDING_CONFIG_SETTING_KEY,
+        CODEBASE_INDEX_CONFIG_KEY,
+        "proxy_global",
+        "remote_gateway_config",
+        "remote_telegram_config",
+    ] {
+        db.delete_setting(key)?;
+    }
+
+    for prefix in ["proxy_strategy_", "proxy_custom_", "provider_"] {
+        delete_settings_by_prefix(db, prefix)?;
+    }
+
+    let conn = db.get_connection()?;
+    conn.execute("DELETE FROM webhook_channels", [])?;
+    conn.execute("DELETE FROM guardrail_rules", [])?;
+    conn.execute("DELETE FROM remote_agents", [])?;
+    conn.execute("DELETE FROM mcp_servers", [])?;
+
+    Ok(())
+}
+
+fn delete_settings_by_prefix(
+    db: &crate::storage::Database,
+    prefix: &str,
+) -> crate::utils::error::AppResult<()> {
+    for (key, _) in db.get_settings_by_prefix(prefix)? {
+        db.delete_setting(&key)?;
+    }
+    Ok(())
+}
+
+fn clear_plugin_settings_file() -> crate::utils::error::AppResult<()> {
+    let plugin_settings_path =
+        crate::utils::paths::plan_cascade_dir()?.join("plugin-settings.json");
+    if plugin_settings_path.exists() {
+        std::fs::remove_file(plugin_settings_path)?;
     }
     Ok(())
 }

@@ -462,10 +462,11 @@ impl LspEnricher {
                 })
                 .unwrap_or(language.as_str());
 
-            let symbols = match self
-                .index_store
-                .get_symbols_for_enrichment_by_files(project_path, index_language, &file_refs)
-            {
+            let symbols = match self.index_store.get_symbols_for_enrichment_by_files(
+                project_path,
+                index_language,
+                &file_refs,
+            ) {
                 Ok(s) => s,
                 Err(e) => {
                     warn!(
@@ -620,8 +621,7 @@ impl LspEnricher {
 
                             for location in &locations {
                                 let uri_str = location.uri.as_str();
-                                let target_path =
-                                    uri_to_relative_path(uri_str, project_path);
+                                let target_path = uri_to_relative_path(uri_str, project_path);
 
                                 let _ = self.index_store.insert_cross_reference(
                                     project_path,
@@ -679,7 +679,10 @@ impl LspEnricher {
                     return false;
                 }
                 drop(clients);
-                info!("Shutting down idle LSP clients (idle for {:?})", ts.elapsed());
+                info!(
+                    "Shutting down idle LSP clients (idle for {:?})",
+                    ts.elapsed()
+                );
                 self.shutdown_all().await;
                 true
             }

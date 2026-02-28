@@ -17,7 +17,9 @@ import {
 } from '@radix-ui/react-icons';
 import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '../../store/settings';
-import { exportAllSettings, importAllSettings, type ImportResult } from '../../lib/settingsApi';
+import { useEmbeddingStore } from '../../store/embedding';
+import { CUSTOM_MODELS_STORAGE_KEY, LOCAL_PROVIDER_API_KEY_CACHE_STORAGE_KEY } from '../../lib/providers';
+import { exportAllSettings, importAllSettings, resetAllSettings, type ImportResult } from '../../lib/settingsApi';
 
 type MessageType = 'success' | 'error' | 'warning';
 
@@ -218,7 +220,20 @@ export function ImportExportSection() {
     setMessage(null);
 
     try {
+      await resetAllSettings();
+
+      // Reset frontend persisted settings.
       useSettingsStore.getState().resetToDefaults();
+
+      // Clear frontend-only caches related to provider/API key UI.
+      localStorage.removeItem('plan-cascade-api-keys');
+      localStorage.removeItem(LOCAL_PROVIDER_API_KEY_CACHE_STORAGE_KEY);
+      localStorage.removeItem(CUSTOM_MODELS_STORAGE_KEY);
+
+      // Refresh embedding UI from backend defaults.
+      const embeddingStore = useEmbeddingStore.getState();
+      await Promise.all([embeddingStore.fetchConfig(), embeddingStore.fetchIndexConfig()]);
+
       setMessage({ type: 'success', text: t('importExport.reset.success') });
     } catch (error) {
       console.error('Reset failed:', error);

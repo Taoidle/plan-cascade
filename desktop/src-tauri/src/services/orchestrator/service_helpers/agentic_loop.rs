@@ -3878,11 +3878,8 @@ impl OrchestratorService {
         {
             let has_knowledge = self.knowledge_awareness_section.is_some();
             let has_codebase_search = self.index_store.is_some();
-            let priority_section = build_tool_priority_section(
-                has_knowledge,
-                has_codebase_search,
-                language,
-            );
+            let priority_section =
+                build_tool_priority_section(has_knowledge, has_codebase_search, language);
             if !priority_section.is_empty() {
                 prompt.push_str(&priority_section);
             }

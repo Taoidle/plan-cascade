@@ -63,9 +63,8 @@ impl Tool for SearchKnowledgeTool {
             )),
         );
 
-        let mut top_k_schema = ParameterSchema::integer(Some(
-            "Number of results to return (default: 5, max: 20).",
-        ));
+        let mut top_k_schema =
+            ParameterSchema::integer(Some("Number of results to return (default: 5, max: 20)."));
         top_k_schema.default = Some(Value::Number(serde_json::Number::from(5)));
         properties.insert("top_k".to_string(), top_k_schema);
 
@@ -151,7 +150,10 @@ impl Tool for SearchKnowledgeTool {
                 document_ids: ctx.knowledge_document_filter.clone(),
             };
 
-            match provider.query_for_context(&project_id, query, &config).await {
+            match provider
+                .query_for_context(&project_id, query, &config)
+                .await
+            {
                 Ok(chunks) => {
                     if chunks.is_empty() {
                         return ToolResult::ok(format!(

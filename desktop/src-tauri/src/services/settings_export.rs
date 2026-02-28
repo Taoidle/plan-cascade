@@ -15,8 +15,7 @@ use rusqlite::params;
 use sha2::Sha256;
 
 use crate::models::export::{
-    BackendSettingsExport, GuardrailRuleExport, ProxyExport, RemoteExport,
-    SettingsImportResult,
+    BackendSettingsExport, GuardrailRuleExport, ProxyExport, RemoteExport, SettingsImportResult,
 };
 use crate::models::settings::AppConfig;
 use crate::storage::{ConfigService, Database};
@@ -40,7 +39,12 @@ pub fn encrypt_with_password(plaintext: &str, password: &str) -> AppResult<Strin
     OsRng.fill_bytes(&mut salt);
 
     let mut derived_key = [0u8; KEY_SIZE];
-    pbkdf2_hmac::<Sha256>(password.as_bytes(), &salt, PBKDF2_ITERATIONS, &mut derived_key);
+    pbkdf2_hmac::<Sha256>(
+        password.as_bytes(),
+        &salt,
+        PBKDF2_ITERATIONS,
+        &mut derived_key,
+    );
 
     let key = Key::<Aes256Gcm>::from_slice(&derived_key);
     let cipher = Aes256Gcm::new(key);
@@ -80,15 +84,20 @@ pub fn decrypt_with_password(encrypted: &str, password: &str) -> AppResult<Strin
     let ciphertext = &data[SALT_SIZE + NONCE_SIZE..];
 
     let mut derived_key = [0u8; KEY_SIZE];
-    pbkdf2_hmac::<Sha256>(password.as_bytes(), salt, PBKDF2_ITERATIONS, &mut derived_key);
+    pbkdf2_hmac::<Sha256>(
+        password.as_bytes(),
+        salt,
+        PBKDF2_ITERATIONS,
+        &mut derived_key,
+    );
 
     let key = Key::<Aes256Gcm>::from_slice(&derived_key);
     let cipher = Aes256Gcm::new(key);
     let nonce = Nonce::from_slice(nonce_bytes);
 
-    let plaintext = cipher.decrypt(nonce, ciphertext).map_err(|_| {
-        AppError::keyring("Decryption failed: wrong password or corrupted data")
-    })?;
+    let plaintext = cipher
+        .decrypt(nonce, ciphertext)
+        .map_err(|_| AppError::keyring("Decryption failed: wrong password or corrupted data"))?;
 
     String::from_utf8(plaintext)
         .map_err(|e| AppError::keyring(format!("Decrypted data is not valid UTF-8: {}", e)))

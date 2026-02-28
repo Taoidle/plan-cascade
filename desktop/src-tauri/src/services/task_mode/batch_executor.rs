@@ -1286,10 +1286,11 @@ impl BatchExecutor {
                             );
 
                             let start = std::time::Instant::now();
-                            let shell_result = crate::services::plugins::dispatcher::execute_shell_hook(
-                                &cmd, &env, None, timeout,
-                            )
-                            .await;
+                            let shell_result =
+                                crate::services::plugins::dispatcher::execute_shell_hook(
+                                    &cmd, &env, None, timeout,
+                                )
+                                .await;
                             let duration_ms = start.elapsed().as_millis() as u64;
 
                             // Clean up temp file

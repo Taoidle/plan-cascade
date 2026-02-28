@@ -372,7 +372,11 @@ pub async fn git_delete_branch(
 ) -> Result<CommandResponse<()>, String> {
     let path = PathBuf::from(&repo_path);
     let f = force.unwrap_or(false);
-    match run_git_blocking(&state.service, move |svc| svc.delete_branch(&path, &name, f)).await? {
+    match run_git_blocking(&state.service, move |svc| {
+        svc.delete_branch(&path, &name, f)
+    })
+    .await?
+    {
         Ok(()) => Ok(CommandResponse::ok(())),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -481,15 +485,13 @@ pub async fn git_get_conflict_files(
     repo_path: String,
 ) -> Result<CommandResponse<Vec<ConflictFile>>, String> {
     let path = PathBuf::from(&repo_path);
-    match run_git_blocking(&state.service, move |svc| {
-        match svc.full_status(&path) {
-            Ok(status) => {
-                let conflicted_paths: Vec<String> =
-                    status.conflicted.iter().map(|f| f.path.clone()).collect();
-                conflict::get_conflict_files(&path, &conflicted_paths)
-            }
-            Err(e) => Err(e),
+    match run_git_blocking(&state.service, move |svc| match svc.full_status(&path) {
+        Ok(status) => {
+            let conflicted_paths: Vec<String> =
+                status.conflicted.iter().map(|f| f.path.clone()).collect();
+            conflict::get_conflict_files(&path, &conflicted_paths)
         }
+        Err(e) => Err(e),
     })
     .await?
     {
@@ -904,8 +906,7 @@ pub async fn git_review_diff(
         .ok();
 
     let diff = if staged.as_ref().map_or(true, |d| d.files.is_empty()) {
-        match run_git_blocking(&state.service, move |svc| svc.diff_unstaged(&path_unstaged))
-            .await?
+        match run_git_blocking(&state.service, move |svc| svc.diff_unstaged(&path_unstaged)).await?
         {
             Ok(d) => d,
             Err(e) => return Ok(CommandResponse::err(e.to_string())),
@@ -942,8 +943,7 @@ pub async fn git_resolve_conflict_ai(
     let content = tokio::task::spawn_blocking(move || {
         let path = PathBuf::from(&repo_path);
         let full_path = path.join(&file_path);
-        std::fs::read_to_string(&full_path)
-            .map_err(|e| format!("Failed to read file: {}", e))
+        std::fs::read_to_string(&full_path).map_err(|e| format!("Failed to read file: {}", e))
     })
     .await
     .map_err(|e| format!("Task panicked: {}", e))??;

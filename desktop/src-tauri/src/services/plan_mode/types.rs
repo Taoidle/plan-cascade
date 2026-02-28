@@ -406,7 +406,12 @@ pub struct PlanModeProgressEvent {
 }
 
 impl PlanModeProgressEvent {
-    pub fn batch_started(session_id: &str, current_batch: usize, total_batches: usize, progress_pct: f64) -> Self {
+    pub fn batch_started(
+        session_id: &str,
+        current_batch: usize,
+        total_batches: usize,
+        progress_pct: f64,
+    ) -> Self {
         Self {
             session_id: session_id.to_string(),
             event_type: "batch_started".to_string(),
@@ -419,7 +424,13 @@ impl PlanModeProgressEvent {
         }
     }
 
-    pub fn step_started(session_id: &str, current_batch: usize, total_batches: usize, step_id: &str, progress_pct: f64) -> Self {
+    pub fn step_started(
+        session_id: &str,
+        current_batch: usize,
+        total_batches: usize,
+        step_id: &str,
+        progress_pct: f64,
+    ) -> Self {
         Self {
             session_id: session_id.to_string(),
             event_type: "step_started".to_string(),
@@ -432,7 +443,13 @@ impl PlanModeProgressEvent {
         }
     }
 
-    pub fn step_completed(session_id: &str, current_batch: usize, total_batches: usize, step_id: &str, progress_pct: f64) -> Self {
+    pub fn step_completed(
+        session_id: &str,
+        current_batch: usize,
+        total_batches: usize,
+        step_id: &str,
+        progress_pct: f64,
+    ) -> Self {
         Self {
             session_id: session_id.to_string(),
             event_type: "step_completed".to_string(),
@@ -445,7 +462,14 @@ impl PlanModeProgressEvent {
         }
     }
 
-    pub fn step_failed(session_id: &str, current_batch: usize, total_batches: usize, step_id: &str, error: &str, progress_pct: f64) -> Self {
+    pub fn step_failed(
+        session_id: &str,
+        current_batch: usize,
+        total_batches: usize,
+        step_id: &str,
+        error: &str,
+        progress_pct: f64,
+    ) -> Self {
         Self {
             session_id: session_id.to_string(),
             event_type: "step_failed".to_string(),
@@ -471,7 +495,11 @@ impl PlanModeProgressEvent {
         }
     }
 
-    pub fn execution_cancelled(session_id: &str, current_batch: usize, total_batches: usize) -> Self {
+    pub fn execution_cancelled(
+        session_id: &str,
+        current_batch: usize,
+        total_batches: usize,
+    ) -> Self {
         Self {
             session_id: session_id.to_string(),
             event_type: "execution_cancelled".to_string(),
@@ -662,7 +690,10 @@ mod tests {
         assert!(!StepExecutionState::Pending.is_terminal());
         assert!(!StepExecutionState::Running.is_terminal());
         assert!(StepExecutionState::Completed { duration_ms: 100 }.is_terminal());
-        assert!(StepExecutionState::Failed { reason: "err".to_string() }.is_terminal());
+        assert!(StepExecutionState::Failed {
+            reason: "err".to_string()
+        }
+        .is_terminal());
         assert!(StepExecutionState::Cancelled.is_terminal());
     }
 }

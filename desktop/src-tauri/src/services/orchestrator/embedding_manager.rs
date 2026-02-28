@@ -1231,7 +1231,10 @@ mod tests {
     fn cache_key_different_dimensions_not_equal() {
         let k1 = CacheKey::new(EmbeddingProviderType::TfIdf, "model-a", "hello", 128);
         let k2 = CacheKey::new(EmbeddingProviderType::TfIdf, "model-a", "hello", 768);
-        assert_ne!(k1, k2, "Different dimensions should produce different cache keys");
+        assert_ne!(
+            k1, k2,
+            "Different dimensions should produce different cache keys"
+        );
     }
 
     // =====================================================================

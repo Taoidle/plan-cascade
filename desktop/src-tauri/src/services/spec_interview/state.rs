@@ -219,7 +219,9 @@ impl InterviewStateManager {
                     created_at: row.get(10)?,
                     updated_at: row.get(11)?,
                     conversation_context: row.get(12)?,
-                    locale: row.get::<_, String>(13).unwrap_or_else(|_| "en".to_string()),
+                    locale: row
+                        .get::<_, String>(13)
+                        .unwrap_or_else(|_| "en".to_string()),
                 })
             },
         );
@@ -317,7 +319,9 @@ impl InterviewStateManager {
                     created_at: row.get(10)?,
                     updated_at: row.get(11)?,
                     conversation_context: row.get(12)?,
-                    locale: row.get::<_, String>(13).unwrap_or_else(|_| "en".to_string()),
+                    locale: row
+                        .get::<_, String>(13)
+                        .unwrap_or_else(|_| "en".to_string()),
                 })
             })?
             .filter_map(|r| r.ok())

@@ -834,7 +834,9 @@ fn rule_based_memory_extraction(
         if finding.trim().is_empty() {
             continue;
         }
-        let already_exists = existing.iter().any(|m| m.content.contains(finding.as_str()));
+        let already_exists = existing
+            .iter()
+            .any(|m| m.content.contains(finding.as_str()));
         if already_exists {
             continue;
         }

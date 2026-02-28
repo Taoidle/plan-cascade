@@ -52,8 +52,7 @@ pub async fn generate_plan(
         persona.identity_prompt, persona.thinking_style, language_instruction
     );
 
-    let decomposition_prompt =
-        adapter.decomposition_prompt(description, full_context.as_deref());
+    let decomposition_prompt = adapter.decomposition_prompt(description, full_context.as_deref());
 
     let messages = vec![Message::text(MessageRole::User, decomposition_prompt)];
 

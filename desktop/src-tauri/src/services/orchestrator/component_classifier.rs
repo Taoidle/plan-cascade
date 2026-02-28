@@ -70,7 +70,11 @@ pub fn build_directory_tree(file_paths: &[String], max_depth: usize) -> String {
     dirs.sort_by(|a, b| a.0.cmp(&b.0));
 
     let mut output = String::new();
-    let root_count = dirs.iter().find(|(d, _)| d.is_empty()).map(|(_, c)| *c).unwrap_or(0);
+    let root_count = dirs
+        .iter()
+        .find(|(d, _)| d.is_empty())
+        .map(|(_, c)| *c)
+        .unwrap_or(0);
     if root_count > 0 {
         output.push_str(&format!("(root: {} files)\n", root_count));
     }
@@ -349,10 +353,7 @@ pub async fn classify_components(
 
     // Try LLM classification
     let (mappings, source) = if let Some(llm) = provider {
-        let project_name = project_path
-            .rsplit('/')
-            .next()
-            .unwrap_or(project_path);
+        let project_name = project_path.rsplit('/').next().unwrap_or(project_path);
 
         match llm_classify(llm.as_ref(), &file_paths, project_name).await {
             Ok(mut m) => {
@@ -369,12 +370,18 @@ pub async fn classify_components(
                     error = %e,
                     "component classifier: LLM classification failed, falling back to heuristic"
                 );
-                (heuristic_classify(&file_paths), ClassificationSource::Heuristic)
+                (
+                    heuristic_classify(&file_paths),
+                    ClassificationSource::Heuristic,
+                )
             }
         }
     } else {
         info!("component classifier: no LLM provider, using heuristic");
-        (heuristic_classify(&file_paths), ClassificationSource::Heuristic)
+        (
+            heuristic_classify(&file_paths),
+            ClassificationSource::Heuristic,
+        )
     };
 
     // Store mappings

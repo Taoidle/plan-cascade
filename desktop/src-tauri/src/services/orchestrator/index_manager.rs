@@ -22,8 +22,7 @@ use tracing::{debug, info, warn};
 use super::background_indexer::{
     BackgroundIndexer, BatchCompleteCallback, EnrichmentCallback, IndexProgressCallback,
 };
-use super::lsp_enricher::LspEnricher;
-use super::lsp_registry::LspServerRegistry;
+use super::component_classifier;
 use super::embedding_config_builder;
 use super::embedding_manager::{EmbeddingManager, EmbeddingManagerConfig};
 use super::embedding_provider::{
@@ -32,8 +31,9 @@ use super::embedding_provider::{
 use super::embedding_provider_tfidf::TfIdfEmbeddingProvider;
 use super::embedding_service::EmbeddingService;
 use super::hnsw_index::HnswIndex;
-use super::component_classifier;
 use super::index_store::IndexStore;
+use super::lsp_enricher::LspEnricher;
+use super::lsp_registry::LspServerRegistry;
 use crate::services::llm::provider::LlmProvider;
 use crate::storage::database::{Database, DbPool};
 use crate::storage::KeyringService;
@@ -245,7 +245,11 @@ impl IndexManager {
                         .get(project_path)
                         .map(|m| m.display_name().to_string())
                 };
-                let lsp_enrichment = if self.index_store.has_enrichment_data(project_path).unwrap_or(false) {
+                let lsp_enrichment = if self
+                    .index_store
+                    .has_enrichment_data(project_path)
+                    .unwrap_or(false)
+                {
                     "enriched".to_string()
                 } else {
                     "none".to_string()
@@ -376,9 +380,7 @@ impl IndexManager {
             Self::create_file_watcher(project_path);
 
         // Build enrichment pipeline (debounce loop + callback) for incremental LSP enrichment.
-        let enrichment_cb = self
-            .build_enrichment_pipeline(project_path, 3000)
-            .await;
+        let enrichment_cb = self.build_enrichment_pipeline(project_path, 3000).await;
 
         // Capture provider display name before embedding_mgr is moved into the indexer.
         let provider_display_name = embedding_mgr.display_name().to_string();
@@ -605,7 +607,11 @@ impl IndexManager {
                         .get(project_path)
                         .map(|m| m.display_name().to_string())
                 };
-                let lsp_enrichment = if self.index_store.has_enrichment_data(project_path).unwrap_or(false) {
+                let lsp_enrichment = if self
+                    .index_store
+                    .has_enrichment_data(project_path)
+                    .unwrap_or(false)
+                {
                     "enriched".to_string()
                 } else {
                     "none".to_string()
@@ -700,8 +706,12 @@ impl IndexManager {
         project_path: &str,
     ) -> component_classifier::ClassificationResult {
         let provider = self.llm_provider.read().await.clone();
-        component_classifier::classify_components(&self.index_store, project_path, provider.as_ref())
-            .await
+        component_classifier::classify_components(
+            &self.index_store,
+            project_path,
+            provider.as_ref(),
+        )
+        .await
     }
 
     /// Get the embedding service for a project directory, if one has been
@@ -807,7 +817,10 @@ impl IndexManager {
                 return v;
             }
         }
-        let enabled = self.index_store.has_enrichment_data(project_path).unwrap_or(false);
+        let enabled = self
+            .index_store
+            .has_enrichment_data(project_path)
+            .unwrap_or(false);
         let mut map = self.enrichment_enabled.write().await;
         map.insert(project_path.to_string(), enabled);
         enabled
@@ -970,9 +983,7 @@ impl IndexManager {
         });
 
         // Build enrichment pipeline for incremental LSP enrichment.
-        let enrichment_cb = self
-            .build_enrichment_pipeline(project_path, 3000)
-            .await;
+        let enrichment_cb = self.build_enrichment_pipeline(project_path, 3000).await;
 
         // Load user-configured codebase index exclusions.
         let codebase_config = self.load_codebase_index_config();
@@ -1017,7 +1028,9 @@ impl IndexManager {
     /// Load the persisted embedding configuration from the `settings` table.
     ///
     /// Returns `None` if no config is stored or if deserialization fails.
-    fn load_persisted_embedding_config(&self) -> Option<super::embedding_provider::PersistedEmbeddingConfig> {
+    fn load_persisted_embedding_config(
+        &self,
+    ) -> Option<super::embedding_provider::PersistedEmbeddingConfig> {
         let db = Database::from_pool(self.db_pool.clone());
         embedding_config_builder::load_persisted_embedding_config(&db)
     }
@@ -1123,8 +1136,7 @@ impl IndexManager {
         project_path: &str,
         debounce_ms: u64,
     ) -> EnrichmentCallback {
-        let (enrichment_tx, enrichment_rx) =
-            tokio::sync::mpsc::channel::<Vec<String>>(256);
+        let (enrichment_tx, enrichment_rx) = tokio::sync::mpsc::channel::<Vec<String>>(256);
 
         let enricher = self.get_or_create_lsp_enricher(project_path).await;
         let lock = self.get_enrichment_lock(project_path).await;
@@ -1334,7 +1346,10 @@ async fn run_enrichment_debounce_loop(
         enricher.shutdown_if_idle(Duration::from_secs(300)).await;
 
         // 4. Check if project has enrichment data (lightweight).
-        if !index_store.has_enrichment_data(project_path).unwrap_or(false) {
+        if !index_store
+            .has_enrichment_data(project_path)
+            .unwrap_or(false)
+        {
             continue;
         }
 

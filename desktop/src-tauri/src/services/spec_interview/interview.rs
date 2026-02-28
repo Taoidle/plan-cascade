@@ -649,18 +649,20 @@ impl InterviewManager {
 
     /// Parsed exploration context for adaptive question generation
     fn parse_exploration(state: &PersistedInterviewState) -> Option<ExplorationSummary> {
-        let ctx: serde_json::Value =
-            serde_json::from_str(&state.conversation_context).ok()?;
+        let ctx: serde_json::Value = serde_json::from_str(&state.conversation_context).ok()?;
         let exploration_str = ctx.get("exploration_context")?.as_str()?;
-        let exploration: serde_json::Value =
-            serde_json::from_str(exploration_str).ok()?;
+        let exploration: serde_json::Value = serde_json::from_str(exploration_str).ok()?;
 
         let components: Vec<String> = exploration
             .get("components")
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
-                    .filter_map(|c| c.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()))
+                    .filter_map(|c| {
+                        c.get("name")
+                            .and_then(|n| n.as_str())
+                            .map(|s| s.to_string())
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -670,7 +672,11 @@ impl InterviewManager {
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
-                    .filter_map(|f| f.get("path").and_then(|p| p.as_str()).map(|s| s.to_string()))
+                    .filter_map(|f| {
+                        f.get("path")
+                            .and_then(|p| p.as_str())
+                            .map(|s| s.to_string())
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -741,8 +747,12 @@ impl InterviewManager {
         let question = match phase {
             InterviewPhase::Overview => self.gen_overview_question(&spec_data, state, &exploration),
             InterviewPhase::Scope => self.gen_scope_question(&spec_data, state, &exploration),
-            InterviewPhase::Requirements => self.gen_requirements_question(&spec_data, state, &exploration),
-            InterviewPhase::Interfaces => self.gen_interfaces_question(&spec_data, state, &exploration),
+            InterviewPhase::Requirements => {
+                self.gen_requirements_question(&spec_data, state, &exploration)
+            }
+            InterviewPhase::Interfaces => {
+                self.gen_interfaces_question(&spec_data, state, &exploration)
+            }
             InterviewPhase::Stories => self.gen_stories_question(&spec_data, state, &exploration),
             InterviewPhase::Review => self.gen_review_question(&spec_data, state, &exploration),
             InterviewPhase::Complete => {
@@ -910,9 +920,15 @@ impl InterviewManager {
                 .map(|e| e.components.clone())
                 .unwrap_or_default();
             let (input_type, hint) = if component_names.is_empty() {
-                ("list".to_string(), "List the key deliverables and areas of work".to_string())
+                (
+                    "list".to_string(),
+                    "List the key deliverables and areas of work".to_string(),
+                )
             } else {
-                ("multi_select".to_string(), "Based on project analysis — select components in scope".to_string())
+                (
+                    "multi_select".to_string(),
+                    "Based on project analysis — select components in scope".to_string(),
+                )
             };
             return InterviewQuestion {
                 id: Uuid::new_v4().to_string(),
@@ -936,7 +952,11 @@ impl InterviewManager {
             let in_scope_items: Vec<String> = scope
                 .get("in_scope")
                 .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
                 .unwrap_or_default();
             let remaining: Vec<String> = exploration
                 .as_ref()
@@ -949,9 +969,15 @@ impl InterviewManager {
                 })
                 .unwrap_or_default();
             let (input_type, hint) = if remaining.is_empty() {
-                ("list".to_string(), "Items that will NOT be addressed".to_string())
+                (
+                    "list".to_string(),
+                    "Items that will NOT be addressed".to_string(),
+                )
             } else {
-                ("multi_select".to_string(), "Components not in scope — select any to explicitly exclude".to_string())
+                (
+                    "multi_select".to_string(),
+                    "Components not in scope — select any to explicitly exclude".to_string(),
+                )
             };
             return InterviewQuestion {
                 id: Uuid::new_v4().to_string(),
@@ -977,9 +1003,15 @@ impl InterviewManager {
                 .map(|e| e.key_files.iter().take(8).cloned().collect())
                 .unwrap_or_default();
             let (input_type, hint) = if key_file_options.is_empty() {
-                ("list".to_string(), "Files/modules to preserve as-is".to_string())
+                (
+                    "list".to_string(),
+                    "Files/modules to preserve as-is".to_string(),
+                )
             } else {
-                ("multi_select".to_string(), "Key files detected — select any that should NOT be modified".to_string())
+                (
+                    "multi_select".to_string(),
+                    "Key files detected — select any that should NOT be modified".to_string(),
+                )
             };
             return InterviewQuestion {
                 id: Uuid::new_v4().to_string(),
@@ -1118,9 +1150,7 @@ impl InterviewManager {
         }
 
         // For quick flow or small projects, skip remaining NFR
-        let is_small_project = exploration
-            .as_ref()
-            .map_or(false, |e| e.file_count < 20);
+        let is_small_project = exploration.as_ref().map_or(false, |e| e.file_count < 20);
         if state.flow_level != "quick" && !is_small_project {
             if nfr
                 .get("reliability")
@@ -1803,10 +1833,16 @@ Otherwise, respond with ONLY the JSON object. No formatting, no preamble, no mar
                 let mut parts = Vec::new();
                 parts.push("\n\n## Project Analysis Available".to_string());
                 parts.push("The project has been analyzed. Use this to:".to_string());
-                parts.push("- Ask targeted questions about areas NOT covered by the analysis".to_string());
-                parts.push("- Reference specific components/files when asking about scope".to_string());
+                parts.push(
+                    "- Ask targeted questions about areas NOT covered by the analysis".to_string(),
+                );
+                parts.push(
+                    "- Reference specific components/files when asking about scope".to_string(),
+                );
                 parts.push("- Provide detected items as options in your questions".to_string());
-                parts.push("- Skip questions whose answers are obvious from the codebase".to_string());
+                parts.push(
+                    "- Skip questions whose answers are obvious from the codebase".to_string(),
+                );
 
                 if let Some(components) = exploration.get("components").and_then(|v| v.as_array()) {
                     if !components.is_empty() {
@@ -1841,7 +1877,10 @@ Otherwise, respond with ONLY the JSON object. No formatting, no preamble, no mar
             String::new()
         };
 
-        let phase_instructions = format!("{}{}{}", phase_instructions, locale_instruction, exploration_guidance);
+        let phase_instructions = format!(
+            "{}{}{}",
+            phase_instructions, locale_instruction, exploration_guidance
+        );
 
         let system_prompt = prompt_builder::build_expert_system_prompt(
             &persona,
@@ -1855,8 +1894,14 @@ Otherwise, respond with ONLY the JSON object. No formatting, no preamble, no mar
         // Initial context message (localized)
         let initial_message = match state.locale.as_str() {
             "zh" => format!("我想构建：{}。请开始需求访谈。", state.description),
-            "ja" => format!("次のものを構築したいです：{}。要件インタビューを始めてください。", state.description),
-            _ => format!("I want to build: {}. Please begin the requirements interview.", state.description),
+            "ja" => format!(
+                "次のものを構築したいです：{}。要件インタビューを始めてください。",
+                state.description
+            ),
+            _ => format!(
+                "I want to build: {}. Please begin the requirements interview.",
+                state.description
+            ),
         };
         messages.push(Message::user(initial_message));
 
@@ -1934,7 +1979,9 @@ Otherwise, respond with ONLY the JSON object. No formatting, no preamble, no mar
                 .to_string();
 
             if question_text.is_empty() {
-                return Err(AppError::parse("BA returned empty question in JSON".to_string()));
+                return Err(AppError::parse(
+                    "BA returned empty question in JSON".to_string(),
+                ));
             }
 
             let input_type = parsed

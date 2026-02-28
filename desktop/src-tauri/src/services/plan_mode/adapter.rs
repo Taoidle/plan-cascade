@@ -8,9 +8,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use super::types::{
-    CriterionResult, Plan, PlanStep, StepOutput, TaskDomain,
-};
+use super::types::{CriterionResult, Plan, PlanStep, StepOutput, TaskDomain};
 use crate::services::llm::provider::LlmProvider;
 use crate::services::persona::types::{Persona, PersonaRole};
 
@@ -334,7 +332,11 @@ fn truncate_output(content: &str, max_chars: usize) -> String {
         content.to_string()
     } else {
         let truncated = &content[..max_chars];
-        format!("{}...\n\n[Output truncated — {} chars total]", truncated, content.len())
+        format!(
+            "{}...\n\n[Output truncated — {} chars total]",
+            truncated,
+            content.len()
+        )
     }
 }
 

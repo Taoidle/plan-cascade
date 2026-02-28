@@ -609,9 +609,8 @@ pub fn build_tool_priority_section(
         }
         _ => {
             section.push_str("\n\n## Tool Selection Guide (IMPORTANT)\n\n");
-            section.push_str(
-                "Choose the most appropriate tool based on your **task scenario**:\n\n",
-            );
+            section
+                .push_str("Choose the most appropriate tool based on your **task scenario**:\n\n");
 
             // Scenario 1: domain knowledge lookup
             if has_knowledge {
@@ -743,17 +742,14 @@ pub fn build_sub_agent_tool_guidance(
     lines.push("## Tool Selection Guide / 工具选择指南".to_string());
     lines.push(String::new());
     lines.push(
-        "A pre-built codebase index is available. Choose tools based on your task:"
-            .to_string(),
+        "A pre-built codebase index is available. Choose tools based on your task:".to_string(),
     );
     lines.push("已有预构建的代码索引。请根据任务场景选择工具：".to_string());
     lines.push(String::new());
 
     match task_type {
         Some("explore") => {
-            lines.push(
-                "- **Browse directory structure** → **LS** / 浏览目录结构 → LS".to_string(),
-            );
+            lines.push("- **Browse directory structure** → **LS** / 浏览目录结构 → LS".to_string());
             lines.push(
                 "- **Find symbols / locate files** → **CodebaseSearch** (scope=\"all\") / 查找符号、定位文件 → CodebaseSearch"
                     .to_string(),
@@ -764,9 +760,7 @@ pub fn build_sub_agent_tool_guidance(
                         .to_string(),
                 );
             }
-            lines.push(
-                "- **Read specific files** → **Read** / 读取具体文件 → Read".to_string(),
-            );
+            lines.push("- **Read specific files** → **Read** / 读取具体文件 → Read".to_string());
             lines.push(
                 "- **Regex / exact string search** → **Grep** / 正则精确搜索 → Grep".to_string(),
             );
@@ -789,39 +783,28 @@ pub fn build_sub_agent_tool_guidance(
                 "- **Find function/class/struct definitions** → **CodebaseSearch** (scope=\"symbols\")"
                     .to_string(),
             );
-            lines.push(
-                "  按名称查找函数/类/结构体定义 → CodebaseSearch(symbols)".to_string(),
-            );
+            lines.push("  按名称查找函数/类/结构体定义 → CodebaseSearch(symbols)".to_string());
             if has_semantic {
                 lines.push(
                     "- **Conceptual / natural language search** → **CodebaseSearch** (scope=\"semantic\")"
                         .to_string(),
                 );
-                lines.push(
-                    "  自然语言语义搜索 → CodebaseSearch(semantic)".to_string(),
-                );
+                lines.push("  自然语言语义搜索 → CodebaseSearch(semantic)".to_string());
             }
             lines.push(
                 "- **View file contents** → **Read** (after locating files via CodebaseSearch)"
                     .to_string(),
             );
             lines.push(
-                "  查看文件内容 → Read（先用 CodebaseSearch 定位，再用 Read 读取）"
-                    .to_string(),
+                "  查看文件内容 → Read（先用 CodebaseSearch 定位，再用 Read 读取）".to_string(),
             );
             lines.push(
                 "- **Exact identifier / regex search** → **Grep** (when CodebaseSearch is insufficient)"
                     .to_string(),
             );
-            lines.push(
-                "  精确标识符/正则搜索 → Grep（CodebaseSearch 不满足时使用）".to_string(),
-            );
-            lines.push(
-                "- **Find files by pattern** → **Glob** (e.g., `**/*.rs`)".to_string(),
-            );
-            lines.push(
-                "  按模式查找文件 → Glob".to_string(),
-            );
+            lines.push("  精确标识符/正则搜索 → Grep（CodebaseSearch 不满足时使用）".to_string());
+            lines.push("- **Find files by pattern** → **Glob** (e.g., `**/*.rs`)".to_string());
+            lines.push("  按模式查找文件 → Glob".to_string());
         }
     }
 

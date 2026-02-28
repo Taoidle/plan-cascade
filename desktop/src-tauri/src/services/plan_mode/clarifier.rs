@@ -89,8 +89,7 @@ pub async fn generate_clarification_question(
          IMPORTANT: The question and hint MUST follow the output language instruction above.\n\
          Only ask questions about genuinely missing critical information. \
          Do not ask about obvious details or repeat previous questions.",
-        persona.identity_prompt,
-        persona.thinking_style,
+        persona.identity_prompt, persona.thinking_style,
     );
 
     let user_msg = format!(
@@ -103,10 +102,7 @@ pub async fn generate_clarification_question(
          {qa_section}{context_section}\n\n\
          Generate the next clarification question, or respond with {CLARIFICATION_COMPLETE_MARKER} \
          if you have enough information.",
-        analysis.domain,
-        analysis.complexity,
-        analysis.suggested_approach,
-        analysis.reasoning,
+        analysis.domain, analysis.complexity, analysis.suggested_approach, analysis.reasoning,
     );
 
     let messages = vec![Message::text(MessageRole::User, user_msg)];
@@ -148,7 +144,10 @@ pub async fn generate_clarification_question(
 }
 
 /// Parse a single clarification question from LLM response text.
-fn parse_clarification_question(text: &str, question_index: usize) -> Option<ClarificationQuestion> {
+fn parse_clarification_question(
+    text: &str,
+    question_index: usize,
+) -> Option<ClarificationQuestion> {
     let json_str = extract_json_object(text)?;
 
     let parsed: serde_json::Value = serde_json::from_str(&json_str).ok()?;
@@ -206,7 +205,8 @@ mod tests {
 
     #[test]
     fn test_parse_clarification_question_textarea() {
-        let text = r#"{"question": "Describe your requirements", "hint": "", "inputType": "textarea"}"#;
+        let text =
+            r#"{"question": "Describe your requirements", "hint": "", "inputType": "textarea"}"#;
         let q = parse_clarification_question(text, 2).unwrap();
         assert_eq!(q.question_id, "q3");
         assert!(matches!(q.input_type, ClarificationInputType::Textarea));
@@ -215,7 +215,8 @@ mod tests {
 
     #[test]
     fn test_parse_clarification_question_boolean() {
-        let text = r#"{"question": "Do you need SEO?", "hint": "yes or no", "inputType": "boolean"}"#;
+        let text =
+            r#"{"question": "Do you need SEO?", "hint": "yes or no", "inputType": "boolean"}"#;
         let q = parse_clarification_question(text, 1).unwrap();
         assert_eq!(q.question_id, "q2");
         assert!(matches!(q.input_type, ClarificationInputType::Boolean));

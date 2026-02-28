@@ -133,7 +133,8 @@ pub async fn trigger_lsp_enrichment(
 
     // Emit "enriching" status
     if let Some(mgr) = &*standalone_state.index_manager.read().await {
-        mgr.set_lsp_enrichment_status(&project_path, "enriching").await;
+        mgr.set_lsp_enrichment_status(&project_path, "enriching")
+            .await;
     }
 
     let index_store = Arc::new(IndexStore::new(pool));
@@ -147,7 +148,8 @@ pub async fn trigger_lsp_enrichment(
 
             // Emit "enriched" status and update cached enrichment flag
             if let Some(mgr) = &*standalone_state.index_manager.read().await {
-                mgr.set_lsp_enrichment_status(&project_path, "enriched").await;
+                mgr.set_lsp_enrichment_status(&project_path, "enriched")
+                    .await;
                 mgr.set_enrichment_enabled(&project_path, true).await;
             }
 

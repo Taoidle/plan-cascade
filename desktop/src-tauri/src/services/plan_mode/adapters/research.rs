@@ -7,9 +7,7 @@ use async_trait::async_trait;
 
 use crate::services::persona::types::Persona;
 use crate::services::plan_mode::adapter::{build_plan_persona, DomainAdapter};
-use crate::services::plan_mode::types::{
-    Plan, PlanStep, StepOutput, TaskDomain, PlanPersonaRole,
-};
+use crate::services::plan_mode::types::{Plan, PlanPersonaRole, PlanStep, StepOutput, TaskDomain};
 
 /// Research-focused adapter for investigation and analysis tasks.
 pub struct ResearchAdapter;
@@ -41,7 +39,8 @@ When planning research tasks:
 1. Start with a scope/framing step to define research questions
 2. Add parallel search/investigation steps for different source types
 3. Include an analysis/comparison step to evaluate findings
-4. End with a synthesis step that produces actionable conclusions"#.to_string();
+4. End with a synthesis step that produces actionable conclusions"#
+            .to_string();
         persona
     }
 
@@ -49,16 +48,28 @@ When planning research tasks:
         let mut persona = build_plan_persona(PlanPersonaRole::Executor);
         let title_lower = step.title.to_lowercase();
 
-        if title_lower.contains("scope") || title_lower.contains("frame") || title_lower.contains("define") {
+        if title_lower.contains("scope")
+            || title_lower.contains("frame")
+            || title_lower.contains("define")
+        {
             persona.identity_prompt = r#"You are a research strategist. Define clear research questions, scope boundaries, and key areas to investigate. Be specific about what to look for and what to exclude."#.to_string();
             persona.expert_temperature = 0.5;
-        } else if title_lower.contains("search") || title_lower.contains("gather") || title_lower.contains("investigate") {
+        } else if title_lower.contains("search")
+            || title_lower.contains("gather")
+            || title_lower.contains("investigate")
+        {
             persona.identity_prompt = r#"You are a thorough researcher. Search for relevant information, cite your sources, and capture key findings. Cast a wide net but stay focused on the research questions. Note any conflicting information."#.to_string();
             persona.expert_temperature = 0.4;
-        } else if title_lower.contains("analy") || title_lower.contains("compare") || title_lower.contains("evaluate") {
+        } else if title_lower.contains("analy")
+            || title_lower.contains("compare")
+            || title_lower.contains("evaluate")
+        {
             persona.identity_prompt = r#"You are an analytical researcher. Evaluate the gathered evidence critically. Identify patterns, trends, contradictions, and gaps. Compare different perspectives objectively."#.to_string();
             persona.expert_temperature = 0.3;
-        } else if title_lower.contains("synth") || title_lower.contains("conclude") || title_lower.contains("report") {
+        } else if title_lower.contains("synth")
+            || title_lower.contains("conclude")
+            || title_lower.contains("report")
+        {
             persona.identity_prompt = r#"You are a research synthesizer. Combine findings into clear, well-structured conclusions. Present actionable insights supported by evidence. Acknowledge limitations and areas for further research."#.to_string();
             persona.expert_temperature = 0.5;
         }
