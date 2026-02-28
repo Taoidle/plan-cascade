@@ -524,6 +524,27 @@ Based on the features in mega-plan.json, generate `design_doc.json`:
 - Create feature_mappings linking each feature to relevant patterns/decisions
 - Mark patterns/decisions with `applies_to: ["all"]` if they apply universally
 
+## Step 5.3: Decision Conflict Check (Passive)
+
+After design_doc.json is generated, check new decisions against any existing project decisions:
+
+```bash
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/memory-doctor.py" \
+  --mode passive \
+  --new-decisions design_doc.json \
+  --project-root "$(pwd)"
+```
+
+If the script exits with code 1 (issues found):
+1. Display the diagnosis report to the user
+2. Use `AskUserQuestion` to ask the user how to resolve each issue:
+   - **Deprecate** — Mark the older/conflicting decision as deprecated
+   - **Merge** — Combine duplicate decisions into one
+   - **Skip** — Keep both decisions as-is
+3. Apply the user's choices by modifying the relevant `design_doc.json` files
+
+If the script exits with code 0 (no issues or no existing decisions to compare), proceed silently to Step 6.
+
 ## Step 6: Create Supporting Files
 
 Create `mega-findings.md`:
