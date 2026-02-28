@@ -115,7 +115,7 @@ def run_full_diagnosis(project_root: Path):
     llm = create_llm_provider()
     if not llm:
         print_no_llm_warning()
-        sys.exit(1)
+        sys.exit(2)
 
     from plan_cascade.core.memory_doctor import MemoryDoctor
 
@@ -146,6 +146,7 @@ def run_full_diagnosis(project_root: Path):
         )
         # Write to stderr for machine parsing (stdout has the human report)
         print(json_output, file=sys.stderr)
+        sys.exit(1)
 
 
 def run_passive_diagnosis(project_root: Path, new_decisions_path: Path):
@@ -156,7 +157,7 @@ def run_passive_diagnosis(project_root: Path, new_decisions_path: Path):
     new_doc = load_json_file(new_decisions_path)
     if not new_doc:
         print(f"Error: Cannot load {new_decisions_path}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(2)
 
     new_decisions = new_doc.get("decisions", [])
     if not new_decisions:
@@ -166,7 +167,7 @@ def run_passive_diagnosis(project_root: Path, new_decisions_path: Path):
     llm = create_llm_provider()
     if not llm:
         print_no_llm_warning()
-        sys.exit(1)
+        sys.exit(2)
 
     from plan_cascade.core.memory_doctor import MemoryDoctor
 
@@ -216,6 +217,39 @@ def run_passive_diagnosis(project_root: Path, new_decisions_path: Path):
     sys.exit(1)
 
 
+def run_apply(project_root: Path, apply_path: Path):
+    """Apply resolution actions from a JSON file."""
+    setup_path()
+
+    from plan_cascade.core.memory_doctor import Diagnosis, DiagnosisType, MemoryDoctor
+
+    data = load_json_file(apply_path)
+    if not data or not isinstance(data, list):
+        print("Error: Invalid apply file format", file=sys.stderr)
+        sys.exit(2)
+
+    doctor = MemoryDoctor(project_root)
+    applied = 0
+    for item in data:
+        action = item.get("action", "skip")
+        if action == "skip":
+            continue
+        diag_data = item.get("diagnosis", {})
+        diagnosis = Diagnosis(
+            type=DiagnosisType(diag_data.get("type", "conflict")),
+            decision_a=diag_data.get("decision_a", {}),
+            decision_b=diag_data.get("decision_b", {}),
+            explanation=diag_data.get("explanation", ""),
+            suggestion=diag_data.get("suggestion", ""),
+            source_a=diag_data.get("source_a", ""),
+            source_b=diag_data.get("source_b", ""),
+        )
+        doctor.apply_action(diagnosis, action)
+        applied += 1
+
+    print(f"Applied {applied} action(s).")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Memory Doctor — Decision Conflict Detection",
@@ -238,15 +272,28 @@ def main():
         default=Path.cwd(),
         help="Project root directory (default: current directory)",
     )
+    parser.add_argument(
+        "--apply",
+        type=Path,
+        help="Path to JSON file with actions: [{\"action\": \"deprecate|merge|skip\", \"diagnosis\": {...}}]",
+    )
 
     args = parser.parse_args()
 
-    if args.mode == "passive":
-        if not args.new_decisions:
-            parser.error("--new-decisions is required for passive mode")
-        run_passive_diagnosis(args.project_root, args.new_decisions)
-    else:
-        run_full_diagnosis(args.project_root)
+    try:
+        if args.apply:
+            run_apply(args.project_root, args.apply)
+        elif args.mode == "passive":
+            if not args.new_decisions:
+                parser.error("--new-decisions is required for passive mode")
+            run_passive_diagnosis(args.project_root, args.new_decisions)
+        else:
+            run_full_diagnosis(args.project_root)
+    except SystemExit:
+        raise
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(2)
 
 
 if __name__ == "__main__":

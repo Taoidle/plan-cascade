@@ -16,15 +16,15 @@ uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/memory-doctor.p
   --project-root "$(pwd)"
 ```
 
-This script:
-- Collects all decisions from every `design_doc.json` in the project (root, worktrees, feature directories)
-- Uses LLM to detect conflicts, superseded entries, and semantic duplicates
-- Outputs a formatted diagnosis report to stdout
-- Outputs structured JSON findings to stderr
+This script collects all decisions from every `design_doc.json` in the project (root, worktrees, feature directories) and uses LLM to detect conflicts, superseded entries, and semantic duplicates.
 
-If the script reports "No LLM Available", inform the user they need to set an API key environment variable (ANTHROPIC_API_KEY, OPENAI_API_KEY, or DEEPSEEK_API_KEY).
-
-If the script reports "No Decisions Found", inform the user that no design_doc.json files with decisions were found.
+Exit code handling:
+- **Exit 0**: No issues found, or no decisions to check — display "No issues found" and stop here
+- **Exit 1**: Diagnosis issues found — proceed to Step 2
+- **Exit 2** (or script crash/traceback): Infrastructure error. Common causes:
+  - No API key configured — tell the user to set `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `DEEPSEEK_API_KEY`
+  - No `design_doc.json` files found in the project
+  - Display the error message and stop here
 
 ## Step 2: Display Diagnosis Report
 
@@ -33,11 +33,9 @@ Display the full diagnosis report from Step 1 output. The report groups findings
 - 🟠 **SUPERSEDED**: A newer decision covers the scope of an older one
 - 🟡 **DUPLICATE**: Semantically identical decisions with different wording
 
-If no issues are found, display the "all healthy" message and stop here.
-
 ## Step 3: Interactive Resolution
 
-For each diagnosis finding, use `AskUserQuestion` to let the user choose an action:
+**CRITICAL**: For each diagnosis finding, use `AskUserQuestion` to let the user choose an action:
 
 **For CONFLICT findings:**
 - **Deprecate** — Mark the older decision as `deprecated` (recommended)
@@ -48,30 +46,49 @@ For each diagnosis finding, use `AskUserQuestion` to let the user choose an acti
 - **Skip** — Keep both decisions as-is
 
 **For DUPLICATE findings:**
-- **Merge** — Keep one decision, remove the duplicate
+- **Merge** — Keep one decision, remove the duplicate (recommended)
 - **Skip** — Keep both decisions as-is
 
-Present each finding with its explanation and suggestion from the diagnosis report.
+Present each finding with its explanation and suggestion from the diagnosis report. Example question:
+
+> **ADR-F003 vs ADR-F012**: Two decisions conflict on API response format.
+> Old: "API uses custom JSON structure" (feature-auth/design_doc.json)
+> New: "API uses JSON:API spec" (feature-order/design_doc.json)
+> Suggestion: Deprecate ADR-F003
+>
+> How would you like to resolve this?
 
 ## Step 4: Apply Changes
 
-For each finding where the user chose an action (not "Skip"):
+**CRITICAL**: Construct a JSON array of the user's choices and invoke the script to apply them.
 
-**Deprecate action:**
-Read the target `design_doc.json` file, find the decision by ID, and update it:
+Save the user's choices to a temporary file `_doctor_actions.json`:
 ```json
-{
-  "status": "deprecated",
-  "deprecated_by": "<other-decision-id>",
-  "deprecated_at": "<ISO-8601 timestamp>"
-}
+[
+  {
+    "action": "deprecate",
+    "diagnosis": {
+      "type": "conflict",
+      "decision_a": {"id": "ADR-F003", "_source": "path/to/design_doc.json"},
+      "decision_b": {"id": "ADR-F012"},
+      "source_a": "path/to/design_doc.json",
+      "source_b": "other/design_doc.json"
+    }
+  }
+]
 ```
 
-**Merge action:**
-1. Read both source `design_doc.json` files
-2. In the kept decision, append to `rationale`: `"\n[Merged from <removed-id> on <timestamp>]"`
-3. Remove the duplicate decision from its source file
-4. Write both files back
+Then run:
+```bash
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/memory-doctor.py" \
+  --apply _doctor_actions.json \
+  --project-root "$(pwd)"
+```
+
+Clean up the temporary file after execution:
+```bash
+rm -f _doctor_actions.json
+```
 
 ## Step 5: Summary
 
@@ -86,3 +103,10 @@ Memory Doctor — 处理结果
 ```
 
 If any design_doc.json files were modified, list them so the user knows which files changed.
+
+## Step 6: Next Steps
+
+After the diagnosis is complete:
+- Review changed files with `git diff` to verify the modifications
+- Commit the changes if satisfied
+- Note: Decision conflict checks also run automatically during `/plan-cascade:hybrid-auto` and `/plan-cascade:mega-plan` when new design documents are generated

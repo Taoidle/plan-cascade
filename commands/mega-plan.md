@@ -524,7 +524,7 @@ Based on the features in mega-plan.json, generate `design_doc.json`:
 - Create feature_mappings linking each feature to relevant patterns/decisions
 - Mark patterns/decisions with `applies_to: ["all"]` if they apply universally
 
-## Step 5.3: Decision Conflict Check (Passive)
+### 5.3: Decision Conflict Check (Passive)
 
 After design_doc.json is generated, check new decisions against any existing project decisions:
 
@@ -535,15 +535,18 @@ uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/memory-doctor.p
   --project-root "$(pwd)"
 ```
 
-If the script exits with code 1 (issues found):
+Exit code handling:
+- **Exit 0**: No issues found or no existing decisions to compare — proceed silently to Step 6
+- **Exit 1**: Decision conflicts or duplicates detected — follow the resolution steps below
+- **Exit 2** (or script crash/traceback): Infrastructure error (e.g., no LLM provider). Log the warning and proceed to Step 6. This check is advisory and must not block mega-plan generation.
+
+If exit code is 1:
 1. Display the diagnosis report to the user
 2. Use `AskUserQuestion` to ask the user how to resolve each issue:
-   - **Deprecate** — Mark the older/conflicting decision as deprecated
-   - **Merge** — Combine duplicate decisions into one
+   - **Deprecate** — Mark the older/conflicting decision as deprecated (recommended for conflicts and superseded)
+   - **Merge** — Combine duplicate decisions into one (recommended for duplicates)
    - **Skip** — Keep both decisions as-is
 3. Apply the user's choices by modifying the relevant `design_doc.json` files
-
-If the script exits with code 0 (no issues or no existing decisions to compare), proceed silently to Step 6.
 
 ## Step 6: Create Supporting Files
 
@@ -593,7 +596,7 @@ mkdir -p "$(dirname "$MEGA_STATUS_PATH")"
 }
 ```
 
-## Step 6: Calculate Execution Batches
+## Step 7: Calculate Execution Batches
 
 Group features by dependencies:
 - **Batch 1**: Features with no dependencies (run in parallel)
@@ -606,7 +609,7 @@ Group features by dependencies:
 3. Batch 2 worktrees are created from the **updated** target_branch
 4. This ensures Batch 2 features have access to Batch 1 code
 
-## Step 7: Ask Execution Mode
+## Step 8: Ask Execution Mode
 
 Use AskUserQuestion to ask:
 
@@ -618,7 +621,7 @@ Options:
 
 Update `mega-plan.json` with the chosen mode.
 
-## Step 8: Display Unified Review
+## Step 9: Display Unified Review
 
 **CRITICAL**: Use Bash to display the unified Mega-Plan + Design Document review:
 
@@ -657,7 +660,7 @@ Batch 2 (After Batch 1):
 ============================================================
 ```
 
-## Step 9: Show Files Created and Next Steps
+## Step 10: Show Files Created and Next Steps
 
 After unified review, confirm created files and show execution configuration:
 

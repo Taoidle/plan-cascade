@@ -686,15 +686,18 @@ uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/memory-doctor.p
   --project-root "$(pwd)"
 ```
 
-If the script exits with code 1 (issues found):
+Exit code handling:
+- **Exit 0**: No issues found or no existing decisions to compare — proceed silently to Step 5.5
+- **Exit 1**: Decision conflicts or duplicates detected — follow the resolution steps below
+- **Exit 2** (or script crash/traceback): Infrastructure error (e.g., no LLM provider). Log the warning and proceed to Step 5.5. This check is advisory and must not block PRD generation.
+
+If exit code is 1:
 1. Display the diagnosis report to the user
 2. Use `AskUserQuestion` to ask the user how to resolve each issue:
-   - **Deprecate** — Mark the older/conflicting decision as deprecated
-   - **Merge** — Combine duplicate decisions into one
+   - **Deprecate** — Mark the older/conflicting decision as deprecated (recommended for conflicts and superseded)
+   - **Merge** — Combine duplicate decisions into one (recommended for duplicates)
    - **Skip** — Keep both decisions as-is
 3. Apply the user's choices by modifying the relevant `design_doc.json` files
-
-If the script exits with code 0 (no issues or no existing decisions to compare), proceed silently to Step 5.5.
 
 ## Step 5.5: Display Unified Review
 
