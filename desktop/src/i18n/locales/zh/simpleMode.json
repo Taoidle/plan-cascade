@@ -165,7 +165,64 @@
     "addMemory": "添加记忆",
     "contentRequired": "内容不能为空",
     "clearAll": "清除全部",
-    "clearAllConfirm": "确定删除此项目的所有记忆？此操作不可撤销。"
+    "clearAllConfirm": "确定删除此项目的所有记忆？此操作不可撤销。",
+    "toggleSkill": "切换 {{name}}",
+    "sourceFilters": {
+      "all": "全部",
+      "builtin": "内置",
+      "external": "外部",
+      "project_local": "项目",
+      "generated": "生成",
+      "user": "用户"
+    },
+    "sourceGroups": {
+      "builtin": "内置",
+      "external": "外部",
+      "project_local": "项目",
+      "generated": "生成",
+      "user": "用户"
+    },
+    "sourceLabels": {
+      "builtin": "内置",
+      "external": "外部",
+      "project_local": "项目",
+      "generated": "生成",
+      "user": "用户",
+      "unknown": "未知"
+    },
+    "memoryCategories": {
+      "preference": "偏好",
+      "convention": "约定",
+      "pattern": "模式",
+      "correction": "纠正",
+      "fact": "事实"
+    },
+    "phaseLabels": {
+      "planning": "规划",
+      "implementation": "实现",
+      "retry": "重试",
+      "always": "始终"
+    },
+    "toasts": {
+      "loadSkillsFailed": "加载技能失败",
+      "skillNotFound": "未找到技能",
+      "toggleSkillFailed": "切换技能失败",
+      "searchSkillsFailed": "搜索失败",
+      "skillIndexRefreshed": "技能索引已刷新",
+      "refreshSkillsFailed": "刷新失败",
+      "skillDeleted": "技能已删除",
+      "deleteSkillFailed": "删除技能失败",
+      "loadMemoriesFailed": "加载记忆失败",
+      "memoryAdded": "记忆已添加",
+      "addMemoryFailed": "添加记忆失败",
+      "memoryUpdated": "记忆已更新",
+      "updateMemoryFailed": "更新记忆失败",
+      "memoryDeleted": "记忆已删除",
+      "deleteMemoryFailed": "删除记忆失败",
+      "memoriesCleared": "全部记忆已清除",
+      "clearMemoriesFailed": "清除记忆失败",
+      "searchMemoriesFailed": "搜索失败"
+    }
   },
 
   "pluginPanel": {

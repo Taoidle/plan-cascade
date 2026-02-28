@@ -6,6 +6,7 @@
  */
 
 import { useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { SkillSourceBadge } from '../SkillMemory/SkillSourceBadge';
 import type { SkillSummary } from '../../types/skillMemory';
@@ -17,6 +18,7 @@ interface SkillRowProps {
 }
 
 export function SkillRow({ skill, onToggle, onClick }: SkillRowProps) {
+  const { t } = useTranslation('simpleMode');
   const handleToggle = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       e.stopPropagation();
@@ -57,7 +59,7 @@ export function SkillRow({ skill, onToggle, onClick }: SkillRowProps) {
           'h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600 shrink-0',
           'text-primary-600 focus:ring-primary-500',
         )}
-        aria-label={`Toggle ${skill.name}`}
+        aria-label={t('skillPanel.toggleSkill', { name: skill.name, defaultValue: `Toggle ${skill.name}` })}
       />
 
       {/* Name */}

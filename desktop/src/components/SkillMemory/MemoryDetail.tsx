@@ -40,6 +40,13 @@ export function MemoryDetail({ memory, onClose, onUpdate, onDelete, className }:
   const [editKeywords, setEditKeywords] = useState<string[]>(memory.keywords);
   const [keywordInput, setKeywordInput] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const categoryLabel = useCallback(
+    (cat: MemoryCategory) =>
+      t(`skillPanel.memoryCategories.${cat}`, {
+        defaultValue: cat.charAt(0).toUpperCase() + cat.slice(1),
+      }),
+    [t],
+  );
 
   const handleSave = useCallback(() => {
     const updates: Parameters<typeof onUpdate>[1] = {};
@@ -141,7 +148,7 @@ export function MemoryDetail({ memory, onClose, onUpdate, onDelete, className }:
               >
                 {MEMORY_CATEGORIES.map((cat) => (
                   <option key={cat} value={cat}>
-                    {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                    {categoryLabel(cat)}
                   </option>
                 ))}
               </select>

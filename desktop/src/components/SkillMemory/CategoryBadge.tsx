@@ -6,6 +6,7 @@
  */
 
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import type { MemoryCategory } from '../../types/skillMemory';
 import { getMemoryCategoryDisplayName } from '../../types/skillMemory';
 
@@ -40,8 +41,10 @@ const categoryStyles: Record<MemoryCategory, { bg: string; text: string }> = {
 };
 
 export function CategoryBadge({ category, className, compact = false }: CategoryBadgeProps) {
+  const { t } = useTranslation('simpleMode');
   const style = categoryStyles[category] || categoryStyles.fact;
-  const label = getMemoryCategoryDisplayName(category);
+  const fallbackLabel = getMemoryCategoryDisplayName(category);
+  const label = t(`skillPanel.memoryCategories.${category}`, { defaultValue: fallbackLabel });
 
   return (
     <span

@@ -165,7 +165,64 @@
     "addMemory": "Add Memory",
     "contentRequired": "Content is required",
     "clearAll": "Clear all",
-    "clearAllConfirm": "Delete all memories for this project? This cannot be undone."
+    "clearAllConfirm": "Delete all memories for this project? This cannot be undone.",
+    "toggleSkill": "Toggle {{name}}",
+    "sourceFilters": {
+      "all": "All",
+      "builtin": "Built-in",
+      "external": "External",
+      "project_local": "Project",
+      "generated": "Generated",
+      "user": "User"
+    },
+    "sourceGroups": {
+      "builtin": "Built-in",
+      "external": "External",
+      "project_local": "Project",
+      "generated": "Generated",
+      "user": "User"
+    },
+    "sourceLabels": {
+      "builtin": "Built-in",
+      "external": "External",
+      "project_local": "Project",
+      "generated": "Generated",
+      "user": "User",
+      "unknown": "Unknown"
+    },
+    "memoryCategories": {
+      "preference": "Preference",
+      "convention": "Convention",
+      "pattern": "Pattern",
+      "correction": "Correction",
+      "fact": "Fact"
+    },
+    "phaseLabels": {
+      "planning": "Planning",
+      "implementation": "Implementation",
+      "retry": "Retry",
+      "always": "Always"
+    },
+    "toasts": {
+      "loadSkillsFailed": "Failed to load skills",
+      "skillNotFound": "Skill not found",
+      "toggleSkillFailed": "Failed to toggle skill",
+      "searchSkillsFailed": "Search failed",
+      "skillIndexRefreshed": "Skill index refreshed",
+      "refreshSkillsFailed": "Failed to refresh",
+      "skillDeleted": "Skill deleted",
+      "deleteSkillFailed": "Failed to delete skill",
+      "loadMemoriesFailed": "Failed to load memories",
+      "memoryAdded": "Memory added",
+      "addMemoryFailed": "Failed to add memory",
+      "memoryUpdated": "Memory updated",
+      "updateMemoryFailed": "Failed to update memory",
+      "memoryDeleted": "Memory deleted",
+      "deleteMemoryFailed": "Failed to delete memory",
+      "memoriesCleared": "All memories cleared",
+      "clearMemoriesFailed": "Failed to clear memories",
+      "searchMemoriesFailed": "Search failed"
+    }
   },
 
   "pluginPanel": {

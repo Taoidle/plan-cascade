@@ -19,6 +19,10 @@ interface SkillDetailProps {
 
 export function SkillDetail({ skill, onClose, className }: SkillDetailProps) {
   const { t } = useTranslation('simpleMode');
+  const phaseLabel = (phase: string) =>
+    t(`skillPanel.phaseLabels.${phase}`, {
+      defaultValue: phase,
+    });
 
   return (
     <div data-testid="skill-detail" className={clsx('flex flex-col h-full', className)}>
@@ -83,7 +87,7 @@ export function SkillDetail({ skill, onClose, className }: SkillDetailProps) {
               key={phase}
               className="text-2xs px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400"
             >
-              {phase}
+              {phaseLabel(phase)}
             </span>
           ))}
         </div>

@@ -31,14 +31,58 @@ import { MEMORY_CATEGORIES } from '../../types/skillMemory';
 // Source filter options
 // ============================================================================
 
-const SOURCE_FILTERS: { value: SkillSourceFilter; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'builtin', label: 'Built-in' },
-  { value: 'external', label: 'External' },
-  { value: 'project_local', label: 'Project' },
-  { value: 'generated', label: 'Generated' },
-  { value: 'user', label: 'User' },
-];
+function sourceLabelFallback(source: SkillSourceFilter): string {
+  switch (source) {
+    case 'all':
+      return 'All';
+    case 'builtin':
+      return 'Built-in';
+    case 'external':
+      return 'External';
+    case 'project_local':
+      return 'Project';
+    case 'generated':
+      return 'Generated';
+    case 'user':
+      return 'User';
+    default:
+      return source;
+  }
+}
+
+function sourceGroupFallback(source: string): string {
+  switch (source) {
+    case 'builtin':
+      return 'Built-in';
+    case 'external':
+      return 'External';
+    case 'project_local':
+      return 'Project';
+    case 'generated':
+      return 'Generated';
+    case 'user':
+      return 'User';
+    default:
+      return source.replace(/_/g, ' ');
+  }
+}
+
+function memoryCategoryFallback(category: MemoryCategory | string): string {
+  switch (category) {
+    case 'preference':
+      return 'Preference';
+    case 'convention':
+      return 'Convention';
+    case 'pattern':
+      return 'Pattern';
+    case 'correction':
+      return 'Correction';
+    case 'fact':
+      return 'Fact';
+    default:
+      return category;
+  }
+}
 
 // ============================================================================
 // SkillsTab
@@ -59,6 +103,37 @@ function SkillsTab() {
   const skillDetail = useSkillMemoryStore((s) => s.skillDetail);
 
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
+  const sourceFilters: { value: SkillSourceFilter; label: string }[] = useMemo(
+    () => [
+      { value: 'all', label: t('skillPanel.sourceFilters.all', { defaultValue: sourceLabelFallback('all') }) },
+      {
+        value: 'builtin',
+        label: t('skillPanel.sourceFilters.builtin', { defaultValue: sourceLabelFallback('builtin') }),
+      },
+      {
+        value: 'external',
+        label: t('skillPanel.sourceFilters.external', { defaultValue: sourceLabelFallback('external') }),
+      },
+      {
+        value: 'project_local',
+        label: t('skillPanel.sourceFilters.project_local', { defaultValue: sourceLabelFallback('project_local') }),
+      },
+      {
+        value: 'generated',
+        label: t('skillPanel.sourceFilters.generated', { defaultValue: sourceLabelFallback('generated') }),
+      },
+      { value: 'user', label: t('skillPanel.sourceFilters.user', { defaultValue: sourceLabelFallback('user') }) },
+    ],
+    [t],
+  );
+
+  const getSourceGroupLabel = useCallback(
+    (sourceType: string) =>
+      t(`skillPanel.sourceGroups.${sourceType}`, {
+        defaultValue: sourceGroupFallback(sourceType),
+      }),
+    [t],
+  );
 
   // Filter skills by source and search query
   const filteredSkills = useMemo(() => {
@@ -147,7 +222,7 @@ function SkillsTab() {
 
         {/* Source filter tabs + refresh */}
         <div className="flex items-center gap-1 flex-wrap">
-          {SOURCE_FILTERS.map((filter) => (
+          {sourceFilters.map((filter) => (
             <button
               key={filter.value}
               onClick={() => setSkillSourceFilter(filter.value)}
@@ -189,7 +264,7 @@ function SkillsTab() {
               <div key={sourceType}>
                 <div className="px-2 py-1">
                   <span className="text-2xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                    {sourceType.replace('_', ' ')}
+                    {getSourceGroupLabel(sourceType)}
                   </span>
                   <span className="text-2xs text-gray-400 dark:text-gray-500 ml-1">({groupSkills.length})</span>
                 </div>
@@ -231,6 +306,13 @@ function MemoryTab() {
 
   const [selectedMemory, setSelectedMemory] = useState<MemoryEntry | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const getCategoryLabel = useCallback(
+    (category: MemoryCategory | string) =>
+      t(`skillPanel.memoryCategories.${category}`, {
+        defaultValue: memoryCategoryFallback(category),
+      }),
+    [t],
+  );
 
   // Reload when category filter changes
   useEffect(() => {
@@ -366,7 +448,7 @@ function MemoryTab() {
                   : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
               )}
             >
-              {cat.charAt(0).toUpperCase() + cat.slice(1)}
+              {getCategoryLabel(cat)}
             </button>
           ))}
           <button
@@ -404,7 +486,7 @@ function MemoryTab() {
           <span>{t('skillPanel.avgImportance', { pct: (memoryStats.avg_importance * 100).toFixed(0) })}</span>
           {Object.entries(memoryStats.category_counts).map(([cat, count]) => (
             <span key={cat} className="text-gray-400 dark:text-gray-500">
-              {cat}: {count as number}
+              {getCategoryLabel(cat)}: {count as number}
             </span>
           ))}
         </div>

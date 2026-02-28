@@ -8,6 +8,7 @@
 
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
+import i18n from '../i18n';
 import type {
   SkillSummary,
   SkillDocument,
@@ -28,6 +29,11 @@ interface CommandResponse<T> {
   success: boolean;
   data: T | null;
   error: string | null;
+}
+
+function tSkillMemory(key: string, defaultValue: string): string {
+  const translated = i18n.t(key, { ns: 'simpleMode', defaultValue });
+  return typeof translated === 'string' && translated !== key ? translated : defaultValue;
 }
 
 // ============================================================================
@@ -172,7 +178,10 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
       if (response.success && response.data) {
         set({ skills: response.data, skillsLoading: false });
       } else {
-        set({ skillsError: response.error || 'Failed to load skills', skillsLoading: false });
+        set({
+          skillsError: response.error || tSkillMemory('skillPanel.toasts.loadSkillsFailed', 'Failed to load skills'),
+          skillsLoading: false,
+        });
       }
     } catch (error) {
       set({
@@ -206,7 +215,7 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         set({ skillDetail: response.data, skillDetailLoading: false });
       } else {
         set({ skillDetailLoading: false });
-        get().showToast(response.error || 'Skill not found', 'error');
+        get().showToast(response.error || tSkillMemory('skillPanel.toasts.skillNotFound', 'Skill not found'), 'error');
       }
     } catch (error) {
       set({ skillDetailLoading: false });
@@ -229,7 +238,10 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         set((state) => ({
           skills: state.skills.map((s) => (s.id === id ? { ...s, enabled: !enabled } : s)),
         }));
-        get().showToast(response.error || 'Failed to toggle skill', 'error');
+        get().showToast(
+          response.error || tSkillMemory('skillPanel.toasts.toggleSkillFailed', 'Failed to toggle skill'),
+          'error',
+        );
       }
     } catch (error) {
       set((state) => ({
@@ -252,7 +264,10 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         set((state) => ({
           skills: state.skills.map((s) => (s.id === id ? { ...s, enabled: !enabled } : s)),
         }));
-        get().showToast(response.error || 'Failed to toggle skill', 'error');
+        get().showToast(
+          response.error || tSkillMemory('skillPanel.toasts.toggleSkillFailed', 'Failed to toggle skill'),
+          'error',
+        );
       }
     } catch (error) {
       set((state) => ({
@@ -284,7 +299,10 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         );
         set({ skills: filtered, skillsLoading: false });
       } else {
-        set({ skillsError: fallback.error || 'Search failed', skillsLoading: false });
+        set({
+          skillsError: fallback.error || tSkillMemory('skillPanel.toasts.searchSkillsFailed', 'Search failed'),
+          skillsLoading: false,
+        });
       }
     };
 
@@ -317,11 +335,14 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         projectPath,
       });
       if (response.success) {
-        get().showToast('Skill index refreshed', 'success');
+        get().showToast(tSkillMemory('skillPanel.toasts.skillIndexRefreshed', 'Skill index refreshed'), 'success');
         // Reload skills list
         await get().loadSkills(projectPath);
       } else {
-        get().showToast(response.error || 'Failed to refresh', 'error');
+        get().showToast(
+          response.error || tSkillMemory('skillPanel.toasts.refreshSkillsFailed', 'Failed to refresh'),
+          'error',
+        );
       }
     } catch (error) {
       get().showToast(error instanceof Error ? error.message : String(error), 'error');
@@ -338,9 +359,12 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         set((state) => ({
           skills: state.skills.filter((s) => s.id !== id),
         }));
-        get().showToast('Skill deleted', 'success');
+        get().showToast(tSkillMemory('skillPanel.toasts.skillDeleted', 'Skill deleted'), 'success');
       } else {
-        get().showToast(response.error || 'Failed to delete skill', 'error');
+        get().showToast(
+          response.error || tSkillMemory('skillPanel.toasts.deleteSkillFailed', 'Failed to delete skill'),
+          'error',
+        );
       }
     } catch (error) {
       get().showToast(error instanceof Error ? error.message : String(error), 'error');
@@ -370,7 +394,11 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
           memoryHasMore: response.data.length >= memoryPageSize,
         });
       } else {
-        set({ memoriesError: response.error || 'Failed to load memories', memoriesLoading: false });
+        set({
+          memoriesError:
+            response.error || tSkillMemory('skillPanel.toasts.loadMemoriesFailed', 'Failed to load memories'),
+          memoriesLoading: false,
+        });
       }
     } catch (error) {
       set({
@@ -435,9 +463,12 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         set((state) => ({
           memories: [response.data!, ...state.memories],
         }));
-        get().showToast('Memory added', 'success');
+        get().showToast(tSkillMemory('skillPanel.toasts.memoryAdded', 'Memory added'), 'success');
       } else {
-        get().showToast(response.error || 'Failed to add memory', 'error');
+        get().showToast(
+          response.error || tSkillMemory('skillPanel.toasts.addMemoryFailed', 'Failed to add memory'),
+          'error',
+        );
       }
     } catch (error) {
       get().showToast(error instanceof Error ? error.message : String(error), 'error');
@@ -457,9 +488,12 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         set((state) => ({
           memories: state.memories.map((m) => (m.id === id ? response.data! : m)),
         }));
-        get().showToast('Memory updated', 'success');
+        get().showToast(tSkillMemory('skillPanel.toasts.memoryUpdated', 'Memory updated'), 'success');
       } else {
-        get().showToast(response.error || 'Failed to update memory', 'error');
+        get().showToast(
+          response.error || tSkillMemory('skillPanel.toasts.updateMemoryFailed', 'Failed to update memory'),
+          'error',
+        );
       }
     } catch (error) {
       get().showToast(error instanceof Error ? error.message : String(error), 'error');
@@ -473,9 +507,12 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         set((state) => ({
           memories: state.memories.filter((m) => m.id !== id),
         }));
-        get().showToast('Memory deleted', 'success');
+        get().showToast(tSkillMemory('skillPanel.toasts.memoryDeleted', 'Memory deleted'), 'success');
       } else {
-        get().showToast(response.error || 'Failed to delete memory', 'error');
+        get().showToast(
+          response.error || tSkillMemory('skillPanel.toasts.deleteMemoryFailed', 'Failed to delete memory'),
+          'error',
+        );
       }
     } catch (error) {
       get().showToast(error instanceof Error ? error.message : String(error), 'error');
@@ -489,9 +526,12 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
       });
       if (response.success) {
         set({ memories: [], memoryStats: null, memoryHasMore: false });
-        get().showToast('All memories cleared', 'success');
+        get().showToast(tSkillMemory('skillPanel.toasts.memoriesCleared', 'All memories cleared'), 'success');
       } else {
-        get().showToast(response.error || 'Failed to clear memories', 'error');
+        get().showToast(
+          response.error || tSkillMemory('skillPanel.toasts.clearMemoriesFailed', 'Failed to clear memories'),
+          'error',
+        );
       }
     } catch (error) {
       get().showToast(error instanceof Error ? error.message : String(error), 'error');
@@ -523,7 +563,10 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
           memoryHasMore: false,
         });
       } else {
-        set({ memoriesError: response.error || 'Search failed', memoriesLoading: false });
+        set({
+          memoriesError: response.error || tSkillMemory('skillPanel.toasts.searchMemoriesFailed', 'Search failed'),
+          memoriesLoading: false,
+        });
       }
     } catch (error) {
       set({

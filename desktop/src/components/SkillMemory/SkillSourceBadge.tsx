@@ -6,6 +6,7 @@
  */
 
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import type { SkillSource } from '../../types/skillMemory';
 import { getSkillSourceDisplayName } from '../../types/skillMemory';
 
@@ -40,8 +41,13 @@ const sourceStyles: Record<string, { bg: string; text: string }> = {
 };
 
 export function SkillSourceBadge({ source, className, compact = false }: SkillSourceBadgeProps) {
+  const { t } = useTranslation('simpleMode');
   const style = sourceStyles[source.type] || sourceStyles.builtin;
-  const label = getSkillSourceDisplayName(source);
+  const fallbackLabel = getSkillSourceDisplayName(source);
+  const label =
+    source.type === 'external' && source.source_name
+      ? source.source_name
+      : t(`skillPanel.sourceLabels.${source.type}`, { defaultValue: fallbackLabel });
 
   return (
     <span

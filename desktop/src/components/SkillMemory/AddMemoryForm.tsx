@@ -23,6 +23,13 @@ export function AddMemoryForm({ onSave, onCancel }: AddMemoryFormProps) {
   const [keywords, setKeywords] = useState<string[]>([]);
   const [keywordInput, setKeywordInput] = useState('');
   const [importance, setImportance] = useState(0.5);
+  const categoryLabel = useCallback(
+    (cat: MemoryCategory) =>
+      t(`skillPanel.memoryCategories.${cat}`, {
+        defaultValue: cat.charAt(0).toUpperCase() + cat.slice(1),
+      }),
+    [t],
+  );
 
   const handleSave = useCallback(() => {
     if (!content.trim()) return;
@@ -56,7 +63,7 @@ export function AddMemoryForm({ onSave, onCancel }: AddMemoryFormProps) {
           >
             {MEMORY_CATEGORIES.map((cat) => (
               <option key={cat} value={cat}>
-                {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                {categoryLabel(cat)}
               </option>
             ))}
           </select>

@@ -165,7 +165,64 @@
     "addMemory": "メモリを追加",
     "contentRequired": "内容は必須です",
     "clearAll": "すべてクリア",
-    "clearAllConfirm": "このプロジェクトのすべてのメモリを削除しますか？元に戻せません。"
+    "clearAllConfirm": "このプロジェクトのすべてのメモリを削除しますか？元に戻せません。",
+    "toggleSkill": "{{name}} を切り替え",
+    "sourceFilters": {
+      "all": "すべて",
+      "builtin": "ビルトイン",
+      "external": "外部",
+      "project_local": "プロジェクト",
+      "generated": "生成済み",
+      "user": "ユーザー"
+    },
+    "sourceGroups": {
+      "builtin": "ビルトイン",
+      "external": "外部",
+      "project_local": "プロジェクト",
+      "generated": "生成済み",
+      "user": "ユーザー"
+    },
+    "sourceLabels": {
+      "builtin": "ビルトイン",
+      "external": "外部",
+      "project_local": "プロジェクト",
+      "generated": "生成済み",
+      "user": "ユーザー",
+      "unknown": "不明"
+    },
+    "memoryCategories": {
+      "preference": "設定",
+      "convention": "規約",
+      "pattern": "パターン",
+      "correction": "修正",
+      "fact": "事実"
+    },
+    "phaseLabels": {
+      "planning": "計画",
+      "implementation": "実装",
+      "retry": "再試行",
+      "always": "常時"
+    },
+    "toasts": {
+      "loadSkillsFailed": "スキルの読み込みに失敗しました",
+      "skillNotFound": "スキルが見つかりません",
+      "toggleSkillFailed": "スキルの切り替えに失敗しました",
+      "searchSkillsFailed": "検索に失敗しました",
+      "skillIndexRefreshed": "スキルインデックスを更新しました",
+      "refreshSkillsFailed": "更新に失敗しました",
+      "skillDeleted": "スキルを削除しました",
+      "deleteSkillFailed": "スキルの削除に失敗しました",
+      "loadMemoriesFailed": "メモリの読み込みに失敗しました",
+      "memoryAdded": "メモリを追加しました",
+      "addMemoryFailed": "メモリの追加に失敗しました",
+      "memoryUpdated": "メモリを更新しました",
+      "updateMemoryFailed": "メモリの更新に失敗しました",
+      "memoryDeleted": "メモリを削除しました",
+      "deleteMemoryFailed": "メモリの削除に失敗しました",
+      "memoriesCleared": "すべてのメモリをクリアしました",
+      "clearMemoriesFailed": "メモリのクリアに失敗しました",
+      "searchMemoriesFailed": "検索に失敗しました"
+    }
   },
 
   "pluginPanel": {

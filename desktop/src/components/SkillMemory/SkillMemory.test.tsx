@@ -13,6 +13,9 @@ import type { SkillSummary, MemoryEntry } from '../../types/skillMemory';
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, opts?: Record<string, unknown>) => {
+      if (key === 'skillPanel.toggleSkill') {
+        return `Toggle ${String(opts?.name ?? '')}`;
+      }
       const translations: Record<string, string> = {
         'skillPanel.title': 'Skills & Memory',
         'skillPanel.manageAll': 'Manage All...',
@@ -28,6 +31,16 @@ vi.mock('react-i18next', () => ({
         'skillPanel.memoryTab': 'Memory',
         'skillPanel.close': 'Close',
         'skillPanel.activeSkillsTooltip': `${opts?.count ?? 0} active skill(s)`,
+        'skillPanel.sourceLabels.builtin': 'Built-in',
+        'skillPanel.sourceLabels.external': 'External',
+        'skillPanel.sourceLabels.project_local': 'Project',
+        'skillPanel.sourceLabels.generated': 'Generated',
+        'skillPanel.sourceLabels.user': 'User',
+        'skillPanel.memoryCategories.preference': 'Preference',
+        'skillPanel.memoryCategories.convention': 'Convention',
+        'skillPanel.memoryCategories.pattern': 'Pattern',
+        'skillPanel.memoryCategories.correction': 'Correction',
+        'skillPanel.memoryCategories.fact': 'Fact',
       };
       return translations[key] || key;
     },
