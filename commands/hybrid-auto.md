@@ -699,6 +699,23 @@ If exit code is 1:
    - **Skip** — Keep both decisions as-is
 3. Apply the user's choices by modifying the relevant `design_doc.json` files
 
+## Step 5.45: Generate Markdown Documents
+
+**CRITICAL**: Generate human-readable Markdown files from the finalized JSON:
+
+```bash
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/render-plan-docs.py" \
+  --mode hybrid \
+  --project-root "$(pwd)"
+```
+
+This produces:
+- `prd.md` — Human-readable PRD with stories, acceptance criteria, execution batches
+- `design_doc.md` — Technical design with components, patterns, and full ADR details
+
+These files are programmatically generated from JSON (not LLM) and stay in sync.
+If the script fails, log a warning and continue — the Markdown files are supplementary.
+
 ## Step 5.5: Display Unified Review
 
 **CRITICAL**: Use Bash to display the unified PRD + Design Document review:
@@ -722,9 +739,86 @@ If the script is not available, display a manual summary showing:
 - Flow configuration: {FLOW_LEVEL or "standard (default)"}
 - TDD mode: {TDD_MODE or "auto (default)"}
 
+## Step 5.6: Confirm Architectural Decisions
+
+After the unified review, display a decision summary and confirm with the user.
+
+### 5.6.1: Display Decision Summary
+
+Read `design_doc.json` and for each decision with status "accepted" or "proposed", display:
+
+```
+============================================================
+ARCHITECTURAL DECISIONS — Summary
+============================================================
+
+[ADR-F001] Decision Title
+  Context:      <context>
+  Decision:     <decision>
+  Rationale:    <rationale>
+  Alternatives: <alt1>, <alt2>
+
+[ADR-F002] ...
+
+Total: N decisions
+============================================================
+```
+
+### 5.6.2: Confirmation Flow
+
+**If `NO_CONFIRM_MODE` is true** (i.e., `--no-confirm` was passed):
+- Skip interactive confirmation entirely
+- Auto-accept all decisions: set every decision's status to "accepted" in `design_doc.json`
+- Log: `"Auto-accepted N architectural decisions (--no-confirm mode)"`
+- Proceed to Step 6
+
+**Otherwise** (interactive mode — the default):
+
+Use `AskUserQuestion` with these options:
+
+```
+Question: "These N architectural decisions will be used as the baseline for future conflict detection. Do you accept them?"
+
+Options:
+  1. "Accept All (Recommended)" — Accept all decisions as-is
+  2. "Review Individually" — Review and confirm each decision one by one
+  3. "Discuss" — Chat about specific decisions before confirming
+```
+
+**If user selects "Accept All"**: Set all decision statuses to "accepted" in `design_doc.json`. Proceed to Step 6.
+
+**If user selects "Discuss"**: Let the user discuss freely. After the discussion, repeat Step 5.6.2 (re-ask the question).
+
+**If user selects "Review Individually"**: For each decision, use `AskUserQuestion`:
+
+```
+Question: "[ADR-F001] <title>
+  Context: <context>
+  Decision: <decision>
+  Rationale: <rationale>"
+
+Options:
+  1. "Accept" — Accept this decision
+  2. "Reject" — Remove this decision
+  3. "Modify" — Edit this decision before accepting
+  4. "Discuss" — Chat about this decision
+```
+
+- **Accept**: Mark status as "accepted"
+- **Reject**: Mark status as "rejected"
+- **Modify**: Let the user describe changes, update the decision in `design_doc.json`, then re-confirm this specific ADR
+- **Discuss**: Let the user chat, then re-ask for this specific ADR
+
+After all decisions are reviewed, re-run Step 5.45 to regenerate the Markdown files:
+```bash
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/render-plan-docs.py" \
+  --mode hybrid \
+  --project-root "$(pwd)"
+```
+
 ## Step 6: Confirm Generation Complete and Show Next Steps
 
-After displaying the unified review, confirm and show how to proceed:
+After displaying the unified review and getting decision confirmation, show how to proceed:
 
 ```
 PRD and Design Document generated successfully!
@@ -732,6 +826,8 @@ PRD and Design Document generated successfully!
 Files created:
   - prd.json          (product requirements document)
   - design_doc.json   (technical design document)
+  - prd.md            (human-readable PRD)
+  - design_doc.md     (human-readable technical design)
 
 ============================================================
 EXECUTION CONFIGURATION

@@ -548,6 +548,23 @@ If exit code is 1:
    - **Skip** — Keep both decisions as-is
 3. Apply the user's choices by modifying the relevant `design_doc.json` files
 
+### 5.4: Generate Markdown Documents
+
+**CRITICAL**: Generate human-readable Markdown files from the finalized JSON:
+
+```bash
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/render-plan-docs.py" \
+  --mode mega \
+  --project-root "$(pwd)"
+```
+
+This produces:
+- `mega-plan.md` — Human-readable project plan with features and execution batches
+- `design_doc.md` — Technical design with architecture, patterns, and full ADR details
+
+These files are programmatically generated from JSON (not LLM) and stay in sync.
+If the script fails, log a warning and continue — the Markdown files are supplementary.
+
 ## Step 6: Create Supporting Files
 
 Create `mega-findings.md`:
@@ -660,14 +677,93 @@ Batch 2 (After Batch 1):
 ============================================================
 ```
 
+## Step 9.5: Confirm Architectural Decisions
+
+After the unified review, display a decision summary and confirm with the user.
+
+### 9.5.1: Display Decision Summary
+
+Read `design_doc.json` and for each decision with status "accepted" or "proposed", display:
+
+```
+============================================================
+ARCHITECTURAL DECISIONS — Summary
+============================================================
+
+[ADR-001] Decision Title
+  Context:      <context>
+  Decision:     <decision>
+  Rationale:    <rationale>
+  Alternatives: <alt1>, <alt2>
+
+[ADR-002] ...
+
+Total: N decisions
+============================================================
+```
+
+### 9.5.2: Confirmation Flow
+
+**If `NO_CONFIRM_MODE` is true** (i.e., `--no-confirm` was passed):
+- Skip interactive confirmation entirely
+- Auto-accept all decisions: set every decision's status to "accepted" in `design_doc.json`
+- Log: `"Auto-accepted N architectural decisions (--no-confirm mode)"`
+- Proceed to Step 10
+
+**Otherwise** (interactive mode — the default):
+
+Use `AskUserQuestion` with these options:
+
+```
+Question: "These N architectural decisions will be used as the baseline for future conflict detection. Do you accept them?"
+
+Options:
+  1. "Accept All (Recommended)" — Accept all decisions as-is
+  2. "Review Individually" — Review and confirm each decision one by one
+  3. "Discuss" — Chat about specific decisions before confirming
+```
+
+**If user selects "Accept All"**: Set all decision statuses to "accepted" in `design_doc.json`. Proceed to Step 10.
+
+**If user selects "Discuss"**: Let the user discuss freely. After the discussion, repeat Step 9.5.2 (re-ask the question).
+
+**If user selects "Review Individually"**: For each decision, use `AskUserQuestion`:
+
+```
+Question: "[ADR-001] <title>
+  Context: <context>
+  Decision: <decision>
+  Rationale: <rationale>"
+
+Options:
+  1. "Accept" — Accept this decision
+  2. "Reject" — Remove this decision
+  3. "Modify" — Edit this decision before accepting
+  4. "Discuss" — Chat about this decision
+```
+
+- **Accept**: Mark status as "accepted"
+- **Reject**: Mark status as "rejected"
+- **Modify**: Let the user describe changes, update the decision in `design_doc.json`, then re-confirm this specific ADR
+- **Discuss**: Let the user chat, then re-ask for this specific ADR
+
+After all decisions are reviewed, re-run Step 5.4 to regenerate the Markdown files:
+```bash
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/render-plan-docs.py" \
+  --mode mega \
+  --project-root "$(pwd)"
+```
+
 ## Step 10: Show Files Created and Next Steps
 
-After unified review, confirm created files and show execution configuration:
+After unified review and getting decision confirmation, show created files and execution configuration:
 
 ```
 Files created:
   - mega-plan.json       (project plan - in user data dir or project root)
   - design_doc.json      (project-level technical design - in project root)
+  - mega-plan.md         (human-readable project plan)
+  - design_doc.md        (human-readable technical design)
   - mega-findings.md     (shared findings - always in project root for visibility)
   - .mega-status.json    (execution status - in .state/ dir or project root)
 

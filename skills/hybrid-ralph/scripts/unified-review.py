@@ -393,7 +393,20 @@ def display_design_section(design: dict, mode: str):
             adr_id = d.get("id", "ADR-???")
             title = truncate_text(d.get("title", "Untitled"), 45)
             status = d.get("status", "proposed")
+            context = d.get("context", "")
+            decision = d.get("decision", "")
+            rationale = d.get("rationale", "")
+            alternatives = d.get("alternatives_considered", [])
             print(f"  [{adr_id}] {title} ({status})")
+            if context:
+                print(f"    Context:      {truncate_text(context, 65)}")
+            if decision:
+                print(f"    Decision:     {truncate_text(decision, 65)}")
+            if rationale:
+                print(f"    Rationale:    {truncate_text(rationale, 65)}")
+            if alternatives:
+                print(f"    Alternatives: {', '.join(str(a) for a in alternatives[:3])}")
+            print()
         print()
 
 
