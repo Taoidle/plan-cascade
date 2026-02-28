@@ -1570,7 +1570,6 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
                 : `Execution failed: ${execution.error || 'Unknown error'}`,
             );
             get().saveToHistory();
-            if (succeeded) void triggerMemoryExtraction(get());
           };
 
           if (get().status === 'running') {

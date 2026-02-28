@@ -10,14 +10,13 @@ use std::sync::Arc;
 use tauri::State;
 
 use crate::models::response::CommandResponse;
-use crate::services::skills::config::{load_skills_config, SkillsConfig};
+use crate::services::skills::config::load_skills_config;
 use crate::services::skills::discovery::discover_all_skills;
 use crate::services::skills::generator::SkillGeneratorStore;
 use crate::services::skills::index::{build_index, compute_index_stats};
 use crate::services::skills::model::{
-    GeneratedSkill, GeneratedSkillRecord, InjectionPhase, MatchReason, SelectionPolicy,
-    SkillDocument, SkillIndex, SkillIndexStats, SkillMatch, SkillSource, SkillSummary,
-    SkillsOverview,
+    GeneratedSkillRecord, InjectionPhase, MatchReason, SelectionPolicy, SkillDocument, SkillIndex,
+    SkillIndexStats, SkillMatch, SkillSource, SkillSummary, SkillsOverview,
 };
 use crate::services::skills::select::{lexical_score_skills, select_skills_for_session};
 use crate::state::AppState;
@@ -35,37 +34,16 @@ pub async fn list_skills(
 ) -> Result<CommandResponse<Vec<SkillSummary>>, String> {
     let include_disabled = include_disabled.unwrap_or(true);
 
-    // Build index from discovered skills
-    let index = match build_skill_index_for_project(&project_path, &state).await {
+    // Build unified index from file-based + generated skills.
+    let index = match build_unified_skill_index_for_project(&project_path, include_disabled, &state)
+        .await
+    {
         Ok(idx) => idx,
         Err(e) => return Ok(CommandResponse::err(e)),
     };
 
     let mut summaries = index.summaries();
-
-    // Apply source filter
-    if let Some(filter) = source_filter {
-        summaries.retain(|s| match filter.as_str() {
-            "builtin" => matches!(s.source, SkillSource::Builtin),
-            "external" => matches!(s.source, SkillSource::External { .. }),
-            "user" => matches!(s.source, SkillSource::User),
-            "project" => matches!(s.source, SkillSource::ProjectLocal),
-            "generated" => matches!(s.source, SkillSource::Generated),
-            _ => true,
-        });
-    }
-
-    // Apply disabled filter
-    if !include_disabled {
-        summaries.retain(|s| s.enabled);
-    }
-
-    // Add generated skills from database
-    let generated = match get_generated_summaries(&project_path, include_disabled, &state).await {
-        Ok(g) => g,
-        Err(_) => vec![],
-    };
-    summaries.extend(generated);
+    apply_summary_filters(&mut summaries, source_filter.as_deref(), include_disabled);
 
     Ok(CommandResponse::ok(summaries))
 }
@@ -88,18 +66,20 @@ pub async fn get_skill(
     }
 
     // Check generated skills
-    let generated = state
+    let generated_record = state
         .with_database(|db| {
-            let store = SkillGeneratorStore::new(Arc::new(
-                crate::storage::database::Database::new_in_memory()?,
-            ));
-            // This is a simplification - in production, the store would use the real DB
-            let _ = store;
-            Ok(())
+            let store = SkillGeneratorStore::new(Arc::new(db.clone()));
+            store.get_generated_skill(&id)
         })
         .await;
 
-    let _ = generated;
+    match generated_record {
+        Ok(Some(record)) => {
+            return Ok(CommandResponse::ok(generated_record_to_document(record)));
+        }
+        Ok(None) => {}
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    }
 
     Ok(CommandResponse::err(format!("Skill not found: {}", id)))
 }
@@ -112,7 +92,7 @@ pub async fn search_skills(
     top_k: Option<usize>,
     state: State<'_, AppState>,
 ) -> Result<CommandResponse<Vec<SkillMatch>>, String> {
-    let index = match build_skill_index_for_project(&project_path, &state).await {
+    let index = match build_unified_skill_index_for_project(&project_path, true, &state).await {
         Ok(idx) => idx,
         Err(e) => return Ok(CommandResponse::err(e)),
     };
@@ -282,10 +262,7 @@ pub async fn delete_skill(
     // Try to delete as generated skill
     let result = state
         .with_database(|db| {
-            let store = SkillGeneratorStore::new(Arc::new(
-                // We need to work with the existing db connection
-                crate::storage::database::Database::new_in_memory()?,
-            ));
+            let store = SkillGeneratorStore::new(Arc::new(db.clone()));
             store.delete_generated_skill(&id)
         })
         .await;
@@ -352,7 +329,7 @@ pub async fn get_skills_overview(
     project_path: String,
     state: State<'_, AppState>,
 ) -> Result<CommandResponse<SkillsOverview>, String> {
-    let index = match build_skill_index_for_project(&project_path, &state).await {
+    let index = match build_unified_skill_index_for_project(&project_path, true, &state).await {
         Ok(idx) => idx,
         Err(e) => return Ok(CommandResponse::err(e)),
     };
@@ -442,18 +419,31 @@ async fn build_skill_index_for_project(
     Ok(SkillIndex::new(docs))
 }
 
-/// Get generated skill summaries from the database.
-async fn get_generated_summaries(
+/// Build a unified SkillIndex for a project by combining file-based and generated skills.
+async fn build_unified_skill_index_for_project(
     project_path: &str,
     include_disabled: bool,
     state: &State<'_, AppState>,
-) -> Result<Vec<SkillSummary>, String> {
+) -> Result<SkillIndex, String> {
+    let base_index = build_skill_index_for_project(project_path, state).await?;
+    let mut docs = base_index.skills().to_vec();
+
+    let generated_docs = get_generated_documents(project_path, include_disabled, state).await?;
+    docs.extend(generated_docs);
+
+    Ok(SkillIndex::new(docs))
+}
+
+/// Load generated skills from the database and convert them into SkillDocument records.
+async fn get_generated_documents(
+    project_path: &str,
+    include_disabled: bool,
+    state: &State<'_, AppState>,
+) -> Result<Vec<SkillDocument>, String> {
     let path = project_path.to_string();
     let records: Vec<GeneratedSkillRecord> = state
         .with_database(|db| {
-            let store = SkillGeneratorStore::new(Arc::new(
-                crate::storage::database::Database::new_in_memory()?,
-            ));
+            let store = SkillGeneratorStore::new(Arc::new(db.clone()));
             store.list_generated_skills(&path, include_disabled)
         })
         .await
@@ -461,22 +451,53 @@ async fn get_generated_summaries(
 
     Ok(records
         .into_iter()
-        .map(|r| SkillSummary {
-            id: r.id,
-            name: r.name,
-            description: r.description,
-            version: None,
-            tags: r.tags,
-            source: SkillSource::Generated,
-            priority: 0,
-            enabled: r.enabled,
-            detected: false,
-            user_invocable: false,
-            has_hooks: false,
-            inject_into: vec![InjectionPhase::Always],
-            path: std::path::PathBuf::new(),
-        })
+        .map(generated_record_to_document)
         .collect())
+}
+
+fn generated_record_to_document(record: GeneratedSkillRecord) -> SkillDocument {
+    SkillDocument {
+        id: record.id.clone(),
+        name: record.name,
+        description: record.description,
+        version: None,
+        tags: record.tags,
+        body: record.body,
+        path: std::path::PathBuf::from(format!("generated://{}", record.id)),
+        hash: format!("generated-{}", record.id),
+        last_modified: None,
+        user_invocable: false,
+        allowed_tools: vec![],
+        license: None,
+        metadata: std::collections::HashMap::new(),
+        hooks: None,
+        source: SkillSource::Generated,
+        priority: 0,
+        detect: None,
+        inject_into: vec![InjectionPhase::Always],
+        enabled: record.enabled,
+    }
+}
+
+fn apply_summary_filters(
+    summaries: &mut Vec<SkillSummary>,
+    source_filter: Option<&str>,
+    include_disabled: bool,
+) {
+    if let Some(filter) = source_filter {
+        summaries.retain(|s| match filter {
+            "builtin" => matches!(s.source, SkillSource::Builtin),
+            "external" => matches!(s.source, SkillSource::External { .. }),
+            "user" => matches!(s.source, SkillSource::User),
+            "project" | "project_local" => matches!(s.source, SkillSource::ProjectLocal),
+            "generated" => matches!(s.source, SkillSource::Generated),
+            _ => true,
+        });
+    }
+
+    if !include_disabled {
+        summaries.retain(|s| s.enabled);
+    }
 }
 
 #[cfg(test)]
@@ -540,9 +561,8 @@ mod tests {
     fn test_build_skill_index_for_project_empty() {
         let dir = TempDir::new().unwrap();
 
-        let rt = tokio::runtime::Runtime::new().unwrap();
         // We can't easily test the async function with State, but we can test the core logic
-        let config = SkillsConfig::default();
+        let config = crate::services::skills::config::SkillsConfig::default();
         let discovered = discover_all_skills(dir.path(), &config, None).unwrap();
         let index = build_index(discovered).unwrap();
         assert!(index.is_empty());
@@ -560,12 +580,77 @@ mod tests {
         .unwrap();
         fs::write(dir.path().join("CLAUDE.md"), "# Project Guide").unwrap();
 
-        let config = SkillsConfig::default();
+        let config = crate::services::skills::config::SkillsConfig::default();
         let discovered = discover_all_skills(dir.path(), &config, None).unwrap();
         let index = build_index(discovered).unwrap();
 
         assert_eq!(index.len(), 2);
         let stats = compute_index_stats(&index);
         assert_eq!(stats.project_local_count, 2);
+    }
+
+    #[test]
+    fn test_apply_summary_filters_respects_source() {
+        let mut summaries = vec![
+            SkillSummary {
+                id: "builtin-1".to_string(),
+                name: "builtin".to_string(),
+                description: "builtin".to_string(),
+                version: None,
+                tags: vec![],
+                source: SkillSource::Builtin,
+                priority: 10,
+                enabled: true,
+                detected: false,
+                user_invocable: false,
+                has_hooks: false,
+                inject_into: vec![InjectionPhase::Always],
+                path: std::path::PathBuf::from("/tmp/builtin"),
+            },
+            SkillSummary {
+                id: "generated-1".to_string(),
+                name: "generated".to_string(),
+                description: "generated".to_string(),
+                version: None,
+                tags: vec![],
+                source: SkillSource::Generated,
+                priority: 0,
+                enabled: true,
+                detected: false,
+                user_invocable: false,
+                has_hooks: false,
+                inject_into: vec![InjectionPhase::Always],
+                path: std::path::PathBuf::from("generated://generated-1"),
+            },
+        ];
+
+        apply_summary_filters(&mut summaries, Some("builtin"), true);
+        assert_eq!(summaries.len(), 1);
+        assert!(matches!(summaries[0].source, SkillSource::Builtin));
+    }
+
+    #[test]
+    fn test_generated_record_to_document_has_generated_source() {
+        let record = GeneratedSkillRecord {
+            id: "gen-1".to_string(),
+            project_path: "/tmp/project".to_string(),
+            name: "generated-skill".to_string(),
+            description: "desc".to_string(),
+            tags: vec!["generated".to_string()],
+            body: "body".to_string(),
+            source_type: "generated".to_string(),
+            source_session_ids: vec!["session-1".to_string()],
+            usage_count: 0,
+            success_rate: 1.0,
+            keywords: vec![],
+            enabled: true,
+            created_at: "2026-01-01 00:00:00".to_string(),
+            updated_at: "2026-01-01 00:00:00".to_string(),
+        };
+
+        let doc = generated_record_to_document(record);
+        assert!(matches!(doc.source, SkillSource::Generated));
+        assert_eq!(doc.name, "generated-skill");
+        assert!(doc.path.to_string_lossy().starts_with("generated://"));
     }
 }

@@ -98,6 +98,10 @@ impl MemoryMaintenance {
             params![project_path, min_importance],
         )?;
 
+        if deleted > 0 {
+            store.mark_vocabulary_dirty_for_project(project_path);
+        }
+
         Ok(deleted)
     }
 
@@ -111,6 +115,8 @@ impl MemoryMaintenance {
     ///
     /// Returns count of memories merged (removed).
     pub fn compact_memories(store: &ProjectMemoryStore, project_path: &str) -> AppResult<usize> {
+        store.ensure_vocabulary_for_project(project_path)?;
+
         // Load all memories with their embeddings
         struct MemWithEmb {
             id: String,
@@ -239,6 +245,7 @@ impl MemoryMaintenance {
             for id in &to_delete {
                 conn.execute("DELETE FROM project_memories WHERE id = ?1", params![id])?;
             }
+            store.mark_vocabulary_dirty_for_project(project_path);
         }
 
         Ok(merged_count)

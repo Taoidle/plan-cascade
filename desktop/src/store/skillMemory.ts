@@ -16,6 +16,7 @@ import type {
   MemoryEntry,
   MemoryCategory,
   MemoryStats,
+  SkillMatch,
   SkillSourceLabel,
 } from '../types/skillMemory';
 
@@ -257,36 +258,56 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
       set((state) => ({
         skills: state.skills.map((s) => (s.id === id ? { ...s, enabled: !enabled } : s)),
       }));
+      get().showToast(error instanceof Error ? error.message : String(error), 'error');
     }
   },
 
   searchSkills: async (projectPath: string, query: string) => {
     set({ skillsLoading: true, skillSearchQuery: query });
-    try {
-      const response = await invoke<CommandResponse<SkillSummary[]>>('list_skills', {
+    if (!query.trim()) {
+      await get().loadSkills(projectPath);
+      return;
+    }
+
+    const fallbackToClientFilter = async () => {
+      const fallback = await invoke<CommandResponse<SkillSummary[]>>('list_skills', {
         projectPath,
         sourceFilter: null,
         includeDisabled: true,
       });
-      if (response.success && response.data) {
-        // Client-side filter by query
-        const filtered = query
-          ? response.data.filter(
-              (s) =>
-                s.name.toLowerCase().includes(query.toLowerCase()) ||
-                s.description.toLowerCase().includes(query.toLowerCase()) ||
-                s.tags.some((t) => t.toLowerCase().includes(query.toLowerCase())),
-            )
-          : response.data;
+      if (fallback.success && fallback.data) {
+        const filtered = fallback.data.filter(
+          (s) =>
+            s.name.toLowerCase().includes(query.toLowerCase()) ||
+            s.description.toLowerCase().includes(query.toLowerCase()) ||
+            s.tags.some((t) => t.toLowerCase().includes(query.toLowerCase())),
+        );
         set({ skills: filtered, skillsLoading: false });
       } else {
-        set({ skillsError: response.error || 'Search failed', skillsLoading: false });
+        set({ skillsError: fallback.error || 'Search failed', skillsLoading: false });
+      }
+    };
+
+    try {
+      const response = await invoke<CommandResponse<SkillMatch[]>>('search_skills', {
+        projectPath,
+        query,
+        topK: 50,
+      });
+      if (response.success && response.data) {
+        set({ skills: response.data.map((m) => m.skill), skillsLoading: false });
+      } else {
+        await fallbackToClientFilter();
       }
     } catch (error) {
-      set({
-        skillsError: error instanceof Error ? error.message : String(error),
-        skillsLoading: false,
-      });
+      try {
+        await fallbackToClientFilter();
+      } catch {
+        set({
+          skillsError: error instanceof Error ? error.message : String(error),
+          skillsLoading: false,
+        });
+      }
     }
   },
 

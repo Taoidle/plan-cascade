@@ -18,13 +18,17 @@ use crate::services::knowledge::context_provider::{
     KnowledgeContextConfig, KnowledgeContextProvider,
 };
 use crate::services::memory::retrieval::search_memories;
-use crate::services::memory::store::MemoryCategory;
+use crate::services::memory::store::{MemoryCategory, GLOBAL_PROJECT_PATH};
 use crate::services::memory::MemorySearchRequest;
 use crate::services::skills::config::load_skills_config;
 use crate::services::skills::discovery::discover_all_skills;
+use crate::services::skills::generator::SkillGeneratorStore;
 use crate::services::skills::index::build_index;
 use crate::services::skills::injector::inject_skill_summaries;
-use crate::services::skills::model::{InjectionPhase, SelectionPolicy, SkillMatch};
+use crate::services::skills::model::{
+    GeneratedSkillRecord, InjectionPhase, SelectionPolicy, SkillDocument, SkillIndex, SkillMatch,
+    SkillSource,
+};
 use crate::services::skills::select::select_skills_for_session;
 use crate::services::tools::system_prompt::build_memory_section;
 use crate::state::AppState;
@@ -377,27 +381,7 @@ pub async fn query_memories_for_task(
     project_path: &str,
     query: &str,
 ) -> String {
-    let request = MemorySearchRequest {
-        project_path: project_path.to_string(),
-        query: query.to_string(),
-        categories: None,
-        top_k: 10,
-        min_importance: 0.3,
-    };
-
-    let entries = match app_state
-        .with_memory_store(|store| search_memories(store, &request))
-        .await
-    {
-        Ok(results) => results.into_iter().map(|r| r.entry).collect::<Vec<_>>(),
-        Err(_) => return String::new(),
-    };
-
-    if entries.is_empty() {
-        return String::new();
-    }
-
-    build_memory_section(Some(&entries))
+    query_memories_for_task_filtered(app_state, project_path, query, &[], &[]).await
 }
 
 /// Query Project Memory with optional category/ID filtering.
@@ -438,7 +422,8 @@ pub async fn query_memories_for_task_filtered(
         }
     }
 
-    // 2. If categories selected (or no specific IDs either → search all), do a semantic search
+    // 2. If categories selected (or no specific IDs either → search all), do semantic search
+    // for both project and global memory scopes.
     if selected_memory_ids.is_empty() || !selected_categories.is_empty() {
         let categories = if selected_categories.is_empty() {
             None
@@ -454,21 +439,28 @@ pub async fn query_memories_for_task_filtered(
             }
         };
 
-        let request = MemorySearchRequest {
-            project_path: project_path.to_string(),
-            query: query.to_string(),
-            categories,
-            top_k: 10,
-            min_importance: 0.3,
-        };
+        let search_specs = [
+            (project_path.to_string(), 10usize, 0.3f32),
+            (GLOBAL_PROJECT_PATH.to_string(), 5usize, 0.3f32),
+        ];
 
-        if let Ok(results) = app_state
-            .with_memory_store(|store| search_memories(store, &request))
-            .await
-        {
-            for r in results {
-                if seen_ids.insert(r.entry.id.clone()) {
-                    entries.push(r.entry);
+        for (scope_project_path, top_k, min_importance) in search_specs {
+            let request = MemorySearchRequest {
+                project_path: scope_project_path,
+                query: query.to_string(),
+                categories: categories.clone(),
+                top_k,
+                min_importance,
+            };
+
+            if let Ok(results) = app_state
+                .with_memory_store(|store| search_memories(store, &request))
+                .await
+            {
+                for r in results {
+                    if seen_ids.insert(r.entry.id.clone()) {
+                        entries.push(r.entry);
+                    }
                 }
             }
         }
@@ -491,48 +483,10 @@ pub async fn select_skills_for_task(
     phase: InjectionPhase,
 ) -> (String, Vec<String>) {
     let project_root = Path::new(project_path);
-
-    // Load config
-    let config_path = project_root.join("external-skills.json");
-    let config = load_skills_config(&config_path).unwrap_or_default();
-
-    // Discover skills
-    let discovered = match discover_all_skills(project_root, &config, None) {
-        Ok(d) => d,
-        Err(_) => return (String::new(), vec![]),
+    let index = match build_unified_skill_index_for_task(app_state, project_path).await {
+        Some(idx) => idx,
+        None => return (String::new(), vec![]),
     };
-
-    // Build index
-    let mut index = match build_index(discovered) {
-        Ok(idx) => idx,
-        Err(_) => return (String::new(), vec![]),
-    };
-
-    // Apply persisted disabled state from the database
-    let disabled_ids: std::collections::HashSet<String> = app_state
-        .with_database(|db| {
-            let rows = db.get_settings_by_prefix("skill_disabled:")?;
-            Ok(rows
-                .into_iter()
-                .map(|(key, _)| {
-                    key.strip_prefix("skill_disabled:")
-                        .unwrap_or(&key)
-                        .to_string()
-                })
-                .collect())
-        })
-        .await
-        .unwrap_or_default();
-
-    if !disabled_ids.is_empty() {
-        let mut docs = index.skills().to_vec();
-        for doc in &mut docs {
-            if disabled_ids.contains(&doc.id) {
-                doc.enabled = false;
-            }
-        }
-        index = crate::services::skills::model::SkillIndex::new(docs);
-    }
 
     let policy = SelectionPolicy::default();
     let matches: Vec<SkillMatch> =
@@ -568,18 +522,9 @@ pub async fn select_skills_for_task_filtered(
         return select_skills_for_task(app_state, project_path, query, phase).await;
     }
 
-    let project_root = Path::new(project_path);
-
-    // Load config & discover
-    let config_path = project_root.join("external-skills.json");
-    let config = load_skills_config(&config_path).unwrap_or_default();
-    let discovered = match discover_all_skills(project_root, &config, None) {
-        Ok(d) => d,
-        Err(_) => return (String::new(), vec![]),
-    };
-    let index = match build_index(discovered) {
-        Ok(idx) => idx,
-        Err(_) => return (String::new(), vec![]),
+    let index = match build_unified_skill_index_for_task(app_state, project_path).await {
+        Some(idx) => idx,
+        None => return (String::new(), vec![]),
     };
 
     // Filter to user-selected IDs
@@ -588,7 +533,7 @@ pub async fn select_skills_for_task_filtered(
     let matches: Vec<SkillMatch> = index
         .skills()
         .iter()
-        .filter(|doc| id_set.contains(doc.id.as_str()))
+        .filter(|doc| doc.enabled && id_set.contains(doc.id.as_str()))
         .map(|doc| SkillMatch {
             score: 1.0,
             match_reason: crate::services::skills::model::MatchReason::UserForced,
@@ -608,6 +553,88 @@ pub async fn select_skills_for_task_filtered(
     let policy = SelectionPolicy::default();
     let block = inject_skill_summaries(&matches, &policy);
     (block, expertise)
+}
+
+async fn build_unified_skill_index_for_task(
+    app_state: &AppState,
+    project_path: &str,
+) -> Option<SkillIndex> {
+    let project_root = Path::new(project_path);
+
+    // Load config
+    let config_path = project_root.join("external-skills.json");
+    let config = load_skills_config(&config_path).unwrap_or_default();
+
+    // Discover and build file-based index
+    let discovered = discover_all_skills(project_root, &config, None).ok()?;
+    let mut index = build_index(discovered).ok()?;
+
+    // Apply persisted disabled state from the database for file-based skills.
+    let disabled_ids: std::collections::HashSet<String> = app_state
+        .with_database(|db| {
+            let rows = db.get_settings_by_prefix("skill_disabled:")?;
+            Ok(rows
+                .into_iter()
+                .map(|(key, _)| {
+                    key.strip_prefix("skill_disabled:")
+                        .unwrap_or(&key)
+                        .to_string()
+                })
+                .collect())
+        })
+        .await
+        .unwrap_or_default();
+
+    if !disabled_ids.is_empty() {
+        let mut docs = index.skills().to_vec();
+        for doc in &mut docs {
+            if disabled_ids.contains(&doc.id) {
+                doc.enabled = false;
+            }
+        }
+        index = SkillIndex::new(docs);
+    }
+
+    let mut docs = index.skills().to_vec();
+    let generated_records = app_state
+        .with_database(|db| {
+            let store = SkillGeneratorStore::new(std::sync::Arc::new(db.clone()));
+            store.list_generated_skills(project_path, false)
+        })
+        .await
+        .unwrap_or_default();
+
+    docs.extend(
+        generated_records
+            .into_iter()
+            .map(generated_record_to_skill_document),
+    );
+
+    Some(SkillIndex::new(docs))
+}
+
+fn generated_record_to_skill_document(record: GeneratedSkillRecord) -> SkillDocument {
+    SkillDocument {
+        id: record.id.clone(),
+        name: record.name,
+        description: record.description,
+        version: None,
+        tags: record.tags,
+        body: record.body,
+        path: std::path::PathBuf::from(format!("generated://{}", record.id)),
+        hash: format!("generated-{}", record.id),
+        last_modified: None,
+        user_invocable: false,
+        allowed_tools: vec![],
+        license: None,
+        metadata: std::collections::HashMap::new(),
+        hooks: None,
+        source: SkillSource::Generated,
+        priority: 0,
+        detect: None,
+        inject_into: vec![InjectionPhase::Always],
+        enabled: record.enabled,
+    }
 }
 
 /// Merge exploration context, knowledge block, and memory block into a single

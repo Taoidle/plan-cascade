@@ -4,7 +4,8 @@
 //! cross-session memories stored in SQLite with TF-IDF embeddings for
 //! semantic search.
 
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -167,6 +168,13 @@ pub struct MemoryStats {
 pub struct ProjectMemoryStore {
     pool: DbPool,
     embedding_service: Arc<EmbeddingService>,
+    vocab_state: Arc<Mutex<VocabularyState>>,
+}
+
+#[derive(Debug, Default)]
+struct VocabularyState {
+    active_project: Option<String>,
+    dirty_projects: HashSet<String>,
 }
 
 impl ProjectMemoryStore {
@@ -175,6 +183,7 @@ impl ProjectMemoryStore {
         Self {
             pool,
             embedding_service,
+            vocab_state: Arc::new(Mutex::new(VocabularyState::default())),
         }
     }
 
@@ -183,6 +192,7 @@ impl ProjectMemoryStore {
         Self {
             pool: db.pool().clone(),
             embedding_service,
+            vocab_state: Arc::new(Mutex::new(VocabularyState::default())),
         }
     }
 
@@ -194,6 +204,12 @@ impl ProjectMemoryStore {
     pub fn add_memory(&self, entry: NewMemoryEntry) -> AppResult<MemoryEntry> {
         let id = uuid::Uuid::new_v4().to_string();
         let keywords_json = serde_json::to_string(&entry.keywords)?;
+
+        self.mark_vocabulary_dirty(&entry.project_path);
+        self.ensure_vocabulary_for_project_with_seed(
+            &entry.project_path,
+            std::slice::from_ref(&entry.content),
+        )?;
 
         // Generate embedding
         let embedding = self.embedding_service.embed_text(&entry.content);
@@ -250,6 +266,12 @@ impl ProjectMemoryStore {
 
         // Recompute embedding if content changed
         let embedding_bytes = if updates.content.is_some() {
+            self.mark_vocabulary_dirty(&existing.project_path);
+            let seed_content = new_content.to_string();
+            self.ensure_vocabulary_for_project_with_seed(
+                &existing.project_path,
+                std::slice::from_ref(&seed_content),
+            )?;
             let emb = self.embedding_service.embed_text(new_content);
             if emb.is_empty() {
                 None
@@ -293,6 +315,12 @@ impl ProjectMemoryStore {
                 reason: "Empty content".into(),
             });
         }
+
+        self.mark_vocabulary_dirty(&entry.project_path);
+        self.ensure_vocabulary_for_project_with_seed(
+            &entry.project_path,
+            std::slice::from_ref(&entry.content),
+        )?;
 
         // Generate embedding for the new entry
         let new_embedding = self.embedding_service.embed_text(&entry.content);
@@ -483,8 +511,15 @@ impl ProjectMemoryStore {
 
     /// Delete a specific memory
     pub fn delete_memory(&self, id: &str) -> AppResult<()> {
+        let project_path = self
+            .get_memory(id)?
+            .map(|m| m.project_path)
+            .unwrap_or_default();
         let conn = self.get_connection()?;
         conn.execute("DELETE FROM project_memories WHERE id = ?1", params![id])?;
+        if !project_path.is_empty() {
+            self.mark_vocabulary_dirty(&project_path);
+        }
         Ok(())
     }
 
@@ -495,12 +530,125 @@ impl ProjectMemoryStore {
             "DELETE FROM project_memories WHERE project_path = ?1",
             params![project_path],
         )?;
+        self.mark_vocabulary_dirty(project_path);
         Ok(count)
+    }
+
+    /// Ensure TF-IDF vocabulary is ready for the target project.
+    ///
+    /// The memory module uses a single `EmbeddingService` instance. To keep
+    /// search/upsert quality stable, we rebuild vocabulary when switching
+    /// projects or when writes have marked a project as dirty.
+    pub fn ensure_vocabulary_for_project(&self, project_path: &str) -> AppResult<()> {
+        self.ensure_vocabulary_for_project_with_seed(project_path, &[])
+    }
+
+    /// Mark a project's vocabulary as stale so the next query/write rebuilds it.
+    pub fn mark_vocabulary_dirty_for_project(&self, project_path: &str) {
+        self.mark_vocabulary_dirty(project_path);
     }
 
     // ========================================================================
     // Internal helpers
     // ========================================================================
+
+    fn ensure_vocabulary_for_project_with_seed(
+        &self,
+        project_path: &str,
+        seed_docs: &[String],
+    ) -> AppResult<()> {
+        if project_path.trim().is_empty() {
+            return Ok(());
+        }
+
+        let needs_rebuild = {
+            let state = self.vocab_state.lock().unwrap();
+            let active_matches = state
+                .active_project
+                .as_ref()
+                .map(|p| p == project_path)
+                .unwrap_or(false);
+            !active_matches
+                || state.dirty_projects.contains(project_path)
+                || !self.embedding_service.is_ready()
+        };
+
+        if !needs_rebuild {
+            return Ok(());
+        }
+
+        let mut corpus = self.load_memory_contents_for_project(project_path)?;
+        corpus.extend(seed_docs.iter().cloned());
+
+        if corpus.is_empty() {
+            return Ok(());
+        }
+
+        let corpus_refs: Vec<&str> = corpus.iter().map(String::as_str).collect();
+        self.embedding_service.build_vocabulary(&corpus_refs);
+        self.backfill_embeddings_for_project(project_path)?;
+
+        let mut state = self.vocab_state.lock().unwrap();
+        state.active_project = Some(project_path.to_string());
+        state.dirty_projects.remove(project_path);
+        Ok(())
+    }
+
+    fn load_memory_contents_for_project(&self, project_path: &str) -> AppResult<Vec<String>> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT content
+             FROM project_memories
+             WHERE project_path = ?1
+             ORDER BY importance DESC, updated_at DESC
+             LIMIT 2000",
+        )?;
+
+        let rows = stmt
+            .query_map(params![project_path], |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    fn backfill_embeddings_for_project(&self, project_path: &str) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, content
+             FROM project_memories
+             WHERE project_path = ?1",
+        )?;
+
+        let rows: Vec<(String, String)> = stmt
+            .query_map(params![project_path], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        drop(stmt);
+        for (id, content) in rows {
+            let emb = self.embedding_service.embed_text(&content);
+            let emb_bytes = if emb.is_empty() {
+                None
+            } else {
+                Some(embedding_to_bytes(&emb))
+            };
+            conn.execute(
+                "UPDATE project_memories SET embedding = ?2, updated_at = datetime('now') WHERE id = ?1",
+                params![id, emb_bytes],
+            )?;
+        }
+        Ok(())
+    }
+
+    fn mark_vocabulary_dirty(&self, project_path: &str) {
+        if project_path.trim().is_empty() {
+            return;
+        }
+        let mut state = self.vocab_state.lock().unwrap();
+        state.dirty_projects.insert(project_path.to_string());
+    }
 
     /// Get a connection from the pool
     fn get_connection(

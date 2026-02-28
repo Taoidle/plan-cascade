@@ -2163,6 +2163,12 @@ pub async fn resume_standalone_execution(
         }
     }
 
+    // Wire memory hooks for automatic memory loading and extraction
+    if let Ok(memory_store) = app_state.get_memory_store_arc().await {
+        let loaded_memories = std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new()));
+        orchestrator = orchestrator.with_memory_hooks(memory_store, loaded_memories);
+    }
+
     // Wire plugin context (instructions, skills, commands, hooks, permissions) from enabled plugins
     orchestrator = plugin_state.wire_orchestrator(orchestrator, None).await;
 

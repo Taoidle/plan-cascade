@@ -775,7 +775,9 @@ pub fn build_sub_agent_tool_guidance(
                 "**Analyze priority order**: Prefer CodebaseSearch before Read/Grep/Glob."
                     .to_string(),
             );
-            lines.push("分析任务优先顺序：优先使用 CodebaseSearch，再使用 Read/Grep/Glob。".to_string());
+            lines.push(
+                "分析任务优先顺序：优先使用 CodebaseSearch，再使用 Read/Grep/Glob。".to_string(),
+            );
             lines.push(String::new());
             lines.push(
                 "- **Understand architecture / locate implementations** → **CodebaseSearch** (scope=\"all\")"

@@ -15,6 +15,8 @@ use crate::services::memory::store::{
 };
 use crate::state::AppState;
 
+const EXTRACTION_SESSION_MARKER_PREFIX: &str = "memory_extracted_session:";
+
 /// Search project memories by semantic similarity and keyword match
 #[tauri::command]
 pub async fn search_project_memories(
@@ -258,6 +260,21 @@ pub async fn extract_session_memories(
         skipped_count: 0,
     };
 
+    if let Some(ref sid) = session_id {
+        let marker_key = extraction_marker_key(sid);
+        let already_extracted = state
+            .with_database(|db| Ok(db.get_setting(&marker_key)?.is_some()))
+            .await
+            .unwrap_or(false);
+        if already_extracted {
+            eprintln!(
+                "[memory-extraction] Skipped: session already extracted (session_id={})",
+                sid
+            );
+            return Ok(CommandResponse::ok(zero_result));
+        }
+    }
+
     // Skip short conversations
     if conversation_summary.len() < 50 {
         eprintln!(
@@ -346,6 +363,7 @@ pub async fn extract_session_memories(
 
     let extracted_count = entries.len();
     if extracted_count == 0 {
+        mark_session_extraction_done(&state, session_id.as_deref()).await;
         eprintln!("[memory-extraction] LLM response parsed but yielded 0 entries");
         return Ok(CommandResponse::ok(zero_result));
     }
@@ -374,6 +392,8 @@ pub async fn extract_session_memories(
         "[memory-extraction] Done: extracted={}, inserted={}, merged={}, skipped={}",
         extracted_count, inserted_count, merged_count, skipped_count
     );
+
+    mark_session_extraction_done(&state, session_id.as_deref()).await;
 
     Ok(CommandResponse::ok(MemoryExtractionResult {
         extracted_count,
@@ -482,5 +502,25 @@ fn create_extraction_provider(
         ProviderType::Qwen => Box::new(QwenProvider::new(config)),
         ProviderType::Minimax => Box::new(MinimaxProvider::new(config)),
         ProviderType::Ollama => Box::new(OllamaProvider::new(config)),
+    }
+}
+
+fn extraction_marker_key(session_id: &str) -> String {
+    format!("{}{}", EXTRACTION_SESSION_MARKER_PREFIX, session_id)
+}
+
+async fn mark_session_extraction_done(state: &AppState, session_id: Option<&str>) {
+    let Some(session_id) = session_id else {
+        return;
+    };
+    let marker_key = extraction_marker_key(session_id);
+    if let Err(e) = state
+        .with_database(|db| db.set_setting(&marker_key, "1"))
+        .await
+    {
+        eprintln!(
+            "[memory-extraction] Failed to persist extraction marker for session {}: {}",
+            session_id, e
+        );
     }
 }

@@ -107,6 +107,9 @@ pub fn search_memories(
     store: &ProjectMemoryStore,
     request: &MemorySearchRequest,
 ) -> AppResult<Vec<MemorySearchResult>> {
+    // Ensure vocabulary and memory embeddings are ready for this project.
+    store.ensure_vocabulary_for_project(&request.project_path)?;
+
     // Step 1: Generate query embedding
     let query_embedding = store.embedding_service().embed_text(&request.query);
     let query_keywords = extract_query_keywords(&request.query);
