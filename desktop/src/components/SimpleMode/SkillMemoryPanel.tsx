@@ -76,19 +76,17 @@ export function SkillMemoryPanel() {
   const skillsLoading = useSkillMemoryStore((s) => s.skillsLoading);
   const memories = useSkillMemoryStore((s) => s.memories);
   const memoriesLoading = useSkillMemoryStore((s) => s.memoriesLoading);
-  const panelOpen = useSkillMemoryStore((s) => s.panelOpen);
   const loadSkills = useSkillMemoryStore((s) => s.loadSkills);
   const loadMemories = useSkillMemoryStore((s) => s.loadMemories);
   const toggleSkill = useSkillMemoryStore((s) => s.toggleSkill);
   const openDialog = useSkillMemoryStore((s) => s.openDialog);
 
-  // Load data when panel opens
+  // Fallback loading for direct panel usage (sidebar preloads on mount).
   useEffect(() => {
-    if (panelOpen && workspacePath) {
-      loadSkills(workspacePath);
-      loadMemories(workspacePath);
-    }
-  }, [panelOpen, workspacePath, loadSkills, loadMemories]);
+    if (!workspacePath) return;
+    if (skills.length === 0) void loadSkills(workspacePath);
+    if (memories.length === 0) void loadMemories(workspacePath);
+  }, [workspacePath, skills.length, memories.length, loadSkills, loadMemories]);
 
   // Separate auto-detected skills from others
   const { detectedSkills, projectSkills } = useMemo(() => {
@@ -124,95 +122,89 @@ export function SkillMemoryPanel() {
   }, [openDialog]);
 
   return (
-    <Collapsible open={panelOpen}>
-      <div data-testid="skill-memory-panel" className="border-t border-gray-200 dark:border-gray-700">
-        {/* Header */}
-        <div className="flex items-center justify-between px-3 py-2">
-          <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{t('skillPanel.title')}</span>
-          <button
-            onClick={handleManageAll}
-            className={clsx(
-              'p-1 rounded-md transition-colors',
-              'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
-              'hover:bg-gray-100 dark:hover:bg-gray-800',
-            )}
-            title={t('skillPanel.manageAll')}
-          >
-            <GearIcon className="w-3.5 h-3.5" />
-          </button>
-        </div>
-
-        {/* Content */}
-        <div className="px-2 pb-2 space-y-1 max-h-[300px] overflow-y-auto">
-          {/* Loading state */}
-          {(skillsLoading || memoriesLoading) && skills.length === 0 && memories.length === 0 && (
-            <div className="text-center py-4">
-              <span className="text-xs text-gray-400 dark:text-gray-500">{t('skillPanel.loading')}</span>
-            </div>
+    <div data-testid="skill-memory-panel" className="h-full min-h-0 flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700">
+        <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{t('skillPanel.title')}</span>
+        <button
+          onClick={handleManageAll}
+          className={clsx(
+            'p-1 rounded-md transition-colors',
+            'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
+            'hover:bg-gray-100 dark:hover:bg-gray-800',
           )}
-
-          {/* Auto-Detected Skills */}
-          <CollapsibleSection title={t('skillPanel.detectedSkills')} count={detectedSkills.length}>
-            {detectedSkills.length > 0 ? (
-              detectedSkills.map((skill) => (
-                <SkillRow key={skill.id} skill={skill} onToggle={handleToggle} onClick={handleSkillClick} />
-              ))
-            ) : (
-              <p className="text-2xs text-gray-400 dark:text-gray-500 px-2 py-1">{t('skillPanel.noDetectedSkills')}</p>
-            )}
-          </CollapsibleSection>
-
-          {/* Project Skills */}
-          <CollapsibleSection
-            title={t('skillPanel.projectSkills')}
-            count={projectSkills.length}
-            defaultExpanded={false}
-          >
-            {projectSkills.length > 0 ? (
-              projectSkills.map((skill) => (
-                <SkillRow key={skill.id} skill={skill} onToggle={handleToggle} onClick={handleSkillClick} />
-              ))
-            ) : (
-              <p className="text-2xs text-gray-400 dark:text-gray-500 px-2 py-1">{t('skillPanel.noProjectSkills')}</p>
-            )}
-          </CollapsibleSection>
-
-          {/* Memories */}
-          <CollapsibleSection title={t('skillPanel.memories')} count={memories.length} defaultExpanded={false}>
-            {memories.length > 0 ? (
-              memories
-                .slice(0, 5)
-                .map((memory) => <MemoryRow key={memory.id} memory={memory} onClick={handleMemoryClick} />)
-            ) : (
-              <p className="text-2xs text-gray-400 dark:text-gray-500 px-2 py-1">{t('skillPanel.noMemories')}</p>
-            )}
-            {memories.length > 5 && (
-              <button
-                onClick={() => openDialog('memory')}
-                className="w-full text-2xs text-primary-600 dark:text-primary-400 hover:underline px-2 py-1"
-              >
-                {t('skillPanel.viewAll', { count: memories.length })}
-              </button>
-            )}
-          </CollapsibleSection>
-        </div>
-
-        {/* Manage All button */}
-        <div className="px-3 pb-2">
-          <button
-            onClick={handleManageAll}
-            className={clsx(
-              'w-full px-2 py-1.5 rounded-md text-xs font-medium transition-colors',
-              'text-primary-600 dark:text-primary-400',
-              'hover:bg-primary-50 dark:hover:bg-primary-900/20',
-              'border border-primary-200 dark:border-primary-800',
-            )}
-          >
-            {t('skillPanel.manageAll')}
-          </button>
-        </div>
+          title={t('skillPanel.manageAll')}
+        >
+          <GearIcon className="w-3.5 h-3.5" />
+        </button>
       </div>
-    </Collapsible>
+
+      {/* Content */}
+      <div className="px-2 py-2 space-y-1 flex-1 min-h-0 overflow-y-auto">
+        {/* Loading state */}
+        {(skillsLoading || memoriesLoading) && skills.length === 0 && memories.length === 0 && (
+          <div className="text-center py-4">
+            <span className="text-xs text-gray-400 dark:text-gray-500">{t('skillPanel.loading')}</span>
+          </div>
+        )}
+
+        {/* Auto-Detected Skills */}
+        <CollapsibleSection title={t('skillPanel.detectedSkills')} count={detectedSkills.length}>
+          {detectedSkills.length > 0 ? (
+            detectedSkills.map((skill) => (
+              <SkillRow key={skill.id} skill={skill} onToggle={handleToggle} onClick={handleSkillClick} />
+            ))
+          ) : (
+            <p className="text-2xs text-gray-400 dark:text-gray-500 px-2 py-1">{t('skillPanel.noDetectedSkills')}</p>
+          )}
+        </CollapsibleSection>
+
+        {/* Project Skills */}
+        <CollapsibleSection title={t('skillPanel.projectSkills')} count={projectSkills.length} defaultExpanded={false}>
+          {projectSkills.length > 0 ? (
+            projectSkills.map((skill) => (
+              <SkillRow key={skill.id} skill={skill} onToggle={handleToggle} onClick={handleSkillClick} />
+            ))
+          ) : (
+            <p className="text-2xs text-gray-400 dark:text-gray-500 px-2 py-1">{t('skillPanel.noProjectSkills')}</p>
+          )}
+        </CollapsibleSection>
+
+        {/* Memories */}
+        <CollapsibleSection title={t('skillPanel.memories')} count={memories.length} defaultExpanded={false}>
+          {memories.length > 0 ? (
+            memories
+              .slice(0, 5)
+              .map((memory) => <MemoryRow key={memory.id} memory={memory} onClick={handleMemoryClick} />)
+          ) : (
+            <p className="text-2xs text-gray-400 dark:text-gray-500 px-2 py-1">{t('skillPanel.noMemories')}</p>
+          )}
+          {memories.length > 5 && (
+            <button
+              onClick={() => openDialog('memory')}
+              className="w-full text-2xs text-primary-600 dark:text-primary-400 hover:underline px-2 py-1"
+            >
+              {t('skillPanel.viewAll', { count: memories.length })}
+            </button>
+          )}
+        </CollapsibleSection>
+      </div>
+
+      {/* Manage All button */}
+      <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-700">
+        <button
+          onClick={handleManageAll}
+          className={clsx(
+            'w-full px-2 py-1.5 rounded-md text-xs font-medium transition-colors',
+            'text-primary-600 dark:text-primary-400',
+            'hover:bg-primary-50 dark:hover:bg-primary-900/20',
+            'border border-primary-200 dark:border-primary-800',
+          )}
+        >
+          {t('skillPanel.manageAll')}
+        </button>
+      </div>
+    </div>
   );
 }
 

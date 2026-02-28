@@ -6,10 +6,10 @@
  * and a collapsible "Other" group for unmatched sessions.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
-import { ChevronRightIcon, PlusIcon, Cross2Icon } from '@radix-ui/react-icons';
+import { ChevronRightIcon, ChevronLeftIcon, PlusIcon, Cross2Icon } from '@radix-ui/react-icons';
 import { type ExecutionHistoryItem, type SessionSnapshot } from '../../store/execution';
 import { useSettingsStore } from '../../store/settings';
 import { useSkillMemoryStore } from '../../store/skillMemory';
@@ -159,136 +159,261 @@ function groupSessionsByDirectories(
 }
 
 // ---------------------------------------------------------------------------
-// SidebarToolbar
+// Sidebar Header
 // ---------------------------------------------------------------------------
 
-function SidebarToolbar({
+type SidebarTabId = 'sessions' | 'skills' | 'plugins' | 'agents' | 'prompts';
+
+interface SidebarTabDef {
+  id: SidebarTabId;
+  label: string;
+  count: number;
+}
+
+function SidebarTabs({
+  tabs,
+  activeTab,
+  onTabChange,
+}: {
+  tabs: SidebarTabDef[];
+  activeTab: SidebarTabId;
+  onTabChange: (tab: SidebarTabId) => void;
+}) {
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const pages = useMemo(() => [tabs.slice(0, 2), tabs.slice(2, 5)], [tabs]);
+  const getPageIndexForTab = useCallback(
+    (tabId: SidebarTabId) => (tabId === 'sessions' || tabId === 'skills' ? 0 : 1),
+    [],
+  );
+  const [currentPage, setCurrentPage] = useState<number>(() => getPageIndexForTab(activeTab));
+
+  const focusTab = useCallback((index: number) => {
+    tabRefs.current[index]?.focus();
+  }, []);
+
+  useEffect(() => {
+    setCurrentPage(getPageIndexForTab(activeTab));
+  }, [activeTab, getPageIndexForTab]);
+
+  const handleTabKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+      let nextIndex: number | null = null;
+      if (event.key === 'ArrowRight') {
+        nextIndex = (index + 1) % tabs.length;
+      } else if (event.key === 'ArrowLeft') {
+        nextIndex = (index - 1 + tabs.length) % tabs.length;
+      } else if (event.key === 'Home') {
+        nextIndex = 0;
+      } else if (event.key === 'End') {
+        nextIndex = tabs.length - 1;
+      }
+      if (nextIndex === null) return;
+      event.preventDefault();
+      onTabChange(tabs[nextIndex].id);
+      setCurrentPage(getPageIndexForTab(tabs[nextIndex].id));
+      focusTab(nextIndex);
+    },
+    [focusTab, onTabChange, tabs, getPageIndexForTab],
+  );
+
+  const handlePrevPage = useCallback(() => {
+    const targetPage = Math.max(0, currentPage - 1);
+    setCurrentPage(targetPage);
+    const targetTab = pages[targetPage][0];
+    if (targetTab && targetTab.id !== activeTab) onTabChange(targetTab.id);
+  }, [activeTab, currentPage, onTabChange, pages]);
+
+  const handleNextPage = useCallback(() => {
+    const targetPage = Math.min(pages.length - 1, currentPage + 1);
+    setCurrentPage(targetPage);
+    const targetTab = pages[targetPage][0];
+    if (targetTab && targetTab.id !== activeTab) onTabChange(targetTab.id);
+  }, [activeTab, currentPage, onTabChange, pages]);
+
+  return (
+    <div role="tablist" aria-label="Sidebar tabs" className="rounded-lg bg-gray-100 dark:bg-gray-800/80 p-1">
+      <div className="flex items-center gap-1 h-8">
+        {currentPage > 0 && (
+          <button
+            type="button"
+            data-testid="sidebar-tab-prev"
+            onClick={handlePrevPage}
+            className={clsx(
+              'h-7 w-7 shrink-0 rounded-md flex items-center justify-center transition-colors',
+              'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700',
+            )}
+            aria-label="Previous tab page"
+            title="Previous"
+          >
+            <ChevronLeftIcon className="w-3.5 h-3.5" />
+          </button>
+        )}
+
+        <div className="flex-1 min-w-0 h-8 overflow-hidden">
+          <div
+            className="h-8 flex transition-transform duration-250 ease-out"
+            style={{
+              width: `${pages.length * 100}%`,
+              transform: `translateX(-${currentPage * (100 / pages.length)}%)`,
+            }}
+          >
+            {pages.map((page, pageIndex) => (
+              <div
+                key={pageIndex}
+                className="h-8 shrink-0 flex items-center gap-1"
+                style={{ width: `${100 / pages.length}%` }}
+              >
+                {page.map((tab, pageItemIndex) => {
+                  void pageItemIndex;
+                  const index = tabs.findIndex((item) => item.id === tab.id);
+                  const selected = activeTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      id={`sidebar-tab-${tab.id}`}
+                      ref={(node) => {
+                        tabRefs.current[index] = node;
+                      }}
+                      data-testid={`sidebar-tab-${tab.id}`}
+                      role="tab"
+                      aria-selected={selected}
+                      aria-controls={`sidebar-panel-${tab.id}`}
+                      tabIndex={selected ? 0 : -1}
+                      onClick={() => onTabChange(tab.id)}
+                      onKeyDown={(event) => handleTabKeyDown(event, index)}
+                      className={clsx(
+                        'relative flex-1 min-w-0 h-8 px-2 rounded-md text-xs font-medium transition-colors',
+                        selected
+                          ? 'bg-white dark:bg-gray-700 text-primary-700 dark:text-primary-300 shadow-sm'
+                          : 'text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100',
+                      )}
+                    >
+                      <span className="truncate">{tab.label}</span>
+                      {tab.count > 0 && (
+                        <span
+                          className={clsx(
+                            'ml-1 inline-flex min-w-[1.1rem] h-[1.1rem] items-center justify-center rounded-full px-1 text-2xs',
+                            selected
+                              ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300'
+                              : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300',
+                          )}
+                        >
+                          {tab.count}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {currentPage < pages.length - 1 && (
+          <button
+            type="button"
+            data-testid="sidebar-tab-next"
+            onClick={handleNextPage}
+            className={clsx(
+              'h-7 w-7 shrink-0 rounded-md flex items-center justify-center transition-colors',
+              'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700',
+            )}
+            aria-label="Next tab page"
+            title="Next"
+          >
+            <ChevronRightIcon className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SidebarActions({
+  activeTab,
   onNewTask,
   onAddDirectory,
-  onSkillsClick,
-  onPluginsClick,
-  onAgentsClick,
-  onPromptsClick,
-  skillCount,
-  pluginCount,
-  agentCount,
-  promptCount,
+  onManageSkills,
+  onManagePlugins,
+  onOpenPluginMarketplace,
+  onManageAgents,
+  onManagePrompts,
 }: {
+  activeTab: SidebarTabId;
   onNewTask: () => void;
   onAddDirectory: () => void;
-  onSkillsClick: () => void;
-  onPluginsClick: () => void;
-  onAgentsClick: () => void;
-  onPromptsClick: () => void;
-  skillCount: number;
-  pluginCount: number;
-  agentCount: number;
-  promptCount: number;
+  onManageSkills: () => void;
+  onManagePlugins: () => void;
+  onOpenPluginMarketplace: () => void;
+  onManageAgents: () => void;
+  onManagePrompts: () => void;
 }) {
   const { t } = useTranslation('simpleMode');
 
-  return (
-    <div className="px-3 py-3 border-b border-gray-200 dark:border-gray-700 space-y-2">
-      <button
-        onClick={onNewTask}
-        className={clsx(
-          'w-full px-3 py-2 rounded-lg text-xs font-medium transition-colors',
-          'bg-primary-600 text-white hover:bg-primary-700',
-          'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1',
-        )}
-      >
-        {t('sidebar.newTask')}
-      </button>
+  const secondaryBtn = clsx(
+    'px-2 py-1.5 rounded-md text-xs font-medium transition-colors',
+    'text-gray-600 dark:text-gray-300',
+    'hover:bg-gray-100 dark:hover:bg-gray-800',
+    'border border-gray-200 dark:border-gray-700',
+  );
 
-      <div className="flex items-center gap-1">
+  if (activeTab === 'sessions') {
+    return (
+      <div className="space-y-2">
+        <button
+          onClick={onNewTask}
+          className={clsx(
+            'w-full px-3 py-2 rounded-lg text-xs font-medium transition-colors',
+            'bg-primary-600 text-white hover:bg-primary-700',
+            'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1',
+          )}
+        >
+          {t('sidebar.newTask')}
+        </button>
         <button
           onClick={onAddDirectory}
-          className={clsx(
-            'flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-xs transition-colors',
-            'text-gray-600 dark:text-gray-400',
-            'hover:bg-gray-100 dark:hover:bg-gray-800',
-          )}
-          title={t('sidebar.addDirectory')}
+          className={clsx(secondaryBtn, 'w-full inline-flex items-center justify-center gap-1')}
         >
           <PlusIcon className="w-3.5 h-3.5" />
           <span>{t('sidebar.addDirectory')}</span>
         </button>
+      </div>
+    );
+  }
 
-        <button
-          data-testid="skills-button"
-          onClick={onSkillsClick}
-          className={clsx(
-            'flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-xs transition-colors',
-            'text-gray-600 dark:text-gray-400',
-            'hover:bg-gray-100 dark:hover:bg-gray-800',
-          )}
-          title={t('sidebar.skills')}
-        >
-          {t('sidebar.skills')}
-          {skillCount > 0 && (
-            <span className="text-2xs px-1 py-0.5 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 min-w-[1.2rem] text-center">
-              {skillCount}
-            </span>
-          )}
+  if (activeTab === 'plugins') {
+    return (
+      <div className="flex items-center gap-2">
+        <button onClick={onManagePlugins} className={clsx(secondaryBtn, 'flex-1')}>
+          {t('pluginPanel.manageAll')}
         </button>
-
-        <button
-          data-testid="plugins-button"
-          onClick={onPluginsClick}
-          className={clsx(
-            'flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-xs transition-colors',
-            'text-gray-600 dark:text-gray-400',
-            'hover:bg-gray-100 dark:hover:bg-gray-800',
-          )}
-          title={t('sidebar.plugins')}
-        >
-          {t('sidebar.plugins')}
-          {pluginCount > 0 && (
-            <span className="text-2xs px-1 py-0.5 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 min-w-[1.2rem] text-center">
-              {pluginCount}
-            </span>
-          )}
+        <button onClick={onOpenPluginMarketplace} className={clsx(secondaryBtn, 'shrink-0')}>
+          {t('pluginPanel.marketplace')}
         </button>
       </div>
+    );
+  }
 
-      <div className="flex items-center gap-1">
-        <button
-          data-testid="agents-button"
-          onClick={onAgentsClick}
-          className={clsx(
-            'flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-xs transition-colors',
-            'text-gray-600 dark:text-gray-400',
-            'hover:bg-gray-100 dark:hover:bg-gray-800',
-          )}
-          title={t('sidebar.agents', { defaultValue: 'Agents' })}
-        >
-          {t('sidebar.agents', { defaultValue: 'Agents' })}
-          {agentCount > 0 && (
-            <span className="text-2xs px-1 py-0.5 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 min-w-[1.2rem] text-center">
-              {agentCount}
-            </span>
-          )}
-        </button>
+  if (activeTab === 'skills') {
+    return (
+      <button onClick={onManageSkills} className={clsx(secondaryBtn, 'w-full')}>
+        {t('skillPanel.manageAll')}
+      </button>
+    );
+  }
 
-        <button
-          data-testid="prompts-button"
-          onClick={onPromptsClick}
-          className={clsx(
-            'flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-xs transition-colors',
-            'text-gray-600 dark:text-gray-400',
-            'hover:bg-gray-100 dark:hover:bg-gray-800',
-          )}
-          title={t('sidebar.prompts', { defaultValue: 'Prompts' })}
-        >
-          {t('sidebar.prompts', { defaultValue: 'Prompts' })}
-          {promptCount > 0 && (
-            <span className="text-2xs px-1 py-0.5 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 min-w-[1.2rem] text-center">
-              {promptCount}
-            </span>
-          )}
-        </button>
-      </div>
-    </div>
+  if (activeTab === 'agents') {
+    return (
+      <button onClick={onManageAgents} className={clsx(secondaryBtn, 'w-full')}>
+        {t('agentPanel.manageAll', { defaultValue: 'Manage All...' })}
+      </button>
+    );
+  }
+
+  return (
+    <button onClick={onManagePrompts} className={clsx(secondaryBtn, 'w-full')}>
+      {t('promptPanel.manageAll', { defaultValue: 'Manage All...' })}
+    </button>
   );
 }
 
@@ -915,24 +1040,59 @@ export function WorkspaceTreeSidebar({
   const addPinnedDirectory = useSettingsStore((s) => s.addPinnedDirectory);
   const removePinnedDirectory = useSettingsStore((s) => s.removePinnedDirectory);
   const setWorkspacePath = useSettingsStore((s) => s.setWorkspacePath);
+
   const skills = useSkillMemoryStore((s) => s.skills);
-  const togglePanel = useSkillMemoryStore((s) => s.togglePanel);
+  const loadSkills = useSkillMemoryStore((s) => s.loadSkills);
+  const loadMemories = useSkillMemoryStore((s) => s.loadMemories);
+  const openSkillDialog = useSkillMemoryStore((s) => s.openDialog);
+
   const plugins = usePluginStore((s) => s.plugins);
-  const togglePluginPanel = usePluginStore((s) => s.togglePanel);
-  const agentCount = useAgentsStore((s) => s.agents.length);
-  const toggleAgentPanel = useAgentsStore((s) => s.togglePanel);
-  const promptCount = usePromptsStore((s) => s.prompts.length);
-  const togglePromptPanel = usePromptsStore((s) => s.togglePanel);
+  const loadPlugins = usePluginStore((s) => s.loadPlugins);
+  const openPluginDialog = usePluginStore((s) => s.openDialog);
+  const setPluginDialogTab = usePluginStore((s) => s.setActiveTab);
+
+  const agents = useAgentsStore((s) => s.agents);
+  const fetchAgents = useAgentsStore((s) => s.fetchAgents);
+  const openAgentDialog = useAgentsStore((s) => s.openDialog);
+
+  const prompts = usePromptsStore((s) => s.prompts);
+  const fetchPrompts = usePromptsStore((s) => s.fetchPrompts);
+  const openPromptDialog = usePromptsStore((s) => s.openDialog);
 
   // Count of detected/enabled skills for badge
   const detectedSkillCount = useMemo(() => skills.filter((s) => s.detected || s.enabled).length, [skills]);
-
-  // Count of plugins for badge
-  const pluginCount = useMemo(() => plugins.length, [plugins]);
+  const pluginCount = plugins.length;
+  const agentCount = agents.length;
+  const promptCount = prompts.length;
+  const [activeTab, setActiveTab] = useState<SidebarTabId>('sessions');
 
   // Expand/collapse state for directory paths and "other" group
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set());
   const [otherExpanded, setOtherExpanded] = useState(true);
+
+  // Startup preload for tab badges/content responsiveness.
+  const basePreloadedRef = useRef(false);
+  useEffect(() => {
+    if (basePreloadedRef.current) return;
+    basePreloadedRef.current = true;
+    if (plugins.length === 0) void loadPlugins();
+    if (agents.length === 0) void fetchAgents();
+    if (prompts.length === 0) void fetchPrompts();
+  }, [plugins.length, agents.length, prompts.length, loadPlugins, fetchAgents, fetchPrompts]);
+
+  // Keep skills/memories warm for the current workspace; avoid duplicate call in StrictMode.
+  const lastPreloadedWorkspaceRef = useRef<string | null>(null);
+  useEffect(() => {
+    const normalizedWorkspace = normalizeWorkspacePath(workspacePath);
+    if (!normalizedWorkspace || !workspacePath) {
+      lastPreloadedWorkspaceRef.current = null;
+      return;
+    }
+    if (lastPreloadedWorkspaceRef.current === normalizedWorkspace) return;
+    lastPreloadedWorkspaceRef.current = normalizedWorkspace;
+    void loadSkills(workspacePath);
+    void loadMemories(workspacePath);
+  }, [workspacePath, loadSkills, loadMemories]);
 
   // Auto-expand the active directory on mount / workspace change
   useEffect(() => {
@@ -1051,119 +1211,174 @@ export function WorkspaceTreeSidebar({
 
   const hasBgSessions = Object.keys(backgroundSessions).length > 0;
   const isEmpty = pinnedDirectories.length === 0 && visibleHistory.length === 0 && !hasBgSessions;
+  const sessionCount = visibleHistory.length + Object.keys(backgroundSessions).length;
+  const tabs = useMemo<SidebarTabDef[]>(
+    () => [
+      { id: 'sessions', label: t('sidebar.sessions'), count: sessionCount },
+      { id: 'skills', label: t('sidebar.skills'), count: detectedSkillCount },
+      { id: 'plugins', label: t('sidebar.plugins'), count: pluginCount },
+      { id: 'agents', label: t('sidebar.agents', { defaultValue: 'Agents' }), count: agentCount },
+      { id: 'prompts', label: t('sidebar.prompts', { defaultValue: 'Prompts' }), count: promptCount },
+    ],
+    [t, sessionCount, detectedSkillCount, pluginCount, agentCount, promptCount],
+  );
+
+  const handleManageSkills = useCallback(() => {
+    openSkillDialog('skills');
+  }, [openSkillDialog]);
+
+  const handleManagePlugins = useCallback(() => {
+    setPluginDialogTab('installed');
+    openPluginDialog();
+  }, [setPluginDialogTab, openPluginDialog]);
+
+  const handleOpenPluginMarketplace = useCallback(() => {
+    setPluginDialogTab('marketplace');
+    openPluginDialog();
+  }, [setPluginDialogTab, openPluginDialog]);
+
+  const handleManageAgents = useCallback(() => {
+    openAgentDialog();
+  }, [openAgentDialog]);
+
+  const handleManagePrompts = useCallback(() => {
+    openPromptDialog();
+  }, [openPromptDialog]);
 
   return (
     <div className="h-full min-h-0 flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-      {/* Toolbar */}
-      <SidebarToolbar
-        onNewTask={onNewTask}
-        onAddDirectory={handleAddDirectory}
-        onSkillsClick={togglePanel}
-        onPluginsClick={togglePluginPanel}
-        onAgentsClick={toggleAgentPanel}
-        onPromptsClick={togglePromptPanel}
-        skillCount={detectedSkillCount}
-        pluginCount={pluginCount}
-        agentCount={agentCount}
-        promptCount={promptCount}
-      />
+      {/* Header: tabs + contextual actions */}
+      <div className="px-3 py-3 border-b border-gray-200 dark:border-gray-700 space-y-2">
+        <SidebarTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
+        <SidebarActions
+          activeTab={activeTab}
+          onNewTask={onNewTask}
+          onAddDirectory={handleAddDirectory}
+          onManageSkills={handleManageSkills}
+          onManagePlugins={handleManagePlugins}
+          onOpenPluginMarketplace={handleOpenPluginMarketplace}
+          onManageAgents={handleManageAgents}
+          onManagePrompts={handleManagePrompts}
+        />
+      </div>
 
       {/* Current task indicator */}
-      {currentTask && (
+      {activeTab === 'sessions' && currentTask && (
         <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 text-xs">
           <p className="text-gray-500 dark:text-gray-400">{t('sidebar.current')}</p>
           <p className="text-gray-700 dark:text-gray-200 line-clamp-2">{currentTask}</p>
         </div>
       )}
 
-      {/* Scrollable tree content */}
-      <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
-        {/* Background sessions not matched to any pinned directory */}
-        {onSwitchSession && onRemoveSession && (
-          <BackgroundSessionsSection
-            backgroundSessions={unmatchedBgSessions}
-            onSwitch={onSwitchSession}
-            onRemove={onRemoveSession}
-            foregroundParentSessionId={foregroundParentSessionId}
-            foregroundBgId={foregroundBgId}
-            currentSessionDescription={currentTask || undefined}
-          />
-        )}
+      {activeTab === 'sessions' ? (
+        <div
+          id="sidebar-panel-sessions"
+          role="tabpanel"
+          aria-labelledby="sidebar-tab-sessions"
+          className="flex-1 min-h-0 flex flex-col"
+        >
+          <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
+            {/* Background sessions not matched to any pinned directory */}
+            {onSwitchSession && onRemoveSession && (
+              <BackgroundSessionsSection
+                backgroundSessions={unmatchedBgSessions}
+                onSwitch={onSwitchSession}
+                onRemove={onRemoveSession}
+                foregroundParentSessionId={foregroundParentSessionId}
+                foregroundBgId={foregroundBgId}
+                currentSessionDescription={currentTask || undefined}
+              />
+            )}
 
-        {isEmpty ? (
-          <div className="h-full flex flex-col items-center justify-center text-center px-4 py-8">
-            <svg className="w-8 h-8 text-gray-300 dark:text-gray-600 mb-2" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
-            </svg>
-            <p className="text-xs text-gray-500 dark:text-gray-400">{t('sidebar.noDirectories')}</p>
-            <p className="text-2xs text-gray-400 dark:text-gray-500 mt-1">{t('sidebar.noDirectoriesHint')}</p>
-          </div>
-        ) : (
-          <>
-            {/* Pinned directory nodes */}
-            {directories.map((group) => {
-              const isActive =
-                activeNormalized !== null &&
-                (activeNormalized === group.normalizedPath || activeNormalized.startsWith(group.normalizedPath + '/'));
-              return (
-                <DirectoryNode
-                  key={group.normalizedPath}
-                  group={group}
-                  isActive={isActive}
-                  isExpanded={expandedPaths.has(group.normalizedPath)}
-                  onToggle={() => toggleDirectory(group.normalizedPath)}
-                  onUnpin={() => handleUnpin(group.path)}
-                  onNewTaskInDir={() => handleNewTaskInDir(group.path)}
+            {isEmpty ? (
+              <div className="h-full flex flex-col items-center justify-center text-center px-4 py-8">
+                <svg className="w-8 h-8 text-gray-300 dark:text-gray-600 mb-2" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+                </svg>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{t('sidebar.noDirectories')}</p>
+                <p className="text-2xs text-gray-400 dark:text-gray-500 mt-1">{t('sidebar.noDirectoriesHint')}</p>
+              </div>
+            ) : (
+              <>
+                {/* Pinned directory nodes */}
+                {directories.map((group) => {
+                  const isActive =
+                    activeNormalized !== null &&
+                    (activeNormalized === group.normalizedPath ||
+                      activeNormalized.startsWith(group.normalizedPath + '/'));
+                  return (
+                    <DirectoryNode
+                      key={group.normalizedPath}
+                      group={group}
+                      isActive={isActive}
+                      isExpanded={expandedPaths.has(group.normalizedPath)}
+                      onToggle={() => toggleDirectory(group.normalizedPath)}
+                      onUnpin={() => handleUnpin(group.path)}
+                      onNewTaskInDir={() => handleNewTaskInDir(group.path)}
+                      onRestore={handleRestore}
+                      onDelete={onDelete}
+                      onRename={onRename}
+                      onSwitchSession={onSwitchSession}
+                      onRemoveSession={onRemoveSession}
+                      foregroundParentSessionId={foregroundParentSessionId}
+                      foregroundBgId={foregroundBgId}
+                      currentSessionDescription={currentTask || undefined}
+                    />
+                  );
+                })}
+
+                {/* Other sessions group */}
+                <OtherSessionsGroup
+                  sessions={other}
+                  isExpanded={otherExpanded}
+                  onToggle={toggleOther}
                   onRestore={handleRestore}
                   onDelete={onDelete}
                   onRename={onRename}
-                  onSwitchSession={onSwitchSession}
-                  onRemoveSession={onRemoveSession}
-                  foregroundParentSessionId={foregroundParentSessionId}
-                  foregroundBgId={foregroundBgId}
-                  currentSessionDescription={currentTask || undefined}
                 />
-              );
-            })}
-
-            {/* Other sessions group */}
-            <OtherSessionsGroup
-              sessions={other}
-              isExpanded={otherExpanded}
-              onToggle={toggleOther}
-              onRestore={handleRestore}
-              onDelete={onDelete}
-              onRename={onRename}
-            />
-          </>
-        )}
-      </div>
-
-      {/* Skill & Memory Panel */}
-      <SkillMemoryPanel />
-
-      {/* Plugin Panel */}
-      <PluginPanel />
-
-      {/* Agent Panel */}
-      <AgentPanel />
-
-      {/* Prompt Panel */}
-      <PromptPanel />
-
-      {/* Footer */}
-      {history.length > 0 && (
-        <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-700">
-          <button
-            onClick={onClear}
-            className={clsx(
-              'w-full text-xs px-2 py-1.5 rounded-md transition-colors',
-              'text-red-600 dark:text-red-400',
-              'hover:bg-red-50 dark:hover:bg-red-900/20',
+              </>
             )}
-          >
-            {t('sidebar.clearAll')}
-          </button>
+          </div>
+          {history.length > 0 && (
+            <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-700">
+              <button
+                onClick={onClear}
+                className={clsx(
+                  'w-full text-xs px-2 py-1.5 rounded-md transition-colors',
+                  'text-red-600 dark:text-red-400',
+                  'hover:bg-red-50 dark:hover:bg-red-900/20',
+                )}
+              >
+                {t('sidebar.clearAll')}
+              </button>
+            </div>
+          )}
+        </div>
+      ) : activeTab === 'skills' ? (
+        <div id="sidebar-panel-skills" role="tabpanel" aria-labelledby="sidebar-tab-skills" className="flex-1 min-h-0">
+          <SkillMemoryPanel />
+        </div>
+      ) : activeTab === 'plugins' ? (
+        <div
+          id="sidebar-panel-plugins"
+          role="tabpanel"
+          aria-labelledby="sidebar-tab-plugins"
+          className="flex-1 min-h-0"
+        >
+          <PluginPanel />
+        </div>
+      ) : activeTab === 'agents' ? (
+        <div id="sidebar-panel-agents" role="tabpanel" aria-labelledby="sidebar-tab-agents" className="flex-1 min-h-0">
+          <AgentPanel />
+        </div>
+      ) : (
+        <div
+          id="sidebar-panel-prompts"
+          role="tabpanel"
+          aria-labelledby="sidebar-tab-prompts"
+          className="flex-1 min-h-0"
+        >
+          <PromptPanel />
         </div>
       )}
 

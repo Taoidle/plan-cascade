@@ -18,6 +18,8 @@ vi.mock('react-i18next', () => ({
         'sidebar.addDirectory': 'Add Directory',
         'sidebar.skills': 'Skills',
         'sidebar.plugins': 'Plugins',
+        'sidebar.agents': 'Agents',
+        'sidebar.prompts': 'Prompts',
         'sidebar.clearAll': 'Clear All Sessions',
         'sidebar.current': 'Current',
         'sidebar.otherSessions': 'Other',
@@ -39,6 +41,10 @@ vi.mock('react-i18next', () => ({
         'skillPanel.detectedSkills': 'Auto-Detected Skills',
         'skillPanel.projectSkills': 'Project Skills',
         'skillPanel.memories': 'Memories',
+        'pluginPanel.manageAll': 'Manage All...',
+        'pluginPanel.marketplace': 'Marketplace',
+        'agentPanel.manageAll': 'Manage All...',
+        'promptPanel.manageAll': 'Manage All...',
       };
       return translations[key] || key;
     },
@@ -64,39 +70,106 @@ vi.mock('../../store/settings', () => ({
 }));
 
 // Mock skillMemory store
+const mockSkillMemoryStore = {
+  skills: [],
+  skillsLoading: false,
+  memories: [],
+  memoriesLoading: false,
+  panelOpen: false,
+  dialogOpen: false,
+  activeTab: 'skills',
+  toastMessage: null,
+  toastType: 'info',
+  loadSkills: vi.fn(),
+  loadMemories: vi.fn(),
+  loadMemoryStats: vi.fn(),
+  toggleSkill: vi.fn(),
+  togglePanel: vi.fn(),
+  openDialog: vi.fn(),
+  closeDialog: vi.fn(),
+  setActiveTab: vi.fn(),
+  clearToast: vi.fn(),
+};
+
 vi.mock('../../store/skillMemory', () => ({
-  useSkillMemoryStore: vi.fn((selector) => {
-    const state = {
-      skills: [],
-      skillsLoading: false,
-      memories: [],
-      memoriesLoading: false,
-      panelOpen: false,
-      dialogOpen: false,
-      activeTab: 'skills',
-      toastMessage: null,
-      toastType: 'info',
-      loadSkills: vi.fn(),
-      loadMemories: vi.fn(),
-      loadMemoryStats: vi.fn(),
-      toggleSkill: vi.fn(),
-      togglePanel: vi.fn(),
-      openDialog: vi.fn(),
-      closeDialog: vi.fn(),
-      setActiveTab: vi.fn(),
-      clearToast: vi.fn(),
-    };
-    return typeof selector === 'function' ? selector(state) : state;
-  }),
+  useSkillMemoryStore: vi.fn((selector) =>
+    typeof selector === 'function' ? selector(mockSkillMemoryStore) : mockSkillMemoryStore,
+  ),
 }));
 
-// Mock child components that depend on the store
+const mockPluginStore = {
+  plugins: [],
+  loading: false,
+  panelOpen: false,
+  loadPlugins: vi.fn(),
+  togglePlugin: vi.fn(),
+  openDialog: vi.fn(),
+  setActiveTab: vi.fn(),
+};
+
+vi.mock('../../store/plugins', () => ({
+  usePluginStore: vi.fn((selector) => (typeof selector === 'function' ? selector(mockPluginStore) : mockPluginStore)),
+}));
+
+const mockAgentsStore = {
+  agents: [],
+  searchQuery: '',
+  loading: { agents: false },
+  panelOpen: false,
+  fetchAgents: vi.fn(),
+  openDialog: vi.fn(),
+  setActiveAgentForSession: vi.fn(),
+};
+
+vi.mock('../../store/agents', () => ({
+  useAgentsStore: vi.fn((selector) => (typeof selector === 'function' ? selector(mockAgentsStore) : mockAgentsStore)),
+}));
+
+const mockPromptsStore = {
+  prompts: [],
+  loading: false,
+  panelOpen: false,
+  fetchPrompts: vi.fn(),
+  openDialog: vi.fn(),
+};
+
+vi.mock('../../store/prompts', () => ({
+  usePromptsStore: vi.fn((selector) =>
+    typeof selector === 'function' ? selector(mockPromptsStore) : mockPromptsStore,
+  ),
+}));
+
+// Mock child components to keep sidebar behavior-focused tests stable
 vi.mock('./SkillMemoryPanel', () => ({
-  SkillMemoryPanel: () => null,
+  SkillMemoryPanel: () => <div data-testid="skill-memory-panel">Skills Panel</div>,
+}));
+
+vi.mock('./PluginPanel', () => ({
+  PluginPanel: () => <div data-testid="plugin-panel">Plugin Panel</div>,
+}));
+
+vi.mock('./AgentPanel', () => ({
+  AgentPanel: () => <div data-testid="agent-panel">Agent Panel</div>,
+}));
+
+vi.mock('./PromptPanel', () => ({
+  PromptPanel: () => <div data-testid="prompt-panel">Prompt Panel</div>,
 }));
 
 vi.mock('../SkillMemory/SkillMemoryDialog', () => ({
   SkillMemoryDialog: () => null,
+}));
+
+vi.mock('../Plugins/PluginDialog', () => ({
+  PluginDialog: () => null,
+}));
+
+vi.mock('../Agents/AgentDialog', () => ({
+  AgentDialog: () => null,
+}));
+
+vi.mock('../Prompts/PromptDialog', () => ({
+  PromptDialog: () => null,
 }));
 
 vi.mock('../SkillMemory/SkillMemoryToast', () => ({
@@ -147,6 +220,61 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
     vi.clearAllMocks();
     mockPinnedDirectories = [];
     mockWorkspacePath = '/test/project';
+    mockSkillMemoryStore.skills = [];
+    mockSkillMemoryStore.memories = [];
+    mockPluginStore.plugins = [];
+    mockAgentsStore.agents = [];
+    mockPromptsStore.prompts = [];
+  });
+
+  it('should default to sessions tab and show sessions actions', () => {
+    render(<WorkspaceTreeSidebar {...defaultProps} backgroundSessions={{}} />);
+
+    expect(screen.getByTestId('sidebar-tab-sessions')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('New Task')).toBeInTheDocument();
+    expect(screen.getByText('Add Directory')).toBeInTheDocument();
+    expect(screen.queryByTestId('skill-memory-panel')).not.toBeInTheDocument();
+  });
+
+  it('should switch tabs with single-panel rendering', () => {
+    render(<WorkspaceTreeSidebar {...defaultProps} backgroundSessions={{}} />);
+
+    fireEvent.click(screen.getByTestId('sidebar-tab-skills'));
+    expect(screen.getByTestId('sidebar-tab-skills')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('skill-memory-panel')).toBeInTheDocument();
+    expect(screen.queryByText('New Task')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('sidebar-tab-plugins'));
+    expect(screen.getByTestId('sidebar-tab-plugins')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('plugin-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('skill-memory-panel')).not.toBeInTheDocument();
+  });
+
+  it('should open skill dialog from skills tab action', () => {
+    render(<WorkspaceTreeSidebar {...defaultProps} backgroundSessions={{}} />);
+
+    fireEvent.click(screen.getByTestId('sidebar-tab-skills'));
+    fireEvent.click(screen.getByText('Manage All...'));
+    expect(mockSkillMemoryStore.openDialog).toHaveBeenCalledWith('skills');
+  });
+
+  it('should open plugin marketplace from plugins tab action', () => {
+    render(<WorkspaceTreeSidebar {...defaultProps} backgroundSessions={{}} />);
+
+    fireEvent.click(screen.getByTestId('sidebar-tab-plugins'));
+    fireEvent.click(screen.getByText('Marketplace'));
+    expect(mockPluginStore.setActiveTab).toHaveBeenCalledWith('marketplace');
+    expect(mockPluginStore.openDialog).toHaveBeenCalled();
+  });
+
+  it('should preload sidebar tab data on mount', () => {
+    render(<WorkspaceTreeSidebar {...defaultProps} backgroundSessions={{}} />);
+
+    expect(mockPluginStore.loadPlugins).toHaveBeenCalled();
+    expect(mockAgentsStore.fetchAgents).toHaveBeenCalled();
+    expect(mockPromptsStore.fetchPrompts).toHaveBeenCalled();
+    expect(mockSkillMemoryStore.loadSkills).toHaveBeenCalledWith('/test/project');
+    expect(mockSkillMemoryStore.loadMemories).toHaveBeenCalledWith('/test/project');
   });
 
   it('should NOT render "Active Sessions" section when there are no background sessions', () => {
@@ -352,7 +480,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
     expect(screen.getByText('Task Gamma')).toBeInTheDocument();
 
     // Verify count badge
-    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getAllByText('3').length).toBeGreaterThan(0);
   });
 
   // ---------------------------------------------------------------------------
@@ -424,7 +552,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
     expect(screen.getByText('Fork 2')).toBeInTheDocument();
 
     // Count badge should show total count (3)
-    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getAllByText('3').length).toBeGreaterThan(0);
   });
 
   it('should render orphan sessions (parent does not exist) as root nodes', () => {
@@ -643,7 +771,7 @@ describe('WorkspaceTreeSidebar - Background Sessions', () => {
     expect(screen.getByText('Active BG Session')).toBeInTheDocument();
     expect(screen.getByText('Completed History')).toBeInTheDocument();
     // Directory badge shows total count (2)
-    expect(screen.getByText('2')).toBeInTheDocument();
+    expect(screen.getAllByText('2').length).toBeGreaterThan(0);
   });
 
   it('should hide history item when an active session references originHistoryId', () => {
