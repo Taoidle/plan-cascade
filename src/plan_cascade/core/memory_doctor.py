@@ -46,6 +46,8 @@ class Diagnosis:
             "type": self.type.value,
             "decision_a_id": self.decision_a.get("id", "unknown"),
             "decision_b_id": self.decision_b.get("id", "unknown"),
+            "decision_a": self.decision_a,
+            "decision_b": self.decision_b,
             "explanation": self.explanation,
             "suggestion": self.suggestion,
             "source_a": self.source_a,

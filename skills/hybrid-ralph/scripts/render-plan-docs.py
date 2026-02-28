@@ -459,6 +459,10 @@ def main():
         output_files.append(str(out_path))
 
     # Load and render design_doc.json (both modes)
+    # NOTE: design_doc.json is always in project root (not via PathResolver) because
+    # it is a user-visible file that lives alongside the source code, unlike prd.json
+    # and mega-plan.json which may be stored in platform-specific directories.
+    # See also: unified-review.py load_documents() which follows the same convention.
     design_doc = load_json_file(project_root / "design_doc.json")
     if design_doc:
         design_md = render_design_doc_md(design_doc)

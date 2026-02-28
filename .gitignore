@@ -76,8 +76,11 @@ htmlcov/
 
 # Planning documents
 prd.json
+prd.md
 mega-plan.json
+mega-plan.md
 design_doc.json
+design_doc.md
 
 # Status and state files
 .mega-status.json

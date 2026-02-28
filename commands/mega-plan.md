@@ -546,7 +546,48 @@ If exit code is 1:
    - **Deprecate** — Mark the older/conflicting decision as deprecated (recommended for conflicts and superseded)
    - **Merge** — Combine duplicate decisions into one (recommended for duplicates)
    - **Skip** — Keep both decisions as-is
-3. Apply the user's choices by modifying the relevant `design_doc.json` files
+3. Apply the user's choices using the memory-doctor `--apply` command:
+
+   **CRITICAL**: Construct a JSON array of the user's choices and save it to `_doctor_actions.json`. Each entry must include the full diagnosis context with `decision_a` and `decision_b` dicts (including `id` and `_source` fields) as returned by the diagnosis report:
+
+   ```json
+   [
+     {
+       "action": "deprecate",
+       "diagnosis": {
+         "type": "conflict",
+         "decision_a": {"id": "ADR-003", "_source": "path/to/design_doc.json"},
+         "decision_b": {"id": "ADR-012", "_source": "other/design_doc.json"},
+         "source_a": "path/to/design_doc.json",
+         "source_b": "other/design_doc.json"
+       }
+     },
+     {
+       "action": "merge",
+       "diagnosis": {
+         "type": "duplicate",
+         "decision_a": {"id": "ADR-005", "_source": "path/to/design_doc.json"},
+         "decision_b": {"id": "ADR-009", "_source": "other/design_doc.json"},
+         "source_a": "path/to/design_doc.json",
+         "source_b": "other/design_doc.json"
+       }
+     }
+   ]
+   ```
+
+   Then run the apply command:
+   ```bash
+   uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/memory-doctor.py" \
+     --apply _doctor_actions.json \
+     --project-root "$(pwd)"
+   ```
+
+   Clean up the temporary file:
+   ```bash
+   rm -f _doctor_actions.json
+   ```
+
+   Note: Entries where the user chose **Skip** should be omitted from the actions array entirely.
 
 ### 5.4: Generate Markdown Documents
 
@@ -638,9 +679,86 @@ Options:
 
 Update `mega-plan.json` with the chosen mode.
 
-## Step 9: Display Unified Review
+## Step 9: Confirm Architectural Decisions
 
-**CRITICAL**: Use Bash to display the unified Mega-Plan + Design Document review:
+Before the unified review, display a decision summary and confirm with the user. This ensures any modifications during confirmation are reflected in the unified review displayed afterward.
+
+### 9.1: Display Decision Summary
+
+Read `design_doc.json` and for each decision with status "accepted" or "proposed", display:
+
+```
+============================================================
+ARCHITECTURAL DECISIONS — Summary
+============================================================
+
+[ADR-001] Decision Title
+  Context:      <context>
+  Decision:     <decision>
+  Rationale:    <rationale>
+  Alternatives: <alt1>, <alt2>
+
+[ADR-002] ...
+
+Total: N decisions
+============================================================
+```
+
+### 9.2: Confirmation Flow
+
+**If `NO_CONFIRM_MODE` is true** (i.e., `--no-confirm` was passed):
+- Skip interactive confirmation entirely
+- Auto-accept all decisions: set every decision's status to "accepted" in `design_doc.json`
+- Log: `"Auto-accepted N architectural decisions (--no-confirm mode)"`
+- Proceed to Step 9.5
+
+**Otherwise** (interactive mode — the default):
+
+Use `AskUserQuestion` with these options:
+
+```
+Question: "These N architectural decisions will be used as the baseline for future conflict detection. Do you accept them?"
+
+Options:
+  1. "Accept All (Recommended)" — Accept all decisions as-is
+  2. "Review Individually" — Review and confirm each decision one by one
+  3. "Discuss" — Chat about specific decisions before confirming
+```
+
+**If user selects "Accept All"**: Set all decision statuses to "accepted" in `design_doc.json`. Proceed to Step 9.5.
+
+**If user selects "Discuss"**: Let the user discuss freely. After the discussion, repeat Step 9.2 (re-ask the question).
+
+**If user selects "Review Individually"**: For each decision, use `AskUserQuestion`:
+
+```
+Question: "[ADR-001] <title>
+  Context: <context>
+  Decision: <decision>
+  Rationale: <rationale>"
+
+Options:
+  1. "Accept" — Accept this decision
+  2. "Reject" — Remove this decision
+  3. "Modify" — Edit this decision before accepting
+  4. "Discuss" — Chat about this decision
+```
+
+- **Accept**: Mark status as "accepted"
+- **Reject**: Mark status as "rejected"
+- **Modify**: Let the user describe changes, update the decision in `design_doc.json`, then re-confirm this specific ADR
+- **Discuss**: Let the user chat, then re-ask for this specific ADR
+
+After all decisions are reviewed, re-run Step 5.4 to regenerate the Markdown files:
+```bash
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/render-plan-docs.py" \
+  --mode mega \
+  --project-root "$(pwd)"
+```
+
+## Step 9.5: Display Unified Review
+
+**CRITICAL**: Use Bash to display the unified Mega-Plan + Design Document review. This is displayed after ADR confirmation so it reflects any decision modifications made during Step 9:
 
 ```bash
 uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/unified-review.py" --mode mega
@@ -677,86 +795,9 @@ Batch 2 (After Batch 1):
 ============================================================
 ```
 
-## Step 9.5: Confirm Architectural Decisions
-
-After the unified review, display a decision summary and confirm with the user.
-
-### 9.5.1: Display Decision Summary
-
-Read `design_doc.json` and for each decision with status "accepted" or "proposed", display:
-
-```
-============================================================
-ARCHITECTURAL DECISIONS — Summary
-============================================================
-
-[ADR-001] Decision Title
-  Context:      <context>
-  Decision:     <decision>
-  Rationale:    <rationale>
-  Alternatives: <alt1>, <alt2>
-
-[ADR-002] ...
-
-Total: N decisions
-============================================================
-```
-
-### 9.5.2: Confirmation Flow
-
-**If `NO_CONFIRM_MODE` is true** (i.e., `--no-confirm` was passed):
-- Skip interactive confirmation entirely
-- Auto-accept all decisions: set every decision's status to "accepted" in `design_doc.json`
-- Log: `"Auto-accepted N architectural decisions (--no-confirm mode)"`
-- Proceed to Step 10
-
-**Otherwise** (interactive mode — the default):
-
-Use `AskUserQuestion` with these options:
-
-```
-Question: "These N architectural decisions will be used as the baseline for future conflict detection. Do you accept them?"
-
-Options:
-  1. "Accept All (Recommended)" — Accept all decisions as-is
-  2. "Review Individually" — Review and confirm each decision one by one
-  3. "Discuss" — Chat about specific decisions before confirming
-```
-
-**If user selects "Accept All"**: Set all decision statuses to "accepted" in `design_doc.json`. Proceed to Step 10.
-
-**If user selects "Discuss"**: Let the user discuss freely. After the discussion, repeat Step 9.5.2 (re-ask the question).
-
-**If user selects "Review Individually"**: For each decision, use `AskUserQuestion`:
-
-```
-Question: "[ADR-001] <title>
-  Context: <context>
-  Decision: <decision>
-  Rationale: <rationale>"
-
-Options:
-  1. "Accept" — Accept this decision
-  2. "Reject" — Remove this decision
-  3. "Modify" — Edit this decision before accepting
-  4. "Discuss" — Chat about this decision
-```
-
-- **Accept**: Mark status as "accepted"
-- **Reject**: Mark status as "rejected"
-- **Modify**: Let the user describe changes, update the decision in `design_doc.json`, then re-confirm this specific ADR
-- **Discuss**: Let the user chat, then re-ask for this specific ADR
-
-After all decisions are reviewed, re-run Step 5.4 to regenerate the Markdown files:
-```bash
-uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/render-plan-docs.py" \
-  --mode mega \
-  --project-root "$(pwd)"
-```
-
 ## Step 10: Show Files Created and Next Steps
 
-After unified review and getting decision confirmation, show created files and execution configuration:
+After displaying the unified review, show created files and execution configuration:
 
 ```
 Files created:
