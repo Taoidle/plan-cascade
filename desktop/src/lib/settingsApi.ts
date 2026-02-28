@@ -22,6 +22,7 @@ export interface AppConfig {
   language: string;
   default_provider: string;
   default_model: string;
+  model_by_provider: Record<string, string>;
   analytics_enabled: boolean;
   auto_save_interval: number;
   max_recent_projects: number;
@@ -33,6 +34,7 @@ export interface SettingsUpdate {
   language?: string;
   default_provider?: string;
   default_model?: string;
+  model_by_provider?: Record<string, string>;
   analytics_enabled?: boolean;
   auto_save_interval?: number;
   max_recent_projects?: number;

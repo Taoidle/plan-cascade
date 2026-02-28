@@ -20,6 +20,7 @@ pub mod ollama;
 pub mod openai;
 pub mod provider;
 pub mod qwen;
+pub mod reliable_catalog;
 pub mod streaming_adapters;
 pub mod types;
 

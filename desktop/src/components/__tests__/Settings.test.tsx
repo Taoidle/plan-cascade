@@ -46,6 +46,9 @@ vi.mock('react-i18next', () => ({
         'general.executionLimits.maxIterations': 'Max Iterations',
         'general.executionLimits.maxTotalTokens': 'Max Token Budget',
         'general.executionLimits.timeout': 'Timeout (seconds)',
+        'general.executionLimits.maxConcurrentSubagents': 'Max Concurrent Subagents',
+        'general.executionLimits.maxConcurrentSubagentsHelp':
+          'Maximum number of subagents that can run at the same time.',
         'buttons.cancel': 'Cancel',
         'buttons.save': 'Save',
         'buttons.saving': 'Saving...',
@@ -99,6 +102,7 @@ const mockSetDefaultMode = vi.fn();
 const mockSetTheme = vi.fn();
 const mockSetBackend = vi.fn();
 const mockSetModel = vi.fn();
+const mockSetModelByProvider = vi.fn();
 const mockSetProvider = vi.fn();
 const mockSetStandaloneContextTurns = vi.fn();
 const mockSetEnableContextCompaction = vi.fn();
@@ -110,6 +114,7 @@ const mockSettingsState = {
   backend: 'claude-code' as string,
   provider: 'claude',
   model: '',
+  modelByProvider: { anthropic: '' },
   apiKey: '',
   defaultMode: 'simple' as string,
   theme: 'system' as string,
@@ -134,6 +139,7 @@ const mockSettingsState = {
   setTheme: mockSetTheme,
   setBackend: mockSetBackend,
   setModel: mockSetModel,
+  setModelByProvider: mockSetModelByProvider,
   setProvider: mockSetProvider,
   setStandaloneContextTurns: mockSetStandaloneContextTurns,
   setEnableContextCompaction: mockSetEnableContextCompaction,
@@ -305,17 +311,16 @@ describe('GeneralSection', () => {
     expect(screen.getByText('Execution Limits')).toBeInTheDocument();
     expect(screen.getByText('Max Parallel Stories')).toBeInTheDocument();
     expect(screen.getByText('Max Iterations')).toBeInTheDocument();
-    expect(screen.getByText('Max Token Budget')).toBeInTheDocument();
     expect(screen.getByText('Timeout (seconds)')).toBeInTheDocument();
+    expect(screen.getByText('Max Concurrent Subagents')).toBeInTheDocument();
   });
 
-  it('renders max token budget input with default value', () => {
+  it('renders max parallel stories input with default value', () => {
     render(<GeneralSection />);
 
-    // The maxTotalTokens field should display the default value (1000000)
-    const tokenInputs = screen.getAllByRole('spinbutton');
-    const tokenInput = tokenInputs.find((el) => (el as HTMLInputElement).value === '1000000');
-    expect(tokenInput).toBeDefined();
+    const inputs = screen.getAllByRole('spinbutton');
+    const storiesInput = inputs.find((el) => (el as HTMLInputElement).value === '3');
+    expect(storiesInput).toBeDefined();
   });
 
   it('renders max iterations input with default value', () => {
@@ -327,35 +332,35 @@ describe('GeneralSection', () => {
     expect(iterationsInput).toBeDefined();
   });
 
-  it('updates maxTotalTokens via setState when changed', () => {
+  it('updates maxParallelStories via setState when changed', () => {
     render(<GeneralSection />);
 
-    const tokenInputs = screen.getAllByRole('spinbutton');
-    const tokenInput = tokenInputs.find((el) => (el as HTMLInputElement).value === '1000000') as HTMLInputElement;
+    const inputs = screen.getAllByRole('spinbutton');
+    const storiesInput = inputs.find((el) => (el as HTMLInputElement).value === '3') as HTMLInputElement;
 
-    fireEvent.change(tokenInput, { target: { value: '2000000' } });
+    fireEvent.change(storiesInput, { target: { value: '5' } });
 
-    expect(useSettingsStore.setState).toHaveBeenCalledWith({ maxTotalTokens: 2000000 });
+    expect(useSettingsStore.setState).toHaveBeenCalledWith({ maxParallelStories: 5 });
   });
 
-  it('enforces min constraint on maxTotalTokens input', () => {
+  it('enforces min constraint on maxParallelStories input', () => {
     render(<GeneralSection />);
 
-    const tokenInputs = screen.getAllByRole('spinbutton');
-    const tokenInput = tokenInputs.find((el) => (el as HTMLInputElement).value === '1000000') as HTMLInputElement;
+    const inputs = screen.getAllByRole('spinbutton');
+    const storiesInput = inputs.find((el) => (el as HTMLInputElement).value === '3') as HTMLInputElement;
 
-    expect(tokenInput).toBeDefined();
-    expect(tokenInput.min).toBe('100000');
+    expect(storiesInput).toBeDefined();
+    expect(storiesInput.min).toBe('1');
   });
 
-  it('enforces max constraint on maxTotalTokens input', () => {
+  it('enforces max constraint on maxParallelStories input', () => {
     render(<GeneralSection />);
 
-    const tokenInputs = screen.getAllByRole('spinbutton');
-    const tokenInput = tokenInputs.find((el) => (el as HTMLInputElement).value === '1000000') as HTMLInputElement;
+    const inputs = screen.getAllByRole('spinbutton');
+    const storiesInput = inputs.find((el) => (el as HTMLInputElement).value === '3') as HTMLInputElement;
 
-    expect(tokenInput).toBeDefined();
-    expect(tokenInput.max).toBe('5000000');
+    expect(storiesInput).toBeDefined();
+    expect(storiesInput.max).toBe('10');
   });
 
   it('enforces min constraint on maxIterations input', () => {

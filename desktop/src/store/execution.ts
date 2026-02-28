@@ -729,11 +729,11 @@ const QWEN_US_BASE_URL = 'https://dashscope-us.aliyuncs.com/api/v1';
 
 /** Default model per provider, used when user selects "Provider default". */
 const DEFAULT_MODEL_BY_PROVIDER: Record<string, string> = {
-  anthropic: 'claude-sonnet-4-20250514',
-  openai: 'gpt-4o',
+  anthropic: 'claude-sonnet-4-6-20260219',
+  openai: 'gpt-5.1',
   deepseek: 'deepseek-chat',
-  glm: 'glm-4-flash-250414',
-  qwen: 'qwen-plus',
+  glm: 'glm-5',
+  qwen: 'qwen3-max',
   minimax: 'MiniMax-M2.5',
   ollama: 'llama3.2',
 };
@@ -1435,7 +1435,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         // Use standalone LLM execution
         const provider = resolveStandaloneProvider(backendValue, providerValue, modelValue);
         const effectiveModel =
-          activeAgent?.model || settings.model || DEFAULT_MODEL_BY_PROVIDER[provider] || 'claude-sonnet-4-20250514';
+          activeAgent?.model || settings.model || DEFAULT_MODEL_BY_PROVIDER[provider] || 'claude-sonnet-4-6-20260219';
         const model = effectiveModel;
         const providerApiKey = getLocalProviderApiKey(provider);
         const isSimpleStandalone = mode === 'simple';
@@ -2936,7 +2936,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       const providerValue = String((settingsSnapshot as { provider?: unknown }).provider || '');
       const modelValue = String((settingsSnapshot as { model?: unknown }).model || '');
       const provider = resolveStandaloneProvider(backendValue, providerValue, modelValue);
-      const model = settingsSnapshot.model || DEFAULT_MODEL_BY_PROVIDER[provider] || 'claude-sonnet-4-20250514';
+      const model = settingsSnapshot.model || DEFAULT_MODEL_BY_PROVIDER[provider] || 'claude-sonnet-4-6-20260219';
       const providerApiKey = getLocalProviderApiKey(provider);
       const contextTurnsLimit = getStandaloneContextTurnsLimit();
       const recentTurns = trimStandaloneTurns(rebuiltTurns, contextTurnsLimit);
@@ -3124,7 +3124,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       const providerValue = String((settingsSnapshot as { provider?: unknown }).provider || '');
       const modelValue = String((settingsSnapshot as { model?: unknown }).model || '');
       const provider = resolveStandaloneProvider(backendValue, providerValue, modelValue);
-      const model = settingsSnapshot.model || DEFAULT_MODEL_BY_PROVIDER[provider] || 'claude-sonnet-4-20250514';
+      const model = settingsSnapshot.model || DEFAULT_MODEL_BY_PROVIDER[provider] || 'claude-sonnet-4-6-20260219';
       const providerApiKey = getLocalProviderApiKey(provider);
       const contextTurnsLimit = getStandaloneContextTurnsLimit();
       const recentTurns = trimStandaloneTurns(rebuiltTurns, contextTurnsLimit);
@@ -4150,11 +4150,6 @@ function handleUnifiedExecutionEvent(
     case 'context_compaction': {
       const compacted = (payload as unknown as { messages_compacted?: number }).messages_compacted || 0;
       const preserved = (payload as unknown as { messages_preserved?: number }).messages_preserved || 0;
-      const tokens = (payload as unknown as { compaction_tokens?: number }).compaction_tokens || 0;
-      get().appendStreamLine(
-        `[context compaction] ${compacted} messages summarized, ${preserved} preserved (${tokens} tokens)`,
-        'info',
-      );
       get().addLog(`Context compaction: ${compacted} messages compacted, ${preserved} preserved`);
       break;
     }

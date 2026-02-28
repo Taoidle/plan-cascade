@@ -478,6 +478,10 @@ mod tests {
             core_context: None,
             file_change_tracker: None,
             permission_gate: None,
+            knowledge_pipeline: None,
+            knowledge_project_id: None,
+            knowledge_collection_filter: None,
+            knowledge_document_filter: None,
         }
     }
 

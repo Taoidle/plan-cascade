@@ -293,6 +293,7 @@ pub fn import_backend_settings(
             language: Some(new_config.language),
             default_provider: Some(new_config.default_provider),
             default_model: Some(new_config.default_model),
+            model_by_provider: Some(new_config.model_by_provider),
             analytics_enabled: Some(new_config.analytics_enabled),
             auto_save_interval: Some(new_config.auto_save_interval),
             max_recent_projects: Some(new_config.max_recent_projects),

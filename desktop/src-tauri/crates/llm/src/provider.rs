@@ -33,9 +33,10 @@ pub trait LlmProvider: Send + Sync {
 
     /// Returns the reliability classification for this provider's tool calling.
     ///
-    /// - `Reliable`: Native tool calls work consistently (Anthropic, OpenAI).
-    /// - `Unreliable`: API claims tool support but emission is inconsistent (Qwen, DeepSeek, GLM).
-    /// - `None`: No native tool calling support (Ollama).
+    /// - `Reliable`: Native tool calls work consistently for the selected model.
+    /// - `Unreliable`: API/tool schema is available, but emission quality for
+    ///   the selected model is not reliable enough for strict orchestration.
+    /// - `None`: No native tool calling support.
     ///
     /// Default returns `Reliable` for backward compatibility.
     fn tool_call_reliability(&self) -> ToolCallReliability {

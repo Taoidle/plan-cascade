@@ -3,6 +3,7 @@
 //! Application configuration and settings data structures.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Application configuration stored in config.json
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +16,9 @@ pub struct AppConfig {
     pub default_provider: String,
     /// Default model for the provider
     pub default_model: String,
+    /// Per-provider last selected model (backend source of truth for binding).
+    #[serde(default = "default_model_by_provider")]
+    pub model_by_provider: HashMap<String, String>,
     /// Enable analytics tracking
     pub analytics_enabled: bool,
     /// Auto-save interval in seconds
@@ -32,13 +36,23 @@ fn default_search_provider() -> String {
     "duckduckgo".to_string()
 }
 
+fn default_model_by_provider() -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    map.insert(
+        "anthropic".to_string(),
+        "claude-sonnet-4-6-20260219".to_string(),
+    );
+    map
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
             theme: "system".to_string(),
             language: "en".to_string(),
             default_provider: "anthropic".to_string(),
-            default_model: "claude-sonnet-4-20250514".to_string(),
+            default_model: "claude-sonnet-4-6-20260219".to_string(),
+            model_by_provider: default_model_by_provider(),
             analytics_enabled: true,
             auto_save_interval: 30,
             max_recent_projects: 10,
@@ -55,6 +69,7 @@ pub struct SettingsUpdate {
     pub language: Option<String>,
     pub default_provider: Option<String>,
     pub default_model: Option<String>,
+    pub model_by_provider: Option<HashMap<String, String>>,
     pub analytics_enabled: Option<bool>,
     pub auto_save_interval: Option<u32>,
     pub max_recent_projects: Option<u32>,
@@ -63,6 +78,28 @@ pub struct SettingsUpdate {
 }
 
 impl AppConfig {
+    fn canonical_provider_name(provider: &str) -> String {
+        provider.trim().to_ascii_lowercase()
+    }
+
+    /// Resolve a provider-specific model from `model_by_provider`, falling back to
+    /// `default_model` for the current `default_provider`.
+    pub fn model_for_provider(&self, provider: &str) -> String {
+        let canonical = Self::canonical_provider_name(provider);
+        if let Some(model) = self
+            .model_by_provider
+            .get(&canonical)
+            .map(|v| v.trim())
+            .filter(|v| !v.is_empty())
+        {
+            return model.to_string();
+        }
+        if canonical == Self::canonical_provider_name(&self.default_provider) {
+            return self.default_model.clone();
+        }
+        String::new()
+    }
+
     /// Apply a partial update to the configuration
     pub fn apply_update(&mut self, update: SettingsUpdate) {
         if let Some(theme) = update.theme {
@@ -72,10 +109,42 @@ impl AppConfig {
             self.language = language;
         }
         if let Some(provider) = update.default_provider {
-            self.default_provider = provider;
+            self.default_provider = Self::canonical_provider_name(&provider);
+            if let Some(provider_model) = self
+                .model_by_provider
+                .get(&self.default_provider)
+                .map(|v| v.trim())
+                .filter(|v| !v.is_empty())
+            {
+                self.default_model = provider_model.to_string();
+            }
+        }
+        if let Some(model_map) = update.model_by_provider {
+            let mut normalized = HashMap::new();
+            for (provider, model) in model_map {
+                let canonical = Self::canonical_provider_name(&provider);
+                let trimmed = model.trim().to_string();
+                if !trimmed.is_empty() {
+                    normalized.insert(canonical, trimmed);
+                }
+            }
+            self.model_by_provider = normalized;
+            if let Some(provider_model) = self
+                .model_by_provider
+                .get(&self.default_provider)
+                .map(|v| v.trim())
+                .filter(|v| !v.is_empty())
+            {
+                self.default_model = provider_model.to_string();
+            }
         }
         if let Some(model) = update.default_model {
             self.default_model = model;
+            let canonical = Self::canonical_provider_name(&self.default_provider);
+            if !self.default_model.trim().is_empty() {
+                self.model_by_provider
+                    .insert(canonical, self.default_model.clone());
+            }
         }
         if let Some(enabled) = update.analytics_enabled {
             self.analytics_enabled = enabled;
@@ -119,6 +188,10 @@ impl AppConfig {
             return Err("max_recent_projects cannot exceed 100".to_string());
         }
 
+        if self.default_provider.trim().is_empty() {
+            return Err("default_provider cannot be empty".to_string());
+        }
+
         Ok(())
     }
 }
@@ -133,6 +206,11 @@ mod tests {
         assert_eq!(config.theme, "system");
         assert_eq!(config.language, "en");
         assert_eq!(config.default_provider, "anthropic");
+        assert_eq!(config.default_model, "claude-sonnet-4-6-20260219");
+        assert_eq!(
+            config.model_by_provider.get("anthropic"),
+            Some(&"claude-sonnet-4-6-20260219".to_string())
+        );
     }
 
     #[test]
@@ -141,13 +219,37 @@ mod tests {
         let update = SettingsUpdate {
             theme: Some("dark".to_string()),
             language: Some("zh".to_string()),
+            default_provider: Some("openai".to_string()),
+            default_model: Some("gpt-5.1".to_string()),
             ..Default::default()
         };
         config.apply_update(update);
         assert_eq!(config.theme, "dark");
         assert_eq!(config.language, "zh");
+        assert_eq!(config.default_provider, "openai");
+        assert_eq!(config.default_model, "gpt-5.1");
+        assert_eq!(
+            config.model_by_provider.get("openai"),
+            Some(&"gpt-5.1".to_string())
+        );
         // Other fields should remain unchanged
-        assert_eq!(config.default_provider, "anthropic");
+        assert_eq!(config.search_provider, "duckduckgo");
+    }
+
+    #[test]
+    fn test_apply_update_model_map_drives_default_model() {
+        let mut config = AppConfig::default();
+        let mut map = HashMap::new();
+        map.insert("qwen".to_string(), "qwen3-plus".to_string());
+        let update = SettingsUpdate {
+            default_provider: Some("qwen".to_string()),
+            model_by_provider: Some(map),
+            ..Default::default()
+        };
+        config.apply_update(update);
+        assert_eq!(config.default_provider, "qwen");
+        assert_eq!(config.default_model, "qwen3-plus");
+        assert_eq!(config.model_for_provider("qwen"), "qwen3-plus");
     }
 
     #[test]

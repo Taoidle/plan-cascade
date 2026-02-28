@@ -268,6 +268,8 @@ mod tests {
             enabled: false,
             max_context_chunks: 10,
             minimum_relevance_score: 0.5,
+            collection_ids: None,
+            document_ids: None,
         };
         let json = serde_json::to_string(&config).unwrap();
         let deserialized: KnowledgeContextConfig = serde_json::from_str(&json).unwrap();
@@ -366,6 +368,8 @@ mod tests {
             enabled: false, // Disabled
             max_context_chunks: 5,
             minimum_relevance_score: 0.3,
+            collection_ids: None,
+            document_ids: None,
         };
 
         let chunks = provider

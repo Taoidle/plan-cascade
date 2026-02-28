@@ -382,7 +382,7 @@ describe('InputBox markdown preview toggle', () => {
       expect(screen.getByText('readme.md')).toBeTruthy();
     });
 
-    it('attach button remains visible in preview mode', () => {
+    it('does not render inline attach button in preview mode', () => {
       renderInputBox({
         value: 'content',
         onAttach: vi.fn(),
@@ -391,9 +391,8 @@ describe('InputBox markdown preview toggle', () => {
       // Switch to preview
       fireEvent.click(screen.getByTestId('preview-toggle'));
 
-      // Attach button should still be there
-      const attachBtn = screen.getByTitle('Pick a file');
-      expect(attachBtn).toBeTruthy();
+      // File picking is handled by outer toolbar; InputBox should not render inline picker here.
+      expect(screen.queryByTitle('Pick a file')).toBeNull();
     });
   });
 });

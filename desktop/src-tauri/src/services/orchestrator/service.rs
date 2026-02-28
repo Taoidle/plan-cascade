@@ -355,8 +355,8 @@ pub struct OrchestratorService {
     tool_executor: ToolExecutor,
     /// Pluggable context compactor (ADR-F006).
     /// Selected at construction time based on provider reliability:
-    /// - Reliable (Anthropic, OpenAI) -> LlmSummaryCompactor
-    /// - Unreliable/None (Ollama, Qwen, DeepSeek, GLM) -> SlidingWindowCompactor
+    /// - Reliable model -> LlmSummaryCompactor
+    /// - Unreliable/None -> SlidingWindowCompactor
     compactor: Box<dyn ContextCompactor>,
     cancellation_token: CancellationToken,
     /// Pause flag: when true, the agentic loop sleeps until unpaused or cancelled.
@@ -611,9 +611,9 @@ impl AnalysisPhasePolicy {
 
 /// Build a pluggable compactor based on provider reliability (ADR-F006).
 ///
-/// - **Reliable** providers (Anthropic, OpenAI) get `LlmSummaryCompactor` whose
+/// - **Reliable** models get `LlmSummaryCompactor` whose
 ///   `SummarizeFn` closure captures the provider `Arc` and calls it for summarization.
-/// - **Unreliable / None** providers (Ollama, Qwen, DeepSeek, GLM) get
+/// - **Unreliable / None** models get
 ///   `SlidingWindowCompactor` which is deterministic and makes no LLM calls.
 fn build_compactor(provider: &Arc<dyn LlmProvider>) -> Box<dyn ContextCompactor> {
     match provider.tool_call_reliability() {

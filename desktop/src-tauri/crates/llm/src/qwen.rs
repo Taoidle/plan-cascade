@@ -28,6 +28,7 @@ use super::types::{
     ToolDefinition, UsageStats,
 };
 use crate::http_client::build_http_client;
+use crate::reliable_catalog::is_reliable_model;
 use plan_cascade_core::streaming::UnifiedStreamEvent;
 
 /// Qwen provider using the async-dashscope SDK
@@ -531,10 +532,17 @@ impl LlmProvider for QwenProvider {
     }
 
     fn tool_call_reliability(&self) -> ToolCallReliability {
-        ToolCallReliability::Unreliable
+        if is_reliable_model(self.config.provider, &self.config.model) {
+            ToolCallReliability::Reliable
+        } else {
+            ToolCallReliability::Unreliable
+        }
     }
 
     fn default_fallback_mode(&self) -> FallbackToolFormatMode {
+        if matches!(self.tool_call_reliability(), ToolCallReliability::Reliable) {
+            return FallbackToolFormatMode::Off;
+        }
         if self.config.enable_thinking && self.model_supports_reasoning() {
             FallbackToolFormatMode::Off
         } else {
@@ -977,6 +985,15 @@ mod tests {
         assert_eq!(
             provider.tool_call_reliability(),
             ToolCallReliability::Unreliable
+        );
+
+        let reliable = QwenProvider::new(ProviderConfig {
+            model: "qwen3-plus".to_string(),
+            ..test_config()
+        });
+        assert_eq!(
+            reliable.tool_call_reliability(),
+            ToolCallReliability::Reliable
         );
     }
 

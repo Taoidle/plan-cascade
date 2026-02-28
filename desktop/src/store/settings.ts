@@ -16,6 +16,10 @@ export type GlmEndpoint = 'standard' | 'coding' | 'international' | 'internation
 export type MinimaxEndpoint = 'international' | 'china';
 export type QwenEndpoint = 'china' | 'singapore' | 'us';
 
+function normalizeProviderKey(provider: string): string {
+  return provider.trim().toLowerCase();
+}
+
 interface Agent {
   name: string;
   enabled: boolean;
@@ -42,6 +46,7 @@ interface SettingsState {
   backend: Backend;
   provider: string;
   model: string;
+  modelByProvider: Record<string, string>;
   apiKey: string;
 
   // Agent settings
@@ -105,6 +110,7 @@ interface SettingsState {
   setBackend: (backend: Backend) => void;
   setProvider: (provider: string) => void;
   setModel: (model: string) => void;
+  setModelByProvider: (provider: string, model: string) => void;
   setApiKey: (apiKey: string) => void;
   setTheme: (theme: Theme) => void;
   setLanguage: (language: Language) => void;
@@ -150,6 +156,7 @@ const defaultSettings = {
   backend: 'claude-code' as Backend,
   provider: 'anthropic',
   model: '',
+  modelByProvider: { anthropic: '' } as Record<string, string>,
   apiKey: '',
 
   // Agents
@@ -242,9 +249,40 @@ export const useSettingsStore = create<SettingsState>()(
 
       setBackend: (backend) => set({ backend }),
 
-      setProvider: (provider) => set({ provider }),
+      setProvider: (provider) =>
+        set((state) => {
+          const canonical = normalizeProviderKey(provider);
+          return {
+            provider,
+            model: state.modelByProvider[canonical] ?? '',
+          };
+        }),
 
-      setModel: (model) => set({ model }),
+      setModel: (model) =>
+        set((state) => {
+          const canonical = normalizeProviderKey(state.provider);
+          return {
+            model,
+            modelByProvider: {
+              ...state.modelByProvider,
+              [canonical]: model,
+            },
+          };
+        }),
+
+      setModelByProvider: (provider, model) =>
+        set((state) => {
+          const canonical = normalizeProviderKey(provider);
+          const nextModelByProvider = {
+            ...state.modelByProvider,
+            [canonical]: model,
+          };
+          const shouldUpdateCurrentModel = normalizeProviderKey(state.provider) === canonical;
+          return {
+            modelByProvider: nextModelByProvider,
+            ...(shouldUpdateCurrentModel ? { model } : {}),
+          };
+        }),
 
       setApiKey: (apiKey) => set({ apiKey }),
 
@@ -350,16 +388,26 @@ export const useSettingsStore = create<SettingsState>()(
       name: 'plan-cascade-settings',
       merge: (persisted, current) => {
         const merged = { ...current, ...(persisted as object) };
+        const mergedState = merged as SettingsState;
+        const modelByProvider = { ...(mergedState.modelByProvider || {}) };
+        const canonicalProvider = normalizeProviderKey(mergedState.provider);
+        if (!(canonicalProvider in modelByProvider)) {
+          modelByProvider[canonicalProvider] = mergedState.model || '';
+        }
+        mergedState.modelByProvider = modelByProvider;
+        if (!mergedState.model && typeof modelByProvider[canonicalProvider] === 'string') {
+          mergedState.model = modelByProvider[canonicalProvider];
+        }
         // Ensure new planning phase configs exist for old users
         const defaultPhases = defaultSettings.phaseConfigs;
-        const storedPhases = (merged as SettingsState).phaseConfigs || {};
+        const storedPhases = mergedState.phaseConfigs || {};
         for (const key of Object.keys(defaultPhases)) {
           if (!(key in storedPhases)) {
             storedPhases[key] = defaultPhases[key];
           }
         }
-        (merged as SettingsState).phaseConfigs = storedPhases;
-        return merged as SettingsState;
+        mergedState.phaseConfigs = storedPhases;
+        return mergedState;
       },
       onRehydrateStorage: () => (state) => {
         // Apply theme on rehydration

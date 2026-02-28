@@ -234,6 +234,9 @@ export function ImportExportSection() {
       const embeddingStore = useEmbeddingStore.getState();
       await Promise.all([embeddingStore.fetchConfig(), embeddingStore.fetchIndexConfig()]);
 
+      // Notify settings sections with local UI cache that a hard reset happened.
+      window.dispatchEvent(new CustomEvent('plan-cascade:settings-reset'));
+
       setMessage({ type: 'success', text: t('importExport.reset.success') });
     } catch (error) {
       console.error('Reset failed:', error);
@@ -731,6 +734,7 @@ function buildFrontendExportState(settings: ReturnType<typeof useSettingsStore.g
     backend: settings.backend,
     provider: settings.provider,
     model: settings.model,
+    model_by_provider: settings.modelByProvider,
     theme: settings.theme,
     default_mode: settings.defaultMode,
     agents: settings.agents,
@@ -770,6 +774,14 @@ function syncSettingsToStore(settings: Record<string, unknown>) {
   if (settings.backend) store.setBackend(settings.backend as Parameters<typeof store.setBackend>[0]);
   if (settings.provider) store.setProvider(settings.provider as string);
   if (settings.model) store.setModel(settings.model as string);
+  if (settings.model_by_provider && typeof settings.model_by_provider === 'object') {
+    const modelMap = settings.model_by_provider as Record<string, unknown>;
+    for (const [provider, model] of Object.entries(modelMap)) {
+      if (typeof model === 'string') {
+        store.setModelByProvider(provider, model);
+      }
+    }
+  }
   if (settings.theme) store.setTheme(settings.theme as 'system' | 'light' | 'dark');
   if (settings.default_mode) store.setDefaultMode(settings.default_mode as 'simple' | 'expert');
 

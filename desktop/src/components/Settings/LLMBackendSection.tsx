@@ -92,26 +92,7 @@ export function LLMBackendSection() {
   const [customModelsByProvider, setCustomModelsByProvider] = useState<Record<string, string[]>>({});
   const [customModelInput, setCustomModelInput] = useState('');
 
-  // Load cached custom models and fetch provider metadata on mount.
-  useEffect(() => {
-    const storedCustomModels = localStorage.getItem(CUSTOM_MODELS_STORAGE_KEY);
-    if (storedCustomModels) {
-      try {
-        const parsed = JSON.parse(storedCustomModels) as Record<string, string[]>;
-        const normalized: Record<string, string[]> = {};
-        Object.entries(parsed).forEach(([provider, models]) => {
-          normalized[normalizeProvider(provider)] = dedupeModels(Array.isArray(models) ? models : []);
-        });
-        setCustomModelsByProvider(normalized);
-      } catch {
-        // Ignore malformed localStorage payload
-      }
-    }
-
-    void fetchProviderModels();
-  }, []);
-
-  const fetchProviderModels = async () => {
+  const fetchProviderModels = useCallback(async () => {
     try {
       const result = await invoke<CommandResponse<ProviderCatalog[]>>('list_providers');
       if (!result.success || !result.data) return;
@@ -129,7 +110,26 @@ export function LLMBackendSection() {
     } catch {
       // Keep fallback model list when provider metadata fetch fails.
     }
-  };
+  }, []);
+
+  // Load cached custom models and fetch provider metadata on mount.
+  useEffect(() => {
+    const storedCustomModels = localStorage.getItem(CUSTOM_MODELS_STORAGE_KEY);
+    if (storedCustomModels) {
+      try {
+        const parsed = JSON.parse(storedCustomModels) as Record<string, string[]>;
+        const normalized: Record<string, string[]> = {};
+        Object.entries(parsed).forEach(([provider, models]) => {
+          normalized[normalizeProvider(provider)] = dedupeModels(Array.isArray(models) ? models : []);
+        });
+        setCustomModelsByProvider(normalized);
+      } catch {
+        // Ignore malformed localStorage payload
+      }
+    }
+
+    void fetchProviderModels();
+  }, [fetchProviderModels]);
 
   const fetchApiKeyStatuses = useCallback(async () => {
     const localFallbackStatuses = getLocalProviderApiKeyStatuses();
@@ -212,6 +212,27 @@ export function LLMBackendSection() {
   useEffect(() => {
     void fetchApiKeyStatuses();
   }, [fetchApiKeyStatuses]);
+
+  useEffect(() => {
+    const handleSettingsReset = () => {
+      setApiKeyStatuses({});
+      setApiKeyInputs({});
+      setShowApiKey({});
+      setSavingKey(null);
+      setLoadingSavedKey(null);
+      setKeyMessage(null);
+      setModelsByProvider(FALLBACK_MODELS_BY_PROVIDER);
+      setCustomModelsByProvider({});
+      setCustomModelInput('');
+      void fetchProviderModels();
+      void fetchApiKeyStatuses();
+    };
+
+    window.addEventListener('plan-cascade:settings-reset', handleSettingsReset as EventListener);
+    return () => {
+      window.removeEventListener('plan-cascade:settings-reset', handleSettingsReset as EventListener);
+    };
+  }, [fetchApiKeyStatuses, fetchProviderModels]);
 
   const handleBackendChange = (newBackend: Backend) => {
     setBackend(newBackend);

@@ -909,28 +909,28 @@ fn test_openai_provider_reliable() {
 }
 
 #[test]
-fn test_qwen_provider_unreliable() {
+fn test_qwen_provider_reliable() {
     let config = ProviderConfig {
         provider: ProviderType::Qwen,
         api_key: Some("test".to_string()),
-        model: "qwen-plus".to_string(),
+        model: "qwen3-plus".to_string(),
         ..Default::default()
     };
     let provider = QwenProvider::new(config);
     assert_eq!(
         provider.tool_call_reliability(),
-        ToolCallReliability::Unreliable
+        ToolCallReliability::Reliable
     );
     assert_eq!(
         provider.default_fallback_mode(),
-        FallbackToolFormatMode::Soft
+        FallbackToolFormatMode::Off
     );
     // Still claims API tool support
     assert!(provider.supports_tools());
 }
 
 #[test]
-fn test_deepseek_provider_unreliable() {
+fn test_deepseek_provider_reliable() {
     let config = ProviderConfig {
         provider: ProviderType::DeepSeek,
         api_key: Some("test".to_string()),
@@ -940,49 +940,48 @@ fn test_deepseek_provider_unreliable() {
     let provider = DeepSeekProvider::new(config);
     assert_eq!(
         provider.tool_call_reliability(),
-        ToolCallReliability::Unreliable
+        ToolCallReliability::Reliable
     );
     assert_eq!(
         provider.default_fallback_mode(),
-        FallbackToolFormatMode::Soft
+        FallbackToolFormatMode::Off
     );
 }
 
 #[test]
-fn test_glm_provider_unreliable() {
+fn test_glm_provider_reliable() {
     let config = ProviderConfig {
         provider: ProviderType::Glm,
         api_key: Some("test".to_string()),
-        model: "glm-4-plus".to_string(),
+        model: "glm-5".to_string(),
         ..Default::default()
     };
     let provider = GlmProvider::new(config);
     assert_eq!(
         provider.tool_call_reliability(),
-        ToolCallReliability::Unreliable
+        ToolCallReliability::Reliable
     );
     assert_eq!(
         provider.default_fallback_mode(),
-        FallbackToolFormatMode::Soft
+        FallbackToolFormatMode::Off
     );
 }
 
 #[test]
-fn test_ollama_provider_unreliable() {
+fn test_ollama_provider_reliable() {
     let config = ProviderConfig {
         provider: ProviderType::Ollama,
         model: "llama3".to_string(),
         ..Default::default()
     };
     let provider = OllamaProvider::new(config);
-    // ADR-002: Ollama upgraded from None to Unreliable with ollama-rs SDK migration
     assert_eq!(
         provider.tool_call_reliability(),
-        ToolCallReliability::Unreliable
+        ToolCallReliability::Reliable
     );
     assert_eq!(
         provider.default_fallback_mode(),
-        FallbackToolFormatMode::Soft
+        FallbackToolFormatMode::Off
     );
     // Now supports native tool calling via ollama-rs SDK
     assert!(provider.supports_tools());
@@ -1101,7 +1100,7 @@ fn test_user_override_disables_fallback_for_unreliable() {
 }
 
 #[test]
-fn test_none_provider_gets_fallback_instructions() {
+fn test_ollama_reliable_provider_disables_fallback_instructions() {
     let config = OrchestratorConfig {
         provider: ProviderConfig {
             provider: ProviderType::Ollama,
@@ -1127,10 +1126,10 @@ fn test_none_provider_gets_fallback_instructions() {
     let tools = crate::services::tools::get_tool_definitions_from_registry();
     let opts = LlmRequestOptions::default();
     let prompt = orchestrator.effective_system_prompt(&tools, &opts).unwrap();
-    // None-reliability providers should get fallback instructions
+    // Ollama is treated as reliable and should not use fallback tool-call instructions.
     assert!(
-        prompt.contains("```tool_call"),
-        "None-reliability provider should get fallback instructions"
+        !prompt.contains("```tool_call"),
+        "Reliable provider should not get fallback instructions"
     );
 }
 
@@ -3756,8 +3755,7 @@ fn test_orchestrator_with_composer_registry() {
 // =============================================================================
 
 #[test]
-fn test_ollama_provider_gets_sliding_window_compactor() {
-    // ADR-F006: Ollama (Unreliable reliability) should get SlidingWindowCompactor
+fn test_ollama_provider_gets_llm_summary_compactor() {
     let config = OrchestratorConfig {
         provider: ProviderConfig {
             provider: ProviderType::Ollama,
@@ -3768,7 +3766,7 @@ fn test_ollama_provider_gets_sliding_window_compactor() {
         ..test_config()
     };
     let orchestrator = OrchestratorService::new(config);
-    assert_eq!(orchestrator.compactor.name(), "SlidingWindowCompactor");
+    assert_eq!(orchestrator.compactor.name(), "LlmSummaryCompactor");
 }
 
 #[test]
@@ -3804,25 +3802,23 @@ fn test_openai_provider_gets_llm_summary_compactor() {
 }
 
 #[test]
-fn test_qwen_provider_gets_sliding_window_compactor() {
-    // ADR-F006: Qwen (Unreliable) should get SlidingWindowCompactor
+fn test_qwen_provider_gets_llm_summary_compactor() {
     let config = OrchestratorConfig {
         provider: ProviderConfig {
             provider: ProviderType::Qwen,
             api_key: Some("test-key".to_string()),
-            model: "qwen-plus".to_string(),
+            model: "qwen3-plus".to_string(),
             base_url: Some("http://localhost:8080".to_string()),
             ..Default::default()
         },
         ..test_config()
     };
     let orchestrator = OrchestratorService::new(config);
-    assert_eq!(orchestrator.compactor.name(), "SlidingWindowCompactor");
+    assert_eq!(orchestrator.compactor.name(), "LlmSummaryCompactor");
 }
 
 #[test]
-fn test_deepseek_provider_gets_sliding_window_compactor() {
-    // ADR-F006: DeepSeek (Unreliable) should get SlidingWindowCompactor
+fn test_deepseek_provider_gets_llm_summary_compactor() {
     let config = OrchestratorConfig {
         provider: ProviderConfig {
             provider: ProviderType::DeepSeek,
@@ -3833,23 +3829,22 @@ fn test_deepseek_provider_gets_sliding_window_compactor() {
         ..test_config()
     };
     let orchestrator = OrchestratorService::new(config);
-    assert_eq!(orchestrator.compactor.name(), "SlidingWindowCompactor");
+    assert_eq!(orchestrator.compactor.name(), "LlmSummaryCompactor");
 }
 
 #[test]
-fn test_glm_provider_gets_sliding_window_compactor() {
-    // ADR-F006: GLM (Unreliable) should get SlidingWindowCompactor
+fn test_glm_provider_gets_llm_summary_compactor() {
     let config = OrchestratorConfig {
         provider: ProviderConfig {
             provider: ProviderType::Glm,
             api_key: Some("test-key".to_string()),
-            model: "glm-4".to_string(),
+            model: "glm-5".to_string(),
             ..Default::default()
         },
         ..test_config()
     };
     let orchestrator = OrchestratorService::new(config);
-    assert_eq!(orchestrator.compactor.name(), "SlidingWindowCompactor");
+    assert_eq!(orchestrator.compactor.name(), "LlmSummaryCompactor");
 }
 
 #[test]
@@ -3933,36 +3928,34 @@ fn test_compaction_config_serde_explicit_override_in_orchestrator_config() {
 
 #[test]
 fn test_sub_agent_gets_compactor_based_on_provider() {
-    // ADR-F006: Sub-agents created via new_sub_agent should also get the
-    // correct compactor based on provider reliability
+    // Sub-agents should inherit the same compactor strategy as top-level agents.
     let config = OrchestratorConfig {
         provider: ProviderConfig {
             provider: ProviderType::Qwen,
             api_key: Some("test-key".to_string()),
-            model: "qwen-plus".to_string(),
+            model: "qwen3-plus".to_string(),
             base_url: Some("http://localhost:8080".to_string()),
             ..Default::default()
         },
         ..test_config()
     };
     let sub_agent = OrchestratorService::new_sub_agent(config, CancellationToken::new());
-    assert_eq!(sub_agent.compactor.name(), "SlidingWindowCompactor");
+    assert_eq!(sub_agent.compactor.name(), "LlmSummaryCompactor");
 }
 
 #[test]
-fn test_minimax_provider_gets_sliding_window_compactor() {
-    // ADR-F006: Minimax (Unreliable) should get SlidingWindowCompactor
+fn test_minimax_provider_gets_llm_summary_compactor() {
     let config = OrchestratorConfig {
         provider: ProviderConfig {
             provider: ProviderType::Minimax,
             api_key: Some("test-key".to_string()),
-            model: "minimax-test".to_string(),
+            model: "MiniMax-M2.5".to_string(),
             ..Default::default()
         },
         ..test_config()
     };
     let orchestrator = OrchestratorService::new(config);
-    assert_eq!(orchestrator.compactor.name(), "SlidingWindowCompactor");
+    assert_eq!(orchestrator.compactor.name(), "LlmSummaryCompactor");
 }
 
 // ── Sub-agent context injection tests ──────────────────────────────────
@@ -4092,6 +4085,11 @@ fn test_sub_agent_knowledge_block_capped() {
         skills_snapshot: vec![],
         memories_snapshot: vec![],
         knowledge_block_snapshot: Some(big_block.clone()),
+        shared_knowledge_pipeline: None,
+        knowledge_project_id: None,
+        knowledge_collection_filter: None,
+        knowledge_document_filter: None,
+        knowledge_awareness_snapshot: None,
         shared_analytics_tx: None,
         shared_analytics_cost_calculator: None,
         shared_permission_gate: None,

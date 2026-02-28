@@ -25,6 +25,7 @@ use super::types::{
     ToolCallReliability, ToolDefinition, UsageStats,
 };
 use crate::http_client::build_http_client;
+use crate::reliable_catalog::is_reliable_model;
 use crate::streaming_adapters::ClaudeApiAdapter;
 use plan_cascade_core::streaming::{StreamAdapter, UnifiedStreamEvent};
 
@@ -427,10 +428,17 @@ impl LlmProvider for MinimaxProvider {
     }
 
     fn tool_call_reliability(&self) -> ToolCallReliability {
-        ToolCallReliability::Unreliable
+        if is_reliable_model(self.config.provider, &self.config.model) {
+            ToolCallReliability::Reliable
+        } else {
+            ToolCallReliability::Unreliable
+        }
     }
 
     fn default_fallback_mode(&self) -> FallbackToolFormatMode {
+        if matches!(self.tool_call_reliability(), ToolCallReliability::Reliable) {
+            return FallbackToolFormatMode::Off;
+        }
         if self.config.enable_thinking && self.model_supports_reasoning() {
             FallbackToolFormatMode::Off
         } else {
@@ -839,7 +847,7 @@ mod tests {
         let provider = MinimaxProvider::new(test_config());
         assert_eq!(
             provider.tool_call_reliability(),
-            ToolCallReliability::Unreliable
+            ToolCallReliability::Reliable
         );
     }
 
@@ -852,7 +860,7 @@ mod tests {
         let provider = MinimaxProvider::new(config);
         assert_eq!(
             provider.default_fallback_mode(),
-            FallbackToolFormatMode::Soft
+            FallbackToolFormatMode::Off
         );
     }
 

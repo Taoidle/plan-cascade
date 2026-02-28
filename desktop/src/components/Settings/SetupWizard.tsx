@@ -26,6 +26,7 @@ import {
   FileIcon,
 } from '@radix-ui/react-icons';
 import { useSettingsStore, Backend } from '../../store/settings';
+import { DEFAULT_MODEL_BY_PROVIDER, normalizeProvider } from '../../lib/providers';
 
 // ============================================================================
 // Types
@@ -219,7 +220,7 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, currentStep, isSaving]);
+  }, [isOpen, currentStep, handleComplete, handleNext, handleSkip]);
 
   const currentStepIndex = steps.findIndex((s) => s.id === currentStep);
   const needsApiKey = BACKENDS_REQUIRING_KEY.includes(backend);
@@ -985,10 +986,17 @@ async function saveSettings() {
     const { updateSettings, isTauriAvailable } = await import('../../lib/settingsApi');
 
     if (isTauriAvailable()) {
+      const canonicalProvider = normalizeProvider(settings.provider || '');
+      const resolvedDefaultModel =
+        settings.modelByProvider[canonicalProvider] ||
+        settings.model ||
+        DEFAULT_MODEL_BY_PROVIDER[canonicalProvider] ||
+        '';
       await updateSettings({
         theme: settings.theme,
         default_provider: settings.provider,
-        default_model: settings.model,
+        default_model: resolvedDefaultModel,
+        model_by_provider: settings.modelByProvider,
       });
     }
   } catch (error) {

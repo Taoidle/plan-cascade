@@ -570,7 +570,7 @@ mod tests {
         assert_eq!(provider.display_name(), "Qwen (text-embedding-v3)");
         assert_eq!(provider.provider_type(), EmbeddingProviderType::Qwen);
         assert!(!provider.is_local());
-        assert_eq!(provider.max_batch_size(), 25);
+        assert_eq!(provider.max_batch_size(), 10);
         assert_eq!(provider.api_key, "test-api-key");
     }
 
@@ -643,9 +643,9 @@ mod tests {
     }
 
     #[test]
-    fn max_batch_size_is_25() {
+    fn max_batch_size_is_10_for_matryoshka_models() {
         let provider = QwenEmbeddingProvider::new(&default_config());
-        assert_eq!(provider.max_batch_size(), 25);
+        assert_eq!(provider.max_batch_size(), 10);
     }
 
     #[test]
@@ -796,7 +796,7 @@ mod tests {
             result.unwrap_err(),
             EmbeddingError::BatchSizeLimitExceeded {
                 requested: 26,
-                max_allowed: 25,
+                max_allowed: 10,
             }
         ));
     }

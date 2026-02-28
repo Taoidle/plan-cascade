@@ -2,7 +2,7 @@
 //!
 //! Implementation of the LlmProvider trait for Ollama local inference
 //! using the ollama-rs native SDK. Supports local model inference without
-//! API keys, native tool calling (Unreliable reliability), and streaming.
+//! API keys, native tool calling, and streaming.
 
 use async_trait::async_trait;
 use ollama_rs::generation::chat::request::ChatMessageRequest;
@@ -562,13 +562,11 @@ impl LlmProvider for OllamaProvider {
     }
 
     fn tool_call_reliability(&self) -> ToolCallReliability {
-        // ADR-002: Upgrade from None to Unreliable - enables dual-channel tool calling
-        ToolCallReliability::Unreliable
+        ToolCallReliability::Reliable
     }
 
     fn default_fallback_mode(&self) -> FallbackToolFormatMode {
-        // Dual-channel: native tools + soft prompt fallback for reliability
-        FallbackToolFormatMode::Soft
+        FallbackToolFormatMode::Off
     }
 
     fn context_window(&self) -> u32 {
@@ -779,7 +777,7 @@ mod tests {
         assert!(provider.supports_tools()); // Now true with SDK
         assert_eq!(
             provider.tool_call_reliability(),
-            ToolCallReliability::Unreliable
+            ToolCallReliability::Reliable
         );
     }
 
@@ -834,7 +832,7 @@ mod tests {
         let provider = OllamaProvider::new(test_config());
         assert_eq!(
             provider.tool_call_reliability(),
-            ToolCallReliability::Unreliable
+            ToolCallReliability::Reliable
         );
     }
 
@@ -843,7 +841,7 @@ mod tests {
         let provider = OllamaProvider::new(test_config());
         assert_eq!(
             provider.default_fallback_mode(),
-            FallbackToolFormatMode::Soft
+            FallbackToolFormatMode::Off
         );
     }
 

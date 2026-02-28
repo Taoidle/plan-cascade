@@ -508,11 +508,20 @@ async fn resolve_provider_config(
 
     let project_root = standalone_state.working_directory.read().await.clone();
 
+    let resolved_model = {
+        let model = app_config.model_for_provider(canonical_provider);
+        if model.is_empty() {
+            app_config.default_model.clone()
+        } else {
+            model
+        }
+    };
+
     let config = ProviderConfig {
         provider: provider_type,
         api_key,
         base_url: None,
-        model: app_config.default_model.clone(),
+        model: resolved_model,
         proxy,
         ..Default::default()
     };

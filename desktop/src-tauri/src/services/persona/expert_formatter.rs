@@ -225,15 +225,15 @@ fn extract_json_from_response(response_text: &str) -> String {
         }
     }
 
-    // Try to find JSON object { ... }
-    if let (Some(start), Some(end)) = (trimmed.find('{'), trimmed.rfind('}')) {
+    // Try to find JSON array [ ... ]
+    if let (Some(start), Some(end)) = (trimmed.find('['), trimmed.rfind(']')) {
         if start <= end {
             return trimmed[start..=end].to_string();
         }
     }
 
-    // Try to find JSON array [ ... ]
-    if let (Some(start), Some(end)) = (trimmed.find('['), trimmed.rfind(']')) {
+    // Try to find JSON object { ... }
+    if let (Some(start), Some(end)) = (trimmed.find('{'), trimmed.rfind('}')) {
         if start <= end {
             return trimmed[start..=end].to_string();
         }

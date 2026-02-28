@@ -11,6 +11,7 @@ import { clsx } from 'clsx';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '../../store/settings';
+import { DEFAULT_MODEL_BY_PROVIDER, normalizeProvider } from '../../lib/providers';
 
 // Section components (to be implemented)
 import { GeneralSection } from './GeneralSection';
@@ -127,7 +128,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               className={clsx(
                 'w-48 shrink-0 border-r border-gray-200 dark:border-gray-800',
                 'bg-gray-50 dark:bg-gray-950',
-                'p-2 space-y-1',
+                'p-2 space-y-1 overflow-y-auto min-h-0',
               )}
             >
               {tabs.map((tab) => (
@@ -240,11 +241,18 @@ async function saveSettingsToBackend() {
     const { updateSettings, isTauriAvailable } = await import('../../lib/settingsApi');
 
     if (isTauriAvailable()) {
+      const canonicalProvider = normalizeProvider(settings.provider || '');
+      const resolvedDefaultModel =
+        settings.modelByProvider[canonicalProvider] ||
+        settings.model ||
+        DEFAULT_MODEL_BY_PROVIDER[canonicalProvider] ||
+        '';
       await updateSettings({
         theme: settings.theme,
         language: settings.language,
         default_provider: settings.provider,
-        default_model: settings.model,
+        default_model: resolvedDefaultModel,
+        model_by_provider: settings.modelByProvider,
       });
     }
   } catch (error) {

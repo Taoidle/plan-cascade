@@ -444,11 +444,20 @@ async fn resolve_extraction_provider(
         .ok()
         .flatten();
 
+    let resolved_model = {
+        let model = app_config.model_for_provider(canonical);
+        if model.is_empty() {
+            app_config.default_model.clone()
+        } else {
+            model
+        }
+    };
+
     let config = ProviderConfig {
         provider: provider_type.clone(),
         api_key,
         base_url: resolved_base_url,
-        model: app_config.default_model.clone(),
+        model: resolved_model,
         max_tokens: 2048,
         temperature: 0.3,
         proxy,

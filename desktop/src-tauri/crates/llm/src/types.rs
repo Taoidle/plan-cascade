@@ -74,13 +74,12 @@ impl Default for ToolCallMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolCallReliability {
-    /// Provider's native tool calling works consistently (Anthropic, OpenAI).
+    /// Provider/model native tool calling works consistently.
     Reliable,
-    /// Provider claims tool support but native tool_calls emission is inconsistent,
-    /// especially when thinking/reasoning mode is enabled (Qwen, DeepSeek, GLM).
+    /// Provider claims tool support but native tool_calls emission is inconsistent.
     /// The orchestrator injects Soft fallback instructions alongside native tools.
     Unreliable,
-    /// Provider does not support native tool calling (Ollama).
+    /// Provider does not support native tool calling.
     /// The orchestrator uses full prompt-based fallback.
     None,
 }

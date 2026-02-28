@@ -14,6 +14,7 @@ use super::types::{
     ToolCallReliability, ToolDefinition, UsageStats,
 };
 use crate::http_client::build_http_client;
+use crate::reliable_catalog::is_reliable_model;
 use crate::streaming_adapters::DeepSeekAdapter;
 use plan_cascade_core::streaming::{StreamAdapter, UnifiedStreamEvent};
 
@@ -380,13 +381,17 @@ impl LlmProvider for DeepSeekProvider {
     }
 
     fn tool_call_reliability(&self) -> ToolCallReliability {
-        // DeepSeek API supports native function calling, but in practice
-        // models with thinking/reasoning may not emit native tool_calls reliably.
-        // Keep Unreliable to use prompt-based fallback which works consistently.
-        ToolCallReliability::Unreliable
+        if is_reliable_model(self.config.provider, &self.config.model) {
+            ToolCallReliability::Reliable
+        } else {
+            ToolCallReliability::Unreliable
+        }
     }
 
     fn default_fallback_mode(&self) -> FallbackToolFormatMode {
+        if matches!(self.tool_call_reliability(), ToolCallReliability::Reliable) {
+            return FallbackToolFormatMode::Off;
+        }
         if self.config.enable_thinking && self.model_supports_thinking() {
             // DeepSeek R1 with thinking enabled: disable prompt-based fallback
             // to avoid confusing the model with dual-channel tool calling

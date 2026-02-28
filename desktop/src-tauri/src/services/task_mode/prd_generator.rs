@@ -1356,9 +1356,14 @@ Hope this helps!"#;
             },
         ];
 
-        // Very small budget forces compaction
-        let messages =
-            compact_conversation_history(&provider, &history, PRD_RESERVED_TOKENS + 100).await;
+        // Force compaction deterministically: budget is 1 token below full-history estimate.
+        let forced_history_budget = estimate_history_tokens(&history).saturating_sub(1);
+        let messages = compact_conversation_history(
+            &provider,
+            &history,
+            PRD_RESERVED_TOKENS + forced_history_budget,
+        )
+        .await;
 
         // Should have summary pair + at least one recent turn
         assert!(messages.len() >= 4); // summary pair (2) + at least 1 recent turn (2)

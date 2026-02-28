@@ -438,11 +438,15 @@ describe('TaskModeStore', () => {
 
       emitEvent('task-mode-progress', {
         sessionId: 'session-123',
+        eventType: 'story_completed',
         currentBatch: 2,
         totalBatches: 3,
-        storyStatuses: { 'story-001': 'completed', 'story-002': 'running' },
-        storiesCompleted: 1,
-        storiesFailed: 0,
+        storyId: 'story-001',
+        storyStatus: 'completed',
+        agentName: 'frontend-agent',
+        gateResults: null,
+        error: null,
+        progressPct: 66,
       });
 
       const state = useTaskModeStore.getState();
@@ -458,11 +462,15 @@ describe('TaskModeStore', () => {
 
       emitEvent('task-mode-progress', {
         sessionId: 'other-session',
+        eventType: 'story_started',
         currentBatch: 5,
         totalBatches: 10,
-        storyStatuses: {},
-        storiesCompleted: 0,
-        storiesFailed: 0,
+        storyId: 'story-001',
+        storyStatus: 'running',
+        agentName: 'backend-agent',
+        gateResults: null,
+        error: null,
+        progressPct: 10,
       });
 
       expect(useTaskModeStore.getState().currentBatch).toBe(0);
