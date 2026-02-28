@@ -22,6 +22,7 @@ import type {
   PlanClarifyQuestionCardData,
 } from '../types/planModeCard';
 import type { CommandResponse } from '../lib/tauri';
+import type { ContextSourceConfig } from './contextSources';
 
 // ============================================================================
 // Store Interface
@@ -50,6 +51,8 @@ export interface PlanModeState {
     provider?: string,
     model?: string,
     baseUrl?: string,
+    projectPath?: string,
+    contextSources?: ContextSourceConfig,
     conversationContext?: string,
     locale?: string,
   ) => Promise<void>;
@@ -58,6 +61,9 @@ export interface PlanModeState {
     provider?: string,
     model?: string,
     baseUrl?: string,
+    projectPath?: string,
+    contextSources?: ContextSourceConfig,
+    conversationContext?: string,
     locale?: string,
   ) => Promise<PlanModeSession | null>;
   skipClarification: () => Promise<void>;
@@ -65,6 +71,8 @@ export interface PlanModeState {
     provider?: string,
     model?: string,
     baseUrl?: string,
+    projectPath?: string,
+    contextSources?: ContextSourceConfig,
     conversationContext?: string,
     locale?: string,
   ) => Promise<void>;
@@ -73,6 +81,9 @@ export interface PlanModeState {
     provider?: string,
     model?: string,
     baseUrl?: string,
+    projectPath?: string,
+    contextSources?: ContextSourceConfig,
+    conversationContext?: string,
     locale?: string,
   ) => Promise<void>;
   refreshStatus: () => Promise<void>;
@@ -113,7 +124,16 @@ const DEFAULT_STATE = {
 export const usePlanModeStore = create<PlanModeState>((set, get) => ({
   ...DEFAULT_STATE,
 
-  enterPlanMode: async (description, provider, model, baseUrl, conversationContext, locale) => {
+  enterPlanMode: async (
+    description,
+    provider,
+    model,
+    baseUrl,
+    projectPath,
+    contextSources,
+    conversationContext,
+    locale,
+  ) => {
     set({ isLoading: true, error: null });
     try {
       // Resolve base URL for multi-endpoint providers (Qwen, GLM, MiniMax)
@@ -129,6 +149,8 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
         provider: provider || null,
         model: model || null,
         baseUrl: finalBaseUrl || null,
+        projectPath: projectPath || null,
+        contextSources: contextSources || null,
         conversationContext: conversationContext || null,
         locale: locale || null,
       });
@@ -152,7 +174,16 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
     }
   },
 
-  submitClarification: async (answer, provider, model, baseUrl, locale) => {
+  submitClarification: async (
+    answer,
+    provider,
+    model,
+    baseUrl,
+    projectPath,
+    contextSources,
+    conversationContext,
+    locale,
+  ) => {
     const { sessionId } = get();
     if (!sessionId) return null;
 
@@ -169,6 +200,9 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
         provider: finalProvider || null,
         model: finalModel || null,
         baseUrl: finalBaseUrl || null,
+        projectPath: projectPath || null,
+        contextSources: contextSources || null,
+        conversationContext: conversationContext || null,
         locale: locale || null,
       });
       if (result.success && result.data) {
@@ -201,7 +235,7 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
     }
   },
 
-  generatePlan: async (provider, model, baseUrl, conversationContext, locale) => {
+  generatePlan: async (provider, model, baseUrl, projectPath, contextSources, conversationContext, locale) => {
     const { sessionId } = get();
     if (!sessionId) return;
 
@@ -218,6 +252,8 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
         provider: finalProvider || null,
         model: finalModel || null,
         baseUrl: finalBaseUrl || null,
+        projectPath: projectPath || null,
+        contextSources: contextSources || null,
         conversationContext: conversationContext || null,
         locale: locale || null,
       });
@@ -236,7 +272,7 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
     }
   },
 
-  approvePlan: async (plan, provider, model, baseUrl, locale) => {
+  approvePlan: async (plan, provider, model, baseUrl, projectPath, contextSources, conversationContext, locale) => {
     const { sessionId } = get();
     if (!sessionId) return;
 
@@ -254,6 +290,9 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
         provider: finalProvider || null,
         model: finalModel || null,
         baseUrl: finalBaseUrl || null,
+        projectPath: projectPath || null,
+        contextSources: contextSources || null,
+        conversationContext: conversationContext || null,
         locale: locale || null,
       });
 

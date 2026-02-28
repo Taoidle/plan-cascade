@@ -20,6 +20,11 @@ use crate::services::plan_mode::types::{
     ClarificationAnswer, Plan, PlanAnalysis, PlanExecutionProgress, PlanExecutionReport,
     PlanModePhase, PlanModeSession, StepExecutionState, StepOutput,
 };
+use crate::services::skills::model::InjectionPhase;
+use crate::services::task_mode::context_provider::{
+    query_selected_context_without_knowledge, ContextSourceConfig, MemorySourceConfig,
+    SkillsSourceConfig,
+};
 use crate::state::AppState;
 
 // ============================================================================
@@ -54,6 +59,8 @@ pub async fn enter_plan_mode(
     provider: Option<String>,
     model: Option<String>,
     base_url: Option<String>,
+    project_path: Option<String>,
+    context_sources: Option<ContextSourceConfig>,
     conversation_context: Option<String>,
     locale: Option<String>,
     state: tauri::State<'_, PlanModeState>,
@@ -104,10 +111,24 @@ pub async fn enter_plan_mode(
 
         let locale_tag = normalize_locale(locale.as_deref());
         let lang_instruction = locale_instruction(locale_tag);
+        let plan_context = build_plan_conversation_context(
+            &app_state,
+            project_path.as_deref(),
+            conversation_context.as_deref(),
+            context_sources.as_ref(),
+            &description,
+            InjectionPhase::Planning,
+        )
+        .await;
+        let plan_context_ref = if plan_context.is_empty() {
+            None
+        } else {
+            Some(plan_context.as_str())
+        };
 
         match crate::services::plan_mode::analyzer::analyze_task(
             &description,
-            conversation_context.as_deref(),
+            plan_context_ref,
             lang_instruction,
             llm_provider.clone(),
             &registry,
@@ -125,7 +146,7 @@ pub async fn enter_plan_mode(
                         &description,
                         &analysis,
                         &[],
-                        conversation_context.as_deref(),
+                        plan_context_ref,
                         lang_instruction,
                         adapter.as_ref(),
                         llm_provider,
@@ -191,6 +212,9 @@ pub async fn submit_plan_clarification(
     provider: Option<String>,
     model: Option<String>,
     base_url: Option<String>,
+    project_path: Option<String>,
+    context_sources: Option<ContextSourceConfig>,
+    conversation_context: Option<String>,
     locale: Option<String>,
     state: tauri::State<'_, PlanModeState>,
     app_state: tauri::State<'_, AppState>,
@@ -246,12 +270,26 @@ pub async fn submit_plan_clarification(
 
         let locale_tag = normalize_locale(locale.as_deref());
         let lang_instruction = locale_instruction(locale_tag);
+        let plan_context = build_plan_conversation_context(
+            &app_state,
+            project_path.as_deref(),
+            conversation_context.as_deref(),
+            context_sources.as_ref(),
+            &description,
+            InjectionPhase::Planning,
+        )
+        .await;
+        let plan_context_ref = if plan_context.is_empty() {
+            None
+        } else {
+            Some(plan_context.as_str())
+        };
 
         crate::services::plan_mode::clarifier::generate_clarification_question(
             &description,
             &analysis,
             &clarifications,
-            None,
+            plan_context_ref,
             lang_instruction,
             adapter.as_ref(),
             llm_provider,
@@ -310,6 +348,8 @@ pub async fn generate_plan(
     provider: Option<String>,
     model: Option<String>,
     base_url: Option<String>,
+    project_path: Option<String>,
+    context_sources: Option<ContextSourceConfig>,
     conversation_context: Option<String>,
     locale: Option<String>,
     state: tauri::State<'_, PlanModeState>,
@@ -352,13 +392,27 @@ pub async fn generate_plan(
 
     let locale_tag = normalize_locale(locale.as_deref());
     let lang_instruction = locale_instruction(locale_tag);
+    let plan_context = build_plan_conversation_context(
+        &app_state,
+        project_path.as_deref(),
+        conversation_context.as_deref(),
+        context_sources.as_ref(),
+        &description,
+        InjectionPhase::Planning,
+    )
+    .await;
+    let plan_context_ref = if plan_context.is_empty() {
+        None
+    } else {
+        Some(plan_context.as_str())
+    };
 
     match crate::services::plan_mode::planner::generate_plan(
         &description,
         &domain,
         adapter,
         &clarifications,
-        conversation_context.as_deref(),
+        plan_context_ref,
         lang_instruction,
         llm_provider,
     )
@@ -389,13 +443,16 @@ pub async fn approve_plan(
     provider: Option<String>,
     model: Option<String>,
     base_url: Option<String>,
+    project_path: Option<String>,
+    context_sources: Option<ContextSourceConfig>,
+    conversation_context: Option<String>,
     locale: Option<String>,
     state: tauri::State<'_, PlanModeState>,
     app_state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<CommandResponse<bool>, String> {
     // Validate
-    let adapter_name = {
+    let (adapter_name, task_description) = {
         let session_guard = state.session.read().await;
         let session = session_guard
             .as_ref()
@@ -406,7 +463,7 @@ pub async fn approve_plan(
             return Ok(CommandResponse::err("Not in reviewing phase"));
         }
 
-        plan.adapter_name.clone()
+        (plan.adapter_name.clone(), session.description.clone())
     };
 
     let (prov, mdl) = match (&provider, &model) {
@@ -449,6 +506,20 @@ pub async fn approve_plan(
     let sid = session_id.clone();
     let locale_tag = normalize_locale(locale.as_deref());
     let lang_instruction = locale_instruction(locale_tag).to_string();
+    let execution_context = build_plan_conversation_context(
+        &app_state,
+        project_path.as_deref(),
+        conversation_context.as_deref(),
+        context_sources.as_ref(),
+        &task_description,
+        InjectionPhase::Implementation,
+    )
+    .await;
+    let execution_context = if execution_context.is_empty() {
+        None
+    } else {
+        Some(execution_context)
+    };
 
     tokio::spawn(async move {
         let config = crate::services::plan_mode::step_executor::StepExecutionConfig::default();
@@ -461,6 +532,7 @@ pub async fn approve_plan(
             adapter,
             llm_provider,
             config,
+            execution_context,
             lang_instruction,
             app_handle,
             cancel_token,
@@ -704,6 +776,66 @@ pub async fn list_plan_adapters(
 ) -> Result<CommandResponse<Vec<AdapterInfo>>, String> {
     let registry = state.adapter_registry.read().await;
     Ok(CommandResponse::ok(registry.list()))
+}
+
+fn default_plan_context_sources() -> ContextSourceConfig {
+    ContextSourceConfig {
+        project_id: "default".to_string(),
+        knowledge: None,
+        memory: Some(MemorySourceConfig {
+            enabled: true,
+            selected_categories: vec![],
+            selected_memory_ids: vec![],
+        }),
+        skills: Some(SkillsSourceConfig {
+            enabled: true,
+            selected_skill_ids: vec![],
+        }),
+    }
+}
+
+async fn build_plan_conversation_context(
+    app_state: &AppState,
+    project_path: Option<&str>,
+    conversation_context: Option<&str>,
+    context_sources: Option<&ContextSourceConfig>,
+    query: &str,
+    phase: InjectionPhase,
+) -> String {
+    let mut sections = Vec::new();
+
+    if let Some(ctx) = conversation_context {
+        let trimmed = ctx.trim();
+        if !trimmed.is_empty() {
+            sections.push(trimmed.to_string());
+        }
+    }
+
+    let Some(project_path) = project_path.map(str::trim).filter(|p| !p.is_empty()) else {
+        return sections.join("\n\n");
+    };
+
+    let config = context_sources
+        .cloned()
+        .unwrap_or_else(default_plan_context_sources);
+
+    let enriched = query_selected_context_without_knowledge(
+        &config,
+        app_state,
+        project_path,
+        query,
+        phase,
+    )
+    .await;
+
+    if !enriched.memory_block.is_empty() {
+        sections.push(enriched.memory_block);
+    }
+    if !enriched.skills_block.is_empty() {
+        sections.push(enriched.skills_block);
+    }
+
+    sections.join("\n\n")
 }
 
 // ============================================================================

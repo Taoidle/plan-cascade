@@ -15,6 +15,7 @@ import i18n from '../i18n';
 import { useExecutionStore } from './execution';
 import { usePlanModeStore } from './planMode';
 import { useSettingsStore } from './settings';
+import { useContextSourcesStore } from './contextSources';
 import { buildConversationHistory } from '../lib/contextBridge';
 import type { CardPayload } from '../types/workflowCard';
 import type {
@@ -141,9 +142,20 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
 
     // Resolve provider base URL (handles multi-endpoint providers like Qwen, GLM, MiniMax)
     const baseUrl = settings.provider ? resolveProviderBaseUrl(settings.provider, settings) : undefined;
+    const projectPath = settings.workspacePath || undefined;
+    const contextSources = useContextSourcesStore.getState().buildConfig();
 
     // Enter plan mode (runs analysis)
-    await planStore.enterPlanMode(description, settings.provider, settings.model, baseUrl, contextStr, i18n.language);
+    await planStore.enterPlanMode(
+      description,
+      settings.provider,
+      settings.model,
+      baseUrl,
+      projectPath,
+      contextSources,
+      contextStr,
+      i18n.language,
+    );
 
     const { analysis, sessionPhase, sessionId, error } = usePlanModeStore.getState();
 
@@ -193,7 +205,24 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
     injectInfo(i18n.t('planMode:orchestrator.generatingQuestion', 'Generating next question...'));
 
     const planStore = usePlanModeStore.getState();
-    const updatedSession = await planStore.submitClarification(answer, undefined, undefined, undefined, i18n.language);
+    const settings = useSettingsStore.getState();
+    const projectPath = settings.workspacePath || undefined;
+    const contextSources = useContextSourcesStore.getState().buildConfig();
+    const conversationHistory = buildConversationHistory();
+    const contextStr =
+      conversationHistory.length > 0
+        ? conversationHistory.map((t) => `user: ${t.user}\nassistant: ${t.assistant}`).join('\n')
+        : undefined;
+    const updatedSession = await planStore.submitClarification(
+      answer,
+      undefined,
+      undefined,
+      undefined,
+      projectPath,
+      contextSources,
+      contextStr,
+      i18n.language,
+    );
 
     if (!updatedSession) {
       // Submission failed — fallback to planning
@@ -243,9 +272,20 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       conversationHistory.length > 0
         ? conversationHistory.map((t) => `user: ${t.user}\nassistant: ${t.assistant}`).join('\n')
         : undefined;
+    const settings = useSettingsStore.getState();
+    const projectPath = settings.workspacePath || undefined;
+    const contextSources = useContextSourcesStore.getState().buildConfig();
 
     const planStore = usePlanModeStore.getState();
-    await planStore.generatePlan(undefined, undefined, undefined, contextStr, i18n.language);
+    await planStore.generatePlan(
+      undefined,
+      undefined,
+      undefined,
+      projectPath,
+      contextSources,
+      contextStr,
+      i18n.language,
+    );
 
     const { plan, error } = usePlanModeStore.getState();
 
@@ -318,7 +358,24 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
 
     // Trigger approval
     const planStore = usePlanModeStore.getState();
-    await planStore.approvePlan(plan, undefined, undefined, undefined, i18n.language);
+    const settings = useSettingsStore.getState();
+    const projectPath = settings.workspacePath || undefined;
+    const contextSources = useContextSourcesStore.getState().buildConfig();
+    const conversationHistory = buildConversationHistory();
+    const contextStr =
+      conversationHistory.length > 0
+        ? conversationHistory.map((t) => `user: ${t.user}\nassistant: ${t.assistant}`).join('\n')
+        : undefined;
+    await planStore.approvePlan(
+      plan,
+      undefined,
+      undefined,
+      undefined,
+      projectPath,
+      contextSources,
+      contextStr,
+      i18n.language,
+    );
   },
 
   cancelWorkflow: async () => {

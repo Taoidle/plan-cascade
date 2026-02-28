@@ -7,18 +7,25 @@ use rusqlite::params;
 use std::sync::Arc;
 
 use crate::services::skills::model::{GeneratedSkill, GeneratedSkillRecord};
-use crate::storage::database::Database;
+use crate::storage::database::{Database, DbPool};
 use crate::utils::error::{AppError, AppResult};
 
 /// Service for managing auto-generated skills in the skill_library table.
 pub struct SkillGeneratorStore {
-    db: Arc<Database>,
+    pool: DbPool,
 }
 
 impl SkillGeneratorStore {
     /// Create a new SkillGeneratorStore.
     pub fn new(db: Arc<Database>) -> Self {
-        Self { db }
+        Self {
+            pool: db.pool().clone(),
+        }
+    }
+
+    /// Create a SkillGeneratorStore from an existing database pool.
+    pub fn from_pool(pool: DbPool) -> Self {
+        Self { pool }
     }
 
     /// Save a generated skill to the database.
@@ -33,7 +40,7 @@ impl SkillGeneratorStore {
         let keywords_json = "[]"; // Keywords can be extracted later
 
         {
-            let conn = self.db.get_connection()?;
+            let conn = self.get_connection()?;
             conn.execute(
                 "INSERT INTO skill_library (id, project_path, name, description, tags, body, source_type, source_session_ids, keywords)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -61,7 +68,7 @@ impl SkillGeneratorStore {
         project_path: &str,
         include_disabled: bool,
     ) -> AppResult<Vec<GeneratedSkillRecord>> {
-        let conn = self.db.get_connection()?;
+        let conn = self.get_connection()?;
 
         let sql = if include_disabled {
             "SELECT id, project_path, name, description, tags, body, source_type, \
@@ -105,7 +112,7 @@ impl SkillGeneratorStore {
 
     /// Get a single generated skill by ID.
     pub fn get_generated_skill(&self, id: &str) -> AppResult<Option<GeneratedSkillRecord>> {
-        let conn = self.db.get_connection()?;
+        let conn = self.get_connection()?;
 
         let result = conn.query_row(
             "SELECT id, project_path, name, description, tags, body, source_type, \
@@ -142,7 +149,7 @@ impl SkillGeneratorStore {
 
     /// Toggle a generated skill's enabled state.
     pub fn toggle_generated_skill(&self, id: &str, enabled: bool) -> AppResult<()> {
-        let conn = self.db.get_connection()?;
+        let conn = self.get_connection()?;
         let enabled_int: i32 = if enabled { 1 } else { 0 };
 
         let rows = conn.execute(
@@ -162,7 +169,7 @@ impl SkillGeneratorStore {
 
     /// Delete a generated skill by ID.
     pub fn delete_generated_skill(&self, id: &str) -> AppResult<()> {
-        let conn = self.db.get_connection()?;
+        let conn = self.get_connection()?;
 
         let rows = conn.execute("DELETE FROM skill_library WHERE id = ?1", params![id])?;
 
@@ -178,7 +185,7 @@ impl SkillGeneratorStore {
 
     /// Increment usage count for a generated skill.
     pub fn increment_usage(&self, id: &str) -> AppResult<()> {
-        let conn = self.db.get_connection()?;
+        let conn = self.get_connection()?;
 
         conn.execute(
             "UPDATE skill_library SET usage_count = usage_count + 1, updated_at = datetime('now') WHERE id = ?1",
@@ -190,7 +197,7 @@ impl SkillGeneratorStore {
 
     /// Count generated skills for a project.
     pub fn count_generated_skills(&self, project_path: &str) -> AppResult<usize> {
-        let conn = self.db.get_connection()?;
+        let conn = self.get_connection()?;
 
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM skill_library WHERE project_path = ?1",
@@ -199,6 +206,14 @@ impl SkillGeneratorStore {
         )?;
 
         Ok(count as usize)
+    }
+
+    fn get_connection(
+        &self,
+    ) -> AppResult<r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>> {
+        self.pool
+            .get()
+            .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))
     }
 }
 

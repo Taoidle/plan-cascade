@@ -20,7 +20,7 @@
 //! 7. `on_session_end`    - Session teardown (memory extraction)
 //! 8. `on_compaction`     - Context compaction (memory extraction from compacted content)
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -30,6 +30,8 @@ use tokio::sync::RwLock;
 use crate::services::memory::retrieval::search_memories;
 use crate::services::memory::store::ProjectMemoryStore;
 use crate::services::memory::store::{MemoryCategory, MemorySearchRequest, NewMemoryEntry};
+use crate::services::skills::generator::SkillGeneratorStore;
+use crate::services::skills::model::GeneratedSkill;
 use crate::services::skills::model::{InjectionPhase, SelectionPolicy, SkillIndex, SkillMatch};
 use crate::services::skills::select::select_skills_for_session;
 
@@ -793,6 +795,8 @@ pub fn register_memory_hooks(
                 rule_based_memory_extraction(&store, &ctx, &summary, &project_path, &existing);
             }
 
+            maybe_generate_skill_from_session(provider.clone(), &store, &ctx, &summary, &project_path).await;
+
             Ok(())
         })
     }));
@@ -868,6 +872,274 @@ fn rule_based_memory_extraction(
             }
         }
     }
+}
+
+/// P1: Optionally auto-generate a reusable skill from a successful, non-trivial session.
+///
+/// Generation criteria:
+/// - Session must be successful
+/// - Session must include at least 3 tool calls
+/// - Conversation content should be substantial
+/// - LLM provider must be available
+///
+/// Duplicate prevention:
+/// - Reject if name collides (case-insensitive)
+/// - Reject if token Jaccard similarity with existing generated skills >= 0.80
+async fn maybe_generate_skill_from_session(
+    provider: Option<Arc<dyn crate::services::llm::provider::LlmProvider>>,
+    memory_store: &ProjectMemoryStore,
+    ctx: &HookContext,
+    summary: &SessionSummary,
+    project_path: &str,
+) {
+    let total_tool_calls: usize = summary.tool_usage.values().sum();
+    if !summary.success || total_tool_calls < 3 || summary.conversation_content.len() < 160 {
+        return;
+    }
+
+    let Some(provider) = provider else {
+        return;
+    };
+
+    use crate::services::llm::types::{
+        LlmRequestOptions, Message, MessageContent as LlmMessageContent, MessageRole as LlmMessageRole,
+    };
+
+    let mut tool_usage_lines: Vec<String> = summary
+        .tool_usage
+        .iter()
+        .map(|(name, count)| format!("- {}: {} calls", name, count))
+        .collect();
+    tool_usage_lines.sort();
+
+    let findings_preview = summary
+        .key_findings
+        .iter()
+        .take(12)
+        .map(|f| format!("- {}", f))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let prompt = format!(
+        "Generate ONE reusable coding skill from this successful session.\n\
+         Return ONLY JSON with fields: name, description, tags, body.\n\
+         Constraints:\n\
+         - name: 3-8 words, imperative style.\n\
+         - description: <= 120 chars.\n\
+         - tags: 2-6 lowercase tags.\n\
+         - body: markdown instructions with a heading and numbered steps.\n\
+         - Avoid project-specific paths and private names.\n\
+         - Make it broadly reusable for similar tasks.\n\n\
+         ## Task\n{}\n\n\
+         ## Tool Usage\n{}\n\n\
+         ## Key Findings\n{}\n\n\
+         ## Conversation Excerpt\n{}",
+        summary.task_description,
+        tool_usage_lines.join("\n"),
+        if findings_preview.is_empty() {
+            "- (none)".to_string()
+        } else {
+            findings_preview
+        },
+        summary
+            .conversation_content
+            .chars()
+            .take(5000)
+            .collect::<String>(),
+    );
+
+    let messages = vec![Message {
+        role: LlmMessageRole::User,
+        content: vec![LlmMessageContent::Text { text: prompt }],
+    }];
+
+    let opts = LlmRequestOptions {
+        temperature_override: Some(0.2),
+        ..Default::default()
+    };
+
+    let response = match tokio::time::timeout(
+        std::time::Duration::from_secs(25),
+        provider.send_message(messages, None, vec![], opts),
+    )
+    .await
+    {
+        Ok(Ok(resp)) => resp,
+        Ok(Err(e)) => {
+            eprintln!(
+                "[hooks] Skill generation skipped (LLM error): session={}, error={}",
+                ctx.session_id, e
+            );
+            return;
+        }
+        Err(_) => {
+            eprintln!(
+                "[hooks] Skill generation skipped (LLM timeout): session={}",
+                ctx.session_id
+            );
+            return;
+        }
+    };
+
+    let Some(response_text) = response.content else {
+        return;
+    };
+
+    let Some(candidate) = parse_generated_skill_response(&response_text, &ctx.session_id) else {
+        eprintln!(
+            "[hooks] Skill generation skipped (invalid payload): session={}",
+            ctx.session_id
+        );
+        return;
+    };
+
+    let skill_store = SkillGeneratorStore::from_pool(memory_store.pool().clone());
+    let existing = skill_store
+        .list_generated_skills(project_path, true)
+        .unwrap_or_default();
+
+    let duplicate = existing.iter().any(|skill| {
+        skill.name.eq_ignore_ascii_case(&candidate.name)
+            || generated_skill_similarity(
+                &candidate.name,
+                &candidate.description,
+                &candidate.body,
+                &skill.name,
+                &skill.description,
+                &skill.body,
+            ) >= 0.80
+    });
+    if duplicate {
+        eprintln!(
+            "[hooks] Skill generation deduped: session={}, candidate={}",
+            ctx.session_id, candidate.name
+        );
+        return;
+    }
+
+    match skill_store.save_generated_skill(project_path, &candidate) {
+        Ok(saved) => {
+            eprintln!(
+                "[hooks] Generated skill saved: session={}, skill_id={}, name={}",
+                ctx.session_id, saved.id, saved.name
+            );
+        }
+        Err(e) => {
+            eprintln!(
+                "[hooks] Skill generation save failed: session={}, error={}",
+                ctx.session_id, e
+            );
+        }
+    }
+}
+
+fn parse_generated_skill_response(response_text: &str, session_id: &str) -> Option<GeneratedSkill> {
+    let json_str = extract_first_json_object(response_text)?;
+    let parsed: serde_json::Value = serde_json::from_str(&json_str).ok()?;
+
+    let name = parsed.get("name")?.as_str()?.trim().to_string();
+    let description = parsed
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let mut body = parsed
+        .get("body")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    if name.is_empty() || body.len() < 80 {
+        return None;
+    }
+
+    if !body.starts_with('#') {
+        body = format!("# {}\n\n{}", name, body);
+    }
+
+    let tags = parsed
+        .get("tags")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| s.trim().to_lowercase())
+                .filter(|s| !s.is_empty())
+                .take(8)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| vec!["generated".to_string()]);
+
+    Some(GeneratedSkill {
+        name,
+        description: if description.is_empty() {
+            "Auto-generated skill from successful session".to_string()
+        } else {
+            description
+        },
+        tags,
+        body,
+        source_session_ids: vec![session_id.to_string()],
+    })
+}
+
+fn extract_first_json_object(text: &str) -> Option<String> {
+    if let Some(start) = text.find("```json") {
+        let after = &text[start + 7..];
+        if let Some(end) = after.find("```") {
+            return Some(after[..end].trim().to_string());
+        }
+    }
+    if let Some(start) = text.find("```") {
+        let after = &text[start + 3..];
+        let after_lang = if let Some(nl) = after.find('\n') {
+            &after[nl + 1..]
+        } else {
+            after
+        };
+        if let Some(end) = after_lang.find("```") {
+            let content = after_lang[..end].trim();
+            if content.starts_with('{') {
+                return Some(content.to_string());
+            }
+        }
+    }
+    if let Some(start) = text.find('{') {
+        if let Some(end) = text.rfind('}') {
+            return Some(text[start..=end].to_string());
+        }
+    }
+    None
+}
+
+fn generated_skill_similarity(
+    name_a: &str,
+    desc_a: &str,
+    body_a: &str,
+    name_b: &str,
+    desc_b: &str,
+    body_b: &str,
+) -> f32 {
+    let tokens_a = skill_tokens(&format!("{} {} {}", name_a, desc_a, body_a));
+    let tokens_b = skill_tokens(&format!("{} {} {}", name_b, desc_b, body_b));
+    if tokens_a.is_empty() || tokens_b.is_empty() {
+        return 0.0;
+    }
+    let intersection = tokens_a.intersection(&tokens_b).count() as f32;
+    let union = tokens_a.union(&tokens_b).count() as f32;
+    if union <= f32::EPSILON {
+        0.0
+    } else {
+        intersection / union
+    }
+}
+
+fn skill_tokens(text: &str) -> HashSet<String> {
+    crate::services::memory::retrieval::extract_query_keywords(text)
+        .into_iter()
+        .collect()
 }
 
 // ============================================================================
@@ -1646,5 +1918,77 @@ mod tests {
         assert!(debug.contains("on_user_message: 1"));
         assert!(debug.contains("on_session_end: 2"));
         assert!(debug.contains("on_compaction: 2"));
+    }
+
+    #[test]
+    fn test_extract_first_json_object_prefers_fenced_json() {
+        let text = r#"prefix
+```json
+{"name":"Skill A","description":"desc","tags":["rust"],"body":"body"}
+```
+suffix {"name":"Skill B"}"#;
+
+        let extracted = extract_first_json_object(text).expect("json should be extracted");
+        assert_eq!(
+            extracted,
+            r#"{"name":"Skill A","description":"desc","tags":["rust"],"body":"body"}"#
+        );
+    }
+
+    #[test]
+    fn test_parse_generated_skill_response_normalizes_body_and_tags() {
+        let payload = r#"```json
+{
+  "name": "Refactor Error Handling",
+  "description": "Consolidate error mapping flow",
+  "tags": ["Rust", "  Errors  ", "Refactor"],
+  "body": "1. Audit all error call sites and group them by domain boundaries.\n2. Introduce a shared error enum with conversion helpers and typed context.\n3. Update handlers and add regression tests for each failure branch."
+}
+```"#;
+
+        let parsed = parse_generated_skill_response(payload, "session-abc")
+            .expect("valid payload should parse");
+        assert_eq!(parsed.name, "Refactor Error Handling");
+        assert_eq!(parsed.description, "Consolidate error mapping flow");
+        assert!(parsed.body.starts_with("# Refactor Error Handling\n\n"));
+        assert_eq!(
+            parsed.tags,
+            vec![
+                "rust".to_string(),
+                "errors".to_string(),
+                "refactor".to_string()
+            ]
+        );
+        assert_eq!(parsed.source_session_ids, vec!["session-abc".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_generated_skill_response_rejects_short_body() {
+        let payload = r#"{"name":"Tiny Skill","description":"desc","tags":["test"],"body":"too short"}"#;
+        let parsed = parse_generated_skill_response(payload, "session-abc");
+        assert!(parsed.is_none());
+    }
+
+    #[test]
+    fn test_generated_skill_similarity_identity_and_distance() {
+        let identical = generated_skill_similarity(
+            "Refactor HTTP Client",
+            "Normalize retries and timeout handling",
+            "# Refactor HTTP Client\n\n1. Add retry policy\n2. Add timeout policy\n3. Add tests",
+            "Refactor HTTP Client",
+            "Normalize retries and timeout handling",
+            "# Refactor HTTP Client\n\n1. Add retry policy\n2. Add timeout policy\n3. Add tests",
+        );
+        assert!(identical > 0.99);
+
+        let distant = generated_skill_similarity(
+            "Tune SQL Indexes",
+            "Optimize query latency",
+            "# Tune SQL Indexes\n\n1. Profile slow queries\n2. Add composite indexes",
+            "Design API Contract",
+            "Define endpoint response models",
+            "# Design API Contract\n\n1. Define schemas\n2. Align error codes",
+        );
+        assert!(distant < 0.60);
     }
 }

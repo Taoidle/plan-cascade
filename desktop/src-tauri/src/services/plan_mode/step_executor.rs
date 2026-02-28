@@ -48,6 +48,7 @@ pub async fn execute_plan(
     adapter: Arc<dyn DomainAdapter>,
     provider: Arc<dyn LlmProvider>,
     config: StepExecutionConfig,
+    shared_context: Option<String>,
     language_instruction: String,
     app_handle: tauri::AppHandle,
     cancellation_token: CancellationToken,
@@ -133,6 +134,7 @@ pub async fn execute_plan(
             let cancel = cancellation_token.clone();
             let plan_clone = plan.clone();
             let cfg = config.clone();
+            let shared_ctx = shared_context.clone();
             let lang_inst = language_instruction.clone();
             let batch_index = batch_idx;
             let total_b = total_batches;
@@ -205,6 +207,7 @@ pub async fn execute_plan(
                     &plan_clone,
                     adapter.as_ref(),
                     provider.as_ref(),
+                    shared_ctx.as_deref(),
                     &lang_inst,
                 )
                 .await
@@ -335,13 +338,24 @@ async fn execute_single_step(
     plan: &Plan,
     adapter: &dyn DomainAdapter,
     provider: &dyn LlmProvider,
+    shared_context: Option<&str>,
     language_instruction: &str,
 ) -> AppResult<StepOutput> {
     let persona = adapter.execution_persona(step);
 
+    let context_section = shared_context
+        .filter(|s| !s.trim().is_empty())
+        .map(|ctx| {
+            format!(
+                "\n\n## Project Memory & Skills Context\n{}",
+                truncate_context_for_system(ctx, 12_000)
+            )
+        })
+        .unwrap_or_default();
+
     let system = format!(
-        "{}\n\n{}\n\n## Output Language\n{}",
-        persona.identity_prompt, persona.thinking_style, language_instruction
+        "{}\n\n{}{}\n\n## Output Language\n{}",
+        persona.identity_prompt, persona.thinking_style, context_section, language_instruction
     );
 
     let user_prompt = adapter.step_execution_prompt(step, dep_outputs, plan);
@@ -373,6 +387,14 @@ async fn execute_single_step(
         criteria_met: vec![], // Populated during validation phase
         artifacts: vec![],
     })
+}
+
+fn truncate_context_for_system(context: &str, max_chars: usize) -> String {
+    if context.chars().count() <= max_chars {
+        return context.to_string();
+    }
+    let truncated: String = context.chars().take(max_chars).collect();
+    format!("{}\n\n[Context truncated for budget]", truncated)
 }
 
 /// Truncate dependency outputs to fit within budget.
