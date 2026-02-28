@@ -26,9 +26,6 @@ import {
   normalizeProvider,
   dedupeModels,
   getApiKeyRequiredProviders,
-  getLocalProviderApiKey,
-  setLocalProviderApiKey,
-  getLocalProviderApiKeyStatuses,
   type ApiKeyStatus,
 } from '../../lib/providers';
 
@@ -80,7 +77,7 @@ export function LLMBackendSection() {
     qwenEndpoint,
     setQwenEndpoint,
   } = useSettingsStore();
-  const [apiKeyStatuses, setApiKeyStatuses] = useState<ApiKeyStatus>(() => getLocalProviderApiKeyStatuses());
+  const [apiKeyStatuses, setApiKeyStatuses] = useState<ApiKeyStatus>({});
   const [apiKeyInputs, setApiKeyInputs] = useState<{ [provider: string]: string }>({});
   const [showApiKey, setShowApiKey] = useState<{ [provider: string]: boolean }>({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
@@ -114,6 +111,10 @@ export function LLMBackendSection() {
 
   // Load cached custom models and fetch provider metadata on mount.
   useEffect(() => {
+    // Migrate away from frontend API key persistence.
+    localStorage.removeItem('plan-cascade-provider-api-key-cache');
+    localStorage.removeItem('plan-cascade-api-keys');
+
     const storedCustomModels = localStorage.getItem(CUSTOM_MODELS_STORAGE_KEY);
     if (storedCustomModels) {
       try {
@@ -132,9 +133,7 @@ export function LLMBackendSection() {
   }, [fetchProviderModels]);
 
   const fetchApiKeyStatuses = useCallback(async () => {
-    const localFallbackStatuses = getLocalProviderApiKeyStatuses();
-
-    // Preferred path: batch query via list_configured_api_key_providers (single keychain access).
+    // Preferred path: batch query via list_configured_api_key_providers (single keyring access).
     try {
       const result = await invoke<CommandResponse<string[]>>('list_configured_api_key_providers');
       if (result.success) {
@@ -143,9 +142,7 @@ export function LLMBackendSection() {
         providers.forEach((provider) => {
           statuses[normalizeProvider(provider)] = true;
         });
-        const merged = { ...statuses, ...localFallbackStatuses };
-        setApiKeyStatuses(merged);
-        localStorage.setItem('plan-cascade-api-keys', JSON.stringify(merged));
+        setApiKeyStatuses(statuses);
         return;
       }
       throw new Error(result.error || 'Failed to fetch API key statuses');
@@ -179,33 +176,15 @@ export function LLMBackendSection() {
             statuses[provider] = true;
           }
         });
-        const merged = { ...statuses, ...localFallbackStatuses };
-        setApiKeyStatuses(merged);
-        localStorage.setItem('plan-cascade-api-keys', JSON.stringify(merged));
+        setApiKeyStatuses(statuses);
         return;
       }
     } catch (error) {
       console.error('Failed to fetch API key statuses:', error);
     }
 
-    // Final fallback: local cache.
-    const stored = localStorage.getItem('plan-cascade-api-keys');
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored) as ApiKeyStatus;
-        const normalized: ApiKeyStatus = {};
-        Object.entries(parsed).forEach(([provider, configured]) => {
-          if (configured) {
-            normalized[normalizeProvider(provider)] = true;
-          }
-        });
-        setApiKeyStatuses({ ...normalized, ...localFallbackStatuses });
-      } catch {
-        setApiKeyStatuses(localFallbackStatuses);
-      }
-    } else {
-      setApiKeyStatuses(localFallbackStatuses);
-    }
+    // Final fallback: unknown status (treat as not configured).
+    setApiKeyStatuses({});
   }, []);
 
   // Refresh status on mount and whenever active backend/local key changes.
@@ -261,14 +240,8 @@ export function LLMBackendSection() {
         throw new Error(result.error || 'Failed to store API key');
       }
 
-      // Update local status tracking
-      const currentStatuses = { ...apiKeyStatuses, [canonicalProvider]: true };
-      localStorage.setItem('plan-cascade-api-keys', JSON.stringify(currentStatuses));
-      setApiKeyStatuses(currentStatuses);
+      setApiKeyStatuses((prev) => ({ ...prev, [canonicalProvider]: true }));
       setApiKeyInputs((prev) => ({ ...prev, [canonicalProvider]: apiKey.trim() }));
-      setLocalProviderApiKey(canonicalProvider, apiKey.trim());
-      // Sync to zustand store so useGitAI re-evaluates LLM availability
-      useSettingsStore.getState().setApiKey(apiKey.trim());
       setKeyMessage({ provider: canonicalProvider, type: 'success', message: t('llm.apiKey.saveSuccess') });
       await fetchApiKeyStatuses();
     } catch (error) {
@@ -295,14 +268,8 @@ export function LLMBackendSection() {
         throw new Error(result.error || 'Failed to remove API key');
       }
 
-      // Update local status tracking
-      const currentStatuses = { ...apiKeyStatuses, [canonicalProvider]: false };
-      localStorage.setItem('plan-cascade-api-keys', JSON.stringify(currentStatuses));
-      setApiKeyStatuses(currentStatuses);
+      setApiKeyStatuses((prev) => ({ ...prev, [canonicalProvider]: false }));
       setApiKeyInputs((prev) => ({ ...prev, [canonicalProvider]: '' }));
-      setLocalProviderApiKey(canonicalProvider, '');
-      // Sync to zustand store so useGitAI re-evaluates LLM availability
-      useSettingsStore.getState().setApiKey('');
       setKeyMessage({ provider: canonicalProvider, type: 'success', message: t('llm.apiKey.removeSuccess') });
       await fetchApiKeyStatuses();
     } catch (error) {
@@ -339,31 +306,9 @@ export function LLMBackendSection() {
           ...prev,
           [canonicalProvider]: true,
         }));
-      } else {
-        const fallbackKey = getLocalProviderApiKey(canonicalProvider);
-        if (fallbackKey) {
-          setApiKeyInputs((prev) => ({
-            ...prev,
-            [canonicalProvider]: fallbackKey,
-          }));
-          setApiKeyStatuses((prev) => ({
-            ...prev,
-            [canonicalProvider]: true,
-          }));
-        }
       }
     } catch {
-      const fallbackKey = getLocalProviderApiKey(canonicalProvider);
-      if (fallbackKey) {
-        setApiKeyInputs((prev) => ({
-          ...prev,
-          [canonicalProvider]: fallbackKey,
-        }));
-        setApiKeyStatuses((prev) => ({
-          ...prev,
-          [canonicalProvider]: true,
-        }));
-      }
+      // Ignore key fetch errors.
     } finally {
       setLoadingSavedKey(null);
     }

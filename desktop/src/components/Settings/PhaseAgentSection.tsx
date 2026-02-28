@@ -15,7 +15,7 @@ import { ChevronDownIcon, Cross2Icon } from '@radix-ui/react-icons';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { useSettingsStore } from '../../store/settings';
-import { FALLBACK_MODELS_BY_PROVIDER, getLocalProviderApiKeyStatuses } from '../../lib/providers';
+import { FALLBACK_MODELS_BY_PROVIDER } from '../../lib/providers';
 import type { CommandResponse } from '../../lib/tauri';
 
 // ---------------------------------------------------------------------------
@@ -154,12 +154,6 @@ export function PhaseAgentSection() {
         }
       } catch {
         // Keyring unavailable — fall through
-      }
-
-      // 2. Merge with localStorage cache (belt-and-suspenders, same as LLMBackendSection)
-      const localStatuses = getLocalProviderApiKeyStatuses();
-      for (const [provider, configured] of Object.entries(localStatuses)) {
-        if (configured) providers.add(provider);
       }
 
       setConfiguredProviders(Array.from(providers));

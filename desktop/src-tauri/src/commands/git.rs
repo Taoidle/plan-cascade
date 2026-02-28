@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
-use crate::commands::standalone::normalize_provider_name;
+use crate::commands::standalone::{get_api_key_with_aliases, normalize_provider_name};
 use crate::models::response::CommandResponse;
 use crate::services::git::conflict;
 use crate::services::git::graph::compute_graph_layout;
@@ -1057,11 +1057,21 @@ pub async fn git_configure_llm(
         }
     };
 
-    let api_key_opt = if api_key.is_empty() {
+    let keyring = KeyringService::new();
+    let provided_api_key = api_key.trim().to_string();
+    let mut api_key_opt = if provided_api_key.is_empty() {
         None
     } else {
-        Some(api_key)
+        Some(provided_api_key)
     };
+
+    // Resolve from keyring when frontend does not pass an explicit key.
+    if api_key_opt.is_none() && provider_type != ProviderType::Ollama {
+        match get_api_key_with_aliases(&keyring, canonical) {
+            Ok(key) => api_key_opt = key,
+            Err(e) => return Ok(CommandResponse::err(e)),
+        }
+    }
 
     if provider_type != ProviderType::Ollama && api_key_opt.is_none() {
         return Ok(CommandResponse::err(format!(
@@ -1099,7 +1109,6 @@ pub async fn git_configure_llm(
             .filter(|u| !u.is_empty())
     };
 
-    let keyring = KeyringService::new();
     let proxy = app_state
         .with_database(|db| {
             Ok(crate::commands::proxy::resolve_provider_proxy(

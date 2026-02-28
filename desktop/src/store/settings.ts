@@ -386,9 +386,14 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'plan-cascade-settings',
+      partialize: (state) => {
+        return Object.fromEntries(Object.entries(state).filter(([key]) => key !== 'apiKey')) as Partial<SettingsState>;
+      },
       merge: (persisted, current) => {
         const merged = { ...current, ...(persisted as object) };
         const mergedState = merged as SettingsState;
+        // API keys are not persisted in frontend state.
+        mergedState.apiKey = '';
         const modelByProvider = { ...(mergedState.modelByProvider || {}) };
         const canonicalProvider = normalizeProviderKey(mergedState.provider);
         if (!(canonicalProvider in modelByProvider)) {
@@ -410,6 +415,9 @@ export const useSettingsStore = create<SettingsState>()(
         return mergedState;
       },
       onRehydrateStorage: () => (state) => {
+        // Drop legacy frontend API-key caches; keys live in backend keyring.
+        localStorage.removeItem('plan-cascade-api-keys');
+        localStorage.removeItem('plan-cascade-provider-api-key-cache');
         // Apply theme on rehydration
         if (state?.theme) {
           applyTheme(state.theme);

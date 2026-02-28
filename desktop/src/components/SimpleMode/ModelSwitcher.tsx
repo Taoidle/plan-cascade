@@ -12,6 +12,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
+import { invoke } from '@tauri-apps/api/core';
 import { useSettingsStore, type Backend } from '../../store/settings';
 import { useExecutionStore } from '../../store/execution';
 import {
@@ -19,7 +20,6 @@ import {
   FALLBACK_MODELS_BY_PROVIDER,
   DEFAULT_MODEL_BY_PROVIDER,
   normalizeProvider,
-  getLocalProviderApiKeyStatuses,
   getCustomModelsByProvider,
   type BackendOption,
   type ApiKeyStatus,
@@ -36,6 +36,12 @@ interface ProviderGroup {
   hasApiKey: boolean;
   requiresApiKey: boolean;
   isCli: boolean;
+}
+
+interface CommandResponse<T> {
+  success: boolean;
+  data: T | null;
+  error: string | null;
 }
 
 // ============================================================================
@@ -82,16 +88,32 @@ export function ModelSwitcher({ dropdownDirection = 'down' }: ModelSwitcherProps
   const containerRef = useRef<HTMLDivElement>(null);
 
   // API key statuses (refreshed on open)
-  const [apiKeyStatuses, setApiKeyStatuses] = useState<ApiKeyStatus>(() => getLocalProviderApiKeyStatuses());
+  const [apiKeyStatuses, setApiKeyStatuses] = useState<ApiKeyStatus>({});
 
   const isRunning = status === 'running' || status === 'paused';
+
+  const refreshApiKeyStatuses = useCallback(async () => {
+    try {
+      const result = await invoke<CommandResponse<string[]>>('list_configured_api_key_providers');
+      if (result.success) {
+        const statuses: ApiKeyStatus = {};
+        for (const providerName of result.data || []) {
+          statuses[normalizeProvider(providerName)] = true;
+        }
+        setApiKeyStatuses(statuses);
+        return;
+      }
+    } catch {
+      // Ignore lookup failures and keep existing statuses.
+    }
+  }, []);
 
   // Refresh API key statuses when dropdown opens
   useEffect(() => {
     if (open) {
-      setApiKeyStatuses(getLocalProviderApiKeyStatuses());
+      void refreshApiKeyStatuses();
     }
-  }, [open]);
+  }, [open, refreshApiKeyStatuses]);
 
   // Close on outside click
   useEffect(() => {

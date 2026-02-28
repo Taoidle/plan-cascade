@@ -181,7 +181,6 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
     backend,
     setBackend,
     setProvider,
-    setApiKey: storeSetApiKey,
     onboardingCompleted,
     setOnboardingCompleted,
     setWorkspacePath: storeSetWorkspacePath,
@@ -199,28 +198,6 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
       setIsOpen(true);
     }
   }, [forceShow, onboardingCompleted]);
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        if (currentStep === 'complete') {
-          handleComplete();
-        } else {
-          handleNext();
-        }
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        handleSkip();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, currentStep, handleComplete, handleNext, handleSkip]);
 
   const currentStepIndex = steps.findIndex((s) => s.id === currentStep);
   const needsApiKey = BACKENDS_REQUIRING_KEY.includes(backend);
@@ -260,9 +237,6 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
         if (!result.success) {
           throw new Error(result.error || 'Failed to store API key');
         }
-
-        // Keep local copy for backward compatibility with previous flows.
-        storeSetApiKey(apiKey);
       }
 
       // Persist workspace path if set
@@ -287,11 +261,32 @@ export function SetupWizard({ forceShow = false, onComplete }: SetupWizardProps)
     backend,
     workspacePath,
     wantsTour,
-    storeSetApiKey,
     storeSetWorkspacePath,
     setOnboardingCompleted,
     onComplete,
   ]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (currentStep === 'complete') {
+          handleComplete();
+        } else {
+          handleNext();
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        handleSkip();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, currentStep, handleComplete, handleNext, handleSkip]);
 
   const handleProviderChange = useCallback(
     (newBackend: Backend) => {

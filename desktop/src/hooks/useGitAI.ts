@@ -12,7 +12,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { CommandResponse } from '../lib/tauri';
 import { useSettingsStore } from '../store/settings';
-import { getLocalProviderApiKey, normalizeProvider, DEFAULT_MODEL_BY_PROVIDER } from '../lib/providers';
+import { normalizeProvider, DEFAULT_MODEL_BY_PROVIDER } from '../lib/providers';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -81,7 +81,6 @@ export function useGitAI(): UseGitAIReturn {
   const backend = useSettingsStore((s) => s.backend);
   const provider = useSettingsStore((s) => s.provider);
   const model = useSettingsStore((s) => s.model);
-  const apiKey = useSettingsStore((s) => s.apiKey);
   const minimaxEndpoint = useSettingsStore((s) => s.minimaxEndpoint);
   const glmEndpoint = useSettingsStore((s) => s.glmEndpoint);
   const qwenEndpoint = useSettingsStore((s) => s.qwenEndpoint);
@@ -99,25 +98,6 @@ export function useGitAI(): UseGitAIReturn {
         // (claude-code uses subprocess CLI, not a direct LLM API)
         if (providerName && providerName !== 'claude-code') {
           const canonicalProvider = normalizeProvider(providerName);
-
-          // Resolve API key per-provider: localStorage cache → OS keyring
-          // NOTE: We intentionally skip the zustand apiKey for resolution because
-          // it is a single global value and may not match the current provider.
-          // It remains in the dependency array to trigger re-runs when changed.
-          let resolvedApiKey = getLocalProviderApiKey(canonicalProvider);
-
-          if (!resolvedApiKey) {
-            try {
-              const keyResult = await invoke<CommandResponse<string | null>>('get_provider_api_key', {
-                provider: canonicalProvider,
-              });
-              if (keyResult.success && typeof keyResult.data === 'string' && keyResult.data.trim()) {
-                resolvedApiKey = keyResult.data.trim();
-              }
-            } catch {
-              // Keyring may not be available
-            }
-          }
 
           // Resolve model: use store value, or fall back to provider default
           const resolvedModel = model || DEFAULT_MODEL_BY_PROVIDER[canonicalProvider] || '';
@@ -143,7 +123,8 @@ export function useGitAI(): UseGitAIReturn {
           const configResult = await invoke<CommandResponse<boolean>>('git_configure_llm', {
             provider: providerName,
             model: resolvedModel,
-            apiKey: resolvedApiKey,
+            // Backend resolves key from secure storage when empty.
+            apiKey: '',
             baseUrl: resolvedBaseUrl,
           });
 
@@ -151,7 +132,6 @@ export function useGitAI(): UseGitAIReturn {
             console.warn('[GitAI] git_configure_llm failed:', configResult.error, {
               provider: providerName,
               model: resolvedModel,
-              hasKey: !!resolvedApiKey,
             });
           }
         }
@@ -180,7 +160,7 @@ export function useGitAI(): UseGitAIReturn {
     return () => {
       isMountedRef.current = false;
     };
-  }, [backend, provider, model, apiKey, minimaxEndpoint, glmEndpoint, qwenEndpoint]);
+  }, [backend, provider, model, minimaxEndpoint, glmEndpoint, qwenEndpoint]);
 
   const unavailableReason = isCheckingAvailability
     ? 'Checking LLM availability...'
