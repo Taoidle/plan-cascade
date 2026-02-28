@@ -22,6 +22,12 @@ use crate::utils::error::{AppError, AppResult};
 /// Memories stored under this path are loaded for every project session.
 pub const GLOBAL_PROJECT_PATH: &str = "__global__";
 
+/// Similarity threshold tuned for sparse TF-IDF vectors during upsert merge.
+///
+/// This is intentionally lower than dense-embedding heuristics; TF-IDF cosine
+/// distributions are generally more compressed.
+const TFIDF_UPSERT_MERGE_THRESHOLD: f32 = 0.72;
+
 // ============================================================================
 // Data Types
 // ============================================================================
@@ -308,7 +314,7 @@ impl ProjectMemoryStore {
             .ok_or_else(|| AppError::Internal("Failed to retrieve updated memory".into()))
     }
 
-    /// Upsert: if similar memory exists (cosine > 0.85), merge; otherwise insert
+    /// Upsert: if similar memory exists (cosine > TFIDF_UPSERT_MERGE_THRESHOLD), merge; otherwise insert.
     pub fn upsert_memory(&self, entry: NewMemoryEntry) -> AppResult<UpsertResult> {
         if entry.content.trim().is_empty() {
             return Ok(UpsertResult::Skipped {
@@ -325,35 +331,51 @@ impl ProjectMemoryStore {
         // Generate embedding for the new entry
         let new_embedding = self.embedding_service.embed_text(&entry.content);
 
-        // Load existing memories for this project
-        let existing = self.list_memories(&entry.project_path, None, 0, 1000)?;
+        struct ExistingCandidate {
+            id: String,
+            content: String,
+            importance: f32,
+            keywords: Vec<String>,
+            embedding: Vec<f32>,
+        }
+
+        // Load existing memories + embeddings in one query (avoid N+1 queries).
+        let existing: Vec<ExistingCandidate> = {
+            let conn = self.get_connection()?;
+            let mut stmt = conn.prepare(
+                "SELECT id, content, importance, keywords, embedding
+                 FROM project_memories
+                 WHERE project_path = ?1
+                 ORDER BY importance DESC
+                 LIMIT 1000",
+            )?;
+
+            let rows = stmt.query_map(params![&entry.project_path], |row| {
+                let keywords_json: String = row.get(3)?;
+                let embedding_bytes: Option<Vec<u8>> = row.get(4)?;
+                Ok(ExistingCandidate {
+                    id: row.get(0)?,
+                    content: row.get(1)?,
+                    importance: row.get(2)?,
+                    keywords: serde_json::from_str(&keywords_json).unwrap_or_default(),
+                    embedding: embedding_bytes
+                        .map(|bytes| bytes_to_embedding(&bytes))
+                        .unwrap_or_default(),
+                })
+            })?;
+
+            rows.filter_map(|r| r.ok()).collect()
+        };
 
         // Check for high-similarity duplicates
         if !new_embedding.is_empty() {
-            // Load all embeddings in one connection
-            let embeddings_with_ids: Vec<(String, Vec<f32>)> = {
-                let conn = self.get_connection()?;
-                let mut result = Vec::new();
-                for mem in &existing {
-                    let embedding_bytes: Option<Vec<u8>> = conn.query_row(
-                        "SELECT embedding FROM project_memories WHERE id = ?1",
-                        params![mem.id],
-                        |row| row.get(0),
-                    )?;
-                    if let Some(bytes) = embedding_bytes {
-                        result.push((mem.id.clone(), bytes_to_embedding(&bytes)));
-                    }
+            for mem in &existing {
+                if mem.embedding.is_empty() {
+                    continue;
                 }
-                result
-            }; // connection released here
+                let sim = cosine_similarity(&new_embedding, &mem.embedding);
 
-            for (mem_id, existing_emb) in &embeddings_with_ids {
-                let sim = cosine_similarity(&new_embedding, existing_emb);
-
-                if sim > 0.85 {
-                    // Find the original memory entry
-                    let mem = existing.iter().find(|m| m.id == *mem_id).unwrap();
-
+                if sim > TFIDF_UPSERT_MERGE_THRESHOLD {
                     // Merge: update existing entry with combined content
                     let merged_content = if mem.content.contains(&entry.content) {
                         mem.content.clone()
@@ -375,9 +397,9 @@ impl ProjectMemoryStore {
                         importance: Some(merged_importance),
                         keywords: Some(merged_keywords),
                     };
-                    let merged = self.update_memory(mem_id, update)?;
+                    let merged = self.update_memory(&mem.id, update)?;
                     return Ok(UpsertResult::Merged {
-                        original_id: mem_id.clone(),
+                        original_id: mem.id.clone(),
                         merged,
                     });
                 }
@@ -532,6 +554,30 @@ impl ProjectMemoryStore {
         )?;
         self.mark_vocabulary_dirty(project_path);
         Ok(count)
+    }
+
+    /// Increment access counters for the specified memory IDs.
+    ///
+    /// Returns the number of rows updated.
+    pub fn touch_memories(&self, ids: &[String]) -> AppResult<usize> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+
+        let conn = self.get_connection()?;
+        let tx = conn.unchecked_transaction()?;
+        let mut touched = 0usize;
+        for id in ids {
+            touched += tx.execute(
+                "UPDATE project_memories
+                 SET access_count = access_count + 1,
+                     last_accessed_at = datetime('now')
+                 WHERE id = ?1",
+                params![id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(touched)
     }
 
     /// Ensure TF-IDF vocabulary is ready for the target project.
@@ -1063,7 +1109,7 @@ mod tests {
             }
             UpsertResult::Inserted(_) => {
                 // Even if not merged (vocab may not produce high-enough similarity),
-                // the test is still valid — it means the cosine was < 0.85
+                // the test is still valid — it means the cosine was below the merge threshold
                 // which is acceptable behavior
             }
             UpsertResult::Skipped { .. } => panic!("Should not be skipped"),

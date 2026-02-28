@@ -5,13 +5,18 @@
 //! - **Decay**: Reduces importance of memories not accessed recently.
 //!   Formula: new_importance = importance * 0.95^(days_since_last_access / 7)
 //! - **Prune**: Removes memories with importance below a threshold.
-//! - **Compact**: Merges highly similar memories (cosine > 0.90).
+//! - **Compact**: Merges highly similar memories using a TF-IDF-tuned threshold.
+
+use std::collections::HashSet;
 
 use rusqlite::params;
 
 use crate::services::memory::store::{bytes_to_embedding, embedding_to_bytes, ProjectMemoryStore};
 use crate::services::orchestrator::embedding_service::cosine_similarity;
 use crate::utils::error::AppResult;
+
+/// Similarity threshold tuned for sparse TF-IDF vectors during maintenance compaction.
+const TFIDF_COMPACTION_THRESHOLD: f32 = 0.82;
 
 /// Memory maintenance operations
 pub struct MemoryMaintenance;
@@ -35,7 +40,14 @@ impl MemoryMaintenance {
                 crate::utils::error::AppError::database(format!("Failed to get connection: {}", e))
             })?;
             let mut stmt = conn.prepare(
-                "SELECT id, importance, julianday('now') - julianday(last_accessed_at)
+                "SELECT id, importance,
+                        julianday('now') - julianday(
+                            CASE
+                                WHEN last_decay_at IS NULL THEN last_accessed_at
+                                WHEN last_decay_at > last_accessed_at THEN last_decay_at
+                                ELSE last_accessed_at
+                            END
+                        )
                  FROM project_memories
                  WHERE project_path = ?1",
             )?;
@@ -45,7 +57,7 @@ impl MemoryMaintenance {
                     Ok(DecayCandidate {
                         id: row.get(0)?,
                         importance: row.get(1)?,
-                        days_since_access: row.get::<_, f64>(2).unwrap_or(0.0),
+                        days_since_access: row.get::<_, f64>(2).unwrap_or(0.0).floor(),
                     })
                 })?
                 .filter_map(|r| r.ok())
@@ -71,7 +83,11 @@ impl MemoryMaintenance {
                     ))
                 })?;
                 conn.execute(
-                    "UPDATE project_memories SET importance = ?2, updated_at = datetime('now') WHERE id = ?1",
+                    "UPDATE project_memories
+                     SET importance = ?2,
+                         last_decay_at = datetime('now'),
+                         updated_at = datetime('now')
+                     WHERE id = ?1",
                     params![candidate.id, new_importance],
                 )?;
                 affected += 1;
@@ -105,7 +121,7 @@ impl MemoryMaintenance {
         Ok(deleted)
     }
 
-    /// Merge highly similar memories (cosine similarity > 0.90).
+    /// Merge highly similar memories (cosine similarity > TFIDF_COMPACTION_THRESHOLD).
     ///
     /// For each pair of similar memories:
     /// - Keeps the one with higher importance
@@ -161,7 +177,7 @@ impl MemoryMaintenance {
         }; // connection released
 
         // Find pairs to merge
-        let mut to_delete: Vec<String> = Vec::new();
+        let mut to_delete: HashSet<String> = HashSet::new();
         let mut merged_count = 0;
 
         for i in 0..memories.len() {
@@ -180,7 +196,7 @@ impl MemoryMaintenance {
                 {
                     let sim = cosine_similarity(emb_a, emb_b);
 
-                    if sim > 0.90 {
+                    if sim > TFIDF_COMPACTION_THRESHOLD {
                         // Merge j into i (i has higher or equal importance since sorted DESC)
                         let merged_content = if memories[i].content.contains(&memories[j].content) {
                             memories[i].content.clone()
@@ -230,7 +246,7 @@ impl MemoryMaintenance {
                         }
 
                         // Schedule the less important one for deletion
-                        to_delete.push(memories[j].id.clone());
+                        to_delete.insert(memories[j].id.clone());
                         merged_count += 1;
                     }
                 }
@@ -349,6 +365,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_decay_memories_is_incremental_and_idempotent_per_day() {
+        let store = create_test_store();
+
+        let mem = store
+            .add_memory(sample_entry("Incremental decay entry", 0.8))
+            .unwrap();
+
+        {
+            let conn = store.pool().get().map_err(|e| format!("{}", e)).unwrap();
+            conn.execute(
+                "UPDATE project_memories SET last_accessed_at = datetime('now', '-14 days') WHERE id = ?1",
+                params![mem.id],
+            )
+            .unwrap();
+        }
+
+        let affected_first = MemoryMaintenance::decay_memories(&store, "/test/project").unwrap();
+        assert_eq!(affected_first, 1);
+        let first = store.get_memory(&mem.id).unwrap().unwrap();
+
+        // Running again immediately should not apply another full decay step.
+        let affected_second = MemoryMaintenance::decay_memories(&store, "/test/project").unwrap();
+        assert_eq!(affected_second, 0);
+        let second = store.get_memory(&mem.id).unwrap().unwrap();
+        assert!(
+            (first.importance - second.importance).abs() < f32::EPSILON,
+            "Importance should remain unchanged on immediate repeated maintenance",
+        );
+    }
+
     // -----------------------------------------------------------------------
     // Prune tests
     // -----------------------------------------------------------------------
@@ -434,7 +481,7 @@ mod tests {
 
         let after = store.count_memories("/test/project").unwrap();
 
-        // If the embeddings were similar enough (> 0.90), compaction should have merged
+        // If the embeddings were similar enough (above compaction threshold), compaction should have merged
         if merged > 0 {
             assert!(after < before);
         }

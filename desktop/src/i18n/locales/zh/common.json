@@ -2,6 +2,20 @@
   "appName": "Plan Cascade",
   "version": "v0.1.0",
   "ready": "就绪",
+  "startup": {
+    "progress": "{{current}}/{{total}}",
+    "stage": {
+      "booting": "正在启动运行时...",
+      "coreState": "正在初始化核心服务...",
+      "plugins": "正在加载插件系统...",
+      "indexManager": "正在准备代码索引管理器...",
+      "specInterview": "正在初始化需求访谈服务...",
+      "recoveryScan": "正在扫描未完成任务...",
+      "remoteGateway": "正在检查远程网关自动启动...",
+      "syncing": "正在准备工作区...",
+      "ready": "即将就绪..."
+    }
+  },
 
   "buttons": {
     "save": "保存",

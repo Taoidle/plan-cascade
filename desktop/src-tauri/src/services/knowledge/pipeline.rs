@@ -17,7 +17,9 @@ use tauri::Emitter;
 use crate::services::knowledge::chunker::{Chunk, Chunker, Document};
 use crate::services::knowledge::reranker::{Reranker, SearchResult};
 use crate::services::orchestrator::embedding_manager::EmbeddingManager;
-use crate::services::orchestrator::embedding_service::embedding_to_bytes;
+use crate::services::orchestrator::embedding_service::{
+    bytes_to_embedding, cosine_similarity, embedding_to_bytes,
+};
 use crate::services::orchestrator::hnsw_index::HnswIndex;
 use crate::storage::database::Database;
 use crate::utils::error::{AppError, AppResult};
@@ -334,13 +336,13 @@ impl RagPipeline {
         // Store chunks in SQLite within a transaction (sync scope — connection dropped before await)
         emit_progress("storing", 70, "Storing chunks in database...");
         let hnsw_items = {
-            let conn = self
+            let mut conn = self
                 .database
                 .get_connection()
                 .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             let tx = conn
-                .unchecked_transaction()
+                .transaction()
                 .map_err(|e| AppError::database(format!("Failed to begin transaction: {}", e)))?;
 
             let mut items: Vec<(usize, Vec<f32>)> = Vec::new();
@@ -455,6 +457,12 @@ impl RagPipeline {
 
         // Search HNSW (async — no connection held)
         let hnsw_results = self.hnsw_index.search(&query_embedding, top_k * 3).await;
+        if hnsw_results.is_empty() {
+            tracing::warn!(
+                collection = %collection_name,
+                "HNSW returned no results; attempting SQLite fallback search"
+            );
+        }
 
         // Look up chunks from DB (sync scope — connection dropped before await)
         let mut search_results = {
@@ -502,6 +510,19 @@ impl RagPipeline {
             // conn dropped here
         };
 
+        if search_results.is_empty() {
+            tracing::warn!(
+                collection = %collection_name,
+                "Primary ANN search returned empty results; falling back to SQLite cosine search"
+            );
+            search_results = self.sqlite_similarity_fallback(
+                &collection_id,
+                collection_name,
+                &query_embedding,
+                top_k * 3,
+            )?;
+        }
+
         let total_searched = search_results.len();
 
         // Apply reranker if configured (async — no connection held)
@@ -516,6 +537,67 @@ impl RagPipeline {
             total_searched,
             collection_name: collection_name.to_string(),
         })
+    }
+
+    /// Fallback query path when ANN search fails or returns empty.
+    ///
+    /// Performs brute-force cosine similarity over all chunk embeddings in SQLite.
+    fn sqlite_similarity_fallback(
+        &self,
+        collection_id: &str,
+        collection_name: &str,
+        query_embedding: &[f32],
+        limit: usize,
+    ) -> AppResult<Vec<SearchResult>> {
+        let conn = self
+            .database
+            .get_connection()
+            .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT document_id, content, metadata, embedding
+                 FROM knowledge_chunks
+                 WHERE collection_id = ?1
+                   AND embedding IS NOT NULL
+                   AND length(embedding) > 0",
+            )
+            .map_err(|e| AppError::database(format!("Failed to prepare fallback query: {}", e)))?;
+
+        let mut results: Vec<SearchResult> = stmt
+            .query_map(rusqlite::params![collection_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Vec<u8>>(3)?,
+                ))
+            })
+            .map_err(|e| AppError::database(format!("Failed to execute fallback query: {}", e)))?
+            .filter_map(|row| row.ok())
+            .filter_map(|(document_id, content, metadata_json, emb_bytes)| {
+                let chunk_embedding = bytes_to_embedding(&emb_bytes);
+                if chunk_embedding.is_empty() {
+                    return None;
+                }
+                let score = cosine_similarity(query_embedding, &chunk_embedding);
+                let metadata: HashMap<String, String> =
+                    serde_json::from_str(&metadata_json).unwrap_or_default();
+                Some(SearchResult {
+                    chunk_text: content,
+                    document_id,
+                    collection_name: collection_name.to_string(),
+                    score,
+                    metadata,
+                })
+            })
+            .collect();
+
+        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        if limit > 0 {
+            results.truncate(limit);
+        }
+        Ok(results)
     }
 
     /// List all collections for a project.
@@ -622,13 +704,13 @@ impl RagPipeline {
 
         // Delete chunks and update count in a transaction (sync scope)
         {
-            let conn = self
+            let mut conn = self
                 .database
                 .get_connection()
                 .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             let tx = conn
-                .unchecked_transaction()
+                .transaction()
                 .map_err(|e| AppError::database(format!("Failed to begin transaction: {}", e)))?;
 
             tx.execute(

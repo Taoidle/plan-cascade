@@ -13,6 +13,7 @@
 use crate::services::memory::store::{
     MemoryCategory, MemoryEntry, NewMemoryEntry, GLOBAL_PROJECT_PATH,
 };
+use crate::utils::error::{AppError, AppResult};
 
 /// Explicit memory commands detected from user messages
 #[derive(Debug, Clone, PartialEq)]
@@ -37,7 +38,10 @@ pub enum MemoryCommand {
 ///
 /// Returns None if no memory command detected.
 pub fn detect_memory_command(user_message: &str) -> Option<MemoryCommand> {
-    let lower = user_message.trim().to_lowercase();
+    let trimmed = user_message.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
 
     // --- Forget patterns (check first to avoid matching "remember" in "stop remembering") ---
     let forget_patterns = [
@@ -51,8 +55,8 @@ pub fn detect_memory_command(user_message: &str) -> Option<MemoryCommand> {
     ];
 
     for pattern in &forget_patterns {
-        if let Some(rest) = lower.strip_prefix(pattern) {
-            let query = rest.trim().trim_end_matches('.').to_string();
+        if let Some(rest) = strip_prefix_case_insensitive(trimmed, pattern) {
+            let query = trim_command_payload(rest).to_string();
             if !query.is_empty() {
                 return Some(MemoryCommand::Forget { query });
             }
@@ -72,13 +76,8 @@ pub fn detect_memory_command(user_message: &str) -> Option<MemoryCommand> {
     ];
 
     for pattern in &query_patterns {
-        if lower.starts_with(pattern) {
-            let rest = &lower[pattern.len()..];
-            let query = rest
-                .trim()
-                .trim_end_matches('?')
-                .trim_end_matches('.')
-                .to_string();
+        if let Some(rest) = strip_prefix_case_insensitive(trimmed, pattern) {
+            let query = trim_command_payload(rest).to_string();
             // For patterns like "what are my preferences" that may have no additional text
             return Some(MemoryCommand::Query {
                 query: if query.is_empty() {
@@ -108,8 +107,8 @@ pub fn detect_memory_command(user_message: &str) -> Option<MemoryCommand> {
     ];
 
     for pattern in &remember_patterns {
-        if let Some(rest) = lower.strip_prefix(pattern) {
-            let content = rest.trim().trim_end_matches('.').to_string();
+        if let Some(rest) = strip_prefix_case_insensitive(trimmed, pattern) {
+            let content = trim_command_payload(rest).to_string();
             if !content.is_empty() {
                 return Some(MemoryCommand::Remember { content });
             }
@@ -117,6 +116,21 @@ pub fn detect_memory_command(user_message: &str) -> Option<MemoryCommand> {
     }
 
     None
+}
+
+fn strip_prefix_case_insensitive<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    let head = text.get(..prefix.len())?;
+    if head.eq_ignore_ascii_case(prefix) {
+        text.get(prefix.len()..)
+    } else {
+        None
+    }
+}
+
+fn trim_command_payload(text: &str) -> &str {
+    text.trim()
+        .trim_end_matches(|c: char| matches!(c, '.' | '?' | '!' | '。' | '？' | '！'))
+        .trim()
 }
 
 /// LLM-driven memory extractor
@@ -262,11 +276,12 @@ Rules:
     ///
     /// Expects a JSON array of objects with category, content, keywords, importance.
     /// Tolerant of markdown code blocks wrapping the JSON.
+    /// Returns a parse error when the top-level payload is not valid JSON array.
     pub fn parse_extraction_response(
         response: &str,
         project_path: &str,
         session_id: Option<&str>,
-    ) -> Vec<NewMemoryEntry> {
+    ) -> AppResult<Vec<NewMemoryEntry>> {
         // Strip markdown code blocks if present
         let json_str = response
             .trim()
@@ -276,12 +291,11 @@ Rules:
         let json_str = json_str.strip_suffix("```").unwrap_or(json_str).trim();
 
         // Parse JSON array
-        let items: Vec<serde_json::Value> = match serde_json::from_str(json_str) {
-            Ok(v) => v,
-            Err(_) => return Vec::new(),
-        };
+        let items: Vec<serde_json::Value> = serde_json::from_str(json_str).map_err(|e| {
+            AppError::parse(format!("Failed to parse memory extraction JSON: {}", e))
+        })?;
 
-        items
+        let entries = items
             .iter()
             .filter_map(|item| {
                 let category_str = item.get("category")?.as_str()?;
@@ -327,7 +341,9 @@ Rules:
                     source_context: None,
                 })
             })
-            .collect()
+            .collect();
+
+        Ok(entries)
     }
 }
 
@@ -383,7 +399,7 @@ mod tests {
         assert_eq!(
             cmd,
             Some(MemoryCommand::Remember {
-                content: "the api uses rest not graphql".into()
+                content: "the API uses REST not GraphQL".into()
             })
         );
     }
@@ -405,7 +421,7 @@ mod tests {
         assert_eq!(
             cmd,
             Some(MemoryCommand::Forget {
-                query: "i said to use pnpm".into()
+                query: "I said to use pnpm".into()
             })
         );
     }
@@ -482,6 +498,17 @@ mod tests {
     fn test_detect_empty_content_returns_none() {
         assert!(detect_memory_command("Remember that ").is_none());
         assert!(detect_memory_command("Forget that ").is_none());
+    }
+
+    #[test]
+    fn test_detect_preserves_case_for_payload() {
+        let cmd = detect_memory_command("Remember that I prefer CamelCase identifiers.");
+        assert_eq!(
+            cmd,
+            Some(MemoryCommand::Remember {
+                content: "I prefer CamelCase identifiers".into()
+            })
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -562,7 +589,8 @@ mod tests {
             response,
             "/test/project",
             Some("session-1"),
-        );
+        )
+        .unwrap();
 
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].category, MemoryCategory::Preference);
@@ -579,7 +607,7 @@ mod tests {
     fn test_parse_extraction_response_markdown_wrapped() {
         let response = "```json\n[\n  {\n    \"category\": \"convention\",\n    \"content\": \"Tests in __tests__\",\n    \"keywords\": [\"tests\"],\n    \"importance\": 0.6\n  }\n]\n```";
 
-        let entries = MemoryExtractor::parse_extraction_response(response, "/test", None);
+        let entries = MemoryExtractor::parse_extraction_response(response, "/test", None).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].category, MemoryCategory::Convention);
@@ -588,28 +616,28 @@ mod tests {
     #[test]
     fn test_parse_extraction_response_empty_array() {
         let response = "[]";
-        let entries = MemoryExtractor::parse_extraction_response(response, "/test", None);
+        let entries = MemoryExtractor::parse_extraction_response(response, "/test", None).unwrap();
         assert!(entries.is_empty());
     }
 
     #[test]
     fn test_parse_extraction_response_invalid_json() {
         let response = "not valid json";
-        let entries = MemoryExtractor::parse_extraction_response(response, "/test", None);
-        assert!(entries.is_empty());
+        let result = MemoryExtractor::parse_extraction_response(response, "/test", None);
+        assert!(result.is_err());
     }
 
     #[test]
     fn test_parse_extraction_response_invalid_category() {
         let response = r#"[{"category": "invalid", "content": "test", "importance": 0.5}]"#;
-        let entries = MemoryExtractor::parse_extraction_response(response, "/test", None);
+        let entries = MemoryExtractor::parse_extraction_response(response, "/test", None).unwrap();
         assert!(entries.is_empty());
     }
 
     #[test]
     fn test_parse_extraction_response_empty_content_skipped() {
         let response = r#"[{"category": "fact", "content": "", "importance": 0.5}]"#;
-        let entries = MemoryExtractor::parse_extraction_response(response, "/test", None);
+        let entries = MemoryExtractor::parse_extraction_response(response, "/test", None).unwrap();
         assert!(entries.is_empty());
     }
 
@@ -636,7 +664,8 @@ mod tests {
             response,
             "/test/project",
             Some("session-1"),
-        );
+        )
+        .unwrap();
 
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].project_path, "__global__");
@@ -646,7 +675,7 @@ mod tests {
     #[test]
     fn test_parse_extraction_response_default_scope_is_project() {
         let response = r#"[{"category": "fact", "content": "test fact", "importance": 0.5}]"#;
-        let entries = MemoryExtractor::parse_extraction_response(response, "/test", None);
+        let entries = MemoryExtractor::parse_extraction_response(response, "/test", None).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].project_path, "/test");
     }
@@ -654,7 +683,7 @@ mod tests {
     #[test]
     fn test_parse_extraction_response_clamps_importance() {
         let response = r#"[{"category": "fact", "content": "test", "importance": 1.5}]"#;
-        let entries = MemoryExtractor::parse_extraction_response(response, "/test", None);
+        let entries = MemoryExtractor::parse_extraction_response(response, "/test", None).unwrap();
         assert_eq!(entries.len(), 1);
         assert!(entries[0].importance <= 1.0);
     }

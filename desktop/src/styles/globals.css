@@ -244,6 +244,37 @@
     }
   }
 
+  /* Startup splash ambient glow */
+  .animate-startup-glow {
+    animation: startupGlow 4s ease-in-out infinite;
+  }
+
+  @keyframes startupGlow {
+    0%,
+    100% {
+      opacity: 0.75;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.03);
+    }
+  }
+
+  /* Startup progress indicator */
+  .animate-startup-indicator {
+    animation: startupIndicator 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+
+  @keyframes startupIndicator {
+    0% {
+      transform: translateX(-120%);
+    }
+    100% {
+      transform: translateX(220%);
+    }
+  }
+
   /* ============================================================
      Responsive Container Utilities
      ============================================================ */

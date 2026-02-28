@@ -615,31 +615,40 @@ impl Chunker for SemanticChunker {
 /// Split text into sentences with their character offsets.
 fn split_into_sentences(text: &str) -> Vec<(usize, &str)> {
     let mut sentences = Vec::new();
-    let mut start = 0;
-    let bytes = text.as_bytes();
-    let len = bytes.len();
-    let mut i = 0;
+    let mut start = 0usize;
+    let len = text.len();
 
-    while i < len {
-        let b = bytes[i];
-        // Detect sentence-ending punctuation followed by whitespace or end
-        if (b == b'.' || b == b'!' || b == b'?')
-            && (i + 1 >= len || bytes[i + 1].is_ascii_whitespace())
-        {
-            let end = i + 1;
-            let sentence = text[start..end].trim();
-            if !sentence.is_empty() {
-                sentences.push((start, sentence));
-            }
-            // Skip whitespace after sentence end
-            i += 1;
-            while i < len && bytes[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            start = i;
+    let mut iter = text.char_indices().peekable();
+    while let Some((idx, ch)) = iter.next() {
+        if !is_sentence_terminator(ch) {
             continue;
         }
-        i += 1;
+
+        // Include trailing closing quotes/brackets after sentence punctuation.
+        let mut end = idx + ch.len_utf8();
+        while let Some((next_idx, next_ch)) = iter.peek().copied() {
+            if !is_trailing_sentence_quote(next_ch) {
+                break;
+            }
+            end = next_idx + next_ch.len_utf8();
+            iter.next();
+        }
+
+        let sentence = text[start..end].trim();
+        if !sentence.is_empty() {
+            sentences.push((start, sentence));
+        }
+
+        // Skip whitespace before next sentence start.
+        start = end;
+        while let Some((next_idx, next_ch)) = iter.peek().copied() {
+            if !next_ch.is_whitespace() {
+                start = next_idx;
+                break;
+            }
+            iter.next();
+            start = next_idx + next_ch.len_utf8();
+        }
     }
 
     // Remaining text
@@ -651,6 +660,17 @@ fn split_into_sentences(text: &str) -> Vec<(usize, &str)> {
     }
 
     sentences
+}
+
+fn is_sentence_terminator(ch: char) -> bool {
+    matches!(ch, '.' | '!' | '?' | '。' | '！' | '？')
+}
+
+fn is_trailing_sentence_quote(ch: char) -> bool {
+    matches!(
+        ch,
+        '"' | '\'' | ')' | ']' | '}' | '”' | '’' | '」' | '』' | '】' | '》'
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1024,5 +1044,17 @@ mod tests {
     fn split_sentences_no_ending() {
         let sentences = split_into_sentences("No ending punctuation");
         assert_eq!(sentences.len(), 1);
+    }
+
+    #[test]
+    fn split_sentences_cjk_punctuation() {
+        let sentences = split_into_sentences("你好世界。今天天气很好！要去散步吗？");
+        assert_eq!(sentences.len(), 3);
+    }
+
+    #[test]
+    fn split_sentences_japanese_punctuation() {
+        let sentences = split_into_sentences("これはテストです。次の文です！終わり？");
+        assert_eq!(sentences.len(), 3);
     }
 }

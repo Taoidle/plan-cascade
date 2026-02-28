@@ -10,22 +10,54 @@ use crate::services::memory::store::{MemoryCategory, MemoryEntry};
 use crate::services::orchestrator::index_store::ProjectIndexSummary;
 
 /// Detect the primary language of the user's message.
-/// Returns "zh" for Chinese-dominant text, "en" for English/other.
+/// Returns one of: "zh", "ja", "ko", "en".
 pub fn detect_language(text: &str) -> &'static str {
-    let cjk_count = text.chars().filter(|c| is_cjk_char(*c)).count();
-    let total_alpha = text.chars().filter(|c| c.is_alphanumeric()).count();
-    if total_alpha > 0 && (cjk_count as f64 / total_alpha as f64) > 0.3 {
+    let han_count = text.chars().filter(|c| is_han_char(*c)).count();
+    let kana_count = text.chars().filter(|c| is_japanese_kana(*c)).count();
+    let hangul_count = text.chars().filter(|c| is_hangul(*c)).count();
+    let total_alnum = text.chars().filter(|c| c.is_alphanumeric()).count();
+
+    // Hangul is unique to Korean.
+    if hangul_count >= 2 && (hangul_count as f64 / total_alnum.max(1) as f64) >= 0.2 {
+        return "ko";
+    }
+
+    // Hiragana/Katakana are unique to Japanese.
+    if kana_count >= 1 {
+        return "ja";
+    }
+
+    // Han ideographs without kana/hangul are treated as Chinese.
+    if total_alnum > 0 && (han_count as f64 / total_alnum as f64) > 0.3 {
         "zh"
     } else {
         "en"
     }
 }
 
-fn is_cjk_char(c: char) -> bool {
+fn is_han_char(c: char) -> bool {
     matches!(c,
         '\u{4E00}'..='\u{9FFF}'   // CJK Unified Ideographs
         | '\u{3400}'..='\u{4DBF}' // CJK Extension A
         | '\u{F900}'..='\u{FAFF}' // CJK Compatibility
+    )
+}
+
+fn is_japanese_kana(c: char) -> bool {
+    matches!(
+        c,
+        '\u{3040}'..='\u{309F}' // Hiragana
+            | '\u{30A0}'..='\u{30FF}' // Katakana
+            | '\u{31F0}'..='\u{31FF}' // Katakana Phonetic Extensions
+    )
+}
+
+fn is_hangul(c: char) -> bool {
+    matches!(
+        c,
+        '\u{AC00}'..='\u{D7AF}' // Hangul Syllables
+            | '\u{1100}'..='\u{11FF}' // Hangul Jamo
+            | '\u{3130}'..='\u{318F}' // Hangul Compatibility Jamo
     )
 }
 
@@ -170,6 +202,8 @@ pub fn build_system_prompt_with_memories(
 
     let language_instruction = match language {
         "zh" => "IMPORTANT: The user is communicating in Chinese. You MUST respond in Chinese (简体中文). Keep all your output, analysis, and explanations in Chinese. Only use English for code, technical terms, and tool parameters.",
+        "ja" => "IMPORTANT: The user is communicating in Japanese. You MUST respond in Japanese. Keep code symbols, identifiers, and file paths in original form.",
+        "ko" => "IMPORTANT: The user is communicating in Korean. You MUST respond in Korean. Keep code symbols, identifiers, and file paths in original form.",
         _ => "Respond in the same language as the user's message.",
     };
 
@@ -1421,6 +1455,24 @@ mod tests {
     }
 
     #[test]
+    fn test_build_system_prompt_japanese_language() {
+        let tools = get_tool_definitions_from_registry();
+        let prompt = build_system_prompt(
+            &PathBuf::from("/test"),
+            &tools,
+            None,
+            "OpenAI",
+            "gpt-4.1",
+            "ja",
+        );
+
+        assert!(
+            prompt.contains("respond in Japanese") || prompt.contains("respond in japanese"),
+            "Japanese language instruction should be present"
+        );
+    }
+
+    #[test]
     fn test_detect_language_chinese() {
         assert_eq!(detect_language("你是哪个模型"), "zh");
         assert_eq!(detect_language("帮我 fix 这个 bug"), "zh");
@@ -1436,10 +1488,20 @@ mod tests {
 
     #[test]
     fn test_detect_language_mixed() {
-        // More than 30% CJK should detect as zh
+        // More than 30% Han should detect as zh.
         assert_eq!(detect_language("帮我 fix 这个 bug"), "zh");
         // Empty string defaults to en
         assert_eq!(detect_language(""), "en");
+    }
+
+    #[test]
+    fn test_detect_language_japanese() {
+        assert_eq!(detect_language("このプロジェクトを分析してください"), "ja");
+    }
+
+    #[test]
+    fn test_detect_language_korean() {
+        assert_eq!(detect_language("이 프로젝트 구조를 분석해줘"), "ko");
     }
 
     // =========================================================================

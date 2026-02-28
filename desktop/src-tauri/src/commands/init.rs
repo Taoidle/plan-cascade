@@ -6,7 +6,7 @@
 //! the remote gateway if configured.
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::plugins::PluginState;
 use crate::commands::remote::RemoteState;
@@ -29,6 +29,45 @@ pub struct InitResult {
     pub remote_gateway_auto_started: bool,
 }
 
+const INIT_PROGRESS_EVENT: &str = "app-init-progress";
+const INIT_TOTAL_STEPS: u8 = 6;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InitStage {
+    CoreState,
+    Plugins,
+    IndexManager,
+    SpecInterview,
+    RecoveryScan,
+    RemoteGateway,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InitProgressEvent {
+    pub stage: InitStage,
+    pub step_index: u8,
+    pub total_steps: u8,
+}
+
+fn emit_init_progress(app: &AppHandle, stage: InitStage, step_index: u8) {
+    if let Err(e) = app.emit(
+        INIT_PROGRESS_EVENT,
+        InitProgressEvent {
+            stage,
+            step_index,
+            total_steps: INIT_TOTAL_STEPS,
+        },
+    ) {
+        tracing::debug!(
+            error = %e,
+            stage = ?stage,
+            step = step_index,
+            "Failed to emit init progress event"
+        );
+    }
+}
+
 /// Initialize the application on startup
 /// This command sets up all backend services, prepares the app for use,
 /// initializes the IndexManager for background codebase indexing,
@@ -43,9 +82,13 @@ pub async fn init_app(
     spec_interview_state: State<'_, SpecInterviewState>,
     app: AppHandle,
 ) -> Result<CommandResponse<InitResult>, String> {
+    emit_init_progress(&app, InitStage::CoreState, 1);
+
     // Initialize all services
     match state.initialize().await {
         Ok(_) => {
+            emit_init_progress(&app, InitStage::Plugins, 2);
+
             // Initialize the plugin system early (ADR-F003).
             // Plugin discovery is fast (directory scanning only) and does not
             // depend on the database or index. Initializing it before the
@@ -69,6 +112,8 @@ pub async fn init_app(
                 tracing::info!("Plugin system initialized with root: {}", plugin_root);
             }
 
+            emit_init_progress(&app, InitStage::IndexManager, 3);
+
             // Initialize IndexManager with the database pool.
             // Store in StandaloneState BEFORE calling ensure_indexed() so that
             // get_index_status queries can immediately retrieve the manager and
@@ -76,7 +121,7 @@ pub async fn init_app(
             // showing after app restart).
             if let Ok(pool) = state.with_database(|db| Ok(db.pool().clone())).await {
                 let manager = IndexManager::new(pool);
-                manager.set_app_handle(app).await;
+                manager.set_app_handle(app.clone()).await;
 
                 // Store immediately so frontend can query status
                 {
@@ -99,6 +144,8 @@ pub async fn init_app(
                 }
             }
 
+            emit_init_progress(&app, InitStage::SpecInterview, 4);
+
             // Initialize the spec interview service
             if let Ok(pool) = state.with_database(|db| Ok(db.pool().clone())).await {
                 if let Err(e) = spec_interview_state.initialize(pool).await {
@@ -106,11 +153,15 @@ pub async fn init_app(
                 }
             }
 
+            emit_init_progress(&app, InitStage::RecoveryScan, 5);
+
             // Scan for incomplete executions after initialization
             let incomplete_tasks = state
                 .with_database(|db| RecoveryDetector::detect(db))
                 .await
                 .unwrap_or_default();
+
+            emit_init_progress(&app, InitStage::RemoteGateway, 6);
 
             // Auto-start remote gateway if configured.
             // This is non-blocking: failures are logged but do not prevent app init.

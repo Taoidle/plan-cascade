@@ -27,7 +27,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::services::memory::retrieval::search_memories;
+use crate::services::memory::retrieval::{
+    search_memories_with_options, MemoryRankingMode, MemorySearchOptions, MemoryTouchPolicy,
+};
 use crate::services::memory::store::ProjectMemoryStore;
 use crate::services::memory::store::{MemoryCategory, MemorySearchRequest, NewMemoryEntry};
 use crate::services::skills::generator::SkillGeneratorStore;
@@ -180,7 +182,7 @@ pub type OnCompactionHook = Box<
 /// Registry of lifecycle hooks for the agentic loop.
 ///
 /// Hooks are stored in Vecs and executed sequentially in registration order.
-/// Errors from individual hooks are logged via `eprintln!` but do not prevent
+/// Errors from individual hooks are logged via `tracing` but do not prevent
 /// subsequent hooks from executing or disrupt the main agentic loop.
 pub struct AgenticHooks {
     on_session_start: Vec<OnSessionStartHook>,
@@ -301,7 +303,7 @@ impl AgenticHooks {
     pub async fn fire_on_session_start(&self, ctx: &HookContext) {
         for (i, hook) in self.on_session_start.iter().enumerate() {
             if let Err(e) = hook(ctx.clone()).await {
-                eprintln!("[hooks] on_session_start hook {} failed: {}", i, e);
+                tracing::info!("[hooks] on_session_start hook {} failed: {}", i, e);
             }
         }
     }
@@ -322,7 +324,7 @@ impl AgenticHooks {
                     // No modification
                 }
                 Err(e) => {
-                    eprintln!("[hooks] on_user_message hook {} failed: {}", i, e);
+                    tracing::info!("[hooks] on_user_message hook {} failed: {}", i, e);
                 }
             }
         }
@@ -333,7 +335,7 @@ impl AgenticHooks {
     pub async fn fire_on_before_llm(&self, ctx: &HookContext, iteration: u32) {
         for (i, hook) in self.on_before_llm.iter().enumerate() {
             if let Err(e) = hook(ctx.clone(), iteration).await {
-                eprintln!("[hooks] on_before_llm hook {} failed: {}", i, e);
+                tracing::info!("[hooks] on_before_llm hook {} failed: {}", i, e);
             }
         }
     }
@@ -342,7 +344,7 @@ impl AgenticHooks {
     pub async fn fire_on_after_llm(&self, ctx: &HookContext, response_text: Option<String>) {
         for (i, hook) in self.on_after_llm.iter().enumerate() {
             if let Err(e) = hook(ctx.clone(), response_text.clone()).await {
-                eprintln!("[hooks] on_after_llm hook {} failed: {}", i, e);
+                tracing::info!("[hooks] on_after_llm hook {} failed: {}", i, e);
             }
         }
     }
@@ -366,7 +368,7 @@ impl AgenticHooks {
                     // No skip requested
                 }
                 Err(e) => {
-                    eprintln!("[hooks] on_before_tool hook {} failed: {}", i, e);
+                    tracing::info!("[hooks] on_before_tool hook {} failed: {}", i, e);
                 }
             }
         }
@@ -402,7 +404,7 @@ impl AgenticHooks {
                     }
                 }
                 Err(e) => {
-                    eprintln!("[hooks] on_after_tool hook {} failed: {}", i, e);
+                    tracing::info!("[hooks] on_after_tool hook {} failed: {}", i, e);
                 }
             }
         }
@@ -417,7 +419,7 @@ impl AgenticHooks {
     pub async fn fire_on_session_end(&self, ctx: &HookContext, summary: SessionSummary) {
         for (i, hook) in self.on_session_end.iter().enumerate() {
             if let Err(e) = hook(ctx.clone(), summary.clone()).await {
-                eprintln!("[hooks] on_session_end hook {} failed: {}", i, e);
+                tracing::info!("[hooks] on_session_end hook {} failed: {}", i, e);
             }
         }
     }
@@ -426,7 +428,7 @@ impl AgenticHooks {
     pub async fn fire_on_compaction(&self, ctx: &HookContext, compacted_snippets: Vec<String>) {
         for (i, hook) in self.on_compaction.iter().enumerate() {
             if let Err(e) = hook(ctx.clone(), compacted_snippets.clone()).await {
-                eprintln!("[hooks] on_compaction hook {} failed: {}", i, e);
+                tracing::info!("[hooks] on_compaction hook {} failed: {}", i, e);
             }
         }
     }
@@ -450,7 +452,7 @@ pub fn build_default_hooks() -> AgenticHooks {
     // Session start: log session initialization
     hooks.register_on_session_start(Box::new(|ctx| {
         Box::pin(async move {
-            eprintln!(
+            tracing::info!(
                 "[hooks] Session started: session={}, project={}, provider={}/{}",
                 ctx.session_id,
                 ctx.project_path.display(),
@@ -464,7 +466,7 @@ pub fn build_default_hooks() -> AgenticHooks {
     // Session end: log session completion
     hooks.register_on_session_end(Box::new(|ctx, summary| {
         Box::pin(async move {
-            eprintln!(
+            tracing::info!(
                 "[hooks] Session ended: session={}, turns={}, success={}, files_read={}, findings={}",
                 ctx.session_id,
                 summary.total_turns,
@@ -479,7 +481,7 @@ pub fn build_default_hooks() -> AgenticHooks {
     // Compaction: log compaction event
     hooks.register_on_compaction(Box::new(|ctx, snippets| {
         Box::pin(async move {
-            eprintln!(
+            tracing::info!(
                 "[hooks] Context compaction: session={}, compacted_snippets={}",
                 ctx.session_id,
                 snippets.len(),
@@ -529,7 +531,7 @@ pub fn register_skill_hooks(
             let count = matches.len();
             let mut w = store.write().await;
             *w = matches;
-            eprintln!(
+            tracing::info!(
                 "[hooks] Skill detection: session={}, detected_skills={}",
                 ctx.session_id, count,
             );
@@ -586,7 +588,7 @@ pub fn register_memory_hooks(
 ) {
     use crate::services::memory::store::GLOBAL_PROJECT_PATH;
 
-    // on_session_start: load project + global memories
+    // on_session_start: load project + global memories (browse mode, no query)
     let store_clone = memory_store.clone();
     let memories_out = loaded_memories.clone();
     hooks.register_on_session_start(Box::new(move |ctx| {
@@ -594,6 +596,7 @@ pub fn register_memory_hooks(
         let out = memories_out.clone();
         Box::pin(async move {
             let project_path = ctx.project_path.to_string_lossy().to_string();
+            let mut seen_ids = HashSet::new();
 
             // Load project-scoped memories
             let project_request = MemorySearchRequest {
@@ -604,12 +607,23 @@ pub fn register_memory_hooks(
                 min_importance: 0.1,
             };
             let mut all_entries = Vec::new();
-            match search_memories(&store, &project_request) {
+            match search_memories_with_options(
+                &store,
+                &project_request,
+                MemorySearchOptions {
+                    ranking_mode: MemoryRankingMode::Browse,
+                    touch_policy: MemoryTouchPolicy::NoTouch,
+                },
+            ) {
                 Ok(results) => {
-                    all_entries.extend(results.into_iter().map(|r| r.entry));
+                    for result in results {
+                        if seen_ids.insert(result.entry.id.clone()) {
+                            all_entries.push(result.entry);
+                        }
+                    }
                 }
                 Err(e) => {
-                    eprintln!(
+                    tracing::info!(
                         "[hooks] Project memory load failed: session={}, error={}",
                         ctx.session_id, e,
                     );
@@ -624,12 +638,23 @@ pub fn register_memory_hooks(
                 top_k: 5,
                 min_importance: 0.3,
             };
-            match search_memories(&store, &global_request) {
+            match search_memories_with_options(
+                &store,
+                &global_request,
+                MemorySearchOptions {
+                    ranking_mode: MemoryRankingMode::Browse,
+                    touch_policy: MemoryTouchPolicy::NoTouch,
+                },
+            ) {
                 Ok(results) => {
-                    all_entries.extend(results.into_iter().map(|r| r.entry));
+                    for result in results {
+                        if seen_ids.insert(result.entry.id.clone()) {
+                            all_entries.push(result.entry);
+                        }
+                    }
                 }
                 Err(e) => {
-                    eprintln!(
+                    tracing::info!(
                         "[hooks] Global memory load failed: session={}, error={}",
                         ctx.session_id, e,
                     );
@@ -639,11 +664,98 @@ pub fn register_memory_hooks(
             let count = all_entries.len();
             let mut w = out.write().await;
             *w = all_entries;
-            eprintln!(
+            tracing::info!(
                 "[hooks] Memory loaded: session={}, memories={} (project+global)",
                 ctx.session_id, count,
             );
             Ok(())
+        })
+    }));
+
+    // on_user_message: refresh memory selection with semantic query
+    let store_clone_msg = memory_store.clone();
+    let memories_out_msg = loaded_memories.clone();
+    hooks.register_on_user_message(Box::new(move |ctx, message| {
+        let store = store_clone_msg.clone();
+        let out = memories_out_msg.clone();
+        Box::pin(async move {
+            let query = message.trim().to_string();
+            if query.is_empty() {
+                return Ok(None);
+            }
+
+            let project_path = ctx.project_path.to_string_lossy().to_string();
+            let mut seen_ids = HashSet::new();
+            let mut all_entries = Vec::new();
+
+            let project_request = MemorySearchRequest {
+                project_path: project_path.clone(),
+                query: query.clone(),
+                categories: None,
+                top_k: 10,
+                min_importance: 0.1,
+            };
+            match search_memories_with_options(
+                &store,
+                &project_request,
+                MemorySearchOptions {
+                    ranking_mode: MemoryRankingMode::Hybrid,
+                    touch_policy: MemoryTouchPolicy::NoTouch,
+                },
+            ) {
+                Ok(results) => {
+                    for result in results {
+                        if seen_ids.insert(result.entry.id.clone()) {
+                            all_entries.push(result.entry);
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::info!(
+                        "[hooks] Project memory refresh failed: session={}, error={}",
+                        ctx.session_id, e,
+                    );
+                }
+            }
+
+            let global_request = MemorySearchRequest {
+                project_path: GLOBAL_PROJECT_PATH.to_string(),
+                query,
+                categories: None,
+                top_k: 5,
+                min_importance: 0.3,
+            };
+            match search_memories_with_options(
+                &store,
+                &global_request,
+                MemorySearchOptions {
+                    ranking_mode: MemoryRankingMode::Hybrid,
+                    touch_policy: MemoryTouchPolicy::NoTouch,
+                },
+            ) {
+                Ok(results) => {
+                    for result in results {
+                        if seen_ids.insert(result.entry.id.clone()) {
+                            all_entries.push(result.entry);
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::info!(
+                        "[hooks] Global memory refresh failed: session={}, error={}",
+                        ctx.session_id, e,
+                    );
+                }
+            }
+
+            let count = all_entries.len();
+            let mut w = out.write().await;
+            *w = all_entries;
+            tracing::info!(
+                "[hooks] Memory refreshed from message: session={}, memories={}",
+                ctx.session_id, count
+            );
+            Ok(None)
         })
     }));
 
@@ -658,7 +770,7 @@ pub fn register_memory_hooks(
 
             // Skip extraction for trivial sessions
             if summary.total_turns < 3 || summary.conversation_content.len() < 100 {
-                eprintln!(
+                tracing::info!(
                     "[hooks] Memory extraction skipped (trivial session): session={}, turns={}, content_len={}",
                     ctx.session_id, summary.total_turns, summary.conversation_content.len(),
                 );
@@ -706,14 +818,14 @@ pub fn register_memory_hooks(
                     {
                         Ok(Ok(resp)) => resp.content.unwrap_or_else(|| content_for_extraction.clone()),
                         Ok(Err(e)) => {
-                            eprintln!(
+                            tracing::info!(
                                 "[hooks] LLM summarization failed: session={}, error={}",
                                 ctx.session_id, e,
                             );
                             content_for_extraction.clone()
                         }
                         Err(_) => {
-                            eprintln!(
+                            tracing::info!(
                                 "[hooks] LLM summarization timed out: session={}",
                                 ctx.session_id,
                             );
@@ -749,41 +861,50 @@ pub fn register_memory_hooks(
                     Ok(Ok(resp)) => {
                         let response_text = resp.content.unwrap_or_default();
 
-                        let new_memories = MemoryExtractor::parse_extraction_response(
+                        match MemoryExtractor::parse_extraction_response(
                             &response_text,
                             &project_path,
                             Some(&ctx.session_id),
-                        );
-
-                        let mut inserted = 0u32;
-                        let mut merged = 0u32;
-                        for entry in new_memories {
-                            match store.upsert_memory(entry) {
-                                Ok(crate::services::memory::store::UpsertResult::Inserted(_)) => inserted += 1,
-                                Ok(crate::services::memory::store::UpsertResult::Merged { .. }) => merged += 1,
-                                Ok(crate::services::memory::store::UpsertResult::Skipped { .. }) => {}
-                                Err(e) => {
-                                    eprintln!(
-                                        "[hooks] Memory upsert failed: session={}, error={}",
-                                        ctx.session_id, e,
-                                    );
+                        ) {
+                            Ok(new_memories) => {
+                                let mut inserted = 0u32;
+                                let mut merged = 0u32;
+                                for entry in new_memories {
+                                    match store.upsert_memory(entry) {
+                                        Ok(crate::services::memory::store::UpsertResult::Inserted(_)) => inserted += 1,
+                                        Ok(crate::services::memory::store::UpsertResult::Merged { .. }) => merged += 1,
+                                        Ok(crate::services::memory::store::UpsertResult::Skipped { .. }) => {}
+                                        Err(e) => {
+                                            tracing::info!(
+                                                "[hooks] Memory upsert failed: session={}, error={}",
+                                                ctx.session_id, e,
+                                            );
+                                        }
+                                    }
                                 }
+                                tracing::info!(
+                                    "[hooks] LLM memory extraction: session={}, inserted={}, merged={}",
+                                    ctx.session_id, inserted, merged,
+                                );
+                            }
+                            Err(e) => {
+                                tracing::info!(
+                                    "[hooks] LLM extraction parse failed, falling back to rule-based: session={}, error={}",
+                                    ctx.session_id, e,
+                                );
+                                rule_based_memory_extraction(&store, &ctx, &summary, &project_path, &existing);
                             }
                         }
-                        eprintln!(
-                            "[hooks] LLM memory extraction: session={}, inserted={}, merged={}",
-                            ctx.session_id, inserted, merged,
-                        );
                     }
                     Ok(Err(e)) => {
-                        eprintln!(
+                        tracing::info!(
                             "[hooks] LLM extraction failed, falling back to rule-based: session={}, error={}",
                             ctx.session_id, e,
                         );
                         rule_based_memory_extraction(&store, &ctx, &summary, &project_path, &existing);
                     }
                     Err(_) => {
-                        eprintln!(
+                        tracing::info!(
                             "[hooks] LLM extraction timed out, falling back to rule-based: session={}",
                             ctx.session_id,
                         );
@@ -804,7 +925,7 @@ pub fn register_memory_hooks(
     // on_compaction: log only (no memory writes)
     hooks.register_on_compaction(Box::new(move |ctx, snippets| {
         Box::pin(async move {
-            eprintln!(
+            tracing::info!(
                 "[hooks] Context compaction: session={}, snippets={}",
                 ctx.session_id,
                 snippets.len(),
@@ -859,13 +980,13 @@ fn rule_based_memory_extraction(
     if !new_memories.is_empty() {
         match store.add_memories(new_memories) {
             Ok(_) => {
-                eprintln!(
+                tracing::info!(
                     "[hooks] Rule-based memory extracted: session={}, new_memories={}",
                     ctx.session_id, count,
                 );
             }
             Err(e) => {
-                eprintln!(
+                tracing::info!(
                     "[hooks] Rule-based memory extraction failed: session={}, error={}",
                     ctx.session_id, e,
                 );
@@ -966,14 +1087,14 @@ async fn maybe_generate_skill_from_session(
     {
         Ok(Ok(resp)) => resp,
         Ok(Err(e)) => {
-            eprintln!(
+            tracing::info!(
                 "[hooks] Skill generation skipped (LLM error): session={}, error={}",
                 ctx.session_id, e
             );
             return;
         }
         Err(_) => {
-            eprintln!(
+            tracing::info!(
                 "[hooks] Skill generation skipped (LLM timeout): session={}",
                 ctx.session_id
             );
@@ -986,7 +1107,7 @@ async fn maybe_generate_skill_from_session(
     };
 
     let Some(candidate) = parse_generated_skill_response(&response_text, &ctx.session_id) else {
-        eprintln!(
+        tracing::info!(
             "[hooks] Skill generation skipped (invalid payload): session={}",
             ctx.session_id
         );
@@ -1010,7 +1131,7 @@ async fn maybe_generate_skill_from_session(
             ) >= 0.80
     });
     if duplicate {
-        eprintln!(
+        tracing::info!(
             "[hooks] Skill generation deduped: session={}, candidate={}",
             ctx.session_id, candidate.name
         );
@@ -1019,13 +1140,13 @@ async fn maybe_generate_skill_from_session(
 
     match skill_store.save_generated_skill(project_path, &candidate) {
         Ok(saved) => {
-            eprintln!(
+            tracing::info!(
                 "[hooks] Generated skill saved: session={}, skill_id={}, name={}",
                 ctx.session_id, saved.id, saved.name
             );
         }
         Err(e) => {
-            eprintln!(
+            tracing::info!(
                 "[hooks] Skill generation save failed: session={}, error={}",
                 ctx.session_id, e
             );
@@ -1603,7 +1724,7 @@ mod tests {
     }
 
     #[test]
-    fn test_register_memory_hooks_adds_three_hooks() {
+    fn test_register_memory_hooks_adds_four_hooks() {
         let mut hooks = AgenticHooks::new();
         assert_eq!(hooks.total_hooks(), 0);
 
@@ -1612,8 +1733,8 @@ mod tests {
 
         register_memory_hooks(&mut hooks, store, loaded_memories, None);
 
-        // Should register 3 hooks: on_session_start + on_session_end + on_compaction
-        assert_eq!(hooks.total_hooks(), 3);
+        // Should register 4 hooks: on_session_start + on_user_message + on_session_end + on_compaction
+        assert_eq!(hooks.total_hooks(), 4);
     }
 
     #[test]
@@ -1626,8 +1747,8 @@ mod tests {
 
         register_memory_hooks(&mut hooks, store, loaded_memories, None);
 
-        // defaults(3) + memory hooks(3) = 6
-        assert_eq!(hooks.total_hooks(), 6);
+        // defaults(3) + memory hooks(4) = 7
+        assert_eq!(hooks.total_hooks(), 7);
     }
 
     #[tokio::test]
@@ -1768,8 +1889,8 @@ mod tests {
         let loaded_memories = Arc::new(RwLock::new(Vec::new()));
         register_memory_hooks(&mut hooks, store, loaded_memories, None);
 
-        // defaults(3) + skill(2) + memory(3) = 8
-        assert_eq!(hooks.total_hooks(), 8);
+        // defaults(3) + skill(2) + memory(4) = 9
+        assert_eq!(hooks.total_hooks(), 9);
         assert!(!hooks.is_empty());
     }
 
@@ -1805,8 +1926,8 @@ mod tests {
 
         assert_eq!(
             hooks.total_hooks(),
-            8,
-            "defaults(3) + skill(2) + memory(3) = 8"
+            9,
+            "defaults(3) + skill(2) + memory(4) = 9"
         );
 
         let ctx = test_context();
@@ -1906,16 +2027,16 @@ mod tests {
 
         // Expected distribution:
         // on_session_start: 1 (default) + 1 (skill) + 1 (memory) = 3
-        // on_user_message: 1 (skill) = 1
+        // on_user_message: 1 (skill) + 1 (memory) = 2
         // on_session_end: 1 (default) + 1 (memory) = 2
         // on_compaction: 1 (default) + 1 (memory) = 2
-        // Total: 3 + 1 + 2 + 2 = 8
-        assert_eq!(hooks.total_hooks(), 8);
+        // Total: 3 + 2 + 2 + 2 = 9
+        assert_eq!(hooks.total_hooks(), 9);
 
         // Verify the debug format reflects the distribution
         let debug = format!("{:?}", hooks);
         assert!(debug.contains("on_session_start: 3"));
-        assert!(debug.contains("on_user_message: 1"));
+        assert!(debug.contains("on_user_message: 2"));
         assert!(debug.contains("on_session_end: 2"));
         assert!(debug.contains("on_compaction: 2"));
     }

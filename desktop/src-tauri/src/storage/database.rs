@@ -613,6 +613,7 @@ impl Database {
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 last_accessed_at TEXT NOT NULL DEFAULT (datetime('now')),
+                last_decay_at TEXT,
                 UNIQUE(project_path, content)
             )",
             [],
@@ -635,6 +636,16 @@ impl Database {
              ON project_memories(project_path, importance DESC)",
             [],
         )?;
+
+        // Migration: add decay tracking column for incremental/idempotent decay.
+        {
+            let has_last_decay_at =
+                Self::table_has_column(&conn, "project_memories", "last_decay_at");
+            if !has_last_decay_at {
+                let _ = conn
+                    .execute_batch("ALTER TABLE project_memories ADD COLUMN last_decay_at TEXT;");
+            }
+        }
 
         // Episodic records for learning from past interactions
         conn.execute(
@@ -1999,6 +2010,17 @@ mod tests {
         assert!(indexes.contains(&"idx_project_memories_project".to_string()));
         assert!(indexes.contains(&"idx_project_memories_category".to_string()));
         assert!(indexes.contains(&"idx_project_memories_importance".to_string()));
+    }
+
+    #[test]
+    fn test_project_memories_last_decay_column_exists() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+        assert!(Database::table_has_column(
+            &conn,
+            "project_memories",
+            "last_decay_at"
+        ));
     }
 
     #[test]

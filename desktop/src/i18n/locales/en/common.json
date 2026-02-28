@@ -2,6 +2,20 @@
   "appName": "Plan Cascade",
   "version": "v0.1.0",
   "ready": "Ready",
+  "startup": {
+    "progress": "{{current}}/{{total}}",
+    "stage": {
+      "booting": "Starting runtime...",
+      "coreState": "Initializing core services...",
+      "plugins": "Loading plugin system...",
+      "indexManager": "Preparing codebase index manager...",
+      "specInterview": "Initializing spec interview service...",
+      "recoveryScan": "Scanning interrupted tasks...",
+      "remoteGateway": "Checking remote gateway auto-start...",
+      "syncing": "Preparing workspace...",
+      "ready": "Almost ready..."
+    }
+  },
 
   "buttons": {
     "save": "Save",

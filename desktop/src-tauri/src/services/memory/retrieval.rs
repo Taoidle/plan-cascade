@@ -11,18 +11,55 @@
 //! 4. Compute keyword overlap (Jaccard coefficient)
 //! 5. Apply combined scoring formula
 //! 6. Sort by final_score descending, return top_k
-//! 7. Bump access_count and last_accessed_at for returned entries
+//! 7. Optionally bump access_count and last_accessed_at for returned entries
 
 use std::collections::HashSet;
 
 use chrono::{NaiveDateTime, Utc};
 use rusqlite::params;
+use serde::{Deserialize, Serialize};
 
 use crate::services::memory::store::{
     bytes_to_embedding, MemoryCategory, MemorySearchRequest, MemorySearchResult, ProjectMemoryStore,
 };
 use crate::services::orchestrator::embedding_service::cosine_similarity;
 use crate::utils::error::AppResult;
+
+/// Ranking mode for memory retrieval.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryRankingMode {
+    /// Full 4-signal ranking: embedding + keyword + importance + recency.
+    Hybrid,
+    /// Browse mode for empty/noisy queries: importance + recency only.
+    Browse,
+}
+
+/// Whether search should mutate access counters.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryTouchPolicy {
+    /// Read-only search. Does not update access counters.
+    NoTouch,
+    /// Touch all returned results by incrementing access counters.
+    TouchReturned,
+}
+
+/// Search-time behavior controls.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemorySearchOptions {
+    pub ranking_mode: MemoryRankingMode,
+    pub touch_policy: MemoryTouchPolicy,
+}
+
+impl Default for MemorySearchOptions {
+    fn default() -> Self {
+        Self {
+            ranking_mode: MemoryRankingMode::Hybrid,
+            touch_policy: MemoryTouchPolicy::NoTouch,
+        }
+    }
+}
 
 /// Relevance scoring formula:
 ///
@@ -47,6 +84,14 @@ pub fn compute_relevance_score(
 ) -> f32 {
     let recency = 1.0 / (1.0 + days_since_last_access as f32 * 0.1);
     0.40 * embedding_similarity + 0.25 * keyword_overlap + 0.20 * importance + 0.15 * recency
+}
+
+/// Browse score used when no reliable semantic query is available.
+///
+/// Recency uses the same decay curve as hybrid scoring.
+fn compute_browse_score(importance: f32, days_since_last_access: f64) -> f32 {
+    let recency = 1.0 / (1.0 + days_since_last_access as f32 * 0.1);
+    0.80 * importance + 0.20 * recency
 }
 
 /// Compute Jaccard coefficient between two keyword sets.
@@ -82,15 +127,62 @@ fn days_since(datetime_str: &str) -> f64 {
     }
 }
 
+/// Basic English stopwords that should not participate in keyword overlap.
+fn is_stopword(token: &str) -> bool {
+    matches!(
+        token,
+        "a"
+            | "an"
+            | "and"
+            | "are"
+            | "as"
+            | "at"
+            | "be"
+            | "but"
+            | "by"
+            | "can"
+            | "do"
+            | "for"
+            | "from"
+            | "had"
+            | "has"
+            | "have"
+            | "how"
+            | "in"
+            | "into"
+            | "is"
+            | "it"
+            | "of"
+            | "on"
+            | "or"
+            | "that"
+            | "the"
+            | "their"
+            | "this"
+            | "to"
+            | "use"
+            | "using"
+            | "what"
+            | "when"
+            | "where"
+            | "which"
+            | "who"
+            | "with"
+            | "you"
+            | "your"
+    )
+}
+
 /// Extract simple keywords from a query string.
 ///
 /// Splits on whitespace and non-alphanumeric characters, lowercases,
-/// filters out short tokens (< 3 chars).
+/// filters out short tokens (< 3 chars) and common stopwords.
 pub fn extract_query_keywords(query: &str) -> Vec<String> {
     query
         .to_lowercase()
         .split(|c: char| !c.is_alphanumeric() && c != '_')
         .filter(|s| s.len() >= 3)
+        .filter(|s| !is_stopword(s))
         .map(|s| s.to_string())
         .collect()
 }
@@ -102,17 +194,36 @@ pub fn extract_query_keywords(query: &str) -> Vec<String> {
 /// 2. Retrieves candidate memories filtered by project_path, categories, and min_importance
 /// 3. Scores each candidate using the 4-signal formula
 /// 4. Returns top_k results sorted by score descending
-/// 5. Bumps access_count and last_accessed_at for returned entries
+/// 5. Does not mutate access metadata by default
 pub fn search_memories(
     store: &ProjectMemoryStore,
     request: &MemorySearchRequest,
 ) -> AppResult<Vec<MemorySearchResult>> {
+    search_memories_with_options(store, request, MemorySearchOptions::default())
+}
+
+/// Search memories with explicit ranking and touch behavior.
+pub fn search_memories_with_options(
+    store: &ProjectMemoryStore,
+    request: &MemorySearchRequest,
+    options: MemorySearchOptions,
+) -> AppResult<Vec<MemorySearchResult>> {
     // Ensure vocabulary and memory embeddings are ready for this project.
-    store.ensure_vocabulary_for_project(&request.project_path)?;
+    if matches!(options.ranking_mode, MemoryRankingMode::Hybrid) {
+        store.ensure_vocabulary_for_project(&request.project_path)?;
+    }
 
     // Step 1: Generate query embedding
-    let query_embedding = store.embedding_service().embed_text(&request.query);
-    let query_keywords = extract_query_keywords(&request.query);
+    let query_embedding = if matches!(options.ranking_mode, MemoryRankingMode::Hybrid) {
+        store.embedding_service().embed_text(&request.query)
+    } else {
+        Vec::new()
+    };
+    let query_keywords = if matches!(options.ranking_mode, MemoryRankingMode::Hybrid) {
+        extract_query_keywords(&request.query)
+    } else {
+        Vec::new()
+    };
 
     // Step 2: Retrieve candidates from DB
     let conn = store.pool().get().map_err(|e| {
@@ -212,7 +323,12 @@ pub fn search_memories(
             let days = days_since(&c.last_accessed_at);
 
             // Combine scores
-            let score = compute_relevance_score(emb_sim, kw_overlap, c.importance, days);
+            let score = match options.ranking_mode {
+                MemoryRankingMode::Hybrid => {
+                    compute_relevance_score(emb_sim, kw_overlap, c.importance, days)
+                }
+                MemoryRankingMode::Browse => compute_browse_score(c.importance, days),
+            };
 
             let category = MemoryCategory::from_str(&c.category).unwrap_or(MemoryCategory::Fact);
 
@@ -240,17 +356,11 @@ pub fn search_memories(
     scored_results.sort_by(|a, b| b.relevance_score.partial_cmp(&a.relevance_score).unwrap());
     scored_results.truncate(request.top_k);
 
-    // Step 7: Bump access_count and last_accessed_at for returned entries
-    if !scored_results.is_empty() {
-        let conn = store.pool().get().map_err(|e| {
-            crate::utils::error::AppError::database(format!("Failed to get connection: {}", e))
-        })?;
-        for result in &scored_results {
-            let _ = conn.execute(
-                "UPDATE project_memories SET access_count = access_count + 1, last_accessed_at = datetime('now') WHERE id = ?1",
-                params![result.entry.id],
-            );
-        }
+    // Optional touch after read.
+    if matches!(options.touch_policy, MemoryTouchPolicy::TouchReturned) && !scored_results.is_empty()
+    {
+        let ids: Vec<String> = scored_results.iter().map(|r| r.entry.id.clone()).collect();
+        let _ = store.touch_memories(&ids)?;
     }
 
     Ok(scored_results)
@@ -366,13 +476,27 @@ mod tests {
     #[test]
     fn test_extract_query_keywords() {
         let keywords = extract_query_keywords("What is the pnpm package manager?");
-        assert!(keywords.contains(&"what".to_string()));
         assert!(keywords.contains(&"pnpm".to_string()));
         assert!(keywords.contains(&"package".to_string()));
         assert!(keywords.contains(&"manager".to_string()));
-        // "the" is 3 chars so it passes, but "is" has only 2 chars and should be filtered
+        // Common stopwords should be filtered.
+        assert!(!keywords.contains(&"what".to_string()));
+        assert!(!keywords.contains(&"the".to_string()));
+        // "is" has only 2 chars and should also be filtered by length.
         assert!(!keywords.contains(&"is".to_string()));
-        assert!(keywords.contains(&"the".to_string()));
+    }
+
+    #[test]
+    fn test_extract_query_keywords_filters_stopwords() {
+        let keywords = extract_query_keywords("Can you use the API for this task and explain it?");
+        assert!(!keywords.contains(&"can".to_string()));
+        assert!(!keywords.contains(&"use".to_string()));
+        assert!(!keywords.contains(&"the".to_string()));
+        assert!(!keywords.contains(&"for".to_string()));
+        assert!(!keywords.contains(&"and".to_string()));
+        assert!(keywords.contains(&"api".to_string()));
+        assert!(keywords.contains(&"task".to_string()));
+        assert!(keywords.contains(&"explain".to_string()));
     }
 
     // -----------------------------------------------------------------------
@@ -565,7 +689,7 @@ mod tests {
     }
 
     #[test]
-    fn test_search_bumps_access_count() {
+    fn test_search_is_read_only_by_default() {
         let store = create_test_store();
 
         let mem = store
@@ -595,7 +719,43 @@ mod tests {
         )
         .unwrap();
 
-        // Verify access count was bumped
+        // Default search should be read-only
+        let updated = store.get_memory(&mem.id).unwrap().unwrap();
+        assert_eq!(updated.access_count, 0);
+    }
+
+    #[test]
+    fn test_search_touch_policy_updates_access_count() {
+        let store = create_test_store();
+
+        let mem = store
+            .add_memory(NewMemoryEntry {
+                project_path: "/test/project".into(),
+                category: MemoryCategory::Fact,
+                content: "Tauri React Rust application framework".into(),
+                keywords: vec!["tauri".into()],
+                importance: 0.5,
+                source_session_id: None,
+                source_context: None,
+            })
+            .unwrap();
+
+        let _results = search_memories_with_options(
+            &store,
+            &MemorySearchRequest {
+                project_path: "/test/project".into(),
+                query: "tauri application".into(),
+                categories: None,
+                top_k: 10,
+                min_importance: 0.1,
+            },
+            MemorySearchOptions {
+                ranking_mode: MemoryRankingMode::Hybrid,
+                touch_policy: MemoryTouchPolicy::TouchReturned,
+            },
+        )
+        .unwrap();
+
         let updated = store.get_memory(&mem.id).unwrap().unwrap();
         assert_eq!(updated.access_count, 1);
     }

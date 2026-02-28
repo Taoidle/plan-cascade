@@ -355,11 +355,20 @@ pub async fn extract_session_memories(
     };
 
     // Parse extraction response
-    let entries = MemoryExtractor::parse_extraction_response(
+    let entries = match MemoryExtractor::parse_extraction_response(
         &response_text,
         &project_path,
         session_id.as_deref(),
-    );
+    ) {
+        Ok(entries) => entries,
+        Err(e) => {
+            eprintln!(
+                "[memory-extraction] Failed to parse extraction response: {}",
+                e
+            );
+            return Ok(CommandResponse::ok(zero_result));
+        }
+    };
 
     let extracted_count = entries.len();
     if extracted_count == 0 {
