@@ -259,6 +259,9 @@ fn main() {
             // File attachment commands
             plan_cascade_desktop::commands::files::read_file_for_attachment,
             plan_cascade_desktop::commands::files::list_workspace_files,
+            plan_cascade_desktop::commands::files::list_workspace_files_v2,
+            plan_cascade_desktop::commands::files::estimate_prompt_tokens,
+            plan_cascade_desktop::commands::files::prepare_attachment_context,
             // Memory commands
             plan_cascade_desktop::commands::memory::search_project_memories,
             plan_cascade_desktop::commands::memory::list_project_memories,

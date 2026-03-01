@@ -271,6 +271,27 @@ interface CommandResponse<T> {
   error: string | null;
 }
 
+interface AttachmentContextInput {
+  name: string;
+  path: string;
+  size: number;
+  type: FileAttachmentData['type'];
+  content?: string;
+  preview?: string;
+}
+
+interface AttachmentContextPrepareResult {
+  prepared_prompt: string;
+  included_files: string[];
+  skipped_files: { name: string; path: string; reason: string }[];
+  prompt_tokens: number;
+  attachment_tokens: number;
+  total_tokens: number;
+  budget_tokens: number;
+  exceeds_budget: boolean;
+  truncated: boolean;
+}
+
 export interface StandaloneTurn {
   user: string;
   assistant: string;
@@ -1084,6 +1105,56 @@ function formatToolArgs(toolName: string, rawArgs?: string): string {
   }
 }
 
+function toAttachmentContextInputs(attachments: FileAttachmentData[]): AttachmentContextInput[] {
+  return attachments.map((attachment) => ({
+    name: attachment.name,
+    path: attachment.path,
+    size: attachment.size,
+    type: attachment.type,
+    content: attachment.content,
+    preview: attachment.preview,
+  }));
+}
+
+async function preparePromptWithAttachmentContext(
+  prompt: string,
+  attachments: FileAttachmentData[],
+  addLog?: (message: string) => void,
+): Promise<string> {
+  if (attachments.length === 0) return prompt;
+
+  try {
+    const result = await invoke<CommandResponse<AttachmentContextPrepareResult>>('prepare_attachment_context', {
+      prompt,
+      attachments: toAttachmentContextInputs(attachments),
+      budgetTokens: 160000,
+      maxAttachmentTokens: 64000,
+      maxTokensPerFile: 12000,
+    });
+
+    if (result.success && result.data) {
+      const prepared = result.data;
+      if (prepared.truncated) {
+        addLog?.('Attachment context was truncated to fit budget');
+      }
+      if (prepared.skipped_files.length > 0) {
+        addLog?.(`Skipped ${prepared.skipped_files.length} attachment(s) due to context budget`);
+      }
+      if (prepared.exceeds_budget) {
+        addLog?.(
+          `Prepared prompt exceeds estimated budget (${prepared.total_tokens}/${prepared.budget_tokens} tokens)`,
+        );
+      }
+      return prepared.prepared_prompt;
+    }
+  } catch {
+    // Fallback below.
+  }
+
+  addLog?.('Falling back to legacy attachment prompt builder');
+  return buildPromptWithAttachments(prompt, attachments);
+}
+
 function isLegacyTaskStartData(data: unknown): data is LegacyTaskStartData {
   return typeof data === 'object' && data !== null && typeof (data as { task_id?: unknown }).task_id === 'string';
 }
@@ -1361,8 +1432,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
         // Enrich prompt with file attachments if any
         const claudeAttachments = get().attachments;
-        const claudePrompt =
-          claudeAttachments.length > 0 ? buildPromptWithAttachments(description, claudeAttachments) : description;
+        const claudePrompt = await preparePromptWithAttachmentContext(description, claudeAttachments, get().addLog);
         get().clearAttachments();
 
         // Send the message to the session
@@ -1402,10 +1472,11 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
         // Enrich prompt with file attachments if any
         const standaloneAttachments = get().attachments;
-        const enrichedMessage =
-          standaloneAttachments.length > 0
-            ? buildPromptWithAttachments(messageToSend, standaloneAttachments)
-            : messageToSend;
+        const enrichedMessage = await preparePromptWithAttachmentContext(
+          messageToSend,
+          standaloneAttachments,
+          get().addLog,
+        );
         get().clearAttachments();
 
         // Resolve provider-specific base URL override (e.g. GLM Coding endpoint)
@@ -1733,8 +1804,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
     // Enrich prompt with file attachments if any
     const followUpAttachments = get().attachments;
-    const enrichedPrompt =
-      followUpAttachments.length > 0 ? buildPromptWithAttachments(basePrompt, followUpAttachments) : basePrompt;
+    const enrichedPrompt = await preparePromptWithAttachmentContext(basePrompt, followUpAttachments, get().addLog);
     get().clearAttachments();
 
     get().addLog(`Follow-up: ${prompt}`);

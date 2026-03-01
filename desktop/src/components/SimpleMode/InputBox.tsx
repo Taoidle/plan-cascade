@@ -55,6 +55,8 @@ interface InputBoxProps {
   onClearAgent?: () => void;
   /** When true, plain Enter submits (Shift+Enter for newline). For interview answers. */
   enterSubmits?: boolean;
+  /** Allow submits even when isLoading is true (used for queued messages). */
+  allowSubmitWhileLoading?: boolean;
 }
 
 interface WorkspaceFileResult {
@@ -62,6 +64,13 @@ interface WorkspaceFileResult {
   path: string;
   size: number;
   is_dir: boolean;
+}
+
+interface WorkspaceFileListV2Result {
+  items: WorkspaceFileResult[];
+  next_cursor: string | null;
+  has_more: boolean;
+  total: number;
 }
 
 interface FileContentResult {
@@ -134,6 +143,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     activeAgentName,
     onClearAgent,
     enterSubmits = false,
+    allowSubmitWhileLoading = false,
   },
   ref,
 ) {
@@ -402,20 +412,37 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       }
 
       try {
-        const result = await invoke<CommandResponse<WorkspaceFileResult[]>>('list_workspace_files', {
+        const v2 = await invoke<CommandResponse<WorkspaceFileListV2Result>>('list_workspace_files_v2', {
+          path: workspacePath,
+          query: query || null,
+          pageSize: 50,
+          cursor: null,
+        });
+
+        if (v2.success && v2.data) {
+          setAutocompleteFiles(v2.data.items);
+          return;
+        }
+      } catch {
+        // Fallback to v1 for compatibility with older backend builds.
+      }
+
+      try {
+        const v1 = await invoke<CommandResponse<WorkspaceFileResult[]>>('list_workspace_files', {
           path: workspacePath,
           query: query || null,
           maxResults: 20,
         });
 
-        if (result.success && result.data) {
-          setAutocompleteFiles(result.data);
-        } else {
-          setAutocompleteFiles([]);
+        if (v1.success && v1.data) {
+          setAutocompleteFiles(v1.data);
+          return;
         }
       } catch {
-        setAutocompleteFiles([]);
+        // noop
       }
+
+      setAutocompleteFiles([]);
     },
     [workspacePath],
   );
@@ -568,7 +595,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     // Submit on Cmd/Ctrl + Enter (or plain Enter when enterSubmits is true)
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey || (enterSubmits && !e.shiftKey))) {
       e.preventDefault();
-      if (!disabled && !isLoading && value.trim()) {
+      if (!disabled && (!isLoading || allowSubmitWhileLoading) && value.trim()) {
         onSubmit();
       }
     }
@@ -585,7 +612,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     });
   }, []);
 
-  const canSubmit = !disabled && !isLoading && (value.trim() || attachments.length > 0);
+  const canSubmit = !disabled && (!isLoading || allowSubmitWhileLoading) && (value.trim() || attachments.length > 0);
 
   return (
     <div
@@ -799,7 +826,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
           )}
           title={t('input.submitTitle')}
         >
-          {isLoading ? <UpdateIcon className="w-5 h-5 animate-spin" /> : <PaperPlaneIcon className="w-5 h-5" />}
+          {isLoading && !allowSubmitWhileLoading ? (
+            <UpdateIcon className="w-5 h-5 animate-spin" />
+          ) : (
+            <PaperPlaneIcon className="w-5 h-5" />
+          )}
         </button>
       </div>
     </div>

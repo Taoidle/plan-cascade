@@ -221,6 +221,34 @@ describe('InputBox compact-first layout', () => {
 
       expect(onSubmit).not.toHaveBeenCalled();
     });
+
+    it('allows submit while loading when allowSubmitWhileLoading is true', () => {
+      const onSubmit = vi.fn();
+      renderInputBox({
+        value: 'queued message',
+        onSubmit,
+        isLoading: true,
+        allowSubmitWhileLoading: true,
+      });
+      const textarea = screen.getByRole('textbox');
+
+      fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
+
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps submit button enabled while loading when allowSubmitWhileLoading is true', () => {
+      const onSubmit = vi.fn();
+      renderInputBox({
+        value: 'queued message',
+        onSubmit,
+        isLoading: true,
+        allowSubmitWhileLoading: true,
+      });
+
+      const submitBtn = screen.getByTitle('input.submitTitle');
+      expect(submitBtn).not.toHaveAttribute('disabled');
+    });
   });
 
   describe('file chips padding', () => {

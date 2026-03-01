@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
+import { invoke } from '@tauri-apps/api/core';
 import { InputBox, type InputBoxHandle } from './InputBox';
 import { WorkspaceTreeSidebar } from './WorkspaceTreeSidebar';
 import { EdgeCollapseButton } from './EdgeCollapseButton';
@@ -39,9 +40,29 @@ import {
 import { useToast } from '../shared/Toast';
 import { useContextSourcesStore } from '../../store/contextSources';
 import { ChatTranscript } from './ChatTranscript';
-import { PlanClarifyInputArea } from './PlanClarifyInputArea';
+import {
+  clearPersistedSimpleChatQueue,
+  loadPersistedSimpleChatQueue,
+  persistSimpleChatQueue,
+  type QueuedChatMessage,
+} from './queuePersistence';
+import {
+  DEFAULT_PROMPT_TOKEN_BUDGET,
+  estimatePromptTokensFallback,
+  formatTokenCount,
+  toAttachmentTokenEstimateInput,
+  type PromptTokenEstimateResult,
+} from './tokenBudget';
 
 type WorkflowMode = 'chat' | 'plan' | 'task';
+interface CommandResponse<T> {
+  success: boolean;
+  data: T | null;
+  error: string | null;
+}
+
+const MAX_QUEUED_CHAT_MESSAGES = 3;
+const TOKEN_ESTIMATE_DEBOUNCE_MS = 180;
 
 export function SimpleMode() {
   const { t } = useTranslation('simpleMode');
@@ -96,6 +117,9 @@ export function SimpleMode() {
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>('output');
   const [workflowMode, setWorkflowMode] = useState<WorkflowMode>('chat');
   const [supportsPointerHover, setSupportsPointerHover] = useState(false);
+  const [queuedChatMessages, setQueuedChatMessages] = useState<QueuedChatMessage[]>([]);
+  const [tokenEstimate, setTokenEstimate] = useState<PromptTokenEstimateResult | null>(null);
+  const [isEstimatingTokenBudget, setIsEstimatingTokenBudget] = useState(false);
 
   // Ref for InputBox to call pickFile externally
   const inputBoxRef = useRef<InputBoxHandle>(null);
@@ -104,11 +128,28 @@ export function SimpleMode() {
   const [isCapturing, setIsCapturing] = useState(false);
   const leftHoverTimerRef = useRef<number | null>(null);
   const rightHoverTimerRef = useRef<number | null>(null);
+  const queueIdRef = useRef(0);
+  const queueDispatchInFlightRef = useRef(false);
+  const hasHydratedQueueRef = useRef(false);
+
+  const isRunning = status === 'running' || status === 'paused';
 
   // Handle workflow mode changes with context inheritance notifications
   const handleWorkflowModeChange = useCallback(
     (newMode: WorkflowMode) => {
       if (newMode === workflowMode) return;
+      if (isRunning) {
+        const canConfirm = typeof window !== 'undefined' && typeof window.confirm === 'function';
+        const confirmed = !canConfirm
+          ? true
+          : window.confirm(
+              t('workflow.modeSwitchConfirm', {
+                defaultValue:
+                  'An execution is still running. Switching modes now may change your active workflow context. Continue?',
+              }),
+            );
+        if (!confirmed) return;
+      }
 
       // Check for context inheritance
       const hasChatHistory = streamingOutput.length > 0;
@@ -132,9 +173,19 @@ export function SimpleMode() {
         );
       }
 
+      if (workflowMode === 'chat' && newMode !== 'chat' && queuedChatMessages.length > 0) {
+        setQueuedChatMessages([]);
+        showToast(
+          t('workflow.clearQueuedMessages', {
+            defaultValue: 'Cleared queued chat messages when leaving Chat mode.',
+          }),
+          'info',
+        );
+      }
+
       setWorkflowMode(newMode);
     },
-    [workflowMode, streamingOutput, showToast, t],
+    [workflowMode, isRunning, streamingOutput, queuedChatMessages.length, showToast, t],
   );
 
   useEffect(() => {
@@ -152,6 +203,36 @@ export function SimpleMode() {
     media.addEventListener('change', handleChange);
     return () => media.removeEventListener('change', handleChange);
   }, []);
+
+  useEffect(() => {
+    if (hasHydratedQueueRef.current) return;
+    hasHydratedQueueRef.current = true;
+
+    if (typeof localStorage === 'undefined') return;
+    const restored = loadPersistedSimpleChatQueue(localStorage, workspacePath, MAX_QUEUED_CHAT_MESSAGES);
+    if (restored.length === 0) return;
+
+    setQueuedChatMessages(restored);
+    queueIdRef.current = restored.length;
+    showToast(
+      t('workflow.queue.recovered', {
+        count: restored.length,
+        defaultValue: `Recovered ${restored.length} queued chat message(s).`,
+      }),
+      'info',
+    );
+  }, [workspacePath, showToast, t]);
+
+  useEffect(() => {
+    if (!hasHydratedQueueRef.current || typeof localStorage === 'undefined') return;
+
+    if (queuedChatMessages.length === 0) {
+      clearPersistedSimpleChatQueue(localStorage);
+      return;
+    }
+
+    persistSimpleChatQueue(localStorage, queuedChatMessages, workspacePath);
+  }, [queuedChatMessages, workspacePath]);
 
   // Handle navigation requests coming from chat cards.
   useEffect(() => {
@@ -226,6 +307,16 @@ export function SimpleMode() {
   const skipPlanClarification = usePlanOrchestratorStore((s) => s.skipClarification);
   const cancelPlanWorkflow = usePlanOrchestratorStore((s) => s.cancelWorkflow);
   const resetPlanWorkflow = usePlanOrchestratorStore((s) => s.resetWorkflow);
+  const hasStructuredInterviewQuestion =
+    workflowMode === 'task' &&
+    workflowPhase === 'interviewing' &&
+    !!pendingQuestion &&
+    (pendingQuestion.inputType === 'boolean' ||
+      pendingQuestion.inputType === 'single_select' ||
+      pendingQuestion.inputType === 'multi_select');
+  const hasTextInterviewQuestion =
+    workflowMode === 'task' && workflowPhase === 'interviewing' && !!pendingQuestion && !hasStructuredInterviewQuestion;
+  const hasPlanClarifyQuestion = workflowMode === 'plan' && planPhase === 'clarifying' && !!pendingClarifyQuestion;
 
   // Tool permission state
   const permissionRequest = useToolPermissionStore((s) => s.pendingRequest);
@@ -241,64 +332,154 @@ export function SimpleMode() {
     void setPermissionLevel(permissionSessionId, permissionLevel);
   }, [permissionSessionId, permissionLevel, setPermissionLevel]);
 
-  const handleStart = useCallback(async () => {
-    if (!description.trim() || isSubmitting || isAnalyzingStrategy) return;
-    const prompt = description;
-    setDescription('');
-
-    if (workflowMode === 'task') {
-      // Route Task mode through the workflow orchestrator
-      await startWorkflow(prompt);
-      return;
-    }
-
-    if (workflowMode === 'plan') {
-      // Route Plan mode through the plan orchestrator
-      await startPlanWorkflow(prompt);
-      return;
-    }
-
-    await start(prompt, 'simple');
-  }, [description, isAnalyzingStrategy, isSubmitting, start, startWorkflow, startPlanWorkflow, workflowMode]);
-
-  const handleFollowUp = useCallback(async () => {
-    if (!description.trim() || isSubmitting) return;
-    const prompt = description;
-    setDescription('');
-
-    // Route through orchestrator if in active Task workflow phase
-    // Note: interviewing phase is handled by InterviewInputPanel, not InputBox
-    if (workflowMode === 'task' && workflowPhase !== 'idle') {
-      if (workflowPhase === 'configuring') {
-        overrideConfigNatural(prompt);
-      } else if (workflowPhase === 'reviewing_prd') {
-        addPrdFeedback(prompt);
+  const handleStart = useCallback(
+    async (inputPrompt?: string) => {
+      const prompt = (inputPrompt ?? description).trim();
+      if (!prompt || isSubmitting || isAnalyzingStrategy) return;
+      if (inputPrompt === undefined) {
+        setDescription('');
       }
-      return;
-    }
 
-    // Route plan clarification through plan orchestrator
-    if (workflowMode === 'plan' && planPhase === 'clarifying' && pendingClarifyQuestion) {
-      await submitPlanClarification({
-        questionId: pendingClarifyQuestion.questionId,
-        answer: prompt,
-        skipped: false,
+      if (workflowMode === 'task') {
+        // Route Task mode through the workflow orchestrator
+        await startWorkflow(prompt);
+        return;
+      }
+
+      if (workflowMode === 'plan') {
+        // Route Plan mode through the plan orchestrator
+        await startPlanWorkflow(prompt);
+        return;
+      }
+
+      await start(prompt, 'simple');
+    },
+    [description, isAnalyzingStrategy, isSubmitting, start, startWorkflow, startPlanWorkflow, workflowMode],
+  );
+
+  const handleFollowUp = useCallback(
+    async (inputPrompt?: string) => {
+      const prompt = (inputPrompt ?? description).trim();
+      if (!prompt || isSubmitting) return;
+      if (inputPrompt === undefined) {
+        setDescription('');
+      }
+
+      // Route through orchestrator if in active Task workflow phase
+      if (workflowMode === 'task' && workflowPhase !== 'idle') {
+        if (workflowPhase === 'configuring') {
+          overrideConfigNatural(prompt);
+        } else if (workflowPhase === 'reviewing_prd') {
+          addPrdFeedback(prompt);
+        } else if (workflowPhase === 'interviewing' && pendingQuestion && !hasStructuredInterviewQuestion) {
+          await submitInterviewAnswer(prompt);
+        }
+        return;
+      }
+
+      // Route plan clarification through plan orchestrator
+      if (workflowMode === 'plan' && planPhase === 'clarifying' && pendingClarifyQuestion) {
+        await submitPlanClarification({
+          questionId: pendingClarifyQuestion.questionId,
+          answer: prompt,
+          skipped: false,
+        });
+        return;
+      }
+
+      await sendFollowUp(prompt);
+    },
+    [
+      description,
+      isSubmitting,
+      sendFollowUp,
+      workflowMode,
+      workflowPhase,
+      pendingQuestion,
+      planPhase,
+      pendingClarifyQuestion,
+      hasStructuredInterviewQuestion,
+      overrideConfigNatural,
+      addPrdFeedback,
+      submitPlanClarification,
+      submitInterviewAnswer,
+    ],
+  );
+
+  const removeQueuedChatMessage = useCallback((id: string) => {
+    setQueuedChatMessages((prev) => prev.filter((msg) => msg.id !== id));
+  }, []);
+
+  const queueChatMessage = useCallback(
+    (prompt: string, submitAsFollowUp: boolean) => {
+      setQueuedChatMessages((prev) => {
+        if (prev.length >= MAX_QUEUED_CHAT_MESSAGES) {
+          showToast(
+            t('workflow.queueLimitReached', {
+              max: MAX_QUEUED_CHAT_MESSAGES,
+              defaultValue: `Queue is full (max ${MAX_QUEUED_CHAT_MESSAGES} messages).`,
+            }),
+            'info',
+          );
+          return prev;
+        }
+
+        const nextId = `queued-${Date.now()}-${queueIdRef.current++}`;
+        return [...prev, { id: nextId, prompt, submitAsFollowUp }];
       });
+    },
+    [showToast, t],
+  );
+
+  const handleComposerSubmit = useCallback(async () => {
+    const prompt = description.trim();
+    if (!prompt) return;
+    const taskWorkflowActive =
+      workflowPhase !== 'idle' &&
+      workflowPhase !== 'completed' &&
+      workflowPhase !== 'failed' &&
+      workflowPhase !== 'cancelled';
+    const planWorkflowActive =
+      planPhase !== 'idle' && planPhase !== 'completed' && planPhase !== 'failed' && planPhase !== 'cancelled';
+
+    const submitAsFollowUp =
+      isChatSession ||
+      (workflowMode === 'task' && taskWorkflowActive) ||
+      (workflowMode === 'plan' && planWorkflowActive);
+
+    if (workflowMode === 'chat' && isRunning) {
+      if (attachments.length > 0) {
+        showToast(
+          t('workflow.queueAttachmentsNotSupported', {
+            defaultValue: 'Queued chat messages with new attachments are not supported yet.',
+          }),
+          'info',
+        );
+        return;
+      }
+      queueChatMessage(prompt, submitAsFollowUp);
+      setDescription('');
       return;
     }
 
-    await sendFollowUp(prompt);
+    if (submitAsFollowUp) {
+      await handleFollowUp(prompt);
+    } else {
+      await handleStart(prompt);
+    }
   }, [
     description,
-    isSubmitting,
-    sendFollowUp,
+    isChatSession,
     workflowMode,
     workflowPhase,
     planPhase,
-    pendingClarifyQuestion,
-    overrideConfigNatural,
-    addPrdFeedback,
-    submitPlanClarification,
+    isRunning,
+    attachments.length,
+    showToast,
+    t,
+    queueChatMessage,
+    handleFollowUp,
+    handleStart,
   ]);
 
   const handleNewTask = useCallback(() => {
@@ -309,6 +490,7 @@ export function SimpleMode() {
     reset();
     clearStrategyAnalysis();
     setDescription('');
+    setQueuedChatMessages([]);
 
     if (hasContext) {
       showToast(t('contextBridge.contextReset', { defaultValue: 'Context cleared for new task' }), 'info');
@@ -323,6 +505,7 @@ export function SimpleMode() {
       setRightPanelOpen(false);
       handleWorkflowModeChange('chat');
       setDescription('');
+      setQueuedChatMessages([]);
     },
     [restoreFromHistory, handleWorkflowModeChange, resetWorkflow, resetPlanWorkflow],
   );
@@ -335,6 +518,7 @@ export function SimpleMode() {
       switchToSession(sessionId);
       setWorkflowMode('chat');
       setDescription('');
+      setQueuedChatMessages([]);
     },
     [resetWorkflow, resetPlanWorkflow, switchToSession],
   );
@@ -363,7 +547,6 @@ export function SimpleMode() {
     }
   }, [showToast, t]);
 
-  const isRunning = status === 'running' || status === 'paused';
   const isTaskWorkflowActive =
     workflowPhase !== 'idle' &&
     workflowPhase !== 'completed' &&
@@ -387,7 +570,20 @@ export function SimpleMode() {
       planPhase === 'planning' ||
       planPhase === 'executing' ||
       (planPhase === 'clarifying' && pendingClarifyQuestion === null));
-  const inputBusy = isRunning || isSubmitting || isAnalyzingStrategy || isTaskWorkflowBusy || isPlanWorkflowBusy;
+  const inputBusy = isSubmitting || isAnalyzingStrategy || isTaskWorkflowBusy || isPlanWorkflowBusy;
+  const inputDisabled =
+    inputBusy ||
+    hasStructuredInterviewQuestion ||
+    (workflowMode !== 'chat' && isRunning) ||
+    (workflowMode === 'task' && workflowPhase === 'interviewing' && pendingQuestion === null) ||
+    (workflowMode === 'plan' && planPhase === 'clarifying' && pendingClarifyQuestion === null);
+  const inputLoading =
+    (inputBusy ||
+      (workflowMode !== 'chat' && isRunning) ||
+      (workflowMode === 'task' && workflowPhase === 'interviewing' && pendingQuestion === null) ||
+      (workflowMode === 'plan' && planPhase === 'clarifying' && pendingClarifyQuestion === null)) &&
+    !(workflowMode === 'chat' && isRunning);
+  const canQueueWhileRunning = workflowMode === 'chat' && isRunning && !inputBusy && !hasStructuredInterviewQuestion;
   const hoverPanelsEnabled = autoPanelHoverEnabled && supportsPointerHover;
   const isLeftPanelOpen = !sidebarCollapsed || leftPanelHoverExpanded;
   const isRightPanelOpen = rightPanelOpen || rightPanelHoverExpanded;
@@ -476,6 +672,84 @@ export function SimpleMode() {
     }
   }, [isRightPanelOpen, rightPanelOpen, rightPanelTab]);
 
+  useEffect(() => {
+    if (workflowMode !== 'chat' || queuedChatMessages.length === 0) return;
+    if (isRunning || isSubmitting || isAnalyzingStrategy || permissionRequest) return;
+    if (queueDispatchInFlightRef.current) return;
+
+    const [nextMessage] = queuedChatMessages;
+    if (!nextMessage) return;
+
+    queueDispatchInFlightRef.current = true;
+    setQueuedChatMessages((prev) => prev.slice(1));
+    const run = nextMessage.submitAsFollowUp ? handleFollowUp(nextMessage.prompt) : handleStart(nextMessage.prompt);
+    void Promise.resolve(run).finally(() => {
+      queueDispatchInFlightRef.current = false;
+    });
+  }, [
+    workflowMode,
+    queuedChatMessages,
+    isRunning,
+    isSubmitting,
+    isAnalyzingStrategy,
+    permissionRequest,
+    handleFollowUp,
+    handleStart,
+  ]);
+
+  useEffect(() => {
+    const hasPrompt = description.trim().length > 0;
+    const hasAttachments = attachments.length > 0;
+    if (!hasPrompt && !hasAttachments) {
+      setTokenEstimate(null);
+      setIsEstimatingTokenBudget(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setIsEstimatingTokenBudget(true);
+      try {
+        const result = await invoke<CommandResponse<PromptTokenEstimateResult>>('estimate_prompt_tokens', {
+          prompt: description,
+          attachments: toAttachmentTokenEstimateInput(attachments),
+          budgetTokens: DEFAULT_PROMPT_TOKEN_BUDGET,
+        });
+
+        if (cancelled) return;
+        if (result.success && result.data) {
+          setTokenEstimate(result.data);
+          return;
+        }
+      } catch {
+        // Fallback below.
+      } finally {
+        if (!cancelled) {
+          setIsEstimatingTokenBudget(false);
+        }
+      }
+
+      if (!cancelled) {
+        setTokenEstimate(estimatePromptTokensFallback(description, attachments, DEFAULT_PROMPT_TOKEN_BUDGET));
+      }
+    }, TOKEN_ESTIMATE_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [description, attachments]);
+
+  const tokenEstimateProgress = useMemo(() => {
+    if (!tokenEstimate || tokenEstimate.budget_tokens <= 0) return 0;
+    return Math.min(100, Math.round((tokenEstimate.estimated_tokens / tokenEstimate.budget_tokens) * 100));
+  }, [tokenEstimate]);
+
+  const attachmentSharePercent = useMemo(() => {
+    if (!tokenEstimate || tokenEstimate.estimated_tokens <= 0) return 0;
+    return Math.round((tokenEstimate.attachment_tokens / tokenEstimate.estimated_tokens) * 100);
+  }, [tokenEstimate]);
+
   return (
     <div className="h-full flex flex-col">
       {/* Main content area */}
@@ -561,7 +835,7 @@ export function SimpleMode() {
               workflowMode={workflowMode}
               onWorkflowModeChange={handleWorkflowModeChange}
               onFilePick={() => inputBoxRef.current?.pickFile()}
-              isFilePickDisabled={inputBusy}
+              isFilePickDisabled={inputBusy || isRunning || !!permissionRequest}
               executionStatus={status}
               onPause={pause}
               onResume={resume}
@@ -588,90 +862,139 @@ export function SimpleMode() {
                   loading={isPermissionResponding}
                   queueSize={permissionQueueSize}
                 />
-              ) : /* Priority 2: Interview input panel (replaces InputBox during interviews) */
-              workflowMode === 'task' && workflowPhase === 'interviewing' && pendingQuestion ? (
-                <InterviewInputPanel
-                  question={pendingQuestion}
-                  onSubmit={submitInterviewAnswer}
-                  onSkip={skipInterviewQuestion}
-                  loading={isInterviewSubmitting}
-                />
-              ) : /* Priority 3: Interview loading state (LLM generating next question) */
-              workflowMode === 'task' && workflowPhase === 'interviewing' && !pendingQuestion ? (
-                <div className="px-4 py-3 flex items-center gap-2 text-sm text-violet-600 dark:text-violet-400">
-                  <svg
-                    className="animate-spin h-4 w-4"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    />
-                  </svg>
-                  <span>{t('workflow.interview.generating', { defaultValue: 'Generating next question...' })}</span>
-                </div>
-              ) : /* Priority 4: Plan clarification input (with question + hint) */
-              workflowMode === 'plan' && planPhase === 'clarifying' && pendingClarifyQuestion ? (
-                <PlanClarifyInputArea
-                  question={pendingClarifyQuestion}
-                  onSubmit={(text) =>
-                    submitPlanClarification({
-                      questionId: pendingClarifyQuestion.questionId,
-                      answer: text,
-                      skipped: false,
-                    })
-                  }
-                  onSkip={() =>
-                    submitPlanClarification({
-                      questionId: pendingClarifyQuestion.questionId,
-                      answer: '',
-                      skipped: true,
-                    })
-                  }
-                  onSkipAll={skipPlanClarification}
-                  loading={planIsBusy}
-                />
-              ) : /* Priority 5: Plan clarification loading state */
-              workflowMode === 'plan' && planPhase === 'clarifying' && !pendingClarifyQuestion ? (
-                <div className="px-4 py-3 flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
-                  <svg
-                    className="animate-spin h-4 w-4"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    />
-                  </svg>
-                  <span>
-                    {t('planMode:clarify.generatingQuestion', { defaultValue: 'Generating clarification question...' })}
-                  </span>
-                </div>
               ) : (
-                <div className="p-4">
+                <div className="p-4 space-y-3">
+                  {/* Structured interview keeps dedicated controls, while the composer stays mounted. */}
+                  {hasStructuredInterviewQuestion && pendingQuestion && (
+                    <InterviewInputPanel
+                      question={pendingQuestion}
+                      onSubmit={submitInterviewAnswer}
+                      onSkip={skipInterviewQuestion}
+                      loading={isInterviewSubmitting}
+                    />
+                  )}
+
+                  {/* Text interview question prompt */}
+                  {hasTextInterviewQuestion && pendingQuestion && (
+                    <div className="rounded-lg border border-violet-200 dark:border-violet-800 bg-violet-50/40 dark:bg-violet-900/20 px-3 py-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium uppercase tracking-wide text-violet-600 dark:text-violet-400">
+                            {t('workflow.interview.questionTitle', { defaultValue: 'Interview Question' })}
+                          </p>
+                          <p className="mt-1 text-sm font-medium text-violet-800 dark:text-violet-200">
+                            {pendingQuestion.question}
+                          </p>
+                          {pendingQuestion.hint && (
+                            <p className="mt-1 text-xs text-violet-600/80 dark:text-violet-300/80">
+                              {pendingQuestion.hint}
+                            </p>
+                          )}
+                        </div>
+                        {!pendingQuestion.required && (
+                          <button
+                            onClick={skipInterviewQuestion}
+                            className="shrink-0 px-2 py-1 rounded text-xs text-violet-600 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-800/50 transition-colors"
+                          >
+                            {t('workflow.interview.skipBtn', { defaultValue: 'Skip' })}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Plan clarify prompt while still using the shared composer */}
+                  {hasPlanClarifyQuestion && pendingClarifyQuestion && (
+                    <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-900/20 px-3 py-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
+                            {t('planMode:clarify.title', { defaultValue: 'Clarification Needed' })}
+                          </p>
+                          <p className="mt-1 text-sm font-medium text-amber-800 dark:text-amber-200">
+                            {pendingClarifyQuestion.question}
+                          </p>
+                          {pendingClarifyQuestion.hint && (
+                            <p className="mt-1 text-xs text-amber-700/80 dark:text-amber-300/80">
+                              {pendingClarifyQuestion.hint}
+                            </p>
+                          )}
+                        </div>
+                        <div className="shrink-0 flex items-center gap-1">
+                          <button
+                            onClick={() =>
+                              submitPlanClarification({
+                                questionId: pendingClarifyQuestion.questionId,
+                                answer: '',
+                                skipped: true,
+                              })
+                            }
+                            className="px-2 py-1 rounded text-xs text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-800/50 transition-colors"
+                          >
+                            {t('planMode:clarify.skipQuestion', { defaultValue: 'Skip' })}
+                          </button>
+                          <button
+                            onClick={skipPlanClarification}
+                            className="px-2 py-1 rounded text-xs text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-800/50 transition-colors"
+                          >
+                            {t('planMode:clarify.skipAll', { defaultValue: 'Skip All' })}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Question generation/loading hints */}
+                  {workflowMode === 'task' && workflowPhase === 'interviewing' && !pendingQuestion && (
+                    <div className="px-3 py-2 flex items-center gap-2 text-sm text-violet-600 dark:text-violet-400">
+                      <svg
+                        className="animate-spin h-4 w-4"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        />
+                      </svg>
+                      <span>{t('workflow.interview.generating', { defaultValue: 'Generating next question...' })}</span>
+                    </div>
+                  )}
+                  {workflowMode === 'plan' && planPhase === 'clarifying' && !pendingClarifyQuestion && (
+                    <div className="px-3 py-2 flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
+                      <svg
+                        className="animate-spin h-4 w-4"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        />
+                      </svg>
+                      <span>
+                        {t('planMode:clarify.generatingQuestion', {
+                          defaultValue: 'Generating clarification question...',
+                        })}
+                      </span>
+                    </div>
+                  )}
+
                   <InputBox
                     ref={inputBoxRef}
                     value={description}
                     onChange={setDescription}
-                    onSubmit={
-                      isChatSession ||
-                      (workflowMode === 'task' && isTaskWorkflowActive) ||
-                      (workflowMode === 'plan' && isPlanWorkflowActive)
-                        ? handleFollowUp
-                        : handleStart
-                    }
-                    disabled={inputBusy}
+                    onSubmit={handleComposerSubmit}
+                    disabled={inputDisabled}
                     enterSubmits={false}
                     placeholder={
-                      inputBusy
+                      inputDisabled && !canQueueWhileRunning
                         ? t('workflow.input.waitingPlaceholder', { defaultValue: 'Waiting for response...' })
                         : workflowMode === 'task' && workflowPhase === 'configuring'
                           ? t('workflow.input.configuringPlaceholder', {
@@ -682,20 +1005,31 @@ export function SimpleMode() {
                             ? t('workflow.input.prdFeedbackPlaceholder', {
                                 defaultValue: 'Add feedback or press Approve on the PRD card...',
                               })
-                            : workflowMode === 'task'
-                              ? t('workflow.input.taskPlaceholder', {
-                                  defaultValue: 'Describe a task (implementation / analysis / refactor)...',
+                            : hasTextInterviewQuestion
+                              ? t('workflow.input.interviewPlaceholder', {
+                                  defaultValue: 'Type your answer to the interview question...',
                                 })
-                              : workflowMode === 'plan'
-                                ? t('workflow.input.planPlaceholder', {
-                                    defaultValue:
-                                      'Describe a task to decompose and execute (writing, research, etc.)...',
-                                  })
-                                : t('input.followUpPlaceholder', {
-                                    defaultValue: 'Type a normal chat message...',
-                                  })
+                              : workflowMode === 'plan' && planPhase === 'clarifying' && pendingClarifyQuestion
+                                ? t('planMode:clarify.inputPlaceholder', { defaultValue: 'Type your clarification...' })
+                                : workflowMode === 'task'
+                                  ? t('workflow.input.taskPlaceholder', {
+                                      defaultValue: 'Describe a task (implementation / analysis / refactor)...',
+                                    })
+                                  : workflowMode === 'plan'
+                                    ? t('workflow.input.planPlaceholder', {
+                                        defaultValue:
+                                          'Describe a task to decompose and execute (writing, research, etc.)...',
+                                      })
+                                    : isRunning
+                                      ? t('workflow.queue.placeholder', {
+                                          defaultValue: 'Execution in progress. Your message will be queued...',
+                                        })
+                                      : t('input.followUpPlaceholder', {
+                                          defaultValue: 'Type a normal chat message...',
+                                        })
                     }
-                    isLoading={inputBusy}
+                    isLoading={inputLoading}
+                    allowSubmitWhileLoading={canQueueWhileRunning}
                     attachments={attachments}
                     onAttach={addAttachment}
                     onRemoveAttachment={removeAttachment}
@@ -706,6 +1040,106 @@ export function SimpleMode() {
                       useExecutionStore.setState({ activeAgentId: null, activeAgentName: null });
                     }}
                   />
+
+                  {tokenEstimate && (
+                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 px-3 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-medium text-gray-700 dark:text-gray-200">
+                          {t('workflow.tokenBudget.title', { defaultValue: 'Prompt Token Budget' })}
+                        </p>
+                        <span
+                          className={clsx(
+                            'text-xs font-mono',
+                            tokenEstimate.exceeds_budget
+                              ? 'text-red-600 dark:text-red-400'
+                              : 'text-gray-600 dark:text-gray-300',
+                          )}
+                        >
+                          {formatTokenCount(tokenEstimate.estimated_tokens)} /{' '}
+                          {formatTokenCount(tokenEstimate.budget_tokens)}
+                        </span>
+                      </div>
+                      <div className="mt-2 h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                        <div
+                          className={clsx(
+                            'h-full rounded-full transition-all',
+                            tokenEstimate.exceeds_budget
+                              ? 'bg-red-500'
+                              : tokenEstimateProgress >= 85
+                                ? 'bg-amber-500'
+                                : 'bg-emerald-500',
+                          )}
+                          style={{ width: `${tokenEstimateProgress}%` }}
+                        />
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-600 dark:text-gray-300">
+                        <span>
+                          {t('workflow.tokenBudget.prompt', { defaultValue: 'Prompt' })}:&nbsp;
+                          <span className="font-mono">{formatTokenCount(tokenEstimate.prompt_tokens)}</span>
+                        </span>
+                        <span>
+                          {t('workflow.tokenBudget.attachments', { defaultValue: 'Attachments' })}:&nbsp;
+                          <span className="font-mono">
+                            {formatTokenCount(tokenEstimate.attachment_tokens)} ({attachmentSharePercent}%)
+                          </span>
+                        </span>
+                        <span
+                          className={clsx(
+                            tokenEstimate.remaining_tokens < 0
+                              ? 'text-red-600 dark:text-red-400'
+                              : 'text-gray-600 dark:text-gray-300',
+                          )}
+                        >
+                          {t('workflow.tokenBudget.remaining', { defaultValue: 'Remaining' })}:&nbsp;
+                          <span className="font-mono">{formatTokenCount(tokenEstimate.remaining_tokens)}</span>
+                        </span>
+                      </div>
+                      {tokenEstimate.exceeds_budget && (
+                        <p className="mt-2 text-xs text-red-600 dark:text-red-400">
+                          {t('workflow.tokenBudget.exceeded', {
+                            defaultValue: 'Estimated tokens exceed budget. Some attachment context may be truncated.',
+                          })}
+                        </p>
+                      )}
+                      {isEstimatingTokenBudget && (
+                        <p className="mt-1 text-2xs text-gray-500 dark:text-gray-400">
+                          {t('workflow.tokenBudget.estimating', { defaultValue: 'Estimating token budget...' })}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {workflowMode === 'chat' && queuedChatMessages.length > 0 && (
+                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 px-3 py-2">
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300">
+                        {t('workflow.queue.title', {
+                          count: queuedChatMessages.length,
+                          max: MAX_QUEUED_CHAT_MESSAGES,
+                          defaultValue: `Queued messages (${queuedChatMessages.length}/${MAX_QUEUED_CHAT_MESSAGES})`,
+                        })}
+                      </p>
+                      <div className="mt-2 space-y-1">
+                        {queuedChatMessages.map((message, index) => (
+                          <div
+                            key={message.id}
+                            className="flex items-center gap-2 rounded bg-white dark:bg-gray-900 px-2 py-1 border border-gray-200 dark:border-gray-700"
+                          >
+                            <span className="text-2xs text-gray-500 dark:text-gray-400 shrink-0">#{index + 1}</span>
+                            <span className="text-xs text-gray-700 dark:text-gray-200 truncate flex-1">
+                              {message.prompt}
+                            </span>
+                            <button
+                              onClick={() => removeQueuedChatMessage(message.id)}
+                              className="text-2xs text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 transition-colors"
+                              title={t('workflow.queue.remove', { defaultValue: 'Remove queued message' })}
+                            >
+                              {t('workflow.queue.removeShort', { defaultValue: 'Remove' })}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               {apiError && (

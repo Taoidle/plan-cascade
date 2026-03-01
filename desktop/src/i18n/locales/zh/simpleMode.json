@@ -338,6 +338,25 @@
 
   "workflow": {
     "cancelWorkflow": "取消工作流",
+    "modeSwitchConfirm": "当前执行仍在进行。立即切换模式可能改变当前工作流上下文，是否继续？",
+    "clearQueuedMessages": "离开对话模式时已清空排队消息。",
+    "queueLimitReached": "排队已满（最多 3 条消息）。",
+    "queueAttachmentsNotSupported": "运行中排队暂不支持新附件消息。",
+    "queue": {
+      "title": "排队消息（{{count}}/{{max}}）",
+      "recovered": "已恢复 {{count}} 条排队消息。",
+      "placeholder": "执行进行中，你的消息将进入队列...",
+      "remove": "移除此排队消息",
+      "removeShort": "移除"
+    },
+    "tokenBudget": {
+      "title": "提示词 Token 预算",
+      "prompt": "提示词",
+      "attachments": "附件",
+      "remaining": "剩余",
+      "exceeded": "预计 token 已超预算，部分附件上下文可能被截断。",
+      "estimating": "正在估算 token 预算..."
+    },
 
     "strategy": {
       "title": "策略分析",

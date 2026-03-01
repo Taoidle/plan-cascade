@@ -338,6 +338,25 @@
 
   "workflow": {
     "cancelWorkflow": "Cancel workflow",
+    "modeSwitchConfirm": "An execution is still running. Switching modes now may change your active workflow context. Continue?",
+    "clearQueuedMessages": "Cleared queued chat messages when leaving Chat mode.",
+    "queueLimitReached": "Queue is full (max 3 messages).",
+    "queueAttachmentsNotSupported": "Queued chat messages with new attachments are not supported yet.",
+    "queue": {
+      "title": "Queued messages ({{count}}/{{max}})",
+      "recovered": "Recovered {{count}} queued chat message(s).",
+      "placeholder": "Execution in progress. Your message will be queued...",
+      "remove": "Remove queued message",
+      "removeShort": "Remove"
+    },
+    "tokenBudget": {
+      "title": "Prompt Token Budget",
+      "prompt": "Prompt",
+      "attachments": "Attachments",
+      "remaining": "Remaining",
+      "exceeded": "Estimated tokens exceed budget. Some attachment context may be truncated.",
+      "estimating": "Estimating token budget..."
+    },
 
     "strategy": {
       "title": "Strategy Analysis",
