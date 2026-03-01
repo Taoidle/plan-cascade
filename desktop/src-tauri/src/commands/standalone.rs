@@ -1589,10 +1589,10 @@ pub async fn save_binary_export(path: String, data_base64: String) -> CommandRes
 /// Get usage statistics from the database
 ///
 /// Deprecated: Use the new analytics system (`services/analytics/`) via
-/// `get_dashboard_summary` or `list_usage_records` commands instead.
+/// `get_dashboard_summary_v2` or `list_usage_records_v2` commands instead.
 /// This function queries the legacy `analytics` table which is no longer written to.
 #[deprecated(
-    note = "Use services/analytics/ commands (get_dashboard_summary, list_usage_records) instead"
+    note = "Use services/analytics/ commands (get_dashboard_summary_v2, list_usage_records_v2) instead"
 )]
 #[tauri::command]
 pub async fn get_usage_stats(

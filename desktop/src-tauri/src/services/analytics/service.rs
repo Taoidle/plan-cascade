@@ -5,9 +5,18 @@
 
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
+use regex::Regex;
 use rusqlite::params;
+use std::fs::File;
+use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
 
-use crate::models::analytics::{ModelPricing, UsageFilter, UsageRecord, UsageStats};
+use crate::models::analytics::{
+    AggregationPeriod, CostBreakdown, CostStatus, DashboardFilterV2, DashboardSummary, ExportFormat,
+    ExportJob, ExportJobStatus, ExportStreamingJobRequest, ModelPricing, ModelUsage, PricingRule,
+    PricingRuleStatus, ProjectUsage, RecomputeCostsRequest, RecomputeCostsResult, TimeSeriesPoint,
+    UsageFilter, UsageRecord, UsageRecordV2, UsageStats,
+};
 use crate::utils::error::{AppError, AppResult};
 
 /// Type alias for the analytics connection pool
@@ -105,6 +114,107 @@ impl AnalyticsService {
             [],
         )?;
 
+        // Create v2 pricing rules table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS pricing_rules (
+                id TEXT PRIMARY KEY,
+                provider TEXT NOT NULL,
+                model_pattern TEXT NOT NULL,
+                currency TEXT NOT NULL DEFAULT 'USD',
+                input_per_million INTEGER NOT NULL DEFAULT 0,
+                output_per_million INTEGER NOT NULL DEFAULT 0,
+                cache_read_per_million INTEGER NOT NULL DEFAULT 0,
+                cache_write_per_million INTEGER NOT NULL DEFAULT 0,
+                thinking_per_million INTEGER NOT NULL DEFAULT 0,
+                effective_from INTEGER NOT NULL,
+                effective_to INTEGER,
+                status TEXT NOT NULL DEFAULT 'active',
+                note TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pricing_rules_lookup
+             ON pricing_rules(provider, effective_from, effective_to, status)",
+            [],
+        )?;
+
+        // Create v2 usage event table (dual-write target)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS usage_events (
+                event_id TEXT PRIMARY KEY,
+                session_id TEXT,
+                project_id TEXT,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                thinking_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+                timestamp_utc INTEGER NOT NULL,
+                metadata_json TEXT,
+                ingest_status TEXT NOT NULL DEFAULT 'ingested'
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_time ON usage_events(timestamp_utc)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_provider_model ON usage_events(provider, model)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_project ON usage_events(project_id)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_session ON usage_events(session_id)",
+            [],
+        )?;
+
+        // Create v2 usage costs table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS usage_costs (
+                event_id TEXT PRIMARY KEY,
+                rule_id TEXT,
+                cost_total INTEGER NOT NULL DEFAULT 0,
+                currency TEXT NOT NULL DEFAULT 'USD',
+                cost_status TEXT NOT NULL DEFAULT 'missing',
+                cost_breakdown_json TEXT,
+                computed_at INTEGER NOT NULL,
+                FOREIGN KEY(event_id) REFERENCES usage_events(event_id) ON DELETE CASCADE
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_usage_costs_status ON usage_costs(cost_status)",
+            [],
+        )?;
+
+        // Daily rollup table for fast dashboard queries
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS analytics_rollup_daily (
+                date_utc TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                project_id TEXT NOT NULL DEFAULT '',
+                request_count INTEGER NOT NULL DEFAULT 0,
+                tokens_total INTEGER NOT NULL DEFAULT 0,
+                input_tokens_total INTEGER NOT NULL DEFAULT 0,
+                output_tokens_total INTEGER NOT NULL DEFAULT 0,
+                cost_total INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(date_utc, provider, model, project_id)
+            )",
+            [],
+        )?;
+
         // Apply migrations
         self.apply_migrations(&conn)?;
 
@@ -149,7 +259,54 @@ impl AnalyticsService {
             )?;
         }
 
+        // Migration 3: Analytics v2 tables were introduced.
+        // The CREATE TABLE IF NOT EXISTS calls in init_schema already ensure
+        // table availability; this row marks migration completion.
+        if current_version < 3 {
+            conn.execute(
+                "INSERT INTO analytics_schema_version (version, applied_at) VALUES (3, ?1)",
+                params![chrono::Utc::now().timestamp()],
+            )?;
+        }
+
+        // Migration 4: enrich rollup table with split input/output tokens.
+        if current_version < 4 {
+            if !Self::column_exists(conn, "analytics_rollup_daily", "input_tokens_total")? {
+                conn.execute(
+                    "ALTER TABLE analytics_rollup_daily ADD COLUMN input_tokens_total INTEGER NOT NULL DEFAULT 0",
+                    [],
+                )?;
+            }
+            if !Self::column_exists(conn, "analytics_rollup_daily", "output_tokens_total")? {
+                conn.execute(
+                    "ALTER TABLE analytics_rollup_daily ADD COLUMN output_tokens_total INTEGER NOT NULL DEFAULT 0",
+                    [],
+                )?;
+            }
+            conn.execute(
+                "INSERT INTO analytics_schema_version (version, applied_at) VALUES (4, ?1)",
+                params![chrono::Utc::now().timestamp()],
+            )?;
+        }
+
         Ok(())
+    }
+
+    fn column_exists(
+        conn: &rusqlite::Connection,
+        table: &str,
+        column: &str,
+    ) -> AppResult<bool> {
+        let pragma = format!("PRAGMA table_info({})", table);
+        let mut stmt = conn.prepare(&pragma)?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let name: String = row.get(1)?;
+            if name == column {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Initialize default model pricing
@@ -250,9 +407,10 @@ impl AnalyticsService {
 
     /// Insert a new usage record
     pub fn insert_usage_record(&self, record: &UsageRecord) -> AppResult<i64> {
-        let conn = self.get_connection()?;
+        let mut conn = self.get_connection()?;
+        let tx = conn.unchecked_transaction()?;
 
-        conn.execute(
+        tx.execute(
             "INSERT INTO usage_records
              (session_id, project_id, model_name, provider, input_tokens, output_tokens,
               thinking_tokens, cache_read_tokens, cache_creation_tokens,
@@ -274,13 +432,15 @@ impl AnalyticsService {
             ],
         )?;
 
-        let id = conn.last_insert_rowid();
+        let id = tx.last_insert_rowid();
+        Self::dual_write_v2_tx(&tx, record)?;
+        tx.commit()?;
         Ok(id)
     }
 
     /// Insert multiple usage records in a batch
     pub fn insert_usage_records_batch(&self, records: &[UsageRecord]) -> AppResult<Vec<i64>> {
-        let conn = self.get_connection()?;
+        let mut conn = self.get_connection()?;
         let mut ids = Vec::with_capacity(records.len());
 
         let tx = conn.unchecked_transaction()?;
@@ -308,6 +468,7 @@ impl AnalyticsService {
                 ],
             )?;
             ids.push(tx.last_insert_rowid());
+            Self::dual_write_v2_tx(&tx, record)?;
         }
 
         tx.commit()?;
@@ -632,8 +793,1227 @@ impl AnalyticsService {
     }
 
     // ========================================================================
+    // Analytics v2 Public APIs
+    // ========================================================================
+
+    /// List manual pricing rules ordered by provider/model/effective window.
+    pub fn list_pricing_rules(&self) -> AppResult<Vec<PricingRule>> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, provider, model_pattern, currency, input_per_million, output_per_million,
+                    cache_read_per_million, cache_write_per_million, thinking_per_million,
+                    effective_from, effective_to, status, created_at, updated_at, note
+             FROM pricing_rules
+             ORDER BY provider ASC, model_pattern ASC, effective_from DESC, updated_at DESC",
+        )?;
+
+        let rules = stmt
+            .query_map([], |row| Self::row_to_pricing_rule(row))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rules)
+    }
+
+    /// Upsert one pricing rule with overlap validation.
+    pub fn upsert_pricing_rule(&self, rule: &PricingRule) -> AppResult<PricingRule> {
+        let conn = self.get_connection()?;
+        let mut normalized = rule.clone();
+
+        normalized.provider = normalized.provider.trim().to_string();
+        normalized.model_pattern = normalized.model_pattern.trim().to_string();
+        normalized.currency = normalized.currency.trim().to_string();
+
+        if normalized.id.trim().is_empty() {
+            normalized.id = uuid::Uuid::new_v4().to_string();
+        }
+        if normalized.provider.is_empty() {
+            return Err(AppError::validation("provider must not be empty"));
+        }
+        if normalized.model_pattern.is_empty() {
+            return Err(AppError::validation("model_pattern must not be empty"));
+        }
+        if normalized.currency.is_empty() {
+            normalized.currency = "USD".to_string();
+        }
+        if let Some(end) = normalized.effective_to {
+            if end <= normalized.effective_from {
+                return Err(AppError::validation(
+                    "effective_to must be greater than effective_from",
+                ));
+            }
+        }
+        for price in [
+            normalized.input_per_million,
+            normalized.output_per_million,
+            normalized.cache_read_per_million,
+            normalized.cache_write_per_million,
+            normalized.thinking_per_million,
+        ] {
+            if price < 0 {
+                return Err(AppError::validation("price values must be non-negative"));
+            }
+        }
+
+        let mut existing_stmt = conn.prepare("SELECT created_at FROM pricing_rules WHERE id = ?1")?;
+        let existing_created = existing_stmt
+            .query_row(params![normalized.id], |row| row.get::<_, i64>(0))
+            .ok();
+
+        let now = chrono::Utc::now().timestamp();
+        normalized.created_at = existing_created.unwrap_or(now);
+        normalized.updated_at = now;
+
+        if normalized.status == PricingRuleStatus::Active {
+            let max_ts = i64::MAX;
+            let effective_to = normalized.effective_to.unwrap_or(max_ts);
+            let conflict_count: i64 = conn.query_row(
+                "SELECT COUNT(*)
+                 FROM pricing_rules
+                 WHERE id != ?1
+                   AND provider = ?2
+                   AND model_pattern = ?3
+                   AND status = ?4
+                   AND effective_from < ?5
+                   AND COALESCE(effective_to, 9223372036854775807) > ?6",
+                params![
+                    normalized.id,
+                    normalized.provider,
+                    normalized.model_pattern,
+                    PricingRuleStatus::Active.as_str(),
+                    effective_to,
+                    normalized.effective_from,
+                ],
+                |row| row.get(0),
+            )?;
+            if conflict_count > 0 {
+                return Err(AppError::validation(
+                    "overlapping active pricing rule exists for provider + model pattern",
+                ));
+            }
+        }
+
+        conn.execute(
+            "INSERT INTO pricing_rules
+             (id, provider, model_pattern, currency, input_per_million, output_per_million,
+              cache_read_per_million, cache_write_per_million, thinking_per_million,
+              effective_from, effective_to, status, note, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+             ON CONFLICT(id) DO UPDATE SET
+                provider = excluded.provider,
+                model_pattern = excluded.model_pattern,
+                currency = excluded.currency,
+                input_per_million = excluded.input_per_million,
+                output_per_million = excluded.output_per_million,
+                cache_read_per_million = excluded.cache_read_per_million,
+                cache_write_per_million = excluded.cache_write_per_million,
+                thinking_per_million = excluded.thinking_per_million,
+                effective_from = excluded.effective_from,
+                effective_to = excluded.effective_to,
+                status = excluded.status,
+                note = excluded.note,
+                updated_at = excluded.updated_at",
+            params![
+                normalized.id,
+                normalized.provider,
+                normalized.model_pattern,
+                normalized.currency,
+                normalized.input_per_million,
+                normalized.output_per_million,
+                normalized.cache_read_per_million,
+                normalized.cache_write_per_million,
+                normalized.thinking_per_million,
+                normalized.effective_from,
+                normalized.effective_to,
+                normalized.status.as_str(),
+                normalized.note,
+                normalized.created_at,
+                normalized.updated_at,
+            ],
+        )?;
+
+        Ok(normalized)
+    }
+
+    /// Delete pricing rule by ID.
+    pub fn delete_pricing_rule(&self, rule_id: &str) -> AppResult<bool> {
+        let conn = self.get_connection()?;
+        let rows = conn.execute("DELETE FROM pricing_rules WHERE id = ?1", params![rule_id])?;
+        Ok(rows > 0)
+    }
+
+    /// Query usage records from v2 event/cost tables.
+    pub fn list_usage_records_v2(
+        &self,
+        filter: &DashboardFilterV2,
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> AppResult<Vec<UsageRecordV2>> {
+        let conn = self.get_connection()?;
+        let mut sql = String::from(
+            "SELECT ue.event_id, ue.session_id, ue.project_id, ue.model, ue.provider,
+                    ue.input_tokens, ue.output_tokens, ue.thinking_tokens,
+                    ue.cache_read_tokens, ue.cache_write_tokens,
+                    COALESCE(uc.cost_total, 0) AS cost_total,
+                    ue.timestamp_utc, ue.metadata_json, uc.rule_id,
+                    COALESCE(uc.currency, 'USD') AS currency,
+                    COALESCE(uc.cost_status, 'missing') AS cost_status,
+                    uc.cost_breakdown_json
+             FROM usage_events ue
+             LEFT JOIN usage_costs uc ON uc.event_id = ue.event_id
+             WHERE 1=1",
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        Self::append_v2_filter_clauses(&mut sql, &mut params_vec, filter, "ue", "uc");
+        sql.push_str(" ORDER BY ue.timestamp_utc DESC");
+
+        if let Some(lim) = limit {
+            sql.push_str(&format!(" LIMIT {}", lim.max(0)));
+        }
+        if let Some(off) = offset {
+            sql.push_str(&format!(" OFFSET {}", off.max(0)));
+        }
+
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params_refs.as_slice(), |row| Self::row_to_usage_record_v2(row))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    /// Count usage records from v2 event/cost tables.
+    pub fn count_usage_records_v2(&self, filter: &DashboardFilterV2) -> AppResult<i64> {
+        let conn = self.get_connection()?;
+        let mut sql = String::from(
+            "SELECT COUNT(*)
+             FROM usage_events ue
+             LEFT JOIN usage_costs uc ON uc.event_id = ue.event_id
+             WHERE 1=1",
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        Self::append_v2_filter_clauses(&mut sql, &mut params_vec, filter, "ue", "uc");
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+        let count = conn.query_row(&sql, params_refs.as_slice(), |row| row.get(0))?;
+        Ok(count)
+    }
+
+    /// v2 dashboard summary with cost-status filtering and rollup acceleration.
+    pub fn get_dashboard_summary_v2(
+        &self,
+        filter: &DashboardFilterV2,
+        period: AggregationPeriod,
+    ) -> AppResult<DashboardSummary> {
+        let current_stats = self.get_usage_stats_v2(filter)?;
+        let previous_filter = Self::calculate_previous_period_filter_v2(filter);
+        let previous_stats = self.get_usage_stats_v2(&previous_filter)?;
+
+        let cost_change = DashboardSummary::calculate_change(
+            current_stats.total_cost_microdollars as f64,
+            previous_stats.total_cost_microdollars as f64,
+        );
+        let tokens_change = DashboardSummary::calculate_change(
+            current_stats.total_tokens() as f64,
+            previous_stats.total_tokens() as f64,
+        );
+        let requests_change = DashboardSummary::calculate_change(
+            current_stats.request_count as f64,
+            previous_stats.request_count as f64,
+        );
+
+        let by_model = self.aggregate_by_model_v2(filter)?;
+        let by_project = self.aggregate_by_project_v2(filter)?;
+        let time_series = self.get_time_series_v2(filter, period)?;
+
+        Ok(DashboardSummary {
+            current_period: current_stats,
+            previous_period: previous_stats,
+            cost_change_percent: cost_change,
+            tokens_change_percent: tokens_change,
+            requests_change_percent: requests_change,
+            by_model,
+            by_project,
+            time_series,
+        })
+    }
+
+    /// Recompute usage costs with current pricing rules for matching records.
+    pub fn recompute_costs(&self, request: &RecomputeCostsRequest) -> AppResult<RecomputeCostsResult> {
+        let mut conn = self.get_connection()?;
+        let tx = conn.unchecked_transaction()?;
+        let filter = &request.filter;
+
+        let mut sql = String::from(
+            "SELECT ue.event_id, ue.session_id, ue.project_id, ue.provider, ue.model,
+                    ue.input_tokens, ue.output_tokens, ue.thinking_tokens,
+                    ue.cache_read_tokens, ue.cache_write_tokens, ue.timestamp_utc,
+                    COALESCE(uc.cost_total, 0) AS existing_cost,
+                    ue.metadata_json
+             FROM usage_events ue
+             LEFT JOIN usage_costs uc ON uc.event_id = ue.event_id
+             WHERE 1=1",
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        Self::append_v2_filter_clauses(&mut sql, &mut params_vec, filter, "ue", "uc");
+        sql.push_str(" ORDER BY ue.timestamp_utc ASC");
+
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = tx.prepare(&sql)?;
+        let event_rows = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, i64>(9)?,
+                    row.get::<_, i64>(10)?,
+                    row.get::<_, i64>(11)?,
+                    row.get::<_, Option<String>>(12)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
+
+        let mut result = RecomputeCostsResult::default();
+        for (
+            event_id,
+            session_id,
+            project_id,
+            provider,
+            model,
+            input_tokens,
+            output_tokens,
+            thinking_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+            timestamp_utc,
+            existing_cost,
+            metadata_json,
+        ) in event_rows
+        {
+            result.scanned_records += 1;
+            let synthetic = UsageRecord {
+                id: 0,
+                session_id,
+                project_id,
+                model_name: model,
+                provider,
+                input_tokens,
+                output_tokens,
+                thinking_tokens,
+                cache_read_tokens,
+                cache_creation_tokens: cache_write_tokens,
+                cost_microdollars: existing_cost,
+                timestamp: timestamp_utc,
+                metadata: metadata_json,
+            };
+            let (rule_id, cost_total, cost_status, currency, breakdown_json) =
+                Self::resolve_cost_for_record_tx(&tx, &synthetic)?;
+
+            tx.execute(
+                "INSERT INTO usage_costs
+                 (event_id, rule_id, cost_total, currency, cost_status, cost_breakdown_json, computed_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(event_id) DO UPDATE SET
+                    rule_id = excluded.rule_id,
+                    cost_total = excluded.cost_total,
+                    currency = excluded.currency,
+                    cost_status = excluded.cost_status,
+                    cost_breakdown_json = excluded.cost_breakdown_json,
+                    computed_at = excluded.computed_at",
+                params![
+                    event_id,
+                    rule_id,
+                    cost_total,
+                    currency,
+                    cost_status.as_str(),
+                    breakdown_json,
+                    chrono::Utc::now().timestamp(),
+                ],
+            )?;
+
+            result.recomputed_records += 1;
+            match cost_status {
+                CostStatus::Exact => result.exact_records += 1,
+                CostStatus::Estimated => result.estimated_records += 1,
+                CostStatus::Missing => result.missing_records += 1,
+            }
+        }
+
+        Self::rebuild_rollup_daily_tx(&tx)?;
+        tx.commit()?;
+        Ok(result)
+    }
+
+    /// Export v2 usage records to a local file in streaming mode.
+    pub fn export_usage_streaming_job(
+        &self,
+        request: &ExportStreamingJobRequest,
+    ) -> AppResult<ExportJob> {
+        let job_id = uuid::Uuid::new_v4().to_string();
+        let extension = match request.format {
+            ExportFormat::Csv => "csv",
+            ExportFormat::Json => "json",
+        };
+        let file_path = request
+            .file_path
+            .clone()
+            .filter(|p| !p.trim().is_empty())
+            .unwrap_or_else(|| Self::default_export_path(extension));
+        let path = PathBuf::from(file_path.clone());
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let file = File::create(&path)?;
+        let mut writer = BufWriter::new(file);
+        let mut total_exported = 0_i64;
+        let chunk_size = 2_000_i64;
+
+        match request.format {
+            ExportFormat::Csv => {
+                writeln!(
+                    writer,
+                    "event_id,session_id,project_id,provider,model,input_tokens,output_tokens,thinking_tokens,cache_read_tokens,cache_write_tokens,cost_microdollars,currency,cost_status,timestamp,timestamp_formatted,rule_id,cost_breakdown_json,metadata_json"
+                )?;
+
+                let mut offset = 0_i64;
+                loop {
+                    let batch =
+                        self.list_usage_records_v2(&request.filter, Some(chunk_size), Some(offset))?;
+                    if batch.is_empty() {
+                        break;
+                    }
+
+                    for row in &batch {
+                        let formatted = chrono::DateTime::from_timestamp(row.timestamp, 0)
+                            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                            .unwrap_or_default();
+                        writeln!(
+                            writer,
+                            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},\"{}\",{},{},{}",
+                            Self::csv_escape_local(&row.event_id),
+                            Self::csv_escape_local(row.session_id.as_deref().unwrap_or("")),
+                            Self::csv_escape_local(row.project_id.as_deref().unwrap_or("")),
+                            Self::csv_escape_local(&row.provider),
+                            Self::csv_escape_local(&row.model_name),
+                            row.input_tokens,
+                            row.output_tokens,
+                            row.thinking_tokens,
+                            row.cache_read_tokens,
+                            row.cache_creation_tokens,
+                            row.cost_microdollars,
+                            Self::csv_escape_local(&row.currency),
+                            row.cost_status.as_str(),
+                            row.timestamp,
+                            formatted,
+                            Self::csv_escape_local(row.pricing_rule_id.as_deref().unwrap_or("")),
+                            Self::csv_escape_local(row.cost_breakdown_json.as_deref().unwrap_or("")),
+                            Self::csv_escape_local(row.metadata.as_deref().unwrap_or("")),
+                        )?;
+                    }
+
+                    total_exported += batch.len() as i64;
+                    offset += chunk_size;
+                    if batch.len() < chunk_size as usize {
+                        break;
+                    }
+                }
+
+                if request.include_summary {
+                    let summary = self.get_usage_stats_v2(&request.filter)?;
+                    writeln!(writer, "\n# summary")?;
+                    writeln!(writer, "# request_count={}", summary.request_count)?;
+                    writeln!(writer, "# total_input_tokens={}", summary.total_input_tokens)?;
+                    writeln!(writer, "# total_output_tokens={}", summary.total_output_tokens)?;
+                    writeln!(
+                        writer,
+                        "# total_cost_microdollars={}",
+                        summary.total_cost_microdollars
+                    )?;
+                }
+            }
+            ExportFormat::Json => {
+                writeln!(writer, "{{")?;
+                writeln!(
+                    writer,
+                    "  \"exported_at\": \"{}\",",
+                    chrono::Utc::now().to_rfc3339()
+                )?;
+                if request.include_summary {
+                    let summary = self.get_usage_stats_v2(&request.filter)?;
+                    let summary_json = serde_json::to_string_pretty(&summary)?;
+                    writeln!(writer, "  \"summary\": {},", summary_json)?;
+                }
+                writeln!(writer, "  \"records\": [")?;
+
+                let mut first = true;
+                let mut offset = 0_i64;
+                loop {
+                    let batch =
+                        self.list_usage_records_v2(&request.filter, Some(chunk_size), Some(offset))?;
+                    if batch.is_empty() {
+                        break;
+                    }
+                    for row in &batch {
+                        if !first {
+                            writeln!(writer, ",")?;
+                        }
+                        first = false;
+                        let line = serde_json::to_string(row)?;
+                        write!(writer, "    {}", line)?;
+                    }
+                    total_exported += batch.len() as i64;
+                    offset += chunk_size;
+                    if batch.len() < chunk_size as usize {
+                        break;
+                    }
+                }
+                writeln!(writer)?;
+                writeln!(writer, "  ]")?;
+                writeln!(writer, "}}")?;
+            }
+        }
+
+        writer.flush()?;
+        Ok(ExportJob {
+            id: job_id,
+            status: ExportJobStatus::Completed,
+            file_path: Some(path.to_string_lossy().to_string()),
+            record_count: total_exported,
+            error: None,
+        })
+    }
+
+    fn get_usage_stats_v2(&self, filter: &DashboardFilterV2) -> AppResult<UsageStats> {
+        if Self::is_rollup_eligible(filter) {
+            return self.get_usage_stats_v2_rollup(filter);
+        }
+
+        let conn = self.get_connection()?;
+        let mut sql = String::from(
+            "SELECT COALESCE(SUM(ue.input_tokens), 0) AS total_input,
+                    COALESCE(SUM(ue.output_tokens), 0) AS total_output,
+                    COALESCE(SUM(COALESCE(uc.cost_total, 0)), 0) AS total_cost,
+                    COUNT(*) AS request_count
+             FROM usage_events ue
+             LEFT JOIN usage_costs uc ON uc.event_id = ue.event_id
+             WHERE 1=1",
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        Self::append_v2_filter_clauses(&mut sql, &mut params_vec, filter, "ue", "uc");
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+
+        let (total_input, total_output, total_cost, request_count): (i64, i64, i64, i64) =
+            conn.query_row(&sql, params_refs.as_slice(), |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?;
+
+        Ok(Self::usage_stats_from_totals(
+            total_input,
+            total_output,
+            total_cost,
+            request_count,
+        ))
+    }
+
+    fn get_usage_stats_v2_rollup(&self, filter: &DashboardFilterV2) -> AppResult<UsageStats> {
+        let conn = self.get_connection()?;
+        let mut sql = String::from(
+            "SELECT COALESCE(SUM(input_tokens_total), 0) AS total_input,
+                    COALESCE(SUM(output_tokens_total), 0) AS total_output,
+                    COALESCE(SUM(cost_total), 0) AS total_cost,
+                    COALESCE(SUM(request_count), 0) AS request_count
+             FROM analytics_rollup_daily
+             WHERE 1=1",
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        Self::append_rollup_filter_clauses(&mut sql, &mut params_vec, filter);
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+
+        let (total_input, total_output, total_cost, request_count): (i64, i64, i64, i64) =
+            conn.query_row(&sql, params_refs.as_slice(), |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?;
+
+        Ok(Self::usage_stats_from_totals(
+            total_input,
+            total_output,
+            total_cost,
+            request_count,
+        ))
+    }
+
+    fn aggregate_by_model_v2(&self, filter: &DashboardFilterV2) -> AppResult<Vec<ModelUsage>> {
+        if Self::is_rollup_eligible(filter) {
+            let conn = self.get_connection()?;
+            let mut sql = String::from(
+                "SELECT model, provider,
+                        COALESCE(SUM(input_tokens_total), 0) AS total_input,
+                        COALESCE(SUM(output_tokens_total), 0) AS total_output,
+                        COALESCE(SUM(cost_total), 0) AS total_cost,
+                        COALESCE(SUM(request_count), 0) AS request_count
+                 FROM analytics_rollup_daily
+                 WHERE 1=1",
+            );
+            let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+            Self::append_rollup_filter_clauses(&mut sql, &mut params_vec, filter);
+            sql.push_str(" GROUP BY model, provider ORDER BY total_cost DESC, request_count DESC");
+            let params_refs: Vec<&dyn rusqlite::ToSql> =
+                params_vec.iter().map(|p| p.as_ref()).collect();
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt
+                .query_map(params_refs.as_slice(), |row| {
+                    let total_input: i64 = row.get(2)?;
+                    let total_output: i64 = row.get(3)?;
+                    let total_cost: i64 = row.get(4)?;
+                    let request_count: i64 = row.get(5)?;
+                    Ok(ModelUsage {
+                        model_name: row.get(0)?,
+                        provider: row.get(1)?,
+                        stats: Self::usage_stats_from_totals(
+                            total_input,
+                            total_output,
+                            total_cost,
+                            request_count,
+                        ),
+                    })
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+            return Ok(rows);
+        }
+
+        let conn = self.get_connection()?;
+        let mut sql = String::from(
+            "SELECT ue.model, ue.provider,
+                    COALESCE(SUM(ue.input_tokens), 0) AS total_input,
+                    COALESCE(SUM(ue.output_tokens), 0) AS total_output,
+                    COALESCE(SUM(COALESCE(uc.cost_total, 0)), 0) AS total_cost,
+                    COUNT(*) AS request_count
+             FROM usage_events ue
+             LEFT JOIN usage_costs uc ON uc.event_id = ue.event_id
+             WHERE 1=1",
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        Self::append_v2_filter_clauses(&mut sql, &mut params_vec, filter, "ue", "uc");
+        sql.push_str(" GROUP BY ue.model, ue.provider ORDER BY total_cost DESC, request_count DESC");
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                let total_input: i64 = row.get(2)?;
+                let total_output: i64 = row.get(3)?;
+                let total_cost: i64 = row.get(4)?;
+                let request_count: i64 = row.get(5)?;
+                Ok(ModelUsage {
+                    model_name: row.get(0)?,
+                    provider: row.get(1)?,
+                    stats: Self::usage_stats_from_totals(
+                        total_input,
+                        total_output,
+                        total_cost,
+                        request_count,
+                    ),
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    fn aggregate_by_project_v2(&self, filter: &DashboardFilterV2) -> AppResult<Vec<ProjectUsage>> {
+        if Self::is_rollup_eligible(filter) {
+            let conn = self.get_connection()?;
+            let mut sql = String::from(
+                "SELECT project_id,
+                        COALESCE(SUM(input_tokens_total), 0) AS total_input,
+                        COALESCE(SUM(output_tokens_total), 0) AS total_output,
+                        COALESCE(SUM(cost_total), 0) AS total_cost,
+                        COALESCE(SUM(request_count), 0) AS request_count
+                 FROM analytics_rollup_daily
+                 WHERE project_id != ''",
+            );
+            let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+            Self::append_rollup_filter_clauses(&mut sql, &mut params_vec, filter);
+            sql.push_str(" GROUP BY project_id ORDER BY total_cost DESC, request_count DESC");
+            let params_refs: Vec<&dyn rusqlite::ToSql> =
+                params_vec.iter().map(|p| p.as_ref()).collect();
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt
+                .query_map(params_refs.as_slice(), |row| {
+                    let total_input: i64 = row.get(1)?;
+                    let total_output: i64 = row.get(2)?;
+                    let total_cost: i64 = row.get(3)?;
+                    let request_count: i64 = row.get(4)?;
+                    Ok(ProjectUsage {
+                        project_id: row.get(0)?,
+                        project_name: None,
+                        stats: Self::usage_stats_from_totals(
+                            total_input,
+                            total_output,
+                            total_cost,
+                            request_count,
+                        ),
+                    })
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+            return Ok(rows);
+        }
+
+        let conn = self.get_connection()?;
+        let mut sql = String::from(
+            "SELECT COALESCE(ue.project_id, '') AS project_id,
+                    COALESCE(SUM(ue.input_tokens), 0) AS total_input,
+                    COALESCE(SUM(ue.output_tokens), 0) AS total_output,
+                    COALESCE(SUM(COALESCE(uc.cost_total, 0)), 0) AS total_cost,
+                    COUNT(*) AS request_count
+             FROM usage_events ue
+             LEFT JOIN usage_costs uc ON uc.event_id = ue.event_id
+             WHERE COALESCE(ue.project_id, '') != ''",
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        Self::append_v2_filter_clauses(&mut sql, &mut params_vec, filter, "ue", "uc");
+        sql.push_str(" GROUP BY COALESCE(ue.project_id, '') ORDER BY total_cost DESC, request_count DESC");
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                let total_input: i64 = row.get(1)?;
+                let total_output: i64 = row.get(2)?;
+                let total_cost: i64 = row.get(3)?;
+                let request_count: i64 = row.get(4)?;
+                Ok(ProjectUsage {
+                    project_id: row.get(0)?,
+                    project_name: None,
+                    stats: Self::usage_stats_from_totals(
+                        total_input,
+                        total_output,
+                        total_cost,
+                        request_count,
+                    ),
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    fn get_time_series_v2(
+        &self,
+        filter: &DashboardFilterV2,
+        period: AggregationPeriod,
+    ) -> AppResult<Vec<TimeSeriesPoint>> {
+        if Self::is_rollup_eligible(filter) && period == AggregationPeriod::Daily {
+            let conn = self.get_connection()?;
+            let mut sql = String::from(
+                "SELECT date_utc AS period,
+                        MIN(strftime('%s', date_utc || ' 00:00:00')) AS period_start,
+                        COALESCE(SUM(input_tokens_total), 0) AS total_input,
+                        COALESCE(SUM(output_tokens_total), 0) AS total_output,
+                        COALESCE(SUM(cost_total), 0) AS total_cost,
+                        COALESCE(SUM(request_count), 0) AS request_count
+                 FROM analytics_rollup_daily
+                 WHERE 1=1",
+            );
+            let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+            Self::append_rollup_filter_clauses(&mut sql, &mut params_vec, filter);
+            sql.push_str(" GROUP BY date_utc ORDER BY date_utc ASC");
+            let params_refs: Vec<&dyn rusqlite::ToSql> =
+                params_vec.iter().map(|p| p.as_ref()).collect();
+
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt
+                .query_map(params_refs.as_slice(), |row| {
+                    let total_input: i64 = row.get(2)?;
+                    let total_output: i64 = row.get(3)?;
+                    let total_cost: i64 = row.get(4)?;
+                    let request_count: i64 = row.get(5)?;
+                    Ok(TimeSeriesPoint {
+                        timestamp: row.get(1)?,
+                        timestamp_formatted: row.get(0)?,
+                        stats: Self::usage_stats_from_totals(
+                            total_input,
+                            total_output,
+                            total_cost,
+                            request_count,
+                        ),
+                    })
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+            return Ok(rows);
+        }
+
+        let conn = self.get_connection()?;
+        let mut sql = format!(
+            "SELECT strftime('{}', datetime(ue.timestamp_utc, 'unixepoch')) AS period,
+                    MIN(ue.timestamp_utc) AS period_start,
+                    COALESCE(SUM(ue.input_tokens), 0) AS total_input,
+                    COALESCE(SUM(ue.output_tokens), 0) AS total_output,
+                    COALESCE(SUM(COALESCE(uc.cost_total, 0)), 0) AS total_cost,
+                    COUNT(*) AS request_count
+             FROM usage_events ue
+             LEFT JOIN usage_costs uc ON uc.event_id = ue.event_id
+             WHERE 1=1",
+            period.sql_format()
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        Self::append_v2_filter_clauses(&mut sql, &mut params_vec, filter, "ue", "uc");
+        sql.push_str(" GROUP BY period ORDER BY period_start ASC");
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                let total_input: i64 = row.get(2)?;
+                let total_output: i64 = row.get(3)?;
+                let total_cost: i64 = row.get(4)?;
+                let request_count: i64 = row.get(5)?;
+                Ok(TimeSeriesPoint {
+                    timestamp: row.get(1)?,
+                    timestamp_formatted: row.get(0)?,
+                    stats: Self::usage_stats_from_totals(
+                        total_input,
+                        total_output,
+                        total_cost,
+                        request_count,
+                    ),
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    fn rebuild_rollup_daily_tx(tx: &rusqlite::Transaction<'_>) -> AppResult<()> {
+        tx.execute("DELETE FROM analytics_rollup_daily", [])?;
+        tx.execute(
+            "INSERT INTO analytics_rollup_daily
+             (date_utc, provider, model, project_id, request_count, tokens_total, input_tokens_total, output_tokens_total, cost_total)
+             SELECT strftime('%Y-%m-%d', datetime(ue.timestamp_utc, 'unixepoch')) AS date_utc,
+                    ue.provider,
+                    ue.model,
+                    COALESCE(ue.project_id, '') AS project_id,
+                    COUNT(*) AS request_count,
+                    COALESCE(SUM(ue.input_tokens + ue.output_tokens), 0) AS tokens_total,
+                    COALESCE(SUM(ue.input_tokens), 0) AS input_tokens_total,
+                    COALESCE(SUM(ue.output_tokens), 0) AS output_tokens_total,
+                    COALESCE(SUM(COALESCE(uc.cost_total, 0)), 0) AS cost_total
+             FROM usage_events ue
+             LEFT JOIN usage_costs uc ON uc.event_id = ue.event_id
+             GROUP BY date_utc, ue.provider, ue.model, COALESCE(ue.project_id, '')",
+            [],
+        )?;
+        Ok(())
+    }
+
+    fn append_v2_filter_clauses(
+        sql: &mut String,
+        params_vec: &mut Vec<Box<dyn rusqlite::ToSql>>,
+        filter: &DashboardFilterV2,
+        event_alias: &str,
+        cost_alias: &str,
+    ) {
+        if let Some(start) = filter.start_timestamp {
+            sql.push_str(&format!(" AND {}.timestamp_utc >= ?", event_alias));
+            params_vec.push(Box::new(start));
+        }
+        if let Some(end) = filter.end_timestamp {
+            sql.push_str(&format!(" AND {}.timestamp_utc < ?", event_alias));
+            params_vec.push(Box::new(end));
+        }
+        if let Some(ref model) = filter.model_name {
+            sql.push_str(&format!(" AND {}.model = ?", event_alias));
+            params_vec.push(Box::new(model.clone()));
+        }
+        if let Some(ref provider) = filter.provider {
+            sql.push_str(&format!(" AND {}.provider = ?", event_alias));
+            params_vec.push(Box::new(provider.clone()));
+        }
+        if let Some(ref session_id) = filter.session_id {
+            sql.push_str(&format!(" AND {}.session_id = ?", event_alias));
+            params_vec.push(Box::new(session_id.clone()));
+        }
+        if let Some(ref project_id) = filter.project_id {
+            sql.push_str(&format!(" AND COALESCE({}.project_id, '') = ?", event_alias));
+            params_vec.push(Box::new(project_id.clone()));
+        }
+        if let Some(cost_status) = &filter.cost_status {
+            sql.push_str(&format!(
+                " AND COALESCE({}.cost_status, 'missing') = ?",
+                cost_alias
+            ));
+            params_vec.push(Box::new(cost_status.as_str().to_string()));
+        }
+    }
+
+    fn append_rollup_filter_clauses(
+        sql: &mut String,
+        params_vec: &mut Vec<Box<dyn rusqlite::ToSql>>,
+        filter: &DashboardFilterV2,
+    ) {
+        if let Some(start) = filter.start_timestamp {
+            sql.push_str(" AND date_utc >= ?");
+            params_vec.push(Box::new(Self::timestamp_to_date_utc(start)));
+        }
+        if let Some(end) = filter.end_timestamp {
+            sql.push_str(" AND date_utc < ?");
+            params_vec.push(Box::new(Self::timestamp_to_date_utc(end)));
+        }
+        if let Some(ref model) = filter.model_name {
+            sql.push_str(" AND model = ?");
+            params_vec.push(Box::new(model.clone()));
+        }
+        if let Some(ref provider) = filter.provider {
+            sql.push_str(" AND provider = ?");
+            params_vec.push(Box::new(provider.clone()));
+        }
+        if let Some(ref project_id) = filter.project_id {
+            sql.push_str(" AND project_id = ?");
+            params_vec.push(Box::new(project_id.clone()));
+        }
+    }
+
+    fn calculate_previous_period_filter_v2(filter: &DashboardFilterV2) -> DashboardFilterV2 {
+        let mut prev = filter.clone();
+        if let (Some(start), Some(end)) = (filter.start_timestamp, filter.end_timestamp) {
+            let duration = end - start;
+            prev.start_timestamp = Some(start - duration);
+            prev.end_timestamp = Some(start);
+        }
+        prev
+    }
+
+    fn is_rollup_eligible(filter: &DashboardFilterV2) -> bool {
+        if filter.session_id.is_some() || filter.cost_status.is_some() {
+            return false;
+        }
+        if let Some(start) = filter.start_timestamp {
+            if start % 86_400 != 0 {
+                return false;
+            }
+        }
+        if let Some(end) = filter.end_timestamp {
+            if end % 86_400 != 0 {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn usage_stats_from_totals(
+        total_input: i64,
+        total_output: i64,
+        total_cost: i64,
+        request_count: i64,
+    ) -> UsageStats {
+        let avg_tokens = if request_count > 0 {
+            (total_input + total_output) as f64 / request_count as f64
+        } else {
+            0.0
+        };
+        let avg_cost = if request_count > 0 {
+            total_cost as f64 / request_count as f64
+        } else {
+            0.0
+        };
+
+        UsageStats {
+            total_input_tokens: total_input,
+            total_output_tokens: total_output,
+            total_cost_microdollars: total_cost,
+            request_count,
+            avg_tokens_per_request: avg_tokens,
+            avg_cost_per_request: avg_cost,
+        }
+    }
+
+    fn timestamp_to_date_utc(ts: i64) -> String {
+        chrono::DateTime::from_timestamp(ts, 0)
+            .map(|dt| dt.date_naive().format("%Y-%m-%d").to_string())
+            .unwrap_or_else(|| "1970-01-01".to_string())
+    }
+
+    fn default_export_path(extension: &str) -> String {
+        let file_name = format!(
+            "analytics_export_{}.{}",
+            chrono::Utc::now().format("%Y%m%d_%H%M%S"),
+            extension
+        );
+        let base = std::env::var("HOME")
+            .ok()
+            .map(|home| Path::new(&home).join("Downloads"))
+            .unwrap_or_else(std::env::temp_dir);
+        base.join(file_name).to_string_lossy().to_string()
+    }
+
+    fn csv_escape_local(value: &str) -> String {
+        if value.contains(',') || value.contains('"') || value.contains('\n') {
+            format!("\"{}\"", value.replace('"', "\"\""))
+        } else {
+            value.to_string()
+        }
+    }
+
+    // ========================================================================
+    // Analytics v2 dual-write helpers
+    // ========================================================================
+
+    fn dual_write_v2_tx(tx: &rusqlite::Transaction<'_>, record: &UsageRecord) -> AppResult<()> {
+        let event_id = uuid::Uuid::new_v4().to_string();
+        let project_norm = record.project_id.clone().unwrap_or_default();
+
+        tx.execute(
+            "INSERT INTO usage_events
+             (event_id, session_id, project_id, provider, model, input_tokens, output_tokens,
+              thinking_tokens, cache_read_tokens, cache_write_tokens,
+              timestamp_utc, metadata_json, ingest_status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'ingested')",
+            params![
+                event_id,
+                record.session_id,
+                record.project_id,
+                record.provider,
+                record.model_name,
+                record.input_tokens,
+                record.output_tokens,
+                record.thinking_tokens,
+                record.cache_read_tokens,
+                record.cache_creation_tokens,
+                record.timestamp,
+                record.metadata,
+            ],
+        )?;
+
+        let (rule_id, cost_total, cost_status, currency, breakdown_json) =
+            Self::resolve_cost_for_record_tx(tx, record)?;
+
+        tx.execute(
+            "INSERT INTO usage_costs
+             (event_id, rule_id, cost_total, currency, cost_status, cost_breakdown_json, computed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(event_id) DO UPDATE SET
+                rule_id = excluded.rule_id,
+                cost_total = excluded.cost_total,
+                currency = excluded.currency,
+                cost_status = excluded.cost_status,
+                cost_breakdown_json = excluded.cost_breakdown_json,
+                computed_at = excluded.computed_at",
+            params![
+                event_id,
+                rule_id,
+                cost_total,
+                currency,
+                cost_status.as_str(),
+                breakdown_json,
+                chrono::Utc::now().timestamp(),
+            ],
+        )?;
+
+        let date_utc = chrono::DateTime::from_timestamp(record.timestamp, 0)
+            .map(|dt| dt.date_naive().format("%Y-%m-%d").to_string())
+            .unwrap_or_else(|| "1970-01-01".to_string());
+
+        tx.execute(
+            "INSERT INTO analytics_rollup_daily
+             (date_utc, provider, model, project_id, request_count, tokens_total, input_tokens_total, output_tokens_total, cost_total)
+             VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6, ?7, ?8)
+             ON CONFLICT(date_utc, provider, model, project_id) DO UPDATE SET
+                request_count = request_count + 1,
+                tokens_total = tokens_total + excluded.tokens_total,
+                input_tokens_total = input_tokens_total + excluded.input_tokens_total,
+                output_tokens_total = output_tokens_total + excluded.output_tokens_total,
+                cost_total = cost_total + excluded.cost_total",
+            params![
+                date_utc,
+                record.provider,
+                record.model_name,
+                project_norm,
+                record.total_tokens(),
+                record.input_tokens,
+                record.output_tokens,
+                cost_total
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    fn resolve_cost_for_record_tx(
+        tx: &rusqlite::Transaction<'_>,
+        record: &UsageRecord,
+    ) -> AppResult<(Option<String>, i64, CostStatus, String, Option<String>)> {
+        let mut stmt = tx.prepare(
+            "SELECT id, model_pattern, currency, input_per_million, output_per_million,
+                    cache_read_per_million, cache_write_per_million, thinking_per_million
+             FROM pricing_rules
+             WHERE provider = ?1
+               AND status = ?2
+               AND effective_from <= ?3
+               AND (effective_to IS NULL OR effective_to > ?3)
+             ORDER BY effective_from DESC, updated_at DESC",
+        )?;
+
+        let rows = stmt.query_map(
+            params![
+                &record.provider,
+                PricingRuleStatus::Active.as_str(),
+                record.timestamp
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                ))
+            },
+        )?;
+
+        for item in rows {
+            let (
+                rule_id,
+                model_pattern,
+                currency,
+                input_per_million,
+                output_per_million,
+                cache_read_per_million,
+                cache_write_per_million,
+                thinking_per_million,
+            ) = item?;
+
+            if !Self::wildcard_match(&model_pattern, &record.model_name) {
+                continue;
+            }
+
+            let input_cost = (record.input_tokens * input_per_million) / 1_000_000;
+            let output_cost = (record.output_tokens * output_per_million) / 1_000_000;
+            let thinking_cost = (record.thinking_tokens * thinking_per_million) / 1_000_000;
+            let cache_read_cost = (record.cache_read_tokens * cache_read_per_million) / 1_000_000;
+            let cache_write_cost =
+                (record.cache_creation_tokens * cache_write_per_million) / 1_000_000;
+
+            let breakdown = CostBreakdown {
+                input_cost_microdollars: input_cost,
+                output_cost_microdollars: output_cost,
+                thinking_cost_microdollars: thinking_cost,
+                cache_read_cost_microdollars: cache_read_cost,
+                cache_write_cost_microdollars: cache_write_cost,
+                total_cost_microdollars: input_cost
+                    + output_cost
+                    + thinking_cost
+                    + cache_read_cost
+                    + cache_write_cost,
+            };
+
+            return Ok((
+                Some(rule_id),
+                breakdown.total_cost_microdollars,
+                CostStatus::Exact,
+                currency,
+                Some(serde_json::to_string(&breakdown)?),
+            ));
+        }
+
+        if record.cost_microdollars > 0 {
+            let breakdown = serde_json::json!({
+                "legacy_total_cost_microdollars": record.cost_microdollars,
+            });
+            return Ok((
+                None,
+                record.cost_microdollars,
+                CostStatus::Estimated,
+                "USD".to_string(),
+                Some(breakdown.to_string()),
+            ));
+        }
+
+        Ok((None, 0, CostStatus::Missing, "USD".to_string(), None))
+    }
+
+    pub(crate) fn wildcard_match(pattern: &str, value: &str) -> bool {
+        if pattern == "*" || pattern == "%" {
+            return true;
+        }
+
+        let escaped = regex::escape(pattern);
+        let wildcard = escaped.replace("\\*", ".*").replace("\\%", ".*");
+        let regex = format!("^{}$", wildcard);
+        match Regex::new(&regex) {
+            Ok(re) => re.is_match(value),
+            Err(_) => false,
+        }
+    }
+
+    // ========================================================================
     // Helper Methods
     // ========================================================================
+
+    fn row_to_pricing_rule(row: &rusqlite::Row) -> rusqlite::Result<PricingRule> {
+        let status_raw: String = row.get(11)?;
+        Ok(PricingRule {
+            id: row.get(0)?,
+            provider: row.get(1)?,
+            model_pattern: row.get(2)?,
+            currency: row.get(3)?,
+            input_per_million: row.get(4)?,
+            output_per_million: row.get(5)?,
+            cache_read_per_million: row.get(6)?,
+            cache_write_per_million: row.get(7)?,
+            thinking_per_million: row.get(8)?,
+            effective_from: row.get(9)?,
+            effective_to: row.get(10)?,
+            status: PricingRuleStatus::from_str(&status_raw),
+            created_at: row.get(12)?,
+            updated_at: row.get(13)?,
+            note: row.get(14)?,
+        })
+    }
+
+    fn row_to_usage_record_v2(row: &rusqlite::Row) -> rusqlite::Result<UsageRecordV2> {
+        let status_raw: String = row.get(15)?;
+        Ok(UsageRecordV2 {
+            event_id: row.get(0)?,
+            session_id: row.get(1)?,
+            project_id: row.get(2)?,
+            model_name: row.get(3)?,
+            provider: row.get(4)?,
+            input_tokens: row.get(5)?,
+            output_tokens: row.get(6)?,
+            thinking_tokens: row.get(7)?,
+            cache_read_tokens: row.get(8)?,
+            cache_creation_tokens: row.get(9)?,
+            cost_microdollars: row.get(10)?,
+            timestamp: row.get(11)?,
+            metadata: row.get(12)?,
+            pricing_rule_id: row.get(13)?,
+            currency: row.get(14)?,
+            cost_status: CostStatus::from_str(&status_raw),
+            cost_breakdown_json: row.get(16)?,
+        })
+    }
 
     /// Convert a database row to UsageRecord
     fn row_to_usage_record(row: &rusqlite::Row) -> rusqlite::Result<UsageRecord> {
@@ -823,5 +2203,47 @@ mod tests {
         assert!(deleted);
 
         assert!(service.get_usage_record(id).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_v2_pricing_rule_and_record_query() {
+        let service = create_test_service().unwrap();
+
+        let mut rule = PricingRule::new("anthropic", "claude-*");
+        rule.input_per_million = 2_000_000;
+        rule.output_per_million = 10_000_000;
+        rule.effective_from = 0;
+        let saved = service.upsert_pricing_rule(&rule).unwrap();
+        assert!(!saved.id.is_empty());
+
+        let record = UsageRecord::new("claude-sonnet-4-20250514", "anthropic", 1_000, 500);
+        service.insert_usage_record(&record).unwrap();
+
+        let filter = DashboardFilterV2::default();
+        let rows = service.list_usage_records_v2(&filter, Some(10), Some(0)).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].provider, "anthropic");
+        assert_eq!(rows[0].cost_status, CostStatus::Exact);
+
+        let count = service.count_usage_records_v2(&filter).unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_recompute_costs_missing_path() {
+        let service = create_test_service().unwrap();
+        service
+            .insert_usage_record(&UsageRecord::new("unknown-model", "unknown-provider", 100, 50))
+            .unwrap();
+
+        let result = service
+            .recompute_costs(&RecomputeCostsRequest {
+                filter: DashboardFilterV2::default(),
+            })
+            .unwrap();
+
+        assert_eq!(result.scanned_records, 1);
+        assert_eq!(result.recomputed_records, 1);
+        assert_eq!(result.missing_records, 1);
     }
 }

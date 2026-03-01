@@ -15,6 +15,7 @@ import { CostChart } from './CostChart';
 import { TokenBreakdown } from './TokenBreakdown';
 import { ExportDialog } from './ExportDialog';
 import { UsageTable } from './UsageTable';
+import { PricingRulesPanel } from './PricingRulesPanel';
 import AnalyticsSkeleton from './AnalyticsSkeleton';
 
 export function Dashboard() {
@@ -22,8 +23,19 @@ export function Dashboard() {
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'details'>('overview');
 
-  const { summary, isLoading, error, initialize, fetchDashboardSummary, fetchPricing, clearError } =
-    useAnalyticsStore();
+  const {
+    summary,
+    summaryLoading,
+    isLoading,
+    error,
+    filter,
+    initialize,
+    fetchDashboardSummary,
+    fetchPricing,
+    setFilter,
+    clearError,
+  } = useAnalyticsStore();
+  const loading = summaryLoading || isLoading;
 
   // Initialize and fetch data on mount
   useEffect(() => {
@@ -44,6 +56,15 @@ export function Dashboard() {
   const handleRetry = () => {
     clearError();
     fetchDashboardSummary();
+  };
+
+  const handleModelDrilldown = (provider: string, modelName: string) => {
+    setFilter({
+      ...filter,
+      provider,
+      model_name: modelName,
+    });
+    setActiveTab('details');
   };
 
   return (
@@ -156,13 +177,13 @@ export function Dashboard() {
         )}
 
         {/* Loading State */}
-        {isLoading && !summary && <AnalyticsSkeleton />}
+        {loading && !summary && <AnalyticsSkeleton />}
 
         {/* Overview Tab */}
         {activeTab === 'overview' && summary && (
           <div className="space-y-6">
             {/* Overview Cards */}
-            <OverviewCards summary={summary} isLoading={isLoading} />
+            <OverviewCards summary={summary} isLoading={loading} />
 
             {/* Charts Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-2 3xl:grid-cols-2 gap-6">
@@ -207,14 +228,19 @@ export function Dashboard() {
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                   {t('tables.topModels', 'Top Models by Cost')}
                 </h3>
-                <ModelTable models={summary.by_model} />
+                <ModelTable models={summary.by_model} onSelect={handleModelDrilldown} />
               </div>
             )}
           </div>
         )}
 
         {/* Details Tab */}
-        {activeTab === 'details' && <UsageTable />}
+        {activeTab === 'details' && (
+          <div className="space-y-6">
+            <UsageTable />
+            <PricingRulesPanel />
+          </div>
+        )}
       </div>
 
       {/* Export Dialog */}
@@ -235,9 +261,10 @@ interface ModelTableProps {
       request_count: number;
     };
   }>;
+  onSelect?: (provider: string, modelName: string) => void;
 }
 
-function ModelTable({ models }: ModelTableProps) {
+function ModelTable({ models, onSelect }: ModelTableProps) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -253,7 +280,14 @@ function ModelTable({ models }: ModelTableProps) {
         </thead>
         <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
           {models.map((model) => (
-            <tr key={`${model.provider}-${model.model_name}`} className="text-gray-900 dark:text-white">
+            <tr
+              key={`${model.provider}-${model.model_name}`}
+              className={clsx(
+                'text-gray-900 dark:text-white',
+                onSelect && 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/40',
+              )}
+              onClick={() => onSelect?.(model.provider, model.model_name)}
+            >
               <td className="py-3 font-medium">{model.model_name}</td>
               <td className="py-3 capitalize">{model.provider}</td>
               <td className="py-3 text-right">{model.stats.request_count.toLocaleString()}</td>

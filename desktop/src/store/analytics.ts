@@ -7,7 +7,14 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 
-// Types matching Rust models
+// Shared command envelope
+export interface CommandResponse<T> {
+  success: boolean;
+  data: T | null;
+  error: string | null;
+}
+
+// Core usage stats
 export interface UsageStats {
   total_input_tokens: number;
   total_output_tokens: number;
@@ -15,22 +22,6 @@ export interface UsageStats {
   request_count: number;
   avg_tokens_per_request: number;
   avg_cost_per_request: number;
-}
-
-export interface UsageRecord {
-  id: number;
-  session_id: string | null;
-  project_id: string | null;
-  model_name: string;
-  provider: string;
-  input_tokens: number;
-  output_tokens: number;
-  thinking_tokens: number;
-  cache_read_tokens: number;
-  cache_creation_tokens: number;
-  cost_microdollars: number;
-  timestamp: number;
-  metadata: string | null;
 }
 
 export interface ModelUsage {
@@ -62,34 +53,58 @@ export interface DashboardSummary {
   time_series: TimeSeriesPoint[];
 }
 
-export interface ModelPricing {
-  id: number;
-  model_name: string;
-  provider: string;
-  input_price_per_million: number;
-  output_price_per_million: number;
-  is_custom: boolean;
-  updated_at: number;
-}
+export type CostStatus = 'exact' | 'estimated' | 'missing';
 
-export interface UsageFilter {
+export interface DashboardFilterV2 {
   start_timestamp?: number;
   end_timestamp?: number;
   model_name?: string;
   provider?: string;
   session_id?: string;
   project_id?: string;
+  cost_status?: CostStatus;
+}
+
+export interface UsageRecord {
+  event_id: string;
+  session_id: string | null;
+  project_id: string | null;
+  model_name: string;
+  provider: string;
+  input_tokens: number;
+  output_tokens: number;
+  thinking_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  cost_microdollars: number;
+  timestamp: number;
+  metadata: string | null;
+  pricing_rule_id: string | null;
+  currency: string;
+  cost_status: CostStatus;
+  cost_breakdown_json: string | null;
+}
+
+export interface PricingRule {
+  id: string;
+  provider: string;
+  model_pattern: string;
+  currency: string;
+  input_per_million: number;
+  output_per_million: number;
+  cache_read_per_million: number;
+  cache_write_per_million: number;
+  thinking_per_million: number;
+  effective_from: number;
+  effective_to: number | null;
+  status: 'active' | 'disabled';
+  created_at: number;
+  updated_at: number;
+  note: string | null;
 }
 
 export type AggregationPeriod = 'hourly' | 'daily' | 'weekly' | 'monthly';
-
 export type ExportFormat = 'csv' | 'json';
-
-export interface ExportRequest {
-  filter: UsageFilter;
-  format: ExportFormat;
-  include_summary: boolean;
-}
 
 export interface ExportResult {
   data: string;
@@ -98,27 +113,46 @@ export interface ExportResult {
   suggested_filename: string;
 }
 
-// Period presets
-export type PeriodPreset = 'last7days' | 'last30days' | 'last90days' | 'custom';
+export type ExportJobStatus = 'running' | 'completed' | 'failed';
 
-export interface CommandResponse<T> {
-  success: boolean;
-  data: T | null;
+export interface ExportJob {
+  id: string;
+  status: ExportJobStatus;
+  file_path: string | null;
+  record_count: number;
   error: string | null;
 }
+
+export interface RecomputeCostsResult {
+  scanned_records: number;
+  recomputed_records: number;
+  exact_records: number;
+  estimated_records: number;
+  missing_records: number;
+}
+
+// Period presets
+export type PeriodPreset = 'last7days' | 'last30days' | 'last90days' | 'custom';
 
 interface AnalyticsState {
   // Data
   summary: DashboardSummary | null;
   records: UsageRecord[];
-  pricing: ModelPricing[];
+  totalRecords: number;
+  pricingRules: PricingRule[];
 
-  // Loading states
+  // Loading states (split)
+  summaryLoading: boolean;
+  recordsLoading: boolean;
+  pricingLoading: boolean;
+  exportLoading: boolean;
+
+  // Backward-compatible loading fields
   isLoading: boolean;
   isExporting: boolean;
 
   // Filter state
-  filter: UsageFilter;
+  filter: DashboardFilterV2;
   period: AggregationPeriod;
   periodPreset: PeriodPreset;
 
@@ -131,23 +165,31 @@ interface AnalyticsState {
   fetchRecords: (limit?: number, offset?: number) => Promise<void>;
   fetchPricing: () => Promise<void>;
 
-  setFilter: (filter: UsageFilter) => void;
+  setFilter: (filter: DashboardFilterV2) => void;
   setPeriod: (period: AggregationPeriod) => void;
   setPeriodPreset: (preset: PeriodPreset) => void;
   setDateRange: (start: Date, end: Date) => void;
 
+  // Export (v1 compatibility + v2 streaming)
   exportData: (format: ExportFormat, includeSummary: boolean) => Promise<ExportResult | null>;
   exportByModel: (format: ExportFormat) => Promise<string | null>;
   exportByProject: (format: ExportFormat) => Promise<string | null>;
+  exportStreamingJob: (format: ExportFormat, includeSummary: boolean, filePath?: string) => Promise<ExportJob | null>;
 
-  setCustomPricing: (pricing: ModelPricing) => Promise<boolean>;
-  removeCustomPricing: (provider: string, modelName: string) => Promise<boolean>;
+  // Pricing rule management (v2)
+  upsertPricingRule: (rule: PricingRule) => Promise<PricingRule | null>;
+  deletePricingRule: (ruleId: string) => Promise<boolean>;
+  recomputeCosts: () => Promise<RecomputeCostsResult | null>;
 
   clearError: () => void;
 }
 
+function refreshCompositeLoading(state: Pick<AnalyticsState, 'summaryLoading' | 'recordsLoading' | 'pricingLoading'>) {
+  return state.summaryLoading || state.recordsLoading || state.pricingLoading;
+}
+
 // Helper to convert preset to filter
-function presetToFilter(preset: PeriodPreset): UsageFilter {
+function presetToFilter(preset: PeriodPreset): DashboardFilterV2 {
   const now = Math.floor(Date.now() / 1000);
   const day = 24 * 60 * 60;
 
@@ -195,16 +237,39 @@ export function formatChange(percent: number): string {
   return `${sign}${percent.toFixed(1)}%`;
 }
 
+function csvEscape(value: string): string {
+  if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+function analyticsFilename(prefix: string, format: ExportFormat): string {
+  const now = new Date();
+  const pad = (v: number) => String(v).padStart(2, '0');
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  return `${prefix}_${stamp}.${format}`;
+}
+
 export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
   // Initial state
   summary: null,
   records: [],
-  pricing: [],
+  totalRecords: 0,
+  pricingRules: [],
+
+  summaryLoading: false,
+  recordsLoading: false,
+  pricingLoading: false,
+  exportLoading: false,
+
   isLoading: false,
   isExporting: false,
+
   filter: presetToFilter('last30days'),
   period: 'daily',
   periodPreset: 'last30days',
+
   error: null,
 
   // Initialize analytics
@@ -215,195 +280,395 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
         console.warn('Analytics initialization deferred:', response.error);
       }
     } catch (error) {
-      // Backend may not be ready yet; analytics will retry on next interaction
       console.warn('Analytics initialization deferred:', error);
     }
   },
 
-  // Fetch dashboard summary
+  // Fetch dashboard summary (v2)
   fetchDashboardSummary: async () => {
-    set({ isLoading: true, error: null });
+    set((state) => ({
+      summaryLoading: true,
+      isLoading: refreshCompositeLoading({ ...state, summaryLoading: true }),
+      error: null,
+    }));
     try {
       const { filter, period } = get();
-      const response = await invoke<CommandResponse<DashboardSummary>>('get_dashboard_summary', {
+      const response = await invoke<CommandResponse<DashboardSummary>>('get_dashboard_summary_v2', {
         filter,
         period,
       });
 
       if (response.success && response.data) {
-        set({ summary: response.data, isLoading: false });
+        set((state) => ({
+          summary: response.data,
+          summaryLoading: false,
+          isLoading: refreshCompositeLoading({ ...state, summaryLoading: false }),
+        }));
       } else {
-        set({ error: response.error || 'Failed to fetch dashboard data', isLoading: false });
+        set((state) => ({
+          error: response.error || 'Failed to fetch dashboard data',
+          summaryLoading: false,
+          isLoading: refreshCompositeLoading({ ...state, summaryLoading: false }),
+        }));
       }
     } catch (error) {
-      set({ error: String(error), isLoading: false });
+      set((state) => ({
+        error: String(error),
+        summaryLoading: false,
+        isLoading: refreshCompositeLoading({ ...state, summaryLoading: false }),
+      }));
     }
   },
 
-  // Fetch usage records
+  // Fetch usage records + total count (v2)
   fetchRecords: async (limit = 100, offset = 0) => {
-    set({ isLoading: true, error: null });
+    set((state) => ({
+      recordsLoading: true,
+      isLoading: refreshCompositeLoading({ ...state, recordsLoading: true }),
+      error: null,
+    }));
     try {
       const { filter } = get();
-      const response = await invoke<CommandResponse<UsageRecord[]>>('list_usage_records', {
-        filter,
-        limit,
-        offset,
-      });
 
-      if (response.success && response.data) {
-        set({ records: response.data, isLoading: false });
+      const [recordsResp, countResp] = await Promise.all([
+        invoke<CommandResponse<UsageRecord[]>>('list_usage_records_v2', {
+          filter,
+          limit,
+          offset,
+        }),
+        invoke<CommandResponse<number>>('count_usage_records_v2', {
+          filter,
+        }),
+      ]);
+
+      if (recordsResp.success && recordsResp.data) {
+        const rows = recordsResp.data ?? [];
+        set((state) => ({
+          records: rows,
+          totalRecords: countResp.success && countResp.data !== null ? countResp.data : state.totalRecords,
+          recordsLoading: false,
+          isLoading: refreshCompositeLoading({ ...state, recordsLoading: false }),
+          error: countResp.success ? state.error : countResp.error || state.error,
+        }));
       } else {
-        set({ error: response.error || 'Failed to fetch records', isLoading: false });
+        set((state) => ({
+          error: recordsResp.error || 'Failed to fetch records',
+          recordsLoading: false,
+          isLoading: refreshCompositeLoading({ ...state, recordsLoading: false }),
+        }));
       }
     } catch (error) {
-      set({ error: String(error), isLoading: false });
+      set((state) => ({
+        error: String(error),
+        recordsLoading: false,
+        isLoading: refreshCompositeLoading({ ...state, recordsLoading: false }),
+      }));
     }
   },
 
-  // Fetch pricing
+  // Fetch pricing rules (v2)
   fetchPricing: async () => {
+    set((state) => ({
+      pricingLoading: true,
+      isLoading: refreshCompositeLoading({ ...state, pricingLoading: true }),
+    }));
     try {
-      const response = await invoke<CommandResponse<ModelPricing[]>>('list_model_pricing');
+      const response = await invoke<CommandResponse<PricingRule[]>>('list_pricing_rules');
       if (response.success && response.data) {
-        set({ pricing: response.data });
+        const rules = response.data ?? [];
+        set((state) => ({
+          pricingRules: rules,
+          pricingLoading: false,
+          isLoading: refreshCompositeLoading({ ...state, pricingLoading: false }),
+        }));
+      } else {
+        set((state) => ({
+          error: response.error || state.error,
+          pricingLoading: false,
+          isLoading: refreshCompositeLoading({ ...state, pricingLoading: false }),
+        }));
       }
     } catch (error) {
-      console.error('Failed to fetch pricing:', error);
+      set((state) => ({
+        error: String(error),
+        pricingLoading: false,
+        isLoading: refreshCompositeLoading({ ...state, pricingLoading: false }),
+      }));
     }
   },
 
-  // Set filter
   setFilter: (filter) => {
     set({ filter, periodPreset: 'custom' });
   },
 
-  // Set aggregation period
   setPeriod: (period) => {
     set({ period });
   },
 
-  // Set period preset
   setPeriodPreset: (preset) => {
     const filter = presetToFilter(preset);
     set({ periodPreset: preset, filter });
   },
 
-  // Set custom date range
+  // Inclusive end date (UI chooses day, backend uses end-exclusive timestamp)
   setDateRange: (start, end) => {
+    const startBoundary = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 0, 0, 0, 0);
+    const endExclusive = new Date(end.getFullYear(), end.getMonth(), end.getDate() + 1, 0, 0, 0, 0);
     set({
       filter: {
         ...get().filter,
-        start_timestamp: Math.floor(start.getTime() / 1000),
-        end_timestamp: Math.floor(end.getTime() / 1000),
+        start_timestamp: Math.floor(startBoundary.getTime() / 1000),
+        end_timestamp: Math.floor(endExclusive.getTime() / 1000),
       },
       periodPreset: 'custom',
     });
   },
 
-  // Export data
+  // Compatibility export API now built on v2 data (no v1 backend dependency)
   exportData: async (format, includeSummary) => {
-    set({ isExporting: true });
+    set({ exportLoading: true, isExporting: true });
     try {
-      const { filter } = get();
-      const request: ExportRequest = {
-        filter,
-        format,
-        include_summary: includeSummary,
+      const { filter, period } = get();
+      const pageSize = 2000;
+      let offset = 0;
+      const rows: UsageRecord[] = [];
+
+      while (true) {
+        const resp = await invoke<CommandResponse<UsageRecord[]>>('list_usage_records_v2', {
+          filter,
+          limit: pageSize,
+          offset,
+        });
+        if (!resp.success || !resp.data) {
+          set({ exportLoading: false, isExporting: false, error: resp.error || 'Export failed' });
+          return null;
+        }
+        rows.push(...resp.data);
+        if (resp.data.length < pageSize) {
+          break;
+        }
+        offset += pageSize;
+      }
+
+      let summary: UsageStats | null = null;
+      if (includeSummary) {
+        const summaryResp = await invoke<CommandResponse<DashboardSummary>>('get_dashboard_summary_v2', {
+          filter,
+          period,
+        });
+        if (summaryResp.success && summaryResp.data) {
+          summary = summaryResp.data.current_period;
+        }
+      }
+
+      let data = '';
+      if (format === 'json') {
+        data = JSON.stringify(
+          {
+            exported_at: new Date().toISOString(),
+            record_count: rows.length,
+            summary,
+            records: rows,
+          },
+          null,
+          2,
+        );
+      } else {
+        const header =
+          'event_id,session_id,project_id,provider,model,input_tokens,output_tokens,thinking_tokens,cache_read_tokens,cache_write_tokens,cost_microdollars,currency,cost_status,timestamp,metadata_json';
+        const lines = rows.map((r) =>
+          [
+            csvEscape(r.event_id),
+            csvEscape(r.session_id || ''),
+            csvEscape(r.project_id || ''),
+            csvEscape(r.provider),
+            csvEscape(r.model_name),
+            r.input_tokens,
+            r.output_tokens,
+            r.thinking_tokens,
+            r.cache_read_tokens,
+            r.cache_creation_tokens,
+            r.cost_microdollars,
+            csvEscape(r.currency),
+            r.cost_status,
+            r.timestamp,
+            csvEscape(r.metadata || ''),
+          ].join(','),
+        );
+        data = [header, ...lines].join('\n');
+        if (summary) {
+          data += `\n\n# summary\n# request_count=${summary.request_count}\n# total_input_tokens=${summary.total_input_tokens}\n# total_output_tokens=${summary.total_output_tokens}\n# total_cost_microdollars=${summary.total_cost_microdollars}\n`;
+        }
+      }
+
+      set({ exportLoading: false, isExporting: false });
+      return {
+        data,
+        record_count: rows.length,
+        summary,
+        suggested_filename: analyticsFilename('analytics_records', format),
       };
-
-      const response = await invoke<CommandResponse<ExportResult>>('export_usage', { request });
-
-      set({ isExporting: false });
-
-      if (response.success && response.data) {
-        return response.data;
-      } else {
-        set({ error: response.error || 'Export failed' });
-        return null;
-      }
     } catch (error) {
-      set({ error: String(error), isExporting: false });
+      set({ error: String(error), exportLoading: false, isExporting: false });
       return null;
     }
   },
 
-  // Export by model
   exportByModel: async (format) => {
-    set({ isExporting: true });
+    set({ exportLoading: true, isExporting: true });
     try {
-      const { filter } = get();
-      const response = await invoke<CommandResponse<string>>('export_by_model', { filter, format });
-
-      set({ isExporting: false });
-
-      if (response.success && response.data) {
-        return response.data;
-      } else {
-        set({ error: response.error || 'Export failed' });
-        return null;
-      }
-    } catch (error) {
-      set({ error: String(error), isExporting: false });
-      return null;
-    }
-  },
-
-  // Export by project
-  exportByProject: async (format) => {
-    set({ isExporting: true });
-    try {
-      const { filter } = get();
-      const response = await invoke<CommandResponse<string>>('export_by_project', { filter, format });
-
-      set({ isExporting: false });
-
-      if (response.success && response.data) {
-        return response.data;
-      } else {
-        set({ error: response.error || 'Export failed' });
-        return null;
-      }
-    } catch (error) {
-      set({ error: String(error), isExporting: false });
-      return null;
-    }
-  },
-
-  // Set custom pricing
-  setCustomPricing: async (pricing) => {
-    try {
-      const response = await invoke<CommandResponse<boolean>>('set_custom_pricing', { pricing });
-      if (response.success) {
-        await get().fetchPricing();
-        return true;
-      }
-      return false;
-    } catch (error) {
-      console.error('Failed to set custom pricing:', error);
-      return false;
-    }
-  },
-
-  // Remove custom pricing
-  removeCustomPricing: async (provider, modelName) => {
-    try {
-      const response = await invoke<CommandResponse<boolean>>('remove_custom_pricing', {
-        provider,
-        model_name: modelName,
+      const { filter, period } = get();
+      const response = await invoke<CommandResponse<DashboardSummary>>('get_dashboard_summary_v2', {
+        filter,
+        period,
       });
-      if (response.success) {
+
+      set({ exportLoading: false, isExporting: false });
+      if (response.success && response.data) {
+        const rows = response.data.by_model;
+        if (format === 'json') {
+          return JSON.stringify(rows, null, 2);
+        }
+
+        const header =
+          'model_name,provider,total_input_tokens,total_output_tokens,total_cost_microdollars,request_count,avg_tokens_per_request,avg_cost_per_request';
+        const lines = rows.map((r) =>
+          [
+            csvEscape(r.model_name),
+            csvEscape(r.provider),
+            r.stats.total_input_tokens,
+            r.stats.total_output_tokens,
+            r.stats.total_cost_microdollars,
+            r.stats.request_count,
+            r.stats.avg_tokens_per_request.toFixed(4),
+            r.stats.avg_cost_per_request.toFixed(4),
+          ].join(','),
+        );
+        return [header, ...lines].join('\n');
+      }
+      set({ error: response.error || 'Export failed' });
+      return null;
+    } catch (error) {
+      set({ error: String(error), exportLoading: false, isExporting: false });
+      return null;
+    }
+  },
+
+  exportByProject: async (format) => {
+    set({ exportLoading: true, isExporting: true });
+    try {
+      const { filter, period } = get();
+      const response = await invoke<CommandResponse<DashboardSummary>>('get_dashboard_summary_v2', {
+        filter,
+        period,
+      });
+
+      set({ exportLoading: false, isExporting: false });
+      if (response.success && response.data) {
+        const rows = response.data.by_project;
+        if (format === 'json') {
+          return JSON.stringify(rows, null, 2);
+        }
+
+        const header =
+          'project_id,project_name,total_input_tokens,total_output_tokens,total_cost_microdollars,request_count,avg_tokens_per_request,avg_cost_per_request';
+        const lines = rows.map((r) =>
+          [
+            csvEscape(r.project_id),
+            csvEscape(r.project_name || ''),
+            r.stats.total_input_tokens,
+            r.stats.total_output_tokens,
+            r.stats.total_cost_microdollars,
+            r.stats.request_count,
+            r.stats.avg_tokens_per_request.toFixed(4),
+            r.stats.avg_cost_per_request.toFixed(4),
+          ].join(','),
+        );
+        return [header, ...lines].join('\n');
+      }
+      set({ error: response.error || 'Export failed' });
+      return null;
+    } catch (error) {
+      set({ error: String(error), exportLoading: false, isExporting: false });
+      return null;
+    }
+  },
+
+  // v2 streaming export job (writes local file on backend)
+  exportStreamingJob: async (format, includeSummary, filePath) => {
+    set({ exportLoading: true, isExporting: true });
+    try {
+      const { filter } = get();
+      const response = await invoke<CommandResponse<ExportJob>>('export_usage_streaming_job', {
+        request: {
+          filter,
+          format,
+          include_summary: includeSummary,
+          file_path: filePath,
+        },
+      });
+      set({ exportLoading: false, isExporting: false });
+
+      if (response.success && response.data) {
+        return response.data;
+      }
+      set({ error: response.error || 'Export failed' });
+      return null;
+    } catch (error) {
+      set({ error: String(error), exportLoading: false, isExporting: false });
+      return null;
+    }
+  },
+
+  upsertPricingRule: async (rule) => {
+    try {
+      const response = await invoke<CommandResponse<PricingRule>>('upsert_pricing_rule', { rule });
+      if (response.success && response.data) {
+        await get().fetchPricing();
+        return response.data;
+      }
+      set({ error: response.error || 'Failed to save pricing rule' });
+      return null;
+    } catch (error) {
+      set({ error: String(error) });
+      return null;
+    }
+  },
+
+  deletePricingRule: async (ruleId) => {
+    try {
+      const response = await invoke<CommandResponse<boolean>>('delete_pricing_rule', { ruleId });
+      if (response.success && response.data) {
         await get().fetchPricing();
         return true;
       }
+      if (!response.success) {
+        set({ error: response.error || 'Failed to delete pricing rule' });
+      }
       return false;
     } catch (error) {
-      console.error('Failed to remove custom pricing:', error);
+      set({ error: String(error) });
       return false;
     }
   },
 
-  // Clear error
+  recomputeCosts: async () => {
+    try {
+      const response = await invoke<CommandResponse<RecomputeCostsResult>>('recompute_costs', {
+        request: { filter: get().filter },
+      });
+      if (response.success && response.data) {
+        await Promise.all([get().fetchDashboardSummary(), get().fetchRecords(), get().fetchPricing()]);
+        return response.data;
+      }
+      set({ error: response.error || 'Failed to recompute costs' });
+      return null;
+    } catch (error) {
+      set({ error: String(error) });
+      return null;
+    }
+  },
+
   clearError: () => {
     set({ error: null });
   },

@@ -151,6 +151,113 @@ impl ModelPricing {
     }
 }
 
+/// Pricing rule lifecycle status
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PricingRuleStatus {
+    #[default]
+    Active,
+    Disabled,
+}
+
+impl PricingRuleStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PricingRuleStatus::Active => "active",
+            PricingRuleStatus::Disabled => "disabled",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Self {
+        match value {
+            "disabled" => PricingRuleStatus::Disabled,
+            _ => PricingRuleStatus::Active,
+        }
+    }
+}
+
+/// Cost calculation status
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CostStatus {
+    Exact,
+    Estimated,
+    #[default]
+    Missing,
+}
+
+impl CostStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CostStatus::Exact => "exact",
+            CostStatus::Estimated => "estimated",
+            CostStatus::Missing => "missing",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Self {
+        match value {
+            "exact" => CostStatus::Exact,
+            "estimated" => CostStatus::Estimated,
+            _ => CostStatus::Missing,
+        }
+    }
+}
+
+/// Pricing rule for provider/model with effective time range.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PricingRule {
+    pub id: String,
+    pub provider: String,
+    pub model_pattern: String,
+    pub currency: String,
+    pub input_per_million: i64,
+    pub output_per_million: i64,
+    pub cache_read_per_million: i64,
+    pub cache_write_per_million: i64,
+    pub thinking_per_million: i64,
+    pub effective_from: i64,
+    pub effective_to: Option<i64>,
+    pub status: PricingRuleStatus,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub note: Option<String>,
+}
+
+impl PricingRule {
+    pub fn new(provider: impl Into<String>, model_pattern: impl Into<String>) -> Self {
+        let now = chrono::Utc::now().timestamp();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            provider: provider.into(),
+            model_pattern: model_pattern.into(),
+            currency: "USD".to_string(),
+            input_per_million: 0,
+            output_per_million: 0,
+            cache_read_per_million: 0,
+            cache_write_per_million: 0,
+            thinking_per_million: 0,
+            effective_from: now,
+            effective_to: None,
+            status: PricingRuleStatus::Active,
+            created_at: now,
+            updated_at: now,
+            note: None,
+        }
+    }
+}
+
+/// Cost breakdown persisted for auditing/traceability.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CostBreakdown {
+    pub input_cost_microdollars: i64,
+    pub output_cost_microdollars: i64,
+    pub thinking_cost_microdollars: i64,
+    pub cache_read_cost_microdollars: i64,
+    pub cache_write_cost_microdollars: i64,
+    pub total_cost_microdollars: i64,
+}
+
 /// Aggregated usage statistics
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UsageStats {
@@ -283,6 +390,31 @@ impl UsageFilter {
     }
 }
 
+/// V2 analytics filter criteria (extends v1 filter with cost status).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DashboardFilterV2 {
+    pub start_timestamp: Option<i64>,
+    pub end_timestamp: Option<i64>,
+    pub model_name: Option<String>,
+    pub provider: Option<String>,
+    pub session_id: Option<String>,
+    pub project_id: Option<String>,
+    pub cost_status: Option<CostStatus>,
+}
+
+impl DashboardFilterV2 {
+    pub fn to_usage_filter(&self) -> UsageFilter {
+        UsageFilter {
+            start_timestamp: self.start_timestamp,
+            end_timestamp: self.end_timestamp,
+            model_name: self.model_name.clone(),
+            provider: self.provider.clone(),
+            session_id: self.session_id.clone(),
+            project_id: self.project_id.clone(),
+        }
+    }
+}
+
 /// Dashboard summary data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DashboardSummary {
@@ -349,6 +481,72 @@ pub struct ExportResult {
     pub summary: Option<UsageStats>,
     /// Suggested filename
     pub suggested_filename: String,
+}
+
+/// V2 analytics usage row.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsageRecordV2 {
+    pub event_id: String,
+    pub session_id: Option<String>,
+    pub project_id: Option<String>,
+    pub model_name: String,
+    pub provider: String,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub thinking_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_creation_tokens: i64,
+    pub cost_microdollars: i64,
+    pub timestamp: i64,
+    pub metadata: Option<String>,
+    pub pricing_rule_id: Option<String>,
+    pub currency: String,
+    pub cost_status: CostStatus,
+    pub cost_breakdown_json: Option<String>,
+}
+
+/// Request payload for streaming export job.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportStreamingJobRequest {
+    pub filter: DashboardFilterV2,
+    pub format: ExportFormat,
+    pub include_summary: bool,
+    pub file_path: Option<String>,
+}
+
+/// Export job status for UI tracking.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportJobStatus {
+    Running,
+    Completed,
+    Failed,
+}
+
+/// Export job metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportJob {
+    pub id: String,
+    pub status: ExportJobStatus,
+    pub file_path: Option<String>,
+    pub record_count: i64,
+    pub error: Option<String>,
+}
+
+/// Request payload for recomputing costs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecomputeCostsRequest {
+    pub filter: DashboardFilterV2,
+}
+
+/// Recompute result for reporting.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RecomputeCostsResult {
+    pub scanned_records: i64,
+    pub recomputed_records: i64,
+    pub exact_records: i64,
+    pub estimated_records: i64,
+    pub missing_records: i64,
 }
 
 #[cfg(test)]

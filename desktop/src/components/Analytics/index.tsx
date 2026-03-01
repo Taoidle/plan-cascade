@@ -11,4 +11,5 @@ export { CostChart } from './CostChart';
 export { TokenBreakdown } from './TokenBreakdown';
 export { ExportDialog } from './ExportDialog';
 export { UsageTable } from './UsageTable';
+export { PricingRulesPanel } from './PricingRulesPanel';
 export { default as AnalyticsSkeleton } from './AnalyticsSkeleton';

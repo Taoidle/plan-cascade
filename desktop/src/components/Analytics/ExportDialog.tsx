@@ -21,33 +21,43 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
   const [format, setFormat] = useState<ExportFormat>('csv');
   const [includeSummary, setIncludeSummary] = useState(true);
   const [exportType, setExportType] = useState<'all' | 'byModel' | 'byProject'>('all');
+  const [resultPath, setResultPath] = useState<string | null>(null);
 
-  const { exportData, exportByModel, exportByProject, isExporting } = useAnalyticsStore();
+  const { exportData, exportByModel, exportByProject, exportStreamingJob, exportLoading } = useAnalyticsStore();
 
   const handleExport = async () => {
+    setResultPath(null);
+
+    if (exportType === 'all') {
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      const selected = await save({
+        title: t('exportDialog.saveAs', 'Save analytics export'),
+        defaultPath: `analytics_export.${format}`,
+        canCreateDirectories: true,
+      });
+      if (!selected || Array.isArray(selected)) {
+        return;
+      }
+
+      const job = await exportStreamingJob(format, includeSummary, selected);
+      if (job?.file_path) {
+        setResultPath(job.file_path);
+      }
+      return;
+    }
+
     let data: string | null = null;
     let filename = '';
 
-    switch (exportType) {
-      case 'all':
-        const result = await exportData(format, includeSummary);
-        if (result) {
-          data = result.data;
-          filename = result.suggested_filename;
-        }
-        break;
-      case 'byModel':
-        data = await exportByModel(format);
-        filename = `usage_by_model.${format}`;
-        break;
-      case 'byProject':
-        data = await exportByProject(format);
-        filename = `usage_by_project.${format}`;
-        break;
+    if (exportType === 'byModel') {
+      data = await exportByModel(format);
+      filename = `usage_by_model.${format}`;
+    } else {
+      data = await exportByProject(format);
+      filename = `usage_by_project.${format}`;
     }
 
     if (data) {
-      // Create and download file
       const blob = new Blob([data], {
         type: format === 'csv' ? 'text/csv;charset=utf-8;' : 'application/json',
       });
@@ -62,6 +72,23 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
 
       onOpenChange(false);
     }
+  };
+
+  const handleLegacyRawExport = async () => {
+    const result = await exportData(format, includeSummary);
+    if (!result) return;
+
+    const blob = new Blob([result.data], {
+      type: format === 'csv' ? 'text/csv;charset=utf-8;' : 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = result.suggested_filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -193,6 +220,24 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
                 </span>
               </label>
             )}
+
+            {/* Backward-compatible quick export */}
+            {exportType === 'all' && (
+              <button
+                onClick={handleLegacyRawExport}
+                disabled={exportLoading}
+                className="w-full text-left text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+              >
+                {t('exportDialog.legacy', 'Use in-memory quick export (legacy)')}
+              </button>
+            )}
+
+            {resultPath && (
+              <div className="p-3 rounded-lg border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 text-sm text-green-700 dark:text-green-300">
+                {t('exportDialog.savedTo', 'Export saved to')}:{' '}
+                <span className="font-mono break-all">{resultPath}</span>
+              </div>
+            )}
           </div>
 
           {/* Footer */}
@@ -211,7 +256,7 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
             </Dialog.Close>
             <button
               onClick={handleExport}
-              disabled={isExporting}
+              disabled={exportLoading}
               className={clsx(
                 'px-4 py-2 rounded-lg',
                 'bg-primary-600 text-white',
@@ -220,7 +265,7 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
                 'flex items-center gap-2',
               )}
             >
-              {isExporting && (
+              {exportLoading && (
                 <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24">
                   <circle
                     className="opacity-25"
@@ -238,7 +283,7 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
                   />
                 </svg>
               )}
-              {isExporting ? t('exportDialog.exporting', 'Exporting...') : t('exportDialog.export', 'Export')}
+              {exportLoading ? t('exportDialog.exporting', 'Exporting...') : t('exportDialog.export', 'Export')}
             </button>
           </div>
         </Dialog.Content>

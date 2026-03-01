@@ -34,17 +34,35 @@ const mockSetDateRange = vi.fn();
 
 let mockAnalyticsState = {
   summary: null as DashboardSummary | null,
+  summaryLoading: false,
+  recordsLoading: false,
+  pricingLoading: false,
+  exportLoading: false,
   isLoading: false,
+  isExporting: false,
   error: null as string | null,
+  filter: {},
+  records: [],
+  totalRecords: 0,
+  pricingRules: [],
   initialize: mockInitialize,
   fetchDashboardSummary: mockFetchDashboardSummary,
   fetchPricing: mockFetchPricing,
+  fetchRecords: vi.fn().mockResolvedValue(undefined),
+  setFilter: vi.fn(),
   clearError: mockClearError,
   periodPreset: 'last30days' as string,
   period: 'daily' as string,
   setPeriodPreset: mockSetPeriodPreset,
   setPeriod: mockSetPeriod,
   setDateRange: mockSetDateRange,
+  exportData: vi.fn(),
+  exportByModel: vi.fn(),
+  exportByProject: vi.fn(),
+  exportStreamingJob: vi.fn(),
+  upsertPricingRule: vi.fn(),
+  deletePricingRule: vi.fn(),
+  recomputeCosts: vi.fn(),
 };
 
 vi.mock('../../store/analytics', () => ({
@@ -102,6 +120,10 @@ vi.mock('../Analytics/ExportDialog', () => ({
 
 vi.mock('../Analytics/UsageTable', () => ({
   UsageTable: () => <div data-testid="usage-table">Usage Table</div>,
+}));
+
+vi.mock('../Analytics/PricingRulesPanel', () => ({
+  PricingRulesPanel: () => <div data-testid="pricing-rules-panel">Pricing Rules</div>,
 }));
 
 vi.mock('../Analytics/AnalyticsSkeleton', () => ({
@@ -175,17 +197,35 @@ describe('Dashboard', () => {
     vi.clearAllMocks();
     mockAnalyticsState = {
       summary: null,
+      summaryLoading: false,
+      recordsLoading: false,
+      pricingLoading: false,
+      exportLoading: false,
       isLoading: false,
+      isExporting: false,
       error: null,
+      filter: {},
+      records: [],
+      totalRecords: 0,
+      pricingRules: [],
       initialize: mockInitialize,
       fetchDashboardSummary: mockFetchDashboardSummary,
       fetchPricing: mockFetchPricing,
+      fetchRecords: vi.fn().mockResolvedValue(undefined),
+      setFilter: vi.fn(),
       clearError: mockClearError,
       periodPreset: 'last30days',
       period: 'daily',
       setPeriodPreset: mockSetPeriodPreset,
       setPeriod: mockSetPeriod,
       setDateRange: mockSetDateRange,
+      exportData: vi.fn(),
+      exportByModel: vi.fn(),
+      exportByProject: vi.fn(),
+      exportStreamingJob: vi.fn(),
+      upsertPricingRule: vi.fn(),
+      deletePricingRule: vi.fn(),
+      recomputeCosts: vi.fn(),
     };
   });
 
