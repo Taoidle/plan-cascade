@@ -144,3 +144,6 @@ export type { ArtifactsState, ScopeFilter } from './artifacts';
 
 export { useGitStore } from './git';
 export type { GitTabId } from './git';
+
+export { useWorkflowKernelStore } from './workflowKernel';
+export type { WorkflowKernelStore } from './workflowKernel';

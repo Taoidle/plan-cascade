@@ -48,6 +48,7 @@ pub mod task_mode;
 pub mod timeline;
 pub mod tools;
 pub mod webhook;
+pub mod workflow_kernel;
 pub mod worktree;
 
 pub use agent::AgentService;

@@ -12,6 +12,8 @@ import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import type { ConfigCardData } from '../../../types/workflowCard';
 import { useWorkflowOrchestratorStore } from '../../../store/workflowOrchestrator';
+import { useWorkflowKernelStore } from '../../../store/workflowKernel';
+import { submitWorkflowKernelActionIntent } from '../../../lib/workflowKernelIntent';
 
 export function ConfigCard({ data, interactive }: { data: ConfigCardData; interactive: boolean }) {
   const { t } = useTranslation('simpleMode');
@@ -19,30 +21,86 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
   const [localConfig, setLocalConfig] = useState(data);
   const [nlOverride, setNlOverride] = useState('');
   const [acted, setActed] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const updateConfig = useWorkflowOrchestratorStore((s) => s.updateConfig);
   const confirmConfig = useWorkflowOrchestratorStore((s) => s.confirmConfig);
   const overrideConfigNatural = useWorkflowOrchestratorStore((s) => s.overrideConfigNatural);
   const phase = useWorkflowOrchestratorStore((s) => s.phase);
+  const workflowSession = useWorkflowKernelStore((s) => s.session);
+  const transitionAndSubmitWorkflowKernelInput = useWorkflowKernelStore((s) => s.transitionAndSubmitInput);
 
-  const isActive = interactive && phase === 'configuring';
+  const isKernelTaskActive = workflowSession?.status === 'active' && workflowSession.activeMode === 'task';
+  const isActive = interactive && phase === 'configuring' && isKernelTaskActive && !acted;
 
-  const handleConfirm = useCallback(() => {
+  const handleConfirm = useCallback(async () => {
+    if (!isActive || isSubmitting) return;
+    setIsSubmitting(true);
     setActed(true);
     if (layer === 2) {
       updateConfig(localConfig);
     }
-    setLayer(1);
-    confirmConfig();
-  }, [layer, localConfig, updateConfig, confirmConfig]);
+    const summary = [
+      `flow=${localConfig.flowLevel}`,
+      `tdd=${localConfig.tddMode}`,
+      `maxParallel=${localConfig.maxParallel}`,
+      `qualityGates=${localConfig.qualityGatesEnabled}`,
+      `specInterview=${localConfig.specInterviewEnabled}`,
+    ].join(';');
+    try {
+      await submitWorkflowKernelActionIntent({
+        transitionAndSubmitInput: transitionAndSubmitWorkflowKernelInput,
+        mode: 'task',
+        type: 'task_configuration',
+        source: 'config_card_confirm',
+        action: layer === 2 ? 'confirm_custom_config' : 'confirm_default_config',
+        content: summary,
+        metadata: {
+          layer,
+          flowLevel: localConfig.flowLevel,
+          tddMode: localConfig.tddMode,
+          maxParallel: localConfig.maxParallel,
+          qualityGatesEnabled: localConfig.qualityGatesEnabled,
+          specInterviewEnabled: localConfig.specInterviewEnabled,
+        },
+      });
+    } catch {
+      // Keep orchestration available even if kernel logging fails.
+    }
+    try {
+      setLayer(1);
+      await confirmConfig();
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [confirmConfig, isActive, isSubmitting, layer, localConfig, transitionAndSubmitWorkflowKernelInput, updateConfig]);
 
-  const handleNlSubmit = useCallback(() => {
+  const handleNlSubmit = useCallback(async () => {
+    if (!isActive || isSubmitting) return;
     if (nlOverride.trim()) {
+      setIsSubmitting(true);
       setActed(true);
+      try {
+        await submitWorkflowKernelActionIntent({
+          transitionAndSubmitInput: transitionAndSubmitWorkflowKernelInput,
+          mode: 'task',
+          type: 'task_configuration',
+          source: 'config_card_nl_override',
+          action: 'apply_natural_language_override',
+          content: nlOverride.trim(),
+          metadata: {
+            isNaturalLanguageOverride: true,
+          },
+        });
+      } catch {
+        // Keep orchestration available even if kernel logging fails.
+      } finally {
+        setIsSubmitting(false);
+      }
       overrideConfigNatural(nlOverride.trim());
       setNlOverride('');
       setLayer(1);
     }
-  }, [nlOverride, overrideConfigNatural]);
+  }, [isActive, isSubmitting, nlOverride, overrideConfigNatural, transitionAndSubmitWorkflowKernelInput]);
 
   return (
     <div className="rounded-lg border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-900/20 overflow-hidden">
@@ -96,8 +154,11 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
           {isActive && (
             <div className="flex items-center gap-2 pt-1">
               <button
-                onClick={handleConfirm}
-                className="px-3 py-1 text-xs font-medium rounded-md bg-sky-600 text-white hover:bg-sky-700 transition-colors"
+                onClick={() => {
+                  void handleConfirm();
+                }}
+                disabled={isSubmitting}
+                className="px-3 py-1 text-xs font-medium rounded-md bg-sky-600 text-white hover:bg-sky-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
               >
                 {t('workflow.config.continue')}
               </button>
@@ -164,8 +225,11 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
 
           <div className="flex items-center gap-2 pt-1">
             <button
-              onClick={handleConfirm}
-              className="px-3 py-1 text-xs font-medium rounded-md bg-sky-600 text-white hover:bg-sky-700 transition-colors"
+              onClick={() => {
+                void handleConfirm();
+              }}
+              disabled={isSubmitting}
+              className="px-3 py-1 text-xs font-medium rounded-md bg-sky-600 text-white hover:bg-sky-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
             >
               {t('workflow.config.applyAndContinue')}
             </button>
@@ -197,13 +261,21 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
               type="text"
               value={nlOverride}
               onChange={(e) => setNlOverride(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleNlSubmit()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  void handleNlSubmit();
+                }
+              }}
+              disabled={isSubmitting}
               placeholder={t('workflow.config.nlPlaceholder')}
               className="flex-1 px-2 py-1 text-xs rounded border border-sky-300 dark:border-sky-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-sky-500"
             />
             <button
-              onClick={handleNlSubmit}
-              className="px-3 py-1 text-xs font-medium rounded-md bg-sky-600 text-white hover:bg-sky-700 transition-colors"
+              onClick={() => {
+                void handleNlSubmit();
+              }}
+              disabled={isSubmitting}
+              className="px-3 py-1 text-xs font-medium rounded-md bg-sky-600 text-white hover:bg-sky-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
             >
               {t('workflow.config.apply')}
             </button>

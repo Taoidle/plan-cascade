@@ -497,7 +497,81 @@
       "failed": "{{count}} 个失败",
       "qualityGates": "质量门禁",
       "passed": "{{count}} 个通过",
-      "total": "/ 共 {{count}} 个"
+      "total": "/ 共 {{count}} 个",
+      "kernel": {
+        "noSession": "无工作流会话",
+        "mode": {
+          "chat": "聊天",
+          "plan": "计划",
+          "task": "任务"
+        },
+        "status": {
+          "active": "进行中",
+          "completed": "已完成",
+          "failed": "失败",
+          "cancelled": "已取消",
+          "inactive": "未激活"
+        },
+        "labels": {
+          "phase": "阶段",
+          "events": "事件",
+          "checkpoints": "检查点",
+          "updated": "更新时间",
+          "timeline": "事件时间线"
+        },
+        "phase": {
+          "ready": "就绪",
+          "running": "运行中",
+          "paused": "已暂停",
+          "completed": "已完成",
+          "idle": "空闲",
+          "analyzing": "分析中",
+          "clarifying": "澄清中",
+          "planning": "规划中",
+          "reviewing_plan": "审查计划",
+          "executing": "执行中",
+          "configuring": "配置中",
+          "interviewing": "访谈中",
+          "exploring": "探索中",
+          "requirement_analysis": "需求分析",
+          "generating_prd": "生成 PRD",
+          "reviewing_prd": "审查 PRD",
+          "architecture_review": "架构审查",
+          "generating_design_doc": "生成设计文档",
+          "cancelled": "已取消",
+          "failed": "失败"
+        },
+        "eventKind": {
+          "session_opened": "会话已创建",
+          "mode_transitioned": "模式已切换",
+          "input_submitted": "输入已提交",
+          "plan_edited": "计划已编辑",
+          "plan_execution_started": "计划执行已开始",
+          "plan_step_retried": "步骤已重试",
+          "operation_cancelled": "操作已取消",
+          "session_recovered": "会话已恢复",
+          "checkpoint_created": "检查点已创建"
+        },
+        "eventSummary": {
+          "step": "步骤 {{stepId}}",
+          "transition": "{{source}} -> {{target}}",
+          "phase": "阶段 {{phase}}",
+          "events": "{{count}} 个事件"
+        },
+        "reasonCode": {
+          "cancelled_by_user": "用户取消",
+          "session_opened": "会话已创建",
+          "mode_transitioned": "模式已切换",
+          "mode_transitioned_with_input": "模式切换并提交输入",
+          "input_submitted": "输入已提交",
+          "plan_edited": "计划已编辑",
+          "plan_execution_started": "计划执行已开始",
+          "plan_step_retried": "步骤已重试",
+          "operation_cancelled": "操作已取消",
+          "session_recovered": "会话已恢复",
+          "unknown_reason": "未知原因"
+        }
+      }
     },
 
     "interview": {

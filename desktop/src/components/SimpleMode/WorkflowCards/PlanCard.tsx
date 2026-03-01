@@ -12,6 +12,8 @@ import { useTranslation } from 'react-i18next';
 import { ChevronDownIcon, ChevronRightIcon } from '@radix-ui/react-icons';
 import type { PlanCardData, PlanStepData } from '../../../types/planModeCard';
 import { usePlanOrchestratorStore } from '../../../store/planOrchestrator';
+import { useWorkflowKernelStore } from '../../../store/workflowKernel';
+import { submitWorkflowKernelActionIntent } from '../../../lib/workflowKernelIntent';
 
 function priorityColor(priority: string): string {
   switch (priority) {
@@ -93,9 +95,14 @@ function StepRow({ step, isExpanded, onToggle }: { step: PlanStepData; isExpande
 export function PlanCard({ data, interactive }: { data: PlanCardData; interactive: boolean }) {
   const { t } = useTranslation('planMode');
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set());
+  const [acted, setActed] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const approvePlan = usePlanOrchestratorStore((s) => s.approvePlan);
   const phase = usePlanOrchestratorStore((s) => s.phase);
-  const isActive = interactive && phase === 'reviewing_plan';
+  const workflowSession = useWorkflowKernelStore((s) => s.session);
+  const transitionAndSubmitWorkflowKernelInput = useWorkflowKernelStore((s) => s.transitionAndSubmitInput);
+  const isKernelPlanActive = workflowSession?.status === 'active' && workflowSession.activeMode === 'plan';
+  const isActive = interactive && phase === 'reviewing_plan' && isKernelPlanActive && !acted;
 
   const toggleStep = useCallback((stepId: string) => {
     setExpandedSteps((prev) => {
@@ -109,9 +116,32 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
     });
   }, []);
 
-  const handleApprove = () => {
-    approvePlan(data);
-  };
+  const handleApprove = useCallback(async () => {
+    if (!isActive || isSubmitting) return;
+    setActed(true);
+    setIsSubmitting(true);
+    try {
+      await submitWorkflowKernelActionIntent({
+        transitionAndSubmitInput: transitionAndSubmitWorkflowKernelInput,
+        mode: 'plan',
+        type: 'plan_approval',
+        source: 'plan_card',
+        action: 'approve_plan',
+        content: 'approve_plan',
+        metadata: {
+          stepCount: data.steps.length,
+          batchCount: data.batches.length,
+        },
+      });
+    } catch {
+      // Keep orchestration available even if kernel logging fails.
+    }
+    try {
+      await approvePlan(data);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [approvePlan, data, isActive, isSubmitting, transitionAndSubmitWorkflowKernelInput]);
 
   return (
     <div className="rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20">
@@ -163,10 +193,13 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
       {isActive && (
         <div className="px-3 py-2 border-t border-teal-200 dark:border-teal-800 flex items-center justify-end gap-2">
           <button
-            onClick={handleApprove}
+            onClick={() => {
+              void handleApprove();
+            }}
+            disabled={isSubmitting}
             className={clsx(
               'px-3 py-1.5 rounded-md text-xs font-medium',
-              'bg-teal-600 text-white hover:bg-teal-700',
+              'bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-60 disabled:cursor-not-allowed',
               'transition-colors',
             )}
           >

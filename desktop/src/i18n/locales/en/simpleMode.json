@@ -497,7 +497,81 @@
       "failed": "{{count}} failed",
       "qualityGates": "Quality Gates",
       "passed": "{{count}} passed",
-      "total": "/ {{count}} total"
+      "total": "/ {{count}} total",
+      "kernel": {
+        "noSession": "No workflow session",
+        "mode": {
+          "chat": "Chat",
+          "plan": "Plan",
+          "task": "Task"
+        },
+        "status": {
+          "active": "Active",
+          "completed": "Completed",
+          "failed": "Failed",
+          "cancelled": "Cancelled",
+          "inactive": "Inactive"
+        },
+        "labels": {
+          "phase": "Phase",
+          "events": "Events",
+          "checkpoints": "Checkpoints",
+          "updated": "Updated",
+          "timeline": "Event Timeline"
+        },
+        "phase": {
+          "ready": "Ready",
+          "running": "Running",
+          "paused": "Paused",
+          "completed": "Completed",
+          "idle": "Idle",
+          "analyzing": "Analyzing",
+          "clarifying": "Clarifying",
+          "planning": "Planning",
+          "reviewing_plan": "Reviewing Plan",
+          "executing": "Executing",
+          "configuring": "Configuring",
+          "interviewing": "Interviewing",
+          "exploring": "Exploring",
+          "requirement_analysis": "Requirement Analysis",
+          "generating_prd": "Generating PRD",
+          "reviewing_prd": "Reviewing PRD",
+          "architecture_review": "Architecture Review",
+          "generating_design_doc": "Generating Design Doc",
+          "cancelled": "Cancelled",
+          "failed": "Failed"
+        },
+        "eventKind": {
+          "session_opened": "Session opened",
+          "mode_transitioned": "Mode transitioned",
+          "input_submitted": "Input submitted",
+          "plan_edited": "Plan edited",
+          "plan_execution_started": "Plan execution started",
+          "plan_step_retried": "Plan step retried",
+          "operation_cancelled": "Operation cancelled",
+          "session_recovered": "Session recovered",
+          "checkpoint_created": "Checkpoint created"
+        },
+        "eventSummary": {
+          "step": "Step {{stepId}}",
+          "transition": "{{source}} -> {{target}}",
+          "phase": "Phase {{phase}}",
+          "events": "{{count}} events"
+        },
+        "reasonCode": {
+          "cancelled_by_user": "Cancelled by user",
+          "session_opened": "Session opened",
+          "mode_transitioned": "Mode transitioned",
+          "mode_transitioned_with_input": "Mode transitioned with input",
+          "input_submitted": "Input submitted",
+          "plan_edited": "Plan edited",
+          "plan_execution_started": "Plan execution started",
+          "plan_step_retried": "Plan step retried",
+          "operation_cancelled": "Operation cancelled",
+          "session_recovered": "Session recovered",
+          "unknown_reason": "Unknown reason"
+        }
+      }
     },
 
     "interview": {

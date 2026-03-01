@@ -478,7 +478,81 @@
       "failed": "{{count}} 失敗",
       "qualityGates": "品質ゲート",
       "passed": "{{count}} 合格",
-      "total": "/ {{count}} 合計"
+      "total": "/ {{count}} 合計",
+      "kernel": {
+        "noSession": "ワークフローセッションがありません",
+        "mode": {
+          "chat": "チャット",
+          "plan": "プラン",
+          "task": "タスク"
+        },
+        "status": {
+          "active": "進行中",
+          "completed": "完了",
+          "failed": "失敗",
+          "cancelled": "キャンセル済み",
+          "inactive": "非アクティブ"
+        },
+        "labels": {
+          "phase": "フェーズ",
+          "events": "イベント",
+          "checkpoints": "チェックポイント",
+          "updated": "更新",
+          "timeline": "イベントタイムライン"
+        },
+        "phase": {
+          "ready": "準備完了",
+          "running": "実行中",
+          "paused": "一時停止",
+          "completed": "完了",
+          "idle": "待機",
+          "analyzing": "分析中",
+          "clarifying": "明確化中",
+          "planning": "計画中",
+          "reviewing_plan": "プランレビュー中",
+          "executing": "実行中",
+          "configuring": "設定中",
+          "interviewing": "インタビュー中",
+          "exploring": "探索中",
+          "requirement_analysis": "要件分析",
+          "generating_prd": "PRD 生成中",
+          "reviewing_prd": "PRD レビュー中",
+          "architecture_review": "アーキテクチャレビュー",
+          "generating_design_doc": "設計ドキュメント生成中",
+          "cancelled": "キャンセル済み",
+          "failed": "失敗"
+        },
+        "eventKind": {
+          "session_opened": "セッション開始",
+          "mode_transitioned": "モード遷移",
+          "input_submitted": "入力送信",
+          "plan_edited": "プラン編集",
+          "plan_execution_started": "プラン実行開始",
+          "plan_step_retried": "ステップ再試行",
+          "operation_cancelled": "操作キャンセル",
+          "session_recovered": "セッション復旧",
+          "checkpoint_created": "チェックポイント作成"
+        },
+        "eventSummary": {
+          "step": "ステップ {{stepId}}",
+          "transition": "{{source}} -> {{target}}",
+          "phase": "フェーズ {{phase}}",
+          "events": "{{count}} イベント"
+        },
+        "reasonCode": {
+          "cancelled_by_user": "ユーザーによりキャンセル",
+          "session_opened": "セッション開始",
+          "mode_transitioned": "モード遷移",
+          "mode_transitioned_with_input": "モード遷移と入力送信",
+          "input_submitted": "入力送信",
+          "plan_edited": "プラン編集",
+          "plan_execution_started": "プラン実行開始",
+          "plan_step_retried": "ステップ再試行",
+          "operation_cancelled": "操作キャンセル",
+          "session_recovered": "セッション復旧",
+          "unknown_reason": "不明な理由"
+        }
+      }
     },
 
     "interview": {

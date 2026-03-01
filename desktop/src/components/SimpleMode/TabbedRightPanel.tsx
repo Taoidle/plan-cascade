@@ -9,7 +9,7 @@
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { GitPanel } from './GitPanel';
-import { WorkflowProgressPanel } from './WorkflowProgressPanel';
+import { WorkflowKernelProgressPanel } from './WorkflowKernelProgressPanel';
 import { StreamingOutput, ErrorState } from '../shared';
 import type { StreamLine } from '../../store/execution';
 import type { AnalysisCoverageSnapshot } from '../../store/execution';
@@ -75,19 +75,10 @@ export function TabbedRightPanel({
         {activeTab === 'output' ? (
           <div className="min-h-0 flex flex-col h-full">
             <div className="shrink-0 space-y-2 p-2">
-              {workflowMode === 'task' ? (
-                <>
-                  {workflowPhase !== 'idle' && <WorkflowProgressPanel />}
-                  <ExecutionLogsCard logs={logs} />
-                  <ErrorState maxErrors={8} />
-                </>
-              ) : (
-                <>
-                  {analysisCoverage && <AnalysisCoveragePanel coverage={analysisCoverage} />}
-                  <ExecutionLogsCard logs={logs} />
-                  <ErrorState maxErrors={8} />
-                </>
-              )}
+              <WorkflowKernelProgressPanel workflowMode={workflowMode} workflowPhase={workflowPhase} />
+              {workflowMode !== 'task' && analysisCoverage && <AnalysisCoveragePanel coverage={analysisCoverage} />}
+              <ExecutionLogsCard logs={logs} />
+              <ErrorState maxErrors={8} />
             </div>
             <StreamingOutput maxHeight="none" compact={false} showClear className="flex-1 min-h-0 px-2 pb-2" />
           </div>

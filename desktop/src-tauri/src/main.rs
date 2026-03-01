@@ -22,6 +22,7 @@ use plan_cascade_desktop::commands::standalone::StandaloneState;
 use plan_cascade_desktop::commands::task_mode::TaskModeState;
 use plan_cascade_desktop::commands::webhook::WebhookState;
 use plan_cascade_desktop::commands::worktree::WorktreeState;
+use plan_cascade_desktop::services::workflow_kernel::WorkflowKernelState;
 use plan_cascade_desktop::state::AppState;
 
 use tauri::Manager;
@@ -45,6 +46,7 @@ fn main() {
         .manage(RemoteState::new())
         .manage(TaskModeState::new())
         .manage(PlanModeState::new())
+        .manage(WorkflowKernelState::new())
         .manage(ExecutionRegistry::new())
         .manage(KnowledgeState::new())
         .manage(DocsIndexerState::new())
@@ -230,6 +232,17 @@ fn main() {
             plan_cascade_desktop::commands::plan_mode::get_step_output,
             plan_cascade_desktop::commands::plan_mode::exit_plan_mode,
             plan_cascade_desktop::commands::plan_mode::list_plan_adapters,
+            // Workflow Kernel v2 commands
+            plan_cascade_desktop::commands::workflow::workflow_open_session,
+            plan_cascade_desktop::commands::workflow::workflow_transition_mode,
+            plan_cascade_desktop::commands::workflow::workflow_submit_input,
+            plan_cascade_desktop::commands::workflow::workflow_transition_and_submit_input,
+            plan_cascade_desktop::commands::workflow::workflow_apply_plan_edit,
+            plan_cascade_desktop::commands::workflow::workflow_execute_plan,
+            plan_cascade_desktop::commands::workflow::workflow_retry_step,
+            plan_cascade_desktop::commands::workflow::workflow_cancel_operation,
+            plan_cascade_desktop::commands::workflow::workflow_get_session_state,
+            plan_cascade_desktop::commands::workflow::workflow_recover_session,
             // Spec Interview commands
             plan_cascade_desktop::commands::spec_interview::start_spec_interview,
             plan_cascade_desktop::commands::spec_interview::submit_interview_answer,

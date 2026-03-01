@@ -23,6 +23,7 @@ import { useExecutionStore } from '../../store/execution';
 import { useSettingsStore } from '../../store/settings';
 import { useWorkflowOrchestratorStore } from '../../store/workflowOrchestrator';
 import { usePlanOrchestratorStore } from '../../store/planOrchestrator';
+import { useWorkflowKernelStore } from '../../store/workflowKernel';
 import { useGitStore } from '../../store/git';
 import { useFileChangesStore } from '../../store/fileChanges';
 import { InterviewInputPanel } from './InterviewInputPanel';
@@ -39,6 +40,7 @@ import {
 } from '../../lib/exportUtils';
 import { useToast } from '../shared/Toast';
 import { useContextSourcesStore } from '../../store/contextSources';
+import { buildConversationHistory } from '../../lib/contextBridge';
 import { ChatTranscript } from './ChatTranscript';
 import {
   clearPersistedSimpleChatQueue,
@@ -63,6 +65,11 @@ interface CommandResponse<T> {
 
 const MAX_QUEUED_CHAT_MESSAGES = 3;
 const TOKEN_ESTIMATE_DEBOUNCE_MS = 180;
+const WORKFLOW_KERNEL_SESSION_STORAGE_PREFIX = 'simple_mode_workflow_kernel_session_v2:';
+
+function workflowKernelSessionStorageKey(workspacePath: string | null): string {
+  return `${WORKFLOW_KERNEL_SESSION_STORAGE_PREFIX}${workspacePath || '__default_workspace__'}`;
+}
 
 export function SimpleMode() {
   const { t } = useTranslation('simpleMode');
@@ -132,7 +139,37 @@ export function SimpleMode() {
   const queueDispatchInFlightRef = useRef(false);
   const hasHydratedQueueRef = useRef(false);
 
+  const workflowKernelSessionId = useWorkflowKernelStore((s) => s.sessionId);
+  const workflowKernelSession = useWorkflowKernelStore((s) => s.session);
+  const openWorkflowKernelSession = useWorkflowKernelStore((s) => s.openSession);
+  const recoverWorkflowKernelSession = useWorkflowKernelStore((s) => s.recoverSession);
+  const transitionWorkflowKernelMode = useWorkflowKernelStore((s) => s.transitionMode);
+  const transitionAndSubmitWorkflowKernelInput = useWorkflowKernelStore((s) => s.transitionAndSubmitInput);
+  const syncWorkflowKernelPhase = useWorkflowKernelStore((s) => s.syncModePhase);
+  const refreshWorkflowKernelState = useWorkflowKernelStore((s) => s.refreshSessionState);
+  const cancelWorkflowKernelOperation = useWorkflowKernelStore((s) => s.cancelOperation);
+  const resetWorkflowKernel = useWorkflowKernelStore((s) => s.reset);
+  const kernelBootstrapInFlightRef = useRef(false);
+  const lastSyncedKernelPhasesRef = useRef<{ chat: string; plan: string; task: string }>({
+    chat: '',
+    plan: '',
+    task: '',
+  });
+
   const isRunning = status === 'running' || status === 'paused';
+
+  const persistWorkflowKernelSessionId = useCallback(
+    (sessionId: string) => {
+      if (typeof localStorage === 'undefined') return;
+      localStorage.setItem(workflowKernelSessionStorageKey(workspacePath), sessionId);
+    },
+    [workspacePath],
+  );
+
+  const clearPersistedWorkflowKernelSessionId = useCallback(() => {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.removeItem(workflowKernelSessionStorageKey(workspacePath));
+  }, [workspacePath]);
 
   // Handle workflow mode changes with context inheritance notifications
   const handleWorkflowModeChange = useCallback(
@@ -183,9 +220,39 @@ export function SimpleMode() {
         );
       }
 
-      setWorkflowMode(newMode);
+      const conversationContext = buildConversationHistory().map((turn) => ({
+        user: turn.user,
+        assistant: turn.assistant,
+      }));
+
+      void (async () => {
+        const transitioned = await transitionWorkflowKernelMode(newMode, {
+          conversationContext,
+          artifactRefs: [],
+          contextSources: ['simple_mode'],
+          metadata: {
+            sourceMode: workflowMode,
+            targetMode: newMode,
+            hasChatHistory,
+            hasPendingTaskContext: !!hasPendingTaskContext,
+            switchedAt: new Date().toISOString(),
+          },
+        });
+
+        if (!transitioned) {
+          showToast(
+            t('workflow.modeSwitchFailed', {
+              defaultValue: 'Failed to switch workflow mode. Please retry.',
+            }),
+            'error',
+          );
+          return;
+        }
+
+        setWorkflowMode(transitioned.activeMode);
+      })();
     },
-    [workflowMode, isRunning, streamingOutput, queuedChatMessages.length, showToast, t],
+    [workflowMode, isRunning, streamingOutput, queuedChatMessages.length, showToast, t, transitionWorkflowKernelMode],
   );
 
   useEffect(() => {
@@ -194,6 +261,60 @@ export function SimpleMode() {
       cleanup();
     };
   }, [initialize, cleanup]);
+
+  useEffect(() => {
+    if (workflowKernelSessionId) return;
+    if (kernelBootstrapInFlightRef.current) return;
+
+    kernelBootstrapInFlightRef.current = true;
+    const bootstrap = async () => {
+      if (typeof localStorage !== 'undefined') {
+        const persistedSessionId = localStorage.getItem(workflowKernelSessionStorageKey(workspacePath));
+        if (persistedSessionId) {
+          const recovered = await recoverWorkflowKernelSession(persistedSessionId);
+          if (recovered?.session?.sessionId) {
+            kernelBootstrapInFlightRef.current = false;
+            return;
+          }
+          localStorage.removeItem(workflowKernelSessionStorageKey(workspacePath));
+        }
+      }
+
+      await openWorkflowKernelSession('chat', {
+        conversationContext: [],
+        artifactRefs: [],
+        contextSources: ['simple_mode'],
+        metadata: {
+          entry: 'simple_mode_mount',
+        },
+      });
+      kernelBootstrapInFlightRef.current = false;
+    };
+
+    void bootstrap().finally(() => {
+      kernelBootstrapInFlightRef.current = false;
+    });
+  }, [workflowKernelSessionId, workspacePath, openWorkflowKernelSession, recoverWorkflowKernelSession]);
+
+  useEffect(() => {
+    if (!workflowKernelSessionId) return;
+    persistWorkflowKernelSessionId(workflowKernelSessionId);
+  }, [workflowKernelSessionId, persistWorkflowKernelSessionId]);
+
+  useEffect(() => {
+    if (!workflowKernelSessionId) return;
+    void refreshWorkflowKernelState();
+    const timer = window.setInterval(() => {
+      void refreshWorkflowKernelState();
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [workflowKernelSessionId, refreshWorkflowKernelState]);
+
+  useEffect(() => {
+    const activeMode = workflowKernelSession?.activeMode;
+    if (!activeMode || activeMode === workflowMode) return;
+    setWorkflowMode(activeMode);
+  }, [workflowKernelSession?.activeMode, workflowMode]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
@@ -286,7 +407,7 @@ export function SimpleMode() {
     };
   }, [bridgeSessionId, workspacePath]);
 
-  const workflowPhase = useWorkflowOrchestratorStore((s) => s.phase);
+  const workflowPhaseLegacy = useWorkflowOrchestratorStore((s) => s.phase);
   const pendingQuestion = useWorkflowOrchestratorStore((s) => s.pendingQuestion);
   const startWorkflow = useWorkflowOrchestratorStore((s) => s.startWorkflow);
   const submitInterviewAnswer = useWorkflowOrchestratorStore((s) => s.submitInterviewAnswer);
@@ -299,7 +420,7 @@ export function SimpleMode() {
     useWorkflowOrchestratorStore((s) => s.phase === 'interviewing') && pendingQuestion === null;
 
   // Plan mode orchestrator
-  const planPhase = usePlanOrchestratorStore((s) => s.phase);
+  const planPhaseLegacy = usePlanOrchestratorStore((s) => s.phase);
   const pendingClarifyQuestion = usePlanOrchestratorStore((s) => s.pendingClarifyQuestion);
   const planIsBusy = usePlanOrchestratorStore((s) => s.isBusy);
   const startPlanWorkflow = usePlanOrchestratorStore((s) => s.startPlanWorkflow);
@@ -307,6 +428,43 @@ export function SimpleMode() {
   const skipPlanClarification = usePlanOrchestratorStore((s) => s.skipClarification);
   const cancelPlanWorkflow = usePlanOrchestratorStore((s) => s.cancelWorkflow);
   const resetPlanWorkflow = usePlanOrchestratorStore((s) => s.resetWorkflow);
+
+  const workflowPhase = workflowKernelSession?.modeSnapshots.task?.phase ?? workflowPhaseLegacy;
+  const planPhase = workflowKernelSession?.modeSnapshots.plan?.phase ?? planPhaseLegacy;
+
+  useEffect(() => {
+    if (workflowMode !== 'task') return;
+    if (!workflowPhaseLegacy) return;
+    if (lastSyncedKernelPhasesRef.current.task === workflowPhaseLegacy) return;
+    lastSyncedKernelPhasesRef.current.task = workflowPhaseLegacy;
+    void syncWorkflowKernelPhase('task', workflowPhaseLegacy, 'task_orchestrator');
+  }, [workflowMode, workflowPhaseLegacy, syncWorkflowKernelPhase]);
+
+  useEffect(() => {
+    if (workflowMode !== 'plan') return;
+    if (!planPhaseLegacy) return;
+    if (lastSyncedKernelPhasesRef.current.plan === planPhaseLegacy) return;
+    lastSyncedKernelPhasesRef.current.plan = planPhaseLegacy;
+    void syncWorkflowKernelPhase('plan', planPhaseLegacy, 'plan_orchestrator');
+  }, [workflowMode, planPhaseLegacy, syncWorkflowKernelPhase]);
+
+  useEffect(() => {
+    if (workflowMode !== 'chat') return;
+    const phase =
+      status === 'running'
+        ? 'running'
+        : status === 'paused'
+          ? 'paused'
+          : status === 'completed'
+            ? 'completed'
+            : status === 'failed'
+              ? 'failed'
+              : 'ready';
+    if (lastSyncedKernelPhasesRef.current.chat === phase) return;
+    lastSyncedKernelPhasesRef.current.chat = phase;
+    void syncWorkflowKernelPhase('chat', phase, 'chat_execution_status');
+  }, [workflowMode, status, syncWorkflowKernelPhase]);
+
   const hasStructuredInterviewQuestion =
     workflowMode === 'task' &&
     workflowPhase === 'interviewing' &&
@@ -340,6 +498,31 @@ export function SimpleMode() {
         setDescription('');
       }
 
+      const conversationContext = buildConversationHistory().map((turn) => ({
+        user: turn.user,
+        assistant: turn.assistant,
+      }));
+      await transitionAndSubmitWorkflowKernelInput(
+        workflowMode,
+        {
+          type: 'mode_entry_prompt',
+          content: prompt,
+          metadata: {
+            mode: workflowMode,
+            source: inputPrompt === undefined ? 'composer' : 'queue_or_external',
+          },
+        },
+        {
+          conversationContext,
+          artifactRefs: [],
+          contextSources: ['simple_mode'],
+          metadata: {
+            source: 'start',
+            mode: workflowMode,
+          },
+        },
+      );
+
       if (workflowMode === 'task') {
         // Route Task mode through the workflow orchestrator
         await startWorkflow(prompt);
@@ -354,7 +537,16 @@ export function SimpleMode() {
 
       await start(prompt, 'simple');
     },
-    [description, isAnalyzingStrategy, isSubmitting, start, startWorkflow, startPlanWorkflow, workflowMode],
+    [
+      description,
+      isAnalyzingStrategy,
+      isSubmitting,
+      start,
+      startWorkflow,
+      startPlanWorkflow,
+      transitionAndSubmitWorkflowKernelInput,
+      workflowMode,
+    ],
   );
 
   const handleFollowUp = useCallback(
@@ -368,10 +560,29 @@ export function SimpleMode() {
       // Route through orchestrator if in active Task workflow phase
       if (workflowMode === 'task' && workflowPhase !== 'idle') {
         if (workflowPhase === 'configuring') {
+          await transitionAndSubmitWorkflowKernelInput(workflowMode, {
+            type: 'task_configuration',
+            content: prompt,
+            metadata: { mode: workflowMode, phase: workflowPhase },
+          });
           overrideConfigNatural(prompt);
         } else if (workflowPhase === 'reviewing_prd') {
+          await transitionAndSubmitWorkflowKernelInput(workflowMode, {
+            type: 'task_prd_feedback',
+            content: prompt,
+            metadata: { mode: workflowMode, phase: workflowPhase },
+          });
           addPrdFeedback(prompt);
         } else if (workflowPhase === 'interviewing' && pendingQuestion && !hasStructuredInterviewQuestion) {
+          await transitionAndSubmitWorkflowKernelInput(workflowMode, {
+            type: 'task_interview_answer',
+            content: prompt,
+            metadata: {
+              mode: workflowMode,
+              phase: workflowPhase,
+              questionId: pendingQuestion.questionId,
+            },
+          });
           await submitInterviewAnswer(prompt);
         }
         return;
@@ -379,6 +590,15 @@ export function SimpleMode() {
 
       // Route plan clarification through plan orchestrator
       if (workflowMode === 'plan' && planPhase === 'clarifying' && pendingClarifyQuestion) {
+        await transitionAndSubmitWorkflowKernelInput(workflowMode, {
+          type: 'plan_clarification',
+          content: prompt,
+          metadata: {
+            mode: workflowMode,
+            phase: planPhase,
+            questionId: pendingClarifyQuestion.questionId,
+          },
+        });
         await submitPlanClarification({
           questionId: pendingClarifyQuestion.questionId,
           answer: prompt,
@@ -387,6 +607,13 @@ export function SimpleMode() {
         return;
       }
 
+      await transitionAndSubmitWorkflowKernelInput(workflowMode, {
+        type: 'chat_message',
+        content: prompt,
+        metadata: {
+          mode: workflowMode,
+        },
+      });
       await sendFollowUp(prompt);
     },
     [
@@ -403,8 +630,81 @@ export function SimpleMode() {
       addPrdFeedback,
       submitPlanClarification,
       submitInterviewAnswer,
+      transitionAndSubmitWorkflowKernelInput,
     ],
   );
+
+  const handleStructuredInterviewSubmit = useCallback(
+    async (answer: string) => {
+      const normalized = answer.trim();
+      if (!normalized) return;
+      const questionId = pendingQuestion?.questionId;
+      await transitionAndSubmitWorkflowKernelInput('task', {
+        type: 'task_interview_answer',
+        content: normalized,
+        metadata: {
+          mode: 'task',
+          phase: workflowPhase,
+          source: 'structured_interview_panel',
+          questionId: questionId ?? null,
+        },
+      });
+      await submitInterviewAnswer(normalized);
+    },
+    [pendingQuestion?.questionId, submitInterviewAnswer, transitionAndSubmitWorkflowKernelInput, workflowPhase],
+  );
+
+  const handleSkipInterviewQuestion = useCallback(async () => {
+    const questionId = pendingQuestion?.questionId;
+    await transitionAndSubmitWorkflowKernelInput('task', {
+      type: 'task_interview_answer',
+      content: '[skip]',
+      metadata: {
+        mode: 'task',
+        phase: workflowPhase,
+        source: 'interview_skip',
+        questionId: questionId ?? null,
+        skipped: true,
+      },
+    });
+    await skipInterviewQuestion();
+  }, [pendingQuestion?.questionId, skipInterviewQuestion, transitionAndSubmitWorkflowKernelInput, workflowPhase]);
+
+  const handleSkipPlanClarifyQuestion = useCallback(async () => {
+    const questionId = pendingClarifyQuestion?.questionId;
+    await transitionAndSubmitWorkflowKernelInput('plan', {
+      type: 'plan_clarification',
+      content: '[skip]',
+      metadata: {
+        mode: 'plan',
+        phase: planPhase,
+        source: 'plan_clarify_skip_question',
+        questionId: questionId ?? null,
+        skipped: true,
+      },
+    });
+    if (!pendingClarifyQuestion) return;
+    await submitPlanClarification({
+      questionId: pendingClarifyQuestion.questionId,
+      answer: '',
+      skipped: true,
+    });
+  }, [pendingClarifyQuestion, planPhase, submitPlanClarification, transitionAndSubmitWorkflowKernelInput]);
+
+  const handleSkipPlanClarification = useCallback(async () => {
+    await transitionAndSubmitWorkflowKernelInput('plan', {
+      type: 'plan_clarification',
+      content: '[skip_all]',
+      metadata: {
+        mode: 'plan',
+        phase: planPhase,
+        source: 'plan_clarify_skip_all',
+        questionId: pendingClarifyQuestion?.questionId ?? null,
+        skippedAll: true,
+      },
+    });
+    await skipPlanClarification();
+  }, [pendingClarifyQuestion?.questionId, planPhase, skipPlanClarification, transitionAndSubmitWorkflowKernelInput]);
 
   const removeQueuedChatMessage = useCallback((id: string) => {
     setQueuedChatMessages((prev) => prev.filter((msg) => msg.id !== id));
@@ -485,43 +785,111 @@ export function SimpleMode() {
   const handleNewTask = useCallback(() => {
     const hasContext = streamingOutput.length > 0 || useExecutionStore.getState()._pendingTaskContext;
 
+    clearPersistedWorkflowKernelSessionId();
+    resetWorkflowKernel();
     resetWorkflow();
     resetPlanWorkflow();
     reset();
     clearStrategyAnalysis();
     setDescription('');
     setQueuedChatMessages([]);
+    void openWorkflowKernelSession('chat', {
+      conversationContext: [],
+      artifactRefs: [],
+      contextSources: ['simple_mode'],
+      metadata: {
+        entry: 'new_task',
+      },
+    });
 
     if (hasContext) {
       showToast(t('contextBridge.contextReset', { defaultValue: 'Context cleared for new task' }), 'info');
     }
-  }, [reset, clearStrategyAnalysis, resetWorkflow, resetPlanWorkflow, streamingOutput, showToast, t]);
+  }, [
+    clearPersistedWorkflowKernelSessionId,
+    reset,
+    clearStrategyAnalysis,
+    resetWorkflow,
+    resetPlanWorkflow,
+    resetWorkflowKernel,
+    openWorkflowKernelSession,
+    streamingOutput,
+    showToast,
+    t,
+  ]);
 
   const handleRestoreHistory = useCallback(
     (historyId: string) => {
+      clearPersistedWorkflowKernelSessionId();
+      resetWorkflowKernel();
       resetWorkflow();
       resetPlanWorkflow();
       restoreFromHistory(historyId);
       setRightPanelOpen(false);
-      handleWorkflowModeChange('chat');
+      setWorkflowMode('chat');
       setDescription('');
       setQueuedChatMessages([]);
+      void openWorkflowKernelSession('chat', {
+        conversationContext: [],
+        artifactRefs: [],
+        contextSources: ['simple_mode'],
+        metadata: {
+          entry: 'restore_history',
+          historyId,
+        },
+      });
     },
-    [restoreFromHistory, handleWorkflowModeChange, resetWorkflow, resetPlanWorkflow],
+    [
+      clearPersistedWorkflowKernelSessionId,
+      restoreFromHistory,
+      resetWorkflow,
+      resetPlanWorkflow,
+      resetWorkflowKernel,
+      openWorkflowKernelSession,
+    ],
   );
 
   const handleSwitchSession = useCallback(
     (sessionId: string) => {
       // Keep workflow/orchestrator state scoped to the foreground session.
+      clearPersistedWorkflowKernelSessionId();
+      resetWorkflowKernel();
       resetWorkflow();
       resetPlanWorkflow();
       switchToSession(sessionId);
       setWorkflowMode('chat');
       setDescription('');
       setQueuedChatMessages([]);
+      void openWorkflowKernelSession('chat', {
+        conversationContext: [],
+        artifactRefs: [],
+        contextSources: ['simple_mode'],
+        metadata: {
+          entry: 'switch_session',
+          externalSessionId: sessionId,
+        },
+      });
     },
-    [resetWorkflow, resetPlanWorkflow, switchToSession],
+    [
+      clearPersistedWorkflowKernelSessionId,
+      resetWorkflow,
+      resetPlanWorkflow,
+      resetWorkflowKernel,
+      openWorkflowKernelSession,
+      switchToSession,
+    ],
   );
+
+  const handleCancelStructuredWorkflow = useCallback(async () => {
+    await cancelWorkflowKernelOperation('cancelled_by_user');
+    if (workflowMode === 'plan') {
+      await cancelPlanWorkflow();
+      return;
+    }
+    if (workflowMode === 'task') {
+      await cancelWorkflow();
+    }
+  }, [cancelWorkflowKernelOperation, workflowMode, cancelPlanWorkflow, cancelWorkflow]);
 
   const handleExportImage = useCallback(async () => {
     const el = chatScrollRef.current;
@@ -547,13 +915,25 @@ export function SimpleMode() {
     }
   }, [showToast, t]);
 
+  const kernelStatus = workflowKernelSession?.status ?? 'active';
+  const kernelSessionMode = workflowKernelSession?.activeMode ?? workflowMode;
+  const hasActiveKernelSession = kernelStatus === 'active';
   const isTaskWorkflowActive =
+    workflowMode === 'task' &&
+    kernelSessionMode === 'task' &&
+    hasActiveKernelSession &&
     workflowPhase !== 'idle' &&
     workflowPhase !== 'completed' &&
     workflowPhase !== 'failed' &&
     workflowPhase !== 'cancelled';
   const isPlanWorkflowActive =
-    planPhase !== 'idle' && planPhase !== 'completed' && planPhase !== 'failed' && planPhase !== 'cancelled';
+    workflowMode === 'plan' &&
+    kernelSessionMode === 'plan' &&
+    hasActiveKernelSession &&
+    planPhase !== 'idle' &&
+    planPhase !== 'completed' &&
+    planPhase !== 'failed' &&
+    planPhase !== 'cancelled';
   const isTaskWorkflowBusy =
     workflowMode === 'task' &&
     (workflowPhase === 'analyzing' ||
@@ -840,9 +1220,9 @@ export function SimpleMode() {
               onPause={pause}
               onResume={resume}
               onCancel={cancel}
-              taskWorkflowActive={workflowMode === 'task' && isTaskWorkflowActive}
-              planWorkflowActive={workflowMode === 'plan' && isPlanWorkflowActive}
-              onCancelWorkflow={workflowMode === 'plan' ? cancelPlanWorkflow : cancelWorkflow}
+              taskWorkflowActive={isTaskWorkflowActive}
+              planWorkflowActive={isPlanWorkflowActive}
+              onCancelWorkflow={handleCancelStructuredWorkflow}
               onExportImage={handleExportImage}
               isExportDisabled={streamingOutput.length === 0}
               isCapturing={isCapturing}
@@ -868,8 +1248,8 @@ export function SimpleMode() {
                   {hasStructuredInterviewQuestion && pendingQuestion && (
                     <InterviewInputPanel
                       question={pendingQuestion}
-                      onSubmit={submitInterviewAnswer}
-                      onSkip={skipInterviewQuestion}
+                      onSubmit={handleStructuredInterviewSubmit}
+                      onSkip={handleSkipInterviewQuestion}
                       loading={isInterviewSubmitting}
                     />
                   )}
@@ -893,7 +1273,9 @@ export function SimpleMode() {
                         </div>
                         {!pendingQuestion.required && (
                           <button
-                            onClick={skipInterviewQuestion}
+                            onClick={() => {
+                              void handleSkipInterviewQuestion();
+                            }}
                             className="shrink-0 px-2 py-1 rounded text-xs text-violet-600 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-800/50 transition-colors"
                           >
                             {t('workflow.interview.skipBtn', { defaultValue: 'Skip' })}
@@ -922,19 +1304,17 @@ export function SimpleMode() {
                         </div>
                         <div className="shrink-0 flex items-center gap-1">
                           <button
-                            onClick={() =>
-                              submitPlanClarification({
-                                questionId: pendingClarifyQuestion.questionId,
-                                answer: '',
-                                skipped: true,
-                              })
-                            }
+                            onClick={() => {
+                              void handleSkipPlanClarifyQuestion();
+                            }}
                             className="px-2 py-1 rounded text-xs text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-800/50 transition-colors"
                           >
                             {t('planMode:clarify.skipQuestion', { defaultValue: 'Skip' })}
                           </button>
                           <button
-                            onClick={skipPlanClarification}
+                            onClick={() => {
+                              void handleSkipPlanClarification();
+                            }}
                             className="px-2 py-1 rounded text-xs text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-800/50 transition-colors"
                           >
                             {t('planMode:clarify.skipAll', { defaultValue: 'Skip All' })}

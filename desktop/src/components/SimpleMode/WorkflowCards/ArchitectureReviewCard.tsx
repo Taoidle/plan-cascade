@@ -10,6 +10,8 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useWorkflowOrchestratorStore } from '../../../store/workflowOrchestrator';
+import { useWorkflowKernelStore } from '../../../store/workflowKernel';
+import { submitWorkflowKernelActionIntent } from '../../../lib/workflowKernelIntent';
 import type { ArchitectureReviewCardData } from '../../../types/workflowCard';
 
 const severityColors = {
@@ -32,6 +34,8 @@ export function ArchitectureReviewCard({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const approveArchitecture = useWorkflowOrchestratorStore((s) => s.approveArchitecture);
   const phase = useWorkflowOrchestratorStore((s) => s.phase);
+  const workflowSession = useWorkflowKernelStore((s) => s.session);
+  const transitionAndSubmitWorkflowKernelInput = useWorkflowKernelStore((s) => s.transitionAndSubmitInput);
 
   const toggleMod = (index: number) => {
     setSelectedMods((prev) => {
@@ -47,6 +51,23 @@ export function ArchitectureReviewCard({
     setActed(true);
     setIsSubmitting(true);
     try {
+      try {
+        await submitWorkflowKernelActionIntent({
+          transitionAndSubmitInput: transitionAndSubmitWorkflowKernelInput,
+          mode: 'task',
+          type: 'execution_control',
+          source: 'architecture_review_card',
+          action: 'approve_architecture_review',
+          content: 'architecture_review:approve',
+          metadata: {
+            concernCount: data.concerns.length,
+            suggestionCount: data.suggestions.length,
+            modificationCount: data.prdModifications.length,
+          },
+        });
+      } catch {
+        // Keep orchestration available even if kernel logging fails.
+      }
       await approveArchitecture?.(true, []);
     } finally {
       setIsSubmitting(false);
@@ -59,13 +80,30 @@ export function ArchitectureReviewCard({
     setIsSubmitting(true);
     const selected = data.prdModifications.filter((_, i) => selectedMods.has(i));
     try {
+      try {
+        await submitWorkflowKernelActionIntent({
+          transitionAndSubmitInput: transitionAndSubmitWorkflowKernelInput,
+          mode: 'task',
+          type: 'execution_control',
+          source: 'architecture_review_card',
+          action: 'request_architecture_changes',
+          content: 'architecture_review:request_changes',
+          metadata: {
+            selectedModificationCount: selected.length,
+            totalModificationCount: data.prdModifications.length,
+          },
+        });
+      } catch {
+        // Keep orchestration available even if kernel logging fails.
+      }
       await approveArchitecture?.(false, selected);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const isInteractive = interactive && phase === 'architecture_review' && !acted && !isSubmitting;
+  const isKernelTaskActive = workflowSession?.status === 'active' && workflowSession.activeMode === 'task';
+  const isInteractive = interactive && phase === 'architecture_review' && isKernelTaskActive && !acted && !isSubmitting;
 
   return (
     <div className="rounded-lg border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-900/20 overflow-hidden">

@@ -12,17 +12,24 @@ import type { PrdCardData, PrdStoryData } from '../../../types/workflowCard';
 import { Collapsible } from '../Collapsible';
 import { useWorkflowOrchestratorStore } from '../../../store/workflowOrchestrator';
 import type { TaskStory } from '../../../store/taskMode';
+import { useWorkflowKernelStore } from '../../../store/workflowKernel';
+import { submitWorkflowKernelActionIntent } from '../../../lib/workflowKernelIntent';
 
 export function PrdCard({ data, interactive }: { data: PrdCardData; interactive: boolean }) {
   const { t } = useTranslation('simpleMode');
   const [expandedStories, setExpandedStories] = useState<Set<string>>(new Set());
   const [isEditing, setIsEditing] = useState(false);
+  const [acted, setActed] = useState(false);
+  const [isApproving, setIsApproving] = useState(false);
   const phase = useWorkflowOrchestratorStore((s) => s.phase);
   const approvePrd = useWorkflowOrchestratorStore((s) => s.approvePrd);
   const editablePrd = useWorkflowOrchestratorStore((s) => s.editablePrd);
   const updateEditableStory = useWorkflowOrchestratorStore((s) => s.updateEditableStory);
+  const workflowSession = useWorkflowKernelStore((s) => s.session);
+  const transitionAndSubmitWorkflowKernelInput = useWorkflowKernelStore((s) => s.transitionAndSubmitInput);
 
-  const isActive = interactive && phase === 'reviewing_prd';
+  const isKernelTaskActive = workflowSession?.status === 'active' && workflowSession.activeMode === 'task';
+  const isActive = interactive && phase === 'reviewing_prd' && isKernelTaskActive && !acted;
 
   // When editing, read stories from the live editablePrd; otherwise use the snapshot card data
   const displayStories: PrdStoryData[] = isEditing && editablePrd ? editablePrd.stories : data.stories;
@@ -40,8 +47,42 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
   }, []);
 
   const handleApprove = useCallback(() => {
-    approvePrd();
-  }, [approvePrd]);
+    if (!isActive || isApproving) return;
+    setActed(true);
+    setIsApproving(true);
+    void (async () => {
+      try {
+        await submitWorkflowKernelActionIntent({
+          transitionAndSubmitInput: transitionAndSubmitWorkflowKernelInput,
+          mode: 'task',
+          type: 'execution_control',
+          source: 'prd_card',
+          action: 'approve_prd',
+          content: 'approve_prd',
+          metadata: {
+            storyCount: data.stories.length,
+            batchCount: data.batches.length,
+            isEdited: !!editablePrd,
+          },
+        });
+      } catch {
+        // Keep orchestration available even if kernel logging fails.
+      }
+      try {
+        await approvePrd();
+      } finally {
+        setIsApproving(false);
+      }
+    })();
+  }, [
+    approvePrd,
+    data.batches.length,
+    data.stories.length,
+    editablePrd,
+    isActive,
+    isApproving,
+    transitionAndSubmitWorkflowKernelInput,
+  ]);
 
   // Group stories by batch
   const storyBatchMap = new Map<string, number>();
@@ -123,7 +164,8 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
         <div className="px-3 py-2 border-t border-emerald-200 dark:border-emerald-800 flex items-center gap-2">
           <button
             onClick={handleApprove}
-            className="px-3 py-1.5 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+            disabled={isApproving}
+            className="px-3 py-1.5 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
           >
             {t('workflow.prd.approveAndExecute')}
           </button>

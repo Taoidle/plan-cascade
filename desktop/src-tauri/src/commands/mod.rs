@@ -45,6 +45,7 @@ pub mod strategy;
 pub mod task_mode;
 pub mod timeline;
 pub mod webhook;
+pub mod workflow;
 pub mod worktree;
 
 pub use a2a::*;
@@ -89,4 +90,5 @@ pub use strategy::*;
 pub use task_mode::*;
 pub use timeline::*;
 pub use webhook::*;
+pub use workflow::*;
 pub use worktree::*;
