@@ -42,6 +42,12 @@
       "description": "Choose your preferred color scheme. System follows your OS preference."
     },
 
+    "panelHover": {
+      "title": "Panel Interaction",
+      "enable": "Enable edge hover expand/collapse",
+      "description": "When enabled, moving the mouse to the left/right edge temporarily expands the sidebar/output panel, and moving away collapses it after a short delay."
+    },
+
     "language": {
       "title": "Language",
       "description": "Select your preferred language."

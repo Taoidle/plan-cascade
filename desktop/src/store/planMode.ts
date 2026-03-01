@@ -44,6 +44,7 @@ export interface PlanModeState {
   isLoading: boolean;
   error: string | null;
   _unlistenFn: UnlistenFn | null;
+  _requestId: number;
 
   // Actions
   enterPlanMode: (
@@ -88,6 +89,7 @@ export interface PlanModeState {
   ) => Promise<void>;
   refreshStatus: () => Promise<void>;
   cancelExecution: () => Promise<void>;
+  cancelOperation: () => Promise<void>;
   fetchReport: () => Promise<void>;
   exitPlanMode: () => Promise<void>;
   fetchAdapters: () => Promise<void>;
@@ -115,6 +117,7 @@ const DEFAULT_STATE = {
   isLoading: false,
   error: null,
   _unlistenFn: null,
+  _requestId: 0,
 };
 
 // ============================================================================
@@ -134,7 +137,8 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
     conversationContext,
     locale,
   ) => {
-    set({ isLoading: true, error: null });
+    const requestId = get()._requestId + 1;
+    set({ isLoading: true, error: null, _requestId: requestId });
     try {
       // Resolve base URL for multi-endpoint providers (Qwen, GLM, MiniMax)
       let finalBaseUrl = baseUrl;
@@ -154,6 +158,7 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
         conversationContext: conversationContext || null,
         locale: locale || null,
       });
+      if (get()._requestId !== requestId) return;
 
       if (result.success && result.data) {
         set({
@@ -170,6 +175,7 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
         set({ isLoading: false, error: result.error || 'Failed to enter plan mode' });
       }
     } catch (e) {
+      if (get()._requestId !== requestId) return;
       set({ isLoading: false, error: String(e) });
     }
   },
@@ -186,6 +192,8 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
   ) => {
     const { sessionId } = get();
     if (!sessionId) return null;
+    const requestId = get()._requestId + 1;
+    set({ _requestId: requestId });
 
     try {
       const settingsStore = (await import('./settings')).useSettingsStore.getState();
@@ -205,6 +213,7 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
         conversationContext: conversationContext || null,
         locale: locale || null,
       });
+      if (get()._requestId !== requestId) return null;
       if (result.success && result.data) {
         set({
           sessionPhase: result.data.phase,
@@ -214,6 +223,7 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
       }
       return null;
     } catch (e) {
+      if (get()._requestId !== requestId) return null;
       set({ error: String(e) });
       return null;
     }
@@ -222,15 +232,19 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
   skipClarification: async () => {
     const { sessionId } = get();
     if (!sessionId) return;
+    const requestId = get()._requestId + 1;
+    set({ _requestId: requestId });
 
     try {
       const result = await invoke<CommandResponse<PlanModeSession>>('skip_plan_clarification', {
         sessionId,
       });
+      if (get()._requestId !== requestId) return;
       if (result.success && result.data) {
         set({ sessionPhase: result.data.phase });
       }
     } catch (e) {
+      if (get()._requestId !== requestId) return;
       set({ error: String(e) });
     }
   },
@@ -239,7 +253,8 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
     const { sessionId } = get();
     if (!sessionId) return;
 
-    set({ isLoading: true, error: null });
+    const requestId = get()._requestId + 1;
+    set({ isLoading: true, error: null, _requestId: requestId });
     try {
       const settingsStore = (await import('./settings')).useSettingsStore.getState();
       const finalProvider = provider || settingsStore.provider;
@@ -257,6 +272,7 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
         conversationContext: conversationContext || null,
         locale: locale || null,
       });
+      if (get()._requestId !== requestId) return;
 
       if (result.success && result.data) {
         set({
@@ -268,6 +284,7 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
         set({ isLoading: false, error: result.error || 'Failed to generate plan' });
       }
     } catch (e) {
+      if (get()._requestId !== requestId) return;
       set({ isLoading: false, error: String(e) });
     }
   },
@@ -276,7 +293,8 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
     const { sessionId } = get();
     if (!sessionId) return;
 
-    set({ isLoading: true, error: null });
+    const requestId = get()._requestId + 1;
+    set({ isLoading: true, error: null, _requestId: requestId });
     try {
       const settingsStore = (await import('./settings')).useSettingsStore.getState();
       const finalProvider = provider || settingsStore.provider;
@@ -295,6 +313,7 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
         conversationContext: conversationContext || null,
         locale: locale || null,
       });
+      if (get()._requestId !== requestId) return;
 
       if (result.success) {
         set({ sessionPhase: 'executing', isLoading: false });
@@ -302,6 +321,7 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
         set({ isLoading: false, error: result.error || 'Failed to approve plan' });
       }
     } catch (e) {
+      if (get()._requestId !== requestId) return;
       set({ isLoading: false, error: String(e) });
     }
   },
@@ -328,11 +348,38 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
   cancelExecution: async () => {
     const { sessionId } = get();
     if (!sessionId) return;
+    const requestId = get()._requestId + 1;
+    set({ _requestId: requestId });
 
     try {
-      await invoke<CommandResponse<boolean>>('cancel_plan_execution', { sessionId });
-      set({ sessionPhase: 'cancelled' });
+      const result = await invoke<CommandResponse<boolean>>('cancel_plan_execution', { sessionId });
+      if (get()._requestId !== requestId) return;
+      if (result.success) {
+        set({ sessionPhase: 'cancelled' });
+      } else {
+        set({ error: result.error || 'Failed to cancel plan execution' });
+      }
     } catch (e) {
+      if (get()._requestId !== requestId) return;
+      set({ error: String(e) });
+    }
+  },
+
+  cancelOperation: async () => {
+    const { sessionId } = get();
+    const requestId = get()._requestId + 1;
+    set({ _requestId: requestId });
+
+    try {
+      const result = await invoke<CommandResponse<boolean>>('cancel_plan_operation', {
+        sessionId: sessionId || null,
+      });
+      if (get()._requestId !== requestId) return;
+      if (!result.success) {
+        set({ error: result.error || 'Failed to cancel plan operation' });
+      }
+    } catch (e) {
+      if (get()._requestId !== requestId) return;
       set({ error: String(e) });
     }
   },
@@ -353,6 +400,8 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
 
   exitPlanMode: async () => {
     const { sessionId, _unlistenFn } = get();
+    const nextRequestId = get()._requestId + 1;
+    set({ _requestId: nextRequestId });
 
     if (_unlistenFn) {
       _unlistenFn();
@@ -366,7 +415,7 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
       }
     }
 
-    set({ ...DEFAULT_STATE });
+    set({ ...DEFAULT_STATE, _requestId: nextRequestId });
   },
 
   fetchAdapters: async () => {
@@ -425,6 +474,6 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
   reset: () => {
     const { _unlistenFn } = get();
     if (_unlistenFn) _unlistenFn();
-    set({ ...DEFAULT_STATE });
+    set((state) => ({ ...DEFAULT_STATE, _requestId: state._requestId + 1 }));
   },
 }));

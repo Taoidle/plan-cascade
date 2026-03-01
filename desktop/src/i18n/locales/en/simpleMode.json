@@ -750,7 +750,24 @@
   },
   "rightPanel": {
     "outputTab": "Output",
-    "gitTab": "Git"
+    "gitTab": "Git",
+    "errors": {
+      "summary": "{{count}} issue(s)",
+      "dismiss": "Dismiss",
+      "dismissAll": "Dismiss all",
+      "retryStory": "Retry story",
+      "showDetails": "Details",
+      "hideDetails": "Hide",
+      "suggestedFix": "Suggested fix",
+      "viewAll": "Expand",
+      "hideList": "Collapse",
+      "moreErrors": "{{count}} more errors not shown",
+      "severity": {
+        "warning": "Warning",
+        "error": "Error",
+        "critical": "Critical"
+      }
+    }
   },
   "edgeButton": {
     "expandSidebar": "Expand sidebar",

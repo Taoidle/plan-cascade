@@ -417,21 +417,58 @@ pub struct ArchitectureReviewResult {
 
 /// Managed Tauri state for task mode.
 pub struct TaskModeState {
-    session: Arc<RwLock<Option<TaskModeSession>>>,
-    /// Cancellation token for the currently executing batch.
-    cancellation_token: Arc<RwLock<Option<CancellationToken>>>,
-    /// Final execution result (populated when execution completes).
-    execution_result: Arc<RwLock<Option<BatchExecutionResult>>>,
+    sessions: Arc<RwLock<HashMap<String, TaskModeSession>>>,
+    /// Cancellation tokens keyed by executing session id.
+    cancellation_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
+    /// Cancellation tokens keyed by session id for pre-execution operations.
+    operation_cancellation_tokens: Arc<RwLock<HashMap<String, (String, CancellationToken)>>>,
+    /// Final execution results keyed by session id.
+    execution_results: Arc<RwLock<HashMap<String, BatchExecutionResult>>>,
 }
 
 impl TaskModeState {
     /// Create a new empty state.
     pub fn new() -> Self {
         Self {
-            session: Arc::new(RwLock::new(None)),
-            cancellation_token: Arc::new(RwLock::new(None)),
-            execution_result: Arc::new(RwLock::new(None)),
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            cancellation_tokens: Arc::new(RwLock::new(HashMap::new())),
+            operation_cancellation_tokens: Arc::new(RwLock::new(HashMap::new())),
+            execution_results: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+}
+
+const TASK_OPERATION_CANCELLED_ERROR: &str = "Operation cancelled";
+
+async fn register_task_operation_token(
+    state: &TaskModeState,
+    session_id: &str,
+) -> (String, CancellationToken) {
+    let operation_id = uuid::Uuid::new_v4().to_string();
+    let token = CancellationToken::new();
+
+    let previous = {
+        let mut tokens = state.operation_cancellation_tokens.write().await;
+        tokens.insert(
+            session_id.to_string(),
+            (operation_id.clone(), token.clone()),
+        )
+    };
+    if let Some((_, prev_token)) = previous {
+        prev_token.cancel();
+    }
+
+    (operation_id, token)
+}
+
+async fn clear_task_operation_token(state: &TaskModeState, session_id: &str, operation_id: &str) {
+    let mut tokens = state.operation_cancellation_tokens.write().await;
+    let should_remove = tokens
+        .get(session_id)
+        .map(|(current_id, _)| current_id == operation_id)
+        .unwrap_or(false);
+    if should_remove {
+        tokens.remove(session_id);
     }
 }
 
@@ -452,22 +489,6 @@ pub async fn enter_task_mode(
         return Ok(CommandResponse::err("Task description cannot be empty"));
     }
 
-    // Check if already in task mode
-    {
-        let session = state.session.read().await;
-        if let Some(ref s) = *session {
-            if !matches!(
-                s.status,
-                TaskModeStatus::Completed | TaskModeStatus::Failed | TaskModeStatus::Cancelled
-            ) {
-                return Ok(CommandResponse::err(format!(
-                    "Already in task mode (session: {}). Exit first.",
-                    s.session_id
-                )));
-            }
-        }
-    }
-
     // Run strategy analysis
     let analysis = analyze_task_for_mode(&description, None);
 
@@ -484,8 +505,8 @@ pub async fn enter_task_mode(
 
     // Store session
     {
-        let mut s = state.session.write().await;
-        *s = Some(session.clone());
+        let mut sessions = state.sessions.write().await;
+        sessions.insert(session.session_id.clone(), session.clone());
     }
 
     Ok(CommandResponse::ok(session))
@@ -523,10 +544,10 @@ pub async fn generate_task_prd(
 ) -> Result<CommandResponse<TaskPrd>, String> {
     // Validate and extract session
     let (description, status) = {
-        let session_guard = state.session.read().await;
-        match session_guard.as_ref() {
-            Some(s) if s.session_id == session_id => (s.description.clone(), s.status.clone()),
-            _ => {
+        let sessions = state.sessions.read().await;
+        match sessions.get(&session_id) {
+            Some(s) => (s.description.clone(), s.status.clone()),
+            None => {
                 return Ok(CommandResponse::err(
                     "Invalid session ID or no active session",
                 ))
@@ -543,156 +564,186 @@ pub async fn generate_task_prd(
 
     // Update status to GeneratingPrd
     {
-        let mut session_guard = state.session.write().await;
-        if let Some(s) = session_guard.as_mut() {
+        let mut sessions = state.sessions.write().await;
+        if let Some(s) = sessions.get_mut(&session_id) {
             s.status = TaskModeStatus::GeneratingPrd;
+        } else {
+            return Ok(CommandResponse::err(
+                "Invalid session ID or no active session",
+            ));
         }
     }
+    let (operation_id, operation_token) = register_task_operation_token(&state, &session_id).await;
+    let result = tokio::select! {
+        _ = operation_token.cancelled() => Ok(CommandResponse::err(TASK_OPERATION_CANCELLED_ERROR)),
+        result = async {
+            // If compiled_spec is provided (from interview pipeline), convert directly
+            if let Some(spec_value) = compiled_spec {
+                match prd_generator::convert_compiled_prd_to_task_prd(spec_value) {
+                    Ok(prd) => {
+                        let mut sessions = state.sessions.write().await;
+                        if let Some(s) = sessions.get_mut(&session_id) {
+                            s.status = TaskModeStatus::ReviewingPrd;
+                            s.prd = Some(prd.clone());
+                        } else {
+                            return Ok(CommandResponse::err(
+                                "Invalid session ID or no active session",
+                            ));
+                        }
+                        return Ok(CommandResponse::ok(prd));
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[generate_task_prd] compiled_spec conversion failed, falling back to LLM: {}",
+                            e
+                        );
+                        // Fall through to LLM generation
+                    }
+                }
+            }
 
-    // If compiled_spec is provided (from interview pipeline), convert directly
-    if let Some(spec_value) = compiled_spec {
-        match prd_generator::convert_compiled_prd_to_task_prd(spec_value) {
-            Ok(prd) => {
-                let mut session_guard = state.session.write().await;
-                if let Some(s) = session_guard.as_mut() {
+            // Resolve provider/model: explicit param → database settings → hardcoded defaults
+            let resolved_provider = match provider {
+                Some(ref p) if !p.is_empty() => p.clone(),
+                _ => {
+                    match app_state
+                        .with_database(|db| db.get_setting("llm_provider"))
+                        .await
+                    {
+                        Ok(Some(p)) if !p.is_empty() => p,
+                        _ => "anthropic".to_string(),
+                    }
+                }
+            };
+            let resolved_model = match model {
+                Some(ref m) if !m.is_empty() => m.clone(),
+                _ => {
+                    match app_state
+                        .with_database(|db| db.get_setting("llm_model"))
+                        .await
+                    {
+                        Ok(Some(m)) if !m.is_empty() => m,
+                        _ => match resolved_provider.as_str() {
+                            "anthropic" => "claude-sonnet-4-20250514".to_string(),
+                            "openai" => "gpt-4o".to_string(),
+                            "deepseek" => "deepseek-chat".to_string(),
+                            "ollama" => "qwen2.5-coder:14b".to_string(),
+                            _ => "claude-sonnet-4-20250514".to_string(),
+                        },
+                    }
+                }
+            };
+
+            // Resolve provider configuration
+            let llm_provider = match resolve_llm_provider(
+                &resolved_provider,
+                &resolved_model,
+                api_key.or(apiKey),
+                base_url.or(baseUrl),
+                &app_state,
+            )
+            .await
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    // Reset status back to Initialized on failure
+                    let mut sessions = state.sessions.write().await;
+                    if let Some(s) = sessions.get_mut(&session_id) {
+                        s.status = TaskModeStatus::Initialized;
+                    }
+                    return Ok(CommandResponse::err(e));
+                }
+            };
+
+            // Call LLM for PRD generation with conversation history context
+            let history = conversation_history.unwrap_or_default();
+            let context_budget = max_context_tokens.unwrap_or(200_000);
+
+            // Read exploration result from session for context injection
+            let exploration_context_str = {
+                let sessions = state.sessions.read().await;
+                sessions
+                    .get(&session_id)
+                    .and_then(|s| s.exploration_result.as_ref())
+                    .map(exploration::format_exploration_context)
+            };
+
+            // Query domain knowledge for PRD generation (only if user enabled sources)
+            let project_path_str = std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                .to_string_lossy()
+                .to_string();
+            let enriched = if let Some(ref cs) = context_sources {
+                crate::services::task_mode::context_provider::query_selected_context(
+                    cs,
+                    &knowledge_state,
+                    &app_state,
+                    &project_path_str,
+                    &description,
+                    crate::services::skills::model::InjectionPhase::Planning,
+                )
+                .await
+            } else {
+                crate::services::task_mode::context_provider::EnrichedContext::default()
+            };
+            let combined_context = crate::services::task_mode::context_provider::merge_enriched_context(
+                exploration_context_str.as_deref(),
+                &enriched.knowledge_block,
+                &enriched.memory_block,
+            );
+
+            let prd = match prd_generator::generate_prd_with_llm(
+                llm_provider,
+                &description,
+                &history,
+                context_budget,
+                combined_context.as_deref(),
+            )
+            .await
+            {
+                Ok(prd) => prd,
+                Err(e) => {
+                    // Reset status back to Initialized on failure
+                    let mut sessions = state.sessions.write().await;
+                    if let Some(s) = sessions.get_mut(&session_id) {
+                        s.status = TaskModeStatus::Initialized;
+                    }
+                    return Ok(CommandResponse::err(format!(
+                        "PRD generation failed: {}",
+                        e
+                    )));
+                }
+            };
+
+            // Update session with generated PRD
+            {
+                let mut sessions = state.sessions.write().await;
+                if let Some(s) = sessions.get_mut(&session_id) {
                     s.status = TaskModeStatus::ReviewingPrd;
                     s.prd = Some(prd.clone());
+                } else {
+                    return Ok(CommandResponse::err(
+                        "Invalid session ID or no active session",
+                    ));
                 }
-                return Ok(CommandResponse::ok(prd));
             }
-            Err(e) => {
-                eprintln!(
-                    "[generate_task_prd] compiled_spec conversion failed, falling back to LLM: {}",
-                    e
-                );
-                // Fall through to LLM generation
+
+            Ok(CommandResponse::ok(prd))
+        } => result,
+    };
+    clear_task_operation_token(&state, &session_id, &operation_id).await;
+
+    if matches!(&result, Ok(resp) if !resp.success && resp.error.as_deref() == Some(TASK_OPERATION_CANCELLED_ERROR))
+    {
+        let mut sessions = state.sessions.write().await;
+        if let Some(session) = sessions.get_mut(&session_id) {
+            if session.status == TaskModeStatus::GeneratingPrd {
+                session.status = TaskModeStatus::Initialized;
             }
         }
     }
 
-    // Resolve provider/model: explicit param → database settings → hardcoded defaults
-    let resolved_provider = match provider {
-        Some(ref p) if !p.is_empty() => p.clone(),
-        _ => {
-            match app_state
-                .with_database(|db| db.get_setting("llm_provider"))
-                .await
-            {
-                Ok(Some(p)) if !p.is_empty() => p,
-                _ => "anthropic".to_string(),
-            }
-        }
-    };
-    let resolved_model = match model {
-        Some(ref m) if !m.is_empty() => m.clone(),
-        _ => {
-            match app_state
-                .with_database(|db| db.get_setting("llm_model"))
-                .await
-            {
-                Ok(Some(m)) if !m.is_empty() => m,
-                _ => match resolved_provider.as_str() {
-                    "anthropic" => "claude-sonnet-4-20250514".to_string(),
-                    "openai" => "gpt-4o".to_string(),
-                    "deepseek" => "deepseek-chat".to_string(),
-                    "ollama" => "qwen2.5-coder:14b".to_string(),
-                    _ => "claude-sonnet-4-20250514".to_string(),
-                },
-            }
-        }
-    };
-
-    // Resolve provider configuration
-    let llm_provider = match resolve_llm_provider(
-        &resolved_provider,
-        &resolved_model,
-        api_key.or(apiKey),
-        base_url.or(baseUrl),
-        &app_state,
-    )
-    .await
-    {
-        Ok(p) => p,
-        Err(e) => {
-            // Reset status back to Initialized on failure
-            let mut session_guard = state.session.write().await;
-            if let Some(s) = session_guard.as_mut() {
-                s.status = TaskModeStatus::Initialized;
-            }
-            return Ok(CommandResponse::err(e));
-        }
-    };
-
-    // Call LLM for PRD generation with conversation history context
-    let history = conversation_history.unwrap_or_default();
-    let context_budget = max_context_tokens.unwrap_or(200_000);
-
-    // Read exploration result from session for context injection
-    let exploration_context_str = {
-        let session_guard = state.session.read().await;
-        session_guard
-            .as_ref()
-            .and_then(|s| s.exploration_result.as_ref())
-            .map(exploration::format_exploration_context)
-    };
-
-    // Query domain knowledge for PRD generation (only if user enabled sources)
-    let project_path_str = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .to_string_lossy()
-        .to_string();
-    let enriched = if let Some(ref cs) = context_sources {
-        crate::services::task_mode::context_provider::query_selected_context(
-            cs,
-            &knowledge_state,
-            &app_state,
-            &project_path_str,
-            &description,
-            crate::services::skills::model::InjectionPhase::Planning,
-        )
-        .await
-    } else {
-        crate::services::task_mode::context_provider::EnrichedContext::default()
-    };
-    let combined_context = crate::services::task_mode::context_provider::merge_enriched_context(
-        exploration_context_str.as_deref(),
-        &enriched.knowledge_block,
-        &enriched.memory_block,
-    );
-
-    let prd = match prd_generator::generate_prd_with_llm(
-        llm_provider,
-        &description,
-        &history,
-        context_budget,
-        combined_context.as_deref(),
-    )
-    .await
-    {
-        Ok(prd) => prd,
-        Err(e) => {
-            // Reset status back to Initialized on failure
-            let mut session_guard = state.session.write().await;
-            if let Some(s) = session_guard.as_mut() {
-                s.status = TaskModeStatus::Initialized;
-            }
-            return Ok(CommandResponse::err(format!(
-                "PRD generation failed: {}",
-                e
-            )));
-        }
-    };
-
-    // Update session with generated PRD
-    {
-        let mut session_guard = state.session.write().await;
-        if let Some(s) = session_guard.as_mut() {
-            s.status = TaskModeStatus::ReviewingPrd;
-            s.prd = Some(prd.clone());
-        }
-    }
-
-    Ok(CommandResponse::ok(prd))
+    result
 }
 
 /// Explore the project codebase to gather context for PRD generation.
@@ -728,9 +779,9 @@ pub async fn explore_project(
 
     // Validate session
     {
-        let session_guard = state.session.read().await;
-        match session_guard.as_ref() {
-            Some(s) if s.session_id == session_id => {
+        let sessions = state.sessions.read().await;
+        match sessions.get(&session_id) {
+            Some(s) => {
                 if s.status != TaskModeStatus::Initialized {
                     return Ok(CommandResponse::err(format!(
                         "Cannot explore in {:?} status",
@@ -748,11 +799,19 @@ pub async fn explore_project(
 
     // Set status to Exploring
     {
-        let mut session_guard = state.session.write().await;
-        if let Some(s) = session_guard.as_mut() {
+        let mut sessions = state.sessions.write().await;
+        if let Some(s) = sessions.get_mut(&session_id) {
             s.status = TaskModeStatus::Exploring;
+        } else {
+            return Ok(CommandResponse::err(
+                "Invalid session ID or no active session",
+            ));
         }
     }
+    let (operation_id, operation_token) = register_task_operation_token(&state, &session_id).await;
+    let result = tokio::select! {
+        _ = operation_token.cancelled() => Ok(CommandResponse::err(TASK_OPERATION_CANCELLED_ERROR)),
+        result = async {
 
     let start = std::time::Instant::now();
 
@@ -779,10 +838,14 @@ pub async fn explore_project(
 
         // Reset status
         {
-            let mut session_guard = state.session.write().await;
-            if let Some(s) = session_guard.as_mut() {
+            let mut sessions = state.sessions.write().await;
+            if let Some(s) = sessions.get_mut(&session_id) {
                 s.status = TaskModeStatus::Initialized;
                 s.exploration_result = Some(result.clone());
+            } else {
+                return Ok(CommandResponse::err(
+                    "Invalid session ID or no active session",
+                ));
             }
         }
         return Ok(CommandResponse::ok(result));
@@ -1105,10 +1168,14 @@ pub async fn explore_project(
 
     // Store result and reset status
     {
-        let mut session_guard = state.session.write().await;
-        if let Some(s) = session_guard.as_mut() {
+        let mut sessions = state.sessions.write().await;
+        if let Some(s) = sessions.get_mut(&session_id) {
             s.status = TaskModeStatus::Initialized;
             s.exploration_result = Some(result.clone());
+        } else {
+            return Ok(CommandResponse::err(
+                "Invalid session ID or no active session",
+            ));
         }
     }
 
@@ -1122,6 +1189,21 @@ pub async fn explore_project(
     );
 
     Ok(CommandResponse::ok(result))
+        } => result,
+    };
+    clear_task_operation_token(&state, &session_id, &operation_id).await;
+
+    if matches!(&result, Ok(resp) if !resp.success && resp.error.as_deref() == Some(TASK_OPERATION_CANCELLED_ERROR))
+    {
+        let mut sessions = state.sessions.write().await;
+        if let Some(session) = sessions.get_mut(&session_id) {
+            if session.status == TaskModeStatus::Exploring {
+                session.status = TaskModeStatus::Initialized;
+            }
+        }
+    }
+
+    result
 }
 
 /// Resolve an LLM provider from frontend parameters and OS keyring.
@@ -1310,22 +1392,24 @@ pub async fn approve_task_prd(
     phase_configs: Option<HashMap<String, PhaseConfigInput>>,
     context_sources: Option<crate::services::task_mode::context_provider::ContextSourceConfig>,
 ) -> Result<CommandResponse<bool>, String> {
-    let mut session_guard = state.session.write().await;
-    let session = match session_guard.as_mut() {
-        Some(s) if s.session_id == session_id => s,
-        _ => {
-            return Ok(CommandResponse::err(
-                "Invalid session ID or no active session",
-            ))
+    let task_description = {
+        let sessions = state.sessions.read().await;
+        let session = match sessions.get(&session_id) {
+            Some(s) => s,
+            None => {
+                return Ok(CommandResponse::err(
+                    "Invalid session ID or no active session",
+                ))
+            }
+        };
+        if session.status != TaskModeStatus::ReviewingPrd {
+            return Ok(CommandResponse::err(format!(
+                "Cannot approve PRD in {:?} status",
+                session.status
+            )));
         }
+        session.description.clone()
     };
-
-    if session.status != TaskModeStatus::ReviewingPrd {
-        return Ok(CommandResponse::err(format!(
-            "Cannot approve PRD in {:?} status",
-            session.status
-        )));
-    }
 
     // Validate PRD
     if prd.stories.is_empty() {
@@ -1359,25 +1443,37 @@ pub async fn approve_task_prd(
         Ok(batches) => {
             let mut approved_prd = prd;
             approved_prd.batches = batches;
-            session.prd = Some(approved_prd);
-            session.status = TaskModeStatus::Executing;
+            {
+                let mut sessions = state.sessions.write().await;
+                let session = match sessions.get_mut(&session_id) {
+                    Some(s) => s,
+                    None => {
+                        return Ok(CommandResponse::err(
+                            "Invalid session ID or no active session",
+                        ))
+                    }
+                };
+                session.prd = Some(approved_prd);
+                session.status = TaskModeStatus::Executing;
+            }
 
             // Create cancellation token for this execution
             let cancellation_token = CancellationToken::new();
             {
-                let mut ct = state.cancellation_token.write().await;
-                *ct = Some(cancellation_token.clone());
+                let mut tokens = state.cancellation_tokens.write().await;
+                tokens.insert(session_id.clone(), cancellation_token.clone());
             }
 
             // Clear any previous execution result
             {
-                let mut er = state.execution_result.write().await;
-                *er = None;
+                let mut results = state.execution_results.write().await;
+                results.remove(&session_id);
             }
 
             // Clone what we need for the spawned background task
-            let session_arc = state.session.clone();
-            let result_arc = state.execution_result.clone();
+            let sessions_arc = state.sessions.clone();
+            let results_arc = state.execution_results.clone();
+            let tokens_arc = state.cancellation_tokens.clone();
             let sid = session_id.clone();
             let app_handle = app.clone();
             let stories_for_exec = stories.clone();
@@ -1434,7 +1530,7 @@ pub async fn approve_task_prd(
                     // LLM mode: skip knowledge pre-injection (handled by SearchKnowledge tool)
                     crate::services::task_mode::context_provider::query_selected_context_without_knowledge(
                         cs, &app_state, &project_path_str,
-                        &session.description, crate::services::skills::model::InjectionPhase::Implementation,
+                        &task_description, crate::services::skills::model::InjectionPhase::Implementation,
                     ).await
                 } else {
                     // CLI mode: full pre-injection including knowledge (no tools available)
@@ -1443,7 +1539,7 @@ pub async fn approve_task_prd(
                         &knowledge_state,
                         &app_state,
                         &project_path_str,
-                        &session.description,
+                        &task_description,
                         crate::services::skills::model::InjectionPhase::Implementation,
                     )
                     .await
@@ -1473,7 +1569,7 @@ pub async fn approve_task_prd(
                             };
                             let collections = pipeline.list_collections(&pid).unwrap_or_default();
                             let language = crate::services::tools::system_prompt::detect_language(
-                                &session.description,
+                                &task_description,
                             );
                             let summaries: Vec<
                                     crate::services::tools::system_prompt::KnowledgeCollectionSummary,
@@ -1568,32 +1664,33 @@ pub async fn approve_task_prd(
                     .await;
 
                 // Update session state based on result
-                let mut session_guard = session_arc.write().await;
-                if let Some(ref mut session) = *session_guard {
-                    if session.session_id == sid {
-                        match &result {
-                            Ok(exec_result) => {
-                                // Update progress
-                                session.progress = Some(executor.get_progress().await);
+                let mut sessions = sessions_arc.write().await;
+                if let Some(session) = sessions.get_mut(&sid) {
+                    match &result {
+                        Ok(exec_result) => {
+                            // Update progress
+                            session.progress = Some(executor.get_progress().await);
 
-                                if exec_result.cancelled {
-                                    session.status = TaskModeStatus::Cancelled;
-                                } else if exec_result.success {
-                                    session.status = TaskModeStatus::Completed;
-                                } else {
-                                    session.status = TaskModeStatus::Failed;
-                                }
-
-                                // Store the result
-                                let mut er = result_arc.write().await;
-                                *er = Some(exec_result.clone());
-                            }
-                            Err(_) => {
+                            if exec_result.cancelled {
+                                session.status = TaskModeStatus::Cancelled;
+                            } else if exec_result.success {
+                                session.status = TaskModeStatus::Completed;
+                            } else {
                                 session.status = TaskModeStatus::Failed;
                             }
+
+                            // Store the result
+                            let mut results = results_arc.write().await;
+                            results.insert(sid.clone(), exec_result.clone());
+                        }
+                        Err(_) => {
+                            session.status = TaskModeStatus::Failed;
                         }
                     }
                 }
+
+                let mut tokens = tokens_arc.write().await;
+                tokens.remove(&sid);
             });
 
             Ok(CommandResponse::ok(true))
@@ -1611,9 +1708,9 @@ pub async fn get_task_execution_status(
     session_id: String,
     state: tauri::State<'_, TaskModeState>,
 ) -> Result<CommandResponse<TaskExecutionStatus>, String> {
-    let session_guard = state.session.read().await;
-    let session = match session_guard.as_ref() {
-        Some(s) if s.session_id == session_id => s,
+    let sessions = state.sessions.read().await;
+    let session = match sessions.get(&session_id) {
+        Some(s) => s,
         _ => {
             return Ok(CommandResponse::err(
                 "Invalid session ID or no active session",
@@ -1651,9 +1748,9 @@ pub async fn cancel_task_execution(
     session_id: String,
     state: tauri::State<'_, TaskModeState>,
 ) -> Result<CommandResponse<bool>, String> {
-    let session_guard = state.session.read().await;
-    let session = match session_guard.as_ref() {
-        Some(s) if s.session_id == session_id => s,
+    let sessions = state.sessions.read().await;
+    let session = match sessions.get(&session_id) {
+        Some(s) => s,
         _ => {
             return Ok(CommandResponse::err(
                 "Invalid session ID or no active session",
@@ -1666,14 +1763,49 @@ pub async fn cancel_task_execution(
     }
 
     // Trigger the cancellation token
-    let ct = state.cancellation_token.read().await;
-    if let Some(ref token) = *ct {
+    let ct = state.cancellation_tokens.read().await;
+    if let Some(token) = ct.get(&session_id) {
         token.cancel();
+    } else {
+        return Ok(CommandResponse::err("No execution in progress to cancel"));
     }
 
     // Note: The background task will update session.status to Cancelled
     // when it detects the cancellation token.
     Ok(CommandResponse::ok(true))
+}
+
+/// Cancel a running task pre-execution operation (explore/analysis/PRD generation/review).
+#[tauri::command]
+pub async fn cancel_task_operation(
+    session_id: Option<String>,
+    state: tauri::State<'_, TaskModeState>,
+) -> Result<CommandResponse<bool>, String> {
+    let mut cancelled_any = false;
+    let tokens = state.operation_cancellation_tokens.read().await;
+
+    match session_id {
+        Some(sid) => {
+            if let Some((_, token)) = tokens.get(&sid) {
+                token.cancel();
+                cancelled_any = true;
+            }
+        }
+        None => {
+            for (_, token) in tokens.values() {
+                token.cancel();
+                cancelled_any = true;
+            }
+        }
+    }
+
+    if cancelled_any {
+        Ok(CommandResponse::ok(true))
+    } else {
+        Ok(CommandResponse::err(
+            "No task operation in progress to cancel",
+        ))
+    }
 }
 
 /// Get the execution report after completion.
@@ -1684,9 +1816,9 @@ pub async fn get_task_execution_report(
     session_id: String,
     state: tauri::State<'_, TaskModeState>,
 ) -> Result<CommandResponse<ExecutionReport>, String> {
-    let session_guard = state.session.read().await;
-    let session = match session_guard.as_ref() {
-        Some(s) if s.session_id == session_id => s,
+    let sessions = state.sessions.read().await;
+    let session = match sessions.get(&session_id) {
+        Some(s) => s,
         _ => {
             return Ok(CommandResponse::err(
                 "Invalid session ID or no active session",
@@ -1726,8 +1858,8 @@ pub async fn get_task_execution_report(
         .unwrap_or_default();
 
     // Try to get the real execution result
-    let exec_result = state.execution_result.read().await;
-    if let Some(ref result) = *exec_result {
+    let exec_results = state.execution_results.read().await;
+    if let Some(result) = exec_results.get(&session_id) {
         let agent_assignments: HashMap<String, String> = result
             .agent_assignments
             .iter()
@@ -1970,35 +2102,39 @@ pub async fn exit_task_mode(
     session_id: String,
     state: tauri::State<'_, TaskModeState>,
 ) -> Result<CommandResponse<bool>, String> {
-    let mut session_guard = state.session.write().await;
-    match session_guard.as_ref() {
-        Some(s) if s.session_id == session_id => {
-            // Cancel any running execution
-            {
-                let ct = state.cancellation_token.read().await;
-                if let Some(ref token) = *ct {
-                    token.cancel();
-                }
-            }
-
-            *session_guard = None;
-
-            // Clean up cancellation token and execution result
-            {
-                let mut ct = state.cancellation_token.write().await;
-                *ct = None;
-            }
-            {
-                let mut er = state.execution_result.write().await;
-                *er = None;
-            }
-
-            Ok(CommandResponse::ok(true))
-        }
-        _ => Ok(CommandResponse::err(
+    let removed = {
+        let mut sessions = state.sessions.write().await;
+        sessions.remove(&session_id).is_some()
+    };
+    if !removed {
+        return Ok(CommandResponse::err(
             "Invalid session ID or no active session",
-        )),
+        ));
     }
+
+    // Cancel and remove any active token for this session.
+    if let Some(token) = {
+        let mut tokens = state.cancellation_tokens.write().await;
+        tokens.remove(&session_id)
+    } {
+        token.cancel();
+    }
+
+    // Cancel and remove any active pre-execution operation token for this session.
+    if let Some((_, token)) = {
+        let mut tokens = state.operation_cancellation_tokens.write().await;
+        tokens.remove(&session_id)
+    } {
+        token.cancel();
+    }
+
+    // Drop any cached execution report for this session.
+    {
+        let mut results = state.execution_results.write().await;
+        results.remove(&session_id);
+    }
+
+    Ok(CommandResponse::ok(true))
 }
 
 // ============================================================================
@@ -2369,9 +2505,9 @@ pub async fn run_requirement_analysis(
 
     // Validate session
     {
-        let session_guard = state.session.read().await;
-        match session_guard.as_ref() {
-            Some(s) if s.session_id == session_id => {}
+        let sessions = state.sessions.read().await;
+        match sessions.get(&session_id) {
+            Some(_) => {}
             _ => {
                 return Ok(CommandResponse::err(
                     "Invalid session ID or no active session",
@@ -2379,6 +2515,10 @@ pub async fn run_requirement_analysis(
             }
         }
     }
+    let (operation_id, operation_token) = register_task_operation_token(&state, &session_id).await;
+    let result = tokio::select! {
+        _ = operation_token.cancelled() => Ok(CommandResponse::err(TASK_OPERATION_CANCELLED_ERROR)),
+        result = async {
 
     // Resolve provider/model
     let resolved_provider = match provider {
@@ -2558,6 +2698,10 @@ Be specific and actionable. Reference concrete technical details when available.
             e
         ))),
     }
+        } => result,
+    };
+    clear_task_operation_token(&state, &session_id, &operation_id).await;
+    result
 }
 
 /// Run architecture review using the SoftwareArchitect persona.
@@ -2588,9 +2732,9 @@ pub async fn run_architecture_review(
 
     // Validate session
     {
-        let session_guard = state.session.read().await;
-        match session_guard.as_ref() {
-            Some(s) if s.session_id == session_id => {}
+        let sessions = state.sessions.read().await;
+        match sessions.get(&session_id) {
+            Some(_) => {}
             _ => {
                 return Ok(CommandResponse::err(
                     "Invalid session ID or no active session",
@@ -2598,6 +2742,10 @@ pub async fn run_architecture_review(
             }
         }
     }
+    let (operation_id, operation_token) = register_task_operation_token(&state, &session_id).await;
+    let result = tokio::select! {
+        _ = operation_token.cancelled() => Ok(CommandResponse::err(TASK_OPERATION_CANCELLED_ERROR)),
+        result = async {
 
     // Resolve provider/model
     let resolved_provider = match provider {
@@ -2821,6 +2969,10 @@ testing strategy, dependency management, and integration patterns.
             e
         ))),
     }
+        } => result,
+    };
+    clear_task_operation_token(&state, &session_id, &operation_id).await;
+    result
 }
 
 // ============================================================================
@@ -3743,8 +3895,8 @@ mod tests {
     #[tokio::test]
     async fn test_state_creation() {
         let state = test_state();
-        let session = state.session.read().await;
-        assert!(session.is_none());
+        let sessions = state.sessions.read().await;
+        assert!(sessions.is_empty());
     }
 
     // ========================================================================

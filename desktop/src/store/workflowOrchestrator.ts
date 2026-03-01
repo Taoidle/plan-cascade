@@ -91,6 +91,9 @@ interface WorkflowOrchestratorState {
   /** Conversation history extracted from Chat for Task context sharing */
   _conversationHistory: CrossModeConversationTurn[];
 
+  /** Guards async continuations after cancel/reset */
+  _runToken: number;
+
   // Actions
   startWorkflow: (description: string) => Promise<void>;
   confirmConfig: (overrides?: Partial<WorkflowConfig>) => Promise<void>;
@@ -145,6 +148,7 @@ const DEFAULT_STATE = {
   error: null as string | null,
   _unlistenFn: null as UnlistenFn | null,
   _conversationHistory: [] as CrossModeConversationTurn[],
+  _runToken: 0,
 };
 
 // ============================================================================
@@ -155,6 +159,10 @@ let _cardCounter = 0;
 
 function nextCardId(): string {
   return `card-${++_cardCounter}-${Date.now()}`;
+}
+
+function isRunActive(get: GetFn, runToken: number): boolean {
+  return get()._runToken === runToken;
 }
 
 /** Inject a card message into the chat transcript */
@@ -468,22 +476,26 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
    * Phase transitions: idle → analyzing → configuring
    */
   startWorkflow: async (description: string) => {
+    const runToken = get()._runToken + 1;
     // Add user message as 'info' StreamLine so it appears as a chat bubble in ChatTranscript
     useExecutionStore.getState().appendStreamLine(description, 'info');
 
-    set({ phase: 'analyzing', taskDescription: description, error: null });
+    set({ phase: 'analyzing', taskDescription: description, error: null, _runToken: runToken });
     injectInfo(i18n.t('workflow.orchestrator.analyzingTask', { ns: 'simpleMode' }), 'info');
 
     // Extract complete Chat conversation history for Task context sharing
     const conversationHistory = buildConversationHistory();
+    if (!isRunActive(get, runToken)) return;
     set({ _conversationHistory: conversationHistory });
 
     try {
       // 1. Enter task mode (creates session + runs strategy analysis)
       await useTaskModeStore.getState().enterTaskMode(description);
+      if (!isRunActive(get, runToken)) return;
 
       const taskModeState = useTaskModeStore.getState();
       if (taskModeState.error) {
+        if (!isRunActive(get, runToken)) return;
         set({ phase: 'failed', error: taskModeState.error });
         injectError('Strategy Analysis Failed', taskModeState.error);
         return;
@@ -494,9 +506,11 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
       // 2. Try LLM enhancement of strategy analysis
       const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
+      if (!isRunActive(get, runToken)) return;
       const strategyResolved = resolvePhaseAgent('plan_strategy');
       if (analysis) {
         try {
+          if (!isRunActive(get, runToken)) return;
           injectInfo(i18n.t('workflow.orchestrator.enhancingAnalysis', { ns: 'simpleMode' }), 'info');
 
           const enhanced = await invoke<{ success: boolean; data: StrategyAnalysis | null; error: string | null }>(
@@ -511,6 +525,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
               locale: i18n.language,
             },
           );
+          if (!isRunActive(get, runToken)) return;
 
           if (enhanced.success && enhanced.data) {
             analysis = enhanced.data;
@@ -521,10 +536,12 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         }
       }
 
+      if (!isRunActive(get, runToken)) return;
       set({ sessionId, strategyAnalysis: analysis });
 
       // 3. Inject strategy card (with LLM-enhanced or keyword result)
       if (analysis) {
+        if (!isRunActive(get, runToken)) return;
         injectCard('strategy_card', buildStrategyCardData(analysis, formatModelDisplay(strategyResolved)));
       }
 
@@ -547,11 +564,14 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         }
       }
 
+      if (!isRunActive(get, runToken)) return;
       set({ config, phase: 'configuring' });
 
       // 5. Inject config card (user interacts with it to advance)
+      if (!isRunActive(get, runToken)) return;
       injectCard('config_card', buildConfigCardData(config, false), true);
     } catch (e) {
+      if (!isRunActive(get, runToken)) return;
       const msg = e instanceof Error ? e.message : String(e);
       set({ phase: 'failed', error: msg });
       injectError('Workflow Failed', msg);
@@ -564,18 +584,23 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
    */
   confirmConfig: async (overrides?: Partial<WorkflowConfig>) => {
     const state = get();
+    const runToken = state._runToken;
     const config = overrides ? { ...state.config, ...overrides } : state.config;
+    if (!isRunActive(get, runToken)) return;
     set({ config, phase: 'exploring' });
 
     try {
       // Always explore first (exploration provides context for interview BA)
-      await explorePhase(set, get);
+      await explorePhase(set, get, runToken);
+      if (!isRunActive(get, runToken)) return;
 
       if (config.specInterviewEnabled) {
         // Start interview flow (BA now has exploration context)
+        if (!isRunActive(get, runToken)) return;
         set({ phase: 'interviewing' });
 
         const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
+        if (!isRunActive(get, runToken)) return;
         const interviewResolved = resolvePhaseAgent('plan_interview');
 
         injectCard('persona_indicator', {
@@ -614,10 +639,12 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         let session: InterviewSession | null = null;
         for (let attempt = 0; attempt < maxRetries; attempt++) {
           session = await useSpecInterviewStore.getState().startInterview(interviewConfig);
+          if (!isRunActive(get, runToken)) return;
           if (session) break;
           const interviewError = useSpecInterviewStore.getState().error || '';
           if (interviewError.includes('not initialized') && attempt < maxRetries - 1) {
             await new Promise((r) => setTimeout(r, baseDelay * Math.pow(2, attempt)));
+            if (!isRunActive(get, runToken)) return;
             useSpecInterviewStore.getState().clearError();
             continue;
           }
@@ -631,6 +658,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
           return;
         }
 
+        if (!isRunActive(get, runToken)) return;
         set({ interviewId: session.id });
 
         // Present first question
@@ -645,10 +673,12 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         }
       } else {
         // Skip interview, run requirement analysis then generate PRD
-        await requirementAnalysisPhase(set, get);
-        await generatePrdPhase(set, get);
+        await requirementAnalysisPhase(set, get, runToken);
+        if (!isRunActive(get, runToken)) return;
+        await generatePrdPhase(set, get, runToken);
       }
     } catch (e) {
+      if (!isRunActive(get, runToken)) return;
       const msg = e instanceof Error ? e.message : String(e);
       set({ phase: 'failed', error: msg });
       injectError('Configuration Failed', msg);
@@ -725,6 +755,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
   /** Submit answer to current interview question */
   submitInterviewAnswer: async (answer: string) => {
+    const runToken = get()._runToken;
     const { pendingQuestion } = get();
     if (!pendingQuestion) return;
 
@@ -739,6 +770,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
     // Submit to backend
     const updatedSession = await useSpecInterviewStore.getState().submitAnswer(answer);
+    if (!isRunActive(get, runToken)) return;
 
     if (!updatedSession) {
       const error = useSpecInterviewStore.getState().error;
@@ -758,11 +790,13 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         flow_level: config.flowLevel,
         tdd_mode: config.tddMode === 'off' ? null : config.tddMode,
       });
+      if (!isRunActive(get, runToken)) return;
 
       if (compiled) {
         // Advance to requirement analysis then PRD generation
-        await requirementAnalysisPhase(set, get);
-        await generatePrdPhase(set, get);
+        await requirementAnalysisPhase(set, get, runToken);
+        if (!isRunActive(get, runToken)) return;
+        await generatePrdPhase(set, get, runToken);
       } else {
         const error = useSpecInterviewStore.getState().error;
         set({ phase: 'failed', error: error || 'Failed to compile spec' });
@@ -785,6 +819,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
   /** Skip current interview question */
   skipInterviewQuestion: async () => {
+    const runToken = get()._runToken;
     const { pendingQuestion } = get();
     if (!pendingQuestion) return;
 
@@ -798,6 +833,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
     // Submit skip (empty answer)
     const updatedSession = await useSpecInterviewStore.getState().submitAnswer('');
+    if (!isRunActive(get, runToken)) return;
 
     if (!updatedSession) {
       const error = useSpecInterviewStore.getState().error;
@@ -813,9 +849,11 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         flow_level: config.flowLevel,
         tdd_mode: config.tddMode === 'off' ? null : config.tddMode,
       });
+      if (!isRunActive(get, runToken)) return;
       if (compiled) {
-        await requirementAnalysisPhase(set, get);
-        await generatePrdPhase(set, get);
+        await requirementAnalysisPhase(set, get, runToken);
+        if (!isRunActive(get, runToken)) return;
+        await generatePrdPhase(set, get, runToken);
       } else {
         const error = useSpecInterviewStore.getState().error;
         set({ phase: 'failed', error: error || 'Failed to compile spec' });
@@ -850,6 +888,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   /** Approve PRD and run architecture review before execution */
   approvePrd: async (editedPrd?: TaskPrd) => {
     const state = get();
+    const runToken = state._runToken;
     const prd = editedPrd || state.editablePrd;
     if (!prd) {
       set({ error: 'No PRD to approve' });
@@ -860,14 +899,14 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
     // Non-quick flow: run architecture review (interactive — returns after injecting card)
     if (state.config.flowLevel !== 'quick') {
-      await architectureReviewPhase(set, get, prd);
+      await architectureReviewPhase(set, get, prd, runToken);
       // Architecture review is interactive — user clicks Accept/Revise in the card.
       // The continuation happens in approveArchitecture() action.
       return;
     }
 
     // Quick flow: skip architecture review, go straight to design doc + execution
-    await designDocAndExecutePhase(set, get, prd);
+    await designDocAndExecutePhase(set, get, prd, runToken);
   },
 
   /** Add feedback to editable PRD (during reviewing_prd phase) */
@@ -885,6 +924,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     acceptAsIs: boolean,
     selectedModifications: ArchitectureReviewCardData['prdModifications'],
   ) => {
+    const runToken = get()._runToken;
     const { phase, editablePrd, config } = get();
     if (phase !== 'architecture_review') return;
 
@@ -901,7 +941,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       const prd = editablePrd;
       if (!prd) return;
 
-      await designDocAndExecutePhase(set, get, prd);
+      await designDocAndExecutePhase(set, get, prd, runToken);
     } else {
       if (!editablePrd) return;
 
@@ -937,10 +977,14 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
   /** Cancel the current workflow */
   cancelWorkflow: async () => {
-    const { phase, sessionId } = get();
+    const { phase, sessionId, _runToken } = get();
+    const nextRunToken = _runToken + 1;
+    set({ _runToken: nextRunToken });
 
     if (phase === 'executing' && sessionId) {
       await useTaskModeStore.getState().cancelExecution();
+    } else {
+      await useTaskModeStore.getState().cancelOperation();
     }
 
     // Unsubscribe from events
@@ -964,7 +1008,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     useTaskModeStore.getState().reset();
     useSpecInterviewStore.getState().reset();
 
-    set({ ...DEFAULT_STATE });
+    set((state) => ({ ...DEFAULT_STATE, _runToken: state._runToken + 1 }));
   },
 
   /** Clear conversation history without resetting the entire workflow */
@@ -990,7 +1034,8 @@ type GetFn = () => WorkflowOrchestratorState;
  * For quick flow: skips exploration entirely.
  * For standard/full flow: runs project exploration, injects results as card.
  */
-async function explorePhase(set: SetFn, get: GetFn) {
+async function explorePhase(set: SetFn, get: GetFn, runToken: number) {
+  if (!isRunActive(get, runToken)) return;
   const { config, taskDescription, sessionId } = get();
 
   // Quick flow: skip exploration entirely
@@ -999,6 +1044,7 @@ async function explorePhase(set: SetFn, get: GetFn) {
   set({ phase: 'exploring' });
 
   const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
+  if (!isRunActive(get, runToken)) return;
   const explorationResolved = resolvePhaseAgent('plan_exploration');
 
   injectCard('persona_indicator', {
@@ -1025,6 +1071,7 @@ async function explorePhase(set: SetFn, get: GetFn) {
       locale: i18n.language,
       contextSources: (await import('./contextSources')).useContextSourcesStore.getState().buildConfig() ?? null,
     });
+    if (!isRunActive(get, runToken)) return;
 
     if (result.success && result.data) {
       const normalized = normalizeExplorationCardData(result.data);
@@ -1044,7 +1091,8 @@ async function explorePhase(set: SetFn, get: GetFn) {
  * Runs the PM expert-formatter pipeline to analyze requirements
  * from task description, interview results, and exploration context.
  */
-async function requirementAnalysisPhase(set: SetFn, get: GetFn) {
+async function requirementAnalysisPhase(set: SetFn, get: GetFn, runToken: number) {
+  if (!isRunActive(get, runToken)) return;
   const { config, taskDescription, explorationResult } = get();
 
   // Skip for quick flow
@@ -1053,6 +1101,7 @@ async function requirementAnalysisPhase(set: SetFn, get: GetFn) {
   set({ phase: 'requirement_analysis' });
 
   const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
+  if (!isRunActive(get, runToken)) return;
   const reqResolved = resolvePhaseAgent('plan_requirements');
 
   injectCard('persona_indicator', {
@@ -1094,6 +1143,7 @@ async function requirementAnalysisPhase(set: SetFn, get: GetFn) {
       locale: i18n.language,
       contextSources,
     });
+    if (!isRunActive(get, runToken)) return;
 
     if (result.success && result.data) {
       set({ requirementAnalysis: result.data });
@@ -1125,7 +1175,8 @@ async function requirementAnalysisPhase(set: SetFn, get: GetFn) {
  * Reviews the approved PRD and injects an interactive card for
  * the user to accept or request revisions. Max 3 rounds.
  */
-async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd) {
+async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd, runToken: number) {
+  if (!isRunActive(get, runToken)) return;
   const { architectureReviewRound, explorationResult } = get();
 
   // Max 3 rounds to prevent infinite loops
@@ -1143,6 +1194,7 @@ async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd) {
   set({ phase: 'architecture_review', architectureReviewRound: architectureReviewRound + 1 });
 
   const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
+  if (!isRunActive(get, runToken)) return;
   const archResolved = resolvePhaseAgent('plan_architecture');
 
   injectCard('persona_indicator', {
@@ -1179,6 +1231,7 @@ async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd) {
       locale: i18n.language,
       contextSources: archContextSources,
     });
+    if (!isRunActive(get, runToken)) return;
 
     if (result.success && result.data) {
       set({ architectureReview: result.data });
@@ -1195,7 +1248,7 @@ async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd) {
         'warning',
       );
       // Continue to design doc + execution
-      await designDocAndExecutePhase(set, get, prd);
+      await designDocAndExecutePhase(set, get, prd, runToken);
     }
   } catch {
     injectInfo(
@@ -1205,7 +1258,7 @@ async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd) {
       }),
       'warning',
     );
-    await designDocAndExecutePhase(set, get, prd);
+    await designDocAndExecutePhase(set, get, prd, runToken);
   }
 }
 
@@ -1215,7 +1268,8 @@ async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd) {
  * Generates design doc from PRD, then starts story execution.
  * Extracted from approvePrd to share between approveArchitecture and quick flow.
  */
-async function designDocAndExecutePhase(set: SetFn, get: GetFn, prd: TaskPrd) {
+async function designDocAndExecutePhase(set: SetFn, get: GetFn, prd: TaskPrd, runToken: number) {
+  if (!isRunActive(get, runToken)) return;
   set({ phase: 'generating_design_doc', editablePrd: prd });
   injectInfo(i18n.t('workflow.orchestrator.generatingDesignDoc', { ns: 'simpleMode' }), 'info');
 
@@ -1269,6 +1323,7 @@ async function designDocAndExecutePhase(set: SetFn, get: GetFn, prd: TaskPrd) {
       };
       error?: string;
     }>('prepare_design_doc_for_task', { prd, projectPath });
+    if (!isRunActive(get, runToken)) return;
     if (designResult.success && designResult.data) {
       const doc = designResult.data.design_doc;
       const cardData: DesignDocCardData = {
@@ -1328,12 +1383,15 @@ async function designDocAndExecutePhase(set: SetFn, get: GetFn, prd: TaskPrd) {
   }
 
   // Start execution
+  if (!isRunActive(get, runToken)) return;
   set({ phase: 'executing' });
   injectInfo(i18n.t('workflow.orchestrator.prdApproved', { ns: 'simpleMode' }), 'success');
 
   try {
-    await subscribeToProgressEvents(set, get);
+    await subscribeToProgressEvents(set, get, runToken);
+    if (!isRunActive(get, runToken)) return;
     await useTaskModeStore.getState().approvePrd(prd);
+    if (!isRunActive(get, runToken)) return;
 
     const taskModeError = useTaskModeStore.getState().error;
     if (taskModeError) {
@@ -1350,10 +1408,12 @@ async function designDocAndExecutePhase(set: SetFn, get: GetFn, prd: TaskPrd) {
 /**
  * Generate PRD phase (called after config confirmation or interview completion).
  */
-async function generatePrdPhase(set: SetFn, get: GetFn) {
+async function generatePrdPhase(set: SetFn, get: GetFn, runToken: number) {
+  if (!isRunActive(get, runToken)) return;
   set({ phase: 'generating_prd' });
 
   const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
+  if (!isRunActive(get, runToken)) return;
   const prdResolved = resolvePhaseAgent('plan_prd');
 
   injectCard('persona_indicator', {
@@ -1378,6 +1438,7 @@ async function generatePrdPhase(set: SetFn, get: GetFn) {
         prdResolved.model || undefined,
         prdResolved.baseUrl,
       );
+    if (!isRunActive(get, runToken)) return;
 
     const taskModeState = useTaskModeStore.getState();
     if (taskModeState.error) {
@@ -1415,7 +1476,8 @@ async function generatePrdPhase(set: SetFn, get: GetFn) {
  * story_completed, story_failed, execution_completed, execution_cancelled, error).
  * We accumulate story statuses locally and inject appropriate UI cards.
  */
-async function subscribeToProgressEvents(set: SetFn, get: GetFn) {
+async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: number) {
+  if (!isRunActive(get, runToken)) return;
   // Unsubscribe from existing
   const existing = get()._unlistenFn;
   if (existing) existing();
@@ -1436,6 +1498,7 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn) {
       error: string | null;
       progressPct: number;
     }>('task-mode-progress', (event) => {
+      if (!isRunActive(get, runToken)) return;
       const payload = event.payload;
       const state = get();
       if (state.sessionId && payload.sessionId !== state.sessionId) return;
@@ -1558,6 +1621,7 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn) {
             .getState()
             .fetchReport()
             .then(() => {
+              if (!isRunActive(get, runToken)) return;
               const report = useTaskModeStore.getState().report;
               if (report) {
                 injectCard('completion_report', {

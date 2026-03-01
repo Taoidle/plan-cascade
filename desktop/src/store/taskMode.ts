@@ -249,6 +249,9 @@ export interface TaskModeState {
   /** Cancel current execution */
   cancelExecution: () => Promise<void>;
 
+  /** Cancel current pre-execution operation */
+  cancelOperation: () => Promise<void>;
+
   /** Get execution report */
   fetchReport: () => Promise<void>;
 
@@ -460,6 +463,20 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
       }
     } catch (e) {
       set({ isLoading: false, error: String(e) });
+    }
+  },
+
+  cancelOperation: async () => {
+    const { sessionId } = get();
+    try {
+      const result = await invoke<CommandResponse<boolean>>('cancel_task_operation', {
+        sessionId: sessionId || null,
+      });
+      if (!result.success) {
+        set({ error: result.error ?? 'Cancel failed' });
+      }
+    } catch (e) {
+      set({ error: String(e) });
     }
   },
 

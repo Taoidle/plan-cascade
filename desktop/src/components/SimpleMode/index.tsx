@@ -82,17 +82,23 @@ export function SimpleMode() {
   const workspacePath = useSettingsStore((s) => s.workspacePath);
   const sidebarCollapsed = useSettingsStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useSettingsStore((s) => s.setSidebarCollapsed);
+  const autoPanelHoverEnabled = useSettingsStore((s) => s.autoPanelHoverEnabled);
 
   const [description, setDescription] = useState('');
+  const [leftPanelHoverExpanded, setLeftPanelHoverExpanded] = useState(false);
+  const [rightPanelHoverExpanded, setRightPanelHoverExpanded] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>('output');
   const [workflowMode, setWorkflowMode] = useState<WorkflowMode>('chat');
+  const [supportsPointerHover, setSupportsPointerHover] = useState(false);
 
   // Ref for InputBox to call pickFile externally
   const inputBoxRef = useRef<InputBoxHandle>(null);
   // Ref for ChatTranscript scroll container (used for image export)
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const [isCapturing, setIsCapturing] = useState(false);
+  const leftHoverTimerRef = useRef<number | null>(null);
+  const rightHoverTimerRef = useRef<number | null>(null);
 
   // Handle workflow mode changes with context inheritance notifications
   const handleWorkflowModeChange = useCallback(
@@ -132,6 +138,15 @@ export function SimpleMode() {
       cleanup();
     };
   }, [initialize, cleanup]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia('(hover: hover) and (pointer: fine)');
+    const handleChange = () => setSupportsPointerHover(media.matches);
+    handleChange();
+    media.addEventListener('change', handleChange);
+    return () => media.removeEventListener('change', handleChange);
+  }, []);
 
   const prevPathRef = useRef(workspacePath);
   useEffect(() => {
@@ -206,23 +221,22 @@ export function SimpleMode() {
 
   const handleStart = useCallback(async () => {
     if (!description.trim() || isSubmitting || isAnalyzingStrategy) return;
+    const prompt = description;
+    setDescription('');
 
     if (workflowMode === 'task') {
       // Route Task mode through the workflow orchestrator
-      await startWorkflow(description);
-      setDescription('');
+      await startWorkflow(prompt);
       return;
     }
 
     if (workflowMode === 'plan') {
       // Route Plan mode through the plan orchestrator
-      await startPlanWorkflow(description);
-      setDescription('');
+      await startPlanWorkflow(prompt);
       return;
     }
 
-    await start(description, 'simple');
-    setDescription('');
+    await start(prompt, 'simple');
   }, [description, isAnalyzingStrategy, isSubmitting, start, startWorkflow, startPlanWorkflow, workflowMode]);
 
   const handleFollowUp = useCallback(async () => {
@@ -281,11 +295,26 @@ export function SimpleMode() {
 
   const handleRestoreHistory = useCallback(
     (historyId: string) => {
+      resetWorkflow();
+      resetPlanWorkflow();
       restoreFromHistory(historyId);
       setRightPanelOpen(false);
       handleWorkflowModeChange('chat');
+      setDescription('');
     },
-    [restoreFromHistory, handleWorkflowModeChange],
+    [restoreFromHistory, handleWorkflowModeChange, resetWorkflow, resetPlanWorkflow],
+  );
+
+  const handleSwitchSession = useCallback(
+    (sessionId: string) => {
+      // Keep workflow/orchestrator state scoped to the foreground session.
+      resetWorkflow();
+      resetPlanWorkflow();
+      switchToSession(sessionId);
+      setWorkflowMode('chat');
+      setDescription('');
+    },
+    [resetWorkflow, resetPlanWorkflow, switchToSession],
   );
 
   const handleExportImage = useCallback(async () => {
@@ -313,36 +342,146 @@ export function SimpleMode() {
   }, [showToast, t]);
 
   const isRunning = status === 'running' || status === 'paused';
-  const isDisabled = isRunning || isSubmitting || isAnalyzingStrategy;
+  const isTaskWorkflowActive =
+    workflowPhase !== 'idle' &&
+    workflowPhase !== 'completed' &&
+    workflowPhase !== 'failed' &&
+    workflowPhase !== 'cancelled';
+  const isPlanWorkflowActive =
+    planPhase !== 'idle' && planPhase !== 'completed' && planPhase !== 'failed' && planPhase !== 'cancelled';
+  const isTaskWorkflowBusy =
+    workflowMode === 'task' &&
+    (workflowPhase === 'analyzing' ||
+      workflowPhase === 'exploring' ||
+      workflowPhase === 'requirement_analysis' ||
+      workflowPhase === 'generating_prd' ||
+      workflowPhase === 'generating_design_doc' ||
+      workflowPhase === 'executing' ||
+      (workflowPhase === 'interviewing' && pendingQuestion === null));
+  const isPlanWorkflowBusy =
+    workflowMode === 'plan' &&
+    (planIsBusy ||
+      planPhase === 'analyzing' ||
+      planPhase === 'planning' ||
+      planPhase === 'executing' ||
+      (planPhase === 'clarifying' && pendingClarifyQuestion === null));
+  const inputBusy = isRunning || isSubmitting || isAnalyzingStrategy || isTaskWorkflowBusy || isPlanWorkflowBusy;
+  const hoverPanelsEnabled = autoPanelHoverEnabled && supportsPointerHover;
+  const isLeftPanelOpen = !sidebarCollapsed || leftPanelHoverExpanded;
+  const isRightPanelOpen = rightPanelOpen || rightPanelHoverExpanded;
 
   const detailLineCount = useMemo(
     () => streamingOutput.filter((line) => line.type !== 'text' && line.type !== 'info').length,
     [streamingOutput],
   );
 
+  const clearLeftHoverTimer = useCallback(() => {
+    if (leftHoverTimerRef.current !== null) {
+      window.clearTimeout(leftHoverTimerRef.current);
+      leftHoverTimerRef.current = null;
+    }
+  }, []);
+
+  const clearRightHoverTimer = useCallback(() => {
+    if (rightHoverTimerRef.current !== null) {
+      window.clearTimeout(rightHoverTimerRef.current);
+      rightHoverTimerRef.current = null;
+    }
+  }, []);
+
+  const openLeftHoverPanel = useCallback(() => {
+    if (!hoverPanelsEnabled || !sidebarCollapsed) return;
+    clearLeftHoverTimer();
+    setLeftPanelHoverExpanded(true);
+  }, [hoverPanelsEnabled, sidebarCollapsed, clearLeftHoverTimer]);
+
+  const scheduleCloseLeftHoverPanel = useCallback(() => {
+    if (!hoverPanelsEnabled || !sidebarCollapsed) return;
+    clearLeftHoverTimer();
+    leftHoverTimerRef.current = window.setTimeout(() => {
+      setLeftPanelHoverExpanded(false);
+      leftHoverTimerRef.current = null;
+    }, 180);
+  }, [hoverPanelsEnabled, sidebarCollapsed, clearLeftHoverTimer]);
+
+  const openRightHoverPanel = useCallback(() => {
+    if (!hoverPanelsEnabled || rightPanelOpen) return;
+    clearRightHoverTimer();
+    setRightPanelHoverExpanded(true);
+  }, [hoverPanelsEnabled, rightPanelOpen, clearRightHoverTimer]);
+
+  const scheduleCloseRightHoverPanel = useCallback(() => {
+    if (!hoverPanelsEnabled || rightPanelOpen) return;
+    clearRightHoverTimer();
+    rightHoverTimerRef.current = window.setTimeout(() => {
+      setRightPanelHoverExpanded(false);
+      rightHoverTimerRef.current = null;
+    }, 180);
+  }, [hoverPanelsEnabled, rightPanelOpen, clearRightHoverTimer]);
+
+  useEffect(() => {
+    if (hoverPanelsEnabled) return;
+    clearLeftHoverTimer();
+    clearRightHoverTimer();
+    setLeftPanelHoverExpanded(false);
+    setRightPanelHoverExpanded(false);
+  }, [hoverPanelsEnabled, clearLeftHoverTimer, clearRightHoverTimer]);
+
+  useEffect(
+    () => () => {
+      clearLeftHoverTimer();
+      clearRightHoverTimer();
+    },
+    [clearLeftHoverTimer, clearRightHoverTimer],
+  );
+
   // Output button toggle logic
   const handleToggleOutput = useCallback(() => {
-    if (!rightPanelOpen) {
+    if (!isRightPanelOpen) {
       setRightPanelOpen(true);
+      setRightPanelHoverExpanded(false);
+      setRightPanelTab('output');
+    } else if (!rightPanelOpen) {
+      // Hover-opened panel: convert to pinned panel on explicit toggle.
+      setRightPanelOpen(true);
+      setRightPanelHoverExpanded(false);
       setRightPanelTab('output');
     } else if (rightPanelTab === 'output') {
       setRightPanelOpen(false);
+      setRightPanelHoverExpanded(false);
     } else {
       setRightPanelTab('output');
     }
-  }, [rightPanelOpen, rightPanelTab]);
+  }, [isRightPanelOpen, rightPanelOpen, rightPanelTab]);
 
   return (
     <div className="h-full flex flex-col">
       {/* Main content area */}
       <div className="flex-1 min-h-0 px-4 py-2">
-        <div className="h-full max-w-[2200px] mx-auto w-full flex">
+        <div className="relative h-full max-w-[2200px] mx-auto w-full flex">
+          {hoverPanelsEnabled && (
+            <>
+              <div
+                className="absolute left-0 top-0 bottom-0 w-2 z-20"
+                onMouseEnter={openLeftHoverPanel}
+                onMouseLeave={scheduleCloseLeftHoverPanel}
+              />
+              <div
+                className="absolute right-0 top-0 bottom-0 w-2 z-20"
+                onMouseEnter={openRightHoverPanel}
+                onMouseLeave={scheduleCloseRightHoverPanel}
+              />
+            </>
+          )}
+
           {/* Left panel: WorkspaceTreeSidebar */}
           <div
             className={clsx(
               'shrink-0 transition-all duration-200 ease-out overflow-hidden',
-              sidebarCollapsed ? 'w-0 opacity-0' : 'w-[280px] opacity-100 mr-3',
+              isLeftPanelOpen ? 'w-[280px] opacity-100 mr-3' : 'w-0 opacity-0',
             )}
+            onMouseEnter={openLeftHoverPanel}
+            onMouseLeave={scheduleCloseLeftHoverPanel}
           >
             <div className="w-[280px] h-full">
               <WorkspaceTreeSidebar
@@ -354,7 +493,7 @@ export function SimpleMode() {
                 onNewTask={handleNewTask}
                 currentTask={isChatSession ? streamingOutput[0]?.content || null : null}
                 backgroundSessions={backgroundSessions}
-                onSwitchSession={switchToSession}
+                onSwitchSession={handleSwitchSession}
                 onRemoveSession={removeBackgroundSession}
                 foregroundParentSessionId={foregroundParentSessionId}
                 foregroundBgId={foregroundBgId}
@@ -367,13 +506,27 @@ export function SimpleMode() {
             {/* Edge collapse buttons — absolute overlay inside chat area */}
             <EdgeCollapseButton
               side="left"
-              expanded={!sidebarCollapsed}
-              onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+              expanded={isLeftPanelOpen}
+              onToggle={() => {
+                if (sidebarCollapsed && leftPanelHoverExpanded) {
+                  setSidebarCollapsed(false);
+                } else {
+                  setSidebarCollapsed(!sidebarCollapsed);
+                }
+                setLeftPanelHoverExpanded(false);
+              }}
             />
             <EdgeCollapseButton
               side="right"
-              expanded={rightPanelOpen}
-              onToggle={() => setRightPanelOpen(!rightPanelOpen)}
+              expanded={isRightPanelOpen}
+              onToggle={() => {
+                if (!rightPanelOpen && rightPanelHoverExpanded) {
+                  setRightPanelOpen(true);
+                } else {
+                  setRightPanelOpen(!rightPanelOpen);
+                }
+                setRightPanelHoverExpanded(false);
+              }}
             />
 
             {/* Chat transcript */}
@@ -386,30 +539,18 @@ export function SimpleMode() {
               workflowMode={workflowMode}
               onWorkflowModeChange={handleWorkflowModeChange}
               onFilePick={() => inputBoxRef.current?.pickFile()}
-              isFilePickDisabled={isDisabled}
+              isFilePickDisabled={inputBusy}
               executionStatus={status}
               onPause={pause}
               onResume={resume}
               onCancel={cancel}
-              taskWorkflowActive={
-                workflowMode === 'task' &&
-                workflowPhase !== 'idle' &&
-                workflowPhase !== 'completed' &&
-                workflowPhase !== 'failed' &&
-                workflowPhase !== 'cancelled'
-              }
-              planWorkflowActive={
-                workflowMode === 'plan' &&
-                planPhase !== 'idle' &&
-                planPhase !== 'completed' &&
-                planPhase !== 'failed' &&
-                planPhase !== 'cancelled'
-              }
+              taskWorkflowActive={workflowMode === 'task' && isTaskWorkflowActive}
+              planWorkflowActive={workflowMode === 'plan' && isPlanWorkflowActive}
               onCancelWorkflow={workflowMode === 'plan' ? cancelPlanWorkflow : cancelWorkflow}
               onExportImage={handleExportImage}
               isExportDisabled={streamingOutput.length === 0}
               isCapturing={isCapturing}
-              rightPanelOpen={rightPanelOpen}
+              rightPanelOpen={isRightPanelOpen}
               rightPanelTab={rightPanelTab}
               onToggleOutput={handleToggleOutput}
               detailLineCount={detailLineCount}
@@ -500,15 +641,15 @@ export function SimpleMode() {
                     onChange={setDescription}
                     onSubmit={
                       isChatSession ||
-                      (workflowMode === 'task' && workflowPhase !== 'idle') ||
-                      (workflowMode === 'plan' && planPhase !== 'idle')
+                      (workflowMode === 'task' && isTaskWorkflowActive) ||
+                      (workflowMode === 'plan' && isPlanWorkflowActive)
                         ? handleFollowUp
                         : handleStart
                     }
-                    disabled={isDisabled}
+                    disabled={inputBusy}
                     enterSubmits={false}
                     placeholder={
-                      isRunning
+                      inputBusy
                         ? t('workflow.input.waitingPlaceholder', { defaultValue: 'Waiting for response...' })
                         : workflowMode === 'task' && workflowPhase === 'configuring'
                           ? t('workflow.input.configuringPlaceholder', {
@@ -532,7 +673,7 @@ export function SimpleMode() {
                                     defaultValue: 'Type a normal chat message...',
                                   })
                     }
-                    isLoading={isRunning}
+                    isLoading={inputBusy}
                     attachments={attachments}
                     onAttach={addAttachment}
                     onRemoveAttachment={removeAttachment}
@@ -557,8 +698,10 @@ export function SimpleMode() {
           <div
             className={clsx(
               'shrink-0 transition-all duration-200 ease-out overflow-hidden',
-              rightPanelOpen ? 'w-[520px] opacity-100 ml-3' : 'w-0 opacity-0',
+              isRightPanelOpen ? 'w-[520px] opacity-100 ml-3' : 'w-0 opacity-0',
             )}
+            onMouseEnter={openRightHoverPanel}
+            onMouseLeave={scheduleCloseRightHoverPanel}
           >
             <div className="w-[520px] h-full">
               <TabbedRightPanel

@@ -20,7 +20,8 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
   const { t } = useTranslation('settings');
   const { t: tCommon } = useTranslation();
   const { t: tWizard } = useTranslation('wizard');
-  const { defaultMode, setDefaultMode, theme, setTheme } = useSettingsStore();
+  const { defaultMode, setDefaultMode, theme, setTheme, autoPanelHoverEnabled, setAutoPanelHoverEnabled } =
+    useSettingsStore();
   const { triggerWizard, startTour } = useOnboardingStore();
 
   return (
@@ -108,6 +109,30 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
           <option value="dark">{t('general.theme.dark')}</option>
         </select>
         <p className="text-sm text-gray-500 dark:text-gray-400">{t('general.theme.description')}</p>
+      </section>
+
+      {/* Panel Hover Section */}
+      <section className="space-y-4">
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('general.panelHover.title')}</h3>
+        <label
+          className={clsx(
+            'flex items-start gap-4 p-4 rounded-lg border cursor-pointer',
+            'transition-colors',
+            'border-gray-200 dark:border-gray-700',
+            'hover:bg-gray-50 dark:hover:bg-gray-800',
+          )}
+        >
+          <input
+            type="checkbox"
+            checked={autoPanelHoverEnabled}
+            onChange={(e) => setAutoPanelHoverEnabled(e.target.checked)}
+            className="mt-1 text-primary-600"
+          />
+          <div>
+            <div className="font-medium text-gray-900 dark:text-white text-sm">{t('general.panelHover.enable')}</div>
+            <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('general.panelHover.description')}</div>
+          </div>
+        </label>
       </section>
 
       {/* Execution Limits */}

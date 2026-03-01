@@ -84,6 +84,7 @@ interface SettingsState {
   // Sidebar settings
   pinnedDirectories: string[];
   sidebarCollapsed: boolean;
+  autoPanelHoverEnabled: boolean;
 
   // Context compaction
   enableContextCompaction: boolean;
@@ -149,6 +150,7 @@ interface SettingsState {
   addPinnedDirectory: (path: string) => void;
   removePinnedDirectory: (path: string) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
+  setAutoPanelHoverEnabled: (enabled: boolean) => void;
 }
 
 const defaultSettings = {
@@ -205,6 +207,7 @@ const defaultSettings = {
   // Sidebar
   pinnedDirectories: [] as string[],
   sidebarCollapsed: false,
+  autoPanelHoverEnabled: false,
 
   // Context compaction
   enableContextCompaction: true,
@@ -383,6 +386,7 @@ export const useSettingsStore = create<SettingsState>()(
         }),
 
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
+      setAutoPanelHoverEnabled: (autoPanelHoverEnabled) => set({ autoPanelHoverEnabled }),
     }),
     {
       name: 'plan-cascade-settings',

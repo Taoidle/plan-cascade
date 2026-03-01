@@ -209,10 +209,17 @@ pub async fn execute_plan(
                     provider.as_ref(),
                     shared_ctx.as_deref(),
                     &lang_inst,
+                    cancel.clone(),
                 )
                 .await
                 {
                     Ok(output) => {
+                        if cancel.is_cancelled() {
+                            let mut s = states.write().await;
+                            s.insert(step.id.clone(), StepExecutionState::Cancelled);
+                            return;
+                        }
+
                         let duration_ms = start.elapsed().as_millis() as u64;
                         {
                             let mut s = states.write().await;
@@ -245,6 +252,12 @@ pub async fn execute_plan(
                         );
                     }
                     Err(e) => {
+                        if cancel.is_cancelled() {
+                            let mut s = states.write().await;
+                            s.insert(step.id.clone(), StepExecutionState::Cancelled);
+                            return;
+                        }
+
                         let reason = format!("{e}");
                         {
                             let mut s = states.write().await;
@@ -340,7 +353,12 @@ async fn execute_single_step(
     provider: &dyn LlmProvider,
     shared_context: Option<&str>,
     language_instruction: &str,
+    cancellation_token: CancellationToken,
 ) -> AppResult<StepOutput> {
+    if cancellation_token.is_cancelled() {
+        return Err(AppError::internal("Execution cancelled"));
+    }
+
     let persona = adapter.execution_persona(step);
 
     let context_section = shared_context
@@ -371,10 +389,18 @@ async fn execute_single_step(
         ..Default::default()
     };
 
-    let response = provider
-        .send_message(messages, Some(system), vec![], options)
-        .await
-        .map_err(|e| AppError::Internal(format!("Step execution LLM error: {e}")))?;
+    let response = tokio::select! {
+        _ = cancellation_token.cancelled() => {
+            return Err(AppError::internal("Execution cancelled"));
+        }
+        response = provider.send_message(messages, Some(system), vec![], options) => {
+            response.map_err(|e| AppError::Internal(format!("Step execution LLM error: {e}")))?
+        }
+    };
+
+    if cancellation_token.is_cancelled() {
+        return Err(AppError::internal("Execution cancelled"));
+    }
 
     let content = response
         .content

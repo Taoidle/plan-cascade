@@ -79,13 +79,13 @@ export function TabbedRightPanel({
                 <>
                   {workflowPhase !== 'idle' && <WorkflowProgressPanel />}
                   <ExecutionLogsCard logs={logs} />
-                  <ErrorState maxErrors={3} />
+                  <ErrorState maxErrors={8} />
                 </>
               ) : (
                 <>
                   {analysisCoverage && <AnalysisCoveragePanel coverage={analysisCoverage} />}
                   <ExecutionLogsCard logs={logs} />
-                  <ErrorState maxErrors={3} />
+                  <ErrorState maxErrors={8} />
                 </>
               )}
             </div>

@@ -33,18 +33,54 @@ use crate::state::AppState;
 
 /// Managed state for Plan Mode.
 pub struct PlanModeState {
-    session: Arc<RwLock<Option<PlanModeSession>>>,
-    cancellation_token: Arc<RwLock<Option<CancellationToken>>>,
+    sessions: Arc<RwLock<HashMap<String, PlanModeSession>>>,
+    cancellation_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
+    operation_cancellation_tokens: Arc<RwLock<HashMap<String, (String, CancellationToken)>>>,
     adapter_registry: Arc<RwLock<AdapterRegistry>>,
 }
 
 impl PlanModeState {
     pub fn new() -> Self {
         Self {
-            session: Arc::new(RwLock::new(None)),
-            cancellation_token: Arc::new(RwLock::new(None)),
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            cancellation_tokens: Arc::new(RwLock::new(HashMap::new())),
+            operation_cancellation_tokens: Arc::new(RwLock::new(HashMap::new())),
             adapter_registry: Arc::new(RwLock::new(AdapterRegistry::with_builtins())),
         }
+    }
+}
+
+const PLAN_OPERATION_CANCELLED_ERROR: &str = "Operation cancelled";
+
+async fn register_plan_operation_token(
+    state: &PlanModeState,
+    session_id: &str,
+) -> (String, CancellationToken) {
+    let operation_id = uuid::Uuid::new_v4().to_string();
+    let token = CancellationToken::new();
+
+    let previous = {
+        let mut tokens = state.operation_cancellation_tokens.write().await;
+        tokens.insert(
+            session_id.to_string(),
+            (operation_id.clone(), token.clone()),
+        )
+    };
+    if let Some((_, prev_token)) = previous {
+        prev_token.cancel();
+    }
+
+    (operation_id, token)
+}
+
+async fn clear_plan_operation_token(state: &PlanModeState, session_id: &str, operation_id: &str) {
+    let mut tokens = state.operation_cancellation_tokens.write().await;
+    let should_remove = tokens
+        .get(session_id)
+        .map(|(current_id, _)| current_id == operation_id)
+        .unwrap_or(false);
+    if should_remove {
+        tokens.remove(session_id);
     }
 }
 
@@ -70,22 +106,6 @@ pub async fn enter_plan_mode(
         return Ok(CommandResponse::err("Task description cannot be empty"));
     }
 
-    // Check if already in plan mode
-    {
-        let session = state.session.read().await;
-        if let Some(ref s) = *session {
-            if !matches!(
-                s.phase,
-                PlanModePhase::Completed | PlanModePhase::Failed | PlanModePhase::Cancelled
-            ) {
-                return Ok(CommandResponse::err(format!(
-                    "Already in plan mode (session: {}). Exit first.",
-                    s.session_id
-                )));
-            }
-        }
-    }
-
     // Create initial session
     let mut session = PlanModeSession {
         session_id: uuid::Uuid::new_v4().to_string(),
@@ -100,108 +120,117 @@ pub async fn enter_plan_mode(
         progress: None,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
+    let session_id = session.session_id.clone();
+    let (operation_id, operation_token) = register_plan_operation_token(&state, &session_id).await;
 
-    // Run analysis if provider is specified
-    if let (Some(ref prov), Some(ref mdl)) = (&provider, &model) {
-        let llm_provider = resolve_llm_provider(prov, mdl, None, base_url.clone(), &app_state)
-            .await
-            .map_err(|e| format!("Failed to resolve LLM provider: {e}"))?;
-
-        let registry = state.adapter_registry.read().await;
-
-        let locale_tag = normalize_locale(locale.as_deref());
-        let lang_instruction = locale_instruction(locale_tag);
-        let plan_context = build_plan_conversation_context(
-            &app_state,
-            project_path.as_deref(),
-            conversation_context.as_deref(),
-            context_sources.as_ref(),
-            &description,
-            InjectionPhase::Planning,
-        )
-        .await;
-        let plan_context_ref = if plan_context.is_empty() {
-            None
-        } else {
-            Some(plan_context.as_str())
-        };
-
-        match crate::services::plan_mode::analyzer::analyze_task(
-            &description,
-            plan_context_ref,
-            lang_instruction,
-            llm_provider.clone(),
-            &registry,
-        )
-        .await
-        {
-            Ok(analysis) => {
-                if analysis.needs_clarification {
-                    // Generate first clarification question
-                    let adapter = registry
-                        .get(&analysis.adapter_name)
-                        .unwrap_or_else(|| registry.find_for_domain(&analysis.domain));
-
-                    match crate::services::plan_mode::clarifier::generate_clarification_question(
-                        &description,
-                        &analysis,
-                        &[],
-                        plan_context_ref,
-                        lang_instruction,
-                        adapter.as_ref(),
-                        llm_provider,
-                    )
+    let result = tokio::select! {
+        _ = operation_token.cancelled() => Ok(CommandResponse::err(PLAN_OPERATION_CANCELLED_ERROR)),
+        result = async {
+            // Run analysis if provider is specified
+            if let (Some(ref prov), Some(ref mdl)) = (&provider, &model) {
+                let llm_provider = resolve_llm_provider(prov, mdl, None, base_url.clone(), &app_state)
                     .await
-                    {
-                        Ok(Some(question)) => {
-                            session.current_question = Some(question);
-                            session.phase = PlanModePhase::Clarifying;
-                        }
-                        _ => {
-                            // Question generation failed or returned None — skip to planning
+                    .map_err(|e| format!("Failed to resolve LLM provider: {e}"))?;
+
+                let registry = state.adapter_registry.read().await;
+
+                let locale_tag = normalize_locale(locale.as_deref());
+                let lang_instruction = locale_instruction(locale_tag);
+                let plan_context = build_plan_conversation_context(
+                    &app_state,
+                    project_path.as_deref(),
+                    conversation_context.as_deref(),
+                    context_sources.as_ref(),
+                    &description,
+                    InjectionPhase::Planning,
+                )
+                .await;
+                let plan_context_ref = if plan_context.is_empty() {
+                    None
+                } else {
+                    Some(plan_context.as_str())
+                };
+
+                match crate::services::plan_mode::analyzer::analyze_task(
+                    &description,
+                    plan_context_ref,
+                    lang_instruction,
+                    llm_provider.clone(),
+                    &registry,
+                )
+                .await
+                {
+                    Ok(analysis) => {
+                        if analysis.needs_clarification {
+                            // Generate first clarification question
+                            let adapter = registry
+                                .get(&analysis.adapter_name)
+                                .unwrap_or_else(|| registry.find_for_domain(&analysis.domain));
+
+                            match crate::services::plan_mode::clarifier::generate_clarification_question(
+                                &description,
+                                &analysis,
+                                &[],
+                                plan_context_ref,
+                                lang_instruction,
+                                adapter.as_ref(),
+                                llm_provider,
+                            )
+                            .await
+                            {
+                                Ok(Some(question)) => {
+                                    session.current_question = Some(question);
+                                    session.phase = PlanModePhase::Clarifying;
+                                }
+                                _ => {
+                                    // Question generation failed or returned None — skip to planning
+                                    session.phase = PlanModePhase::Planning;
+                                }
+                            }
+                        } else {
                             session.phase = PlanModePhase::Planning;
                         }
+                        session.analysis = Some(analysis);
                     }
-                } else {
-                    session.phase = PlanModePhase::Planning;
+                    Err(e) => {
+                        // Analysis failed, but we can still proceed without it
+                        session.phase = PlanModePhase::Planning;
+                        session.analysis = Some(PlanAnalysis {
+                            domain: crate::services::plan_mode::types::TaskDomain::General,
+                            complexity: 5,
+                            estimated_steps: 4,
+                            needs_clarification: false,
+                            reasoning: format!("Analysis failed: {e}. Proceeding with general approach."),
+                            adapter_name: "general".to_string(),
+                            suggested_approach: "Standard decomposition".to_string(),
+                        });
+                    }
                 }
-                session.analysis = Some(analysis);
-            }
-            Err(e) => {
-                // Analysis failed, but we can still proceed without it
+            } else {
+                // No provider specified — skip analysis
                 session.phase = PlanModePhase::Planning;
                 session.analysis = Some(PlanAnalysis {
                     domain: crate::services::plan_mode::types::TaskDomain::General,
                     complexity: 5,
                     estimated_steps: 4,
                     needs_clarification: false,
-                    reasoning: format!("Analysis failed: {e}. Proceeding with general approach."),
+                    reasoning: "No LLM provider configured for analysis. Using defaults.".to_string(),
                     adapter_name: "general".to_string(),
                     suggested_approach: "Standard decomposition".to_string(),
                 });
             }
-        }
-    } else {
-        // No provider specified — skip analysis
-        session.phase = PlanModePhase::Planning;
-        session.analysis = Some(PlanAnalysis {
-            domain: crate::services::plan_mode::types::TaskDomain::General,
-            complexity: 5,
-            estimated_steps: 4,
-            needs_clarification: false,
-            reasoning: "No LLM provider configured for analysis. Using defaults.".to_string(),
-            adapter_name: "general".to_string(),
-            suggested_approach: "Standard decomposition".to_string(),
-        });
-    }
 
-    // Store session
-    {
-        let mut s = state.session.write().await;
-        *s = Some(session.clone());
-    }
+            // Store session
+            {
+                let mut sessions = state.sessions.write().await;
+                sessions.insert(session.session_id.clone(), session.clone());
+            }
 
-    Ok(CommandResponse::ok(session))
+            Ok(CommandResponse::ok(session))
+        } => result,
+    };
+    clear_plan_operation_token(&state, &session_id, &operation_id).await;
+    result
 }
 
 /// Submit a clarification answer and generate next question.
@@ -219,26 +248,16 @@ pub async fn submit_plan_clarification(
     state: tauri::State<'_, PlanModeState>,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<CommandResponse<PlanModeSession>, String> {
-    // Phase 1: Store the answer and extract data needed for question generation
-    let (description, analysis, clarifications, adapter_name) = {
-        let mut session_guard = state.session.write().await;
-        let session = session_guard
-            .as_mut()
-            .filter(|s| s.session_id == session_id)
+    // Snapshot data needed for question generation.
+    let (description, analysis, mut clarifications, adapter_name, current_question_text) = {
+        let sessions = state.sessions.read().await;
+        let session = sessions
+            .get(&session_id)
             .ok_or_else(|| "No active plan mode session".to_string())?;
 
         if session.phase != PlanModePhase::Clarifying {
             return Ok(CommandResponse::err("Not in clarifying phase"));
         }
-
-        // Enrich answer with question text from current_question
-        let mut enriched_answer = answer;
-        if let Some(ref cq) = session.current_question {
-            enriched_answer.question_text = cq.question.clone();
-        }
-
-        session.clarifications.push(enriched_answer);
-        session.current_question = None;
 
         let analysis = session
             .analysis
@@ -254,73 +273,100 @@ pub async fn submit_plan_clarification(
                 .as_ref()
                 .map(|a| a.adapter_name.clone())
                 .unwrap_or_default(),
+            session
+                .current_question
+                .as_ref()
+                .map(|q| q.question.clone()),
         )
     };
 
-    // Phase 2: Generate next question (requires LLM call, done outside session lock)
-    let next_question = if let (Some(ref prov), Some(ref mdl)) = (&provider, &model) {
-        let llm_provider = resolve_llm_provider(prov, mdl, None, base_url, &app_state)
-            .await
-            .map_err(|e| format!("Failed to resolve LLM provider: {e}"))?;
+    let mut enriched_answer = answer;
+    if let Some(question_text) = current_question_text {
+        enriched_answer.question_text = question_text;
+    }
+    clarifications.push(enriched_answer);
 
-        let registry = state.adapter_registry.read().await;
-        let adapter = registry
-            .get(&adapter_name)
-            .unwrap_or_else(|| registry.find_for_domain(&analysis.domain));
+    let (operation_id, operation_token) = register_plan_operation_token(&state, &session_id).await;
+    let next_question_result = tokio::select! {
+        _ = operation_token.cancelled() => Err(PLAN_OPERATION_CANCELLED_ERROR.to_string()),
+        result = async {
+            if let (Some(ref prov), Some(ref mdl)) = (&provider, &model) {
+                let llm_provider = resolve_llm_provider(prov, mdl, None, base_url, &app_state)
+                    .await
+                    .map_err(|e| format!("Failed to resolve LLM provider: {e}"))?;
 
-        let locale_tag = normalize_locale(locale.as_deref());
-        let lang_instruction = locale_instruction(locale_tag);
-        let plan_context = build_plan_conversation_context(
-            &app_state,
-            project_path.as_deref(),
-            conversation_context.as_deref(),
-            context_sources.as_ref(),
-            &description,
-            InjectionPhase::Planning,
-        )
-        .await;
-        let plan_context_ref = if plan_context.is_empty() {
-            None
-        } else {
-            Some(plan_context.as_str())
-        };
+                let registry = state.adapter_registry.read().await;
+                let adapter = registry
+                    .get(&adapter_name)
+                    .unwrap_or_else(|| registry.find_for_domain(&analysis.domain));
 
-        crate::services::plan_mode::clarifier::generate_clarification_question(
-            &description,
-            &analysis,
-            &clarifications,
-            plan_context_ref,
-            lang_instruction,
-            adapter.as_ref(),
-            llm_provider,
-        )
-        .await
-        .unwrap_or(None)
-    } else {
-        None
+                let locale_tag = normalize_locale(locale.as_deref());
+                let lang_instruction = locale_instruction(locale_tag);
+                let plan_context = build_plan_conversation_context(
+                    &app_state,
+                    project_path.as_deref(),
+                    conversation_context.as_deref(),
+                    context_sources.as_ref(),
+                    &description,
+                    InjectionPhase::Planning,
+                )
+                .await;
+                let plan_context_ref = if plan_context.is_empty() {
+                    None
+                } else {
+                    Some(plan_context.as_str())
+                };
+
+                Ok(
+                    crate::services::plan_mode::clarifier::generate_clarification_question(
+                        &description,
+                        &analysis,
+                        &clarifications,
+                        plan_context_ref,
+                        lang_instruction,
+                        adapter.as_ref(),
+                        llm_provider,
+                    )
+                    .await
+                    .unwrap_or(None),
+                )
+            } else {
+                Ok(None)
+            }
+        } => result,
+    };
+    clear_plan_operation_token(&state, &session_id, &operation_id).await;
+
+    let next_question = match next_question_result {
+        Ok(question) => question,
+        Err(e) if e == PLAN_OPERATION_CANCELLED_ERROR => {
+            return Ok(CommandResponse::err(PLAN_OPERATION_CANCELLED_ERROR));
+        }
+        Err(e) => return Err(e),
     };
 
-    // Phase 3: Update session with next question or transition to planning
-    let mut session_guard = state.session.write().await;
-    let session = session_guard
-        .as_mut()
-        .filter(|s| s.session_id == session_id)
+    // Apply clarification only if operation completed.
+    let mut sessions = state.sessions.write().await;
+    let session = sessions
+        .get_mut(&session_id)
         .ok_or_else(|| "No active plan mode session".to_string())?;
 
+    if session.phase != PlanModePhase::Clarifying {
+        return Ok(CommandResponse::err("Not in clarifying phase"));
+    }
+
+    session.clarifications = clarifications;
     match next_question {
         Some(q) => {
             session.current_question = Some(q);
-            // Stay in Clarifying phase
         }
         None => {
-            // No more questions — transition to Planning
             session.current_question = None;
             session.phase = PlanModePhase::Planning;
         }
     }
 
-    let result = session.clone();
-    Ok(CommandResponse::ok(result))
+    Ok(CommandResponse::ok(session.clone()))
 }
 
 /// Skip clarification and proceed to planning.
@@ -329,10 +375,9 @@ pub async fn skip_plan_clarification(
     session_id: String,
     state: tauri::State<'_, PlanModeState>,
 ) -> Result<CommandResponse<PlanModeSession>, String> {
-    let mut session_guard = state.session.write().await;
-    let session = session_guard
-        .as_mut()
-        .filter(|s| s.session_id == session_id)
+    let mut sessions = state.sessions.write().await;
+    let session = sessions
+        .get_mut(&session_id)
         .ok_or_else(|| "No active plan mode session".to_string())?;
 
     session.phase = PlanModePhase::Planning;
@@ -357,10 +402,9 @@ pub async fn generate_plan(
 ) -> Result<CommandResponse<Plan>, String> {
     // Extract session data
     let (description, domain, adapter_name, clarifications) = {
-        let session_guard = state.session.read().await;
-        let session = session_guard
-            .as_ref()
-            .filter(|s| s.session_id == session_id)
+        let sessions = state.sessions.read().await;
+        let session = sessions
+            .get(&session_id)
             .ok_or_else(|| "No active plan mode session".to_string())?;
 
         let analysis = session
@@ -380,59 +424,64 @@ pub async fn generate_plan(
         (Some(p), Some(m)) => (p.as_str(), m.as_str()),
         _ => return Ok(CommandResponse::err("Provider and model are required")),
     };
+    let (operation_id, operation_token) = register_plan_operation_token(&state, &session_id).await;
+    let result = tokio::select! {
+        _ = operation_token.cancelled() => Ok(CommandResponse::err(PLAN_OPERATION_CANCELLED_ERROR)),
+        result = async {
+            let llm_provider = resolve_llm_provider(prov, mdl, None, base_url, &app_state)
+                .await
+                .map_err(|e| format!("Failed to resolve LLM provider: {e}"))?;
 
-    let llm_provider = resolve_llm_provider(prov, mdl, None, base_url, &app_state)
-        .await
-        .map_err(|e| format!("Failed to resolve LLM provider: {e}"))?;
+            let registry = state.adapter_registry.read().await;
+            let adapter = registry
+                .get(&adapter_name)
+                .unwrap_or_else(|| registry.find_for_domain(&domain));
 
-    let registry = state.adapter_registry.read().await;
-    let adapter = registry
-        .get(&adapter_name)
-        .unwrap_or_else(|| registry.find_for_domain(&domain));
+            let locale_tag = normalize_locale(locale.as_deref());
+            let lang_instruction = locale_instruction(locale_tag);
+            let plan_context = build_plan_conversation_context(
+                &app_state,
+                project_path.as_deref(),
+                conversation_context.as_deref(),
+                context_sources.as_ref(),
+                &description,
+                InjectionPhase::Planning,
+            )
+            .await;
+            let plan_context_ref = if plan_context.is_empty() {
+                None
+            } else {
+                Some(plan_context.as_str())
+            };
 
-    let locale_tag = normalize_locale(locale.as_deref());
-    let lang_instruction = locale_instruction(locale_tag);
-    let plan_context = build_plan_conversation_context(
-        &app_state,
-        project_path.as_deref(),
-        conversation_context.as_deref(),
-        context_sources.as_ref(),
-        &description,
-        InjectionPhase::Planning,
-    )
-    .await;
-    let plan_context_ref = if plan_context.is_empty() {
-        None
-    } else {
-        Some(plan_context.as_str())
-    };
-
-    match crate::services::plan_mode::planner::generate_plan(
-        &description,
-        &domain,
-        adapter,
-        &clarifications,
-        plan_context_ref,
-        lang_instruction,
-        llm_provider,
-    )
-    .await
-    {
-        Ok(plan) => {
-            // Update session
-            let mut session_guard = state.session.write().await;
-            if let Some(session) = session_guard
-                .as_mut()
-                .filter(|s| s.session_id == session_id)
+            match crate::services::plan_mode::planner::generate_plan(
+                &description,
+                &domain,
+                adapter,
+                &clarifications,
+                plan_context_ref,
+                lang_instruction,
+                llm_provider,
+            )
+            .await
             {
-                session.plan = Some(plan.clone());
-                session.phase = PlanModePhase::ReviewingPlan;
-            }
+                Ok(plan) => {
+                    // Update session
+                    let mut sessions = state.sessions.write().await;
+                    let session = sessions
+                        .get_mut(&session_id)
+                        .ok_or_else(|| "No active plan mode session".to_string())?;
+                    session.plan = Some(plan.clone());
+                    session.phase = PlanModePhase::ReviewingPlan;
 
-            Ok(CommandResponse::ok(plan))
-        }
-        Err(e) => Ok(CommandResponse::err(format!("Plan generation failed: {e}"))),
-    }
+                    Ok(CommandResponse::ok(plan))
+                }
+                Err(e) => Ok(CommandResponse::err(format!("Plan generation failed: {e}"))),
+            }
+        } => result,
+    };
+    clear_plan_operation_token(&state, &session_id, &operation_id).await;
+    result
 }
 
 /// Approve the plan and start execution.
@@ -453,10 +502,9 @@ pub async fn approve_plan(
 ) -> Result<CommandResponse<bool>, String> {
     // Validate
     let (adapter_name, task_description) = {
-        let session_guard = state.session.read().await;
-        let session = session_guard
-            .as_ref()
-            .filter(|s| s.session_id == session_id)
+        let sessions = state.sessions.read().await;
+        let session = sessions
+            .get(&session_id)
             .ok_or_else(|| "No active plan mode session".to_string())?;
 
         if session.phase != PlanModePhase::ReviewingPlan {
@@ -483,26 +531,24 @@ pub async fn approve_plan(
 
     // Update session to executing
     {
-        let mut session_guard = state.session.write().await;
-        if let Some(session) = session_guard
-            .as_mut()
-            .filter(|s| s.session_id == session_id)
-        {
-            session.plan = Some(plan.clone());
-            session.phase = PlanModePhase::Executing;
-        }
+        let mut sessions = state.sessions.write().await;
+        let session = sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| "No active plan mode session".to_string())?;
+        session.plan = Some(plan.clone());
+        session.phase = PlanModePhase::Executing;
     }
 
     // Set cancellation token
     let cancel_token = CancellationToken::new();
     {
-        let mut ct = state.cancellation_token.write().await;
-        *ct = Some(cancel_token.clone());
+        let mut tokens = state.cancellation_tokens.write().await;
+        tokens.insert(session_id.clone(), cancel_token.clone());
     }
 
     // Spawn execution as background task
-    let session_arc = state.session.clone();
-    let ct_arc = state.cancellation_token.clone();
+    let sessions_arc = state.sessions.clone();
+    let tokens_arc = state.cancellation_tokens.clone();
     let sid = session_id.clone();
     let locale_tag = normalize_locale(locale.as_deref());
     let lang_instruction = locale_instruction(locale_tag).to_string();
@@ -540,8 +586,8 @@ pub async fn approve_plan(
         .await;
 
         // Update session with results
-        let mut session_guard = session_arc.write().await;
-        if let Some(session) = session_guard.as_mut().filter(|s| s.session_id == sid) {
+        let mut sessions = sessions_arc.write().await;
+        if let Some(session) = sessions.get_mut(&sid) {
             match result {
                 Ok((outputs, states)) => {
                     let failed = states
@@ -577,8 +623,8 @@ pub async fn approve_plan(
         }
 
         // Clear cancellation token
-        let mut ct = ct_arc.write().await;
-        *ct = None;
+        let mut tokens = tokens_arc.write().await;
+        tokens.remove(&sid);
     });
 
     Ok(CommandResponse::ok(true))
@@ -590,10 +636,9 @@ pub async fn get_plan_execution_status(
     session_id: String,
     state: tauri::State<'_, PlanModeState>,
 ) -> Result<CommandResponse<PlanExecutionStatusResponse>, String> {
-    let session_guard = state.session.read().await;
-    let session = session_guard
-        .as_ref()
-        .filter(|s| s.session_id == session_id)
+    let sessions = state.sessions.read().await;
+    let session = sessions
+        .get(&session_id)
         .ok_or_else(|| "No active plan mode session".to_string())?;
 
     let total_steps = session.plan.as_ref().map_or(0, |p| p.steps.len());
@@ -633,22 +678,55 @@ pub async fn cancel_plan_execution(
 ) -> Result<CommandResponse<bool>, String> {
     // Verify session
     {
-        let session_guard = state.session.read().await;
-        let session = session_guard
-            .as_ref()
-            .filter(|s| s.session_id == session_id);
+        let sessions = state.sessions.read().await;
+        let session = sessions.get(&session_id);
         if session.is_none() {
             return Ok(CommandResponse::err("No active plan mode session"));
         }
     }
 
     // Cancel via token
-    let ct_guard = state.cancellation_token.read().await;
-    if let Some(ref token) = *ct_guard {
+    let ct_guard = state.cancellation_tokens.read().await;
+    if let Some(token) = ct_guard.get(&session_id) {
         token.cancel();
+    } else {
+        return Ok(CommandResponse::err("No execution in progress to cancel"));
     }
 
     Ok(CommandResponse::ok(true))
+}
+
+/// Cancel a running plan pre-execution operation (analysis/clarification/planning).
+#[tauri::command]
+pub async fn cancel_plan_operation(
+    session_id: Option<String>,
+    state: tauri::State<'_, PlanModeState>,
+) -> Result<CommandResponse<bool>, String> {
+    let mut cancelled_any = false;
+    let tokens = state.operation_cancellation_tokens.read().await;
+
+    match session_id {
+        Some(sid) => {
+            if let Some((_, token)) = tokens.get(&sid) {
+                token.cancel();
+                cancelled_any = true;
+            }
+        }
+        None => {
+            for (_, token) in tokens.values() {
+                token.cancel();
+                cancelled_any = true;
+            }
+        }
+    }
+
+    if cancelled_any {
+        Ok(CommandResponse::ok(true))
+    } else {
+        Ok(CommandResponse::err(
+            "No plan operation in progress to cancel",
+        ))
+    }
 }
 
 /// Get the final execution report.
@@ -657,10 +735,9 @@ pub async fn get_plan_execution_report(
     session_id: String,
     state: tauri::State<'_, PlanModeState>,
 ) -> Result<CommandResponse<PlanExecutionReport>, String> {
-    let session_guard = state.session.read().await;
-    let session = session_guard
-        .as_ref()
-        .filter(|s| s.session_id == session_id)
+    let sessions = state.sessions.read().await;
+    let session = sessions
+        .get(&session_id)
         .ok_or_else(|| "No active plan mode session".to_string())?;
 
     let plan = session
@@ -721,10 +798,9 @@ pub async fn get_step_output(
     step_id: String,
     state: tauri::State<'_, PlanModeState>,
 ) -> Result<CommandResponse<StepOutput>, String> {
-    let session_guard = state.session.read().await;
-    let session = session_guard
-        .as_ref()
-        .filter(|s| s.session_id == session_id)
+    let sessions = state.sessions.read().await;
+    let session = sessions
+        .get(&session_id)
         .ok_or_else(|| "No active plan mode session".to_string())?;
 
     match session.step_outputs.get(&step_id) {
@@ -742,28 +818,28 @@ pub async fn exit_plan_mode(
     session_id: String,
     state: tauri::State<'_, PlanModeState>,
 ) -> Result<CommandResponse<bool>, String> {
-    // Cancel any running execution
-    {
-        let ct_guard = state.cancellation_token.read().await;
-        if let Some(ref token) = *ct_guard {
-            token.cancel();
-        }
+    let removed_session = {
+        let mut sessions = state.sessions.write().await;
+        sessions.remove(&session_id).is_some()
+    };
+    if !removed_session {
+        return Ok(CommandResponse::err("No active plan mode session"));
     }
 
-    // Clear session
-    {
-        let mut session_guard = state.session.write().await;
-        if let Some(ref s) = *session_guard {
-            if s.session_id == session_id {
-                *session_guard = None;
-            }
-        }
+    let removed_token = {
+        let mut tokens = state.cancellation_tokens.write().await;
+        tokens.remove(&session_id)
+    };
+    if let Some(token) = removed_token {
+        token.cancel();
     }
 
-    // Clear cancellation token
-    {
-        let mut ct = state.cancellation_token.write().await;
-        *ct = None;
+    let removed_operation_token = {
+        let mut tokens = state.operation_cancellation_tokens.write().await;
+        tokens.remove(&session_id)
+    };
+    if let Some((_, token)) = removed_operation_token {
+        token.cancel();
     }
 
     Ok(CommandResponse::ok(true))
@@ -819,14 +895,9 @@ async fn build_plan_conversation_context(
         .cloned()
         .unwrap_or_else(default_plan_context_sources);
 
-    let enriched = query_selected_context_without_knowledge(
-        &config,
-        app_state,
-        project_path,
-        query,
-        phase,
-    )
-    .await;
+    let enriched =
+        query_selected_context_without_knowledge(&config, app_state, project_path, query, phase)
+            .await;
 
     if !enriched.memory_block.is_empty() {
         sections.push(enriched.memory_block);

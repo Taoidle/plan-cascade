@@ -1,97 +1,69 @@
 /**
  * ErrorState Component
  *
- * Actionable error display component with error description, suggested fix,
- * retry button, and collapsible stack trace. Supports warning, error, and
- * critical severity levels.
- *
- * Story 008: Real-time Execution Feedback
+ * Compact error surface for right-side output panel:
+ * - summary row with severity counts
+ * - collapsed preview (latest error only)
+ * - expandable, scrollable stacked list for multiple errors
  */
 
-import { useState, useCallback } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import {
   ExclamationTriangleIcon,
   CrossCircledIcon,
-  InfoCircledIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   Cross2Icon,
   ReloadIcon,
 } from '@radix-ui/react-icons';
-import { useExecutionStore, ExecutionError, ErrorSeverity } from '../../store/execution';
-
-// ============================================================================
-// Types
-// ============================================================================
+import { useExecutionStore, type ExecutionError, type ErrorSeverity } from '../../store/execution';
 
 interface ErrorStateProps {
-  /** Filter errors by story ID */
   storyId?: string;
-  /** Additional class names */
   className?: string;
-  /** Show dismissed errors */
   showDismissed?: boolean;
-  /** Maximum number of errors to display */
   maxErrors?: number;
 }
 
-interface SingleErrorProps {
+interface CompactErrorItemProps {
   error: ExecutionError;
   onDismiss: (id: string) => void;
   onRetry?: (storyId: string) => void;
+  isPrimary?: boolean;
 }
 
-// ============================================================================
-// Severity Configuration
-// ============================================================================
+const SEVERITY_ORDER: Record<ErrorSeverity, number> = { critical: 0, error: 1, warning: 2 };
 
-const SEVERITY_CONFIG: Record<
-  ErrorSeverity,
-  {
-    containerBg: string;
-    containerBorder: string;
-    iconColor: string;
-    titleColor: string;
-    icon: React.ReactNode;
-    label: string;
+function severityBadgeClass(severity: ErrorSeverity): string {
+  if (severity === 'critical') {
+    return 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300';
   }
-> = {
-  warning: {
-    containerBg: 'bg-warning-50 dark:bg-warning-950',
-    containerBorder: 'border-warning-200 dark:border-warning-800',
-    iconColor: 'text-warning-500',
-    titleColor: 'text-warning-800 dark:text-warning-200',
-    icon: <ExclamationTriangleIcon className="w-5 h-5" />,
-    label: 'Warning',
-  },
-  error: {
-    containerBg: 'bg-error-50 dark:bg-error-950',
-    containerBorder: 'border-error-200 dark:border-error-800',
-    iconColor: 'text-error-500',
-    titleColor: 'text-error-800 dark:text-error-200',
-    icon: <CrossCircledIcon className="w-5 h-5" />,
-    label: 'Error',
-  },
-  critical: {
-    containerBg: 'bg-error-100 dark:bg-error-900',
-    containerBorder: 'border-error-300 dark:border-error-700',
-    iconColor: 'text-error-600 dark:text-error-400',
-    titleColor: 'text-error-900 dark:text-error-100',
-    icon: <CrossCircledIcon className="w-5 h-5" />,
-    label: 'Critical',
-  },
-};
+  if (severity === 'error') {
+    return 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-300';
+  }
+  return 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300';
+}
 
-// ============================================================================
-// SingleError Component
-// ============================================================================
+function severityTextClass(severity: ErrorSeverity): string {
+  if (severity === 'critical') return 'text-red-700 dark:text-red-300';
+  if (severity === 'error') return 'text-red-600 dark:text-red-300';
+  return 'text-amber-700 dark:text-amber-300';
+}
 
-function SingleError({ error, onDismiss, onRetry }: SingleErrorProps) {
-  const [showStackTrace, setShowStackTrace] = useState(false);
-  const config = SEVERITY_CONFIG[error.severity];
-  const hasStackTrace = !!error.stackTrace;
-  const hasRetry = !!error.storyId && !!onRetry;
+function SeverityIcon({ severity }: { severity: ErrorSeverity }) {
+  if (severity === 'warning') return <ExclamationTriangleIcon className="w-3.5 h-3.5" />;
+  return <CrossCircledIcon className="w-3.5 h-3.5" />;
+}
+
+function CompactErrorItem({ error, onDismiss, onRetry, isPrimary = false }: CompactErrorItemProps) {
+  const { t } = useTranslation('simpleMode');
+  const [showDetails, setShowDetails] = useState(false);
+  const hasStackTrace = Boolean(error.stackTrace);
+  const hasSuggestedFix = Boolean(error.suggestedFix);
+  const canRetry = Boolean(error.storyId && onRetry);
+  const timestamp = new Date(error.timestamp).toLocaleTimeString();
 
   const handleRetry = useCallback(() => {
     if (error.storyId && onRetry) {
@@ -99,222 +71,168 @@ function SingleError({ error, onDismiss, onRetry }: SingleErrorProps) {
     }
   }, [error.storyId, onRetry]);
 
-  const timestamp = new Date(error.timestamp).toLocaleTimeString();
-
   return (
     <div
       className={clsx(
-        'rounded-lg border overflow-hidden',
-        'transition-all duration-300',
-        'animate-[slideDown_0.3s_ease-out]',
-        config.containerBg,
-        config.containerBorder,
-        error.severity === 'critical' && 'ring-2 ring-error-400/50 dark:ring-error-600/50',
+        'rounded-md border p-2',
+        isPrimary
+          ? 'border-red-200 dark:border-red-800/60 bg-red-50/60 dark:bg-red-900/20'
+          : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/40',
       )}
     >
-      {/* Header */}
-      <div className="flex items-start gap-3 p-4">
-        {/* Severity icon */}
-        <div className={clsx('mt-0.5 shrink-0', config.iconColor)}>{config.icon}</div>
-
-        {/* Content */}
-        <div className="flex-1 min-w-0">
-          {/* Title row */}
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <div className="flex items-center gap-2">
-                <span
-                  className={clsx(
-                    'text-2xs font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded',
-                    error.severity === 'warning' &&
-                      'bg-warning-200 dark:bg-warning-800 text-warning-800 dark:text-warning-200',
-                    error.severity === 'error' && 'bg-error-200 dark:bg-error-800 text-error-800 dark:text-error-200',
-                    error.severity === 'critical' &&
-                      'bg-error-300 dark:bg-error-700 text-error-900 dark:text-error-100',
-                  )}
-                >
-                  {config.label}
-                </span>
-                <span className="text-2xs text-gray-500 dark:text-gray-400">{timestamp}</span>
-              </div>
-              <h4 className={clsx('font-semibold mt-1', config.titleColor)}>{error.title}</h4>
-            </div>
-
-            {/* Dismiss button */}
-            <button
-              onClick={() => onDismiss(error.id)}
-              className={clsx(
-                'p-1 rounded shrink-0',
-                'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
-                'hover:bg-gray-200/50 dark:hover:bg-gray-700/50',
-                'transition-colors',
-              )}
-              title="Dismiss"
-            >
-              <Cross2Icon className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Description */}
-          <p className="text-sm text-gray-700 dark:text-gray-300 mt-1.5">{error.description}</p>
-
-          {/* Suggested fix */}
-          {error.suggestedFix && (
-            <div
-              className={clsx(
-                'flex items-start gap-2 mt-3 p-2.5 rounded-md',
-                'bg-white/60 dark:bg-gray-800/60',
-                'border border-gray-200/50 dark:border-gray-700/50',
-              )}
-            >
-              <InfoCircledIcon className="w-4 h-4 text-primary-500 mt-0.5 shrink-0" />
-              <div>
-                <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Suggested Fix</span>
-                <p className="text-sm text-gray-800 dark:text-gray-200 mt-0.5">{error.suggestedFix}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Actions row */}
-          <div className="flex items-center gap-2 mt-3">
-            {/* Retry button */}
-            {hasRetry && (
-              <button
-                onClick={handleRetry}
-                className={clsx(
-                  'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg',
-                  'text-sm font-medium',
-                  'bg-primary-600 text-white',
-                  'hover:bg-primary-700',
-                  'transition-colors',
-                  'shadow-sm',
-                )}
-              >
-                <ReloadIcon className="w-3.5 h-3.5" />
-                Retry Story
-              </button>
-            )}
-
-            {/* Stack trace toggle */}
-            {hasStackTrace && (
-              <button
-                onClick={() => setShowStackTrace((prev) => !prev)}
-                className={clsx(
-                  'inline-flex items-center gap-1 px-2 py-1 rounded-md',
-                  'text-xs font-medium',
-                  'bg-gray-200/50 dark:bg-gray-700/50',
-                  'text-gray-600 dark:text-gray-400',
-                  'hover:bg-gray-300/50 dark:hover:bg-gray-600/50',
-                  'transition-colors',
-                )}
-              >
-                {showStackTrace ? (
-                  <ChevronDownIcon className="w-3.5 h-3.5" />
-                ) : (
-                  <ChevronRightIcon className="w-3.5 h-3.5" />
-                )}
-                {showStackTrace ? 'Hide' : 'Show'} Details
-              </button>
-            )}
-          </div>
+      <div className="flex items-start gap-2">
+        <div className={clsx('mt-0.5 shrink-0', severityTextClass(error.severity))}>
+          <SeverityIcon severity={error.severity} />
         </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className={clsx('text-[11px] px-1.5 py-0.5 rounded font-medium', severityBadgeClass(error.severity))}>
+              {t(`rightPanel.errors.severity.${error.severity}`)}
+            </span>
+            <span className="text-[11px] text-gray-500 dark:text-gray-400 shrink-0">{timestamp}</span>
+            <p className="text-xs font-medium text-gray-800 dark:text-gray-200 truncate">{error.title}</p>
+          </div>
+          <p className="text-xs text-gray-600 dark:text-gray-300 mt-1 break-words line-clamp-2">{error.description}</p>
+        </div>
+        <button
+          onClick={() => onDismiss(error.id)}
+          className="p-1 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+          title={t('rightPanel.errors.dismiss')}
+        >
+          <Cross2Icon className="w-3.5 h-3.5" />
+        </button>
       </div>
 
-      {/* Collapsible stack trace */}
-      {showStackTrace && hasStackTrace && (
-        <div className={clsx('border-t', config.containerBorder)}>
-          <pre
-            className={clsx(
-              'p-4 text-xs font-mono',
-              'text-gray-700 dark:text-gray-300',
-              'whitespace-pre-wrap break-all',
-              'max-h-48 overflow-y-auto',
-              'bg-white/40 dark:bg-gray-900/40',
-            )}
-          >
-            {error.stackTrace}
-          </pre>
+      {(canRetry || hasStackTrace || hasSuggestedFix) && (
+        <div className="mt-2 flex items-center gap-1 flex-wrap">
+          {canRetry && (
+            <button
+              onClick={handleRetry}
+              className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs bg-primary-600 text-white hover:bg-primary-700"
+            >
+              <ReloadIcon className="w-3 h-3" />
+              {t('rightPanel.errors.retryStory')}
+            </button>
+          )}
+          {(hasStackTrace || hasSuggestedFix) && (
+            <button
+              onClick={() => setShowDetails((prev) => !prev)}
+              className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700"
+            >
+              {showDetails ? <ChevronDownIcon className="w-3 h-3" /> : <ChevronRightIcon className="w-3 h-3" />}
+              {showDetails ? t('rightPanel.errors.hideDetails') : t('rightPanel.errors.showDetails')}
+            </button>
+          )}
+        </div>
+      )}
+
+      {showDetails && (hasSuggestedFix || hasStackTrace) && (
+        <div className="mt-2 space-y-2">
+          {hasSuggestedFix && (
+            <div className="rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-2 py-1.5">
+              <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                {t('rightPanel.errors.suggestedFix')}
+              </p>
+              <p className="text-xs text-gray-700 dark:text-gray-300 mt-0.5 break-words">{error.suggestedFix}</p>
+            </div>
+          )}
+          {hasStackTrace && (
+            <pre className="rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-2 text-[11px] text-gray-700 dark:text-gray-300 max-h-32 overflow-y-auto whitespace-pre-wrap break-all">
+              {error.stackTrace}
+            </pre>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-// ============================================================================
-// ErrorState Component
-// ============================================================================
-
 export function ErrorState({ storyId, className, showDismissed = false, maxErrors = 10 }: ErrorStateProps) {
+  const { t } = useTranslation('simpleMode');
   const { executionErrors, dismissError, retryStory, clearExecutionErrors } = useExecutionStore();
+  const [expanded, setExpanded] = useState(false);
 
-  const filteredErrors = (() => {
+  const sortedErrors = useMemo(() => {
     let errors = executionErrors;
-
-    // Filter by story
     if (storyId) {
       errors = errors.filter((e) => e.storyId === storyId);
     }
-
-    // Filter dismissed
     if (!showDismissed) {
       errors = errors.filter((e) => !e.dismissed);
     }
 
-    // Sort by severity (critical > error > warning) then by timestamp
-    errors = [...errors].sort((a, b) => {
-      const severityOrder: Record<ErrorSeverity, number> = { critical: 0, error: 1, warning: 2 };
-      const severityDiff = severityOrder[a.severity] - severityOrder[b.severity];
+    return [...errors].sort((a, b) => {
+      const severityDiff = SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];
       if (severityDiff !== 0) return severityDiff;
       return b.timestamp - a.timestamp;
     });
+  }, [executionErrors, showDismissed, storyId]);
 
-    return errors.slice(0, maxErrors);
-  })();
+  if (sortedErrors.length === 0) return null;
 
-  if (filteredErrors.length === 0) return null;
-
-  const criticalCount = filteredErrors.filter((e) => e.severity === 'critical').length;
-  const errorCount = filteredErrors.filter((e) => e.severity === 'error').length;
-  const warningCount = filteredErrors.filter((e) => e.severity === 'warning').length;
+  const visibleErrors = sortedErrors.slice(0, maxErrors);
+  const overflowCount = Math.max(0, sortedErrors.length - visibleErrors.length);
+  const latest = visibleErrors[0];
+  const criticalCount = visibleErrors.filter((e) => e.severity === 'critical').length;
+  const errorCount = visibleErrors.filter((e) => e.severity === 'error').length;
+  const warningCount = visibleErrors.filter((e) => e.severity === 'warning').length;
 
   return (
-    <div className={clsx('space-y-3', className)}>
-      {/* Summary header */}
-      {filteredErrors.length > 1 && (
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-xs">
-            {criticalCount > 0 && (
-              <span className="text-error-600 dark:text-error-400 font-medium">{criticalCount} critical</span>
-            )}
-            {errorCount > 0 && (
-              <span className="text-error-500 font-medium">
-                {errorCount} error{errorCount > 1 ? 's' : ''}
-              </span>
-            )}
-            {warningCount > 0 && (
-              <span className="text-warning-600 dark:text-warning-400 font-medium">
-                {warningCount} warning{warningCount > 1 ? 's' : ''}
-              </span>
-            )}
-          </div>
-          <button
-            onClick={clearExecutionErrors}
-            className={clsx(
-              'text-xs px-2 py-1 rounded',
-              'text-gray-500 dark:text-gray-400',
-              'hover:bg-gray-100 dark:hover:bg-gray-800',
-              'transition-colors',
-            )}
-          >
-            Dismiss All
-          </button>
-        </div>
+    <div
+      className={clsx(
+        'rounded-lg border border-red-200/70 dark:border-red-800/60 bg-red-50/40 dark:bg-red-900/15',
+        className,
       )}
+    >
+      <div className="px-2.5 py-2 flex items-center gap-2">
+        <CrossCircledIcon className="w-4 h-4 text-red-500 dark:text-red-400 shrink-0" />
+        <p className="text-xs font-medium text-red-700 dark:text-red-300 truncate">
+          {t('rightPanel.errors.summary', { count: sortedErrors.length })}
+        </p>
+        <div className="ml-auto flex items-center gap-1 text-[11px]">
+          {criticalCount > 0 && <span className="text-red-700 dark:text-red-300">{criticalCount} C</span>}
+          {errorCount > 0 && <span className="text-red-600 dark:text-red-300">{errorCount} E</span>}
+          {warningCount > 0 && <span className="text-amber-700 dark:text-amber-300">{warningCount} W</span>}
+        </div>
+        <button
+          onClick={() => setExpanded((prev) => !prev)}
+          className="inline-flex items-center gap-1 text-[11px] px-1.5 py-1 rounded text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/30"
+        >
+          {expanded ? <ChevronDownIcon className="w-3 h-3" /> : <ChevronRightIcon className="w-3 h-3" />}
+          {expanded ? t('rightPanel.errors.hideList') : t('rightPanel.errors.viewAll')}
+        </button>
+      </div>
 
-      {/* Error list */}
-      {filteredErrors.map((error) => (
-        <SingleError key={error.id} error={error} onDismiss={dismissError} onRetry={retryStory} />
-      ))}
+      <div className="border-t border-red-200/70 dark:border-red-800/60 p-2">
+        {expanded ? (
+          <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+            {visibleErrors.map((error, idx) => (
+              <CompactErrorItem
+                key={error.id}
+                error={error}
+                onDismiss={dismissError}
+                onRetry={retryStory}
+                isPrimary={idx === 0}
+              />
+            ))}
+            {overflowCount > 0 && (
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 text-center">
+                {t('rightPanel.errors.moreErrors', { count: overflowCount })}
+              </p>
+            )}
+            <div className="pt-1">
+              <button
+                onClick={clearExecutionErrors}
+                className="text-xs px-2 py-1 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                {t('rightPanel.errors.dismissAll')}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <CompactErrorItem error={latest} onDismiss={dismissError} onRetry={retryStory} isPrimary />
+        )}
+      </div>
     </div>
   );
 }

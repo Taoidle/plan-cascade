@@ -750,7 +750,24 @@
   },
   "rightPanel": {
     "outputTab": "出力",
-    "gitTab": "Git"
+    "gitTab": "Git",
+    "errors": {
+      "summary": "{{count}} 件の問題",
+      "dismiss": "閉じる",
+      "dismissAll": "すべて閉じる",
+      "retryStory": "ストーリー再試行",
+      "showDetails": "詳細",
+      "hideDetails": "非表示",
+      "suggestedFix": "修正案",
+      "viewAll": "展開",
+      "hideList": "折りたたむ",
+      "moreErrors": "他に {{count}} 件のエラーは省略されています",
+      "severity": {
+        "warning": "警告",
+        "error": "エラー",
+        "critical": "重大"
+      }
+    }
   },
   "edgeButton": {
     "expandSidebar": "サイドバーを展開",

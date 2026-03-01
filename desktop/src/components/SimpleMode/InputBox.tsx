@@ -202,7 +202,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isAutocompleteOpen]);
+  }, [isAutocompleteOpen, closeAutocomplete]);
 
   // ============================================================================
   // File reading via Tauri backend
@@ -506,13 +506,18 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   );
 
   // Auto-resize textarea
-  const handleInput = () => {
+  const handleInput = useCallback(() => {
     const textarea = textareaRef.current;
     if (textarea) {
       textarea.style.height = 'auto';
       textarea.style.height = `${Math.min(textarea.scrollHeight, 400)}px`;
     }
-  };
+  }, []);
+
+  // Keep textarea height in sync when parent clears/replaces value.
+  useEffect(() => {
+    handleInput();
+  }, [value, handleInput]);
 
   // ============================================================================
   // Keyboard handling

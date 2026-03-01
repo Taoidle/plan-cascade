@@ -750,7 +750,24 @@
   },
   "rightPanel": {
     "outputTab": "输出",
-    "gitTab": "Git"
+    "gitTab": "Git",
+    "errors": {
+      "summary": "{{count}} 条问题",
+      "dismiss": "忽略",
+      "dismissAll": "全部忽略",
+      "retryStory": "重试故事",
+      "showDetails": "详情",
+      "hideDetails": "收起",
+      "suggestedFix": "建议修复",
+      "viewAll": "展开",
+      "hideList": "折叠",
+      "moreErrors": "还有 {{count}} 条错误未显示",
+      "severity": {
+        "warning": "警告",
+        "error": "错误",
+        "critical": "严重"
+      }
+    }
   },
   "edgeButton": {
     "expandSidebar": "展开侧边栏",

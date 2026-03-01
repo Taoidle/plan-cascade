@@ -60,6 +60,9 @@ interface PlanOrchestratorState {
   /** Unlisten function for progress events */
   _progressUnlisten: UnlistenFn | null;
 
+  /** Guards async continuation after cancellation/reset */
+  _runToken: number;
+
   // Actions
   startPlanWorkflow: (description: string) => Promise<void>;
   submitClarification: (answer: PlanClarifyAnswerCardData) => Promise<void>;
@@ -105,6 +108,7 @@ const DEFAULT_STATE = {
   editablePlan: null as PlanCardData | null,
   isBusy: false,
   _progressUnlisten: null as UnlistenFn | null,
+  _runToken: 0,
 };
 
 // ============================================================================
@@ -115,11 +119,12 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
   ...DEFAULT_STATE,
 
   startPlanWorkflow: async (description: string) => {
+    const runToken = get()._runToken + 1;
     const planStore = usePlanModeStore.getState();
     const settings = useSettingsStore.getState();
     const { resolveProviderBaseUrl } = await import('../lib/providers');
 
-    set({ isBusy: true, taskDescription: description, phase: 'analyzing' });
+    set({ isBusy: true, taskDescription: description, phase: 'analyzing', _runToken: runToken });
 
     // Add user message to chat transcript so it appears as a chat bubble
     useExecutionStore.getState().appendStreamLine(description, 'info');
@@ -156,15 +161,18 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       contextStr,
       i18n.language,
     );
+    if (get()._runToken !== runToken) return;
 
     const { analysis, sessionPhase, sessionId, error } = usePlanModeStore.getState();
 
     if (error) {
+      if (get()._runToken !== runToken) return;
       injectError(i18n.t('planMode:orchestrator.analysisFailed', 'Analysis Failed'), error);
       set({ isBusy: false, phase: 'failed' });
       return;
     }
 
+    if (get()._runToken !== runToken) return;
     set({ sessionId, analysis });
 
     // Inject analysis card
@@ -176,6 +184,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
     if (sessionPhase === 'clarifying') {
       const { currentQuestion } = usePlanModeStore.getState();
 
+      if (get()._runToken !== runToken) return;
       set({ phase: 'clarifying', isBusy: false, pendingClarifyQuestion: currentQuestion ?? null });
 
       injectCard('plan_persona_indicator', {
@@ -193,11 +202,13 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       }
     } else {
       // Skip to planning
+      if (get()._runToken !== runToken) return;
       await get().proceedToPlanning();
     }
   },
 
   submitClarification: async (answer: PlanClarifyAnswerCardData) => {
+    const runToken = get()._runToken;
     // Inject answer card immediately
     injectCard('plan_clarify_answer', answer as unknown as Record<string, unknown>);
 
@@ -223,9 +234,11 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       contextStr,
       i18n.language,
     );
+    if (get()._runToken !== runToken) return;
 
     if (!updatedSession) {
       // Submission failed — fallback to planning
+      if (get()._runToken !== runToken) return;
       injectInfo(i18n.t('planMode:orchestrator.clarificationFailed', 'Clarification failed, proceeding to planning.'));
       set({ isBusy: false });
       await get().proceedToPlanning();
@@ -236,27 +249,33 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       // Clarification complete — transition to planning
       injectInfo(i18n.t('planMode:orchestrator.clarificationComplete', 'Clarification complete.'));
       set({ pendingClarifyQuestion: null, isBusy: false });
+      if (get()._runToken !== runToken) return;
       await get().proceedToPlanning();
     } else if (updatedSession.currentQuestion) {
       // Next question available
+      if (get()._runToken !== runToken) return;
       set({ pendingClarifyQuestion: updatedSession.currentQuestion, isBusy: false });
       injectCard('plan_clarify_question', updatedSession.currentQuestion as unknown as Record<string, unknown>);
     } else {
       // No question and still clarifying — fallback to planning
+      if (get()._runToken !== runToken) return;
       set({ pendingClarifyQuestion: null, isBusy: false });
       await get().proceedToPlanning();
     }
   },
 
   skipClarification: async () => {
+    const runToken = get()._runToken;
     set({ pendingClarifyQuestion: null });
     injectInfo(i18n.t('planMode:orchestrator.clarificationSkipped', 'Clarification skipped.'));
     const planStore = usePlanModeStore.getState();
     await planStore.skipClarification();
+    if (get()._runToken !== runToken) return;
     await get().proceedToPlanning();
   },
 
   proceedToPlanning: async () => {
+    const runToken = get()._runToken;
     set({ phase: 'planning', isBusy: true });
 
     injectCard('plan_persona_indicator', {
@@ -286,21 +305,25 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       contextStr,
       i18n.language,
     );
+    if (get()._runToken !== runToken) return;
 
     const { plan, error } = usePlanModeStore.getState();
 
     if (error || !plan) {
+      if (get()._runToken !== runToken) return;
       injectError(i18n.t('planMode:orchestrator.planFailed', 'Plan Generation Failed'), error || 'No plan produced');
       set({ isBusy: false, phase: 'failed' });
       return;
     }
 
     // Inject plan card (interactive for review)
+    if (get()._runToken !== runToken) return;
     set({ editablePlan: plan, phase: 'reviewing_plan', isBusy: false });
     injectCard('plan_card', { ...plan, editable: true } as unknown as Record<string, unknown>, true);
   },
 
   approvePlan: async (plan: PlanCardData) => {
+    const runToken = get()._runToken;
     set({ phase: 'executing', isBusy: true });
 
     injectInfo(i18n.t('planMode:orchestrator.planApproved', 'Plan approved! Starting execution...'));
@@ -313,6 +336,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
 
     // Subscribe to progress events
     const unlisten = await listen<PlanModeProgressPayload>('plan-mode-progress', (event) => {
+      if (get()._runToken !== runToken) return;
       const payload = event.payload;
       const { sessionId } = get();
       if (payload.sessionId !== sessionId) return;
@@ -335,6 +359,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       if (payload.eventType === 'execution_completed') {
         const planModeState = usePlanModeStore.getState();
         planModeState.fetchReport().then(() => {
+          if (get()._runToken !== runToken) return;
           const { report } = usePlanModeStore.getState();
           if (report) {
             injectCard('plan_completion_card', {
@@ -350,10 +375,15 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
           set({ phase: report?.success ? 'completed' : 'failed', isBusy: false });
         });
       } else if (payload.eventType === 'execution_cancelled') {
+        if (get()._runToken !== runToken) return;
         set({ phase: 'cancelled', isBusy: false });
       }
     });
 
+    if (get()._runToken !== runToken) {
+      unlisten();
+      return;
+    }
     set({ _progressUnlisten: unlisten });
 
     // Trigger approval
@@ -376,14 +406,22 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       contextStr,
       i18n.language,
     );
+    if (get()._runToken !== runToken) {
+      unlisten();
+    }
   },
 
   cancelWorkflow: async () => {
-    const { phase, _progressUnlisten } = get();
+    const { phase, _progressUnlisten, _runToken } = get();
+    const nextRunToken = _runToken + 1;
+    set({ _runToken: nextRunToken });
 
     if (phase === 'executing') {
       const planStore = usePlanModeStore.getState();
       await planStore.cancelExecution();
+    } else {
+      const planStore = usePlanModeStore.getState();
+      await planStore.cancelOperation();
     }
 
     if (_progressUnlisten) {
@@ -393,13 +431,13 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
     const planStore = usePlanModeStore.getState();
     await planStore.exitPlanMode();
 
-    set({ ...DEFAULT_STATE });
+    set({ ...DEFAULT_STATE, _runToken: nextRunToken });
     injectInfo(i18n.t('planMode:orchestrator.cancelled', 'Plan mode cancelled.'));
   },
 
   resetWorkflow: () => {
     const { _progressUnlisten } = get();
     if (_progressUnlisten) _progressUnlisten();
-    set({ ...DEFAULT_STATE });
+    set((state) => ({ ...DEFAULT_STATE, _runToken: state._runToken + 1 }));
   },
 }));

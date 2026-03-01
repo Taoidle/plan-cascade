@@ -763,6 +763,7 @@ function buildFrontendExportState(settings: ReturnType<typeof useSettingsStore.g
     phase_configs: settings.phaseConfigs,
     pinned_directories: settings.pinnedDirectories,
     sidebar_collapsed: settings.sidebarCollapsed,
+    auto_panel_hover_enabled: settings.autoPanelHoverEnabled,
     workspace_path: settings.workspacePath,
   };
 }
@@ -919,6 +920,9 @@ function syncSettingsToStore(settings: Record<string, unknown>) {
   }
   if (typeof settings.sidebar_collapsed === 'boolean') {
     useSettingsStore.setState({ sidebarCollapsed: settings.sidebar_collapsed });
+  }
+  if (typeof settings.auto_panel_hover_enabled === 'boolean') {
+    store.setAutoPanelHoverEnabled(settings.auto_panel_hover_enabled);
   }
   if (typeof settings.workspace_path === 'string') {
     store.setWorkspacePath(settings.workspace_path);
