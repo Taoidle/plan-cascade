@@ -9,7 +9,8 @@ import { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { useFileChangesStore } from '../../../store/fileChanges';
-import { useGitStore } from '../../../store/git';
+import { useSettingsStore } from '../../../store/settings';
+import { requestOpenAIChanges } from '../../../lib/simpleModeNavigation';
 import { DiffViewer } from '../../shared/DiffViewer';
 import type { FileChangeCardData } from '../../../types/workflowCard';
 
@@ -24,6 +25,7 @@ export function FileChangeCard({ data }: { data: FileChangeCardData }) {
 
   const fetchDiff = useFileChangesStore((s) => s.fetchDiff);
   const restoreSingleFile = useFileChangesStore((s) => s.restoreSingleFile);
+  const workspacePath = useSettingsStore((s) => s.workspacePath);
 
   const fileName = data.filePath.split('/').pop() || data.filePath;
   const dirPath = data.filePath.includes('/') ? data.filePath.substring(0, data.filePath.lastIndexOf('/')) : '';
@@ -36,21 +38,13 @@ export function FileChangeCard({ data }: { data: FileChangeCardData }) {
     setExpanded(true);
     if (fullDiff !== null) return;
     setLoadingDiff(true);
-    const diff = await fetchDiff(
-      data.sessionId,
-      '', // projectRoot not needed — prefilled cache should have it
-      data.changeId,
-      data.beforeHash,
-      data.afterHash,
-    );
+    const diff = await fetchDiff(data.sessionId, workspacePath || '', data.changeId, data.beforeHash, data.afterHash);
     setFullDiff(diff);
     setLoadingDiff(false);
-  }, [expanded, fullDiff, fetchDiff, data]);
+  }, [expanded, fullDiff, fetchDiff, data, workspacePath]);
 
   const handleViewInChanges = useCallback(() => {
-    useGitStore.getState().setSelectedTab('ai-changes');
-    useFileChangesStore.getState().selectTurn(data.turnIndex);
-    useGitStore.getState().setDiffPanelVisible(true);
+    requestOpenAIChanges({ turnIndex: data.turnIndex });
   }, [data.turnIndex]);
 
   const handleRevert = useCallback(async () => {
@@ -60,13 +54,13 @@ export function FileChangeCard({ data }: { data: FileChangeCardData }) {
     }
     if (!data.beforeHash) return; // Can't revert new file without before hash
     setReverting(true);
-    const ok = await restoreSingleFile(data.sessionId, '', data.filePath, data.beforeHash);
+    const ok = await restoreSingleFile(data.sessionId, workspacePath || '', data.filePath, data.beforeHash);
     setReverting(false);
     if (ok) {
       setReverted(true);
       setShowRevertConfirm(false);
     }
-  }, [showRevertConfirm, data, restoreSingleFile]);
+  }, [showRevertConfirm, data, restoreSingleFile, workspacePath]);
 
   return (
     <div

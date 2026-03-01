@@ -20,12 +20,15 @@
     "restoreComplete": "Restore Complete",
     "restoreConfirm": "Restore to before Turn {{index}}?",
     "affectedFiles": "The following files will be affected:",
+    "previewLoading": "Computing exact impacted files...",
     "actionDelete": "delete",
     "actionRestore": "restore",
     "actionDeleted": "deleted",
     "actionRestored": "restored",
     "cancel": "Cancel",
     "restoring": "Restoring...",
+    "undoRestore": "Undo restore",
+    "undoing": "Undoing...",
     "done": "Done"
   },
 

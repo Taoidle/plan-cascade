@@ -2676,17 +2676,20 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
     // Restore files to the state before this turn (fire-and-forget)
     const taskId = get().taskId;
+    const standaloneSessionId = get().standaloneSessionId;
+    const fileChangeSessionId = taskId || standaloneSessionId;
     const settingsSnapshot = useSettingsStore.getState();
     const workspacePath = (settingsSnapshot as { workspacePath?: string }).workspacePath;
-    if (taskId && workspacePath) {
-      void invoke('restore_files_to_turn', {
-        sessionId: taskId,
+    if (fileChangeSessionId && workspacePath) {
+      void invoke('restore_files_to_turn_v2', {
+        sessionId: fileChangeSessionId,
         projectRoot: workspacePath,
         turnIndex: targetTurn.turnIndex,
+        createSnapshot: true,
       })
         .then(() =>
           invoke('truncate_changes_from_turn', {
-            sessionId: taskId,
+            sessionId: fileChangeSessionId,
             projectRoot: workspacePath,
             turnIndex: targetTurn.turnIndex,
           }),

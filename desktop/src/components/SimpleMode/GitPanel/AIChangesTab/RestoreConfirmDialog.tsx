@@ -12,19 +12,27 @@ import type { RestoredFile } from '../../../../types/fileChanges';
 interface RestoreConfirmDialogProps {
   turnIndex: number;
   expectedFiles: { path: string; willDelete: boolean }[];
+  previewLoading?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
   restoring: boolean;
   result: RestoredFile[] | null;
+  onUndo?: () => void;
+  canUndo?: boolean;
+  undoing?: boolean;
 }
 
 export function RestoreConfirmDialog({
   turnIndex,
   expectedFiles,
+  previewLoading = false,
   onConfirm,
   onCancel,
   restoring,
   result,
+  onUndo,
+  canUndo = false,
+  undoing = false,
 }: RestoreConfirmDialogProps) {
   const { t } = useTranslation('git');
   return (
@@ -57,7 +65,16 @@ export function RestoreConfirmDialog({
                 </li>
               ))}
             </ul>
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              {canUndo && onUndo && (
+                <button
+                  onClick={onUndo}
+                  disabled={undoing}
+                  className="px-3 py-1.5 text-sm font-medium rounded border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/30 disabled:opacity-50"
+                >
+                  {undoing ? t('aiChanges.undoing') : t('aiChanges.undoRestore')}
+                </button>
+              )}
               <button
                 onClick={onCancel}
                 className="px-3 py-1.5 text-sm font-medium rounded bg-primary-600 text-white hover:bg-primary-700"
@@ -73,21 +90,25 @@ export function RestoreConfirmDialog({
             </h3>
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">{t('aiChanges.affectedFiles')}</p>
             <ul className="space-y-1 mb-4 max-h-48 overflow-y-auto">
-              {expectedFiles.map((f) => (
-                <li key={f.path} className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-                  <span
-                    className={clsx(
-                      'inline-block w-14 text-center rounded px-1 py-0.5 text-2xs font-medium',
-                      f.willDelete
-                        ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
-                        : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
-                    )}
-                  >
-                    {f.willDelete ? t('aiChanges.actionDelete') : t('aiChanges.actionRestore')}
-                  </span>
-                  <span className="font-mono truncate">{f.path}</span>
-                </li>
-              ))}
+              {previewLoading ? (
+                <li className="text-xs text-gray-500 dark:text-gray-400 py-2">{t('aiChanges.previewLoading')}</li>
+              ) : (
+                expectedFiles.map((f) => (
+                  <li key={f.path} className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+                    <span
+                      className={clsx(
+                        'inline-block w-14 text-center rounded px-1 py-0.5 text-2xs font-medium',
+                        f.willDelete
+                          ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+                          : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
+                      )}
+                    >
+                      {f.willDelete ? t('aiChanges.actionDelete') : t('aiChanges.actionRestore')}
+                    </span>
+                    <span className="font-mono truncate">{f.path}</span>
+                  </li>
+                ))
+              )}
             </ul>
             <div className="flex justify-end gap-2">
               <button
@@ -99,7 +120,7 @@ export function RestoreConfirmDialog({
               </button>
               <button
                 onClick={onConfirm}
-                disabled={restoring}
+                disabled={restoring || previewLoading}
                 className="px-3 py-1.5 text-sm font-medium rounded bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50"
               >
                 {restoring ? t('aiChanges.restoring') : t('aiChanges.restore')}

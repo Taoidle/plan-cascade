@@ -22,11 +22,14 @@ import { useExecutionStore } from '../../store/execution';
 import { useSettingsStore } from '../../store/settings';
 import { useWorkflowOrchestratorStore } from '../../store/workflowOrchestrator';
 import { usePlanOrchestratorStore } from '../../store/planOrchestrator';
+import { useGitStore } from '../../store/git';
+import { useFileChangesStore } from '../../store/fileChanges';
 import { InterviewInputPanel } from './InterviewInputPanel';
 import { ToolPermissionOverlay } from './ToolPermissionOverlay';
 import { useToolPermissionStore } from '../../store/toolPermission';
 import { useAgentsStore } from '../../store/agents';
 import { createFileChangeCardBridge } from '../../lib/fileChangeCardBridge';
+import { listenOpenAIChanges } from '../../lib/simpleModeNavigation';
 import {
   captureElementToBlob,
   blobToBase64,
@@ -146,6 +149,19 @@ export function SimpleMode() {
     handleChange();
     media.addEventListener('change', handleChange);
     return () => media.removeEventListener('change', handleChange);
+  }, []);
+
+  // Handle navigation requests coming from chat cards.
+  useEffect(() => {
+    return listenOpenAIChanges(({ turnIndex }) => {
+      setRightPanelOpen(true);
+      setRightPanelHoverExpanded(false);
+      setRightPanelTab('git');
+      useGitStore.getState().setSelectedTab('ai-changes');
+      if (typeof turnIndex === 'number') {
+        useFileChangesStore.getState().selectTurn(turnIndex);
+      }
+    });
   }, []);
 
   const prevPathRef = useRef(workspacePath);

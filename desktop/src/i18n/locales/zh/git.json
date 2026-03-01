@@ -20,12 +20,15 @@
     "restoreComplete": "恢复完成",
     "restoreConfirm": "恢复到轮次 {{index}} 之前？",
     "affectedFiles": "以下文件将受到影响：",
+    "previewLoading": "正在计算精确影响文件...",
     "actionDelete": "删除",
     "actionRestore": "恢复",
     "actionDeleted": "已删除",
     "actionRestored": "已恢复",
     "cancel": "取消",
     "restoring": "正在恢复...",
+    "undoRestore": "撤销恢复",
+    "undoing": "撤销中...",
     "done": "完成"
   },
 

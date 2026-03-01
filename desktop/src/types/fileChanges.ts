@@ -28,3 +28,16 @@ export interface RestoredFile {
   path: string;
   action: 'restored' | 'deleted';
 }
+
+/** Preview row for restore operation. */
+export interface RestorePreviewItem {
+  path: string;
+  action: 'restore' | 'delete';
+  source_turn: number;
+}
+
+/** Restore execution result with optional undo handle. */
+export interface RestoreExecutionResult {
+  operation_id: string | null;
+  restored: RestoredFile[];
+}

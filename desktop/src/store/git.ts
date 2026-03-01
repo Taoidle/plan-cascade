@@ -92,9 +92,6 @@ interface GitState {
   isPulling: boolean;
   isPushing: boolean;
 
-  // --- Diff panel visibility (controlled from git store for cross-component access) ---
-  diffPanelVisible: boolean;
-
   // --- Actions (feature-002: operational) ---
   refreshStatus: () => Promise<void>;
   refreshDiffs: () => Promise<void>;
@@ -139,7 +136,6 @@ interface GitState {
   setFetching: (v: boolean) => void;
   setPulling: (v: boolean) => void;
   setPushing: (v: boolean) => void;
-  setDiffPanelVisible: (v: boolean) => void;
 }
 
 // ============================================================================
@@ -194,7 +190,6 @@ export const useGitStore = create<GitState>((set, get) => ({
   isFetching: false,
   isPulling: false,
   isPushing: false,
-  diffPanelVisible: false,
 
   // ---- Operational Actions (feature-002) ----
 
@@ -546,7 +541,6 @@ export const useGitStore = create<GitState>((set, get) => ({
   setFetching: (v: boolean) => set({ isFetching: v }),
   setPulling: (v: boolean) => set({ isPulling: v }),
   setPushing: (v: boolean) => set({ isPushing: v }),
-  setDiffPanelVisible: (v: boolean) => set({ diffPanelVisible: v }),
 }));
 
 export default useGitStore;

@@ -6,7 +6,9 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 
 use crate::models::response::CommandResponse;
-use crate::services::file_change_tracker::{FileChangeTracker, RestoredFile, TurnChanges};
+use crate::services::file_change_tracker::{
+    FileChangeTracker, RestoreExecutionResult, RestorePreviewItem, RestoredFile, TurnChanges,
+};
 
 /// Tauri-managed state holding file change trackers keyed by session ID.
 pub struct FileChangesState {
@@ -128,17 +130,53 @@ pub async fn get_file_change_diff(
     Ok(result)
 }
 
-/// Restore all files to the state before the given turn index.
+/// Preview affected files for restoring to before the given turn index.
 #[tauri::command]
-pub async fn restore_files_to_turn(
+pub async fn preview_restore_to_turn(
     session_id: String,
     project_root: String,
     turn_index: u32,
     state: tauri::State<'_, FileChangesState>,
+) -> Result<CommandResponse<Vec<RestorePreviewItem>>, String> {
+    let tracker = state.get_or_create(&session_id, &project_root).await;
+    let result = match tracker.lock() {
+        Ok(t) => CommandResponse::ok(t.preview_restore_to_before_turn(turn_index)),
+        Err(_) => CommandResponse::err("Failed to lock tracker"),
+    };
+    Ok(result)
+}
+
+/// Restore files with optional snapshot and undo handle.
+#[tauri::command]
+pub async fn restore_files_to_turn_v2(
+    session_id: String,
+    project_root: String,
+    turn_index: u32,
+    create_snapshot: Option<bool>,
+    state: tauri::State<'_, FileChangesState>,
+) -> Result<CommandResponse<RestoreExecutionResult>, String> {
+    let tracker = state.get_or_create(&session_id, &project_root).await;
+    let result = match tracker.lock() {
+        Ok(mut t) => match t.restore_to_before_turn_v2(turn_index, create_snapshot.unwrap_or(true)) {
+            Ok(resp) => CommandResponse::ok(resp),
+            Err(e) => CommandResponse::err(e),
+        },
+        Err(_) => CommandResponse::err("Failed to lock tracker"),
+    };
+    Ok(result)
+}
+
+/// Undo a previous restore operation.
+#[tauri::command]
+pub async fn undo_restore(
+    session_id: String,
+    project_root: String,
+    operation_id: String,
+    state: tauri::State<'_, FileChangesState>,
 ) -> Result<CommandResponse<Vec<RestoredFile>>, String> {
     let tracker = state.get_or_create(&session_id, &project_root).await;
     let result = match tracker.lock() {
-        Ok(t) => match t.restore_to_before_turn(turn_index) {
+        Ok(mut t) => match t.undo_restore(&operation_id) {
             Ok(restored) => CommandResponse::ok(restored),
             Err(e) => CommandResponse::err(e),
         },

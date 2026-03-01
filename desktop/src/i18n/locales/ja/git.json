@@ -20,12 +20,15 @@
     "restoreComplete": "復元完了",
     "restoreConfirm": "ターン {{index}} の前に復元しますか？",
     "affectedFiles": "以下のファイルが影響を受けます：",
+    "previewLoading": "影響ファイルを計算中...",
     "actionDelete": "削除",
     "actionRestore": "復元",
     "actionDeleted": "削除済み",
     "actionRestored": "復元済み",
     "cancel": "キャンセル",
     "restoring": "復元中...",
+    "undoRestore": "復元を取り消す",
+    "undoing": "取り消し中...",
     "done": "完了"
   },
 

@@ -48,6 +48,43 @@ pub struct RestoredFile {
     pub action: String, // "restored" or "deleted"
 }
 
+/// Preview item for restoring to a turn.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RestorePreviewItem {
+    pub path: String,
+    pub action: String, // "restore" or "delete"
+    pub source_turn: u32,
+}
+
+/// Result payload for v2 restore command with optional undo handle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RestoreExecutionResult {
+    pub operation_id: Option<String>,
+    pub restored: Vec<RestoredFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RestoreSnapshotEntry {
+    path: String,
+    before_restore_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RestoreOperation {
+    operation_id: String,
+    session_id: String,
+    turn_index: u32,
+    timestamp: i64,
+    files: Vec<RestoreSnapshotEntry>,
+}
+
+#[derive(Debug, Clone)]
+struct RestorePreviewTarget {
+    path: String,
+    target_hash: Option<String>,
+    source_turn: u32,
+}
+
 // ── FileChangeTracker ───────────────────────────────────────────────────
 
 /// Payload emitted on the `file-change-recorded` Tauri event.
@@ -322,68 +359,189 @@ impl FileChangeTracker {
 
     // ── Restore ─────────────────────────────────────────────────────────
 
-    /// Restore all files to their state before the given turn index.
-    ///
-    /// For each file modified in `turn_index` or later:
-    /// - Find the state of that file just before `turn_index`
-    /// - If the file didn't exist before (before_hash is None for its first
-    ///   change in/after the target turn), delete it
-    /// - Otherwise, restore from CAS
-    pub fn restore_to_before_turn(&self, turn_index: u32) -> Result<Vec<RestoredFile>, String> {
-        // Collect all changes at or after the target turn
-        let affected_changes: Vec<&FileChange> = self
-            .changes
-            .iter()
-            .filter(|c| c.turn_index >= turn_index)
-            .collect();
-
-        if affected_changes.is_empty() {
-            return Ok(Vec::new());
+    fn compute_restore_targets(&self, turn_index: u32) -> Vec<RestorePreviewTarget> {
+        // Keep the earliest change at/after target turn for each file.
+        let mut target_map: HashMap<String, RestorePreviewTarget> = HashMap::new();
+        for change in self.changes.iter().filter(|c| c.turn_index >= turn_index) {
+            target_map
+                .entry(change.file_path.clone())
+                .or_insert_with(|| RestorePreviewTarget {
+                    path: change.file_path.clone(),
+                    target_hash: change.before_hash.clone(),
+                    source_turn: change.turn_index,
+                });
         }
+        let mut targets: Vec<RestorePreviewTarget> = target_map.into_values().collect();
+        targets.sort_by(|a, b| a.path.cmp(&b.path));
+        targets
+    }
 
-        // For each affected file, find the state just before the target turn.
-        // This is the `before_hash` of the earliest change at/after `turn_index`.
-        let mut file_restore_target: HashMap<&str, Option<&str>> = HashMap::new();
-        for change in &affected_changes {
-            file_restore_target
-                .entry(&change.file_path)
-                .or_insert(change.before_hash.as_deref());
-        }
+    /// Preview all files that would be affected by restoring to before a turn.
+    pub fn preview_restore_to_before_turn(&self, turn_index: u32) -> Vec<RestorePreviewItem> {
+        self.compute_restore_targets(turn_index)
+            .into_iter()
+            .map(|t| RestorePreviewItem {
+                path: t.path,
+                action: if t.target_hash.is_some() {
+                    "restore".to_string()
+                } else {
+                    "delete".to_string()
+                },
+                source_turn: t.source_turn,
+            })
+            .collect()
+    }
 
-        let mut restored = Vec::new();
-        for (file_path, target_hash) in &file_restore_target {
-            let full_path = self.project_root.join(file_path);
-
-            match target_hash {
-                None => {
-                    // File was created by LLM — delete it
-                    if full_path.exists() {
-                        fs::remove_file(&full_path)
-                            .map_err(|e| format!("Failed to delete {file_path}: {e}"))?;
-                    }
-                    restored.push(RestoredFile {
-                        path: file_path.to_string(),
-                        action: "deleted".to_string(),
-                    });
+    fn restore_target_to_disk(&self, target: &RestorePreviewTarget) -> Result<RestoredFile, String> {
+        let full_path = self.project_root.join(&target.path);
+        match target.target_hash.as_deref() {
+            None => {
+                if full_path.exists() {
+                    fs::remove_file(&full_path)
+                        .map_err(|e| format!("Failed to delete {}: {}", target.path, e))?;
                 }
+                Ok(RestoredFile {
+                    path: target.path.clone(),
+                    action: "deleted".to_string(),
+                })
+            }
+            Some(hash) => {
+                let content = self.get_content(hash)?;
+                if let Some(parent) = full_path.parent() {
+                    fs::create_dir_all(parent)
+                        .map_err(|e| format!("Failed to create dirs for {}: {}", target.path, e))?;
+                }
+                fs::write(&full_path, &content)
+                    .map_err(|e| format!("Failed to restore {}: {}", target.path, e))?;
+                Ok(RestoredFile {
+                    path: target.path.clone(),
+                    action: "restored".to_string(),
+                })
+            }
+        }
+    }
+
+    fn capture_restore_snapshot(
+        &self,
+        targets: &[RestorePreviewTarget],
+    ) -> Result<Vec<RestoreSnapshotEntry>, String> {
+        let mut snapshots = Vec::with_capacity(targets.len());
+        for target in targets {
+            let full_path = self.project_root.join(&target.path);
+            let before_restore_hash = if full_path.exists() {
+                let bytes = fs::read(&full_path)
+                    .map_err(|e| format!("Failed to read {} for snapshot: {}", target.path, e))?;
+                Some(self.store_content(&bytes)?)
+            } else {
+                None
+            };
+            snapshots.push(RestoreSnapshotEntry {
+                path: target.path.clone(),
+                before_restore_hash,
+            });
+        }
+        Ok(snapshots)
+    }
+
+    fn apply_snapshot_entries(&self, entries: &[RestoreSnapshotEntry]) -> Result<Vec<RestoredFile>, String> {
+        let mut reverted = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let full_path = self.project_root.join(&entry.path);
+            match entry.before_restore_hash.as_deref() {
                 Some(hash) => {
                     let content = self.get_content(hash)?;
-                    // Ensure parent directory exists
                     if let Some(parent) = full_path.parent() {
                         fs::create_dir_all(parent)
-                            .map_err(|e| format!("Failed to create dirs for {file_path}: {e}"))?;
+                            .map_err(|e| format!("Failed to create dirs for {}: {}", entry.path, e))?;
                     }
                     fs::write(&full_path, &content)
-                        .map_err(|e| format!("Failed to restore {file_path}: {e}"))?;
-                    restored.push(RestoredFile {
-                        path: file_path.to_string(),
+                        .map_err(|e| format!("Failed to undo restore for {}: {}", entry.path, e))?;
+                    reverted.push(RestoredFile {
+                        path: entry.path.clone(),
                         action: "restored".to_string(),
+                    });
+                }
+                None => {
+                    if full_path.exists() {
+                        fs::remove_file(&full_path)
+                            .map_err(|e| format!("Failed to remove {} during undo: {}", entry.path, e))?;
+                    }
+                    reverted.push(RestoredFile {
+                        path: entry.path.clone(),
+                        action: "deleted".to_string(),
                     });
                 }
             }
         }
+        Ok(reverted)
+    }
 
-        Ok(restored)
+    /// Restore all files to their state before the given turn index.
+    ///
+    /// For each file modified in `turn_index` or later:
+    /// - Find the state of that file just before `turn_index`
+    /// - If the file didn't exist before, delete it
+    /// - Otherwise, restore from CAS
+    ///
+    /// Optionally creates an undo snapshot and returns an operation ID.
+    pub fn restore_to_before_turn_v2(
+        &mut self,
+        turn_index: u32,
+        create_snapshot: bool,
+    ) -> Result<RestoreExecutionResult, String> {
+        let targets = self.compute_restore_targets(turn_index);
+        if targets.is_empty() {
+            return Ok(RestoreExecutionResult {
+                operation_id: None,
+                restored: Vec::new(),
+            });
+        }
+
+        let operation = if create_snapshot {
+            let snapshots = self.capture_restore_snapshot(&targets)?;
+            let op = RestoreOperation {
+                operation_id: uuid::Uuid::new_v4().to_string(),
+                session_id: self.session_id.clone(),
+                turn_index,
+                timestamp: chrono::Utc::now().timestamp_millis(),
+                files: snapshots,
+            };
+            Some(op)
+        } else {
+            None
+        };
+
+        let mut restored = Vec::with_capacity(targets.len());
+        let rollback_entries = operation.as_ref().map(|op| op.files.clone());
+        for target in &targets {
+            match self.restore_target_to_disk(target) {
+                Ok(file) => restored.push(file),
+                Err(e) => {
+                    if let Some(entries) = &rollback_entries {
+                        let _ = self.apply_snapshot_entries(entries);
+                    }
+                    return Err(e);
+                }
+            }
+        }
+
+        let operation_id = if let Some(op) = operation {
+            self.persist_restore_operation(&op)?;
+            Some(op.operation_id)
+        } else {
+            None
+        };
+
+        Ok(RestoreExecutionResult {
+            operation_id,
+            restored,
+        })
+    }
+
+    /// Undo a previous restore operation by operation ID.
+    pub fn undo_restore(&mut self, operation_id: &str) -> Result<Vec<RestoredFile>, String> {
+        let operation = self.load_restore_operation(operation_id)?;
+        self.apply_snapshot_entries(&operation.files)
     }
 
     /// Restore a single file to a specific CAS version.
@@ -403,6 +561,40 @@ impl FileChangeTracker {
         self.data_dir
             .join("changes")
             .join(format!("{}.json", self.session_id))
+    }
+
+    fn restore_ops_dir(&self) -> PathBuf {
+        self.data_dir
+            .join("restore-ops")
+            .join(&self.session_id)
+    }
+
+    fn restore_operation_file_path(&self, operation_id: &str) -> PathBuf {
+        self.restore_ops_dir().join(format!("{}.json", operation_id))
+    }
+
+    fn restore_last_file_path(&self) -> PathBuf {
+        self.restore_ops_dir().join("last.json")
+    }
+
+    fn persist_restore_operation(&self, operation: &RestoreOperation) -> Result<(), String> {
+        let ops_dir = self.restore_ops_dir();
+        fs::create_dir_all(&ops_dir).map_err(|e| format!("Failed to create restore ops dir: {e}"))?;
+        let op_json = serde_json::to_string_pretty(operation)
+            .map_err(|e| format!("Failed to serialize restore op: {e}"))?;
+        let op_path = self.restore_operation_file_path(&operation.operation_id);
+        fs::write(&op_path, &op_json).map_err(|e| format!("Failed to write restore op file: {e}"))?;
+        let last_path = self.restore_last_file_path();
+        fs::write(last_path, op_json).map_err(|e| format!("Failed to write last restore op file: {e}"))?;
+        Ok(())
+    }
+
+    fn load_restore_operation(&self, operation_id: &str) -> Result<RestoreOperation, String> {
+        let path = self.restore_operation_file_path(operation_id);
+        let data = fs::read_to_string(path)
+            .map_err(|e| format!("Restore operation not found ({operation_id}): {e}"))?;
+        serde_json::from_str::<RestoreOperation>(&data)
+            .map_err(|e| format!("Failed to parse restore operation ({operation_id}): {e}"))
     }
 
     /// Persist change records to disk.
@@ -602,7 +794,7 @@ mod tests {
         );
 
         // Restore to before turn 1 — should restore existing.txt, keep new.txt
-        let restored = tracker.restore_to_before_turn(1).unwrap();
+        let restored = tracker.restore_to_before_turn_v2(1, false).unwrap().restored;
         assert_eq!(restored.len(), 1);
         assert_eq!(restored[0].path, "existing.txt");
         assert_eq!(restored[0].action, "restored");
@@ -610,11 +802,97 @@ mod tests {
         assert_eq!(content, "original");
 
         // Restore to before turn 0 — should delete new.txt
-        let restored = tracker.restore_to_before_turn(0).unwrap();
+        let restored = tracker.restore_to_before_turn_v2(0, false).unwrap().restored;
         assert_eq!(restored.len(), 2); // new.txt + existing.txt
         let new_file_restore = restored.iter().find(|r| r.path == "new.txt").unwrap();
         assert_eq!(new_file_restore.action, "deleted");
         assert!(!file_path.exists());
+    }
+
+    #[test]
+    fn test_preview_restore_to_before_turn() {
+        let dir = TempDir::new().unwrap();
+        let mut tracker = make_tracker(dir.path());
+
+        // Turn 0: create new file
+        let new_file = dir.path().join("new.txt");
+        fs::write(&new_file, "new content").unwrap();
+        let new_after = tracker.store_content(b"new content").unwrap();
+        tracker.set_turn_index(0);
+        tracker.record_change("tc-new", "Write", "new.txt", None, &new_after, "Created new file");
+
+        // Turn 1: edit existing file
+        let existing = dir.path().join("existing.txt");
+        fs::write(&existing, "original").unwrap();
+        let existing_before = tracker.store_content(b"original").unwrap();
+        fs::write(&existing, "modified").unwrap();
+        let existing_after = tracker.store_content(b"modified").unwrap();
+        tracker.set_turn_index(1);
+        tracker.record_change(
+            "tc-edit",
+            "Edit",
+            "existing.txt",
+            Some(existing_before),
+            &existing_after,
+            "Edited existing file",
+        );
+
+        let preview_turn_0 = tracker.preview_restore_to_before_turn(0);
+        assert_eq!(preview_turn_0.len(), 2);
+        let new_preview = preview_turn_0.iter().find(|p| p.path == "new.txt").unwrap();
+        assert_eq!(new_preview.action, "delete");
+        let existing_preview = preview_turn_0
+            .iter()
+            .find(|p| p.path == "existing.txt")
+            .unwrap();
+        assert_eq!(existing_preview.action, "restore");
+        assert_eq!(existing_preview.source_turn, 1);
+
+        let preview_turn_1 = tracker.preview_restore_to_before_turn(1);
+        assert_eq!(preview_turn_1.len(), 1);
+        assert_eq!(preview_turn_1[0].path, "existing.txt");
+        assert_eq!(preview_turn_1[0].action, "restore");
+    }
+
+    #[test]
+    fn test_restore_v2_and_undo_restore() {
+        let dir = TempDir::new().unwrap();
+        let mut tracker = make_tracker(dir.path());
+
+        // Existing file edited by AI in turn 1
+        let existing = dir.path().join("existing.txt");
+        fs::write(&existing, "original").unwrap();
+        let existing_before = tracker.store_content(b"original").unwrap();
+        fs::write(&existing, "modified").unwrap();
+        let existing_after = tracker.store_content(b"modified").unwrap();
+        tracker.set_turn_index(1);
+        tracker.record_change(
+            "tc-edit",
+            "Edit",
+            "existing.txt",
+            Some(existing_before),
+            &existing_after,
+            "Edited existing file",
+        );
+
+        // New file created by AI in same turn
+        let new_file = dir.path().join("new.txt");
+        fs::write(&new_file, "new content").unwrap();
+        let new_after = tracker.store_content(b"new content").unwrap();
+        tracker.record_change("tc-new", "Write", "new.txt", None, &new_after, "Created new file");
+
+        // Restore to before turn 1
+        let restore = tracker.restore_to_before_turn_v2(1, true).unwrap();
+        assert!(restore.operation_id.is_some());
+        assert_eq!(fs::read_to_string(&existing).unwrap(), "original");
+        assert!(!new_file.exists());
+
+        // Undo restore
+        let op_id = restore.operation_id.unwrap();
+        let undone = tracker.undo_restore(&op_id).unwrap();
+        assert_eq!(undone.len(), 2);
+        assert_eq!(fs::read_to_string(&existing).unwrap(), "modified");
+        assert_eq!(fs::read_to_string(&new_file).unwrap(), "new content");
     }
 
     #[test]

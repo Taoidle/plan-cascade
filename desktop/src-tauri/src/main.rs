@@ -449,9 +449,11 @@ fn main() {
             plan_cascade_desktop::commands::file_changes::advance_turn_index,
             plan_cascade_desktop::commands::file_changes::get_file_changes_by_turn,
             plan_cascade_desktop::commands::file_changes::get_file_change_diff,
-            plan_cascade_desktop::commands::file_changes::restore_files_to_turn,
+            plan_cascade_desktop::commands::file_changes::preview_restore_to_turn,
+            plan_cascade_desktop::commands::file_changes::restore_files_to_turn_v2,
             plan_cascade_desktop::commands::file_changes::truncate_changes_from_turn,
             plan_cascade_desktop::commands::file_changes::restore_single_file,
+            plan_cascade_desktop::commands::file_changes::undo_restore,
             // Permission commands
             plan_cascade_desktop::commands::permissions::set_session_permission_level,
             plan_cascade_desktop::commands::permissions::get_session_permission_level,

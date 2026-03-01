@@ -8,7 +8,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import type { CommandResponse } from '../lib/tauri';
-import type { TurnChanges, RestoredFile } from '../types/fileChanges';
+import type { RestoreExecutionResult, RestorePreviewItem, RestoredFile, TurnChanges } from '../types/fileChanges';
 
 // ============================================================================
 // State
@@ -36,7 +36,18 @@ interface FileChangesState {
     beforeHash: string | null,
     afterHash: string,
   ) => Promise<string | null>;
-  restoreToTurn: (sessionId: string, projectRoot: string, turnIndex: number) => Promise<RestoredFile[] | null>;
+  previewRestoreToTurn: (
+    sessionId: string,
+    projectRoot: string,
+    turnIndex: number,
+  ) => Promise<RestorePreviewItem[] | null>;
+  restoreToTurn: (
+    sessionId: string,
+    projectRoot: string,
+    turnIndex: number,
+    createSnapshot?: boolean,
+  ) => Promise<RestoreExecutionResult | null>;
+  undoRestore: (sessionId: string, projectRoot: string, operationId: string) => Promise<RestoredFile[] | null>;
   restoreSingleFile: (sessionId: string, projectRoot: string, filePath: string, hash: string) => Promise<boolean>;
   truncateFromTurn: (sessionId: string, projectRoot: string, turnIndex: number) => Promise<void>;
   selectTurn: (turnIndex: number | null) => void;
@@ -95,9 +106,9 @@ export const useFileChangesStore = create<FileChangesState>((set, get) => ({
     }
   },
 
-  restoreToTurn: async (sessionId, projectRoot, turnIndex) => {
+  previewRestoreToTurn: async (sessionId, projectRoot, turnIndex) => {
     try {
-      const resp = await invoke<CommandResponse<RestoredFile[]>>('restore_files_to_turn', {
+      const resp = await invoke<CommandResponse<RestorePreviewItem[]>>('preview_restore_to_turn', {
         sessionId,
         projectRoot,
         turnIndex,
@@ -105,7 +116,44 @@ export const useFileChangesStore = create<FileChangesState>((set, get) => ({
       if (resp.success && resp.data) {
         return resp.data;
       }
+      set({ error: resp.error ?? 'Restore preview failed' });
+      return null;
+    } catch (err) {
+      set({ error: String(err) });
+      return null;
+    }
+  },
+
+  restoreToTurn: async (sessionId, projectRoot, turnIndex, createSnapshot = true) => {
+    try {
+      const resp = await invoke<CommandResponse<RestoreExecutionResult>>('restore_files_to_turn_v2', {
+        sessionId,
+        projectRoot,
+        turnIndex,
+        createSnapshot,
+      });
+      if (resp.success && resp.data) {
+        return resp.data;
+      }
       set({ error: resp.error ?? 'Restore failed' });
+      return null;
+    } catch (err) {
+      set({ error: String(err) });
+      return null;
+    }
+  },
+
+  undoRestore: async (sessionId, projectRoot, operationId) => {
+    try {
+      const resp = await invoke<CommandResponse<RestoredFile[]>>('undo_restore', {
+        sessionId,
+        projectRoot,
+        operationId,
+      });
+      if (resp.success && resp.data) {
+        return resp.data;
+      }
+      set({ error: resp.error ?? 'Undo restore failed' });
       return null;
     } catch (err) {
       set({ error: String(err) });

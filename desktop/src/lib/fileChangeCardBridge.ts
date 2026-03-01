@@ -151,6 +151,8 @@ export function createFileChangeCardBridge(sessionId: string, projectRoot: strin
         // Silently skip failed cards
       }
     }
+    // Keep AI changes tab count fresh even when the Git panel is not visible.
+    await useFileChangesStore.getState().fetchChanges(sessionId, projectRoot);
   }
 
   function flushPending() {

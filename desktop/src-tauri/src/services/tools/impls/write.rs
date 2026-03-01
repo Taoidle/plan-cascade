@@ -114,8 +114,9 @@ impl Tool for WriteTool {
                                 .unwrap_or(&path)
                                 .to_string_lossy()
                                 .to_string();
+                            let tool_call_id = format!("write-{}", uuid::Uuid::new_v4());
                             t.record_change(
-                                "",
+                                &tool_call_id,
                                 "Write",
                                 &rel_path,
                                 before_hash,

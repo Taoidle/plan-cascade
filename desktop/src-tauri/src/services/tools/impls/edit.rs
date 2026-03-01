@@ -168,7 +168,15 @@ impl Tool for EditTool {
                             } else {
                                 "Edited 1 occurrence".to_string()
                             };
-                            t.record_change("", "Edit", &rel_path, before_hash, &after_hash, &desc);
+                            let tool_call_id = format!("edit-{}", uuid::Uuid::new_v4());
+                            t.record_change(
+                                &tool_call_id,
+                                "Edit",
+                                &rel_path,
+                                before_hash,
+                                &after_hash,
+                                &desc,
+                            );
                         }
                     }
                 }

@@ -25,7 +25,6 @@ export function AIChangesTab({ sessionId, projectRoot }: AIChangesTabProps) {
   const loading = useFileChangesStore((s) => s.loading);
   const error = useFileChangesStore((s) => s.error);
   const fetchChanges = useFileChangesStore((s) => s.fetchChanges);
-  const truncateFromTurn = useFileChangesStore((s) => s.truncateFromTurn);
   const refreshGitStatus = useGitStore((s) => s.refreshStatus);
 
   // Fetch changes on mount and when session changes
@@ -48,15 +47,21 @@ export function AIChangesTab({ sessionId, projectRoot }: AIChangesTabProps) {
   }, [sessionId, projectRoot, fetchChanges]);
 
   const handleRestoreComplete = useCallback(
-    async (turnIndex: number, _restored: RestoredFile[]) => {
+    async (_turnIndex: number, _restored: RestoredFile[]) => {
       if (!sessionId || !projectRoot) return;
-      // Truncate change records from the restored turn onward
-      await truncateFromTurn(sessionId, projectRoot, turnIndex);
-      // Refresh both AI changes and git status
       await fetchChanges(sessionId, projectRoot);
       refreshGitStatus();
     },
-    [sessionId, projectRoot, truncateFromTurn, fetchChanges, refreshGitStatus],
+    [sessionId, projectRoot, fetchChanges, refreshGitStatus],
+  );
+
+  const handleUndoComplete = useCallback(
+    async (_restored: RestoredFile[]) => {
+      if (!sessionId || !projectRoot) return;
+      await fetchChanges(sessionId, projectRoot);
+      refreshGitStatus();
+    },
+    [sessionId, projectRoot, fetchChanges, refreshGitStatus],
   );
 
   // Empty state
@@ -99,6 +104,7 @@ export function AIChangesTab({ sessionId, projectRoot }: AIChangesTabProps) {
           sessionId={sessionId}
           projectRoot={projectRoot}
           onRestoreComplete={handleRestoreComplete}
+          onUndoComplete={handleUndoComplete}
         />
       ))}
     </div>

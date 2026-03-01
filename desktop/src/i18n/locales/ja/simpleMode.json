@@ -108,16 +108,6 @@
     "currentFork": "（現在）"
   },
 
-  "diffPanel": {
-    "title": "変更",
-    "gitChanges": "Git 変更",
-    "toolChanges": "ツール変更",
-    "noChanges": "変更が検出されませんでした",
-    "notGitRepo": "Git リポジトリではありません",
-    "refresh": "更新",
-    "filesChanged": "{{count}} ファイルが変更されました"
-  },
-
   "skillPanel": {
     "title": "スキルとメモリ",
     "manageAll": "すべて管理...",

@@ -5,52 +5,104 @@
  * Only injected when 2+ files were changed in the same turn.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { useFileChangesStore } from '../../../store/fileChanges';
+import { useSettingsStore } from '../../../store/settings';
 import { useGitStore } from '../../../store/git';
 import { RestoreConfirmDialog } from '../GitPanel/AIChangesTab/RestoreConfirmDialog';
 import type { TurnChangeSummaryCardData } from '../../../types/workflowCard';
 import type { RestoredFile } from '../../../types/fileChanges';
+import { requestOpenAIChanges } from '../../../lib/simpleModeNavigation';
 
 export function TurnChangeSummaryCard({ data }: { data: TurnChangeSummaryCardData }) {
   const { t } = useTranslation('simpleMode');
   const [showRestoreDialog, setShowRestoreDialog] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewFiles, setPreviewFiles] = useState<{ path: string; willDelete: boolean }[] | null>(null);
   const [restoring, setRestoring] = useState(false);
+  const [undoing, setUndoing] = useState(false);
   const [restoreResult, setRestoreResult] = useState<RestoredFile[] | null>(null);
+  const [restoreOperationId, setRestoreOperationId] = useState<string | null>(null);
 
+  const workspacePath = useSettingsStore((s) => s.workspacePath);
+  const refreshGitStatus = useGitStore((s) => s.refreshStatus);
+  const fetchChanges = useFileChangesStore((s) => s.fetchChanges);
+  const previewRestoreToTurn = useFileChangesStore((s) => s.previewRestoreToTurn);
   const restoreToTurn = useFileChangesStore((s) => s.restoreToTurn);
+  const undoRestore = useFileChangesStore((s) => s.undoRestore);
 
   const handleViewAll = useCallback(() => {
-    useGitStore.getState().setSelectedTab('ai-changes');
-    useFileChangesStore.getState().selectTurn(data.turnIndex);
-    useGitStore.getState().setDiffPanelVisible(true);
+    requestOpenAIChanges({ turnIndex: data.turnIndex });
   }, [data.turnIndex]);
 
-  const handleRevertAll = useCallback(() => {
+  const fallbackExpectedFiles = useMemo(
+    () =>
+      data.files.map((f) => ({
+        path: f.filePath,
+        willDelete: f.changeType === 'new_file',
+      })),
+    [data.files],
+  );
+
+  const handleRevertAll = useCallback(async () => {
     setShowRestoreDialog(true);
     setRestoreResult(null);
-  }, []);
+    setRestoreOperationId(null);
+    if (!workspacePath) {
+      setPreviewFiles(fallbackExpectedFiles);
+      return;
+    }
+    setPreviewLoading(true);
+    const preview = await previewRestoreToTurn(data.sessionId, workspacePath, data.turnIndex);
+    setPreviewLoading(false);
+    if (preview && preview.length > 0) {
+      setPreviewFiles(
+        preview.map((item) => ({
+          path: item.path,
+          willDelete: item.action === 'delete',
+        })),
+      );
+      return;
+    }
+    setPreviewFiles(fallbackExpectedFiles);
+  }, [workspacePath, fallbackExpectedFiles, previewRestoreToTurn, data.sessionId, data.turnIndex]);
 
   const handleConfirmRestore = useCallback(async () => {
+    if (!workspacePath) return;
     setRestoring(true);
-    const result = await restoreToTurn(data.sessionId, '', data.turnIndex);
+    const result = await restoreToTurn(data.sessionId, workspacePath, data.turnIndex, true);
     setRestoring(false);
     if (result) {
-      setRestoreResult(result);
+      setRestoreResult(result.restored);
+      setRestoreOperationId(result.operation_id);
+      await fetchChanges(data.sessionId, workspacePath);
+      refreshGitStatus();
     }
-  }, [restoreToTurn, data.sessionId, data.turnIndex]);
+  }, [restoreToTurn, fetchChanges, refreshGitStatus, data.sessionId, data.turnIndex, workspacePath]);
+
+  const handleUndoRestore = useCallback(async () => {
+    if (!workspacePath || !restoreOperationId) return;
+    setUndoing(true);
+    const undone = await undoRestore(data.sessionId, workspacePath, restoreOperationId);
+    setUndoing(false);
+    if (undone) {
+      setRestoreResult(undone);
+      setRestoreOperationId(null);
+      await fetchChanges(data.sessionId, workspacePath);
+      refreshGitStatus();
+    }
+  }, [undoRestore, fetchChanges, refreshGitStatus, workspacePath, restoreOperationId, data.sessionId]);
 
   const handleCloseDialog = useCallback(() => {
     setShowRestoreDialog(false);
+    setPreviewLoading(false);
+    setPreviewFiles(null);
     setRestoreResult(null);
+    setRestoreOperationId(null);
+    setUndoing(false);
   }, []);
-
-  const expectedFiles = data.files.map((f) => ({
-    path: f.filePath,
-    willDelete: f.changeType === 'new_file',
-  }));
 
   return (
     <>
@@ -118,11 +170,15 @@ export function TurnChangeSummaryCard({ data }: { data: TurnChangeSummaryCardDat
       {showRestoreDialog && (
         <RestoreConfirmDialog
           turnIndex={data.turnIndex}
-          expectedFiles={expectedFiles}
+          expectedFiles={previewFiles ?? fallbackExpectedFiles}
+          previewLoading={previewLoading}
           onConfirm={handleConfirmRestore}
           onCancel={handleCloseDialog}
           restoring={restoring}
           result={restoreResult}
+          onUndo={handleUndoRestore}
+          canUndo={Boolean(restoreOperationId)}
+          undoing={undoing}
         />
       )}
     </>

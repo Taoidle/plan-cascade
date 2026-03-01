@@ -2,7 +2,6 @@
  * ToolChangesBar Component
  *
  * Bottom persistent bar showing tool changes (Write/Edit operations).
- * Refactored from the existing tool changes display in DiffPanel.
  * Includes correlation markers linking tool operations to git status entries.
  *
  * Feature-002, Story-006
@@ -37,7 +36,7 @@ interface ToolChange {
 
 /**
  * Extract tool changes (Write/Edit operations) from streaming output lines.
- * Matches the extraction logic from the original DiffPanel.
+ * Shared parser for tool-call log lines in SimpleMode.
  */
 function extractToolChanges(lines: StreamLine[], changedPaths: Set<string>): ToolChange[] {
   const changes: ToolChange[] = [];

@@ -108,16 +108,6 @@
     "currentFork": "（当前）"
   },
 
-  "diffPanel": {
-    "title": "变更",
-    "gitChanges": "Git 变更",
-    "toolChanges": "工具变更",
-    "noChanges": "未检测到变更",
-    "notGitRepo": "不是 Git 仓库",
-    "refresh": "刷新",
-    "filesChanged": "{{count}} 个文件已变更"
-  },
-
   "skillPanel": {
     "title": "技能与记忆",
     "manageAll": "管理全部...",

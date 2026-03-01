@@ -1,8 +1,8 @@
 /**
  * GitPanel Component
  *
- * Main container for the git source control panel. Replaces the former DiffPanel
- * with a tabbed layout: Changes (default), History, Branches.
+ * Main container for the git source control panel with a tabbed layout:
+ * Changes (default), AI Changes, History, Branches.
  * Bottom area reserved for ToolChangesBar.
  */
 
