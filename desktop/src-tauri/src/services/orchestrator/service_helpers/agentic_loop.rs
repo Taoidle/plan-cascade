@@ -988,17 +988,15 @@ impl OrchestratorService {
 
                     // Build execution context once (shared across parallel calls)
                     let exec_ctx = Arc::new(match task_ctx.as_ref() {
-                        Some(tc) => self
-                            .tool_executor
-                            .build_tool_context_with_task_for_session(
-                                execution_session_id.clone(),
-                                tc,
-                            ),
+                        Some(tc) => self.tool_executor.build_tool_context_with_task_for_session(
+                            execution_session_id.clone(),
+                            tc,
+                        ),
                         None => self
                             .tool_executor
                             .build_tool_context_for_session(execution_session_id.clone()),
                     });
-                    let registry = self.tool_executor.registry();
+                    let executor = &self.tool_executor;
 
                     // Spawn all tool executions concurrently
                     let mut futures = Vec::with_capacity(valid_calls.len());
@@ -1008,7 +1006,9 @@ impl OrchestratorService {
                         let args = args.clone();
                         let tc_id = tc_id.clone();
                         futures.push(async move {
-                            let result = registry.execute(&name, &ctx_ref, args).await;
+                            let result = executor
+                                .execute_with_prebuilt_context(&ctx_ref, &name, &args)
+                                .await;
                             (tc_id, name, result)
                         });
                     }
@@ -1390,17 +1390,15 @@ impl OrchestratorService {
 
                     // Spawn all futures
                     let exec_ctx = Arc::new(match task_ctx.as_ref() {
-                        Some(tc) => self
-                            .tool_executor
-                            .build_tool_context_with_task_for_session(
-                                execution_session_id.clone(),
-                                tc,
-                            ),
+                        Some(tc) => self.tool_executor.build_tool_context_with_task_for_session(
+                            execution_session_id.clone(),
+                            tc,
+                        ),
                         None => self
                             .tool_executor
                             .build_tool_context_for_session(execution_session_id.clone()),
                     });
-                    let registry = self.tool_executor.registry();
+                    let executor = &self.tool_executor;
                     let mut futures = Vec::with_capacity(valid_fallback_calls.len());
                     for (tool_id, name, args) in &valid_fallback_calls {
                         let ctx_ref = Arc::clone(&exec_ctx);
@@ -1408,7 +1406,9 @@ impl OrchestratorService {
                         let args = args.clone();
                         let tool_id = tool_id.clone();
                         futures.push(async move {
-                            let result = registry.execute(&name, &ctx_ref, args).await;
+                            let result = executor
+                                .execute_with_prebuilt_context(&ctx_ref, &name, &args)
+                                .await;
                             (tool_id, name, result)
                         });
                     }
@@ -2313,18 +2313,16 @@ impl OrchestratorService {
 
                     // Build execution context once (shared across parallel calls)
                     let exec_ctx = match task_ctx.as_ref() {
-                        Some(tc) => self
-                            .tool_executor
-                            .build_tool_context_with_task_for_session(
-                                hook_ctx.session_id.clone(),
-                                tc,
-                            ),
+                        Some(tc) => self.tool_executor.build_tool_context_with_task_for_session(
+                            hook_ctx.session_id.clone(),
+                            tc,
+                        ),
                         None => self
                             .tool_executor
                             .build_tool_context_for_session(hook_ctx.session_id.clone()),
                     };
                     let exec_ctx = Arc::new(exec_ctx);
-                    let registry = self.tool_executor.registry();
+                    let executor = &self.tool_executor;
 
                     // Spawn all tool executions concurrently
                     let mut futures = Vec::with_capacity(valid_calls.len());
@@ -2334,7 +2332,9 @@ impl OrchestratorService {
                         let args = args.clone();
                         let tc_id = tc_id.clone();
                         futures.push(async move {
-                            let result = registry.execute(&name, &ctx_ref, args).await;
+                            let result = executor
+                                .execute_with_prebuilt_context(&ctx_ref, &name, &args)
+                                .await;
                             (tc_id, name, result)
                         });
                     }
@@ -2818,18 +2818,16 @@ impl OrchestratorService {
                     }
 
                     let exec_ctx = match task_ctx.as_ref() {
-                        Some(tc) => self
-                            .tool_executor
-                            .build_tool_context_with_task_for_session(
-                                hook_ctx.session_id.clone(),
-                                tc,
-                            ),
+                        Some(tc) => self.tool_executor.build_tool_context_with_task_for_session(
+                            hook_ctx.session_id.clone(),
+                            tc,
+                        ),
                         None => self
                             .tool_executor
                             .build_tool_context_for_session(hook_ctx.session_id.clone()),
                     };
                     let exec_ctx = Arc::new(exec_ctx);
-                    let registry = self.tool_executor.registry();
+                    let executor = &self.tool_executor;
 
                     let mut futures = Vec::with_capacity(valid_fallback_calls.len());
                     for (tool_id, name, args) in &valid_fallback_calls {
@@ -2838,7 +2836,9 @@ impl OrchestratorService {
                         let args = args.clone();
                         let tool_id = tool_id.clone();
                         futures.push(async move {
-                            let result = registry.execute(&name, &ctx_ref, args).await;
+                            let result = executor
+                                .execute_with_prebuilt_context(&ctx_ref, &name, &args)
+                                .await;
                             (tool_id, name, result)
                         });
                     }

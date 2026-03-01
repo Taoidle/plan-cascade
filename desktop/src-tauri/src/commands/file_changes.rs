@@ -157,7 +157,8 @@ pub async fn restore_files_to_turn_v2(
 ) -> Result<CommandResponse<RestoreExecutionResult>, String> {
     let tracker = state.get_or_create(&session_id, &project_root).await;
     let result = match tracker.lock() {
-        Ok(mut t) => match t.restore_to_before_turn_v2(turn_index, create_snapshot.unwrap_or(true)) {
+        Ok(mut t) => match t.restore_to_before_turn_v2(turn_index, create_snapshot.unwrap_or(true))
+        {
             Ok(resp) => CommandResponse::ok(resp),
             Err(e) => CommandResponse::err(e),
         },

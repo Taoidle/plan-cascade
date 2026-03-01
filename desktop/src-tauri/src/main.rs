@@ -458,6 +458,8 @@ fn main() {
             plan_cascade_desktop::commands::permissions::set_session_permission_level,
             plan_cascade_desktop::commands::permissions::get_session_permission_level,
             plan_cascade_desktop::commands::permissions::respond_tool_permission,
+            plan_cascade_desktop::commands::permissions::get_permission_policy_config,
+            plan_cascade_desktop::commands::permissions::set_permission_policy_config,
             // Artifact commands
             plan_cascade_desktop::commands::artifacts::artifact_save,
             plan_cascade_desktop::commands::artifacts::artifact_load,

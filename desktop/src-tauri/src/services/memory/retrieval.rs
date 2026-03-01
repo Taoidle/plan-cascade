@@ -131,8 +131,7 @@ fn days_since(datetime_str: &str) -> f64 {
 fn is_stopword(token: &str) -> bool {
     matches!(
         token,
-        "a"
-            | "an"
+        "a" | "an"
             | "and"
             | "are"
             | "as"
@@ -357,7 +356,8 @@ pub fn search_memories_with_options(
     scored_results.truncate(request.top_k);
 
     // Optional touch after read.
-    if matches!(options.touch_policy, MemoryTouchPolicy::TouchReturned) && !scored_results.is_empty()
+    if matches!(options.touch_policy, MemoryTouchPolicy::TouchReturned)
+        && !scored_results.is_empty()
     {
         let ids: Vec<String> = scored_results.iter().map(|r| r.entry.id.clone()).collect();
         let _ = store.touch_memories(&ids)?;

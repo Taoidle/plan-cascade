@@ -793,6 +793,26 @@
       "customConfig": "Custom Proxy for {{provider}}"
     },
 
+    "agentPolicy": {
+      "title": "Agent Network Domain Allowlist",
+      "description": "Allow Bash network commands to be auto-approved only for listed domains.",
+      "builtinTitle": "Built-in Allowlist (Always Enabled)",
+      "builtinDescription": "These domains are maintained by the app and cannot be removed.",
+      "builtinVersion": "Built-in version: {{version}}",
+      "customTitle": "Custom Allowlist",
+      "inputPlaceholder": "e.g., github.com or api.openai.com",
+      "add": "Add",
+      "remove": "Remove",
+      "empty": "No allowlisted domains yet",
+      "invalidDomain": "Invalid domain. Enter a hostname like github.com.",
+      "duplicateDomain": "This domain is already in the allowlist.",
+      "alreadyBuiltin": "This domain is already covered by the built-in allowlist.",
+      "applySuccess": "Policy updated and applied immediately",
+      "applyError": "Failed to apply policy update",
+      "realtimeHint": "Changes apply in real time to new tool calls.",
+      "matchHint": "Matches exact domain and subdomains (e.g., github.com also matches api.github.com)."
+    },
+
     "providers": {
       "anthropic": "Anthropic",
       "openai": "OpenAI",

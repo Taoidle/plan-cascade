@@ -774,12 +774,10 @@ mod tests {
         let msgs = provider.build_input_messages_json(&messages, None);
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0]["role"], "user");
-        assert!(
-            msgs[0]["content"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("[tool_result:call_orphan]")
-        );
+        assert!(msgs[0]["content"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("[tool_result:call_orphan]"));
     }
 
     #[test]

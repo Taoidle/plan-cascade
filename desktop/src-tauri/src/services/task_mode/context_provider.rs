@@ -400,8 +400,7 @@ pub async fn query_memories_for_task(
     project_path: &str,
     query: &str,
 ) -> String {
-    query_memories_for_task_filtered(app_state, project_path, query, &[], &[], &[], &[], None)
-        .await
+    query_memories_for_task_filtered(app_state, project_path, query, &[], &[], &[], &[], None).await
 }
 
 /// Query Project Memory with optional category/ID filtering.

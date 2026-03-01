@@ -793,6 +793,26 @@
       "customConfig": "{{provider}} 自定义代理"
     },
 
+    "agentPolicy": {
+      "title": "Agent 网络域名白名单",
+      "description": "仅对白名单中的域名自动放行 Bash 网络命令。",
+      "builtinTitle": "内置白名单（始终启用）",
+      "builtinDescription": "这些域名由应用内置维护，不能删除。",
+      "builtinVersion": "内置版本：{{version}}",
+      "customTitle": "自定义白名单",
+      "inputPlaceholder": "例如 github.com 或 api.openai.com",
+      "add": "添加",
+      "remove": "移除",
+      "empty": "当前没有白名单域名",
+      "invalidDomain": "域名格式无效，请输入如 github.com 的主机名。",
+      "duplicateDomain": "该域名已在白名单中。",
+      "alreadyBuiltin": "该域名已被内置白名单覆盖。",
+      "applySuccess": "策略已更新并即时生效",
+      "applyError": "策略更新失败",
+      "realtimeHint": "修改会实时作用于新的工具调用。",
+      "matchHint": "同时匹配精确域名和子域名（如 github.com 会匹配 api.github.com）。"
+    },
+
     "providers": {
       "anthropic": "Anthropic",
       "openai": "OpenAI",

@@ -24,6 +24,7 @@ pub mod mcp_manager;
 pub mod mcp_schema;
 pub mod notebook_edit;
 pub mod prompt_fallback;
+pub mod runtime_tools;
 pub mod system_prompt;
 pub mod task_spawner;
 pub mod trait_def;

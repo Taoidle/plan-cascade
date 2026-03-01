@@ -1378,8 +1378,11 @@ pub async fn execute_standalone(
     if let Ok(memory_store) = app_state.get_memory_store_arc().await {
         let loaded_memories = std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new()));
         let memory_hook_config = build_memory_hook_config(context_sources.as_ref());
-        orchestrator = orchestrator
-            .with_memory_hooks_with_config(memory_store, loaded_memories, memory_hook_config);
+        orchestrator = orchestrator.with_memory_hooks_with_config(
+            memory_store,
+            loaded_memories,
+            memory_hook_config,
+        );
     }
 
     // Wire knowledge tool for on-demand SearchKnowledge (replaces pre-injection)

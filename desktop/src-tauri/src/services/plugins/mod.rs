@@ -9,8 +9,8 @@
 //! - dispatcher.rs:  Bridge Claude Code shell hooks to AgenticHooks
 //! - manager.rs:     Unified entry point for plugin management
 
-pub mod dispatcher;
 pub mod compat;
+pub mod dispatcher;
 pub mod installer;
 pub mod lifecycle;
 pub mod loader;

@@ -239,7 +239,17 @@ impl ToolRegistry {
     pub async fn execute(&self, name: &str, ctx: &ToolExecutionContext, args: Value) -> ToolResult {
         // Permission gate check
         if let Some(ref gate) = ctx.permission_gate {
-            if let Err(reason) = gate.check(&ctx.session_id, name, &args).await {
+            let working_dir = ctx.working_directory_snapshot();
+            if let Err(reason) = gate
+                .check_with_context(
+                    &ctx.session_id,
+                    name,
+                    &args,
+                    &working_dir,
+                    &ctx.project_root,
+                )
+                .await
+            {
                 return ToolResult::err(reason);
             }
         }

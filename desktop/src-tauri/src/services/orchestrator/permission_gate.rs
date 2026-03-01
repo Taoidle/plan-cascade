@@ -5,11 +5,15 @@
 //! permission level and "always allow" rule set.
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 use uuid::Uuid;
 
-use super::permissions::{classify_tool_risk, needs_approval, PermissionLevel, PermissionResponse};
+use super::permissions::{
+    evaluate_policy, PermissionLevel, PermissionPolicyConfig, PermissionResponse, PolicyAction,
+    PolicyInput,
+};
 use crate::services::streaming::UnifiedStreamEvent;
 
 /// Max time to wait for a frontend permission decision before auto-deny.
@@ -27,12 +31,14 @@ struct PendingPermissionRequest {
 pub struct PermissionGate {
     /// Per-session permission levels. Missing key → defaults to Strict.
     session_levels: RwLock<HashMap<String, PermissionLevel>>,
-    /// Per-session "always allow" tool sets.
-    /// Key: session_id, Value: set of tool names that have been permanently allowed.
+    /// Per-session "always allow" scope keys.
+    /// Key: session_id, Value: policy scope keys approved with "always allow".
     session_allow_rules: RwLock<HashMap<String, HashSet<String>>>,
     /// Pending approval requests awaiting frontend response.
     /// Key: request_id, Value: oneshot sender to unblock the waiting future.
     pending_requests: Mutex<HashMap<String, PendingPermissionRequest>>,
+    /// Policy v2 runtime config (domain allowlist etc.).
+    policy_config: RwLock<PermissionPolicyConfig>,
     /// Event sender connected to the agentic loop's stream channel.
     /// Set at the start of each execution via `set_event_tx`.
     event_tx: RwLock<Option<mpsc::Sender<UnifiedStreamEvent>>>,
@@ -45,6 +51,7 @@ impl PermissionGate {
             session_levels: RwLock::new(HashMap::new()),
             session_allow_rules: RwLock::new(HashMap::new()),
             pending_requests: Mutex::new(HashMap::new()),
+            policy_config: RwLock::new(PermissionPolicyConfig::default()),
             event_tx: RwLock::new(None),
         }
     }
@@ -83,10 +90,22 @@ impl PermissionGate {
         levels.get(session_id).copied().unwrap_or_default()
     }
 
+    /// Replace the Policy v2 config.
+    pub async fn set_policy_config(&self, config: PermissionPolicyConfig) {
+        let mut guard = self.policy_config.write().await;
+        *guard = config;
+    }
+
+    /// Get the current Policy v2 config snapshot.
+    pub async fn get_policy_config(&self) -> PermissionPolicyConfig {
+        self.policy_config.read().await.clone()
+    }
+
     /// Core permission check.
     ///
-    /// - If the tool doesn't need approval → returns `Ok(())` immediately.
-    /// - If the tool is in the session's "always allow" set → returns `Ok(())`.
+    /// Uses Policy v2 (`deny > prompt > allow`) and applies session-level
+    /// "always allow" rules on approval scope keys.
+    ///
     /// - Otherwise, sends a `ToolPermissionRequest` event and blocks on a oneshot
     ///   channel until the frontend responds via `resolve()`.
     ///
@@ -97,18 +116,53 @@ impl PermissionGate {
         tool_name: &str,
         args: &serde_json::Value,
     ) -> Result<(), String> {
-        let level = self.get_session_level(session_id).await;
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        self.check_with_context(session_id, tool_name, args, &cwd, &cwd)
+            .await
+    }
 
-        // Fast path: no approval needed for this tool at this level
-        if !needs_approval(tool_name, args, level) {
+    /// Context-aware permission check used by the tool execution path.
+    ///
+    /// `working_dir` and `project_root` are required for path-scoped Policy v2
+    /// rules (for example read outside workspace).
+    pub async fn check_with_context(
+        &self,
+        session_id: &str,
+        tool_name: &str,
+        args: &serde_json::Value,
+        working_dir: &Path,
+        project_root: &Path,
+    ) -> Result<(), String> {
+        let level = self.get_session_level(session_id).await;
+        let config = self.get_policy_config().await;
+        let decision = evaluate_policy(
+            PolicyInput {
+                tool_name,
+                args,
+                level,
+                working_dir,
+                project_root,
+            },
+            &config,
+        );
+
+        if decision.action == PolicyAction::Allow {
             return Ok(());
+        }
+        if decision.action == PolicyAction::Deny {
+            return Err(decision.reason);
+        }
+
+        let approval_scope_key = decision.approval_scope_key.clone();
+        if approval_scope_key.is_empty() {
+            return Err("Policy decision missing approval scope key".to_string());
         }
 
         // Check session-level "always allow" rules
         {
             let rules = self.session_allow_rules.read().await;
             if let Some(allowed) = rules.get(session_id) {
-                if allowed.contains(tool_name) {
+                if allowed.contains(&approval_scope_key) {
                     return Ok(());
                 }
             }
@@ -131,13 +185,12 @@ impl PermissionGate {
         }
 
         // Send the permission request event to the frontend
-        let risk = classify_tool_risk(tool_name, args);
         let event = UnifiedStreamEvent::ToolPermissionRequest {
             request_id: request_id.clone(),
             session_id: session_id.to_string(),
             tool_name: tool_name.to_string(),
             arguments: serde_json::to_string(args).unwrap_or_default(),
-            risk: risk.as_str().to_string(),
+            risk: decision.risk.as_str().to_string(),
         };
 
         {
@@ -171,12 +224,15 @@ impl PermissionGate {
                     rules
                         .entry(session_id.to_string())
                         .or_default()
-                        .insert(tool_name.to_string());
+                        .insert(approval_scope_key);
                 }
                 if response.allowed {
                     Ok(())
                 } else {
-                    Err(format!("Tool '{}' execution denied by user", tool_name))
+                    Err(format!(
+                        "Tool '{}' execution denied by user: {}",
+                        tool_name, decision.reason
+                    ))
                 }
             }
             Ok(Err(_)) => {
@@ -239,6 +295,7 @@ impl Default for PermissionGate {
 mod tests {
     use super::*;
     use std::sync::Arc;
+    use tempfile::TempDir;
 
     #[tokio::test]
     async fn test_read_only_tool_auto_passes() {
@@ -440,7 +497,8 @@ mod tests {
         });
 
         let event = rx.recv().await.unwrap();
-        let request_id = if let UnifiedStreamEvent::ToolPermissionRequest { request_id, .. } = event {
+        let request_id = if let UnifiedStreamEvent::ToolPermissionRequest { request_id, .. } = event
+        {
             request_id
         } else {
             panic!("Expected ToolPermissionRequest");
@@ -492,5 +550,76 @@ mod tests {
         let result = check_handle.await.unwrap();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("cancelled"));
+    }
+
+    #[tokio::test]
+    async fn test_read_outside_workspace_requires_approval() {
+        let gate = Arc::new(PermissionGate::new());
+        let workspace = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let outside_file = outside.path().join("outside.txt");
+        std::fs::write(&outside_file, "x").unwrap();
+
+        let (tx, mut rx) = mpsc::channel::<UnifiedStreamEvent>(16);
+        gate.set_event_tx(tx).await;
+
+        let gate_clone = Arc::clone(&gate);
+        let ws = workspace.path().to_path_buf();
+        let check_handle = tokio::spawn(async move {
+            gate_clone
+                .check_with_context(
+                    "session-1",
+                    "Read",
+                    &serde_json::json!({
+                        "file_path": outside_file.to_string_lossy().to_string()
+                    }),
+                    &ws,
+                    &ws,
+                )
+                .await
+        });
+
+        let event = rx.recv().await.unwrap();
+        let request_id = if let UnifiedStreamEvent::ToolPermissionRequest { request_id, .. } = event
+        {
+            request_id
+        } else {
+            panic!("Expected ToolPermissionRequest");
+        };
+        gate.resolve(
+            &request_id,
+            PermissionResponse {
+                request_id: request_id.clone(),
+                allowed: true,
+                always_allow: false,
+            },
+        )
+        .await;
+
+        let result = check_handle.await.unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_allowlisted_bash_network_command_auto_allows_without_prompt() {
+        let gate = PermissionGate::new();
+        gate.set_session_level("session-1", PermissionLevel::Permissive)
+            .await;
+        gate.set_policy_config(PermissionPolicyConfig {
+            network_domain_allowlist: vec!["example.com".to_string()],
+        })
+        .await;
+
+        let cwd = std::env::current_dir().unwrap();
+        let result = gate
+            .check_with_context(
+                "session-1",
+                "Bash",
+                &serde_json::json!({"command": "curl https://api.example.com/v1"}),
+                &cwd,
+                &cwd,
+            )
+            .await;
+        assert!(result.is_ok());
     }
 }

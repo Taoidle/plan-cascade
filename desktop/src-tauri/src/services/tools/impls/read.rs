@@ -41,6 +41,16 @@ pub(crate) fn validate_path(
     working_dir: &Path,
     project_root: &Path,
 ) -> Result<PathBuf, String> {
+    validate_path_with_workspace_boundary(path_str, working_dir, project_root, true)
+}
+
+/// Validate and resolve a path with optional workspace boundary enforcement.
+pub(crate) fn validate_path_with_workspace_boundary(
+    path_str: &str,
+    working_dir: &Path,
+    project_root: &Path,
+    enforce_workspace_boundary: bool,
+) -> Result<PathBuf, String> {
     if path_str.trim().is_empty() {
         return Err("Path cannot be empty".to_string());
     }
@@ -74,7 +84,7 @@ pub(crate) fn validate_path(
 
     match check_path.canonicalize() {
         Ok(canonical) => {
-            if !canonical.starts_with(&canonical_root) {
+            if enforce_workspace_boundary && !canonical.starts_with(&canonical_root) {
                 return Err(format!(
                     "Path '{}' is outside workspace root '{}'",
                     abs_path.display(),
@@ -134,10 +144,11 @@ impl Tool for ReadTool {
             None => return ToolResult::err(missing_param_error("file_path")),
         };
 
-        let path = match validate_path(
+        let path = match validate_path_with_workspace_boundary(
             file_path,
             &ctx.working_directory_snapshot(),
             &ctx.project_root,
+            ctx.permission_gate.is_none(),
         ) {
             Ok(p) => p,
             Err(e) => return ToolResult::err(e),

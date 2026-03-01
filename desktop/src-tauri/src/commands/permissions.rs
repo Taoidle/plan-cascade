@@ -7,7 +7,11 @@ use std::sync::Arc;
 
 use crate::models::response::CommandResponse;
 use crate::services::orchestrator::permission_gate::PermissionGate;
-use crate::services::orchestrator::permissions::{PermissionLevel, PermissionResponse};
+use crate::services::orchestrator::permissions::{
+    builtin_network_domain_allowlist, builtin_network_domain_allowlist_available_versions,
+    builtin_network_domain_allowlist_version, PermissionLevel, PermissionPolicyConfig,
+    PermissionResponse,
+};
 
 /// Tauri managed state for the global permission gate singleton.
 pub struct PermissionState {
@@ -41,6 +45,26 @@ pub struct RespondPermissionRequest {
     pub request_id: String,
     pub allowed: bool,
     pub always_allow: bool,
+}
+
+/// Request payload for updating Policy v2 config.
+#[derive(Debug, Deserialize)]
+pub struct SetPolicyConfigRequest {
+    /// Auto-allow Bash network calls only for these allowlisted domains.
+    pub network_domain_allowlist: Vec<String>,
+}
+
+/// Permission policy config payload returned to frontend.
+#[derive(Debug, Serialize)]
+pub struct PermissionPolicyConfigResponse {
+    /// Custom allowlist configured by user.
+    pub network_domain_allowlist: Vec<String>,
+    /// Built-in allowlist shipped with app.
+    pub builtin_network_domain_allowlist: Vec<String>,
+    /// Current built-in allowlist version id.
+    pub builtin_network_domain_allowlist_version: String,
+    /// All built-in allowlist versions known by this app build.
+    pub builtin_network_domain_allowlist_available_versions: Vec<String>,
 }
 
 /// Set the permission level for a session.
@@ -82,6 +106,43 @@ pub async fn respond_tool_permission(
                 always_allow: request.always_allow,
             },
         )
+        .await;
+    Ok(CommandResponse::ok(()))
+}
+
+/// Get current Policy v2 config.
+#[tauri::command]
+pub async fn get_permission_policy_config(
+    state: tauri::State<'_, PermissionState>,
+) -> Result<CommandResponse<PermissionPolicyConfigResponse>, String> {
+    let config = state.gate.get_policy_config().await;
+    Ok(CommandResponse::ok(PermissionPolicyConfigResponse {
+        network_domain_allowlist: config.network_domain_allowlist,
+        builtin_network_domain_allowlist: builtin_network_domain_allowlist()
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+        builtin_network_domain_allowlist_version: builtin_network_domain_allowlist_version()
+            .to_string(),
+        builtin_network_domain_allowlist_available_versions:
+            builtin_network_domain_allowlist_available_versions()
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect(),
+    }))
+}
+
+/// Replace Policy v2 config.
+#[tauri::command]
+pub async fn set_permission_policy_config(
+    state: tauri::State<'_, PermissionState>,
+    request: SetPolicyConfigRequest,
+) -> Result<CommandResponse<()>, String> {
+    state
+        .gate
+        .set_policy_config(PermissionPolicyConfig {
+            network_domain_allowlist: request.network_domain_allowlist,
+        })
         .await;
     Ok(CommandResponse::ok(()))
 }

@@ -10,8 +10,8 @@ use crate::models::{
     CreateMcpServerRequest, HealthCheckResult, ImportResult, McpServer, UpdateMcpServerRequest,
 };
 use crate::services::mcp::McpService;
-use crate::services::tools::mcp_client::McpToolInfo;
 use crate::services::tools::mcp_manager::{ConnectedServerInfo, McpManager};
+use crate::services::tools::runtime_tools;
 use crate::services::tools::trait_def::ToolRegistry;
 
 /// Tauri-managed state for MCP runtime tool integration.
@@ -28,6 +28,7 @@ pub struct McpRuntimeState {
 
 impl McpRuntimeState {
     pub fn new() -> Self {
+        runtime_tools::clear();
         Self {
             manager: Arc::new(McpManager::new()),
             registry: Arc::new(RwLock::new(ToolRegistry::new())),
@@ -219,7 +220,10 @@ pub async fn connect_mcp_server(
     // Connect and register tools
     let mut registry = state.registry.write().await;
     match state.manager.connect_server(&config, &mut registry).await {
-        Ok(info) => Ok(CommandResponse::ok(info)),
+        Ok(info) => {
+            runtime_tools::replace_from_registry(&registry);
+            Ok(CommandResponse::ok(info))
+        }
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
 }
@@ -236,7 +240,10 @@ pub async fn disconnect_mcp_server(
         .disconnect_server(&server_name, &mut registry)
         .await
     {
-        Ok(()) => Ok(CommandResponse::ok(())),
+        Ok(()) => {
+            runtime_tools::replace_from_registry(&registry);
+            Ok(CommandResponse::ok(()))
+        }
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
 }
@@ -258,8 +265,8 @@ pub async fn list_connected_mcp_servers(
 pub async fn list_mcp_tools(
     state: tauri::State<'_, McpRuntimeState>,
 ) -> Result<CommandResponse<Vec<String>>, String> {
-    let registry = state.registry.read().await;
-    Ok(CommandResponse::ok(registry.names()))
+    let _ = state;
+    Ok(CommandResponse::ok(runtime_tools::names()))
 }
 
 #[cfg(test)]

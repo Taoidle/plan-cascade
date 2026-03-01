@@ -464,18 +464,14 @@ impl ToolExecutor {
     /// auto-generated from the trait implementations and always in sync
     /// with the actual tool behavior.
     pub fn registry_definitions(&self) -> Vec<crate::services::llm::types::ToolDefinition> {
-        self.registry.definitions()
+        crate::services::tools::definitions::get_tool_definitions_from_registry()
     }
 
     /// Get basic tool definitions (without Task tool) from the registry.
     ///
     /// Used for sub-agents to prevent recursion.
     pub fn registry_basic_definitions(&self) -> Vec<crate::services::llm::types::ToolDefinition> {
-        self.registry
-            .definitions()
-            .into_iter()
-            .filter(|d| d.name != "Task" && d.name != "Analyze")
-            .collect()
+        crate::services::tools::definitions::get_basic_tool_definitions_from_registry()
     }
 
     /// Build a ToolExecutionContext from this executor's current state.
@@ -529,6 +525,43 @@ impl ToolExecutor {
         ctx
     }
 
+    /// Execute with a prebuilt context.
+    ///
+    /// Looks up built-in tools first, then runtime tools (for example MCP).
+    /// Permission checks are enforced before execution, regardless of source.
+    pub async fn execute_with_prebuilt_context(
+        &self,
+        ctx: &super::trait_def::ToolExecutionContext,
+        tool_name: &str,
+        arguments: &serde_json::Value,
+    ) -> ToolResult {
+        if let Some(ref gate) = ctx.permission_gate {
+            let working_dir = ctx.working_directory_snapshot();
+            if let Err(reason) = gate
+                .check_with_context(
+                    &ctx.session_id,
+                    tool_name,
+                    arguments,
+                    &working_dir,
+                    &ctx.project_root,
+                )
+                .await
+            {
+                return ToolResult::err(reason);
+            }
+        }
+
+        if let Some(tool) = self.registry.get(tool_name) {
+            return tool.execute(ctx, arguments.clone()).await;
+        }
+
+        if let Some(tool) = super::runtime_tools::get(tool_name) {
+            return tool.execute(ctx, arguments.clone()).await;
+        }
+
+        ToolResult::err(format!("Unknown tool: {}", tool_name))
+    }
+
     /// Execute a tool by name with given arguments.
     ///
     /// All tools are dispatched through the `ToolRegistry`, which looks up the
@@ -539,8 +572,7 @@ impl ToolExecutor {
     /// Task tool will return a depth-limit error.
     pub async fn execute(&self, tool_name: &str, arguments: &serde_json::Value) -> ToolResult {
         let ctx = self.build_tool_context_for_session(String::new());
-        self.registry
-            .execute(tool_name, &ctx, arguments.clone())
+        self.execute_with_prebuilt_context(&ctx, tool_name, arguments)
             .await
     }
 
@@ -555,8 +587,7 @@ impl ToolExecutor {
             Some(tc) => self.build_tool_context_with_task_for_session(session_id.to_string(), tc),
             None => self.build_tool_context_for_session(session_id.to_string()),
         };
-        self.registry
-            .execute(tool_name, &ctx, arguments.clone())
+        self.execute_with_prebuilt_context(&ctx, tool_name, arguments)
             .await
     }
 

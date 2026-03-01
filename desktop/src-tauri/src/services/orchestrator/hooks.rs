@@ -614,13 +614,7 @@ pub fn register_memory_hooks(
     loaded_memories: Arc<RwLock<Vec<crate::services::memory::store::MemoryEntry>>>,
     llm_provider: Option<Arc<dyn crate::services::llm::provider::LlmProvider>>,
 ) {
-    register_memory_hooks_with_config(
-        hooks,
-        memory_store,
-        loaded_memories,
-        llm_provider,
-        None,
-    );
+    register_memory_hooks_with_config(hooks, memory_store, loaded_memories, llm_provider, None);
 }
 
 /// Register memory-related hooks with optional injection filter configuration.
@@ -641,14 +635,10 @@ pub fn register_memory_hooks_with_config(
     } else {
         Some(memory_hook_config.selected_categories.clone())
     };
-    let selected_ids: HashSet<String> = memory_hook_config
-        .selected_memory_ids
-        .into_iter()
-        .collect();
-    let excluded_ids: HashSet<String> = memory_hook_config
-        .excluded_memory_ids
-        .into_iter()
-        .collect();
+    let selected_ids: HashSet<String> =
+        memory_hook_config.selected_memory_ids.into_iter().collect();
+    let excluded_ids: HashSet<String> =
+        memory_hook_config.excluded_memory_ids.into_iter().collect();
     let mut scopes_set: HashSet<String> = memory_hook_config
         .selected_scopes
         .iter()
@@ -761,37 +751,37 @@ pub fn register_memory_hooks_with_config(
             // Load session-scoped memories (ephemeral persistence for this session id).
             if scopes.contains("session") {
                 if let Some(session_project_path) = build_session_project_path(&ctx.session_id) {
-                let session_request = MemorySearchRequest {
-                    project_path: session_project_path,
-                    query: String::new(),
-                    categories: categories.clone(),
-                    top_k: 10,
-                    min_importance: 0.1,
-                };
-                match search_memories_with_options(
-                    &store,
-                    &session_request,
-                    MemorySearchOptions {
-                        ranking_mode: MemoryRankingMode::Browse,
-                        touch_policy: MemoryTouchPolicy::NoTouch,
-                    },
-                ) {
-                    Ok(results) => {
-                        for result in results {
-                            if seen_ids.insert(result.entry.id.clone()) {
-                                all_entries.push(result.entry);
+                    let session_request = MemorySearchRequest {
+                        project_path: session_project_path,
+                        query: String::new(),
+                        categories: categories.clone(),
+                        top_k: 10,
+                        min_importance: 0.1,
+                    };
+                    match search_memories_with_options(
+                        &store,
+                        &session_request,
+                        MemorySearchOptions {
+                            ranking_mode: MemoryRankingMode::Browse,
+                            touch_policy: MemoryTouchPolicy::NoTouch,
+                        },
+                    ) {
+                        Ok(results) => {
+                            for result in results {
+                                if seen_ids.insert(result.entry.id.clone()) {
+                                    all_entries.push(result.entry);
+                                }
                             }
                         }
-                    }
-                    Err(e) => {
-                        tracing::info!(
-                            "[hooks] Session memory load failed: session={}, error={}",
-                            ctx.session_id,
-                            e,
-                        );
+                        Err(e) => {
+                            tracing::info!(
+                                "[hooks] Session memory load failed: session={}, error={}",
+                                ctx.session_id,
+                                e,
+                            );
+                        }
                     }
                 }
-            }
             }
 
             let mut filtered_entries: Vec<_> = all_entries
@@ -923,37 +913,37 @@ pub fn register_memory_hooks_with_config(
 
             if scopes.contains("session") {
                 if let Some(session_project_path) = build_session_project_path(&ctx.session_id) {
-                let session_request = MemorySearchRequest {
-                    project_path: session_project_path,
-                    query: message.clone(),
-                    categories: categories.clone(),
-                    top_k: 10,
-                    min_importance: 0.1,
-                };
-                match search_memories_with_options(
-                    &store,
-                    &session_request,
-                    MemorySearchOptions {
-                        ranking_mode: MemoryRankingMode::Hybrid,
-                        touch_policy: MemoryTouchPolicy::NoTouch,
-                    },
-                ) {
-                    Ok(results) => {
-                        for result in results {
-                            if seen_ids.insert(result.entry.id.clone()) {
-                                all_entries.push(result.entry);
+                    let session_request = MemorySearchRequest {
+                        project_path: session_project_path,
+                        query: message.clone(),
+                        categories: categories.clone(),
+                        top_k: 10,
+                        min_importance: 0.1,
+                    };
+                    match search_memories_with_options(
+                        &store,
+                        &session_request,
+                        MemorySearchOptions {
+                            ranking_mode: MemoryRankingMode::Hybrid,
+                            touch_policy: MemoryTouchPolicy::NoTouch,
+                        },
+                    ) {
+                        Ok(results) => {
+                            for result in results {
+                                if seen_ids.insert(result.entry.id.clone()) {
+                                    all_entries.push(result.entry);
+                                }
                             }
                         }
-                    }
-                    Err(e) => {
-                        tracing::info!(
-                            "[hooks] Session memory refresh failed: session={}, error={}",
-                            ctx.session_id,
-                            e,
-                        );
+                        Err(e) => {
+                            tracing::info!(
+                                "[hooks] Session memory refresh failed: session={}, error={}",
+                                ctx.session_id,
+                                e,
+                            );
+                        }
                     }
                 }
-            }
             }
 
             let filtered_entries: Vec<_> = all_entries

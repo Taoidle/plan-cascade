@@ -18,7 +18,11 @@ fn events() -> &'static Mutex<Vec<PluginRuntimeEvent>> {
 
 fn next_id() -> String {
     let seq = EVENT_SEQ.fetch_add(1, Ordering::Relaxed);
-    format!("plugin-runtime-{}-{}", chrono::Utc::now().timestamp_millis(), seq)
+    format!(
+        "plugin-runtime-{}-{}",
+        chrono::Utc::now().timestamp_millis(),
+        seq
+    )
 }
 
 fn push_event(event: PluginRuntimeEvent) {
@@ -96,4 +100,3 @@ pub fn list_runtime_events(
     out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     out.into_iter().take(limit).collect()
 }
-

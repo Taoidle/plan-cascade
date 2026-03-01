@@ -10,7 +10,9 @@ use crate::services::llm::types::ParameterSchema;
 use crate::services::tools::executor::ToolResult;
 use crate::services::tools::trait_def::{Tool, ToolExecutionContext};
 
+use super::file_io::atomic_write_bytes;
 use super::read::validate_path;
+use super::text_utils::{decode_text_with_format, encode_text_with_format};
 
 /// Write file tool — writes content to a file, creating parent directories as needed.
 pub struct WriteTool;
@@ -102,7 +104,31 @@ impl Tool for WriteTool {
             None
         };
 
-        match std::fs::write(&path, content) {
+        let write_bytes = if path.exists() {
+            let existing_bytes = match std::fs::read(&path) {
+                Ok(b) => b,
+                Err(e) => return ToolResult::err(format!("Failed to read existing file: {}", e)),
+            };
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            let decoded = match decode_text_with_format(&existing_bytes, &ext) {
+                Some(d) => d,
+                None => {
+                    return ToolResult::err(format!(
+                        "Cannot overwrite binary/non-text file with Write: {}",
+                        path.display()
+                    ));
+                }
+            };
+            encode_text_with_format(content, decoded.format)
+        } else {
+            content.as_bytes().to_vec()
+        };
+
+        match atomic_write_bytes(&path, &write_bytes) {
             Ok(_) => {
                 ctx.invalidate_read_cache_for_path(&path);
                 let line_count = content.lines().count();
@@ -110,7 +136,7 @@ impl Tool for WriteTool {
                 // Record change in tracker
                 if let Some(tracker) = &ctx.file_change_tracker {
                     if let Ok(mut t) = tracker.lock() {
-                        if let Ok(after_hash) = t.store_content(content.as_bytes()) {
+                        if let Ok(after_hash) = t.store_content(&write_bytes) {
                             let rel_path = path
                                 .strip_prefix(&ctx.project_root)
                                 .unwrap_or(&path)
@@ -143,6 +169,7 @@ impl Tool for WriteTool {
 #[cfg(test)]
 mod tests {
     use super::super::test_helpers::make_test_ctx;
+    use super::super::text_utils::{decode_text_with_format, TextEncoding};
     use super::*;
     use tempfile::TempDir;
 
@@ -194,5 +221,52 @@ mod tests {
     fn test_write_tool_name() {
         let tool = WriteTool::new();
         assert_eq!(tool.name(), "Write");
+    }
+
+    #[tokio::test]
+    async fn test_write_tool_preserves_utf16le_bom_and_crlf_for_existing_file() {
+        let dir = TempDir::new().unwrap();
+        let tool = WriteTool::new();
+        let ctx = make_test_ctx(dir.path());
+        let file = dir.path().join("existing.txt");
+
+        let mut original = vec![0xFF, 0xFE];
+        for unit in "old\r\ntext\r\n".encode_utf16() {
+            original.extend_from_slice(&unit.to_le_bytes());
+        }
+        std::fs::write(&file, original).unwrap();
+
+        let args = serde_json::json!({
+            "file_path": file.to_string_lossy().to_string(),
+            "content": "new\ncontent\n"
+        });
+        let result = tool.execute(&ctx, args).await;
+        assert!(result.success);
+
+        let written = std::fs::read(&file).unwrap();
+        let decoded = decode_text_with_format(&written, "txt").unwrap();
+        assert_eq!(decoded.format.encoding, TextEncoding::Utf16Le);
+        assert!(decoded.format.has_bom);
+        assert_eq!(decoded.text, "new\r\ncontent\r\n");
+    }
+
+    #[tokio::test]
+    async fn test_write_tool_rejects_existing_binary_file() {
+        let dir = TempDir::new().unwrap();
+        let tool = WriteTool::new();
+        let ctx = make_test_ctx(dir.path());
+        let file = dir.path().join("blob.bin");
+        std::fs::write(&file, vec![0x00, 0xFF, 0x80, 0x11]).unwrap();
+
+        let args = serde_json::json!({
+            "file_path": file.to_string_lossy().to_string(),
+            "content": "text"
+        });
+        let result = tool.execute(&ctx, args).await;
+        assert!(!result.success);
+        assert!(result
+            .error
+            .unwrap()
+            .contains("Cannot overwrite binary/non-text file"));
     }
 }

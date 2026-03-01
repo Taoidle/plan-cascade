@@ -10,8 +10,9 @@ use crate::services::llm::types::ParameterSchema;
 use crate::services::tools::executor::ToolResult;
 use crate::services::tools::trait_def::{Tool, ToolExecutionContext};
 
+use super::file_io::atomic_write_bytes;
 use super::read::validate_path;
-use super::text_utils::decode_read_text;
+use super::text_utils::{decode_text_with_format, encode_text_with_format};
 
 /// Edit file tool — performs string replacement in files.
 pub struct EditTool;
@@ -127,10 +128,11 @@ impl Tool for EditTool {
             .and_then(|e| e.to_str())
             .unwrap_or("")
             .to_lowercase();
-        let (content, _) = match decode_read_text(&bytes, &ext) {
+        let decoded = match decode_text_with_format(&bytes, &ext) {
             Some(value) => value,
             None => return ToolResult::err(format!("Cannot edit binary file: {}", path.display())),
         };
+        let content = decoded.text;
 
         let occurrences = content.matches(old_string).count();
         if occurrences == 0 {
@@ -152,14 +154,16 @@ impl Tool for EditTool {
             content.replacen(old_string, new_string, 1)
         };
 
-        match std::fs::write(&path, &new_content) {
+        let encoded_bytes = encode_text_with_format(&new_content, decoded.format);
+
+        match atomic_write_bytes(&path, &encoded_bytes) {
             Ok(_) => {
                 ctx.invalidate_read_cache_for_path(&path);
 
                 // Record change in tracker
                 if let Some(tracker) = &ctx.file_change_tracker {
                     if let Ok(mut t) = tracker.lock() {
-                        if let Ok(after_hash) = t.store_content(new_content.as_bytes()) {
+                        if let Ok(after_hash) = t.store_content(&encoded_bytes) {
                             let rel_path = path
                                 .strip_prefix(&ctx.project_root)
                                 .unwrap_or(&path)
@@ -201,6 +205,7 @@ impl Tool for EditTool {
 #[cfg(test)]
 mod tests {
     use super::super::test_helpers::make_test_ctx;
+    use super::super::text_utils::{decode_text_with_format, TextEncoding};
     use super::*;
     use tempfile::TempDir;
 
@@ -292,5 +297,34 @@ mod tests {
     fn test_edit_tool_name() {
         let tool = EditTool::new();
         assert_eq!(tool.name(), "Edit");
+    }
+
+    #[tokio::test]
+    async fn test_edit_tool_preserves_utf16le_bom_and_crlf() {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("utf16.txt");
+        let mut original = vec![0xFF, 0xFE];
+        for u in "foo\r\nbar\r\n".encode_utf16() {
+            original.extend_from_slice(&u.to_le_bytes());
+        }
+        std::fs::write(&file_path, original).unwrap();
+
+        let tool = EditTool::new();
+        let ctx = make_test_ctx(dir.path());
+        ctx.read_files.lock().unwrap().insert(file_path.clone());
+
+        let args = serde_json::json!({
+            "file_path": file_path.to_string_lossy().to_string(),
+            "old_string": "foo",
+            "new_string": "baz"
+        });
+        let result = tool.execute(&ctx, args).await;
+        assert!(result.success);
+
+        let bytes = std::fs::read(&file_path).unwrap();
+        let decoded = decode_text_with_format(&bytes, "txt").unwrap();
+        assert_eq!(decoded.format.encoding, TextEncoding::Utf16Le);
+        assert!(decoded.format.has_bom);
+        assert_eq!(decoded.text, "baz\r\nbar\r\n");
     }
 }

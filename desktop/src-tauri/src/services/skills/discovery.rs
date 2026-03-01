@@ -8,7 +8,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::services::skills::config::{resolve_skill_path, SkillsConfig};
-use crate::services::skills::model::{DiscoveredSkill, InjectionPhase, SkillDetection, SkillSource};
+use crate::services::skills::model::{
+    DiscoveredSkill, InjectionPhase, SkillDetection, SkillSource,
+};
 use crate::utils::error::AppResult;
 
 /// Convention file names to discover in project root and subdirectories
@@ -194,7 +196,10 @@ fn load_user_skills_config(config_path: &Path) -> Option<UserSkillsConfig> {
     serde_json::from_str::<UserSkillsConfig>(&content).ok()
 }
 
-fn discover_user_skills(project_root: &Path, plan_cascade_dir: Option<&Path>) -> Vec<DiscoveredSkill> {
+fn discover_user_skills(
+    project_root: &Path,
+    plan_cascade_dir: Option<&Path>,
+) -> Vec<DiscoveredSkill> {
     let mut merged: HashMap<String, UserSkillCandidate> = HashMap::new();
 
     if let Some(plan_dir) = plan_cascade_dir {

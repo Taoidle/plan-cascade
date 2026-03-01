@@ -49,7 +49,11 @@ pub fn evaluate_plugin_compat(plugin: &LoadedPlugin) -> PluginCompatReport {
     let has_invocable_skill = plugin.skills.iter().any(|s| s.user_invocable);
 
     capabilities.push(build_capability("manifest", true, None));
-    capabilities.push(build_capability("skills", true, Some(has_skills.to_string())));
+    capabilities.push(build_capability(
+        "skills",
+        true,
+        Some(has_skills.to_string()),
+    ));
     capabilities.push(build_capability(
         "commands",
         true,
@@ -89,7 +93,8 @@ pub fn evaluate_plugin_compat(plugin: &LoadedPlugin) -> PluginCompatReport {
     if !always_approve_supported {
         gaps.push(CompatGap {
             capability: "permissions_always_approve".to_string(),
-            reason: "always_approve is parsed but not fully enforced by permission gate".to_string(),
+            reason: "always_approve is parsed but not fully enforced by permission gate"
+                .to_string(),
             severity: "medium".to_string(),
         });
     }
@@ -105,7 +110,9 @@ pub fn evaluate_plugin_compat(plugin: &LoadedPlugin) -> PluginCompatReport {
     }
 
     // Detect unsupported "agents/" plugin capability.
-    let has_agents_dir = std::path::Path::new(&plugin.root_path).join("agents").is_dir();
+    let has_agents_dir = std::path::Path::new(&plugin.root_path)
+        .join("agents")
+        .is_dir();
     capabilities.push(build_capability(
         "agents_directory",
         !has_agents_dir,
@@ -114,8 +121,9 @@ pub fn evaluate_plugin_compat(plugin: &LoadedPlugin) -> PluginCompatReport {
     if has_agents_dir {
         gaps.push(CompatGap {
             capability: "agents_directory".to_string(),
-            reason: "plugin agents directory is discovered but not executed as first-class capability"
-                .to_string(),
+            reason:
+                "plugin agents directory is discovered but not executed as first-class capability"
+                    .to_string(),
             severity: "low".to_string(),
         });
     }
@@ -130,7 +138,8 @@ pub fn evaluate_plugin_compat(plugin: &LoadedPlugin) -> PluginCompatReport {
         {
             gaps.push(CompatGap {
                 capability: "quality_gate_registration".to_string(),
-                reason: "QualityGateRegistration command is not valid PluginQualityGate JSON".to_string(),
+                reason: "QualityGateRegistration command is not valid PluginQualityGate JSON"
+                    .to_string(),
                 severity: "high".to_string(),
             });
         }
@@ -155,7 +164,9 @@ pub fn evaluate_plugin_compat(plugin: &LoadedPlugin) -> PluginCompatReport {
     let summary = match level {
         PluginCompatLevel::Full => "All detected plugin capabilities are supported".to_string(),
         PluginCompatLevel::Partial => format!("{} compatibility gaps detected", gaps.len()),
-        PluginCompatLevel::Degraded => format!("{} high-impact compatibility gaps detected", gaps.len()),
+        PluginCompatLevel::Degraded => {
+            format!("{} high-impact compatibility gaps detected", gaps.len())
+        }
     };
 
     PluginCompatReport {

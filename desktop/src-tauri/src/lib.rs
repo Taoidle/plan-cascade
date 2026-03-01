@@ -224,12 +224,12 @@ pub use commands::{
     // Graph Workflow commands
     list_graph_workflows,
     list_guardrails,
+    list_invocable_plugin_skills,
     list_mcp_servers,
     list_mcp_tools,
     list_model_pricing,
     list_plugin_runtime_events,
     list_plugins,
-    list_invocable_plugin_skills,
     list_project_memories,
     // Project commands
     list_projects,

@@ -34,6 +34,7 @@ import { ShortcutsHelpDialog } from './components/ClaudeCodeMode/KeyboardShortcu
 import { useModeStore } from './store/mode';
 import { useOnboardingStore } from './store/onboarding';
 import { useRecoveryStore } from './store/recovery';
+import { usePermissionPolicyStore } from './store/permissionPolicy';
 
 const STARTUP_MIN_DURATION_MS = 3000;
 const STARTUP_MAX_DURATION_MS = 5000;
@@ -201,6 +202,9 @@ function AppContent() {
         recoveryDetectionCalledRef.current = true;
         // After backend is ready, detect incomplete tasks
         detectIncompleteTasks();
+
+        // Apply persisted permission policy config to backend runtime.
+        void usePermissionPolicyStore.getState().initializePolicy();
       }
       backendReady = true;
       tryFinishStartupTransition();

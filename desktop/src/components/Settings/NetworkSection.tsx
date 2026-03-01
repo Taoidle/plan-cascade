@@ -8,8 +8,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import { CheckCircledIcon, CrossCircledIcon } from '@radix-ui/react-icons';
+import { CheckCircledIcon, CrossCircledIcon, PlusIcon, TrashIcon } from '@radix-ui/react-icons';
 import { useProxyStore } from '../../store/proxy';
+import { usePermissionPolicyStore } from '../../store/permissionPolicy';
 import type { ProxyConfig, ProxyProtocol, ProxyStrategy } from '../../lib/proxyApi';
 
 // ---------------------------------------------------------------------------
@@ -48,6 +49,39 @@ const CLAUDE_CODE_PROVIDER = {
 
 const PROTOCOLS: ProxyProtocol[] = ['http', 'https', 'socks5'];
 
+function normalizeAllowlistDomain(input: string): string | null {
+  const raw = input.trim().toLowerCase();
+  if (!raw) return null;
+
+  let hostCandidate = raw;
+  if (hostCandidate.includes('://')) {
+    try {
+      hostCandidate = new URL(hostCandidate).hostname.toLowerCase();
+    } catch {
+      return null;
+    }
+  } else {
+    hostCandidate = hostCandidate.replace(/^[a-z]+:\/\//i, '').split('/')[0];
+  }
+
+  hostCandidate = hostCandidate.replace(/^\.+/, '').replace(/\.+$/, '');
+  if (!hostCandidate) return null;
+
+  if (hostCandidate.includes(':') && hostCandidate.split(':').length === 2) {
+    const [host, port] = hostCandidate.split(':');
+    if (port && /^\d+$/.test(port)) {
+      hostCandidate = host;
+    }
+  }
+
+  // Allow host-style values consistent with backend normalization.
+  if (!/^[a-z0-9._-]+$/.test(hostCandidate)) {
+    return null;
+  }
+
+  return hostCandidate || null;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -62,14 +96,26 @@ export function NetworkSection() {
     saving,
     testing,
     testResult,
-    error,
+    error: proxyError,
     fetchProxyConfig,
     setGlobalProxy,
     setProviderStrategy,
     testProxyConnection,
     clearTestResult,
-    clearError,
+    clearError: clearProxyError,
   } = useProxyStore();
+
+  const {
+    networkDomainAllowlist,
+    builtinNetworkDomainAllowlist,
+    builtinNetworkDomainAllowlistVersion,
+    loading: policyLoading,
+    saving: policySaving,
+    error: policyError,
+    fetchPolicyConfig,
+    setNetworkDomainAllowlist,
+    clearError: clearPolicyError,
+  } = usePermissionPolicyStore();
 
   // Local form state for global proxy
   const [enabled, setEnabled] = useState(false);
@@ -79,12 +125,19 @@ export function NetworkSection() {
   const [authEnabled, setAuthEnabled] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [newDomain, setNewDomain] = useState('');
+  const [proxyStatusMessage, setProxyStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(
+    null,
+  );
+  const [policyStatusMessage, setPolicyStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(
+    null,
+  );
 
   // Load config on mount
   useEffect(() => {
     fetchProxyConfig();
-  }, [fetchProxyConfig]);
+    fetchPolicyConfig();
+  }, [fetchProxyConfig, fetchPolicyConfig]);
 
   // Sync global proxy to form state when loaded
   useEffect(() => {
@@ -104,11 +157,18 @@ export function NetworkSection() {
 
   // Auto-dismiss status message
   useEffect(() => {
-    if (statusMessage) {
-      const timer = setTimeout(() => setStatusMessage(null), 3000);
+    if (proxyStatusMessage) {
+      const timer = setTimeout(() => setProxyStatusMessage(null), 3000);
       return () => clearTimeout(timer);
     }
-  }, [statusMessage]);
+  }, [proxyStatusMessage]);
+
+  useEffect(() => {
+    if (policyStatusMessage) {
+      const timer = setTimeout(() => setPolicyStatusMessage(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [policyStatusMessage]);
 
   const buildProxyConfig = useCallback(
     (): ProxyConfig => ({
@@ -123,15 +183,15 @@ export function NetworkSection() {
   const handleSaveGlobal = useCallback(async () => {
     if (!enabled) {
       const success = await setGlobalProxy(null);
-      if (success) setStatusMessage({ type: 'success', text: t('network.globalProxy.saveSuccess') });
-      else setStatusMessage({ type: 'error', text: t('network.globalProxy.saveError') });
+      if (success) setProxyStatusMessage({ type: 'success', text: t('network.globalProxy.saveSuccess') });
+      else setProxyStatusMessage({ type: 'error', text: t('network.globalProxy.saveError') });
       return;
     }
     if (!host.trim()) return;
     const proxy = buildProxyConfig();
     const success = await setGlobalProxy(proxy, authEnabled && password ? password : undefined);
-    if (success) setStatusMessage({ type: 'success', text: t('network.globalProxy.saveSuccess') });
-    else setStatusMessage({ type: 'error', text: t('network.globalProxy.saveError') });
+    if (success) setProxyStatusMessage({ type: 'success', text: t('network.globalProxy.saveSuccess') });
+    else setProxyStatusMessage({ type: 'error', text: t('network.globalProxy.saveError') });
   }, [enabled, host, buildProxyConfig, setGlobalProxy, authEnabled, password, t]);
 
   const handleTest = useCallback(() => {
@@ -147,7 +207,44 @@ export function NetworkSection() {
     [setProviderStrategy],
   );
 
-  if (loading) {
+  const handleAddDomain = useCallback(async () => {
+    const normalized = normalizeAllowlistDomain(newDomain);
+    if (!normalized) {
+      setPolicyStatusMessage({ type: 'error', text: t('network.agentPolicy.invalidDomain') });
+      return;
+    }
+
+    if (networkDomainAllowlist.includes(normalized)) {
+      setPolicyStatusMessage({ type: 'error', text: t('network.agentPolicy.duplicateDomain') });
+      return;
+    }
+    if (builtinNetworkDomainAllowlist.includes(normalized)) {
+      setPolicyStatusMessage({ type: 'error', text: t('network.agentPolicy.alreadyBuiltin') });
+      return;
+    }
+
+    const success = await setNetworkDomainAllowlist([...networkDomainAllowlist, normalized]);
+    if (success) {
+      setNewDomain('');
+      setPolicyStatusMessage({ type: 'success', text: t('network.agentPolicy.applySuccess') });
+      return;
+    }
+    setPolicyStatusMessage({ type: 'error', text: t('network.agentPolicy.applyError') });
+  }, [newDomain, networkDomainAllowlist, builtinNetworkDomainAllowlist, setNetworkDomainAllowlist, t]);
+
+  const handleRemoveDomain = useCallback(
+    async (domain: string) => {
+      const success = await setNetworkDomainAllowlist(networkDomainAllowlist.filter((d) => d !== domain));
+      if (success) {
+        setPolicyStatusMessage({ type: 'success', text: t('network.agentPolicy.applySuccess') });
+        return;
+      }
+      setPolicyStatusMessage({ type: 'error', text: t('network.agentPolicy.applyError') });
+    },
+    [networkDomainAllowlist, setNetworkDomainAllowlist, t],
+  );
+
+  if (loading || policyLoading) {
     return (
       <div className="flex items-center justify-center py-12">
         <div className="animate-spin w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full" />
@@ -164,27 +261,52 @@ export function NetworkSection() {
       </div>
 
       {/* Error banner */}
-      {error && (
+      {proxyError && (
         <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300 flex items-center justify-between">
-          <span>{error}</span>
-          <button onClick={clearError} className="text-red-500 hover:text-red-700 ml-2">
+          <span>{proxyError}</span>
+          <button onClick={clearProxyError} className="text-red-500 hover:text-red-700 ml-2">
+            &times;
+          </button>
+        </div>
+      )}
+
+      {/* Policy error banner */}
+      {policyError && (
+        <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300 flex items-center justify-between">
+          <span>{policyError}</span>
+          <button onClick={clearPolicyError} className="text-red-500 hover:text-red-700 ml-2">
             &times;
           </button>
         </div>
       )}
 
       {/* Status message */}
-      {statusMessage && (
+      {proxyStatusMessage && (
         <div
           className={clsx(
             'p-3 rounded-lg text-sm flex items-center gap-2',
-            statusMessage.type === 'success'
+            proxyStatusMessage.type === 'success'
               ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300'
               : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300',
           )}
         >
-          {statusMessage.type === 'success' ? <CheckCircledIcon /> : <CrossCircledIcon />}
-          {statusMessage.text}
+          {proxyStatusMessage.type === 'success' ? <CheckCircledIcon /> : <CrossCircledIcon />}
+          {proxyStatusMessage.text}
+        </div>
+      )}
+
+      {/* Policy status message */}
+      {policyStatusMessage && (
+        <div
+          className={clsx(
+            'p-3 rounded-lg text-sm flex items-center gap-2',
+            policyStatusMessage.type === 'success'
+              ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300'
+              : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300',
+          )}
+        >
+          {policyStatusMessage.type === 'success' ? <CheckCircledIcon /> : <CrossCircledIcon />}
+          {policyStatusMessage.text}
         </div>
       )}
 
@@ -463,6 +585,111 @@ export function NetworkSection() {
             ))}
           </div>
         </div>
+      </div>
+
+      {/* ─── Agent Network Domain Allowlist ─── */}
+      <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4">
+        <div>
+          <h3 className="text-base font-medium text-gray-900 dark:text-white">{t('network.agentPolicy.title')}</h3>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t('network.agentPolicy.description')}</p>
+        </div>
+
+        <div className="space-y-2">
+          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            {t('network.agentPolicy.builtinTitle')}
+          </h4>
+          <p className="text-xs text-gray-500 dark:text-gray-400">{t('network.agentPolicy.builtinDescription')}</p>
+          {builtinNetworkDomainAllowlistVersion ? (
+            <p className="text-xs text-gray-400 dark:text-gray-500">
+              {t('network.agentPolicy.builtinVersion', { version: builtinNetworkDomainAllowlistVersion })}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            {builtinNetworkDomainAllowlist.map((domain) => (
+              <span
+                key={`builtin-${domain}`}
+                className={clsx(
+                  'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium',
+                  'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+                )}
+              >
+                {domain}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            {t('network.agentPolicy.customTitle')}
+          </h4>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={newDomain}
+            onChange={(e) => setNewDomain(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void handleAddDomain();
+              }
+            }}
+            placeholder={t('network.agentPolicy.inputPlaceholder')}
+            className={clsx(
+              'flex-1 px-3 py-2 rounded-lg border text-sm',
+              'border-gray-300 dark:border-gray-600',
+              'bg-white dark:bg-gray-800',
+              'text-gray-900 dark:text-white',
+              'placeholder:text-gray-400',
+              'focus:ring-2 focus:ring-primary-500 focus:border-transparent',
+            )}
+          />
+          <button
+            onClick={() => void handleAddDomain()}
+            disabled={policySaving || !newDomain.trim()}
+            className={clsx(
+              'inline-flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium',
+              'bg-primary-600 text-white hover:bg-primary-700',
+              'disabled:opacity-50 disabled:cursor-not-allowed',
+            )}
+          >
+            <PlusIcon className="w-4 h-4" />
+            {t('network.agentPolicy.add')}
+          </button>
+        </div>
+
+        {networkDomainAllowlist.length === 0 ? (
+          <p className="text-sm text-gray-400 dark:text-gray-500 italic">{t('network.agentPolicy.empty')}</p>
+        ) : (
+          <div className="space-y-2">
+            {networkDomainAllowlist.map((domain) => (
+              <div
+                key={domain}
+                className="flex items-center justify-between py-2 px-3 rounded-lg bg-gray-50 dark:bg-gray-800/50"
+              >
+                <span className="font-mono text-sm text-gray-700 dark:text-gray-300">{domain}</span>
+                <button
+                  onClick={() => void handleRemoveDomain(domain)}
+                  disabled={policySaving}
+                  className={clsx(
+                    'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium',
+                    'text-red-600 dark:text-red-300',
+                    'hover:bg-red-50 dark:hover:bg-red-900/20',
+                    'disabled:opacity-50 disabled:cursor-not-allowed',
+                  )}
+                >
+                  <TrashIcon className="w-3.5 h-3.5" />
+                  {t('network.agentPolicy.remove')}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <p className="text-xs text-gray-500 dark:text-gray-400">{t('network.agentPolicy.realtimeHint')}</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500">{t('network.agentPolicy.matchHint')}</p>
       </div>
     </div>
   );

@@ -793,6 +793,26 @@
       "customConfig": "{{provider}} カスタムプロキシ"
     },
 
+    "agentPolicy": {
+      "title": "Agent ネットワークドメイン許可リスト",
+      "description": "リストにあるドメインに対する Bash ネットワークコマンドのみ自動許可します。",
+      "builtinTitle": "内蔵許可リスト（常時有効）",
+      "builtinDescription": "これらのドメインはアプリ組み込みで管理され、削除できません。",
+      "builtinVersion": "内蔵バージョン: {{version}}",
+      "customTitle": "カスタム許可リスト",
+      "inputPlaceholder": "例: github.com または api.openai.com",
+      "add": "追加",
+      "remove": "削除",
+      "empty": "許可リストのドメインはまだありません",
+      "invalidDomain": "無効なドメインです。github.com のようなホスト名を入力してください。",
+      "duplicateDomain": "このドメインは既に許可リストにあります。",
+      "alreadyBuiltin": "このドメインは内蔵許可リストに含まれています。",
+      "applySuccess": "ポリシーを更新し、すぐに反映しました",
+      "applyError": "ポリシーの更新に失敗しました",
+      "realtimeHint": "変更は新しいツール呼び出しにリアルタイムで適用されます。",
+      "matchHint": "完全一致とサブドメイン一致の両方を許可します（例: github.com は api.github.com も許可）。"
+    },
+
     "providers": {
       "anthropic": "Anthropic",
       "openai": "OpenAI",

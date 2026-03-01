@@ -7,6 +7,7 @@
 //! exposes convenience functions for obtaining definition vectors.
 
 use crate::services::llm::types::ToolDefinition;
+use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use super::trait_def::ToolRegistry;
@@ -28,7 +29,16 @@ pub(crate) fn cached_registry() -> &'static ToolRegistry {
 /// auto-generated from the `Tool` trait implementations and always in sync.
 /// Uses a cached `OnceLock<ToolRegistry>` to avoid rebuilding on every call.
 pub fn get_tool_definitions_from_registry() -> Vec<ToolDefinition> {
-    cached_registry().definitions()
+    let mut defs = cached_registry().definitions();
+    let mut seen: HashSet<String> = defs.iter().map(|d| d.name.clone()).collect();
+
+    for def in super::runtime_tools::definitions() {
+        if seen.insert(def.name.clone()) {
+            defs.push(def);
+        }
+    }
+
+    defs
 }
 
 /// Get basic tool definitions (without Task/Analyze) from the trait-based registry.
@@ -36,8 +46,7 @@ pub fn get_tool_definitions_from_registry() -> Vec<ToolDefinition> {
 /// Used for sub-agents to prevent recursion.
 /// Uses a cached `OnceLock<ToolRegistry>` to avoid rebuilding on every call.
 pub fn get_basic_tool_definitions_from_registry() -> Vec<ToolDefinition> {
-    cached_registry()
-        .definitions()
+    get_tool_definitions_from_registry()
         .into_iter()
         .filter(|d| d.name != "Task" && d.name != "Analyze")
         .collect()
@@ -51,18 +60,35 @@ pub fn get_tool_definitions_for_subagent(
     subagent_type: super::task_spawner::SubAgentType,
 ) -> Vec<ToolDefinition> {
     let allowed = subagent_type.allowed_tools();
-    cached_registry()
+    let mut defs: Vec<ToolDefinition> = cached_registry()
         .definitions()
         .into_iter()
         .filter(|d| allowed.contains(&d.name.as_str()))
-        .collect()
+        .collect();
+
+    // Dynamic runtime tools (for example MCP tools) are allowed for
+    // general-purpose sub-agents so they can delegate to external systems.
+    if matches!(
+        subagent_type,
+        super::task_spawner::SubAgentType::GeneralPurpose
+    ) {
+        let mut seen: HashSet<String> = defs.iter().map(|d| d.name.clone()).collect();
+        for def in super::runtime_tools::definitions() {
+            if seen.insert(def.name.clone()) {
+                defs.push(def);
+            }
+        }
+    }
+
+    defs
 }
 
 /// Check if a tool is parallel-safe by name (via the cached registry).
 pub fn is_tool_parallel_safe(name: &str) -> bool {
-    cached_registry()
-        .get(name)
-        .map_or(false, |t| t.is_parallel_safe())
+    if let Some(tool) = cached_registry().get(name) {
+        return tool.is_parallel_safe();
+    }
+    super::runtime_tools::is_parallel_safe(name).unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -145,15 +171,16 @@ mod tests {
 
     #[test]
     fn test_cached_registry_returns_consistent_results() {
-        // Verify that the OnceLock-cached registry returns the same results
-        // across multiple invocations.
+        // Built-in definitions are cached and should always be present
+        // across multiple invocations, even if runtime tools are added.
         let first = get_tool_definitions_from_registry();
         let second = get_tool_definitions_from_registry();
-        assert_eq!(first.len(), second.len());
-
-        for (a, b) in first.iter().zip(second.iter()) {
-            assert_eq!(a.name, b.name);
-            assert_eq!(a.description, b.description);
-        }
+        let first_names: std::collections::HashSet<String> =
+            first.iter().map(|d| d.name.clone()).collect();
+        let second_names: std::collections::HashSet<String> =
+            second.iter().map(|d| d.name.clone()).collect();
+        assert!(first_names.contains("Read"));
+        assert!(first_names.contains("Write"));
+        assert!(second_names.is_superset(&first_names) || first_names.is_superset(&second_names));
     }
 }

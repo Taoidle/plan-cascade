@@ -13,6 +13,7 @@ pub mod browser;
 pub mod codebase_search;
 pub mod cwd;
 pub mod edit;
+mod file_io;
 pub mod glob;
 pub mod grep;
 pub mod ls;

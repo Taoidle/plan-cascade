@@ -392,7 +392,10 @@ impl FileChangeTracker {
             .collect()
     }
 
-    fn restore_target_to_disk(&self, target: &RestorePreviewTarget) -> Result<RestoredFile, String> {
+    fn restore_target_to_disk(
+        &self,
+        target: &RestorePreviewTarget,
+    ) -> Result<RestoredFile, String> {
         let full_path = self.project_root.join(&target.path);
         match target.target_hash.as_deref() {
             None => {
@@ -443,7 +446,10 @@ impl FileChangeTracker {
         Ok(snapshots)
     }
 
-    fn apply_snapshot_entries(&self, entries: &[RestoreSnapshotEntry]) -> Result<Vec<RestoredFile>, String> {
+    fn apply_snapshot_entries(
+        &self,
+        entries: &[RestoreSnapshotEntry],
+    ) -> Result<Vec<RestoredFile>, String> {
         let mut reverted = Vec::with_capacity(entries.len());
         for entry in entries {
             let full_path = self.project_root.join(&entry.path);
@@ -451,8 +457,9 @@ impl FileChangeTracker {
                 Some(hash) => {
                     let content = self.get_content(hash)?;
                     if let Some(parent) = full_path.parent() {
-                        fs::create_dir_all(parent)
-                            .map_err(|e| format!("Failed to create dirs for {}: {}", entry.path, e))?;
+                        fs::create_dir_all(parent).map_err(|e| {
+                            format!("Failed to create dirs for {}: {}", entry.path, e)
+                        })?;
                     }
                     fs::write(&full_path, &content)
                         .map_err(|e| format!("Failed to undo restore for {}: {}", entry.path, e))?;
@@ -463,8 +470,9 @@ impl FileChangeTracker {
                 }
                 None => {
                     if full_path.exists() {
-                        fs::remove_file(&full_path)
-                            .map_err(|e| format!("Failed to remove {} during undo: {}", entry.path, e))?;
+                        fs::remove_file(&full_path).map_err(|e| {
+                            format!("Failed to remove {} during undo: {}", entry.path, e)
+                        })?;
                     }
                     reverted.push(RestoredFile {
                         path: entry.path.clone(),
@@ -564,13 +572,12 @@ impl FileChangeTracker {
     }
 
     fn restore_ops_dir(&self) -> PathBuf {
-        self.data_dir
-            .join("restore-ops")
-            .join(&self.session_id)
+        self.data_dir.join("restore-ops").join(&self.session_id)
     }
 
     fn restore_operation_file_path(&self, operation_id: &str) -> PathBuf {
-        self.restore_ops_dir().join(format!("{}.json", operation_id))
+        self.restore_ops_dir()
+            .join(format!("{}.json", operation_id))
     }
 
     fn restore_last_file_path(&self) -> PathBuf {
@@ -579,13 +586,16 @@ impl FileChangeTracker {
 
     fn persist_restore_operation(&self, operation: &RestoreOperation) -> Result<(), String> {
         let ops_dir = self.restore_ops_dir();
-        fs::create_dir_all(&ops_dir).map_err(|e| format!("Failed to create restore ops dir: {e}"))?;
+        fs::create_dir_all(&ops_dir)
+            .map_err(|e| format!("Failed to create restore ops dir: {e}"))?;
         let op_json = serde_json::to_string_pretty(operation)
             .map_err(|e| format!("Failed to serialize restore op: {e}"))?;
         let op_path = self.restore_operation_file_path(&operation.operation_id);
-        fs::write(&op_path, &op_json).map_err(|e| format!("Failed to write restore op file: {e}"))?;
+        fs::write(&op_path, &op_json)
+            .map_err(|e| format!("Failed to write restore op file: {e}"))?;
         let last_path = self.restore_last_file_path();
-        fs::write(last_path, op_json).map_err(|e| format!("Failed to write last restore op file: {e}"))?;
+        fs::write(last_path, op_json)
+            .map_err(|e| format!("Failed to write last restore op file: {e}"))?;
         Ok(())
     }
 
@@ -794,7 +804,10 @@ mod tests {
         );
 
         // Restore to before turn 1 — should restore existing.txt, keep new.txt
-        let restored = tracker.restore_to_before_turn_v2(1, false).unwrap().restored;
+        let restored = tracker
+            .restore_to_before_turn_v2(1, false)
+            .unwrap()
+            .restored;
         assert_eq!(restored.len(), 1);
         assert_eq!(restored[0].path, "existing.txt");
         assert_eq!(restored[0].action, "restored");
@@ -802,7 +815,10 @@ mod tests {
         assert_eq!(content, "original");
 
         // Restore to before turn 0 — should delete new.txt
-        let restored = tracker.restore_to_before_turn_v2(0, false).unwrap().restored;
+        let restored = tracker
+            .restore_to_before_turn_v2(0, false)
+            .unwrap()
+            .restored;
         assert_eq!(restored.len(), 2); // new.txt + existing.txt
         let new_file_restore = restored.iter().find(|r| r.path == "new.txt").unwrap();
         assert_eq!(new_file_restore.action, "deleted");
@@ -819,7 +835,14 @@ mod tests {
         fs::write(&new_file, "new content").unwrap();
         let new_after = tracker.store_content(b"new content").unwrap();
         tracker.set_turn_index(0);
-        tracker.record_change("tc-new", "Write", "new.txt", None, &new_after, "Created new file");
+        tracker.record_change(
+            "tc-new",
+            "Write",
+            "new.txt",
+            None,
+            &new_after,
+            "Created new file",
+        );
 
         // Turn 1: edit existing file
         let existing = dir.path().join("existing.txt");
@@ -879,7 +902,14 @@ mod tests {
         let new_file = dir.path().join("new.txt");
         fs::write(&new_file, "new content").unwrap();
         let new_after = tracker.store_content(b"new content").unwrap();
-        tracker.record_change("tc-new", "Write", "new.txt", None, &new_after, "Created new file");
+        tracker.record_change(
+            "tc-new",
+            "Write",
+            "new.txt",
+            None,
+            &new_after,
+            "Created new file",
+        );
 
         // Restore to before turn 1
         let restore = tracker.restore_to_before_turn_v2(1, true).unwrap();

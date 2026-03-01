@@ -12,10 +12,10 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tokio::process::Command;
 
+use super::read::validate_path;
 use crate::services::llm::types::ParameterSchema;
 use crate::services::tools::executor::ToolResult;
 use crate::services::tools::trait_def::{Tool, ToolExecutionContext};
-use super::read::validate_path;
 
 /// Blocked bash commands for security
 const BLOCKED_COMMANDS: &[&str] = &[
