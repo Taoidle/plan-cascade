@@ -10,12 +10,42 @@ use crate::services::memory::extraction::MemoryExtractor;
 use crate::services::memory::maintenance::MemoryMaintenance;
 use crate::services::memory::retrieval::search_memories;
 use crate::services::memory::store::{
-    MemoryCategory, MemoryEntry, MemorySearchRequest, MemorySearchResult, MemoryStats,
-    MemoryUpdate, NewMemoryEntry, UpsertResult,
+    build_session_project_path, MemoryCategory, MemoryEntry, MemorySearchRequest,
+    MemorySearchResult, MemoryStats, MemoryUpdate, NewMemoryEntry, UpsertResult,
+    GLOBAL_PROJECT_PATH,
 };
 use crate::state::AppState;
 
 const EXTRACTION_SESSION_MARKER_PREFIX: &str = "memory_extracted_session:";
+
+fn resolve_memory_project_path(
+    project_path: &str,
+    scope: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<String, String> {
+    let resolved_scope = scope.unwrap_or("project").trim().to_ascii_lowercase();
+
+    match resolved_scope.as_str() {
+        "project" => {
+            let trimmed = project_path.trim();
+            if trimmed.is_empty() {
+                Err("project_path is required for project scope".to_string())
+            } else {
+                Ok(trimmed.to_string())
+            }
+        }
+        "global" => Ok(GLOBAL_PROJECT_PATH.to_string()),
+        "session" => {
+            let sid = session_id.unwrap_or("").trim();
+            if sid.is_empty() {
+                return Err("session_id is required for session scope".to_string());
+            }
+            build_session_project_path(sid)
+                .ok_or_else(|| format!("Invalid session_id for memory scope: {}", sid))
+        }
+        other => Err(format!("Invalid memory scope: {}", other)),
+    }
+}
 
 /// Search project memories by semantic similarity and keyword match
 #[tauri::command]
@@ -24,8 +54,16 @@ pub async fn search_project_memories(
     query: String,
     categories: Option<Vec<String>>,
     top_k: Option<usize>,
+    scope: Option<String>,
+    session_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<CommandResponse<Vec<MemorySearchResult>>, String> {
+    let effective_project_path =
+        match resolve_memory_project_path(&project_path, scope.as_deref(), session_id.as_deref()) {
+            Ok(path) => path,
+            Err(e) => return Ok(CommandResponse::err(e)),
+        };
+
     let parsed_categories = categories.as_ref().map(|cats| {
         cats.iter()
             .filter_map(|c| MemoryCategory::from_str(c).ok())
@@ -33,7 +71,7 @@ pub async fn search_project_memories(
     });
 
     let request = MemorySearchRequest {
-        project_path,
+        project_path: effective_project_path,
         query,
         categories: parsed_categories,
         top_k: top_k.unwrap_or(10),
@@ -56,8 +94,16 @@ pub async fn list_project_memories(
     category: Option<String>,
     offset: Option<usize>,
     limit: Option<usize>,
+    scope: Option<String>,
+    session_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<CommandResponse<Vec<MemoryEntry>>, String> {
+    let effective_project_path =
+        match resolve_memory_project_path(&project_path, scope.as_deref(), session_id.as_deref()) {
+            Ok(path) => path,
+            Err(e) => return Ok(CommandResponse::err(e)),
+        };
+
     let parsed_category = category
         .as_ref()
         .and_then(|c| MemoryCategory::from_str(c).ok());
@@ -67,7 +113,7 @@ pub async fn list_project_memories(
 
     match state
         .with_memory_store(|store| {
-            store.list_memories(&project_path, parsed_category, offset, limit)
+            store.list_memories(&effective_project_path, parsed_category, offset, limit)
         })
         .await
     {
@@ -84,20 +130,28 @@ pub async fn add_project_memory(
     content: String,
     keywords: Vec<String>,
     importance: Option<f32>,
+    scope: Option<String>,
+    session_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<CommandResponse<MemoryEntry>, String> {
+    let effective_project_path =
+        match resolve_memory_project_path(&project_path, scope.as_deref(), session_id.as_deref()) {
+            Ok(path) => path,
+            Err(e) => return Ok(CommandResponse::err(e)),
+        };
+
     let parsed_category = match MemoryCategory::from_str(&category) {
         Ok(c) => c,
         Err(e) => return Ok(CommandResponse::err(e.to_string())),
     };
 
     let entry = NewMemoryEntry {
-        project_path,
+        project_path: effective_project_path,
         category: parsed_category,
         content,
         keywords,
         importance: importance.unwrap_or(0.5),
-        source_session_id: None,
+        source_session_id: session_id,
         source_context: None,
     };
 
@@ -166,10 +220,33 @@ pub async fn delete_project_memory(
 #[tauri::command]
 pub async fn clear_project_memories(
     project_path: String,
+    scope: Option<String>,
+    session_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<CommandResponse<usize>, String> {
+    let effective_project_path =
+        match resolve_memory_project_path(&project_path, scope.as_deref(), session_id.as_deref()) {
+            Ok(path) => path,
+            Err(e) => return Ok(CommandResponse::err(e)),
+        };
+
+    match state
+        .with_memory_store(|store| store.clear_project_memories(&effective_project_path))
+        .await
+    {
+        Ok(count) => Ok(CommandResponse::ok(count)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Clear all memories for a session scope.
+#[tauri::command]
+pub async fn clear_session_memories(
+    session_id: String,
     state: State<'_, AppState>,
 ) -> Result<CommandResponse<usize>, String> {
     match state
-        .with_memory_store(|store| store.clear_project_memories(&project_path))
+        .with_memory_store(|store| store.clear_session_memories(&session_id))
         .await
     {
         Ok(count) => Ok(CommandResponse::ok(count)),
@@ -181,10 +258,18 @@ pub async fn clear_project_memories(
 #[tauri::command]
 pub async fn get_memory_stats(
     project_path: String,
+    scope: Option<String>,
+    session_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<CommandResponse<MemoryStats>, String> {
+    let effective_project_path =
+        match resolve_memory_project_path(&project_path, scope.as_deref(), session_id.as_deref()) {
+            Ok(path) => path,
+            Err(e) => return Ok(CommandResponse::err(e)),
+        };
+
     match state
-        .with_memory_store(|store| store.get_stats(&project_path))
+        .with_memory_store(|store| store.get_stats(&effective_project_path))
         .await
     {
         Ok(stats) => Ok(CommandResponse::ok(stats)),
@@ -207,20 +292,34 @@ pub struct MaintenanceResult {
 #[tauri::command]
 pub async fn run_memory_maintenance(
     project_path: String,
+    scope: Option<String>,
+    session_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<CommandResponse<MaintenanceResult>, String> {
+    let effective_project_path =
+        match resolve_memory_project_path(&project_path, scope.as_deref(), session_id.as_deref()) {
+            Ok(path) => path,
+            Err(e) => return Ok(CommandResponse::err(e)),
+        };
+
     let decayed_count = state
-        .with_memory_store(|store| MemoryMaintenance::decay_memories(store, &project_path))
+        .with_memory_store(|store| {
+            MemoryMaintenance::decay_memories(store, &effective_project_path)
+        })
         .await
         .unwrap_or(0);
 
     let pruned_count = state
-        .with_memory_store(|store| MemoryMaintenance::prune_memories(store, &project_path, 0.05))
+        .with_memory_store(|store| {
+            MemoryMaintenance::prune_memories(store, &effective_project_path, 0.05)
+        })
         .await
         .unwrap_or(0);
 
     let compacted_count = state
-        .with_memory_store(|store| MemoryMaintenance::compact_memories(store, &project_path))
+        .with_memory_store(|store| {
+            MemoryMaintenance::compact_memories(store, &effective_project_path)
+        })
         .await
         .unwrap_or(0);
 

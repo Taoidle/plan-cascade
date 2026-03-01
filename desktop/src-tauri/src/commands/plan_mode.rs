@@ -862,6 +862,9 @@ fn default_plan_context_sources() -> ContextSourceConfig {
             enabled: true,
             selected_categories: vec![],
             selected_memory_ids: vec![],
+            excluded_memory_ids: vec![],
+            selected_scopes: vec![],
+            session_id: None,
         }),
         skills: Some(SkillsSourceConfig {
             enabled: true,

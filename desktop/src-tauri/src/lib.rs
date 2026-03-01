@@ -40,6 +40,7 @@ pub use commands::{
     cleanup_gate_results,
     cleanup_standalone_sessions,
     clear_project_memories,
+    clear_session_memories,
     clear_trigger_log,
     compile_spec,
     complete_worktree,

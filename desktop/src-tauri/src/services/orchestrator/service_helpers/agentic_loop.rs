@@ -1924,8 +1924,15 @@ impl OrchestratorService {
         let mut event_actions_state: HashMap<String, serde_json::Value> = HashMap::new();
 
         // Build hook context for lifecycle hooks
+        let hook_session_id = self
+            .config
+            .analysis_session_id
+            .as_ref()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let hook_ctx = crate::services::orchestrator::hooks::HookContext {
-            session_id: uuid::Uuid::new_v4().to_string(),
+            session_id: hook_session_id,
             project_path: self.config.project_root.clone(),
             provider_name: self.provider.name().to_string(),
             model_name: self.config.provider.model.clone(),
@@ -4156,6 +4163,16 @@ impl OrchestratorService {
             params![session_id],
         )?;
 
+        // Delete session-scoped memories.
+        if let Some(session_project_path) =
+            crate::services::memory::store::build_session_project_path(session_id)
+        {
+            conn.execute(
+                "DELETE FROM project_memories WHERE project_path = ?1",
+                params![session_project_path],
+            )?;
+        }
+
         // Remove from cache
         let mut sessions = self.active_sessions.write().await;
         sessions.remove(session_id);
@@ -4174,6 +4191,22 @@ impl OrchestratorService {
             .get()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
+        // Capture stale session ids first so session-scoped memories can be cleaned too.
+        let stale_session_ids: Vec<String> = {
+            let mut stmt = conn.prepare(
+                "SELECT id FROM execution_sessions
+                 WHERE status IN ('completed', 'cancelled')
+                 AND created_at < datetime('now', ?1 || ' days')",
+            )?;
+            let rows =
+                stmt.query_map(params![format!("-{}", days)], |row| row.get::<_, String>(0))?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+
+        if stale_session_ids.is_empty() {
+            return Ok(0);
+        }
+
         // Delete old stories
         conn.execute(
             "DELETE FROM execution_stories WHERE session_id IN (
@@ -4183,6 +4216,18 @@ impl OrchestratorService {
             )",
             params![format!("-{}", days)],
         )?;
+
+        // Delete stale session-scoped memories.
+        for session_id in &stale_session_ids {
+            if let Some(session_project_path) =
+                crate::services::memory::store::build_session_project_path(session_id)
+            {
+                conn.execute(
+                    "DELETE FROM project_memories WHERE project_path = ?1",
+                    params![session_project_path],
+                )?;
+            }
+        }
 
         // Delete old sessions
         let count = conn.execute(

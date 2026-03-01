@@ -6,13 +6,13 @@
  * Supports backend semantic search that flattens results.
  */
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { ChevronDownIcon, ChevronRightIcon, MagnifyingGlassIcon } from '@radix-ui/react-icons';
 import { useContextSourcesStore } from '../../store/contextSources';
 import { useSettingsStore } from '../../store/settings';
-import { MEMORY_CATEGORIES, type MemoryCategory } from '../../types/skillMemory';
+import { MEMORY_CATEGORIES, type MemoryCategory, type MemoryScope } from '../../types/skillMemory';
 
 /** Color classes for each memory category */
 const CATEGORY_COLORS: Record<string, string> = {
@@ -23,10 +23,30 @@ const CATEGORY_COLORS: Record<string, string> = {
   fact: 'bg-purple-400',
 };
 
+const SCOPE_LABELS: Record<MemoryScope, string> = {
+  global: 'Global',
+  project: 'Project',
+  session: 'Session',
+};
+
+const SCOPE_STYLES: Record<MemoryScope, string> = {
+  global: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+  project: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300',
+  session: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+};
+
+function inferScope(projectPath: string): MemoryScope {
+  if (projectPath === '__global__') return 'global';
+  if (projectPath.startsWith('__session__:')) return 'session';
+  return 'project';
+}
+
 export function MemorySourcePicker() {
   const { t } = useTranslation('simpleMode');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
   const {
+    selectedMemoryScopes,
+    memorySessionId,
     selectedMemoryCategories,
     selectedMemoryIds,
     availableMemoryStats,
@@ -36,6 +56,7 @@ export function MemorySourcePicker() {
     memoryPickerSearchQuery,
     memorySearchResults,
     isSearchingMemories,
+    toggleMemoryScope,
     toggleMemoryCategory,
     toggleMemoryItem,
     loadMemoryStats,
@@ -47,13 +68,14 @@ export function MemorySourcePicker() {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [localSearchQuery, setLocalSearchQuery] = useState(memoryPickerSearchQuery);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const scopesKey = useMemo(() => selectedMemoryScopes.join('|'), [selectedMemoryScopes]);
 
   // Load memory stats on mount
   useEffect(() => {
-    if (workspacePath && !availableMemoryStats && !isLoadingMemoryStats) {
+    if (workspacePath) {
       loadMemoryStats(workspacePath);
     }
-  }, [workspacePath, availableMemoryStats, isLoadingMemoryStats, loadMemoryStats]);
+  }, [workspacePath, scopesKey, memorySessionId, loadMemoryStats]);
 
   // Debounced search
   useEffect(() => {
@@ -95,19 +117,8 @@ export function MemorySourcePicker() {
   );
 
   const getCategoryCheckState = (category: string): 'checked' | 'unchecked' | 'indeterminate' => {
-    const isCatSelected = selectedMemoryCategories.includes(category);
-    const memories = categoryMemories[category] || [];
-
-    if (memories.length === 0) {
-      return isCatSelected ? 'checked' : 'unchecked';
-    }
-
-    const memIds = memories.map((m) => m.id);
-    const selectedCount = memIds.filter((id) => selectedMemoryIds.includes(id)).length;
-
-    if (selectedCount === 0 && !isCatSelected) return 'unchecked';
-    if (selectedCount === memIds.length) return 'checked';
-    return 'indeterminate';
+    if (selectedMemoryCategories.length === 0) return 'checked';
+    return selectedMemoryCategories.includes(category) ? 'checked' : 'unchecked';
   };
 
   const categoryLabel = (cat: MemoryCategory) => {
@@ -124,27 +135,39 @@ export function MemorySourcePicker() {
 
   const isSearchMode = !!localSearchQuery.trim();
 
-  if (isLoadingMemoryStats) {
-    return (
-      <div className="p-3 text-xs text-gray-500 dark:text-gray-400">
-        {t('contextSources.knowledgePicker.loading', { defaultValue: 'Loading...' })}
-      </div>
-    );
-  }
-
   const totalCount = availableMemoryStats?.total_count ?? 0;
-  if (totalCount === 0 && !isLoadingMemoryStats) {
-    return (
-      <div className="p-3 text-xs text-gray-500 dark:text-gray-400">
-        {t('contextSources.memoryPicker.noMemories', { defaultValue: 'No memories available' })}
-      </div>
-    );
-  }
+  const noMemoriesInSelectedScopes = !isLoadingMemoryStats && totalCount === 0;
 
   return (
     <div className="py-1">
       <div className="px-3 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 border-b border-gray-100 dark:border-gray-700">
         {t('contextSources.memoryPicker.title', { defaultValue: 'Memory Sources' })}
+      </div>
+
+      {/* Scope toggles */}
+      <div className="px-2 py-1.5 border-b border-gray-100 dark:border-gray-700 flex items-center gap-1 flex-wrap">
+        {(['global', 'project', 'session'] as MemoryScope[]).map((scope) => {
+          const isSelected = selectedMemoryScopes.includes(scope);
+          const disabled = scope === 'session' && !memorySessionId;
+          return (
+            <button
+              key={scope}
+              onClick={() => toggleMemoryScope(scope)}
+              disabled={disabled}
+              className={clsx(
+                'px-2 py-0.5 rounded text-2xs font-medium transition-colors',
+                isSelected
+                  ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300'
+                  : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400',
+                disabled && 'opacity-50 cursor-not-allowed',
+              )}
+            >
+              {t(`contextSources.memoryPicker.scopes.${scope}` as const, {
+                defaultValue: SCOPE_LABELS[scope],
+              })}
+            </button>
+          );
+        })}
       </div>
 
       {/* Search input */}
@@ -169,7 +192,15 @@ export function MemorySourcePicker() {
       </div>
 
       <div className="max-h-64 overflow-y-auto">
-        {isSearchMode ? (
+        {isLoadingMemoryStats ? (
+          <div className="px-3 py-2 text-2xs text-gray-400">
+            {t('contextSources.knowledgePicker.loading', { defaultValue: 'Loading...' })}
+          </div>
+        ) : noMemoriesInSelectedScopes ? (
+          <div className="px-3 py-2 text-2xs text-gray-400">
+            {t('contextSources.memoryPicker.noMemories', { defaultValue: 'No memories available' })}
+          </div>
+        ) : isSearchMode ? (
           // Search results (flat list)
           <>
             {isSearchingMemories && (
@@ -194,7 +225,7 @@ export function MemorySourcePicker() {
               >
                 <input
                   type="checkbox"
-                  checked={selectedMemoryIds.includes(entry.id)}
+                  checked={!selectedMemoryIds.includes(entry.id)}
                   onChange={() => toggleMemoryItem(entry.id)}
                   className="w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-600 text-purple-600 focus:ring-purple-500"
                 />
@@ -204,6 +235,14 @@ export function MemorySourcePicker() {
                     CATEGORY_COLORS[entry.category] || 'bg-gray-400',
                   )}
                 />
+                <span
+                  className={clsx(
+                    'text-2xs px-1 py-0.5 rounded flex-shrink-0',
+                    SCOPE_STYLES[inferScope(entry.project_path)],
+                  )}
+                >
+                  {SCOPE_LABELS[inferScope(entry.project_path)]}
+                </span>
                 <span className="flex-1 text-2xs text-gray-600 dark:text-gray-400 truncate">
                   {entry.content.slice(0, 80)}
                   {entry.content.length > 80 ? '...' : ''}
@@ -242,9 +281,6 @@ export function MemorySourcePicker() {
                   <input
                     type="checkbox"
                     checked={checkState === 'checked'}
-                    ref={(el) => {
-                      if (el) el.indeterminate = checkState === 'indeterminate';
-                    }}
                     onChange={() => toggleMemoryCategory(category)}
                     className="w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-600 text-purple-600 focus:ring-purple-500"
                   />
@@ -288,10 +324,18 @@ export function MemorySourcePicker() {
                       >
                         <input
                           type="checkbox"
-                          checked={selectedMemoryIds.includes(entry.id)}
+                          checked={!selectedMemoryIds.includes(entry.id)}
                           onChange={() => toggleMemoryItem(entry.id)}
                           className="w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-600 text-purple-600 focus:ring-purple-500"
                         />
+                        <span
+                          className={clsx(
+                            'text-2xs px-1 py-0.5 rounded flex-shrink-0',
+                            SCOPE_STYLES[inferScope(entry.project_path)],
+                          )}
+                        >
+                          {SCOPE_LABELS[inferScope(entry.project_path)]}
+                        </span>
                         <span className="flex-1 text-2xs text-gray-600 dark:text-gray-400 truncate">
                           {entry.content.slice(0, 60)}
                           {entry.content.length > 60 ? '...' : ''}

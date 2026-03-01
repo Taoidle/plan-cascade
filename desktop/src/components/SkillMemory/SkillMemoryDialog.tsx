@@ -16,6 +16,7 @@ import * as Tabs from '@radix-ui/react-tabs';
 import { Cross2Icon, MagnifyingGlassIcon, PlusIcon, ReloadIcon, TrashIcon } from '@radix-ui/react-icons';
 import { useSkillMemoryStore, type SkillSourceFilter, type MemoryCategoryFilter } from '../../store/skillMemory';
 import { useSettingsStore } from '../../store/settings';
+import { useExecutionStore } from '../../store/execution';
 import { SkillRow } from '../SimpleMode/SkillRow';
 import { SkillDetail } from './SkillDetail';
 import { MemoryDetail } from './MemoryDetail';
@@ -24,7 +25,7 @@ import { CategoryBadge } from './CategoryBadge';
 import { ImportanceBar } from './ImportanceBar';
 import { EmptyState } from './EmptyState';
 import { debounce } from '../Projects/utils';
-import type { SkillSummary, MemoryEntry, MemoryCategory } from '../../types/skillMemory';
+import type { SkillSummary, MemoryEntry, MemoryCategory, MemoryScope } from '../../types/skillMemory';
 import { MEMORY_CATEGORIES } from '../../types/skillMemory';
 
 // ============================================================================
@@ -81,6 +82,19 @@ function memoryCategoryFallback(category: MemoryCategory | string): string {
       return 'Fact';
     default:
       return category;
+  }
+}
+
+function memoryScopeFallback(scope: MemoryScope): string {
+  switch (scope) {
+    case 'project':
+      return 'Project';
+    case 'global':
+      return 'Global';
+    case 'session':
+      return 'Session';
+    default:
+      return scope;
   }
 }
 
@@ -287,13 +301,19 @@ function SkillsTab() {
 function MemoryTab() {
   const { t } = useTranslation('simpleMode');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
+  const taskId = useExecutionStore((s) => s.taskId);
+  const standaloneSessionId = useExecutionStore((s) => s.standaloneSessionId);
+  const foregroundOriginSessionId = useExecutionStore((s) => s.foregroundOriginSessionId);
   const memories = useSkillMemoryStore((s) => s.memories);
   const memoriesLoading = useSkillMemoryStore((s) => s.memoriesLoading);
   const memorySearchQuery = useSkillMemoryStore((s) => s.memorySearchQuery);
   const memoryCategoryFilter = useSkillMemoryStore((s) => s.memoryCategoryFilter);
+  const memoryScope = useSkillMemoryStore((s) => s.memoryScope);
   const memoryHasMore = useSkillMemoryStore((s) => s.memoryHasMore);
   const setMemorySearchQuery = useSkillMemoryStore((s) => s.setMemorySearchQuery);
   const setMemoryCategoryFilter = useSkillMemoryStore((s) => s.setMemoryCategoryFilter);
+  const setMemoryScope = useSkillMemoryStore((s) => s.setMemoryScope);
+  const setMemorySessionId = useSkillMemoryStore((s) => s.setMemorySessionId);
   const loadMemories = useSkillMemoryStore((s) => s.loadMemories);
   const loadMoreMemories = useSkillMemoryStore((s) => s.loadMoreMemories);
   const searchMemories = useSkillMemoryStore((s) => s.searchMemories);
@@ -306,6 +326,21 @@ function MemoryTab() {
 
   const [selectedMemory, setSelectedMemory] = useState<MemoryEntry | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const activeSessionId = useMemo(() => {
+    if (foregroundOriginSessionId?.trim()) return foregroundOriginSessionId.trim();
+    if (taskId?.trim()) return `claude:${taskId.trim()}`;
+    if (standaloneSessionId?.trim()) return `standalone:${standaloneSessionId.trim()}`;
+    return null;
+  }, [foregroundOriginSessionId, taskId, standaloneSessionId]);
+
+  const memoryScopeOptions = useMemo(
+    () =>
+      (['project', 'global', 'session'] as MemoryScope[]).map((scope) => ({
+        value: scope,
+        label: t(`skillPanel.memoryScopes.${scope}`, { defaultValue: memoryScopeFallback(scope) }),
+      })),
+    [t],
+  );
   const getCategoryLabel = useCallback(
     (category: MemoryCategory | string) =>
       t(`skillPanel.memoryCategories.${category}`, {
@@ -313,6 +348,16 @@ function MemoryTab() {
       }),
     [t],
   );
+
+  useEffect(() => {
+    setMemorySessionId(activeSessionId);
+  }, [activeSessionId, setMemorySessionId]);
+
+  useEffect(() => {
+    if (memoryScope === 'session' && !activeSessionId) {
+      setMemoryScope('project');
+    }
+  }, [memoryScope, activeSessionId, setMemoryScope]);
 
   // Reload when category filter changes
   useEffect(() => {
@@ -323,7 +368,7 @@ function MemoryTab() {
         loadMemories(workspacePath);
       }
     }
-  }, [memoryCategoryFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [memoryCategoryFilter, memoryScope, activeSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const debouncedSearch = useMemo(
     () =>
@@ -361,6 +406,14 @@ function MemoryTab() {
     [setMemoryCategoryFilter],
   );
 
+  const handleScopeFilter = useCallback(
+    (scope: MemoryScope) => {
+      if (scope === 'session' && !activeSessionId) return;
+      setMemoryScope(scope);
+    },
+    [activeSessionId, setMemoryScope],
+  );
+
   const handleAddMemory = useCallback(
     async (category: MemoryCategory, content: string, keywords: string[], importance: number) => {
       if (workspacePath) {
@@ -373,10 +426,16 @@ function MemoryTab() {
   );
 
   const handleClearAll = useCallback(() => {
-    if (workspacePath && window.confirm(t('skillPanel.clearAllConfirm'))) {
+    const confirmKey =
+      memoryScope === 'global'
+        ? 'skillPanel.clearAllConfirmGlobal'
+        : memoryScope === 'session'
+          ? 'skillPanel.clearAllConfirmSession'
+          : 'skillPanel.clearAllConfirm';
+    if (workspacePath && window.confirm(t(confirmKey, { defaultValue: t('skillPanel.clearAllConfirm') }))) {
       clearMemories(workspacePath);
     }
-  }, [workspacePath, clearMemories, t]);
+  }, [workspacePath, clearMemories, t, memoryScope]);
 
   // If add form is open, show it
   if (showAddForm) {
@@ -403,8 +462,31 @@ function MemoryTab() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Toolbar: search + category filter */}
+      {/* Toolbar: scope + search + category filter */}
       <div className="p-3 border-b border-gray-200 dark:border-gray-700 space-y-2">
+        {/* Scope filter */}
+        <div className="flex items-center gap-1 flex-wrap">
+          {memoryScopeOptions.map((option) => {
+            const isDisabled = option.value === 'session' && !activeSessionId;
+            return (
+              <button
+                key={option.value}
+                onClick={() => handleScopeFilter(option.value)}
+                disabled={isDisabled}
+                className={clsx(
+                  'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
+                  memoryScope === option.value
+                    ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                    : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
+                  isDisabled && 'opacity-50 cursor-not-allowed hover:bg-transparent dark:hover:bg-transparent',
+                )}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+
         {/* Search */}
         <div className="relative">
           <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />

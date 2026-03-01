@@ -110,6 +110,11 @@ desktop/node_modules/
 desktop/dist/
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
+# Vendored third-party source code (generated from upstream + local patches)
+desktop/src-tauri/vendor/
+
+# Debug outputs captured during LLM streaming/tool-call investigations
+output-raw-*.txt
 
 # Rust
 Cargo.lock

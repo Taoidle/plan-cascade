@@ -132,6 +132,11 @@
     "dialogTitle": "Skills & Memory Management",
     "skillsTab": "Skills",
     "memoryTab": "Memory",
+    "memoryScopes": {
+      "project": "Project",
+      "global": "Global",
+      "session": "Session"
+    },
     "searchSkills": "Search skills...",
     "searchMemories": "Search memories...",
     "filterAll": "All",
@@ -166,6 +171,8 @@
     "contentRequired": "Content is required",
     "clearAll": "Clear all",
     "clearAllConfirm": "Delete all memories for this project? This cannot be undone.",
+    "clearAllConfirmGlobal": "Delete all global memories? This cannot be undone.",
+    "clearAllConfirmSession": "Delete all memories for this session? This cannot be undone.",
     "toggleSkill": "Toggle {{name}}",
     "sourceFilters": {
       "all": "All",
@@ -221,7 +228,8 @@
       "deleteMemoryFailed": "Failed to delete memory",
       "memoriesCleared": "All memories cleared",
       "clearMemoriesFailed": "Failed to clear memories",
-      "searchMemoriesFailed": "Search failed"
+      "searchMemoriesFailed": "Search failed",
+      "sessionMemoryRequiresSession": "Session memory requires an active session"
     }
   },
 

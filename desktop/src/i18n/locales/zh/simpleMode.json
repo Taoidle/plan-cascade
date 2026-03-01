@@ -132,6 +132,11 @@
     "dialogTitle": "技能与记忆管理",
     "skillsTab": "技能",
     "memoryTab": "记忆",
+    "memoryScopes": {
+      "project": "项目",
+      "global": "全局",
+      "session": "会话"
+    },
     "searchSkills": "搜索技能...",
     "searchMemories": "搜索记忆...",
     "filterAll": "全部",
@@ -166,6 +171,8 @@
     "contentRequired": "内容不能为空",
     "clearAll": "清除全部",
     "clearAllConfirm": "确定删除此项目的所有记忆？此操作不可撤销。",
+    "clearAllConfirmGlobal": "确定删除所有全局记忆？此操作不可撤销。",
+    "clearAllConfirmSession": "确定删除当前会话的所有记忆？此操作不可撤销。",
     "toggleSkill": "切换 {{name}}",
     "sourceFilters": {
       "all": "全部",
@@ -221,7 +228,8 @@
       "deleteMemoryFailed": "删除记忆失败",
       "memoriesCleared": "全部记忆已清除",
       "clearMemoriesFailed": "清除记忆失败",
-      "searchMemoriesFailed": "搜索失败"
+      "searchMemoriesFailed": "搜索失败",
+      "sessionMemoryRequiresSession": "会话记忆需要一个活动会话"
     }
   },
 

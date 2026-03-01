@@ -122,6 +122,9 @@ export interface SkillsOverview {
 /** Categories of project memory */
 export type MemoryCategory = 'preference' | 'convention' | 'pattern' | 'correction' | 'fact';
 
+/** Scope of memory storage */
+export type MemoryScope = 'project' | 'global' | 'session';
+
 /** All valid memory categories */
 export const MEMORY_CATEGORIES: MemoryCategory[] = ['preference', 'convention', 'pattern', 'correction', 'fact'];
 

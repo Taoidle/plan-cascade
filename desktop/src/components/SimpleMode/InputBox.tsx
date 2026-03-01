@@ -168,6 +168,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
   const [autocompleteIndex, setAutocompleteIndex] = useState(0);
   const [atTriggerPos, setAtTriggerPos] = useState(-1);
 
+  const closeAutocomplete = useCallback(() => {
+    setIsAutocompleteOpen(false);
+    setAutocompleteQuery('');
+    setAutocompleteFiles([]);
+    setAutocompleteIndex(0);
+    setAtTriggerPos(-1);
+  }, []);
+
   // Clear file error after timeout
   useEffect(() => {
     if (fileError) {
@@ -411,14 +419,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     },
     [workspacePath],
   );
-
-  const closeAutocomplete = useCallback(() => {
-    setIsAutocompleteOpen(false);
-    setAutocompleteQuery('');
-    setAutocompleteFiles([]);
-    setAutocompleteIndex(0);
-    setAtTriggerPos(-1);
-  }, []);
 
   const handleAutocompleteSelect = useCallback(
     async (file: WorkspaceFileResult) => {

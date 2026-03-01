@@ -7,7 +7,7 @@
  * into both Chat Mode and Task Mode prompts.
  */
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { listen } from '@tauri-apps/api/event';
@@ -15,6 +15,7 @@ import { ChevronUpIcon } from '@radix-ui/react-icons';
 import { useContextSourcesStore } from '../../store/contextSources';
 import { useSettingsStore } from '../../store/settings';
 import { useProjectsStore } from '../../store/projects';
+import { useExecutionStore } from '../../store/execution';
 import { ragSyncDocsCollection } from '../../lib/knowledgeApi';
 import { KnowledgeSourcePicker } from './KnowledgeSourcePicker';
 import { MemorySourcePicker } from './MemorySourcePicker';
@@ -57,12 +58,14 @@ export function ContextSourceBar() {
     skillsEnabled,
     selectedCollections,
     selectedDocuments,
+    selectedMemoryScopes,
     selectedMemoryCategories,
     selectedMemoryIds,
     selectedSkillIds,
     toggleKnowledge,
     toggleMemory,
     toggleSkills,
+    setMemorySessionId,
     loadCollections,
     loadMemoryStats,
     loadAvailableSkills,
@@ -71,7 +74,20 @@ export function ContextSourceBar() {
 
   const workspacePath = useSettingsStore((s) => s.workspacePath);
   const selectedProject = useProjectsStore((s) => s.selectedProject);
+  const taskId = useExecutionStore((s) => s.taskId);
+  const standaloneSessionId = useExecutionStore((s) => s.standaloneSessionId);
+  const foregroundOriginSessionId = useExecutionStore((s) => s.foregroundOriginSessionId);
   const projectId = selectedProject?.id ?? 'default';
+  const activeSessionId = useMemo(() => {
+    if (foregroundOriginSessionId?.trim()) return foregroundOriginSessionId.trim();
+    if (taskId?.trim()) return `claude:${taskId.trim()}`;
+    if (standaloneSessionId?.trim()) return `standalone:${standaloneSessionId.trim()}`;
+    return null;
+  }, [foregroundOriginSessionId, taskId, standaloneSessionId]);
+
+  useEffect(() => {
+    setMemorySessionId(activeSessionId);
+  }, [activeSessionId, setMemorySessionId]);
 
   // Auto-associate knowledge collections when workspace changes
   useEffect(() => {
@@ -203,7 +219,7 @@ export function ContextSourceBar() {
 
   // Badge counts
   const knowledgeCount = selectedCollections.length + selectedDocuments.length;
-  const memoryCount = selectedMemoryCategories.length + selectedMemoryIds.length;
+  const memoryCount = selectedMemoryScopes.length + selectedMemoryCategories.length + selectedMemoryIds.length;
   const skillsCount = selectedSkillIds.length;
 
   return (

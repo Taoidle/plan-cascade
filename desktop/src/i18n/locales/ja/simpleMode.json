@@ -132,6 +132,11 @@
     "dialogTitle": "スキルとメモリの管理",
     "skillsTab": "スキル",
     "memoryTab": "メモリ",
+    "memoryScopes": {
+      "project": "プロジェクト",
+      "global": "グローバル",
+      "session": "セッション"
+    },
     "searchSkills": "スキルを検索...",
     "searchMemories": "メモリを検索...",
     "filterAll": "すべて",
@@ -166,6 +171,8 @@
     "contentRequired": "内容は必須です",
     "clearAll": "すべてクリア",
     "clearAllConfirm": "このプロジェクトのすべてのメモリを削除しますか？元に戻せません。",
+    "clearAllConfirmGlobal": "すべてのグローバルメモリを削除しますか？元に戻せません。",
+    "clearAllConfirmSession": "このセッションのすべてのメモリを削除しますか？元に戻せません。",
     "toggleSkill": "{{name}} を切り替え",
     "sourceFilters": {
       "all": "すべて",
@@ -221,7 +228,8 @@
       "deleteMemoryFailed": "メモリの削除に失敗しました",
       "memoriesCleared": "すべてのメモリをクリアしました",
       "clearMemoriesFailed": "メモリのクリアに失敗しました",
-      "searchMemoriesFailed": "検索に失敗しました"
+      "searchMemoriesFailed": "検索に失敗しました",
+      "sessionMemoryRequiresSession": "セッションメモリには有効なセッションが必要です"
     }
   },
 

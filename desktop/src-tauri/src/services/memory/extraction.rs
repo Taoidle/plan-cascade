@@ -11,7 +11,7 @@
 //! - Query:  "what do you remember about...", "what are my preferences..."
 
 use crate::services::memory::store::{
-    MemoryCategory, MemoryEntry, NewMemoryEntry, GLOBAL_PROJECT_PATH,
+    build_session_project_path, MemoryCategory, MemoryEntry, NewMemoryEntry, GLOBAL_PROJECT_PATH,
 };
 use crate::utils::error::{AppError, AppResult};
 
@@ -250,7 +250,7 @@ Return a JSON array:
     "content": "concise factual statement",
     "keywords": ["keyword1", "keyword2"],
     "importance": 0.0-1.0,
-    "scope": "project|global"
+    "scope": "project|global|session"
   }}
 ]
 
@@ -261,7 +261,7 @@ Rules:
 - "correction": mistakes to avoid (e.g., "editing executor.rs requires cargo check due to type complexity")
 - "fact": general project facts (e.g., "frontend uses Zustand for state management")
 - importance: 0.9+ for explicit user instructions, 0.5-0.8 for discovered patterns, 0.3-0.5 for general facts
-- scope: "global" for cross-project user-level preferences (communication language, coding style, tool preferences, personal habits); "project" for project-specific info (default)
+- scope: "global" for cross-project user-level preferences (communication language, coding style, tool preferences, personal habits); "project" for project-specific info (default); "session" for details useful only in this specific session
 - Preferences about the user themselves (not the project) should be "global"
 - Return empty array [] if nothing worth extracting"#,
             task = task_description,
@@ -320,15 +320,17 @@ Rules:
                     return None;
                 }
 
-                // Route to global or project scope based on LLM output
+                // Route to global/project/session scope based on LLM output.
                 let scope = item
                     .get("scope")
                     .and_then(|v| v.as_str())
                     .unwrap_or("project");
-                let effective_project_path = if scope == "global" {
-                    GLOBAL_PROJECT_PATH.to_string()
-                } else {
-                    project_path.to_string()
+                let effective_project_path = match scope {
+                    "global" => GLOBAL_PROJECT_PATH.to_string(),
+                    "session" => session_id
+                        .and_then(build_session_project_path)
+                        .unwrap_or_else(|| project_path.to_string()),
+                    _ => project_path.to_string(),
                 };
 
                 Some(NewMemoryEntry {
@@ -678,6 +680,28 @@ mod tests {
         let entries = MemoryExtractor::parse_extraction_response(response, "/test", None).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].project_path, "/test");
+    }
+
+    #[test]
+    fn test_parse_extraction_response_session_scope() {
+        let response = r#"[{"category":"fact","content":"Temporary session note","importance":0.6,"scope":"session"}]"#;
+        let entries = MemoryExtractor::parse_extraction_response(
+            response,
+            "/test/project",
+            Some("standalone:abc-1"),
+        )
+        .unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].project_path, "__session__:abc-1");
+    }
+
+    #[test]
+    fn test_parse_extraction_response_session_scope_without_session_id_falls_back_to_project() {
+        let response = r#"[{"category":"fact","content":"Temporary session note","importance":0.6,"scope":"session"}]"#;
+        let entries =
+            MemoryExtractor::parse_extraction_response(response, "/test/project", None).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].project_path, "/test/project");
     }
 
     #[test]

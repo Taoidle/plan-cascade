@@ -740,11 +740,32 @@ impl OrchestratorService {
             tokio::sync::RwLock<Vec<crate::services::memory::store::MemoryEntry>>,
         >,
     ) -> Self {
-        crate::services::orchestrator::hooks::register_memory_hooks(
+        crate::services::orchestrator::hooks::register_memory_hooks_with_config(
             &mut self.hooks,
             memory_store,
             loaded_memories.clone(),
             Some(self.provider.clone()),
+            None,
+        );
+        self.loaded_memories = Some(loaded_memories);
+        self
+    }
+
+    /// Register memory hooks with explicit injection filter configuration.
+    pub fn with_memory_hooks_with_config(
+        mut self,
+        memory_store: std::sync::Arc<crate::services::memory::store::ProjectMemoryStore>,
+        loaded_memories: std::sync::Arc<
+            tokio::sync::RwLock<Vec<crate::services::memory::store::MemoryEntry>>,
+        >,
+        memory_hook_config: Option<crate::services::orchestrator::hooks::MemoryHookConfig>,
+    ) -> Self {
+        crate::services::orchestrator::hooks::register_memory_hooks_with_config(
+            &mut self.hooks,
+            memory_store,
+            loaded_memories.clone(),
+            Some(self.provider.clone()),
+            memory_hook_config,
         );
         self.loaded_memories = Some(loaded_memories);
         self

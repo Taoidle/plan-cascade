@@ -13,6 +13,7 @@ use crate::models::response::CommandResponse;
 use crate::services::claude_code::{
     channels, ActiveSessionManager, ChatHandler, StreamEventPayload,
 };
+use crate::state::AppState;
 
 /// State for Claude Code services
 pub struct ClaudeCodeState {
@@ -175,9 +176,19 @@ pub async fn list_active_sessions(
 pub async fn remove_session(
     session_id: String,
     state: State<'_, ClaudeCodeState>,
+    app_state: State<'_, AppState>,
 ) -> Result<CommandResponse<bool>, String> {
     match state.session_manager.remove_session(&session_id).await {
-        Ok(_) => Ok(CommandResponse::ok(true)),
+        Ok(_) => match app_state
+            .with_memory_store(|store| store.clear_session_memories(&session_id))
+            .await
+        {
+            Ok(_) => Ok(CommandResponse::ok(true)),
+            Err(e) => Ok(CommandResponse::err(format!(
+                "Session removed but failed to clear session memories: {}",
+                e
+            ))),
+        },
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
 }

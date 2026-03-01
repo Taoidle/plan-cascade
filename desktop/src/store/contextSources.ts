@@ -10,7 +10,7 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import type { KnowledgeCollection, DocumentSummary } from '../lib/knowledgeApi';
 import { ragListCollections, ragListDocuments, ragEnsureDocsCollection } from '../lib/knowledgeApi';
-import type { MemoryEntry, MemoryStats, MemorySearchResult, SkillSummary } from '../types/skillMemory';
+import type { MemoryEntry, MemoryScope, MemoryStats, MemorySearchResult, SkillSummary } from '../types/skillMemory';
 import { useProjectsStore } from './projects';
 
 // ---------------------------------------------------------------------------
@@ -21,6 +21,38 @@ interface CommandResponse<T> {
   success: boolean;
   data: T | null;
   error: string | null;
+}
+
+const MEMORY_COMMAND_TIMEOUT_MS = 8000;
+
+async function invokeCommandResponseWithTimeout<T>(
+  command: string,
+  args: Record<string, unknown>,
+  timeoutMs = MEMORY_COMMAND_TIMEOUT_MS,
+): Promise<CommandResponse<T>> {
+  return await new Promise<CommandResponse<T>>((resolve) => {
+    const timer = setTimeout(() => {
+      resolve({
+        success: false,
+        data: null,
+        error: `${command} timed out after ${timeoutMs}ms`,
+      });
+    }, timeoutMs);
+
+    invoke<CommandResponse<T>>(command, args)
+      .then((response) => {
+        clearTimeout(timer);
+        resolve(response);
+      })
+      .catch((error: unknown) => {
+        clearTimeout(timer);
+        resolve({
+          success: false,
+          data: null,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+  });
 }
 
 /** Configuration sent to the backend for conditional context injection. */
@@ -36,6 +68,9 @@ export interface ContextSourceConfig {
     enabled: boolean;
     selected_categories: string[];
     selected_memory_ids: string[];
+    excluded_memory_ids: string[];
+    selected_scopes: MemoryScope[];
+    session_id?: string | null;
   };
   skills?: {
     enabled: boolean;
@@ -55,8 +90,10 @@ export interface ContextSourcesState {
 
   // === Memory State ===
   memoryEnabled: boolean;
+  selectedMemoryScopes: MemoryScope[];
+  memorySessionId: string | null;
   selectedMemoryCategories: string[];
-  selectedMemoryIds: string[];
+  selectedMemoryIds: string[]; // excluded ids for default-included memory injection
   availableMemoryStats: MemoryStats | null;
   categoryMemories: Record<string, MemoryEntry[]>;
   isLoadingMemoryStats: boolean;
@@ -91,6 +128,8 @@ export interface ContextSourcesState {
 
   // === Memory Actions ===
   toggleMemory: (enabled: boolean) => void;
+  toggleMemoryScope: (scope: MemoryScope) => void;
+  setMemorySessionId: (sessionId: string | null) => void;
   toggleMemoryCategory: (category: string) => void;
   toggleMemoryItem: (memoryId: string) => void;
   loadMemoryStats: (projectPath: string) => Promise<void>;
@@ -105,8 +144,17 @@ export interface ContextSourcesState {
   loadAvailableSkills: (projectPath: string) => Promise<void>;
   setSkillPickerSearchQuery: (query: string) => void;
 
-  /** Build the config object for backend invocation. Returns undefined if nothing enabled. */
-  buildConfig: () => ContextSourceConfig | undefined;
+  /** Build the config object for backend invocation. */
+  buildConfig: () => ContextSourceConfig;
+}
+
+function normalizeMemoryScopes(scopes: MemoryScope[], sessionId: string | null): MemoryScope[] {
+  const unique: MemoryScope[] = [];
+  for (const scope of scopes) {
+    if (!unique.includes(scope)) unique.push(scope);
+  }
+  const filtered = unique.filter((scope) => scope !== 'session' || !!sessionId?.trim());
+  return filtered.length > 0 ? filtered : ['project', 'global'];
 }
 
 // ---------------------------------------------------------------------------
@@ -125,7 +173,9 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
   _autoAssociatedPath: null,
 
   // === Memory State ===
-  memoryEnabled: false,
+  memoryEnabled: true,
+  selectedMemoryScopes: ['global', 'project', 'session'],
+  memorySessionId: null,
   selectedMemoryCategories: [],
   selectedMemoryIds: [],
   availableMemoryStats: null,
@@ -348,70 +398,104 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
     }
   },
 
+  toggleMemoryScope: (scope) => {
+    const { selectedMemoryScopes, memorySessionId, categoryMemories, isLoadingCategoryMemories } = get();
+    if (scope === 'session' && !memorySessionId?.trim()) return;
+    const exists = selectedMemoryScopes.includes(scope);
+    const nextScopes = exists ? selectedMemoryScopes.filter((s) => s !== scope) : [...selectedMemoryScopes, scope];
+    const normalizedScopes = normalizeMemoryScopes(nextScopes, memorySessionId);
+    // Scope change invalidates loaded category snapshots
+    set({
+      selectedMemoryScopes: normalizedScopes,
+      categoryMemories: Object.keys(categoryMemories).length > 0 ? {} : categoryMemories,
+      isLoadingCategoryMemories: Object.keys(isLoadingCategoryMemories).length > 0 ? {} : isLoadingCategoryMemories,
+    });
+  },
+
+  setMemorySessionId: (sessionId) => {
+    const trimmed = sessionId?.trim() || null;
+    const { selectedMemoryScopes } = get();
+    const scopesWithSession: MemoryScope[] =
+      trimmed && !selectedMemoryScopes.includes('session')
+        ? [...selectedMemoryScopes, 'session']
+        : selectedMemoryScopes;
+    set({
+      memorySessionId: trimmed,
+      selectedMemoryScopes: normalizeMemoryScopes(scopesWithSession, trimmed),
+    });
+  },
+
   toggleMemoryCategory: (category) => {
-    const { selectedMemoryCategories, categoryMemories, selectedMemoryIds } = get();
+    const { selectedMemoryCategories } = get();
     const isSelected = selectedMemoryCategories.includes(category);
 
     if (isSelected) {
-      // Deselect category and all its memory items
-      const memories = categoryMemories[category] || [];
-      const memIds = new Set(memories.map((m) => m.id));
       set({
         selectedMemoryCategories: selectedMemoryCategories.filter((c) => c !== category),
-        selectedMemoryIds: selectedMemoryIds.filter((id) => !memIds.has(id)),
       });
     } else {
-      // Select category and all its loaded memory items
-      const memories = categoryMemories[category] || [];
-      const memIds = memories.map((m) => m.id);
-      const newIds = new Set([...selectedMemoryIds, ...memIds]);
       set({
         selectedMemoryCategories: [...selectedMemoryCategories, category],
-        selectedMemoryIds: [...newIds],
       });
     }
   },
 
   toggleMemoryItem: (memoryId) => {
-    const { selectedMemoryIds, selectedMemoryCategories, categoryMemories } = get();
-    const isSelected = selectedMemoryIds.includes(memoryId);
-
-    let newIds: string[];
-    if (isSelected) {
-      newIds = selectedMemoryIds.filter((id) => id !== memoryId);
+    const { selectedMemoryIds } = get();
+    const isExcluded = selectedMemoryIds.includes(memoryId);
+    if (isExcluded) {
+      set({ selectedMemoryIds: selectedMemoryIds.filter((id) => id !== memoryId) });
     } else {
-      newIds = [...selectedMemoryIds, memoryId];
+      set({ selectedMemoryIds: [...selectedMemoryIds, memoryId] });
     }
-
-    // Re-evaluate category selections based on item state
-    const newCategories = [...selectedMemoryCategories];
-    for (const [cat, memories] of Object.entries(categoryMemories)) {
-      if (memories.length === 0) continue;
-      const catMemIds = memories.map((m) => m.id);
-      const allSelected = catMemIds.every((id) => newIds.includes(id));
-      const catIdx = newCategories.indexOf(cat);
-
-      if (allSelected && catIdx === -1) {
-        newCategories.push(cat);
-      } else if (!allSelected && catIdx !== -1) {
-        newCategories.splice(catIdx, 1);
-      }
-    }
-
-    set({ selectedMemoryIds: newIds, selectedMemoryCategories: newCategories });
   },
 
   loadMemoryStats: async (projectPath) => {
     set({ isLoadingMemoryStats: true });
     try {
-      const response = await invoke<CommandResponse<MemoryStats>>('get_memory_stats', {
-        projectPath,
-      });
-      if (response.success && response.data) {
-        set({ availableMemoryStats: response.data, isLoadingMemoryStats: false });
-      } else {
-        set({ isLoadingMemoryStats: false });
+      const { selectedMemoryScopes, memorySessionId } = get();
+      const scopes = normalizeMemoryScopes(selectedMemoryScopes, memorySessionId);
+      const settledStats = await Promise.allSettled(
+        scopes.map((scope) =>
+          invokeCommandResponseWithTimeout<MemoryStats>('get_memory_stats', {
+            projectPath,
+            scope,
+            sessionId: memorySessionId,
+          }),
+        ),
+      );
+
+      const nonNullStats: MemoryStats[] = [];
+      for (const result of settledStats) {
+        if (result.status !== 'fulfilled') continue;
+        const response = result.value;
+        if (response.success && response.data) {
+          nonNullStats.push(response.data);
+        }
       }
+
+      if (nonNullStats.length === 0) {
+        set({ availableMemoryStats: null, isLoadingMemoryStats: false });
+        return;
+      }
+
+      let totalCount = 0;
+      let weightedImportanceSum = 0;
+      const categoryCounts: Record<string, number> = {};
+      for (const stats of nonNullStats) {
+        totalCount += stats.total_count;
+        weightedImportanceSum += stats.avg_importance * stats.total_count;
+        for (const [cat, count] of Object.entries(stats.category_counts)) {
+          categoryCounts[cat] = (categoryCounts[cat] || 0) + count;
+        }
+      }
+
+      const aggregate: MemoryStats = {
+        total_count: totalCount,
+        category_counts: categoryCounts,
+        avg_importance: totalCount > 0 ? weightedImportanceSum / totalCount : 0,
+      };
+      set({ availableMemoryStats: aggregate, isLoadingMemoryStats: false });
     } catch {
       set({ isLoadingMemoryStats: false });
     }
@@ -425,22 +509,34 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
       isLoadingCategoryMemories: { ...get().isLoadingCategoryMemories, [category]: true },
     });
     try {
-      const response = await invoke<CommandResponse<MemoryEntry[]>>('list_project_memories', {
-        projectPath,
-        category,
-        offset: 0,
-        limit: 50,
-      });
-      if (response.success && response.data) {
-        set((state) => ({
-          categoryMemories: { ...state.categoryMemories, [category]: response.data! },
-          isLoadingCategoryMemories: { ...state.isLoadingCategoryMemories, [category]: false },
-        }));
-      } else {
-        set({
-          isLoadingCategoryMemories: { ...get().isLoadingCategoryMemories, [category]: false },
-        });
+      const { selectedMemoryScopes, memorySessionId } = get();
+      const scopes = normalizeMemoryScopes(selectedMemoryScopes, memorySessionId);
+      const listResults = await Promise.all(
+        scopes.map(async (scope) => {
+          const response = await invoke<CommandResponse<MemoryEntry[]>>('list_project_memories', {
+            projectPath,
+            category,
+            offset: 0,
+            limit: 50,
+            scope,
+            sessionId: memorySessionId,
+          });
+          return response.success && response.data ? response.data : [];
+        }),
+      );
+
+      const mergedMap = new Map<string, MemoryEntry>();
+      for (const list of listResults) {
+        for (const entry of list) {
+          mergedMap.set(entry.id, entry);
+        }
       }
+      const merged = Array.from(mergedMap.values()).sort((a, b) => b.importance - a.importance);
+
+      set((state) => ({
+        categoryMemories: { ...state.categoryMemories, [category]: merged },
+        isLoadingCategoryMemories: { ...state.isLoadingCategoryMemories, [category]: false },
+      }));
     } catch {
       set({
         isLoadingCategoryMemories: { ...get().isLoadingCategoryMemories, [category]: false },
@@ -451,20 +547,40 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
   searchMemoriesForPicker: async (projectPath, query) => {
     set({ isSearchingMemories: true, memoryPickerSearchQuery: query });
     try {
-      const response = await invoke<CommandResponse<MemorySearchResult[]>>('search_project_memories', {
-        projectPath,
-        query,
-        categories: null,
-        topK: 20,
-      });
-      if (response.success && response.data) {
-        set({
-          memorySearchResults: response.data.map((r) => r.entry),
-          isSearchingMemories: false,
-        });
-      } else {
-        set({ memorySearchResults: [], isSearchingMemories: false });
+      const { selectedMemoryScopes, memorySessionId } = get();
+      const scopes = normalizeMemoryScopes(selectedMemoryScopes, memorySessionId);
+      const searchResults = await Promise.all(
+        scopes.map(async (scope) => {
+          const response = await invoke<CommandResponse<MemorySearchResult[]>>('search_project_memories', {
+            projectPath,
+            query,
+            categories: null,
+            topK: 20,
+            scope,
+            sessionId: memorySessionId,
+          });
+          return response.success && response.data ? response.data : [];
+        }),
+      );
+
+      const mergedMap = new Map<string, { entry: MemoryEntry; score: number }>();
+      for (const results of searchResults) {
+        for (const result of results) {
+          const prev = mergedMap.get(result.entry.id);
+          if (!prev || result.relevance_score > prev.score) {
+            mergedMap.set(result.entry.id, { entry: result.entry, score: result.relevance_score });
+          }
+        }
       }
+
+      const merged = Array.from(mergedMap.values())
+        .sort((a, b) => b.score - a.score)
+        .map((item) => item.entry);
+
+      set({
+        memorySearchResults: merged,
+        isSearchingMemories: false,
+      });
     } catch {
       set({ memorySearchResults: [], isSearchingMemories: false });
     }
@@ -547,32 +663,32 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
       selectedCollections,
       selectedDocuments,
       memoryEnabled,
+      selectedMemoryScopes,
+      memorySessionId,
       selectedMemoryCategories,
       selectedMemoryIds,
       skillsEnabled,
       selectedSkillIds,
     } = get();
 
-    if (!knowledgeEnabled && !memoryEnabled && !skillsEnabled) {
-      return undefined;
-    }
-
     const projectId = useProjectsStore.getState().selectedProject?.id ?? 'default';
     const config: ContextSourceConfig = { project_id: projectId };
+
+    const normalizedScopes = normalizeMemoryScopes(selectedMemoryScopes, memorySessionId);
+    config.memory = {
+      enabled: memoryEnabled,
+      selected_categories: selectedMemoryCategories,
+      selected_memory_ids: [],
+      excluded_memory_ids: selectedMemoryIds,
+      selected_scopes: normalizedScopes,
+      session_id: memorySessionId,
+    };
 
     if (knowledgeEnabled) {
       config.knowledge = {
         enabled: true,
         selected_collections: selectedCollections,
         selected_documents: selectedDocuments,
-      };
-    }
-
-    if (memoryEnabled) {
-      config.memory = {
-        enabled: true,
-        selected_categories: selectedMemoryCategories,
-        selected_memory_ids: selectedMemoryIds,
       };
     }
 

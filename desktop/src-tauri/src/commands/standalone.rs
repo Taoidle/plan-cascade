@@ -167,6 +167,25 @@ fn build_llm_provider_from_config(config: &ProviderConfig) -> Option<Arc<dyn Llm
     Some(provider)
 }
 
+fn build_memory_hook_config(
+    context_sources: Option<&crate::services::task_mode::context_provider::ContextSourceConfig>,
+) -> Option<crate::services::orchestrator::hooks::MemoryHookConfig> {
+    let memory = context_sources?.memory.as_ref()?;
+    let selected_categories: Vec<crate::services::memory::store::MemoryCategory> = memory
+        .selected_categories
+        .iter()
+        .filter_map(|c| crate::services::memory::store::MemoryCategory::from_str(c).ok())
+        .collect();
+
+    Some(crate::services::orchestrator::hooks::MemoryHookConfig {
+        injection_enabled: memory.enabled,
+        selected_scopes: memory.selected_scopes.clone(),
+        selected_categories,
+        selected_memory_ids: memory.selected_memory_ids.clone(),
+        excluded_memory_ids: memory.excluded_memory_ids.clone(),
+    })
+}
+
 fn provider_key_candidates(provider: &str) -> &'static [&'static str] {
     match provider {
         "anthropic" => &["anthropic", "claude", "claude-api"],
@@ -1151,22 +1170,28 @@ pub async fn execute_standalone(
     // Clone session_id before it's moved into orchestrator_config
     let event_session_id = analysis_session_id.clone().unwrap_or_default();
 
-    // Query Memory + Skills context (knowledge is now tool-driven via SearchKnowledge)
+    // Query Skills-only context for standalone system prompt.
+    // Memory injection is handled by memory hooks so it can be centrally filtered.
     let system_prompt = if let Some(ref cs) = context_sources {
+        let mut prompt_context_config = cs.clone();
+        if let Some(memory_cfg) = prompt_context_config.memory.as_mut() {
+            memory_cfg.enabled = false;
+        }
+
         let enriched =
             crate::services::task_mode::context_provider::query_selected_context_without_knowledge(
-                cs,
+                &prompt_context_config,
                 &app_state,
                 &project_path,
                 &message,
                 crate::services::skills::model::InjectionPhase::Implementation,
             )
             .await;
-        // Only memory + skills are pre-injected; knowledge_block is always empty here
+        // Knowledge is tool-driven here; merge only if non-empty (future-proof).
         let domain_context = crate::services::task_mode::context_provider::merge_enriched_context(
             None,
             &enriched.knowledge_block,
-            &enriched.memory_block,
+            "",
         );
         let skills_ctx = if enriched.skills_block.is_empty() {
             None
@@ -1267,7 +1292,9 @@ pub async fn execute_standalone(
     // Wire memory hooks for automatic memory loading and extraction
     if let Ok(memory_store) = app_state.get_memory_store_arc().await {
         let loaded_memories = std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new()));
-        orchestrator = orchestrator.with_memory_hooks(memory_store, loaded_memories);
+        let memory_hook_config = build_memory_hook_config(context_sources.as_ref());
+        orchestrator = orchestrator
+            .with_memory_hooks_with_config(memory_store, loaded_memories, memory_hook_config);
     }
 
     // Wire knowledge tool for on-demand SearchKnowledge (replaces pre-injection)

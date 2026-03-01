@@ -708,6 +708,18 @@ function buildHistorySessionId(taskId: string | null, standaloneSessionId: strin
   return null;
 }
 
+function clearSessionScopedMemory(sessionId: string | null | undefined): void {
+  const normalized = sessionId?.trim();
+  if (!normalized) return;
+  void Promise.resolve(
+    invoke<CommandResponse<number>>('clear_session_memories', {
+      sessionId: normalized,
+    }),
+  ).catch(() => {
+    // Non-critical cleanup path.
+  });
+}
+
 function hasMeaningfulForegroundContent(state: ExecutionState): boolean {
   return (
     state.streamingOutput.length > 0 ||
@@ -1342,8 +1354,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         // Resolve provider-specific base URL override (e.g. GLM Coding endpoint)
         const baseUrl = resolveProviderBaseUrl(provider, settings);
 
-        const contextSources =
-          (await import('./contextSources')).useContextSourcesStore.getState().buildConfig() ?? null;
+        const contextSourcesState = (await import('./contextSources')).useContextSourcesStore.getState();
+        contextSourcesState.setMemorySessionId(standaloneSessionId ? `standalone:${standaloneSessionId}` : null);
+        const contextSources = contextSourcesState.buildConfig() ?? null;
         const result = await invoke<CommandResponse<unknown>>('execute_standalone', {
           message: enrichedMessage,
           provider,
@@ -1967,15 +1980,22 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
   },
 
   clearHistory: () => {
+    const sessionIds = get()
+      .history.map((item) => item.sessionId || null)
+      .filter((sid): sid is string => Boolean(sid && sid.trim()));
     try {
       localStorage.removeItem(HISTORY_KEY);
     } catch {
       // Ignore localStorage errors
     }
     set({ history: [] });
+    for (const sid of sessionIds) {
+      clearSessionScopedMemory(sid);
+    }
   },
 
   deleteHistory: (historyId: string) => {
+    const removedSessionId = get().history.find((item) => item.id === historyId)?.sessionId;
     set((state) => {
       const next = state.history.filter((item) => item.id !== historyId);
       try {
@@ -1985,6 +2005,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       }
       return { history: next };
     });
+    clearSessionScopedMemory(removedSessionId);
   },
 
   renameHistory: (historyId, title) => {
@@ -2517,6 +2538,10 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
   },
 
   removeBackgroundSession: (id: string) => {
+    const snapshot = get().backgroundSessions[id];
+    const removedSessionId =
+      snapshot?.originSessionId ||
+      buildHistorySessionId(snapshot?.taskId || null, snapshot?.standaloneSessionId || null);
     set((state) => {
       if (!state.backgroundSessions[id]) return state;
       const _removed = state.backgroundSessions[id];
@@ -2544,6 +2569,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         foregroundOriginSessionId: state.foregroundBgId === id ? null : state.foregroundOriginSessionId,
       };
     });
+    clearSessionScopedMemory(removedSessionId);
   },
 
   retryStory: async (storyId) => {
@@ -2819,8 +2845,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       const standaloneSessionId = get().standaloneSessionId;
 
       try {
-        const regenContextSources =
-          (await import('./contextSources')).useContextSourcesStore.getState().buildConfig() ?? null;
+        const regenContextState = (await import('./contextSources')).useContextSourcesStore.getState();
+        regenContextState.setMemorySessionId(standaloneSessionId ? `standalone:${standaloneSessionId}` : null);
+        const regenContextSources = regenContextState.buildConfig() ?? null;
         const result = await invoke<CommandResponse<unknown>>('execute_standalone', {
           message: messageToSend,
           provider,
@@ -3005,8 +3032,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       const standaloneSessionId = get().standaloneSessionId;
 
       try {
-        const editContextSources =
-          (await import('./contextSources')).useContextSourcesStore.getState().buildConfig() ?? null;
+        const editContextState = (await import('./contextSources')).useContextSourcesStore.getState();
+        editContextState.setMemorySessionId(standaloneSessionId ? `standalone:${standaloneSessionId}` : null);
+        const editContextSources = editContextState.buildConfig() ?? null;
         const result = await invoke<CommandResponse<unknown>>('execute_standalone', {
           message: messageToSend,
           provider,

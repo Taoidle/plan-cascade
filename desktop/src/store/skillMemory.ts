@@ -16,6 +16,7 @@ import type {
   SkillIndexStats,
   MemoryEntry,
   MemoryCategory,
+  MemoryScope,
   MemoryStats,
   SkillMatch,
   SkillSourceLabel,
@@ -67,6 +68,8 @@ interface SkillMemoryState {
   memoryStats: MemoryStats | null;
   memorySearchQuery: string;
   memoryCategoryFilter: MemoryCategoryFilter;
+  memoryScope: MemoryScope;
+  memorySessionId: string | null;
   memoryPage: number;
   memoryPageSize: number;
   memoryHasMore: boolean;
@@ -116,6 +119,8 @@ interface SkillMemoryState {
   runMaintenance: (projectPath: string) => Promise<void>;
   setMemorySearchQuery: (query: string) => void;
   setMemoryCategoryFilter: (filter: MemoryCategoryFilter) => void;
+  setMemoryScope: (scope: MemoryScope) => void;
+  setMemorySessionId: (sessionId: string | null) => void;
 
   // --- UI Actions ---
   togglePanel: () => void;
@@ -147,6 +152,8 @@ const defaultState = {
   memoryStats: null as MemoryStats | null,
   memorySearchQuery: '',
   memoryCategoryFilter: 'all' as MemoryCategoryFilter,
+  memoryScope: 'project' as MemoryScope,
+  memorySessionId: null as string | null,
   memoryPage: 0,
   memoryPageSize: 20,
   memoryHasMore: true,
@@ -379,13 +386,27 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
   loadMemories: async (projectPath: string) => {
     set({ memoriesLoading: true, memoriesError: null, memoryPage: 0 });
     try {
-      const { memoryCategoryFilter, memoryPageSize } = get();
+      const { memoryCategoryFilter, memoryPageSize, memoryScope, memorySessionId } = get();
+      if (memoryScope === 'session' && !memorySessionId?.trim()) {
+        set({
+          memoriesError: tSkillMemory(
+            'skillPanel.toasts.sessionMemoryRequiresSession',
+            'Session memory requires an active session',
+          ),
+          memoriesLoading: false,
+          memories: [],
+          memoryHasMore: false,
+        });
+        return;
+      }
       const category = memoryCategoryFilter === 'all' ? null : memoryCategoryFilter;
       const response = await invoke<CommandResponse<MemoryEntry[]>>('list_project_memories', {
         projectPath,
         category,
         offset: 0,
         limit: memoryPageSize,
+        scope: memoryScope,
+        sessionId: memorySessionId,
       });
       if (response.success && response.data) {
         set({
@@ -409,7 +430,10 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
   },
 
   loadMoreMemories: async (projectPath: string) => {
-    const { memoryPage, memoryPageSize, memories, memoryCategoryFilter } = get();
+    const { memoryPage, memoryPageSize, memories, memoryCategoryFilter, memoryScope, memorySessionId } = get();
+    if (memoryScope === 'session' && !memorySessionId?.trim()) {
+      return;
+    }
     const nextPage = memoryPage + 1;
     const category = memoryCategoryFilter === 'all' ? null : memoryCategoryFilter;
     try {
@@ -418,6 +442,8 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         category,
         offset: nextPage * memoryPageSize,
         limit: memoryPageSize,
+        scope: memoryScope,
+        sessionId: memorySessionId,
       });
       if (response.success && response.data) {
         set({
@@ -433,8 +459,15 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
 
   loadMemoryStats: async (projectPath: string) => {
     try {
+      const { memoryScope, memorySessionId } = get();
+      if (memoryScope === 'session' && !memorySessionId?.trim()) {
+        set({ memoryStats: null });
+        return;
+      }
       const response = await invoke<CommandResponse<MemoryStats>>('get_memory_stats', {
         projectPath,
+        scope: memoryScope,
+        sessionId: memorySessionId,
       });
       if (response.success && response.data) {
         set({ memoryStats: response.data });
@@ -452,12 +485,22 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
     importance?: number,
   ) => {
     try {
+      const { memoryScope, memorySessionId } = get();
+      if (memoryScope === 'session' && !memorySessionId?.trim()) {
+        get().showToast(
+          tSkillMemory('skillPanel.toasts.sessionMemoryRequiresSession', 'Session memory requires an active session'),
+          'error',
+        );
+        return;
+      }
       const response = await invoke<CommandResponse<MemoryEntry>>('add_project_memory', {
         projectPath,
         category,
         content,
         keywords,
         importance: importance ?? 0.5,
+        scope: memoryScope,
+        sessionId: memorySessionId,
       });
       if (response.success && response.data) {
         set((state) => ({
@@ -521,8 +564,18 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
 
   clearMemories: async (projectPath: string) => {
     try {
+      const { memoryScope, memorySessionId } = get();
+      if (memoryScope === 'session' && !memorySessionId?.trim()) {
+        get().showToast(
+          tSkillMemory('skillPanel.toasts.sessionMemoryRequiresSession', 'Session memory requires an active session'),
+          'error',
+        );
+        return;
+      }
       const response = await invoke<CommandResponse<number>>('clear_project_memories', {
         projectPath,
+        scope: memoryScope,
+        sessionId: memorySessionId,
       });
       if (response.success) {
         set({ memories: [], memoryStats: null, memoryHasMore: false });
@@ -540,6 +593,19 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
 
   searchMemories: async (projectPath: string, query: string) => {
     set({ memoriesLoading: true, memorySearchQuery: query });
+    const { memoryScope, memorySessionId } = get();
+    if (memoryScope === 'session' && !memorySessionId?.trim()) {
+      set({
+        memoriesError: tSkillMemory(
+          'skillPanel.toasts.sessionMemoryRequiresSession',
+          'Session memory requires an active session',
+        ),
+        memoriesLoading: false,
+        memories: [],
+        memoryHasMore: false,
+      });
+      return;
+    }
     if (!query.trim()) {
       await get().loadMemories(projectPath);
       return;
@@ -554,6 +620,8 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
           query,
           categories,
           topK: 50,
+          scope: memoryScope,
+          sessionId: memorySessionId,
         },
       );
       if (response.success && response.data) {
@@ -578,10 +646,16 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
 
   runMaintenance: async (projectPath: string) => {
     try {
+      const { memoryScope, memorySessionId } = get();
+      if (memoryScope === 'session' && !memorySessionId?.trim()) {
+        return;
+      }
       await invoke<CommandResponse<{ decayed_count: number; pruned_count: number; compacted_count: number }>>(
         'run_memory_maintenance',
         {
           projectPath,
+          scope: memoryScope,
+          sessionId: memorySessionId,
         },
       );
       // Silent success — maintenance is non-critical
@@ -592,6 +666,8 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
 
   setMemorySearchQuery: (query: string) => set({ memorySearchQuery: query }),
   setMemoryCategoryFilter: (filter: MemoryCategoryFilter) => set({ memoryCategoryFilter: filter }),
+  setMemoryScope: (scope: MemoryScope) => set({ memoryScope: scope, memoryPage: 0, memoryHasMore: true }),
+  setMemorySessionId: (sessionId: string | null) => set({ memorySessionId: sessionId }),
 
   // --- UI Actions ---
 

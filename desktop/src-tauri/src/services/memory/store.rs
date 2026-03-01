@@ -21,12 +21,42 @@ use crate::utils::error::{AppError, AppResult};
 /// Sentinel project path for global (cross-project) memories.
 /// Memories stored under this path are loaded for every project session.
 pub const GLOBAL_PROJECT_PATH: &str = "__global__";
+/// Sentinel project-path prefix for session-scoped memories.
+pub const SESSION_PROJECT_PATH_PREFIX: &str = "__session__:";
 
 /// Similarity threshold tuned for sparse TF-IDF vectors during upsert merge.
 ///
 /// This is intentionally lower than dense-embedding heuristics; TF-IDF cosine
 /// distributions are generally more compressed.
 const TFIDF_UPSERT_MERGE_THRESHOLD: f32 = 0.72;
+
+/// Normalize a session id for memory scoping.
+///
+/// Accepts raw ids and history-prefixed ids (`claude:<id>`, `standalone:<id>`).
+pub fn normalize_memory_session_id(session_id: &str) -> Option<String> {
+    let trimmed = session_id.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let normalized = trimmed
+        .strip_prefix("claude:")
+        .or_else(|| trimmed.strip_prefix("standalone:"))
+        .unwrap_or(trimmed)
+        .trim();
+
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized.to_string())
+    }
+}
+
+/// Build the internal project_path sentinel for a session-scoped memory namespace.
+pub fn build_session_project_path(session_id: &str) -> Option<String> {
+    normalize_memory_session_id(session_id)
+        .map(|normalized| format!("{}{}", SESSION_PROJECT_PATH_PREFIX, normalized))
+}
 
 // ============================================================================
 // Data Types
@@ -554,6 +584,14 @@ impl ProjectMemoryStore {
         )?;
         self.mark_vocabulary_dirty(project_path);
         Ok(count)
+    }
+
+    /// Delete all memories for a session namespace.
+    pub fn clear_session_memories(&self, session_id: &str) -> AppResult<usize> {
+        let Some(project_path) = build_session_project_path(session_id) else {
+            return Ok(0);
+        };
+        self.clear_project_memories(&project_path)
     }
 
     /// Increment access counters for the specified memory IDs.
@@ -1158,5 +1196,43 @@ mod tests {
         let a_mems = store.list_memories("/project-a", None, 0, 100).unwrap();
         assert_eq!(a_mems.len(), 1);
         assert_eq!(a_mems[0].content, "Memory for project A");
+    }
+
+    #[test]
+    fn test_normalize_memory_session_id() {
+        assert_eq!(
+            normalize_memory_session_id("standalone:abc-123").as_deref(),
+            Some("abc-123")
+        );
+        assert_eq!(
+            normalize_memory_session_id("claude:task-1").as_deref(),
+            Some("task-1")
+        );
+        assert_eq!(
+            normalize_memory_session_id("raw-session").as_deref(),
+            Some("raw-session")
+        );
+        assert!(normalize_memory_session_id("claude:").is_none());
+        assert!(normalize_memory_session_id(" ").is_none());
+    }
+
+    #[test]
+    fn test_clear_session_memories() {
+        let store = create_test_store();
+        let session_path = build_session_project_path("standalone:session-1").unwrap();
+
+        store
+            .add_memory(NewMemoryEntry {
+                project_path: session_path.clone(),
+                content: "session scoped memory".into(),
+                ..sample_entry("ignored")
+            })
+            .unwrap();
+        store.add_memory(sample_entry("project memory")).unwrap();
+
+        let removed = store.clear_session_memories("session-1").unwrap();
+        assert_eq!(removed, 1);
+        assert_eq!(store.count_memories(&session_path).unwrap(), 0);
+        assert_eq!(store.count_memories("/test/project").unwrap(), 1);
     }
 }

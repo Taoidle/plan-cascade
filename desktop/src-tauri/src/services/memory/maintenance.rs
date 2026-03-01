@@ -185,6 +185,15 @@ impl MemoryMaintenance {
                 continue; // Already scheduled for deletion
             }
 
+            // Track incremental merged state for memory `i` so repeated merges
+            // in the same pass accumulate content/keywords instead of overwriting
+            // previous merge results.
+            let mut merged_content_acc = memories[i].content.clone();
+            let mut merged_keywords_acc: Vec<String> =
+                serde_json::from_str(&memories[i].keywords_json).unwrap_or_default();
+            let base_embedding = memories[i].embedding.clone();
+            let mut merged_any = false;
+
             for j in (i + 1)..memories.len() {
                 if to_delete.contains(&memories[j].id) {
                     continue;
@@ -192,64 +201,60 @@ impl MemoryMaintenance {
 
                 // Compute cosine similarity
                 if let (Some(ref emb_a), Some(ref emb_b)) =
-                    (&memories[i].embedding, &memories[j].embedding)
+                    (&base_embedding, &memories[j].embedding)
                 {
                     let sim = cosine_similarity(emb_a, emb_b);
 
                     if sim > TFIDF_COMPACTION_THRESHOLD {
-                        // Merge j into i (i has higher or equal importance since sorted DESC)
-                        let merged_content = if memories[i].content.contains(&memories[j].content) {
-                            memories[i].content.clone()
+                        // Merge j into i (i has higher or equal importance since sorted DESC).
+                        merged_content_acc = if merged_content_acc.contains(&memories[j].content) {
+                            merged_content_acc.clone()
                         } else {
-                            format!("{} | {}", memories[i].content, memories[j].content)
+                            format!("{} | {}", merged_content_acc, memories[j].content)
                         };
 
-                        let keywords_i: Vec<String> =
-                            serde_json::from_str(&memories[i].keywords_json).unwrap_or_default();
                         let keywords_j: Vec<String> =
                             serde_json::from_str(&memories[j].keywords_json).unwrap_or_default();
 
-                        let mut merged_keywords = keywords_i;
                         for kw in keywords_j {
-                            if !merged_keywords.contains(&kw) {
-                                merged_keywords.push(kw);
+                            if !merged_keywords_acc.contains(&kw) {
+                                merged_keywords_acc.push(kw);
                             }
-                        }
-
-                        // Recompute embedding for merged content
-                        let new_emb = store.embedding_service().embed_text(&merged_content);
-                        let new_emb_bytes = if new_emb.is_empty() {
-                            None
-                        } else {
-                            Some(embedding_to_bytes(&new_emb))
-                        };
-
-                        // Update the kept memory
-                        {
-                            let conn = store.pool().get().map_err(|e| {
-                                crate::utils::error::AppError::database(format!(
-                                    "Failed to get connection: {}",
-                                    e
-                                ))
-                            })?;
-                            let merged_kw_json =
-                                serde_json::to_string(&merged_keywords).unwrap_or_default();
-                            conn.execute(
-                                "UPDATE project_memories SET content = ?2, keywords = ?3, embedding = ?4, updated_at = datetime('now') WHERE id = ?1",
-                                params![
-                                    memories[i].id,
-                                    merged_content,
-                                    merged_kw_json,
-                                    new_emb_bytes,
-                                ],
-                            )?;
                         }
 
                         // Schedule the less important one for deletion
                         to_delete.insert(memories[j].id.clone());
+                        merged_any = true;
                         merged_count += 1;
                     }
                 }
+            }
+
+            // Persist the final merged state for the kept memory once.
+            if merged_any {
+                let conn = store.pool().get().map_err(|e| {
+                    crate::utils::error::AppError::database(format!(
+                        "Failed to get connection: {}",
+                        e
+                    ))
+                })?;
+                let merged_kw_json =
+                    serde_json::to_string(&merged_keywords_acc).unwrap_or_default();
+                let merged_emb = store.embedding_service().embed_text(&merged_content_acc);
+                let new_emb_bytes = if merged_emb.is_empty() {
+                    None
+                } else {
+                    Some(embedding_to_bytes(&merged_emb))
+                };
+                conn.execute(
+                    "UPDATE project_memories SET content = ?2, keywords = ?3, embedding = ?4, updated_at = datetime('now') WHERE id = ?1",
+                    params![
+                        memories[i].id,
+                        merged_content_acc,
+                        merged_kw_json,
+                        new_emb_bytes,
+                    ],
+                )?;
             }
         }
 
@@ -529,5 +534,81 @@ mod tests {
 
         let merged = MemoryMaintenance::compact_memories(&store, "/nonexistent").unwrap();
         assert_eq!(merged, 0);
+    }
+
+    #[test]
+    fn test_compact_multiple_merges_accumulate_content_and_keywords() {
+        let store = create_test_store();
+
+        let mem_a = store
+            .add_memory(NewMemoryEntry {
+                project_path: "/test/project".into(),
+                category: MemoryCategory::Fact,
+                content: "base memory".into(),
+                keywords: vec!["base".into()],
+                importance: 0.9,
+                source_session_id: None,
+                source_context: None,
+            })
+            .unwrap();
+
+        let mem_b = store
+            .add_memory(NewMemoryEntry {
+                project_path: "/test/project".into(),
+                category: MemoryCategory::Fact,
+                content: "first merged detail".into(),
+                keywords: vec!["first".into()],
+                importance: 0.8,
+                source_session_id: None,
+                source_context: None,
+            })
+            .unwrap();
+
+        let mem_c = store
+            .add_memory(NewMemoryEntry {
+                project_path: "/test/project".into(),
+                category: MemoryCategory::Fact,
+                content: "second merged detail".into(),
+                keywords: vec!["second".into()],
+                importance: 0.7,
+                source_session_id: None,
+                source_context: None,
+            })
+            .unwrap();
+
+        // Force deterministic high similarity by setting identical embeddings
+        // for all 3 memories, ensuring both merges happen in one compaction pass.
+        {
+            let conn = store.pool().get().map_err(|e| format!("{}", e)).unwrap();
+            let emb = embedding_to_bytes(&[1.0, 0.0, 0.0]);
+            for id in [&mem_a.id, &mem_b.id, &mem_c.id] {
+                conn.execute(
+                    "UPDATE project_memories SET embedding = ?2 WHERE id = ?1",
+                    params![id, emb.clone()],
+                )
+                .unwrap();
+            }
+        }
+
+        let merged = MemoryMaintenance::compact_memories(&store, "/test/project").unwrap();
+        assert_eq!(
+            merged, 2,
+            "Expected two merges into the top-importance memory"
+        );
+
+        let remaining = store.list_memories("/test/project", None, 0, 10).unwrap();
+        assert_eq!(
+            remaining.len(),
+            1,
+            "All duplicates should compact into one memory"
+        );
+
+        let kept = &remaining[0];
+        assert!(kept.content.contains("base memory"));
+        assert!(kept.content.contains("first merged detail"));
+        assert!(kept.content.contains("second merged detail"));
+        assert!(kept.keywords.contains(&"base".to_string()));
+        assert!(kept.keywords.contains(&"first".to_string()));
+        assert!(kept.keywords.contains(&"second".to_string()));
     }
 }

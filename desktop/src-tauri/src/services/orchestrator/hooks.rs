@@ -533,7 +533,8 @@ pub fn register_skill_hooks(
             *w = matches;
             tracing::info!(
                 "[hooks] Skill detection: session={}, detected_skills={}",
-                ctx.session_id, count,
+                ctx.session_id,
+                count,
             );
             Ok(())
         })
@@ -565,6 +566,33 @@ pub fn register_skill_hooks(
     }));
 }
 
+/// Configuration for memory injection behavior in lifecycle hooks.
+#[derive(Debug, Clone)]
+pub struct MemoryHookConfig {
+    /// Whether memory entries should be injected into the prompt.
+    pub injection_enabled: bool,
+    /// Allowed scope names: `project`, `global`, `session`.
+    pub selected_scopes: Vec<String>,
+    /// Allowed categories. Empty means all categories.
+    pub selected_categories: Vec<MemoryCategory>,
+    /// Explicit allowlist of memory ids. Empty means no id-level allowlist.
+    pub selected_memory_ids: Vec<String>,
+    /// Explicit denylist of memory ids to exclude.
+    pub excluded_memory_ids: Vec<String>,
+}
+
+impl Default for MemoryHookConfig {
+    fn default() -> Self {
+        Self {
+            injection_enabled: true,
+            selected_scopes: vec![],
+            selected_categories: vec![],
+            selected_memory_ids: vec![],
+            excluded_memory_ids: vec![],
+        }
+    }
+}
+
 /// Register Memory-related hooks onto an AgenticHooks instance.
 ///
 /// This wires the ProjectMemoryStore into the agentic lifecycle:
@@ -586,87 +614,213 @@ pub fn register_memory_hooks(
     loaded_memories: Arc<RwLock<Vec<crate::services::memory::store::MemoryEntry>>>,
     llm_provider: Option<Arc<dyn crate::services::llm::provider::LlmProvider>>,
 ) {
-    use crate::services::memory::store::GLOBAL_PROJECT_PATH;
+    register_memory_hooks_with_config(
+        hooks,
+        memory_store,
+        loaded_memories,
+        llm_provider,
+        None,
+    );
+}
+
+/// Register memory-related hooks with optional injection filter configuration.
+pub fn register_memory_hooks_with_config(
+    hooks: &mut AgenticHooks,
+    memory_store: Arc<ProjectMemoryStore>,
+    loaded_memories: Arc<RwLock<Vec<crate::services::memory::store::MemoryEntry>>>,
+    llm_provider: Option<Arc<dyn crate::services::llm::provider::LlmProvider>>,
+    memory_hook_config: Option<MemoryHookConfig>,
+) {
+    use crate::services::memory::store::{
+        build_session_project_path, GLOBAL_PROJECT_PATH, SESSION_PROJECT_PATH_PREFIX,
+    };
+    let memory_hook_config = memory_hook_config.unwrap_or_default();
+    let injection_enabled = memory_hook_config.injection_enabled;
+    let allowed_categories = if memory_hook_config.selected_categories.is_empty() {
+        None
+    } else {
+        Some(memory_hook_config.selected_categories.clone())
+    };
+    let selected_ids: HashSet<String> = memory_hook_config
+        .selected_memory_ids
+        .into_iter()
+        .collect();
+    let excluded_ids: HashSet<String> = memory_hook_config
+        .excluded_memory_ids
+        .into_iter()
+        .collect();
+    let mut scopes_set: HashSet<String> = memory_hook_config
+        .selected_scopes
+        .iter()
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if scopes_set.is_empty() {
+        scopes_set.insert("project".to_string());
+        scopes_set.insert("global".to_string());
+        scopes_set.insert("session".to_string());
+    }
 
     // on_session_start: load project + global memories (browse mode, no query)
     let store_clone = memory_store.clone();
     let memories_out = loaded_memories.clone();
+    let scopes_on_start = scopes_set.clone();
+    let categories_on_start = allowed_categories.clone();
+    let selected_ids_on_start = selected_ids.clone();
+    let excluded_ids_on_start = excluded_ids.clone();
     hooks.register_on_session_start(Box::new(move |ctx| {
         let store = store_clone.clone();
         let out = memories_out.clone();
+        let scopes = scopes_on_start.clone();
+        let categories = categories_on_start.clone();
+        let selected_ids = selected_ids_on_start.clone();
+        let excluded_ids = excluded_ids_on_start.clone();
         Box::pin(async move {
+            if !injection_enabled {
+                let mut w = out.write().await;
+                w.clear();
+                tracing::info!(
+                    "[hooks] Memory injection disabled: session={}",
+                    ctx.session_id
+                );
+                return Ok(());
+            }
+
             let project_path = ctx.project_path.to_string_lossy().to_string();
             let mut seen_ids = HashSet::new();
+            let mut all_entries = Vec::new();
 
             // Load project-scoped memories
-            let project_request = MemorySearchRequest {
-                project_path: project_path.clone(),
-                query: String::new(),
-                categories: None,
-                top_k: 10,
-                min_importance: 0.1,
-            };
-            let mut all_entries = Vec::new();
-            match search_memories_with_options(
-                &store,
-                &project_request,
-                MemorySearchOptions {
-                    ranking_mode: MemoryRankingMode::Browse,
-                    touch_policy: MemoryTouchPolicy::NoTouch,
-                },
-            ) {
-                Ok(results) => {
-                    for result in results {
-                        if seen_ids.insert(result.entry.id.clone()) {
-                            all_entries.push(result.entry);
+            if scopes.contains("project") {
+                let project_request = MemorySearchRequest {
+                    project_path: project_path.clone(),
+                    query: String::new(),
+                    categories: categories.clone(),
+                    top_k: 10,
+                    min_importance: 0.1,
+                };
+                match search_memories_with_options(
+                    &store,
+                    &project_request,
+                    MemorySearchOptions {
+                        ranking_mode: MemoryRankingMode::Browse,
+                        touch_policy: MemoryTouchPolicy::NoTouch,
+                    },
+                ) {
+                    Ok(results) => {
+                        for result in results {
+                            if seen_ids.insert(result.entry.id.clone()) {
+                                all_entries.push(result.entry);
+                            }
                         }
                     }
-                }
-                Err(e) => {
-                    tracing::info!(
-                        "[hooks] Project memory load failed: session={}, error={}",
-                        ctx.session_id, e,
-                    );
+                    Err(e) => {
+                        tracing::info!(
+                            "[hooks] Project memory load failed: session={}, error={}",
+                            ctx.session_id,
+                            e,
+                        );
+                    }
                 }
             }
 
             // Load global memories (cross-project user preferences)
-            let global_request = MemorySearchRequest {
-                project_path: GLOBAL_PROJECT_PATH.to_string(),
-                query: String::new(),
-                categories: None,
-                top_k: 5,
-                min_importance: 0.3,
-            };
-            match search_memories_with_options(
-                &store,
-                &global_request,
-                MemorySearchOptions {
-                    ranking_mode: MemoryRankingMode::Browse,
-                    touch_policy: MemoryTouchPolicy::NoTouch,
-                },
-            ) {
-                Ok(results) => {
-                    for result in results {
-                        if seen_ids.insert(result.entry.id.clone()) {
-                            all_entries.push(result.entry);
+            if scopes.contains("global") {
+                let global_request = MemorySearchRequest {
+                    project_path: GLOBAL_PROJECT_PATH.to_string(),
+                    query: String::new(),
+                    categories: categories.clone(),
+                    top_k: 5,
+                    min_importance: 0.3,
+                };
+                match search_memories_with_options(
+                    &store,
+                    &global_request,
+                    MemorySearchOptions {
+                        ranking_mode: MemoryRankingMode::Browse,
+                        touch_policy: MemoryTouchPolicy::NoTouch,
+                    },
+                ) {
+                    Ok(results) => {
+                        for result in results {
+                            if seen_ids.insert(result.entry.id.clone()) {
+                                all_entries.push(result.entry);
+                            }
                         }
                     }
-                }
-                Err(e) => {
-                    tracing::info!(
-                        "[hooks] Global memory load failed: session={}, error={}",
-                        ctx.session_id, e,
-                    );
+                    Err(e) => {
+                        tracing::info!(
+                            "[hooks] Global memory load failed: session={}, error={}",
+                            ctx.session_id,
+                            e,
+                        );
+                    }
                 }
             }
 
-            let count = all_entries.len();
+            // Load session-scoped memories (ephemeral persistence for this session id).
+            if scopes.contains("session") {
+                if let Some(session_project_path) = build_session_project_path(&ctx.session_id) {
+                let session_request = MemorySearchRequest {
+                    project_path: session_project_path,
+                    query: String::new(),
+                    categories: categories.clone(),
+                    top_k: 10,
+                    min_importance: 0.1,
+                };
+                match search_memories_with_options(
+                    &store,
+                    &session_request,
+                    MemorySearchOptions {
+                        ranking_mode: MemoryRankingMode::Browse,
+                        touch_policy: MemoryTouchPolicy::NoTouch,
+                    },
+                ) {
+                    Ok(results) => {
+                        for result in results {
+                            if seen_ids.insert(result.entry.id.clone()) {
+                                all_entries.push(result.entry);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::info!(
+                            "[hooks] Session memory load failed: session={}, error={}",
+                            ctx.session_id,
+                            e,
+                        );
+                    }
+                }
+            }
+            }
+
+            let mut filtered_entries: Vec<_> = all_entries
+                .into_iter()
+                .filter(|entry| {
+                    if excluded_ids.contains(entry.id.as_str()) {
+                        return false;
+                    }
+                    if !selected_ids.is_empty() && !selected_ids.contains(entry.id.as_str()) {
+                        return false;
+                    }
+                    let scope = if entry.project_path == GLOBAL_PROJECT_PATH {
+                        "global"
+                    } else if entry.project_path.starts_with(SESSION_PROJECT_PATH_PREFIX) {
+                        "session"
+                    } else {
+                        "project"
+                    };
+                    scopes.contains(scope)
+                })
+                .collect();
+
+            let count = filtered_entries.len();
             let mut w = out.write().await;
-            *w = all_entries;
+            *w = std::mem::take(&mut filtered_entries);
             tracing::info!(
-                "[hooks] Memory loaded: session={}, memories={} (project+global)",
-                ctx.session_id, count,
+                "[hooks] Memory loaded: session={}, memories={} (project+global+session)",
+                ctx.session_id,
+                count,
             );
             Ok(())
         })
@@ -675,10 +829,23 @@ pub fn register_memory_hooks(
     // on_user_message: refresh memory selection with semantic query
     let store_clone_msg = memory_store.clone();
     let memories_out_msg = loaded_memories.clone();
+    let scopes_on_message = scopes_set.clone();
+    let categories_on_message = allowed_categories.clone();
+    let selected_ids_on_message = selected_ids.clone();
+    let excluded_ids_on_message = excluded_ids.clone();
     hooks.register_on_user_message(Box::new(move |ctx, message| {
         let store = store_clone_msg.clone();
         let out = memories_out_msg.clone();
+        let scopes = scopes_on_message.clone();
+        let categories = categories_on_message.clone();
+        let selected_ids = selected_ids_on_message.clone();
+        let excluded_ids = excluded_ids_on_message.clone();
         Box::pin(async move {
+            if !injection_enabled {
+                let mut w = out.write().await;
+                w.clear();
+                return Ok(None);
+            }
             let query = message.trim().to_string();
             if query.is_empty() {
                 return Ok(None);
@@ -688,72 +855,134 @@ pub fn register_memory_hooks(
             let mut seen_ids = HashSet::new();
             let mut all_entries = Vec::new();
 
-            let project_request = MemorySearchRequest {
-                project_path: project_path.clone(),
-                query: query.clone(),
-                categories: None,
-                top_k: 10,
-                min_importance: 0.1,
-            };
-            match search_memories_with_options(
-                &store,
-                &project_request,
-                MemorySearchOptions {
-                    ranking_mode: MemoryRankingMode::Hybrid,
-                    touch_policy: MemoryTouchPolicy::NoTouch,
-                },
-            ) {
-                Ok(results) => {
-                    for result in results {
-                        if seen_ids.insert(result.entry.id.clone()) {
-                            all_entries.push(result.entry);
+            if scopes.contains("project") {
+                let project_request = MemorySearchRequest {
+                    project_path: project_path.clone(),
+                    query: query.clone(),
+                    categories: categories.clone(),
+                    top_k: 10,
+                    min_importance: 0.1,
+                };
+                match search_memories_with_options(
+                    &store,
+                    &project_request,
+                    MemorySearchOptions {
+                        ranking_mode: MemoryRankingMode::Hybrid,
+                        touch_policy: MemoryTouchPolicy::NoTouch,
+                    },
+                ) {
+                    Ok(results) => {
+                        for result in results {
+                            if seen_ids.insert(result.entry.id.clone()) {
+                                all_entries.push(result.entry);
+                            }
                         }
                     }
-                }
-                Err(e) => {
-                    tracing::info!(
-                        "[hooks] Project memory refresh failed: session={}, error={}",
-                        ctx.session_id, e,
-                    );
+                    Err(e) => {
+                        tracing::info!(
+                            "[hooks] Project memory refresh failed: session={}, error={}",
+                            ctx.session_id,
+                            e,
+                        );
+                    }
                 }
             }
 
-            let global_request = MemorySearchRequest {
-                project_path: GLOBAL_PROJECT_PATH.to_string(),
-                query,
-                categories: None,
-                top_k: 5,
-                min_importance: 0.3,
-            };
-            match search_memories_with_options(
-                &store,
-                &global_request,
-                MemorySearchOptions {
-                    ranking_mode: MemoryRankingMode::Hybrid,
-                    touch_policy: MemoryTouchPolicy::NoTouch,
-                },
-            ) {
-                Ok(results) => {
-                    for result in results {
-                        if seen_ids.insert(result.entry.id.clone()) {
-                            all_entries.push(result.entry);
+            if scopes.contains("global") {
+                let global_request = MemorySearchRequest {
+                    project_path: GLOBAL_PROJECT_PATH.to_string(),
+                    query,
+                    categories: categories.clone(),
+                    top_k: 5,
+                    min_importance: 0.3,
+                };
+                match search_memories_with_options(
+                    &store,
+                    &global_request,
+                    MemorySearchOptions {
+                        ranking_mode: MemoryRankingMode::Hybrid,
+                        touch_policy: MemoryTouchPolicy::NoTouch,
+                    },
+                ) {
+                    Ok(results) => {
+                        for result in results {
+                            if seen_ids.insert(result.entry.id.clone()) {
+                                all_entries.push(result.entry);
+                            }
                         }
                     }
-                }
-                Err(e) => {
-                    tracing::info!(
-                        "[hooks] Global memory refresh failed: session={}, error={}",
-                        ctx.session_id, e,
-                    );
+                    Err(e) => {
+                        tracing::info!(
+                            "[hooks] Global memory refresh failed: session={}, error={}",
+                            ctx.session_id,
+                            e,
+                        );
+                    }
                 }
             }
 
-            let count = all_entries.len();
+            if scopes.contains("session") {
+                if let Some(session_project_path) = build_session_project_path(&ctx.session_id) {
+                let session_request = MemorySearchRequest {
+                    project_path: session_project_path,
+                    query: message.clone(),
+                    categories: categories.clone(),
+                    top_k: 10,
+                    min_importance: 0.1,
+                };
+                match search_memories_with_options(
+                    &store,
+                    &session_request,
+                    MemorySearchOptions {
+                        ranking_mode: MemoryRankingMode::Hybrid,
+                        touch_policy: MemoryTouchPolicy::NoTouch,
+                    },
+                ) {
+                    Ok(results) => {
+                        for result in results {
+                            if seen_ids.insert(result.entry.id.clone()) {
+                                all_entries.push(result.entry);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::info!(
+                            "[hooks] Session memory refresh failed: session={}, error={}",
+                            ctx.session_id,
+                            e,
+                        );
+                    }
+                }
+            }
+            }
+
+            let filtered_entries: Vec<_> = all_entries
+                .into_iter()
+                .filter(|entry| {
+                    if excluded_ids.contains(entry.id.as_str()) {
+                        return false;
+                    }
+                    if !selected_ids.is_empty() && !selected_ids.contains(entry.id.as_str()) {
+                        return false;
+                    }
+                    let scope = if entry.project_path == GLOBAL_PROJECT_PATH {
+                        "global"
+                    } else if entry.project_path.starts_with(SESSION_PROJECT_PATH_PREFIX) {
+                        "session"
+                    } else {
+                        "project"
+                    };
+                    scopes.contains(scope)
+                })
+                .collect();
+
+            let count = filtered_entries.len();
             let mut w = out.write().await;
-            *w = all_entries;
+            *w = filtered_entries;
             tracing::info!(
                 "[hooks] Memory refreshed from message: session={}, memories={}",
-                ctx.session_id, count
+                ctx.session_id,
+                count
             );
             Ok(None)
         })
@@ -784,7 +1013,15 @@ pub fn register_memory_hooks(
             let global_existing = store
                 .list_memories(GLOBAL_PROJECT_PATH, None, 0, 50)
                 .unwrap_or_default();
-            let all_existing: Vec<_> = existing.iter().chain(global_existing.iter()).cloned().collect();
+            let session_existing = build_session_project_path(&ctx.session_id)
+                .and_then(|p| store.list_memories(&p, None, 0, 50).ok())
+                .unwrap_or_default();
+            let all_existing: Vec<_> = existing
+                .iter()
+                .chain(global_existing.iter())
+                .chain(session_existing.iter())
+                .cloned()
+                .collect();
 
             if let Some(ref llm) = provider {
                 // ── LLM-driven extraction (2-stage) ──
@@ -982,13 +1219,15 @@ fn rule_based_memory_extraction(
             Ok(_) => {
                 tracing::info!(
                     "[hooks] Rule-based memory extracted: session={}, new_memories={}",
-                    ctx.session_id, count,
+                    ctx.session_id,
+                    count,
                 );
             }
             Err(e) => {
                 tracing::info!(
                     "[hooks] Rule-based memory extraction failed: session={}, error={}",
-                    ctx.session_id, e,
+                    ctx.session_id,
+                    e,
                 );
             }
         }
@@ -1023,7 +1262,8 @@ async fn maybe_generate_skill_from_session(
     };
 
     use crate::services::llm::types::{
-        LlmRequestOptions, Message, MessageContent as LlmMessageContent, MessageRole as LlmMessageRole,
+        LlmRequestOptions, Message, MessageContent as LlmMessageContent,
+        MessageRole as LlmMessageRole,
     };
 
     let mut tool_usage_lines: Vec<String> = summary
@@ -1089,7 +1329,8 @@ async fn maybe_generate_skill_from_session(
         Ok(Err(e)) => {
             tracing::info!(
                 "[hooks] Skill generation skipped (LLM error): session={}, error={}",
-                ctx.session_id, e
+                ctx.session_id,
+                e
             );
             return;
         }
@@ -1133,7 +1374,8 @@ async fn maybe_generate_skill_from_session(
     if duplicate {
         tracing::info!(
             "[hooks] Skill generation deduped: session={}, candidate={}",
-            ctx.session_id, candidate.name
+            ctx.session_id,
+            candidate.name
         );
         return;
     }
@@ -1142,13 +1384,16 @@ async fn maybe_generate_skill_from_session(
         Ok(saved) => {
             tracing::info!(
                 "[hooks] Generated skill saved: session={}, skill_id={}, name={}",
-                ctx.session_id, saved.id, saved.name
+                ctx.session_id,
+                saved.id,
+                saved.name
             );
         }
         Err(e) => {
             tracing::info!(
                 "[hooks] Skill generation save failed: session={}, error={}",
-                ctx.session_id, e
+                ctx.session_id,
+                e
             );
         }
     }
@@ -2085,7 +2330,8 @@ suffix {"name":"Skill B"}"#;
 
     #[test]
     fn test_parse_generated_skill_response_rejects_short_body() {
-        let payload = r#"{"name":"Tiny Skill","description":"desc","tags":["test"],"body":"too short"}"#;
+        let payload =
+            r#"{"name":"Tiny Skill","description":"desc","tags":["test"],"body":"too short"}"#;
         let parsed = parse_generated_skill_response(payload, "session-abc");
         assert!(parsed.is_none());
     }
