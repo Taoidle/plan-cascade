@@ -842,6 +842,7 @@
   "rightPanel": {
     "outputTab": "Output",
     "gitTab": "Git",
+    "contextTab": "Context",
     "errors": {
       "summary": "{{count}} issue(s)",
       "dismiss": "Dismiss",

@@ -36,7 +36,7 @@ interface ChatToolbarProps {
   isCapturing: boolean;
   // Right panel
   rightPanelOpen: boolean;
-  rightPanelTab: 'output' | 'git';
+  rightPanelTab: 'output' | 'git' | 'context';
   onToggleOutput: () => void;
   detailLineCount: number;
 }

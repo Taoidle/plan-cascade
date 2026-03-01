@@ -37,8 +37,8 @@ use crate::models::orchestrator::{
 };
 use crate::services::agent_composer::registry::ComposerRegistry;
 use crate::services::core::compaction::{
-    CompactionConfig, CompactionResult, ContextCompactor, LlmSummaryCompactor,
-    SlidingWindowCompactor,
+    CompactionConfig, CompactionResult, CompactionStrategy, ContextCompactor, LlmSummaryCompactor,
+    NoopCompactor, SlidingWindowCompactor, SummaryOutcome,
 };
 use crate::services::knowledge::context_provider::{
     KnowledgeContextConfig, KnowledgeContextProvider,
@@ -618,9 +618,14 @@ impl AnalysisPhasePolicy {
 ///   `SummarizeFn` closure captures the provider `Arc` and calls it for summarization.
 /// - **Unreliable / None** models get
 ///   `SlidingWindowCompactor` which is deterministic and makes no LLM calls.
-fn build_compactor(provider: &Arc<dyn LlmProvider>) -> Box<dyn ContextCompactor> {
-    match provider.tool_call_reliability() {
-        ToolCallReliability::Reliable => {
+fn build_compactor(
+    provider: &Arc<dyn LlmProvider>,
+    compaction_config: &CompactionConfig,
+) -> Box<dyn ContextCompactor> {
+    match compaction_config.strategy {
+        CompactionStrategy::None => Box::new(NoopCompactor::new()),
+        CompactionStrategy::SlidingWindow => Box::new(SlidingWindowCompactor::new()),
+        CompactionStrategy::LlmSummary => {
             let provider_clone = Arc::clone(provider);
             Box::new(LlmSummaryCompactor::new(move |messages_to_summarize| {
                 let provider = Arc::clone(&provider_clone);
@@ -724,14 +729,14 @@ fn build_compactor(provider: &Arc<dyn LlmProvider>) -> Box<dyn ContextCompactor>
                             ))
                         })?;
 
-                    Ok(response.content.unwrap_or_else(|| {
-                        "Previous conversation context was compacted.".to_string()
-                    }))
+                    Ok(SummaryOutcome {
+                        summary: response.content.unwrap_or_else(|| {
+                            "Previous conversation context was compacted.".to_string()
+                        }),
+                        token_usage: response.usage.total_tokens(),
+                    })
                 })
             }))
-        }
-        ToolCallReliability::Unreliable | ToolCallReliability::None => {
-            Box::new(SlidingWindowCompactor::new())
         }
     }
 }

@@ -151,6 +151,15 @@ pub struct CompactionResult {
     pub compaction_tokens: u32,
 }
 
+/// Outcome returned by LLM summarization callbacks.
+#[derive(Debug, Clone)]
+pub struct SummaryOutcome {
+    /// Generated summary text used to replace compacted messages.
+    pub summary: String,
+    /// Tokens consumed by summarization (typically input + output).
+    pub token_usage: u32,
+}
+
 // ============================================================================
 // ContextCompactor Trait
 // ============================================================================
@@ -297,7 +306,7 @@ pub type SummarizeFn = Box<
     dyn Fn(
             Vec<Message>,
         )
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = CoreResult<String>> + Send>>
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = CoreResult<SummaryOutcome>> + Send>>
         + Send
         + Sync,
 >;
@@ -322,7 +331,7 @@ impl LlmSummaryCompactor {
         F: Fn(
                 Vec<Message>,
             )
-                -> std::pin::Pin<Box<dyn std::future::Future<Output = CoreResult<String>> + Send>>
+                -> std::pin::Pin<Box<dyn std::future::Future<Output = CoreResult<SummaryOutcome>> + Send>>
             + Send
             + Sync
             + 'static,
@@ -374,7 +383,7 @@ impl ContextCompactor for LlmSummaryCompactor {
             MessageRole::User,
             format!(
                 "[Summary of {} compacted messages]\n{}",
-                removed_count, summary
+                removed_count, summary.summary
             ),
         ));
         result.extend_from_slice(tail);
@@ -384,12 +393,51 @@ impl ContextCompactor for LlmSummaryCompactor {
             messages_removed: removed_count,
             // The summary message is added, so preserved = head + tail + 1 summary
             messages_preserved: config.preserve_head + config.preserve_tail + 1,
-            compaction_tokens: 0, // actual tokens would be tracked by the caller
+            compaction_tokens: summary.token_usage,
         })
     }
 
     fn name(&self) -> &str {
         "LlmSummaryCompactor"
+    }
+}
+
+// ============================================================================
+// NoopCompactor
+// ============================================================================
+
+/// No-op compactor that always returns messages unchanged.
+pub struct NoopCompactor;
+
+impl NoopCompactor {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for NoopCompactor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl ContextCompactor for NoopCompactor {
+    async fn compact(
+        &self,
+        messages: &[Message],
+        _config: &CompactionConfig,
+    ) -> CoreResult<CompactionResult> {
+        Ok(CompactionResult {
+            messages: messages.to_vec(),
+            messages_removed: 0,
+            messages_preserved: messages.len(),
+            compaction_tokens: 0,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "NoopCompactor"
     }
 }
 
@@ -644,7 +692,12 @@ mod tests {
     #[tokio::test]
     async fn test_llm_summary_basic_compaction() {
         let compactor = LlmSummaryCompactor::new(|msgs| {
-            Box::pin(async move { Ok(format!("Summary of {} messages", msgs.len())) })
+            Box::pin(async move {
+                Ok(SummaryOutcome {
+                    summary: format!("Summary of {} messages", msgs.len()),
+                    token_usage: 123,
+                })
+            })
         });
 
         let messages = make_messages(15);
@@ -660,6 +713,7 @@ mod tests {
         // 2 head + 1 summary + 3 tail = 6
         assert_eq!(result.messages.len(), 6);
         assert_eq!(result.messages_removed, 10);
+        assert_eq!(result.compaction_tokens, 123);
 
         // Check summary message
         let summary_text = extract_text(&result.messages[2]).unwrap();
@@ -669,8 +723,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_llm_summary_too_few_messages() {
-        let compactor =
-            LlmSummaryCompactor::new(|_msgs| Box::pin(async move { Ok("summary".to_string()) }));
+        let compactor = LlmSummaryCompactor::new(|_msgs| {
+            Box::pin(async move {
+                Ok(SummaryOutcome {
+                    summary: "summary".to_string(),
+                    token_usage: 0,
+                })
+            })
+        });
 
         let messages = make_messages(5);
         let config = CompactionConfig {
@@ -689,7 +749,12 @@ mod tests {
     #[tokio::test]
     async fn test_llm_summary_disabled() {
         let compactor = LlmSummaryCompactor::new(|_| {
-            Box::pin(async { Ok("should not be called".to_string()) })
+            Box::pin(async {
+                Ok(SummaryOutcome {
+                    summary: "should not be called".to_string(),
+                    token_usage: 0,
+                })
+            })
         });
 
         let messages = make_messages(100);
@@ -721,7 +786,14 @@ mod tests {
 
     #[test]
     fn test_llm_summary_name() {
-        let compactor = LlmSummaryCompactor::new(|_| Box::pin(async { Ok(String::new()) }));
+        let compactor = LlmSummaryCompactor::new(|_| {
+            Box::pin(async {
+                Ok(SummaryOutcome {
+                    summary: String::new(),
+                    token_usage: 0,
+                })
+            })
+        });
         assert_eq!(compactor.name(), "LlmSummaryCompactor");
     }
 

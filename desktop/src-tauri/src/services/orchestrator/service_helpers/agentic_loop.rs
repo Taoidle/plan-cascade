@@ -871,6 +871,7 @@ impl OrchestratorService {
             // instead of summary LLM calls to avoid extra token spikes.
             if self.should_compact(
                 last_input_tokens,
+                messages.len(),
                 request_options.analysis_phase.as_ref().is_some(),
             ) {
                 if request_options.analysis_phase.is_some() {
@@ -2140,7 +2141,7 @@ impl OrchestratorService {
 
             // Check for context compaction before processing tool calls (ADR-F006).
             // Delegates to pluggable compactor selected at construction time.
-            if self.should_compact(last_input_tokens, false) {
+            if self.should_compact(last_input_tokens, messages.len(), false) {
                 // Hook: on_compaction - notify hooks before compaction
                 {
                     let compaction_snippets: Vec<String> = messages
@@ -3441,10 +3442,15 @@ impl OrchestratorService {
     ///
     /// - Normal mode: 90% of context_window (e.g. Claude 200K → 180K)
     /// - Aggressive mode (analysis): 70% of context_window (e.g. Claude 200K → 140K)
-    fn should_compact(&self, last_input_tokens: u32, aggressive: bool) -> bool {
+    fn should_compact(&self, last_input_tokens: u32, message_count: usize, aggressive: bool) -> bool {
         if !self.config.enable_compaction {
             return false;
         }
+
+        if self.config.compaction_config.should_compact(message_count) {
+            return true;
+        }
+
         let ratio = if aggressive { 0.7 } else { 0.9 };
         let threshold = (self.provider.context_window() as f64 * ratio) as u32;
         last_input_tokens > threshold

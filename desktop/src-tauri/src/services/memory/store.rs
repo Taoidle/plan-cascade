@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
+use crate::services::orchestrator::embedding_manager::EmbeddingManager;
 use crate::services::orchestrator::embedding_service::{cosine_similarity, EmbeddingService};
 use crate::storage::database::{Database, DbPool};
 use crate::utils::error::{AppError, AppResult};
@@ -29,6 +30,7 @@ pub const SESSION_PROJECT_PATH_PREFIX: &str = "__session__:";
 /// This is intentionally lower than dense-embedding heuristics; TF-IDF cosine
 /// distributions are generally more compressed.
 const TFIDF_UPSERT_MERGE_THRESHOLD: f32 = 0.72;
+const MEMORY_EMBEDDING_PROVIDER_TFIDF: &str = "tfidf";
 
 /// Normalize a session id for memory scoping.
 ///
@@ -204,6 +206,7 @@ pub struct MemoryStats {
 pub struct ProjectMemoryStore {
     pool: DbPool,
     embedding_service: Arc<EmbeddingService>,
+    embedding_manager: Option<Arc<EmbeddingManager>>,
     vocab_state: Arc<Mutex<VocabularyState>>,
 }
 
@@ -219,6 +222,7 @@ impl ProjectMemoryStore {
         Self {
             pool,
             embedding_service,
+            embedding_manager: None,
             vocab_state: Arc::new(Mutex::new(VocabularyState::default())),
         }
     }
@@ -228,8 +232,19 @@ impl ProjectMemoryStore {
         Self {
             pool: db.pool().clone(),
             embedding_service,
+            embedding_manager: None,
             vocab_state: Arc::new(Mutex::new(VocabularyState::default())),
         }
+    }
+
+    /// Attach an embedding manager for provider-aware dense retrieval.
+    pub fn set_embedding_manager(&mut self, manager: Arc<EmbeddingManager>) {
+        self.embedding_manager = Some(manager);
+    }
+
+    /// Get the configured embedding manager, if any.
+    pub fn get_embedding_manager(&self) -> Option<Arc<EmbeddingManager>> {
+        self.embedding_manager.clone()
     }
 
     // ========================================================================
@@ -249,17 +264,21 @@ impl ProjectMemoryStore {
 
         // Generate embedding
         let embedding = self.embedding_service.embed_text(&entry.content);
+        let embedding_dim = embedding.len() as i64;
         let embedding_bytes = if embedding.is_empty() {
             None
         } else {
             Some(embedding_to_bytes(&embedding))
         };
+        let quality_score = entry.importance.clamp(0.0, 1.0);
 
         {
             let conn = self.get_connection()?;
             conn.execute(
-                "INSERT INTO project_memories (id, project_path, category, content, keywords, embedding, importance, source_session_id, source_context)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                "INSERT INTO project_memories (
+                    id, project_path, category, content, keywords, embedding, importance,
+                    source_session_id, source_context, embedding_provider, embedding_dim, quality_score
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     id,
                     entry.project_path,
@@ -270,6 +289,9 @@ impl ProjectMemoryStore {
                     entry.importance,
                     entry.source_session_id,
                     entry.source_context,
+                    MEMORY_EMBEDDING_PROVIDER_TFIDF,
+                    embedding_dim,
+                    quality_score,
                 ],
             )?;
         } // connection released here
@@ -300,35 +322,54 @@ impl ProjectMemoryStore {
 
         let keywords_json = serde_json::to_string(new_keywords)?;
 
-        // Recompute embedding if content changed
-        let embedding_bytes = if updates.content.is_some() {
-            self.mark_vocabulary_dirty(&existing.project_path);
-            let seed_content = new_content.to_string();
-            self.ensure_vocabulary_for_project_with_seed(
-                &existing.project_path,
-                std::slice::from_ref(&seed_content),
-            )?;
-            let emb = self.embedding_service.embed_text(new_content);
-            if emb.is_empty() {
-                None
+        // Recompute embedding metadata if content changed, otherwise preserve existing metadata.
+        let (embedding_bytes, embedding_provider, embedding_dim, quality_score) =
+            if updates.content.is_some() {
+                self.mark_vocabulary_dirty(&existing.project_path);
+                let seed_content = new_content.to_string();
+                self.ensure_vocabulary_for_project_with_seed(
+                    &existing.project_path,
+                    std::slice::from_ref(&seed_content),
+                )?;
+                let emb = self.embedding_service.embed_text(new_content);
+                let emb_dim = emb.len() as i64;
+                let emb_bytes = if emb.is_empty() {
+                    None
+                } else {
+                    Some(embedding_to_bytes(&emb))
+                };
+                (
+                    emb_bytes,
+                    MEMORY_EMBEDDING_PROVIDER_TFIDF.to_string(),
+                    emb_dim,
+                    new_importance.clamp(0.0, 1.0),
+                )
             } else {
-                Some(embedding_to_bytes(&emb))
-            }
-        } else {
-            // Keep existing embedding — read it back from DB
-            let conn = self.get_connection()?;
-            let result = conn.query_row(
-                "SELECT embedding FROM project_memories WHERE id = ?1",
-                params![id],
-                |row| row.get::<_, Option<Vec<u8>>>(0),
-            )?;
-            result
-        };
+                let conn = self.get_connection()?;
+                conn.query_row(
+                    "SELECT embedding, embedding_provider, embedding_dim, quality_score
+                 FROM project_memories WHERE id = ?1",
+                    params![id],
+                    |row| {
+                        Ok((
+                            row.get::<_, Option<Vec<u8>>>(0)?,
+                            row.get::<_, Option<String>>(1)?
+                                .unwrap_or_else(|| MEMORY_EMBEDDING_PROVIDER_TFIDF.to_string()),
+                            row.get::<_, Option<i64>>(2)?.unwrap_or(0),
+                            row.get::<_, Option<f32>>(3)?.unwrap_or(1.0),
+                        ))
+                    },
+                )?
+            };
 
         {
             let conn = self.get_connection()?;
             conn.execute(
-                "UPDATE project_memories SET content = ?2, category = ?3, importance = ?4, keywords = ?5, embedding = ?6, updated_at = datetime('now') WHERE id = ?1",
+                "UPDATE project_memories
+                 SET content = ?2, category = ?3, importance = ?4, keywords = ?5, embedding = ?6,
+                     embedding_provider = ?7, embedding_dim = ?8, quality_score = ?9,
+                     updated_at = datetime('now')
+                 WHERE id = ?1",
                 params![
                     id,
                     new_content,
@@ -336,6 +377,9 @@ impl ProjectMemoryStore {
                     new_importance,
                     keywords_json,
                     embedding_bytes,
+                    embedding_provider,
+                    embedding_dim,
+                    quality_score,
                 ],
             )?;
         } // connection released here
@@ -713,14 +757,17 @@ impl ProjectMemoryStore {
         drop(stmt);
         for (id, content) in rows {
             let emb = self.embedding_service.embed_text(&content);
+            let emb_dim = emb.len() as i64;
             let emb_bytes = if emb.is_empty() {
                 None
             } else {
                 Some(embedding_to_bytes(&emb))
             };
             conn.execute(
-                "UPDATE project_memories SET embedding = ?2, updated_at = datetime('now') WHERE id = ?1",
-                params![id, emb_bytes],
+                "UPDATE project_memories
+                 SET embedding = ?2, embedding_provider = ?3, embedding_dim = ?4, updated_at = datetime('now')
+                 WHERE id = ?1",
+                params![id, emb_bytes, MEMORY_EMBEDDING_PROVIDER_TFIDF, emb_dim],
             )?;
         }
         Ok(())

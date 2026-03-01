@@ -47,7 +47,7 @@ pub use event_actions::{
 // Pluggable Compaction
 pub use compaction::{
     CompactionConfig, CompactionResult, CompactionStrategy, ContextCompactor, LlmSummaryCompactor,
-    SlidingWindowCompactor,
+    NoopCompactor, SlidingWindowCompactor, SummaryOutcome,
 };
 
 // Builder Pattern & Session State

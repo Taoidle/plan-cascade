@@ -9,12 +9,13 @@
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { GitPanel } from './GitPanel';
+import { ContextOpsPanel } from './ContextOpsPanel';
 import { WorkflowKernelProgressPanel } from './WorkflowKernelProgressPanel';
 import { StreamingOutput, ErrorState } from '../shared';
 import type { StreamLine } from '../../store/execution';
 import type { AnalysisCoverageSnapshot } from '../../store/execution';
 
-export type RightPanelTab = 'output' | 'git';
+export type RightPanelTab = 'output' | 'git' | 'context';
 
 interface TabbedRightPanelProps {
   activeTab: RightPanelTab;
@@ -27,6 +28,7 @@ interface TabbedRightPanelProps {
   // Git tab props
   streamingOutput: StreamLine[];
   workspacePath: string | null;
+  contextSessionId: string | null;
 }
 
 export function TabbedRightPanel({
@@ -38,12 +40,14 @@ export function TabbedRightPanel({
   analysisCoverage,
   streamingOutput,
   workspacePath,
+  contextSessionId,
 }: TabbedRightPanelProps) {
   const { t } = useTranslation('simpleMode');
 
   const tabs: { id: RightPanelTab; label: string }[] = [
     { id: 'output', label: t('rightPanel.outputTab', { defaultValue: 'Output' }) },
     { id: 'git', label: t('rightPanel.gitTab', { defaultValue: 'Git' }) },
+    { id: 'context', label: t('rightPanel.contextTab', { defaultValue: 'Context' }) },
   ];
 
   return (
@@ -82,8 +86,10 @@ export function TabbedRightPanel({
             </div>
             <StreamingOutput maxHeight="none" compact={false} showClear className="flex-1 min-h-0 px-2 pb-2" />
           </div>
-        ) : (
+        ) : activeTab === 'git' ? (
           <GitPanel streamingOutput={streamingOutput} workspacePath={workspacePath} />
+        ) : (
+          <ContextOpsPanel projectPath={workspacePath} sessionId={contextSessionId} />
         )}
       </div>
     </div>

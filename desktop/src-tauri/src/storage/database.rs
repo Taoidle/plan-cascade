@@ -694,6 +694,113 @@ impl Database {
             }
         }
 
+        // Migration: embedding metadata fields for memory provider awareness.
+        {
+            if !Self::table_has_column(&conn, "project_memories", "embedding_provider") {
+                let _ = conn.execute_batch(
+                    "ALTER TABLE project_memories ADD COLUMN embedding_provider TEXT NOT NULL DEFAULT 'tfidf';",
+                );
+            }
+            if !Self::table_has_column(&conn, "project_memories", "embedding_dim") {
+                let _ = conn.execute_batch(
+                    "ALTER TABLE project_memories ADD COLUMN embedding_dim INTEGER NOT NULL DEFAULT 0;",
+                );
+            }
+            if !Self::table_has_column(&conn, "project_memories", "quality_score") {
+                let _ = conn.execute_batch(
+                    "ALTER TABLE project_memories ADD COLUMN quality_score REAL NOT NULL DEFAULT 1.0;",
+                );
+            }
+        }
+
+        // Embedding metadata registry for memory retrieval diagnostics.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS memory_embedding_meta (
+                id TEXT PRIMARY KEY,
+                project_path TEXT NOT NULL,
+                provider_type TEXT NOT NULL,
+                provider_model TEXT,
+                embedding_dim INTEGER NOT NULL DEFAULT 0,
+                version TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_embedding_meta_project
+             ON memory_embedding_meta(project_path, updated_at DESC)",
+            [],
+        )?;
+
+        // Context trace events for ContextEnvelope v2 observability.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS context_trace_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trace_id TEXT NOT NULL,
+                session_id TEXT,
+                turn_id TEXT,
+                event_type TEXT NOT NULL,
+                source_kind TEXT,
+                source_id TEXT,
+                message TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_context_trace_events_trace
+             ON context_trace_events(trace_id, id)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_context_trace_events_session_turn
+             ON context_trace_events(session_id, turn_id, created_at)",
+            [],
+        )?;
+
+        // Reusable context artifacts for handoff across turns/sessions.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS context_artifacts (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                project_path TEXT NOT NULL,
+                session_id TEXT,
+                envelope_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_context_artifacts_project_updated
+             ON context_artifacts(project_path, updated_at DESC)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_context_artifacts_session_updated
+             ON context_artifacts(session_id, updated_at DESC)",
+            [],
+        )?;
+
+        // Chaos probe run history for context pipeline reliability validation.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS context_chaos_runs (
+                run_id TEXT PRIMARY KEY,
+                project_path TEXT NOT NULL,
+                session_id TEXT,
+                report_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_context_chaos_runs_project_created
+             ON context_chaos_runs(project_path, created_at DESC)",
+            [],
+        )?;
+
         // Episodic records for learning from past interactions
         conn.execute(
             "CREATE TABLE IF NOT EXISTS episodic_records (

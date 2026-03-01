@@ -4,9 +4,12 @@
 
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::warn;
 
 use crate::models::settings::{AppConfig, SettingsUpdate};
 use crate::services::memory::ProjectMemoryStore;
+use crate::services::orchestrator::embedding_config_builder::build_embedding_config_from_settings;
+use crate::services::orchestrator::embedding_manager::EmbeddingManager;
 use crate::services::orchestrator::embedding_service::EmbeddingService;
 use crate::storage::{ConfigService, Database, KeyringService};
 use crate::utils::error::{AppError, AppResult};
@@ -68,9 +71,25 @@ impl AppState {
         // Initialize memory store using the database pool
         {
             let db_guard = self.database.read().await;
+            let keyring_guard = self.keyring.read().await;
             if let Some(ref db) = *db_guard {
                 let embedding_service = Arc::new(EmbeddingService::new());
-                let store = Arc::new(ProjectMemoryStore::from_database(db, embedding_service));
+                let mut store = ProjectMemoryStore::from_database(db, embedding_service);
+
+                if let Some(ref keyring) = *keyring_guard {
+                    let (config, _, _) = build_embedding_config_from_settings(db, keyring);
+                    match EmbeddingManager::from_config(config) {
+                        Ok(manager) => store.set_embedding_manager(Arc::new(manager)),
+                        Err(e) => {
+                            warn!(
+                                error = %e,
+                                "app state: failed to build embedding manager for memory store"
+                            );
+                        }
+                    }
+                }
+
+                let store = Arc::new(store);
                 let mut store_lock = self.memory_store.write().await;
                 *store_lock = Some(store);
             }

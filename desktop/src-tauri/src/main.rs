@@ -267,6 +267,7 @@ fn main() {
             plan_cascade_desktop::commands::files::prepare_attachment_context,
             // Memory commands
             plan_cascade_desktop::commands::memory::search_project_memories,
+            plan_cascade_desktop::commands::memory::search_project_memories_v2,
             plan_cascade_desktop::commands::memory::list_project_memories,
             plan_cascade_desktop::commands::memory::add_project_memory,
             plan_cascade_desktop::commands::memory::update_project_memory,
@@ -276,6 +277,20 @@ fn main() {
             plan_cascade_desktop::commands::memory::get_memory_stats,
             plan_cascade_desktop::commands::memory::run_memory_maintenance,
             plan_cascade_desktop::commands::memory::extract_session_memories,
+            // Context V2 commands
+            plan_cascade_desktop::commands::context_v2::prepare_turn_context_v2,
+            plan_cascade_desktop::commands::context_v2::get_context_trace,
+            plan_cascade_desktop::commands::context_v2::set_context_policy,
+            plan_cascade_desktop::commands::context_v2::get_context_policy,
+            plan_cascade_desktop::commands::context_v2::set_context_rollout,
+            plan_cascade_desktop::commands::context_v2::get_context_rollout,
+            plan_cascade_desktop::commands::context_v2::save_context_artifact,
+            plan_cascade_desktop::commands::context_v2::list_context_artifacts,
+            plan_cascade_desktop::commands::context_v2::apply_context_artifact,
+            plan_cascade_desktop::commands::context_v2::delete_context_artifact,
+            plan_cascade_desktop::commands::context_v2::get_context_ops_dashboard,
+            plan_cascade_desktop::commands::context_v2::run_context_chaos_probe,
+            plan_cascade_desktop::commands::context_v2::list_context_chaos_runs,
             // Skill commands
             plan_cascade_desktop::commands::skills::list_skills,
             plan_cascade_desktop::commands::skills::get_skill,

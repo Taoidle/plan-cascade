@@ -23,6 +23,9 @@ import {
   resolveProviderBaseUrl,
   resolveStandaloneProvider,
 } from './execution/providerUtils';
+import type { ContextSourceConfig } from './contextSources';
+import type { ContextEnvelope } from '../lib/contextApi';
+import { useContextOpsStore } from './contextOps';
 
 export type ExecutionStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
 
@@ -290,6 +293,13 @@ interface AttachmentContextPrepareResult {
   budget_tokens: number;
   exceeds_budget: boolean;
   truncated: boolean;
+}
+
+type ContextEnvelopeV2 = ContextEnvelope;
+
+interface ContextConversationTurnInput {
+  role: 'user' | 'assistant';
+  content: string;
 }
 
 export interface StandaloneTurn {
@@ -712,6 +722,73 @@ function buildStandaloneConversationMessage(
     '',
     `User: ${userInput}`,
   ].join('\n');
+}
+
+function buildContextConversationTurns(
+  turns: StandaloneTurn[],
+  contextTurnsLimit: number,
+): ContextConversationTurnInput[] {
+  const history = trimStandaloneTurns(turns, contextTurnsLimit);
+  const conversation: ContextConversationTurnInput[] = [];
+  for (const turn of history) {
+    if (turn.user.trim().length > 0) {
+      conversation.push({ role: 'user', content: turn.user });
+    }
+    if (turn.assistant.trim().length > 0) {
+      conversation.push({ role: 'assistant', content: turn.assistant });
+    }
+  }
+  return conversation;
+}
+
+async function buildStandaloneMessageWithContextEnvelope(params: {
+  query: string;
+  turns: StandaloneTurn[];
+  contextTurnsLimit: number;
+  projectPath: string;
+  sessionId: string | null;
+  contextSources: ContextSourceConfig | null;
+  addLog: (message: string) => void;
+}): Promise<string> {
+  const fallbackMessage =
+    trimStandaloneTurns(params.turns, params.contextTurnsLimit).length > 0
+      ? buildStandaloneConversationMessage(params.turns, params.query, params.contextTurnsLimit)
+      : params.query;
+
+  const request = {
+    project_path: params.projectPath,
+    query: params.query,
+    session_id: params.sessionId ? `standalone:${params.sessionId}` : undefined,
+    mode: 'standalone',
+    conversation_history: buildContextConversationTurns(params.turns, params.contextTurnsLimit),
+    context_sources: params.contextSources ?? undefined,
+  };
+
+  try {
+    const result = await invoke<CommandResponse<ContextEnvelopeV2>>('prepare_turn_context_v2', {
+      request,
+    });
+    if (result.success && result.data?.assembled_prompt) {
+      useContextOpsStore.getState().setLatestEnvelope(result.data);
+      const used = result.data.budget?.used_input_tokens;
+      const total = result.data.budget?.input_token_budget;
+      if (typeof used === 'number' && typeof total === 'number') {
+        params.addLog(`Context v2 prepared (${used}/${total} tokens, trace=${result.data.trace_id})`);
+      } else {
+        params.addLog(`Context v2 prepared (trace=${result.data.trace_id})`);
+      }
+      return result.data.assembled_prompt;
+    }
+
+    if (result.error) {
+      params.addLog(`Context v2 fallback to legacy path: ${result.error}`);
+    }
+    return fallbackMessage;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    params.addLog(`Context v2 invocation failed, fallback to legacy path: ${message}`);
+    return fallbackMessage;
+  }
 }
 
 const PLUGIN_SKILL_LINE_REGEX = /^\s*\/([A-Za-z0-9._-]+):([A-Za-z0-9._-]+)(?:\s+(.*))?\s*$/;
@@ -1452,12 +1529,22 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         const permissionLevel = useToolPermissionStore.getState().sessionLevel;
         const contextTurnsLimit = getStandaloneContextTurnsLimit();
         const recentStandaloneTurns = trimStandaloneTurns(existingStandaloneTurns, contextTurnsLimit);
+        const contextSourcesState = (await import('./contextSources')).useContextSourcesStore.getState();
+        contextSourcesState.setMemorySessionId(standaloneSessionId ? `standalone:${standaloneSessionId}` : null);
+        const contextSources = contextSourcesState.buildConfig() ?? null;
         const { cleanedPrompt, pluginInvocations } = extractPluginInvocationsFromPrompt(description);
         const normalizedPrompt = ensurePromptContent(cleanedPrompt, pluginInvocations.length);
-        const messageToSend =
-          isSimpleStandalone && recentStandaloneTurns.length > 0
-            ? buildStandaloneConversationMessage(existingStandaloneTurns, normalizedPrompt, contextTurnsLimit)
-            : normalizedPrompt;
+        const messageToSend = isSimpleStandalone
+          ? await buildStandaloneMessageWithContextEnvelope({
+              query: normalizedPrompt,
+              turns: existingStandaloneTurns,
+              contextTurnsLimit,
+              projectPath: settings.workspacePath || '.',
+              sessionId: standaloneSessionId,
+              contextSources,
+              addLog: get().addLog,
+            })
+          : normalizedPrompt;
         get().addLog(
           `Resolved provider: ${provider} (backend=${backendValue || 'empty'}, setting=${providerValue || 'empty'}, model=${modelValue || 'empty'})`,
         );
@@ -1467,7 +1554,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         if (isSimpleStandalone && recentStandaloneTurns.length > 0) {
           const contextLabel =
             contextTurnsLimit === STANDALONE_CONTEXT_UNLIMITED ? 'unlimited' : String(contextTurnsLimit);
-          get().addLog(`Using standalone conversation context (${recentStandaloneTurns.length}/${contextLabel} turns)`);
+          get().addLog(
+            `Using standalone conversation context (${recentStandaloneTurns.length}/${contextLabel} turns, v2)`,
+          );
         }
 
         // Enrich prompt with file attachments if any
@@ -1482,9 +1571,6 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         // Resolve provider-specific base URL override (e.g. GLM Coding endpoint)
         const baseUrl = resolveProviderBaseUrl(provider, settings);
 
-        const contextSourcesState = (await import('./contextSources')).useContextSourcesStore.getState();
-        contextSourcesState.setMemorySessionId(standaloneSessionId ? `standalone:${standaloneSessionId}` : null);
-        const contextSources = contextSourcesState.buildConfig() ?? null;
         const result = await invoke<CommandResponse<unknown>>('execute_standalone', {
           message: enrichedMessage,
           provider,
@@ -2968,21 +3054,25 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       const provider = resolveStandaloneProvider(backendValue, providerValue, modelValue);
       const model = settingsSnapshot.model || DEFAULT_MODEL_BY_PROVIDER[provider] || 'claude-sonnet-4-6-20260219';
       const contextTurnsLimit = getStandaloneContextTurnsLimit();
-      const recentTurns = trimStandaloneTurns(rebuiltTurns, contextTurnsLimit);
+      const standaloneSessionId = get().standaloneSessionId;
+      const regenContextState = (await import('./contextSources')).useContextSourcesStore.getState();
+      regenContextState.setMemorySessionId(standaloneSessionId ? `standalone:${standaloneSessionId}` : null);
+      const regenContextSources = regenContextState.buildConfig() ?? null;
       const { cleanedPrompt, pluginInvocations } = extractPluginInvocationsFromPrompt(userContent);
       const normalizedPrompt = ensurePromptContent(cleanedPrompt, pluginInvocations.length);
-      const messageToSend =
-        recentTurns.length > 0
-          ? buildStandaloneConversationMessage(rebuiltTurns, normalizedPrompt, contextTurnsLimit)
-          : normalizedPrompt;
+      const messageToSend = await buildStandaloneMessageWithContextEnvelope({
+        query: normalizedPrompt,
+        turns: rebuiltTurns,
+        contextTurnsLimit,
+        projectPath: settingsSnapshot.workspacePath || '.',
+        sessionId: standaloneSessionId,
+        contextSources: regenContextSources,
+        addLog: get().addLog,
+      });
       const baseUrl = resolveProviderBaseUrl(provider, settingsSnapshot);
-      const standaloneSessionId = get().standaloneSessionId;
       const permissionLevel = useToolPermissionStore.getState().sessionLevel;
 
       try {
-        const regenContextState = (await import('./contextSources')).useContextSourcesStore.getState();
-        regenContextState.setMemorySessionId(standaloneSessionId ? `standalone:${standaloneSessionId}` : null);
-        const regenContextSources = regenContextState.buildConfig() ?? null;
         const result = await invoke<CommandResponse<unknown>>('execute_standalone', {
           message: messageToSend,
           provider,
@@ -3160,21 +3250,25 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       const provider = resolveStandaloneProvider(backendValue, providerValue, modelValue);
       const model = settingsSnapshot.model || DEFAULT_MODEL_BY_PROVIDER[provider] || 'claude-sonnet-4-6-20260219';
       const contextTurnsLimit = getStandaloneContextTurnsLimit();
-      const recentTurns = trimStandaloneTurns(rebuiltTurns, contextTurnsLimit);
+      const standaloneSessionId = get().standaloneSessionId;
+      const editContextState = (await import('./contextSources')).useContextSourcesStore.getState();
+      editContextState.setMemorySessionId(standaloneSessionId ? `standalone:${standaloneSessionId}` : null);
+      const editContextSources = editContextState.buildConfig() ?? null;
       const { cleanedPrompt, pluginInvocations } = extractPluginInvocationsFromPrompt(newContent);
       const normalizedPrompt = ensurePromptContent(cleanedPrompt, pluginInvocations.length);
-      const messageToSend =
-        recentTurns.length > 0
-          ? buildStandaloneConversationMessage(rebuiltTurns, normalizedPrompt, contextTurnsLimit)
-          : normalizedPrompt;
+      const messageToSend = await buildStandaloneMessageWithContextEnvelope({
+        query: normalizedPrompt,
+        turns: rebuiltTurns,
+        contextTurnsLimit,
+        projectPath: settingsSnapshot.workspacePath || '.',
+        sessionId: standaloneSessionId,
+        contextSources: editContextSources,
+        addLog: get().addLog,
+      });
       const baseUrl = resolveProviderBaseUrl(provider, settingsSnapshot);
-      const standaloneSessionId = get().standaloneSessionId;
       const permissionLevel = useToolPermissionStore.getState().sessionLevel;
 
       try {
-        const editContextState = (await import('./contextSources')).useContextSourcesStore.getState();
-        editContextState.setMemorySessionId(standaloneSessionId ? `standalone:${standaloneSessionId}` : null);
-        const editContextSources = editContextState.buildConfig() ?? null;
         const result = await invoke<CommandResponse<unknown>>('execute_standalone', {
           message: messageToSend,
           provider,

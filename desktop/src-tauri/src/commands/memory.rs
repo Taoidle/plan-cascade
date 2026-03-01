@@ -8,7 +8,10 @@ use tauri::State;
 use crate::models::response::CommandResponse;
 use crate::services::memory::extraction::MemoryExtractor;
 use crate::services::memory::maintenance::MemoryMaintenance;
-use crate::services::memory::retrieval::search_memories;
+use crate::services::memory::retrieval::{
+    search_memories, search_memories_v2_async, MemorySearchIntent, MemorySearchRequestV2,
+    MemorySearchResultV2,
+};
 use crate::services::memory::store::{
     build_session_project_path, MemoryCategory, MemoryEntry, MemorySearchRequest,
     MemorySearchResult, MemoryStats, MemoryUpdate, NewMemoryEntry, UpsertResult,
@@ -47,6 +50,16 @@ fn resolve_memory_project_path(
     }
 }
 
+fn parse_memory_intent(intent: Option<&str>) -> MemorySearchIntent {
+    match intent.unwrap_or("default").trim().to_ascii_lowercase().as_str() {
+        "bugfix" => MemorySearchIntent::Bugfix,
+        "refactor" => MemorySearchIntent::Refactor,
+        "qa" => MemorySearchIntent::Qa,
+        "docs" => MemorySearchIntent::Docs,
+        _ => MemorySearchIntent::Default,
+    }
+}
+
 /// Search project memories by semantic similarity and keyword match
 #[tauri::command]
 pub async fn search_project_memories(
@@ -82,6 +95,54 @@ pub async fn search_project_memories(
         .with_memory_store(|store| search_memories(store, &request))
         .await
     {
+        Ok(results) => Ok(CommandResponse::ok(results)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Search project memories with explainable scoring and intent-aware weighting.
+#[tauri::command]
+pub async fn search_project_memories_v2(
+    project_path: String,
+    query: String,
+    categories: Option<Vec<String>>,
+    top_k: Option<usize>,
+    scope: Option<String>,
+    session_id: Option<String>,
+    intent: Option<String>,
+    enable_semantic: Option<bool>,
+    enable_lexical: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<CommandResponse<Vec<MemorySearchResultV2>>, String> {
+    let effective_project_path =
+        match resolve_memory_project_path(&project_path, scope.as_deref(), session_id.as_deref()) {
+            Ok(path) => path,
+            Err(e) => return Ok(CommandResponse::err(e)),
+        };
+
+    let parsed_categories = categories.as_ref().map(|cats| {
+        cats.iter()
+            .filter_map(|c| MemoryCategory::from_str(c).ok())
+            .collect::<Vec<_>>()
+    });
+
+    let request = MemorySearchRequestV2 {
+        project_path: effective_project_path,
+        query,
+        categories: parsed_categories,
+        top_k: top_k.unwrap_or(10),
+        min_importance: 0.1,
+        intent: parse_memory_intent(intent.as_deref()),
+        enable_semantic: enable_semantic.unwrap_or(true),
+        enable_lexical: enable_lexical.unwrap_or(true),
+    };
+
+    let store = match state.get_memory_store_arc().await {
+        Ok(store) => store,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+
+    match search_memories_v2_async(store.as_ref(), &request).await {
         Ok(results) => Ok(CommandResponse::ok(results)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }

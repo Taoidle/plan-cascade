@@ -13,15 +13,18 @@
 //! 6. Sort by final_score descending, return top_k
 //! 7. Optionally bump access_count and last_accessed_at for returned entries
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{NaiveDateTime, Utc};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use crate::services::memory::store::{
-    bytes_to_embedding, MemoryCategory, MemorySearchRequest, MemorySearchResult, ProjectMemoryStore,
+    bytes_to_embedding, MemoryCategory, MemoryEntry, MemorySearchRequest, MemorySearchResult,
+    ProjectMemoryStore,
 };
+use crate::services::orchestrator::embedding_manager::EmbeddingManager;
+use crate::services::orchestrator::embedding_provider::EmbeddingProviderType;
 use crate::services::orchestrator::embedding_service::cosine_similarity;
 use crate::utils::error::AppResult;
 
@@ -57,6 +60,143 @@ impl Default for MemorySearchOptions {
         Self {
             ranking_mode: MemoryRankingMode::Hybrid,
             touch_policy: MemoryTouchPolicy::NoTouch,
+        }
+    }
+}
+
+/// Retrieval intent used to tune ranking weights.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemorySearchIntent {
+    Default,
+    Bugfix,
+    Refactor,
+    Qa,
+    Docs,
+}
+
+impl Default for MemorySearchIntent {
+    fn default() -> Self {
+        Self::Default
+    }
+}
+
+/// V2 memory search request with configurable channels and intent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemorySearchRequestV2 {
+    pub project_path: String,
+    pub query: String,
+    pub categories: Option<Vec<MemoryCategory>>,
+    pub top_k: usize,
+    pub min_importance: f32,
+    #[serde(default)]
+    pub intent: MemorySearchIntent,
+    #[serde(default = "default_true")]
+    pub enable_semantic: bool,
+    #[serde(default = "default_true")]
+    pub enable_lexical: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for MemorySearchRequestV2 {
+    fn default() -> Self {
+        Self {
+            project_path: String::new(),
+            query: String::new(),
+            categories: None,
+            top_k: 10,
+            min_importance: 0.1,
+            intent: MemorySearchIntent::Default,
+            enable_semantic: true,
+            enable_lexical: true,
+        }
+    }
+}
+
+/// Weighted score components returned for explainability.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MemoryScoreBreakdown {
+    pub semantic_similarity: f32,
+    pub lexical_overlap: f32,
+    pub keyword_overlap: f32,
+    pub importance: f32,
+    pub recency_score: f32,
+    pub source_reliability: f32,
+    pub semantic_weight: f32,
+    pub lexical_weight: f32,
+    pub keyword_weight: f32,
+    pub importance_weight: f32,
+    pub recency_weight: f32,
+    pub reliability_weight: f32,
+    pub final_score: f32,
+}
+
+/// Search result with explainable scoring details.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemorySearchResultV2 {
+    pub entry: crate::services::memory::store::MemoryEntry,
+    pub relevance_score: f32,
+    pub score_breakdown: MemoryScoreBreakdown,
+    pub semantic_channel: String,
+    pub degraded: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct IntentWeights {
+    semantic: f32,
+    lexical: f32,
+    keyword: f32,
+    importance: f32,
+    recency: f32,
+    reliability: f32,
+}
+
+impl IntentWeights {
+    fn for_intent(intent: MemorySearchIntent) -> Self {
+        match intent {
+            MemorySearchIntent::Bugfix => Self {
+                semantic: 0.35,
+                lexical: 0.25,
+                keyword: 0.15,
+                importance: 0.15,
+                recency: 0.05,
+                reliability: 0.05,
+            },
+            MemorySearchIntent::Refactor => Self {
+                semantic: 0.32,
+                lexical: 0.20,
+                keyword: 0.13,
+                importance: 0.20,
+                recency: 0.05,
+                reliability: 0.10,
+            },
+            MemorySearchIntent::Qa => Self {
+                semantic: 0.28,
+                lexical: 0.27,
+                keyword: 0.18,
+                importance: 0.12,
+                recency: 0.10,
+                reliability: 0.05,
+            },
+            MemorySearchIntent::Docs => Self {
+                semantic: 0.24,
+                lexical: 0.30,
+                keyword: 0.18,
+                importance: 0.12,
+                recency: 0.06,
+                reliability: 0.10,
+            },
+            MemorySearchIntent::Default => Self {
+                semantic: 0.30,
+                lexical: 0.22,
+                keyword: 0.15,
+                importance: 0.18,
+                recency: 0.08,
+                reliability: 0.07,
+            },
         }
     }
 }
@@ -184,6 +324,280 @@ pub fn extract_query_keywords(query: &str) -> Vec<String> {
         .filter(|s| !is_stopword(s))
         .map(|s| s.to_string())
         .collect()
+}
+
+fn normalize_for_dedupe(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+fn lexical_overlap_score(query_keywords: &[String], content: &str) -> f32 {
+    if query_keywords.is_empty() {
+        return 0.0;
+    }
+
+    let content_lower = content.to_lowercase();
+    let mut matched = 0usize;
+    for kw in query_keywords {
+        if content_lower.contains(kw) {
+            matched += 1;
+        }
+    }
+
+    matched as f32 / query_keywords.len() as f32
+}
+
+#[derive(Debug, Clone)]
+struct MemoryCandidate {
+    entry: MemoryEntry,
+    embedding: Option<Vec<f32>>,
+}
+
+fn build_category_filter_sql(categories: &Option<Vec<MemoryCategory>>) -> String {
+    if let Some(cats) = categories {
+        if cats.is_empty() {
+            String::new()
+        } else {
+            let cat_strs: Vec<String> = cats.iter().map(|c| format!("'{}'", c.as_str())).collect();
+            format!(" AND category IN ({})", cat_strs.join(","))
+        }
+    } else {
+        String::new()
+    }
+}
+
+fn candidate_limit(top_k: usize) -> usize {
+    top_k.max(1).saturating_mul(6).clamp(30, 300)
+}
+
+fn semantic_channel_without_semantic(enable_lexical: bool) -> String {
+    if enable_lexical {
+        "lexical_only".to_string()
+    } else {
+        "disabled".to_string()
+    }
+}
+
+fn provider_channel_name(provider: EmbeddingProviderType) -> &'static str {
+    match provider {
+        EmbeddingProviderType::TfIdf => "tfidf",
+        EmbeddingProviderType::Ollama => "ollama",
+        EmbeddingProviderType::Qwen => "qwen",
+        EmbeddingProviderType::Glm => "glm",
+        EmbeddingProviderType::OpenAI => "openai",
+    }
+}
+
+fn load_candidates_v2(
+    store: &ProjectMemoryStore,
+    request: &MemorySearchRequestV2,
+) -> AppResult<Vec<MemoryCandidate>> {
+    let conn = store.pool().get().map_err(|e| {
+        crate::utils::error::AppError::database(format!("Failed to get connection: {}", e))
+    })?;
+
+    let category_filter = build_category_filter_sql(&request.categories);
+    let sql = format!(
+        "SELECT id, project_path, category, content, keywords, importance, access_count,
+                source_session_id, source_context, created_at, updated_at, last_accessed_at,
+                embedding
+         FROM project_memories
+         WHERE project_path = ?1 AND importance >= ?2{}
+         ORDER BY importance DESC
+         LIMIT {}",
+        category_filter,
+        candidate_limit(request.top_k),
+    );
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(
+        params![request.project_path, request.min_importance],
+        |row| -> rusqlite::Result<MemoryCandidate> {
+            let category_str: String = row.get(2)?;
+            let keywords_json: String = row.get(4)?;
+            let keywords: Vec<String> = serde_json::from_str(&keywords_json).unwrap_or_default();
+            let embedding = row
+                .get::<_, Option<Vec<u8>>>(12)?
+                .map(|bytes| bytes_to_embedding(&bytes));
+
+            Ok(MemoryCandidate {
+                entry: MemoryEntry {
+                    id: row.get(0)?,
+                    project_path: row.get(1)?,
+                    category: MemoryCategory::from_str(&category_str).unwrap_or(MemoryCategory::Fact),
+                    content: row.get(3)?,
+                    keywords,
+                    importance: row.get(5)?,
+                    access_count: row.get(6)?,
+                    source_session_id: row.get(7)?,
+                    source_context: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
+                    last_accessed_at: row.get(11)?,
+                },
+                embedding,
+            })
+        },
+    )?;
+
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+fn compute_tfidf_semantic_scores(
+    store: &ProjectMemoryStore,
+    project_path: &str,
+    query: &str,
+    candidates: &[MemoryCandidate],
+) -> Option<HashMap<String, f32>> {
+    if candidates.is_empty() || store.ensure_vocabulary_for_project(project_path).is_err() {
+        return None;
+    }
+
+    let query_embedding = store.embedding_service().embed_text(query);
+    if query_embedding.is_empty() {
+        return None;
+    }
+
+    let mut scores = HashMap::new();
+    for candidate in candidates {
+        let mem_emb = candidate
+            .embedding
+            .as_ref()
+            .filter(|emb| !emb.is_empty() && emb.len() == query_embedding.len())
+            .cloned()
+            .unwrap_or_else(|| store.embedding_service().embed_text(&candidate.entry.content));
+
+        let similarity = if mem_emb.is_empty() {
+            0.0
+        } else {
+            cosine_similarity(&query_embedding, &mem_emb)
+        };
+        scores.insert(candidate.entry.id.clone(), similarity);
+    }
+
+    Some(scores)
+}
+
+async fn compute_dense_semantic_scores(
+    manager: &EmbeddingManager,
+    query: &str,
+    candidates: &[MemoryCandidate],
+) -> Option<(HashMap<String, f32>, String)> {
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let query_embedding = manager.embed_query(query).await.ok()?;
+    if query_embedding.is_empty() {
+        return None;
+    }
+
+    let docs: Vec<&str> = candidates
+        .iter()
+        .map(|candidate| candidate.entry.content.as_str())
+        .collect();
+    let doc_embeddings = manager.embed_documents(&docs).await.ok()?;
+    if doc_embeddings.len() != candidates.len() {
+        return None;
+    }
+
+    let mut scores = HashMap::new();
+    for (candidate, mem_emb) in candidates.iter().zip(doc_embeddings.iter()) {
+        let similarity = if mem_emb.is_empty() {
+            0.0
+        } else {
+            cosine_similarity(&query_embedding, mem_emb)
+        };
+        scores.insert(candidate.entry.id.clone(), similarity);
+    }
+
+    if scores.is_empty() {
+        return None;
+    }
+
+    Some((
+        scores,
+        provider_channel_name(manager.provider_type()).to_string(),
+    ))
+}
+
+fn rank_candidates_v2(
+    candidates: Vec<MemoryCandidate>,
+    request: &MemorySearchRequestV2,
+    semantic_scores: &HashMap<String, f32>,
+    semantic_channel: &str,
+    degraded: bool,
+) -> Vec<MemorySearchResultV2> {
+    let query_keywords = extract_query_keywords(&request.query);
+    let weights = IntentWeights::for_intent(request.intent);
+    let mut seen_normalized = HashSet::new();
+    let mut final_results = Vec::new();
+
+    for candidate in candidates {
+        let normalized = normalize_for_dedupe(&candidate.entry.content);
+        if !seen_normalized.insert(normalized) {
+            continue;
+        }
+
+        let semantic_similarity = semantic_scores
+            .get(&candidate.entry.id)
+            .copied()
+            .unwrap_or(0.0);
+        let keyword_overlap = keyword_jaccard(&query_keywords, &candidate.entry.keywords);
+        let lexical_overlap = if request.enable_lexical {
+            lexical_overlap_score(&query_keywords, &candidate.entry.content)
+        } else {
+            0.0
+        };
+        let recency_score = 1.0 / (1.0 + days_since(&candidate.entry.last_accessed_at) as f32 * 0.1);
+        let source_reliability = if candidate.entry.source_session_id.is_some() {
+            0.90
+        } else {
+            1.00
+        };
+
+        let final_score = (semantic_similarity * weights.semantic)
+            + (lexical_overlap * weights.lexical)
+            + (keyword_overlap * weights.keyword)
+            + (candidate.entry.importance * weights.importance)
+            + (recency_score * weights.recency)
+            + (source_reliability * weights.reliability);
+
+        let breakdown = MemoryScoreBreakdown {
+            semantic_similarity,
+            lexical_overlap,
+            keyword_overlap,
+            importance: candidate.entry.importance,
+            recency_score,
+            source_reliability,
+            semantic_weight: weights.semantic,
+            lexical_weight: weights.lexical,
+            keyword_weight: weights.keyword,
+            importance_weight: weights.importance,
+            recency_weight: weights.recency,
+            reliability_weight: weights.reliability,
+            final_score,
+        };
+
+        final_results.push(MemorySearchResultV2 {
+            entry: candidate.entry,
+            relevance_score: final_score,
+            score_breakdown: breakdown,
+            semantic_channel: semantic_channel.to_string(),
+            degraded,
+        });
+    }
+
+    final_results.sort_by(|a, b| {
+        b.relevance_score
+            .partial_cmp(&a.relevance_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    final_results.truncate(request.top_k.max(1));
+
+    final_results
 }
 
 /// Search memories using the 4-signal ranking algorithm.
@@ -364,6 +778,92 @@ pub fn search_memories_with_options(
     }
 
     Ok(scored_results)
+}
+
+/// V2 search with explainable scoring, lexical + semantic channels, and intent-aware weights.
+pub fn search_memories_v2(
+    store: &ProjectMemoryStore,
+    request: &MemorySearchRequestV2,
+) -> AppResult<Vec<MemorySearchResultV2>> {
+    let candidates = load_candidates_v2(store, request)?;
+
+    let mut semantic_channel = semantic_channel_without_semantic(request.enable_lexical);
+    let mut degraded = false;
+    let mut semantic_scores = HashMap::new();
+
+    if request.enable_semantic {
+        if let Some(scores) =
+            compute_tfidf_semantic_scores(store, &request.project_path, &request.query, &candidates)
+        {
+            semantic_channel = "tfidf".to_string();
+            semantic_scores = scores;
+        } else {
+            degraded = true;
+        }
+    }
+
+    Ok(rank_candidates_v2(
+        candidates,
+        request,
+        &semantic_scores,
+        &semantic_channel,
+        degraded,
+    ))
+}
+
+/// Async V2 search with provider-aware semantic channel.
+///
+/// Uses dense embedding when an `EmbeddingManager` with non-TF-IDF provider is
+/// configured. Falls back to TF-IDF semantic search, then lexical-only mode if
+/// both semantic channels are unavailable.
+pub async fn search_memories_v2_async(
+    store: &ProjectMemoryStore,
+    request: &MemorySearchRequestV2,
+) -> AppResult<Vec<MemorySearchResultV2>> {
+    let candidates = load_candidates_v2(store, request)?;
+
+    let mut semantic_channel = semantic_channel_without_semantic(request.enable_lexical);
+    let mut degraded = false;
+    let mut semantic_scores = HashMap::new();
+
+    if request.enable_semantic {
+        let dense_manager = store
+            .get_embedding_manager()
+            .filter(|mgr| mgr.provider_type() != EmbeddingProviderType::TfIdf);
+        let dense_configured = dense_manager.is_some();
+
+        if let Some(manager) = dense_manager {
+            if let Some((scores, channel)) =
+                compute_dense_semantic_scores(manager.as_ref(), &request.query, &candidates).await
+            {
+                semantic_channel = channel;
+                semantic_scores = scores;
+            }
+        }
+
+        if semantic_scores.is_empty() {
+            if let Some(scores) =
+                compute_tfidf_semantic_scores(store, &request.project_path, &request.query, &candidates)
+            {
+                semantic_channel = if dense_configured {
+                    "tfidf_fallback".to_string()
+                } else {
+                    "tfidf".to_string()
+                };
+                semantic_scores = scores;
+            } else {
+                degraded = true;
+            }
+        }
+    }
+
+    Ok(rank_candidates_v2(
+        candidates,
+        request,
+        &semantic_scores,
+        &semantic_channel,
+        degraded,
+    ))
 }
 
 // ============================================================================
@@ -824,5 +1324,150 @@ mod tests {
         for i in 1..results.len() {
             assert!(results[i - 1].relevance_score >= results[i].relevance_score);
         }
+    }
+
+    #[test]
+    fn test_search_memories_v2_returns_breakdown() {
+        let store = create_test_store();
+
+        store
+            .add_memory(NewMemoryEntry {
+                project_path: "/test/project".into(),
+                category: MemoryCategory::Preference,
+                content: "Always use pnpm not npm for package management".into(),
+                keywords: vec!["pnpm".into(), "package".into()],
+                importance: 0.9,
+                source_session_id: None,
+                source_context: None,
+            })
+            .unwrap();
+
+        let results = search_memories_v2(
+            &store,
+            &MemorySearchRequestV2 {
+                project_path: "/test/project".into(),
+                query: "pnpm package manager".into(),
+                categories: None,
+                top_k: 5,
+                min_importance: 0.1,
+                intent: MemorySearchIntent::Bugfix,
+                enable_semantic: true,
+                enable_lexical: true,
+            },
+        )
+        .unwrap();
+
+        assert!(!results.is_empty());
+        assert!(results[0].score_breakdown.final_score > 0.0);
+        assert_eq!(results[0].semantic_channel, "tfidf");
+    }
+
+    #[test]
+    fn test_search_memories_v2_lexical_only_mode() {
+        let store = create_test_store();
+
+        store
+            .add_memory(NewMemoryEntry {
+                project_path: "/test/project".into(),
+                category: MemoryCategory::Fact,
+                content: "Unit tests are located under __tests__ directory".into(),
+                keywords: vec!["tests".into(), "__tests__".into()],
+                importance: 0.6,
+                source_session_id: None,
+                source_context: None,
+            })
+            .unwrap();
+
+        let results = search_memories_v2(
+            &store,
+            &MemorySearchRequestV2 {
+                project_path: "/test/project".into(),
+                query: "__tests__ directory".into(),
+                categories: None,
+                top_k: 3,
+                min_importance: 0.1,
+                intent: MemorySearchIntent::Docs,
+                enable_semantic: false,
+                enable_lexical: true,
+            },
+        )
+        .unwrap();
+
+        assert!(!results.is_empty());
+        assert_eq!(results[0].semantic_channel, "lexical_only");
+    }
+
+    #[tokio::test]
+    async fn test_search_memories_v2_async_uses_tfidf_when_no_dense_provider() {
+        let store = create_test_store();
+
+        store
+            .add_memory(NewMemoryEntry {
+                project_path: "/test/project".into(),
+                category: MemoryCategory::Preference,
+                content: "Prefer pnpm for workspace dependency management".into(),
+                keywords: vec!["pnpm".into(), "workspace".into()],
+                importance: 0.8,
+                source_session_id: None,
+                source_context: None,
+            })
+            .unwrap();
+
+        let results = search_memories_v2_async(
+            &store,
+            &MemorySearchRequestV2 {
+                project_path: "/test/project".into(),
+                query: "workspace package manager".into(),
+                categories: None,
+                top_k: 5,
+                min_importance: 0.1,
+                intent: MemorySearchIntent::Default,
+                enable_semantic: true,
+                enable_lexical: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(!results.is_empty());
+        assert_eq!(results[0].semantic_channel, "tfidf");
+        assert!(!results[0].degraded);
+    }
+
+    #[tokio::test]
+    async fn test_search_memories_v2_async_marks_lexical_only_when_semantic_unavailable() {
+        let store = create_test_store();
+
+        store
+            .add_memory(NewMemoryEntry {
+                project_path: "/test/project".into(),
+                category: MemoryCategory::Fact,
+                content: String::new(),
+                keywords: vec![],
+                importance: 0.4,
+                source_session_id: None,
+                source_context: None,
+            })
+            .unwrap();
+
+        let results = search_memories_v2_async(
+            &store,
+            &MemorySearchRequestV2 {
+                project_path: "/test/project".into(),
+                query: "any semantic query".into(),
+                categories: None,
+                top_k: 3,
+                min_importance: 0.1,
+                intent: MemorySearchIntent::Default,
+                enable_semantic: true,
+                enable_lexical: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(!results.is_empty());
+        assert_eq!(results[0].semantic_channel, "lexical_only");
+        assert!(results[0].degraded);
     }
 }

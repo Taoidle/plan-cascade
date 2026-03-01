@@ -446,7 +446,7 @@ impl OrchestratorService {
         let mut tool_executor = ToolExecutor::new(&config.project_root);
         let cancellation_token = CancellationToken::new();
         tool_executor.set_cancellation_token(cancellation_token.clone());
-        let compactor = build_compactor(&provider);
+        let compactor = build_compactor(&provider, &config.compaction_config);
 
         Self {
             config,
@@ -517,7 +517,7 @@ impl OrchestratorService {
 
         let mut tool_executor = ToolExecutor::new(&config.project_root);
         tool_executor.set_cancellation_token(cancellation_token.clone());
-        let compactor = build_compactor(&provider);
+        let compactor = build_compactor(&provider, &config.compaction_config);
 
         Self {
             config,
@@ -609,7 +609,7 @@ impl OrchestratorService {
             tool_executor.set_hnsw_index(Arc::clone(hnsw));
         }
 
-        let compactor = build_compactor(&provider);
+        let compactor = build_compactor(&provider, &config.compaction_config);
 
         // Wrap non-empty snapshots in Arc<RwLock<...>> so the sub-agent's
         // prompt builder can read them through the same field types as the parent.

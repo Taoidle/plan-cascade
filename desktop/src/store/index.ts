@@ -147,3 +147,6 @@ export type { GitTabId } from './git';
 
 export { useWorkflowKernelStore } from './workflowKernel';
 export type { WorkflowKernelStore } from './workflowKernel';
+
+export { useContextOpsStore } from './contextOps';
+export type { ContextOpsState } from './contextOps';

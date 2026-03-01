@@ -484,6 +484,11 @@ export function SimpleMode() {
   const permissionLevel = useToolPermissionStore((s) => s.sessionLevel);
   const setPermissionLevel = useToolPermissionStore((s) => s.setSessionLevel);
   const permissionSessionId = taskId || standaloneSessionId || '';
+  const contextSessionId = taskId
+    ? `claude:${taskId}`
+    : standaloneSessionId
+      ? `standalone:${standaloneSessionId}`
+      : null;
 
   useEffect(() => {
     if (!permissionSessionId) return;
@@ -1534,12 +1539,12 @@ export function SimpleMode() {
           <div
             className={clsx(
               'shrink-0 transition-all duration-200 ease-out overflow-hidden',
-              isRightPanelOpen ? 'w-[520px] opacity-100 ml-3' : 'w-0 opacity-0',
+              isRightPanelOpen ? 'w-[620px] opacity-100 ml-3' : 'w-0 opacity-0',
             )}
             onMouseEnter={openRightHoverPanel}
             onMouseLeave={scheduleCloseRightHoverPanel}
           >
-            <div className="w-[520px] h-full">
+            <div className="w-[620px] h-full">
               <TabbedRightPanel
                 activeTab={rightPanelTab}
                 onTabChange={setRightPanelTab}
@@ -1549,6 +1554,7 @@ export function SimpleMode() {
                 analysisCoverage={analysisCoverage}
                 streamingOutput={streamingOutput}
                 workspacePath={workspacePath}
+                contextSessionId={contextSessionId}
               />
             </div>
           </div>

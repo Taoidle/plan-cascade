@@ -842,6 +842,7 @@
   "rightPanel": {
     "outputTab": "输出",
     "gitTab": "Git",
+    "contextTab": "上下文",
     "errors": {
       "summary": "{{count}} 条问题",
       "dismiss": "忽略",
