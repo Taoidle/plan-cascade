@@ -13,6 +13,9 @@ import type {
   DocumentSummary,
   SearchResult,
   CollectionUpdateCheck,
+  DocsKbStatus,
+  QueryRunSummary,
+  ScopedDocumentRef,
 } from '../lib/knowledgeApi';
 import {
   ragListCollections,
@@ -24,6 +27,10 @@ import {
   ragDeleteDocument,
   ragCheckCollectionUpdates,
   ragApplyCollectionUpdates,
+  ragGetDocsStatus,
+  ragEnsureDocsCollection,
+  ragSyncDocsCollection,
+  ragListQueryRuns,
 } from '../lib/knowledgeApi';
 
 // ---------------------------------------------------------------------------
@@ -39,9 +46,20 @@ export interface KnowledgeState {
 
   /** Documents in the active collection. */
   documents: DocumentSummary[];
+  /** Documents cache bucketed by collection_id. */
+  documentsByCollection: Record<string, DocumentSummary[]>;
 
   /** Query results from the last search. */
   queryResults: SearchResult[];
+  /** Query state cache bucketed by collection_id. */
+  queryStateByCollection: Record<
+    string,
+    {
+      queryResults: SearchResult[];
+      totalSearched: number;
+      searchQuery: string;
+    }
+  >;
 
   /** Total results searched in last query. */
   totalSearched: number;
@@ -49,11 +67,22 @@ export interface KnowledgeState {
   /** Current search query text. */
   searchQuery: string;
 
+  /** Recent retrieval execution runs for active collection. */
+  queryRuns: QueryRunSummary[];
+  /** Query runs cache bucketed by collection_id. */
+  queryRunsByCollection: Record<string, QueryRunSummary[]>;
+
+  /** Docs knowledge status for current workspace/project. */
+  docsStatus: DocsKbStatus | null;
+
   /** Loading states. */
   isLoading: boolean;
   isIngesting: boolean;
   isQuerying: boolean;
   isDeleting: boolean;
+  isLoadingQueryRuns: boolean;
+  isLoadingDocsStatus: boolean;
+  isSyncingDocs: boolean;
 
   /** Upload progress (0 to 100). */
   uploadProgress: number;
@@ -82,10 +111,21 @@ export interface KnowledgeState {
     description?: string,
     workspacePath?: string | null,
   ) => Promise<boolean>;
-  ingestDocuments: (projectId: string, collectionName: string, documents: DocumentInput[]) => Promise<boolean>;
+  ingestDocuments: (projectId: string, collectionId: string, documents: DocumentInput[]) => Promise<boolean>;
   fetchDocuments: (collectionId: string) => Promise<void>;
-  deleteDocument: (collectionId: string, documentId: string) => Promise<boolean>;
-  queryCollection: (projectId: string, collectionName: string, query: string, topK?: number) => Promise<void>;
+  deleteDocument: (collectionId: string, documentUid: string) => Promise<boolean>;
+  queryCollection: (
+    projectId: string,
+    collectionId: string,
+    query: string,
+    topK?: number,
+    retrievalProfile?: string,
+    documentFilters?: ScopedDocumentRef[],
+  ) => Promise<void>;
+  fetchQueryRuns: (projectId: string, collectionId: string, limit?: number) => Promise<void>;
+  fetchDocsStatus: (workspacePath: string, projectId: string) => Promise<void>;
+  ensureDocsCollection: (workspacePath: string, projectId: string) => Promise<boolean>;
+  syncDocsCollection: (workspacePath: string, projectId: string) => Promise<boolean>;
   setSearchQuery: (query: string) => void;
   clearQueryResults: () => void;
   clearError: () => void;
@@ -101,13 +141,28 @@ const DEFAULT_STATE = {
   collections: [],
   activeCollection: null,
   documents: [],
+  documentsByCollection: {} as Record<string, DocumentSummary[]>,
   queryResults: [],
+  queryStateByCollection: {} as Record<
+    string,
+    {
+      queryResults: SearchResult[];
+      totalSearched: number;
+      searchQuery: string;
+    }
+  >,
   totalSearched: 0,
   searchQuery: '',
+  queryRuns: [],
+  queryRunsByCollection: {} as Record<string, QueryRunSummary[]>,
+  docsStatus: null as DocsKbStatus | null,
   isLoading: false,
   isIngesting: false,
   isQuerying: false,
   isDeleting: false,
+  isLoadingQueryRuns: false,
+  isLoadingDocsStatus: false,
+  isSyncingDocs: false,
   uploadProgress: 0,
   pendingUpdates: null as CollectionUpdateCheck | null,
   isCheckingUpdates: false,
@@ -119,7 +174,7 @@ const DEFAULT_STATE = {
 // Store
 // ---------------------------------------------------------------------------
 
-export const useKnowledgeStore = create<KnowledgeState>()((set, _get) => ({
+export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
   ...DEFAULT_STATE,
 
   fetchCollections: async (projectId: string) => {
@@ -143,12 +198,34 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, _get) => ({
   },
 
   selectCollection: (collection: KnowledgeCollection | null) => {
-    set({
-      activeCollection: collection,
-      documents: [],
-      queryResults: [],
-      totalSearched: 0,
-      searchQuery: '',
+    set((state) => {
+      if (!collection) {
+        return {
+          activeCollection: null,
+          documents: [],
+          queryResults: [],
+          totalSearched: 0,
+          searchQuery: '',
+          queryRuns: [],
+          isQuerying: false,
+        };
+      }
+      const docs = state.documentsByCollection[collection.id] ?? [];
+      const queryState = state.queryStateByCollection[collection.id] ?? {
+        queryResults: [],
+        totalSearched: 0,
+        searchQuery: '',
+      };
+      const queryRuns = state.queryRunsByCollection[collection.id] ?? [];
+      return {
+        activeCollection: collection,
+        documents: docs,
+        queryResults: queryState.queryResults,
+        totalSearched: queryState.totalSearched,
+        searchQuery: queryState.searchQuery,
+        queryRuns,
+        isQuerying: false,
+      };
     });
   },
 
@@ -160,10 +237,28 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, _get) => ({
   ) => {
     set({ isIngesting: true, uploadProgress: 0, error: null });
     try {
-      const result = await ragIngestDocuments(collectionName, projectId, description, documents);
+      const result = await ragIngestDocuments({
+        projectId,
+        collectionName,
+        description,
+        documents,
+      });
       if (result.success && result.data) {
         set((state) => ({
           collections: [...state.collections, result.data!],
+          documentsByCollection: { ...state.documentsByCollection, [result.data!.id]: [] },
+          queryStateByCollection: {
+            ...state.queryStateByCollection,
+            [result.data!.id]: {
+              queryResults: [],
+              totalSearched: 0,
+              searchQuery: '',
+            },
+          },
+          queryRunsByCollection: {
+            ...state.queryRunsByCollection,
+            [result.data!.id]: [],
+          },
           isIngesting: false,
           uploadProgress: 100,
         }));
@@ -191,9 +286,31 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, _get) => ({
     try {
       const result = await ragDeleteCollection(collectionName, projectId);
       if (result.success) {
+        const targetCollectionId = get().collections.find((c) => c.name === collectionName)?.id;
         set((state) => ({
           collections: state.collections.filter((c) => c.name !== collectionName),
           activeCollection: state.activeCollection?.name === collectionName ? null : state.activeCollection,
+          documentsByCollection: targetCollectionId
+            ? Object.fromEntries(
+                Object.entries(state.documentsByCollection).filter(
+                  ([collectionId]) => collectionId !== targetCollectionId,
+                ),
+              )
+            : state.documentsByCollection,
+          queryStateByCollection: targetCollectionId
+            ? Object.fromEntries(
+                Object.entries(state.queryStateByCollection).filter(
+                  ([collectionId]) => collectionId !== targetCollectionId,
+                ),
+              )
+            : state.queryStateByCollection,
+          queryRunsByCollection: targetCollectionId
+            ? Object.fromEntries(
+                Object.entries(state.queryRunsByCollection).filter(
+                  ([collectionId]) => collectionId !== targetCollectionId,
+                ),
+              )
+            : state.queryRunsByCollection,
           isDeleting: false,
         }));
         return true;
@@ -245,15 +362,19 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, _get) => ({
     }
   },
 
-  ingestDocuments: async (projectId: string, collectionName: string, documents: DocumentInput[]) => {
+  ingestDocuments: async (projectId: string, collectionId: string, documents: DocumentInput[]) => {
     set({ isIngesting: true, uploadProgress: 10, error: null });
     try {
-      const result = await ragIngestDocuments(collectionName, projectId, null, documents);
+      const result = await ragIngestDocuments({
+        projectId,
+        collectionId,
+        documents,
+      });
       if (result.success && result.data) {
         // Update the collection in the list
         set((state) => ({
-          collections: state.collections.map((c) => (c.name === collectionName ? result.data! : c)),
-          activeCollection: state.activeCollection?.name === collectionName ? result.data! : state.activeCollection,
+          collections: state.collections.map((c) => (c.id === collectionId ? result.data! : c)),
+          activeCollection: state.activeCollection?.id === collectionId ? result.data! : state.activeCollection,
           isIngesting: false,
           uploadProgress: 100,
         }));
@@ -281,7 +402,14 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, _get) => ({
     try {
       const result = await ragListDocuments(collectionId);
       if (result.success && result.data) {
-        set({ documents: result.data, isLoading: false });
+        set((state) => ({
+          documentsByCollection: {
+            ...state.documentsByCollection,
+            [collectionId]: result.data!,
+          },
+          documents: state.activeCollection?.id === collectionId ? result.data! : state.documents,
+          isLoading: false,
+        }));
       } else {
         set({ isLoading: false, error: result.error ?? 'Failed to fetch documents' });
       }
@@ -290,13 +418,22 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, _get) => ({
     }
   },
 
-  deleteDocument: async (collectionId: string, documentId: string) => {
+  deleteDocument: async (collectionId: string, documentUid: string) => {
     set({ isDeleting: true, error: null });
     try {
-      const result = await ragDeleteDocument(collectionId, documentId);
+      const result = await ragDeleteDocument(collectionId, documentUid);
       if (result.success) {
         set((state) => ({
-          documents: state.documents.filter((d) => d.document_id !== documentId),
+          documentsByCollection: {
+            ...state.documentsByCollection,
+            [collectionId]: (state.documentsByCollection[collectionId] ?? []).filter(
+              (d) => d.document_uid !== documentUid,
+            ),
+          },
+          documents:
+            state.activeCollection?.id === collectionId
+              ? state.documents.filter((d) => d.document_uid !== documentUid)
+              : state.documents,
           isDeleting: false,
         }));
         return true;
@@ -310,16 +447,51 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, _get) => ({
     }
   },
 
-  queryCollection: async (projectId: string, collectionName: string, query: string, topK?: number) => {
+  queryCollection: async (
+    projectId: string,
+    collectionId: string,
+    query: string,
+    topK?: number,
+    retrievalProfile?: string,
+    documentFilters?: ScopedDocumentRef[],
+  ) => {
     set({ isQuerying: true, error: null, searchQuery: query });
     try {
-      const result = await ragQuery(collectionName, projectId, query, topK);
+      const result = await ragQuery({
+        projectId,
+        query,
+        topK,
+        collectionIds: [collectionId],
+        retrievalProfile,
+        documentFilters,
+      });
       if (result.success && result.data) {
-        set({
-          queryResults: result.data.results,
-          totalSearched: result.data.total_searched,
+        let latestRuns: QueryRunSummary[] | null = null;
+        const runsResult = await ragListQueryRuns(projectId, [collectionId], 20);
+        if (runsResult.success && runsResult.data) {
+          latestRuns = runsResult.data;
+        }
+        set((state) => ({
+          queryStateByCollection: {
+            ...state.queryStateByCollection,
+            [collectionId]: {
+              queryResults: result.data!.results,
+              totalSearched: result.data!.total_searched,
+              searchQuery: query,
+            },
+          },
+          queryResults: state.activeCollection?.id === collectionId ? result.data!.results : state.queryResults,
+          totalSearched:
+            state.activeCollection?.id === collectionId ? result.data!.total_searched : state.totalSearched,
+          queryRunsByCollection: latestRuns
+            ? {
+                ...state.queryRunsByCollection,
+                [collectionId]: latestRuns,
+              }
+            : state.queryRunsByCollection,
+          queryRuns: state.activeCollection?.id === collectionId && latestRuns ? latestRuns : state.queryRuns,
           isQuerying: false,
-        });
+        }));
       } else {
         set({
           isQuerying: false,
@@ -334,12 +506,150 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, _get) => ({
     }
   },
 
+  fetchQueryRuns: async (projectId: string, collectionId: string, limit?: number) => {
+    set({ isLoadingQueryRuns: true, error: null });
+    try {
+      const result = await ragListQueryRuns(projectId, [collectionId], limit ?? 20);
+      if (result.success && result.data) {
+        set((state) => ({
+          queryRunsByCollection: {
+            ...state.queryRunsByCollection,
+            [collectionId]: result.data!,
+          },
+          queryRuns: state.activeCollection?.id === collectionId ? result.data! : state.queryRuns,
+          isLoadingQueryRuns: false,
+        }));
+      } else {
+        set({
+          isLoadingQueryRuns: false,
+          error: result.error ?? 'Failed to fetch query runs',
+        });
+      }
+    } catch (err) {
+      set({
+        isLoadingQueryRuns: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+
+  fetchDocsStatus: async (workspacePath: string, projectId: string) => {
+    if (!workspacePath) {
+      set({ docsStatus: null });
+      return;
+    }
+    set({ isLoadingDocsStatus: true, error: null });
+    try {
+      const result = await ragGetDocsStatus(workspacePath, projectId);
+      if (result.success && result.data) {
+        set({ docsStatus: result.data, isLoadingDocsStatus: false });
+      } else {
+        set({
+          isLoadingDocsStatus: false,
+          error: result.error ?? 'Failed to get docs status',
+        });
+      }
+    } catch (err) {
+      set({
+        isLoadingDocsStatus: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+
+  ensureDocsCollection: async (workspacePath: string, projectId: string) => {
+    if (!workspacePath) return false;
+    set({ isSyncingDocs: true, error: null });
+    try {
+      const result = await ragEnsureDocsCollection(workspacePath, projectId);
+      if (!result.success) {
+        set({
+          isSyncingDocs: false,
+          error: result.error ?? 'Failed to ensure docs collection',
+        });
+        return false;
+      }
+      const store = get();
+      await store.fetchCollections(projectId);
+      await store.fetchDocsStatus(workspacePath, projectId);
+      set({ isSyncingDocs: false });
+      return true;
+    } catch (err) {
+      set({
+        isSyncingDocs: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
+  },
+
+  syncDocsCollection: async (workspacePath: string, projectId: string) => {
+    if (!workspacePath) return false;
+    set({ isSyncingDocs: true, error: null });
+    try {
+      const result = await ragSyncDocsCollection(workspacePath, projectId);
+      if (!result.success) {
+        set({
+          isSyncingDocs: false,
+          error: result.error ?? 'Failed to sync docs collection',
+        });
+        return false;
+      }
+      const store = get();
+      await store.fetchCollections(projectId);
+      await store.fetchDocsStatus(workspacePath, projectId);
+      set({ isSyncingDocs: false });
+      return true;
+    } catch (err) {
+      set({
+        isSyncingDocs: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
+  },
+
   setSearchQuery: (query: string) => {
-    set({ searchQuery: query });
+    set((state) => {
+      const activeCollectionId = state.activeCollection?.id;
+      if (!activeCollectionId) {
+        return { searchQuery: query };
+      }
+      const current = state.queryStateByCollection[activeCollectionId] ?? {
+        queryResults: [],
+        totalSearched: 0,
+        searchQuery: '',
+      };
+      return {
+        searchQuery: query,
+        queryStateByCollection: {
+          ...state.queryStateByCollection,
+          [activeCollectionId]: { ...current, searchQuery: query },
+        },
+      };
+    });
   },
 
   clearQueryResults: () => {
-    set({ queryResults: [], totalSearched: 0, searchQuery: '' });
+    set((state) => {
+      const activeCollectionId = state.activeCollection?.id;
+      if (!activeCollectionId) {
+        return { queryResults: [], totalSearched: 0, searchQuery: '' };
+      }
+      return {
+        queryResults: [],
+        totalSearched: 0,
+        searchQuery: '',
+        queryStateByCollection: {
+          ...state.queryStateByCollection,
+          [activeCollectionId]: {
+            queryResults: [],
+            totalSearched: 0,
+            searchQuery: '',
+          },
+        },
+      };
+    });
   },
 
   clearError: () => set({ error: null }),

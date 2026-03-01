@@ -881,7 +881,7 @@ impl OrchestratorService {
         pipeline: Arc<crate::services::knowledge::pipeline::RagPipeline>,
         project_id: String,
         collection_filter: Option<Vec<String>>,
-        document_filter: Option<Vec<String>>,
+        document_filter: Option<Vec<crate::services::knowledge::pipeline::ScopedDocumentRef>>,
         awareness_section: String,
     ) -> Self {
         self.tool_executor

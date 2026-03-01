@@ -8,10 +8,12 @@
 //! collection-namespaced IDs.
 
 use serde::{Deserialize, Serialize};
+use rusqlite::OptionalExtension;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 use tauri::Emitter;
 
 use crate::services::knowledge::chunker::{Chunk, Chunker, Document};
@@ -23,6 +25,7 @@ use crate::services::orchestrator::embedding_service::{
 use crate::services::orchestrator::hnsw_index::HnswIndex;
 use crate::storage::database::Database;
 use crate::utils::error::{AppError, AppResult};
+use crate::utils::paths::database_path;
 
 // ---------------------------------------------------------------------------
 // Data structures
@@ -61,11 +64,30 @@ pub struct RagQueryResult {
     pub collection_name: String,
 }
 
+/// Scoped document reference used by filters and context selection.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct ScopedDocumentRef {
+    pub collection_id: String,
+    pub document_uid: String,
+}
+
 /// Summary of a document within a collection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocumentSummary {
-    /// The document ID.
-    pub document_id: String,
+    /// Stable unique document primary key.
+    pub document_uid: String,
+    /// Human-readable document display name.
+    pub display_name: String,
+    /// Kind of source: workspace/upload.
+    pub source_kind: String,
+    /// Stable locator for this source.
+    pub source_locator: String,
+    /// Source type/extension.
+    pub source_type: String,
+    /// Whether this document should be checked for file-system updates.
+    pub trackable: bool,
+    /// Last successful index timestamp.
+    pub last_indexed_at: Option<String>,
     /// Number of chunks this document was split into.
     pub chunk_count: i64,
     /// Preview of the first chunk's content (up to 200 chars).
@@ -75,8 +97,10 @@ pub struct DocumentSummary {
 /// Information about a document that has changed relative to its stored hash.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocUpdateInfo {
-    pub document_id: String,
-    pub source_path: String,
+    pub document_uid: String,
+    pub display_name: String,
+    pub source_kind: String,
+    pub source_locator: String,
     pub source_type: String,
     pub old_hash: String,
     /// `None` if the file was deleted from disk.
@@ -95,6 +119,22 @@ pub struct CollectionUpdateCheck {
     pub new_files: Vec<String>,
     /// Count of documents that are unchanged.
     pub unchanged: usize,
+}
+
+/// A single recorded query execution run for local observability.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryRunSummary {
+    pub id: i64,
+    pub query: String,
+    pub collection_scope: String,
+    pub top_k: i64,
+    pub vector_candidates: i64,
+    pub bm25_candidates: i64,
+    pub merged_candidates: i64,
+    pub rerank_ms: i64,
+    pub total_ms: i64,
+    pub result_count: i64,
+    pub created_at: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -130,13 +170,25 @@ impl RagPipeline {
         Ok(pipeline)
     }
 
-    /// Initialize knowledge tables in SQLite.
+    /// Initialize/migrate knowledge tables in SQLite.
+    ///
+    /// Uses a strong-cut v2 schema migration:
+    /// - introduces `knowledge_documents` with `document_uid`
+    /// - rewires `knowledge_chunks.document_uid` foreign key
+    /// - adds `knowledge_chunks_fts` and `knowledge_query_runs`
     fn init_schema(&self) -> AppResult<()> {
-        let conn = self
+        let mut conn = self
             .database
             .get_connection()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
+        Self::ensure_collections_table(&conn)?;
+        Self::ensure_collection_workspace_path(&conn)?;
+        self.migrate_to_knowledge_v2(&mut conn)?;
+        Ok(())
+    }
+
+    fn ensure_collections_table(conn: &rusqlite::Connection) -> AppResult<()> {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS knowledge_collections (
                 id TEXT PRIMARY KEY,
@@ -150,42 +202,12 @@ impl RagPipeline {
             )",
             [],
         )
-        .map_err(|e| {
-            AppError::database(format!("Failed to create knowledge_collections: {}", e))
-        })?;
+        .map_err(|e| AppError::database(format!("Failed to create knowledge_collections: {}", e)))?;
+        Ok(())
+    }
 
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS knowledge_chunks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                collection_id TEXT NOT NULL,
-                document_id TEXT NOT NULL,
-                chunk_index INTEGER NOT NULL,
-                content TEXT NOT NULL,
-                embedding BLOB,
-                metadata TEXT DEFAULT '{}',
-                created_at TEXT DEFAULT (datetime('now')),
-                FOREIGN KEY (collection_id) REFERENCES knowledge_collections(id) ON DELETE CASCADE
-            )",
-            [],
-        )
-        .map_err(|e| AppError::database(format!("Failed to create knowledge_chunks: {}", e)))?;
-
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_collection ON knowledge_chunks(collection_id)",
-            [],
-        )
-        .map_err(|e| AppError::database(format!("Failed to create index: {}", e)))?;
-
-        // Migration: add workspace_path column if it doesn't exist
-        let has_workspace_path: bool = conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('knowledge_collections') WHERE name='workspace_path'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .map_err(|e| AppError::database(format!("Failed to check column existence: {}", e)))?
-            > 0;
-        if !has_workspace_path {
+    fn ensure_collection_workspace_path(conn: &rusqlite::Connection) -> AppResult<()> {
+        if !Self::table_has_column(conn, "knowledge_collections", "workspace_path")? {
             conn.execute(
                 "ALTER TABLE knowledge_collections ADD COLUMN workspace_path TEXT DEFAULT NULL",
                 [],
@@ -194,6 +216,388 @@ impl RagPipeline {
                 AppError::database(format!("Failed to add workspace_path column: {}", e))
             })?;
         }
+        Ok(())
+    }
+
+    fn table_exists(conn: &rusqlite::Connection, table_name: &str) -> AppResult<bool> {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?1",
+                rusqlite::params![table_name],
+                |row| row.get(0),
+            )
+            .map_err(|e| AppError::database(format!("Failed checking table '{}': {}", table_name, e)))?;
+        Ok(exists > 0)
+    }
+
+    fn table_has_column(
+        conn: &rusqlite::Connection,
+        table_name: &str,
+        column_name: &str,
+    ) -> AppResult<bool> {
+        let safe_table = table_name.replace('\'', "''");
+        let sql = format!(
+            "SELECT COUNT(*) FROM pragma_table_info('{}') WHERE name = ?1",
+            safe_table
+        );
+        let count: i64 = conn
+            .query_row(
+                &sql,
+                rusqlite::params![column_name],
+                |row| row.get(0),
+            )
+            .map_err(|e| {
+                AppError::database(format!(
+                    "Failed checking column '{}.{}': {}",
+                    table_name, column_name, e
+                ))
+            })?;
+        Ok(count > 0)
+    }
+
+    fn create_knowledge_backup(&self, conn: &rusqlite::Connection) -> AppResult<()> {
+        let mut db_file: Option<String> = None;
+        if let Ok(mut stmt) = conn.prepare("PRAGMA database_list") {
+            if let Ok(mut rows) = stmt.query([]) {
+                while let Ok(Some(row)) = rows.next() {
+                    let name: String = row.get(1).unwrap_or_default();
+                    if name == "main" {
+                        let file: String = row.get(2).unwrap_or_default();
+                        if !file.is_empty() {
+                            db_file = Some(file);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        let db_path = if let Some(path) = db_file {
+            std::path::PathBuf::from(path)
+        } else {
+            database_path()?
+        };
+
+        if !db_path.exists() {
+            return Ok(());
+        }
+
+        let backup_path = db_path.with_extension(format!(
+            "knowledge_v2_backup_{}.db",
+            chrono::Utc::now().format("%Y%m%d%H%M%S")
+        ));
+
+        conn.execute("VACUUM INTO ?1", rusqlite::params![backup_path.to_string_lossy().to_string()])
+            .map_err(|e| AppError::database(format!("Failed to backup knowledge DB before migration: {}", e)))?;
+
+        Ok(())
+    }
+
+    fn create_v2_tables(tx: &rusqlite::Transaction<'_>) -> AppResult<()> {
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS knowledge_documents (
+                document_uid TEXT PRIMARY KEY,
+                collection_id TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                source_kind TEXT NOT NULL,
+                source_locator TEXT NOT NULL,
+                source_type TEXT NOT NULL DEFAULT '',
+                content_hash TEXT NOT NULL DEFAULT '',
+                trackable INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now')),
+                last_indexed_at TEXT DEFAULT (datetime('now')),
+                UNIQUE(collection_id, source_kind, source_locator),
+                FOREIGN KEY (collection_id) REFERENCES knowledge_collections(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS knowledge_chunks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection_id TEXT NOT NULL,
+                document_uid TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                embedding BLOB,
+                metadata TEXT DEFAULT '{}',
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (collection_id) REFERENCES knowledge_collections(id) ON DELETE CASCADE,
+                FOREIGN KEY (document_uid) REFERENCES knowledge_documents(document_uid) ON DELETE CASCADE
+            );
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_chunks_fts USING fts5(
+                content,
+                chunk_id UNINDEXED,
+                collection_id UNINDEXED,
+                document_uid UNINDEXED,
+                tokenize='unicode61'
+            );
+
+            CREATE TABLE IF NOT EXISTS knowledge_query_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                query TEXT NOT NULL,
+                collection_scope TEXT NOT NULL DEFAULT '',
+                top_k INTEGER NOT NULL DEFAULT 5,
+                vector_candidates INTEGER NOT NULL DEFAULT 0,
+                bm25_candidates INTEGER NOT NULL DEFAULT 0,
+                merged_candidates INTEGER NOT NULL DEFAULT 0,
+                rerank_ms INTEGER NOT NULL DEFAULT 0,
+                total_ms INTEGER NOT NULL DEFAULT 0,
+                result_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS knowledge_schema_version (
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_knowledge_documents_collection_uid
+                ON knowledge_documents(collection_id, document_uid);
+            CREATE INDEX IF NOT EXISTS idx_knowledge_documents_collection_hash
+                ON knowledge_documents(collection_id, content_hash);
+            CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_collection
+                ON knowledge_chunks(collection_id);
+            CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_collection_document
+                ON knowledge_chunks(collection_id, document_uid);
+            CREATE INDEX IF NOT EXISTS idx_knowledge_query_runs_created_at
+                ON knowledge_query_runs(created_at DESC);
+
+            INSERT OR IGNORE INTO knowledge_schema_version(version) VALUES (2);",
+        )
+        .map_err(|e| AppError::database(format!("Failed creating knowledge v2 tables: {}", e)))?;
+
+        Ok(())
+    }
+
+    fn source_kind_and_locator(source_path: Option<&str>, collection_id: &str, display_name: &str) -> (String, String) {
+        match source_path {
+            Some(sp) if !sp.is_empty() => {
+                if sp.starts_with("upload://") {
+                    ("upload".to_string(), sp.to_string())
+                } else {
+                    ("workspace".to_string(), sp.to_string())
+                }
+            }
+            _ => (
+                "upload".to_string(),
+                format!(
+                    "upload://{}/{}/{}",
+                    collection_id,
+                    uuid::Uuid::new_v4(),
+                    Self::sanitize_filename(display_name)
+                ),
+            ),
+        }
+    }
+
+    fn sanitize_filename(name: &str) -> String {
+        let mut out = String::with_capacity(name.len());
+        for ch in name.chars() {
+            if ch.is_ascii_alphanumeric() || ch == '.' || ch == '-' || ch == '_' {
+                out.push(ch);
+            } else {
+                out.push('_');
+            }
+        }
+        if out.is_empty() {
+            "document".to_string()
+        } else {
+            out
+        }
+    }
+
+    fn migrate_legacy_chunks(tx: &rusqlite::Transaction<'_>) -> AppResult<()> {
+        #[derive(Debug, Clone)]
+        struct LegacyChunk {
+            collection_id: String,
+            document_id: String,
+            chunk_index: i64,
+            content: String,
+            embedding: Option<Vec<u8>>,
+            metadata_json: String,
+        }
+
+        let mut stmt = tx
+            .prepare(
+                "SELECT collection_id, document_id, chunk_index, content, embedding, COALESCE(metadata, '{}')
+                 FROM knowledge_chunks_v1_backup ORDER BY id",
+            )
+            .map_err(|e| AppError::database(format!("Failed preparing legacy chunk read: {}", e)))?;
+
+        let rows: Vec<LegacyChunk> = stmt
+            .query_map([], |row| {
+                Ok(LegacyChunk {
+                    collection_id: row.get(0)?,
+                    document_id: row.get(1)?,
+                    chunk_index: row.get(2)?,
+                    content: row.get(3)?,
+                    embedding: row.get::<_, Option<Vec<u8>>>(4)?,
+                    metadata_json: row.get(5)?,
+                })
+            })
+            .map_err(|e| AppError::database(format!("Failed querying legacy chunks: {}", e)))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let mut doc_uid_by_key: HashMap<String, String> = HashMap::new();
+
+        for legacy in rows {
+            let mut metadata: HashMap<String, String> =
+                serde_json::from_str(&legacy.metadata_json).unwrap_or_default();
+
+            let source_path = metadata.get("source_path").cloned();
+            let source_type = metadata.get("source_type").cloned().unwrap_or_default();
+            let old_hash = metadata
+                .get("content_hash")
+                .cloned()
+                .unwrap_or_else(|| format!("{:x}", Sha256::digest(legacy.content.as_bytes())));
+
+            let (source_kind, source_locator) = Self::source_kind_and_locator(
+                source_path.as_deref(),
+                &legacy.collection_id,
+                &legacy.document_id,
+            );
+            let trackable = source_kind == "workspace";
+            let doc_key = format!(
+                "{}\u{1f}{}\u{1f}{}",
+                legacy.collection_id, source_kind, source_locator
+            );
+
+            let document_uid = if let Some(uid) = doc_uid_by_key.get(&doc_key) {
+                uid.clone()
+            } else {
+                let uid = uuid::Uuid::new_v4().to_string();
+                tx.execute(
+                    "INSERT INTO knowledge_documents
+                     (document_uid, collection_id, display_name, source_kind, source_locator, source_type, content_hash, trackable)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    rusqlite::params![
+                        uid,
+                        legacy.collection_id,
+                        legacy.document_id,
+                        source_kind,
+                        source_locator,
+                        source_type,
+                        old_hash,
+                        if trackable { 1 } else { 0 },
+                    ],
+                )
+                .map_err(|e| AppError::database(format!("Failed inserting migrated document: {}", e)))?;
+                doc_uid_by_key.insert(doc_key, uid.clone());
+                uid
+            };
+
+            metadata.insert("document_uid".to_string(), document_uid.clone());
+            metadata
+                .entry("source_kind".to_string())
+                .or_insert_with(|| source_kind.clone());
+            metadata
+                .entry("source_locator".to_string())
+                .or_insert_with(|| source_locator.clone());
+
+            let metadata_json =
+                serde_json::to_string(&metadata).unwrap_or_else(|_| "{}".to_string());
+
+            tx.execute(
+                "INSERT INTO knowledge_chunks (collection_id, document_uid, chunk_index, content, embedding, metadata)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![
+                    legacy.collection_id,
+                    document_uid,
+                    legacy.chunk_index,
+                    legacy.content,
+                    legacy.embedding.unwrap_or_default(),
+                    metadata_json,
+                ],
+            )
+            .map_err(|e| AppError::database(format!("Failed inserting migrated chunk: {}", e)))?;
+        }
+
+        Ok(())
+    }
+
+    fn rebuild_fts(tx: &rusqlite::Transaction<'_>) -> AppResult<()> {
+        tx.execute("DELETE FROM knowledge_chunks_fts", [])
+            .map_err(|e| AppError::database(format!("Failed clearing knowledge_chunks_fts: {}", e)))?;
+        tx.execute(
+            "INSERT INTO knowledge_chunks_fts (chunk_id, collection_id, document_uid, content)
+             SELECT id, collection_id, document_uid, content FROM knowledge_chunks",
+            [],
+        )
+        .map_err(|e| AppError::database(format!("Failed rebuilding knowledge_chunks_fts: {}", e)))?;
+        Ok(())
+    }
+
+    fn refresh_collection_chunk_count(tx: &rusqlite::Transaction<'_>) -> AppResult<()> {
+        tx.execute(
+            "UPDATE knowledge_collections
+             SET chunk_count = (
+                 SELECT COUNT(*) FROM knowledge_chunks c WHERE c.collection_id = knowledge_collections.id
+             ),
+             updated_at = datetime('now')",
+            [],
+        )
+        .map_err(|e| AppError::database(format!("Failed refreshing chunk_count: {}", e)))?;
+        Ok(())
+    }
+
+    fn migrate_to_knowledge_v2(&self, conn: &mut rusqlite::Connection) -> AppResult<()> {
+        let has_documents = Self::table_exists(conn, "knowledge_documents")?;
+        let has_chunks = Self::table_exists(conn, "knowledge_chunks")?;
+        let chunks_has_uid = if has_chunks {
+            Self::table_has_column(conn, "knowledge_chunks", "document_uid")?
+        } else {
+            false
+        };
+
+        if has_documents && chunks_has_uid {
+            let tx = conn
+                .transaction()
+                .map_err(|e| AppError::database(format!("Failed starting schema finalize tx: {}", e)))?;
+            Self::create_v2_tables(&tx)?;
+            Self::rebuild_fts(&tx)?;
+            Self::refresh_collection_chunk_count(&tx)?;
+            tx.commit()
+                .map_err(|e| AppError::database(format!("Failed committing schema finalize tx: {}", e)))?;
+            return Ok(());
+        }
+
+        if has_chunks {
+            self.create_knowledge_backup(conn)?;
+        }
+
+        let tx = conn
+            .transaction()
+            .map_err(|e| AppError::database(format!("Failed starting knowledge_v2 migration: {}", e)))?;
+
+        if has_chunks {
+            tx.execute("ALTER TABLE knowledge_chunks RENAME TO knowledge_chunks_v1_backup", [])
+                .map_err(|e| {
+                    AppError::database(format!(
+                        "Failed renaming legacy knowledge_chunks before migration: {}",
+                        e
+                    ))
+                })?;
+        }
+
+        Self::create_v2_tables(&tx)?;
+
+        if has_chunks {
+            Self::migrate_legacy_chunks(&tx)?;
+            tx.execute("DROP TABLE knowledge_chunks_v1_backup", [])
+                .map_err(|e| {
+                    AppError::database(format!(
+                        "Failed dropping legacy knowledge_chunks backup table: {}",
+                        e
+                    ))
+                })?;
+        }
+
+        Self::rebuild_fts(&tx)?;
+        Self::refresh_collection_chunk_count(&tx)?;
+
+        tx.commit()
+            .map_err(|e| AppError::database(format!("Failed committing knowledge_v2 migration: {}", e)))?;
 
         Ok(())
     }
@@ -263,10 +667,31 @@ impl RagPipeline {
         documents: Vec<Document>,
         app_handle: Option<&tauri::AppHandle>,
     ) -> AppResult<KnowledgeCollection> {
-        let collection_id =
-            self.get_or_create_collection(collection_name, project_id, description)?;
+        let collection_id = self.get_or_create_collection(collection_name, project_id, description)?;
+        self.ingest_into_collection_with_progress(&collection_id, documents, app_handle, Some(collection_name))
+            .await
+    }
 
-        // Helper to emit progress events
+    /// Ingest documents directly into an existing collection.
+    pub async fn ingest_into_collection(
+        &self,
+        collection_id: &str,
+        documents: Vec<Document>,
+    ) -> AppResult<KnowledgeCollection> {
+        self.ingest_into_collection_with_progress(collection_id, documents, None, None)
+            .await
+    }
+
+    pub async fn ingest_into_collection_with_progress(
+        &self,
+        collection_id: &str,
+        documents: Vec<Document>,
+        app_handle: Option<&tauri::AppHandle>,
+        collection_name_hint: Option<&str>,
+    ) -> AppResult<KnowledgeCollection> {
+        let collection = self.get_collection(collection_id)?;
+        let collection_name = collection_name_hint.unwrap_or(collection.name.as_str());
+
         let emit_progress = |stage: &str, progress: u32, detail: &str| {
             if let Some(handle) = app_handle {
                 let _ = handle.emit(
@@ -283,20 +708,58 @@ impl RagPipeline {
 
         emit_progress("chunking", 0, "Starting document chunking...");
 
-        // Inject source_path and content_hash into document metadata so they survive chunking
         let mut documents = documents;
+        let mut doc_scope: HashMap<String, (String, String, String, String, String, bool)> =
+            HashMap::new();
         for doc in &mut documents {
             if let Some(ref sp) = doc.source_path {
                 doc.metadata
                     .entry("source_path".to_string())
                     .or_insert_with(|| sp.clone());
             }
-            // Compute SHA-256 content hash for staleness detection
-            let hash = format!("{:x}", Sha256::digest(doc.content.as_bytes()));
-            doc.metadata.insert("content_hash".to_string(), hash);
+            let source_type = doc
+                .metadata
+                .get("source_type")
+                .cloned()
+                .or_else(|| {
+                    doc.source_path
+                        .as_ref()
+                        .and_then(|p| Path::new(p).extension().and_then(|e| e.to_str()))
+                        .map(|s| s.to_string())
+                })
+                .unwrap_or_default();
+            let (source_kind, source_locator) =
+                Self::source_kind_and_locator(doc.source_path.as_deref(), collection_id, &doc.id);
+            let content_hash = format!("{:x}", Sha256::digest(doc.content.as_bytes()));
+            let trackable = source_kind == "workspace";
+
+            doc.metadata
+                .insert("source_kind".to_string(), source_kind.clone());
+            doc.metadata
+                .insert("source_locator".to_string(), source_locator.clone());
+            doc.metadata
+                .insert("source_type".to_string(), source_type.clone());
+            doc.metadata
+                .insert("content_hash".to_string(), content_hash.clone());
+            doc.metadata.insert(
+                "trackable".to_string(),
+                if trackable { "true" } else { "false" }.to_string(),
+            );
+
+            let doc_key = format!("{}\u{1f}{}\u{1f}{}", doc.id, source_kind, source_locator);
+            doc_scope.insert(
+                doc_key,
+                (
+                    doc.id.clone(),
+                    source_kind,
+                    source_locator,
+                    source_type,
+                    content_hash,
+                    trackable,
+                ),
+            );
         }
 
-        // Chunk all documents (sync)
         let mut all_chunks: Vec<Chunk> = Vec::new();
         for doc in &documents {
             let chunks = self.chunker.chunk(doc)?;
@@ -305,7 +768,7 @@ impl RagPipeline {
 
         if all_chunks.is_empty() {
             emit_progress("storing", 100, "No chunks to store.");
-            return self.get_collection(&collection_id);
+            return self.get_collection(collection_id);
         }
 
         emit_progress(
@@ -318,7 +781,6 @@ impl RagPipeline {
             ),
         );
 
-        // Embed all chunks (async — no connection held)
         emit_progress("embedding", 30, "Generating embeddings...");
         let chunk_texts: Vec<&str> = all_chunks.iter().map(|c| c.content.as_str()).collect();
         let embeddings = self
@@ -333,9 +795,8 @@ impl RagPipeline {
             &format!("Embedded {} chunks", embeddings.len()),
         );
 
-        // Store chunks in SQLite within a transaction (sync scope — connection dropped before await)
         emit_progress("storing", 70, "Storing chunks in database...");
-        let hnsw_items = {
+        let (hnsw_items, stale_rowids) = {
             let mut conn = self
                 .database
                 .get_connection()
@@ -345,19 +806,145 @@ impl RagPipeline {
                 .transaction()
                 .map_err(|e| AppError::database(format!("Failed to begin transaction: {}", e)))?;
 
-            let mut items: Vec<(usize, Vec<f32>)> = Vec::new();
+            let mut stale: Vec<i64> = Vec::new();
+            let mut doc_uid_by_key: HashMap<String, String> = HashMap::new();
 
+            for (doc_key, (display_name, source_kind, source_locator, source_type, content_hash, trackable)) in
+                &doc_scope
+            {
+                let existing_uid: Option<String> = tx
+                    .query_row(
+                        "SELECT document_uid FROM knowledge_documents
+                         WHERE collection_id = ?1 AND source_kind = ?2 AND source_locator = ?3",
+                        rusqlite::params![collection_id, source_kind, source_locator],
+                        |row| row.get(0),
+                    )
+                    .ok();
+
+                let document_uid = if let Some(uid) = existing_uid {
+                    let mut stale_stmt = tx
+                        .prepare(
+                            "SELECT id FROM knowledge_chunks WHERE collection_id = ?1 AND document_uid = ?2",
+                        )
+                        .map_err(|e| {
+                            AppError::database(format!(
+                                "Failed to prepare stale chunk query: {}",
+                                e
+                            ))
+                        })?;
+                    let mut stale_rows = stale_stmt
+                        .query(rusqlite::params![collection_id, uid.clone()])
+                        .map_err(|e| {
+                            AppError::database(format!("Failed to query stale chunks: {}", e))
+                        })?;
+                    while let Some(row) = stale_rows
+                        .next()
+                        .map_err(|e| AppError::database(format!("Failed reading stale chunk row: {}", e)))?
+                    {
+                        stale.push(row.get::<_, i64>(0).unwrap_or_default());
+                    }
+
+                    tx.execute(
+                        "DELETE FROM knowledge_chunks_fts WHERE chunk_id IN (
+                            SELECT id FROM knowledge_chunks WHERE collection_id = ?1 AND document_uid = ?2
+                        )",
+                        rusqlite::params![collection_id, uid.clone()],
+                    )
+                    .map_err(|e| {
+                        AppError::database(format!("Failed deleting old FTS rows for document: {}", e))
+                    })?;
+                    tx.execute(
+                        "DELETE FROM knowledge_chunks WHERE collection_id = ?1 AND document_uid = ?2",
+                        rusqlite::params![collection_id, uid.clone()],
+                    )
+                    .map_err(|e| {
+                        AppError::database(format!("Failed deleting old chunks for document: {}", e))
+                    })?;
+                    tx.execute(
+                        "UPDATE knowledge_documents
+                         SET display_name = ?1, source_type = ?2, content_hash = ?3, trackable = ?4,
+                             updated_at = datetime('now'), last_indexed_at = datetime('now')
+                         WHERE document_uid = ?5",
+                        rusqlite::params![
+                            display_name,
+                            source_type,
+                            content_hash,
+                            if *trackable { 1 } else { 0 },
+                            uid
+                        ],
+                    )
+                    .map_err(|e| {
+                        AppError::database(format!("Failed updating document metadata: {}", e))
+                    })?;
+                    uid
+                } else {
+                    let uid = uuid::Uuid::new_v4().to_string();
+                    tx.execute(
+                        "INSERT INTO knowledge_documents
+                         (document_uid, collection_id, display_name, source_kind, source_locator, source_type, content_hash, trackable)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                        rusqlite::params![
+                            uid,
+                            collection_id,
+                            display_name,
+                            source_kind,
+                            source_locator,
+                            source_type,
+                            content_hash,
+                            if *trackable { 1 } else { 0 },
+                        ],
+                    )
+                    .map_err(|e| {
+                        AppError::database(format!("Failed inserting knowledge document: {}", e))
+                    })?;
+                    uid
+                };
+
+                doc_uid_by_key.insert(doc_key.clone(), document_uid);
+            }
+
+            let mut items: Vec<(usize, Vec<f32>)> = Vec::new();
             for (i, chunk) in all_chunks.iter().enumerate() {
-                let embedding_bytes = embedding_to_bytes(&embeddings[i]);
+                let source_kind = chunk
+                    .metadata
+                    .get("source_kind")
+                    .cloned()
+                    .unwrap_or_else(|| "upload".to_string());
+                let source_locator = chunk
+                    .metadata
+                    .get("source_locator")
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        format!(
+                            "upload://{}/{}/{}",
+                            collection_id,
+                            uuid::Uuid::new_v4(),
+                            Self::sanitize_filename(&chunk.document_id)
+                        )
+                    });
+                let doc_key = format!(
+                    "{}\u{1f}{}\u{1f}{}",
+                    chunk.document_id, source_kind, source_locator
+                );
+                let document_uid = doc_uid_by_key.get(&doc_key).ok_or_else(|| {
+                    AppError::database(format!(
+                        "Document scope missing for chunk insertion: {}",
+                        doc_key
+                    ))
+                })?;
+
+                let mut metadata = chunk.metadata.clone();
+                metadata.insert("document_uid".to_string(), document_uid.clone());
                 let metadata_json =
-                    serde_json::to_string(&chunk.metadata).unwrap_or_else(|_| "{}".to_string());
+                    serde_json::to_string(&metadata).unwrap_or_else(|_| "{}".to_string());
+                let embedding_bytes = embedding_to_bytes(&embeddings[i]);
 
                 tx.execute(
-                    "INSERT INTO knowledge_chunks (collection_id, document_id, chunk_index, content, embedding, metadata)
+                    "INSERT INTO knowledge_chunks (collection_id, document_uid, chunk_index, content, embedding, metadata)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                     rusqlite::params![
                         collection_id,
-                        chunk.document_id,
+                        document_uid,
                         chunk.index as i64,
                         chunk.content,
                         embedding_bytes,
@@ -366,11 +953,17 @@ impl RagPipeline {
                 )
                 .map_err(|e| AppError::database(format!("Failed to insert chunk: {}", e)))?;
 
-                let chunk_rowid = tx.last_insert_rowid() as usize;
-                items.push((chunk_rowid, embeddings[i].clone()));
+                let chunk_id = tx.last_insert_rowid() as i64;
+                tx.execute(
+                    "INSERT INTO knowledge_chunks_fts (chunk_id, collection_id, document_uid, content)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    rusqlite::params![chunk_id, collection_id, document_uid, chunk.content],
+                )
+                .map_err(|e| AppError::database(format!("Failed to insert chunk FTS row: {}", e)))?;
+
+                items.push((chunk_id as usize, embeddings[i].clone()));
             }
 
-            // Update chunk_count inside the same transaction (P0-4 fix)
             let chunk_count: i64 = tx
                 .query_row(
                     "SELECT COUNT(*) FROM knowledge_chunks WHERE collection_id = ?1",
@@ -388,35 +981,31 @@ impl RagPipeline {
             tx.commit()
                 .map_err(|e| AppError::database(format!("Failed to commit transaction: {}", e)))?;
 
-            items
-            // conn dropped here
+            (items, stale)
         };
 
-        // HNSW operations (async — no connection held)
         if !self.hnsw_index.is_ready().await {
             self.hnsw_index.initialize().await;
         }
-        // Check batch_insert return value — log error but don't fail
-        // (SQLite is the source of truth, HNSW is a derived cache)
+        for rowid in stale_rowids {
+            self.hnsw_index.mark_stale(rowid as usize).await;
+        }
         if !self.hnsw_index.batch_insert(&hnsw_items).await {
             tracing::error!(
-                "HNSW batch_insert failed for '{}'; SQLite is source of truth",
+                "HNSW batch_insert failed for '{}'; SQLite remains source of truth",
                 collection_name
             );
-        } else {
-            // Persist HNSW to disk so the index survives app restart
-            if let Err(e) = self.hnsw_index.save_to_disk().await {
-                tracing::warn!(
-                    error = %e,
-                    "HNSW save_to_disk failed after ingest for '{}'; index will be rebuilt on next startup",
-                    collection_name
-                );
-            }
+        }
+        if let Err(e) = self.hnsw_index.save_to_disk().await {
+            tracing::warn!(
+                error = %e,
+                "HNSW save_to_disk failed after ingest for '{}'; index will rebuild at startup",
+                collection_name
+            );
         }
 
         emit_progress("storing", 100, "Ingestion complete.");
-
-        self.get_collection(&collection_id)
+        self.get_collection(collection_id)
     }
 
     /// Query a collection with a natural language query.
@@ -427,13 +1016,11 @@ impl RagPipeline {
         query_text: &str,
         top_k: usize,
     ) -> AppResult<RagQueryResult> {
-        // Find collection (sync scope — connection dropped before await)
         let collection_id = {
             let conn = self
                 .database
                 .get_connection()
                 .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
-
             conn.query_row(
                 "SELECT id FROM knowledge_collections WHERE name = ?1 AND project_id = ?2",
                 rusqlite::params![collection_name, project_id],
@@ -445,152 +1032,446 @@ impl RagPipeline {
                     collection_name, project_id
                 ))
             })?
-            // conn dropped here
         };
 
-        // Embed the query (async — no connection held)
+        let mut result = self
+            .query_scoped(project_id, query_text, top_k, Some(&[collection_id]), None, None)
+            .await?;
+        result.collection_name = collection_name.to_string();
+        Ok(result)
+    }
+
+    fn resolve_collection_scope(
+        &self,
+        project_id: &str,
+        collection_ids: Option<&[String]>,
+    ) -> AppResult<Vec<(String, String)>> {
+        let mut collections = self
+            .list_collections(project_id)?
+            .into_iter()
+            .map(|c| (c.id, c.name))
+            .collect::<Vec<_>>();
+        if let Some(ids) = collection_ids {
+            if !ids.is_empty() {
+                let filter: HashSet<&str> = ids.iter().map(|id| id.as_str()).collect();
+                collections.retain(|(id, _)| filter.contains(id.as_str()));
+            }
+        }
+        Ok(collections)
+    }
+
+    fn load_chunk_search_result(
+        conn: &rusqlite::Connection,
+        chunk_id: i64,
+    ) -> AppResult<Option<(SearchResult, Vec<f32>)>> {
+        let row = conn.query_row(
+            "SELECT c.id, c.collection_id, col.name, d.display_name, d.document_uid,
+                    c.content, COALESCE(c.metadata, '{}'), COALESCE(c.embedding, X'')
+             FROM knowledge_chunks c
+             JOIN knowledge_documents d ON c.document_uid = d.document_uid
+             JOIN knowledge_collections col ON c.collection_id = col.id
+             WHERE c.id = ?1",
+            rusqlite::params![chunk_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, Vec<u8>>(7)?,
+                ))
+            },
+        );
+
+        let Ok((_cid, collection_id, collection_name, display_name, document_uid, content, metadata_json, emb_bytes)) = row else {
+            return Ok(None);
+        };
+
+        let metadata: HashMap<String, String> =
+            serde_json::from_str(&metadata_json).unwrap_or_default();
+        let embedding = bytes_to_embedding(&emb_bytes);
+        Ok(Some((
+            SearchResult {
+                chunk_text: content,
+                collection_id,
+                document_id: display_name,
+                document_uid,
+                collection_name,
+                score: 0.0,
+                metadata,
+            },
+            embedding,
+        )))
+    }
+
+    fn apply_mmr(
+        candidates: Vec<(SearchResult, Vec<f32>, f32)>,
+        max_items: usize,
+    ) -> Vec<(SearchResult, f32)> {
+        if candidates.is_empty() {
+            return Vec::new();
+        }
+        let lambda = 0.72f32;
+        let mut remaining = candidates;
+        let mut selected: Vec<(SearchResult, Vec<f32>, f32)> = Vec::new();
+
+        while !remaining.is_empty() && selected.len() < max_items {
+            let mut best_idx = 0usize;
+            let mut best_score = f32::MIN;
+            for (idx, (_res, emb, relevance)) in remaining.iter().enumerate() {
+                let diversity = if emb.is_empty() || selected.is_empty() {
+                    0.0
+                } else {
+                    selected
+                        .iter()
+                        .filter(|(_, s_emb, _)| !s_emb.is_empty())
+                        .map(|(_, s_emb, _)| cosine_similarity(emb, s_emb))
+                        .fold(0.0, f32::max)
+                };
+                let mmr_score = lambda * *relevance - (1.0 - lambda) * diversity;
+                if mmr_score > best_score {
+                    best_score = mmr_score;
+                    best_idx = idx;
+                }
+            }
+            let chosen = remaining.remove(best_idx);
+            selected.push(chosen);
+        }
+
+        selected
+            .into_iter()
+            .map(|(mut res, _emb, relevance)| {
+                res.score = relevance;
+                (res, relevance)
+            })
+            .collect()
+    }
+
+    fn log_query_run(
+        &self,
+        query: &str,
+        collection_scope: &str,
+        top_k: usize,
+        vector_candidates: usize,
+        bm25_candidates: usize,
+        merged_candidates: usize,
+        rerank_ms: u128,
+        total_ms: u128,
+        result_count: usize,
+    ) {
+        let conn = match self.database.get_connection() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let _ = conn.execute(
+            "INSERT INTO knowledge_query_runs
+             (query, collection_scope, top_k, vector_candidates, bm25_candidates, merged_candidates, rerank_ms, total_ms, result_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            rusqlite::params![
+                query,
+                collection_scope,
+                top_k as i64,
+                vector_candidates as i64,
+                bm25_candidates as i64,
+                merged_candidates as i64,
+                rerank_ms as i64,
+                total_ms as i64,
+                result_count as i64,
+            ],
+        );
+    }
+
+    /// Query with scoped filters and hybrid retrieval (Vector + BM25 + RRF + MMR).
+    pub async fn query_scoped(
+        &self,
+        project_id: &str,
+        query_text: &str,
+        top_k: usize,
+        collection_ids: Option<&[String]>,
+        document_filters: Option<&[ScopedDocumentRef]>,
+        _retrieval_profile: Option<&str>,
+    ) -> AppResult<RagQueryResult> {
+        let started = Instant::now();
+        let scope = self.resolve_collection_scope(project_id, collection_ids)?;
+        if scope.is_empty() {
+            return Ok(RagQueryResult {
+                results: Vec::new(),
+                total_searched: 0,
+                collection_name: "scoped".to_string(),
+            });
+        }
+
+        let allowed_collections: HashSet<String> = scope.iter().map(|(id, _)| id.clone()).collect();
+        let scoped_documents: HashSet<(String, String)> = document_filters
+            .unwrap_or(&[])
+            .iter()
+            .map(|d| (d.collection_id.clone(), d.document_uid.clone()))
+            .collect();
+        let has_doc_filter = !scoped_documents.is_empty();
+
         let query_embedding = self
             .embedding_manager
             .embed_query(query_text)
             .await
             .map_err(|e| AppError::internal(format!("Query embedding failed: {}", e)))?;
 
-        // Search HNSW (async — no connection held)
-        let hnsw_results = self.hnsw_index.search(&query_embedding, top_k * 3).await;
-        if hnsw_results.is_empty() {
-            tracing::warn!(
-                collection = %collection_name,
-                "HNSW returned no results; attempting SQLite fallback search"
-            );
-        }
+        let vector_top_n = 80usize;
+        let bm25_top_n = 80usize;
+        let fused_top_n = 30usize;
+        let mmr_top_n = 20usize;
 
-        // Look up chunks from DB (sync scope — connection dropped before await)
-        let mut search_results = {
+        let mut candidate_map: HashMap<i64, (SearchResult, Vec<f32>, Option<usize>, Option<usize>)> =
+            HashMap::new();
+        let mut vector_ranked: Vec<i64> = Vec::new();
+        let mut bm25_ranked: Vec<i64> = Vec::new();
+
+        {
             let conn = self
                 .database
                 .get_connection()
                 .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
-            let mut results = Vec::new();
-            for (chunk_rowid, distance) in &hnsw_results {
-                let chunk_data: Option<(String, String, String, Vec<u8>)> = conn
-                    .query_row(
-                        "SELECT document_id, content, metadata, COALESCE(embedding, X'')
-                         FROM knowledge_chunks
-                         WHERE rowid = ?1 AND collection_id = ?2",
-                        rusqlite::params![*chunk_rowid as i64, collection_id],
-                        |row| {
-                            Ok((
-                                row.get::<_, String>(0)?,
-                                row.get::<_, String>(1)?,
-                                row.get::<_, String>(2)?,
-                                row.get::<_, Vec<u8>>(3)?,
-                            ))
-                        },
-                    )
-                    .ok();
-
-                if let Some((document_id, content, metadata_json, _emb_bytes)) = chunk_data {
-                    let metadata: HashMap<String, String> =
-                        serde_json::from_str(&metadata_json).unwrap_or_default();
-
-                    let score = 1.0 - distance;
-
-                    results.push(SearchResult {
-                        chunk_text: content,
-                        document_id,
-                        collection_name: collection_name.to_string(),
-                        score,
-                        metadata,
-                    });
+            let vector_hits = self.hnsw_index.search(&query_embedding, vector_top_n * 3).await;
+            for (rank, (chunk_id, distance)) in vector_hits.iter().enumerate() {
+                let Some((mut result, embedding)) =
+                    Self::load_chunk_search_result(&conn, *chunk_id as i64)?
+                else {
+                    continue;
+                };
+                if !allowed_collections.contains(&result.collection_id) {
+                    continue;
+                }
+                if has_doc_filter
+                    && !scoped_documents
+                        .contains(&(result.collection_id.clone(), result.document_uid.clone()))
+                {
+                    continue;
+                }
+                result.score = (1.0 - distance).clamp(0.0, 1.0);
+                vector_ranked.push(*chunk_id as i64);
+                candidate_map
+                    .entry(*chunk_id as i64)
+                    .and_modify(|entry| {
+                        entry.0 = result.clone();
+                        entry.1 = embedding.clone();
+                        entry.2 = Some(rank + 1);
+                    })
+                    .or_insert((result, embedding, Some(rank + 1), None));
+                if vector_ranked.len() >= vector_top_n {
+                    break;
                 }
             }
 
-            results
-            // conn dropped here
-        };
+            let mut bm25_stmt = conn
+                .prepare(
+                    "SELECT chunk_id, collection_id, document_uid, bm25(knowledge_chunks_fts) AS rank
+                     FROM knowledge_chunks_fts
+                     WHERE knowledge_chunks_fts MATCH ?1
+                     ORDER BY rank
+                     LIMIT ?2",
+                )
+                .map_err(|e| AppError::database(format!("Failed to prepare BM25 query: {}", e)))?;
+            let bm25_rows = bm25_stmt
+                .query_map(rusqlite::params![query_text, bm25_top_n as i64], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, f64>(3).unwrap_or(0.0),
+                    ))
+                })
+                .map_err(|e| AppError::database(format!("Failed to execute BM25 query: {}", e)))?;
 
-        if search_results.is_empty() {
-            tracing::warn!(
-                collection = %collection_name,
-                "Primary ANN search returned empty results; falling back to SQLite cosine search"
-            );
-            search_results = self.sqlite_similarity_fallback(
-                &collection_id,
-                collection_name,
-                &query_embedding,
-                top_k * 3,
-            )?;
+            for (rank, row) in bm25_rows.filter_map(|r| r.ok()).enumerate() {
+                let (chunk_id, collection_id, document_uid, bm25_rank) = row;
+                if !allowed_collections.contains(&collection_id) {
+                    continue;
+                }
+                if has_doc_filter
+                    && !scoped_documents.contains(&(collection_id.clone(), document_uid.clone()))
+                {
+                    continue;
+                }
+                let Some((mut result, embedding)) = Self::load_chunk_search_result(&conn, chunk_id)?
+                else {
+                    continue;
+                };
+                let bm25_score = (1.0 / (1.0 + bm25_rank.abs() as f32)).clamp(0.0, 1.0);
+                result.score = bm25_score;
+                bm25_ranked.push(chunk_id);
+                candidate_map
+                    .entry(chunk_id)
+                    .and_modify(|entry| {
+                        entry.0 = result.clone();
+                        entry.1 = embedding.clone();
+                        entry.3 = Some(rank + 1);
+                    })
+                    .or_insert((result, embedding, None, Some(rank + 1)));
+            }
         }
 
+        let rrf_k = 60.0f32;
+        let mut fused: Vec<(SearchResult, Vec<f32>, f32)> = candidate_map
+            .into_iter()
+            .map(|(_chunk_id, (result, emb, v_rank, b_rank))| {
+                let mut fusion = 0.0f32;
+                if let Some(v) = v_rank {
+                    fusion += 1.0 / (rrf_k + v as f32);
+                }
+                if let Some(b) = b_rank {
+                    fusion += 1.0 / (rrf_k + b as f32);
+                }
+                (result, emb, fusion)
+            })
+            .collect();
+
+        fused.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+        if fused.len() > fused_top_n {
+            fused.truncate(fused_top_n);
+        }
+
+        if fused.is_empty() {
+            let scope_ids: Vec<String> = allowed_collections.into_iter().collect();
+            let fallback = self.sqlite_similarity_fallback(
+                &scope_ids,
+                query_text,
+                &query_embedding,
+                top_k.max(1) * 3,
+                if has_doc_filter {
+                    Some(&scoped_documents)
+                } else {
+                    None
+                },
+            )?;
+            return Ok(RagQueryResult {
+                total_searched: fallback.len(),
+                results: fallback.into_iter().take(top_k).collect(),
+                collection_name: "scoped".to_string(),
+            });
+        }
+
+        let mmr_selected = Self::apply_mmr(fused, mmr_top_n);
+        let mut search_results: Vec<SearchResult> =
+            mmr_selected.into_iter().map(|(r, _)| r).collect();
         let total_searched = search_results.len();
 
-        // Apply reranker if configured (async — no connection held)
+        let rerank_started = Instant::now();
         if let Some(ref reranker) = self.reranker {
             search_results = reranker.rerank(query_text, search_results).await?;
         }
-
+        let rerank_ms = rerank_started.elapsed().as_millis();
         search_results.truncate(top_k);
+
+        let scope_label = scope
+            .iter()
+            .map(|(_, name)| name.clone())
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        self.log_query_run(
+            query_text,
+            &scope_label,
+            top_k,
+            vector_ranked.len(),
+            bm25_ranked.len(),
+            total_searched,
+            rerank_ms,
+            started.elapsed().as_millis(),
+            search_results.len(),
+        );
 
         Ok(RagQueryResult {
             results: search_results,
             total_searched,
-            collection_name: collection_name.to_string(),
+            collection_name: "scoped".to_string(),
         })
     }
 
-    /// Fallback query path when ANN search fails or returns empty.
-    ///
-    /// Performs brute-force cosine similarity over all chunk embeddings in SQLite.
+    /// Fallback query path when ANN + BM25 search returns empty.
     fn sqlite_similarity_fallback(
         &self,
-        collection_id: &str,
-        collection_name: &str,
+        collection_ids: &[String],
+        query_text: &str,
         query_embedding: &[f32],
         limit: usize,
+        scoped_documents: Option<&HashSet<(String, String)>>,
     ) -> AppResult<Vec<SearchResult>> {
+        if collection_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
         let conn = self
             .database
             .get_connection()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
+        let placeholders = vec!["?"; collection_ids.len()].join(",");
+        let sql = format!(
+            "SELECT c.collection_id, col.name, d.display_name, d.document_uid, c.content, COALESCE(c.metadata, '{{}}'), COALESCE(c.embedding, X'')
+             FROM knowledge_chunks c
+             JOIN knowledge_documents d ON c.document_uid = d.document_uid
+             JOIN knowledge_collections col ON c.collection_id = col.id
+             WHERE c.collection_id IN ({})
+               AND c.embedding IS NOT NULL
+               AND length(c.embedding) > 0",
+            placeholders
+        );
+
         let mut stmt = conn
-            .prepare(
-                "SELECT document_id, content, metadata, embedding
-                 FROM knowledge_chunks
-                 WHERE collection_id = ?1
-                   AND embedding IS NOT NULL
-                   AND length(embedding) > 0",
-            )
+            .prepare(&sql)
             .map_err(|e| AppError::database(format!("Failed to prepare fallback query: {}", e)))?;
 
+        let params: Vec<&dyn rusqlite::ToSql> = collection_ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::ToSql)
+            .collect();
+
         let mut results: Vec<SearchResult> = stmt
-            .query_map(rusqlite::params![collection_id], |row| {
+            .query_map(params.as_slice(), |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
-                    row.get::<_, Vec<u8>>(3)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, Vec<u8>>(6)?,
                 ))
             })
             .map_err(|e| AppError::database(format!("Failed to execute fallback query: {}", e)))?
             .filter_map(|row| row.ok())
-            .filter_map(|(document_id, content, metadata_json, emb_bytes)| {
-                let chunk_embedding = bytes_to_embedding(&emb_bytes);
-                if chunk_embedding.is_empty() {
-                    return None;
-                }
-                let score = cosine_similarity(query_embedding, &chunk_embedding);
-                let metadata: HashMap<String, String> =
-                    serde_json::from_str(&metadata_json).unwrap_or_default();
-                Some(SearchResult {
-                    chunk_text: content,
-                    document_id,
-                    collection_name: collection_name.to_string(),
-                    score,
-                    metadata,
-                })
-            })
+            .filter_map(
+                |(collection_id, collection_name, display_name, document_uid, content, metadata_json, emb_bytes)| {
+                    if let Some(filter) = scoped_documents {
+                        if !filter.contains(&(collection_id.clone(), document_uid.clone())) {
+                            return None;
+                        }
+                    }
+                    let chunk_embedding = bytes_to_embedding(&emb_bytes);
+                    if chunk_embedding.is_empty() {
+                        return None;
+                    }
+                    let metadata: HashMap<String, String> =
+                        serde_json::from_str(&metadata_json).unwrap_or_default();
+                    let lexical_bonus = if content.to_lowercase().contains(&query_text.to_lowercase()) {
+                        0.05
+                    } else {
+                        0.0
+                    };
+                    Some(SearchResult {
+                        chunk_text: content,
+                        collection_id,
+                        document_id: display_name,
+                        document_uid,
+                        collection_name,
+                        score: (cosine_similarity(query_embedding, &chunk_embedding) + lexical_bonus).clamp(0.0, 1.0),
+                        metadata,
+                    })
+                },
+            )
             .collect();
 
         results.sort_by(|a, b| {
@@ -602,6 +1483,123 @@ impl RagPipeline {
             results.truncate(limit);
         }
         Ok(results)
+    }
+
+    /// List recent query runs for a project and optional scoped collections.
+    pub fn list_query_runs(
+        &self,
+        project_id: &str,
+        collection_ids: Option<&[String]>,
+        limit: usize,
+    ) -> AppResult<Vec<QueryRunSummary>> {
+        let conn = self
+            .database
+            .get_connection()
+            .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
+
+        let safe_limit = limit.clamp(1, 500) as i64;
+        let has_collection_filter = collection_ids.is_some();
+
+        // query_runs currently stores collection names in `collection_scope`, so we resolve
+        // optional collection IDs to names and use LIKE filtering.
+        let scope_names: Vec<String> = if let Some(ids) = collection_ids {
+            if ids.is_empty() {
+                Vec::new()
+            } else {
+                let mut out = Vec::new();
+                for collection_id in ids {
+                    let maybe_name: Option<String> = conn
+                        .query_row(
+                            "SELECT name FROM knowledge_collections WHERE id = ?1 AND project_id = ?2",
+                            rusqlite::params![collection_id, project_id],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .map_err(|e| {
+                            AppError::database(format!(
+                                "Failed resolving collection id '{}' to name: {}",
+                                collection_id, e
+                            ))
+                        })?;
+                    if let Some(name) = maybe_name {
+                        out.push(name);
+                    }
+                }
+                out
+            }
+        } else {
+            Vec::new()
+        };
+
+        let base_sql = "SELECT id, query, collection_scope, top_k, vector_candidates, bm25_candidates, merged_candidates, rerank_ms, total_ms, result_count, created_at FROM knowledge_query_runs";
+
+        let mut query_runs = Vec::new();
+        if scope_names.is_empty() {
+            if has_collection_filter {
+                return Ok(Vec::new());
+            }
+            let sql = format!("{base_sql} ORDER BY id DESC LIMIT ?1");
+            let mut stmt = conn
+                .prepare(&sql)
+                .map_err(|e| AppError::database(format!("Failed to prepare query runs statement: {}", e)))?;
+            let rows = stmt
+                .query_map(rusqlite::params![safe_limit], |row| {
+                    Ok(QueryRunSummary {
+                        id: row.get(0)?,
+                        query: row.get(1)?,
+                        collection_scope: row.get(2)?,
+                        top_k: row.get(3)?,
+                        vector_candidates: row.get(4)?,
+                        bm25_candidates: row.get(5)?,
+                        merged_candidates: row.get(6)?,
+                        rerank_ms: row.get(7)?,
+                        total_ms: row.get(8)?,
+                        result_count: row.get(9)?,
+                        created_at: row.get(10)?,
+                    })
+                })
+                .map_err(|e| AppError::database(format!("Failed querying query runs: {}", e)))?;
+            for row in rows.flatten() {
+                query_runs.push(row);
+            }
+            return Ok(query_runs);
+        }
+
+        let like_clauses = vec!["collection_scope LIKE ?"; scope_names.len()].join(" OR ");
+        let sql = format!("{base_sql} WHERE ({like_clauses}) ORDER BY id DESC LIMIT ?");
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| AppError::database(format!("Failed to prepare scoped query runs statement: {}", e)))?;
+
+        let mut params: Vec<String> = scope_names
+            .iter()
+            .map(|name| format!("%{}%", name))
+            .collect();
+        params.push(safe_limit.to_string());
+        let params_ref: Vec<&dyn rusqlite::ToSql> =
+            params.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
+
+        let rows = stmt
+            .query_map(params_ref.as_slice(), |row| {
+                Ok(QueryRunSummary {
+                    id: row.get(0)?,
+                    query: row.get(1)?,
+                    collection_scope: row.get(2)?,
+                    top_k: row.get(3)?,
+                    vector_candidates: row.get(4)?,
+                    bm25_candidates: row.get(5)?,
+                    merged_candidates: row.get(6)?,
+                    rerank_ms: row.get(7)?,
+                    total_ms: row.get(8)?,
+                    result_count: row.get(9)?,
+                    created_at: row.get(10)?,
+                })
+            })
+            .map_err(|e| AppError::database(format!("Failed querying scoped query runs: {}", e)))?;
+        for row in rows.flatten() {
+            query_runs.push(row);
+        }
+        Ok(query_runs)
     }
 
     /// List all collections for a project.
@@ -645,19 +1643,45 @@ impl RagPipeline {
 
         let mut stmt = conn
             .prepare(
-                "SELECT document_id, COUNT(*) as chunk_count,
-                        SUBSTR(MIN(CASE WHEN chunk_index = 0 THEN content END), 1, 200) as preview
-                 FROM knowledge_chunks WHERE collection_id = ?1
-                 GROUP BY document_id ORDER BY document_id",
+                "SELECT
+                    d.document_uid,
+                    d.display_name,
+                    d.source_kind,
+                    d.source_locator,
+                    d.source_type,
+                    d.trackable,
+                    d.last_indexed_at,
+                    COALESCE(dc.chunk_count, 0) AS chunk_count,
+                    COALESCE(dp.preview, '') AS preview
+                 FROM knowledge_documents d
+                 LEFT JOIN (
+                    SELECT document_uid, COUNT(*) AS chunk_count
+                    FROM knowledge_chunks
+                    WHERE collection_id = ?1
+                    GROUP BY document_uid
+                 ) dc ON dc.document_uid = d.document_uid
+                 LEFT JOIN (
+                    SELECT document_uid, SUBSTR(content, 1, 200) AS preview
+                    FROM knowledge_chunks
+                    WHERE collection_id = ?1 AND chunk_index = 0
+                 ) dp ON dp.document_uid = d.document_uid
+                 WHERE d.collection_id = ?1
+                 ORDER BY d.display_name",
             )
             .map_err(|e| AppError::database(format!("Failed to prepare query: {}", e)))?;
 
         let rows = stmt
             .query_map(rusqlite::params![collection_id], |row| {
                 Ok(DocumentSummary {
-                    document_id: row.get(0)?,
-                    chunk_count: row.get(1)?,
-                    preview: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    document_uid: row.get(0)?,
+                    display_name: row.get(1)?,
+                    source_kind: row.get(2)?,
+                    source_locator: row.get(3)?,
+                    source_type: row.get(4)?,
+                    trackable: row.get::<_, i64>(5)? > 0,
+                    last_indexed_at: row.get(6)?,
+                    chunk_count: row.get(7)?,
+                    preview: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
                 })
             })
             .map_err(|e| AppError::database(format!("Failed to query documents: {}", e)))?;
@@ -665,11 +1689,11 @@ impl RagPipeline {
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
-    /// Delete a single document from a collection by document_id.
+    /// Delete a single document from a collection by document_uid.
     ///
     /// Removes all chunks for the document, marks HNSW entries as stale,
     /// and updates the collection's chunk_count — all within a transaction.
-    pub async fn delete_document(&self, collection_id: &str, document_id: &str) -> AppResult<()> {
+    pub async fn delete_document(&self, collection_id: &str, document_uid: &str) -> AppResult<()> {
         // Collect chunk rowids for HNSW stale marking (sync scope)
         let rowids = {
             let conn = self
@@ -679,12 +1703,12 @@ impl RagPipeline {
 
             let mut stmt = conn
                 .prepare(
-                    "SELECT rowid FROM knowledge_chunks WHERE collection_id = ?1 AND document_id = ?2",
+                    "SELECT id FROM knowledge_chunks WHERE collection_id = ?1 AND document_uid = ?2",
                 )
                 .map_err(|e| AppError::database(format!("Failed to prepare query: {}", e)))?;
 
             let rowids: Vec<i64> = stmt
-                .query_map(rusqlite::params![collection_id, document_id], |row| {
+                .query_map(rusqlite::params![collection_id, document_uid], |row| {
                     row.get(0)
                 })
                 .map_err(|e| AppError::database(format!("Failed to query rowids: {}", e)))?
@@ -697,7 +1721,7 @@ impl RagPipeline {
         if rowids.is_empty() {
             return Err(AppError::not_found(format!(
                 "Document '{}' not found in collection",
-                document_id
+                document_uid
             )));
         }
 
@@ -718,10 +1742,24 @@ impl RagPipeline {
                 .map_err(|e| AppError::database(format!("Failed to begin transaction: {}", e)))?;
 
             tx.execute(
-                "DELETE FROM knowledge_chunks WHERE collection_id = ?1 AND document_id = ?2",
-                rusqlite::params![collection_id, document_id],
+                "DELETE FROM knowledge_chunks_fts WHERE chunk_id IN (
+                    SELECT id FROM knowledge_chunks WHERE collection_id = ?1 AND document_uid = ?2
+                )",
+                rusqlite::params![collection_id, document_uid],
+            )
+            .map_err(|e| AppError::database(format!("Failed to delete document FTS rows: {}", e)))?;
+
+            tx.execute(
+                "DELETE FROM knowledge_chunks WHERE collection_id = ?1 AND document_uid = ?2",
+                rusqlite::params![collection_id, document_uid],
             )
             .map_err(|e| AppError::database(format!("Failed to delete document chunks: {}", e)))?;
+
+            tx.execute(
+                "DELETE FROM knowledge_documents WHERE collection_id = ?1 AND document_uid = ?2",
+                rusqlite::params![collection_id, document_uid],
+            )
+            .map_err(|e| AppError::database(format!("Failed to delete document record: {}", e)))?;
 
             let chunk_count: i64 = tx
                 .query_row(
@@ -799,10 +1837,22 @@ impl RagPipeline {
                 .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             conn.execute(
+                "DELETE FROM knowledge_chunks_fts WHERE collection_id = ?1",
+                rusqlite::params![collection_id],
+            )
+            .map_err(|e| AppError::database(format!("Failed to delete chunk fts rows: {}", e)))?;
+
+            conn.execute(
                 "DELETE FROM knowledge_chunks WHERE collection_id = ?1",
                 rusqlite::params![collection_id],
             )
             .map_err(|e| AppError::database(format!("Failed to delete chunks: {}", e)))?;
+
+            conn.execute(
+                "DELETE FROM knowledge_documents WHERE collection_id = ?1",
+                rusqlite::params![collection_id],
+            )
+            .map_err(|e| AppError::database(format!("Failed to delete documents: {}", e)))?;
 
             conn.execute(
                 "DELETE FROM knowledge_collections WHERE id = ?1",
@@ -886,74 +1936,58 @@ impl RagPipeline {
     pub async fn reingest_document(
         &self,
         collection_id: &str,
-        document_id: &str,
+        document_uid: &str,
         new_content: Option<String>,
         app_handle: Option<&tauri::AppHandle>,
     ) -> AppResult<KnowledgeCollection> {
-        // Recover metadata from the first chunk
-        let (source_path, source_type) = {
-            let conn = self
-                .database
-                .get_connection()
-                .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
-
-            let metadata_json: String = conn
-                .query_row(
-                    "SELECT metadata FROM knowledge_chunks WHERE collection_id = ?1 AND document_id = ?2 AND chunk_index = 0",
-                    rusqlite::params![collection_id, document_id],
-                    |row| row.get(0),
-                )
-                .map_err(|e| AppError::not_found(format!("Document '{}' not found: {}", document_id, e)))?;
-
-            let metadata: HashMap<String, String> =
-                serde_json::from_str(&metadata_json).unwrap_or_default();
-
-            (
-                metadata.get("source_path").cloned(),
-                metadata.get("source_type").cloned().unwrap_or_default(),
-            )
-        };
-
-        // Get content: from argument, or read from disk
-        let content = if let Some(c) = new_content {
-            c
-        } else {
-            let sp = source_path
-                .as_ref()
-                .ok_or_else(|| AppError::internal("No source_path to read from disk"))?;
-            let path = Path::new(sp);
-            if !path.exists() {
-                return Err(AppError::not_found(format!("File not found: {}", sp)));
-            }
-            Self::read_file_content(path, &source_type)?
-        };
-
-        // Delete old document
-        self.delete_document(collection_id, document_id).await?;
-
-        // Build new Document (content_hash will be computed in ingest_with_progress)
-        let doc = if let Some(ref sp) = source_path {
-            Document::from_parsed_content(document_id, content, sp.clone(), source_type)
-        } else {
-            Document::new(document_id, content)
-        };
-
-        // Look up collection name and project_id
-        let (name, project_id) = {
+        let (display_name, source_kind, source_locator, source_type) = {
             let conn = self
                 .database
                 .get_connection()
                 .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
             conn.query_row(
-                "SELECT name, project_id FROM knowledge_collections WHERE id = ?1",
-                rusqlite::params![collection_id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                "SELECT display_name, source_kind, source_locator, source_type
+                 FROM knowledge_documents WHERE collection_id = ?1 AND document_uid = ?2",
+                rusqlite::params![collection_id, document_uid],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                },
             )
-            .map_err(|e| AppError::not_found(format!("Collection not found: {}", e)))?
+            .map_err(|e| AppError::not_found(format!("Document '{}' not found: {}", document_uid, e)))?
         };
 
-        self.ingest_with_progress(&name, &project_id, "", vec![doc], app_handle)
+        let content = if let Some(c) = new_content {
+            c
+        } else {
+            if source_kind != "workspace" {
+                return Err(AppError::validation(format!(
+                    "Document '{}' is not trackable from filesystem",
+                    document_uid
+                )));
+            }
+            let path = Path::new(&source_locator);
+            if !path.exists() {
+                return Err(AppError::not_found(format!(
+                    "File not found: {}",
+                    source_locator
+                )));
+            }
+            Self::read_file_content(path, &source_type)?
+        };
+
+        let doc = Document::from_parsed_content(
+            display_name,
+            content,
+            source_locator,
+            source_type,
+        );
+        self.ingest_into_collection_with_progress(collection_id, vec![doc], app_handle, None)
             .await
     }
 
@@ -990,18 +2024,26 @@ impl RagPipeline {
             .get_connection()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
-        // Get unique document_ids with their first chunk's metadata
         let mut stmt = conn
             .prepare(
-                "SELECT document_id, metadata FROM knowledge_chunks
-                 WHERE collection_id = ?1 AND chunk_index = 0
-                 ORDER BY document_id",
+                "SELECT document_uid, display_name, source_kind, source_locator, source_type, content_hash, trackable
+                 FROM knowledge_documents
+                 WHERE collection_id = ?1
+                 ORDER BY display_name",
             )
             .map_err(|e| AppError::database(format!("Failed to prepare query: {}", e)))?;
 
-        let rows: Vec<(String, String)> = stmt
+        let rows: Vec<(String, String, String, String, String, String, i64)> = stmt
             .query_map(rusqlite::params![collection_id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, i64>(6)?,
+                ))
             })
             .map_err(|e| AppError::database(format!("Failed to query documents: {}", e)))?
             .filter_map(|r| r.ok())
@@ -1012,46 +2054,40 @@ impl RagPipeline {
         let mut unchanged = 0usize;
         let mut indexed_paths = std::collections::HashSet::new();
 
-        for (document_id, metadata_json) in &rows {
-            let metadata: HashMap<String, String> =
-                serde_json::from_str(metadata_json).unwrap_or_default();
+        for (document_uid, display_name, source_kind, source_locator, source_type, old_hash, trackable) in &rows {
+            let is_trackable = *trackable > 0 && source_kind == "workspace";
+            if !is_trackable {
+                unchanged += 1;
+                continue;
+            }
 
-            let source_path = match metadata.get("source_path") {
-                Some(sp) if !sp.is_empty() => sp.clone(),
-                _ => {
-                    // No source_path — not trackable, skip
-                    unchanged += 1;
-                    continue;
-                }
-            };
-
-            let source_type = metadata.get("source_type").cloned().unwrap_or_default();
-            let old_hash = metadata.get("content_hash").cloned().unwrap_or_default();
-
-            indexed_paths.insert(source_path.clone());
-            let path = Path::new(&source_path);
+            indexed_paths.insert(source_locator.clone());
+            let path = Path::new(source_locator);
 
             if !path.exists() {
                 deleted.push(DocUpdateInfo {
-                    document_id: document_id.clone(),
-                    source_path,
-                    source_type,
-                    old_hash,
+                    document_uid: document_uid.clone(),
+                    display_name: display_name.clone(),
+                    source_kind: source_kind.clone(),
+                    source_locator: source_locator.clone(),
+                    source_type: source_type.clone(),
+                    old_hash: old_hash.clone(),
                     new_hash: None,
                 });
                 continue;
             }
 
-            // Read file and compute hash
-            match Self::read_file_content(path, &source_type) {
+            match Self::read_file_content(path, source_type) {
                 Ok(content) => {
                     let new_hash = format!("{:x}", Sha256::digest(content.as_bytes()));
-                    if new_hash != old_hash {
+                    if new_hash != *old_hash {
                         modified.push(DocUpdateInfo {
-                            document_id: document_id.clone(),
-                            source_path,
-                            source_type,
-                            old_hash,
+                            document_uid: document_uid.clone(),
+                            display_name: display_name.clone(),
+                            source_kind: source_kind.clone(),
+                            source_locator: source_locator.clone(),
+                            source_type: source_type.clone(),
+                            old_hash: old_hash.clone(),
                             new_hash: Some(new_hash),
                         });
                     } else {
@@ -1113,32 +2149,18 @@ impl RagPipeline {
     ) -> AppResult<KnowledgeCollection> {
         // Reingest modified documents
         for doc_info in &updates.modified {
-            self.reingest_document(collection_id, &doc_info.document_id, None, app_handle)
+            self.reingest_document(collection_id, &doc_info.document_uid, None, app_handle)
                 .await?;
         }
 
         // Delete removed documents
         for doc_info in &updates.deleted {
-            self.delete_document(collection_id, &doc_info.document_id)
+            self.delete_document(collection_id, &doc_info.document_uid)
                 .await?;
         }
 
         // Ingest new files
         if !updates.new_files.is_empty() {
-            let (name, project_id) = {
-                let conn = self
-                    .database
-                    .get_connection()
-                    .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
-
-                conn.query_row(
-                    "SELECT name, project_id FROM knowledge_collections WHERE id = ?1",
-                    rusqlite::params![collection_id],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-                )
-                .map_err(|e| AppError::not_found(format!("Collection not found: {}", e)))?
-            };
-
             let mut docs = Vec::new();
             for file_path in &updates.new_files {
                 let path = PathBuf::from(file_path);
@@ -1164,7 +2186,7 @@ impl RagPipeline {
             }
 
             if !docs.is_empty() {
-                self.ingest_with_progress(&name, &project_id, "", docs, app_handle)
+                self.ingest_into_collection_with_progress(collection_id, docs, app_handle, None)
                     .await?;
             }
         }

@@ -14,6 +14,7 @@ use crate::services::knowledge::chunker::{Chunker, Document, ParagraphChunker};
 use crate::services::knowledge::docs_indexer::{DocsIndexer, DocsKbStatus};
 use crate::services::knowledge::pipeline::{
     CollectionUpdateCheck, DocumentSummary, KnowledgeCollection, RagPipeline, RagQueryResult,
+    QueryRunSummary, ScopedDocumentRef,
 };
 use crate::services::knowledge::reranker::{NoopReranker, Reranker, SearchResult};
 use crate::services::orchestrator::embedding_config_builder;
@@ -170,7 +171,8 @@ impl Default for KnowledgeState {
 /// Request for document ingestion.
 #[derive(Debug, Deserialize)]
 pub struct IngestRequest {
-    pub collection_name: String,
+    pub collection_id: Option<String>,
+    pub collection_name: Option<String>,
     pub project_id: String,
     pub description: Option<String>,
     pub documents: Vec<DocumentInput>,
@@ -195,10 +197,13 @@ pub struct DocumentInput {
 /// Request for querying a collection.
 #[derive(Debug, Deserialize)]
 pub struct QueryRequest {
-    pub collection_name: String,
     pub project_id: String,
     pub query: String,
     pub top_k: Option<usize>,
+    pub collection_name: Option<String>,
+    pub collection_ids: Option<Vec<String>>,
+    pub document_filters: Option<Vec<ScopedDocumentRef>>,
+    pub retrieval_profile: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -398,7 +403,8 @@ pub async fn rag_ingest_documents(
     app_handle: tauri::AppHandle,
     knowledge_state: State<'_, KnowledgeState>,
     app_state: State<'_, crate::state::AppState>,
-    collection_name: String,
+    collection_id: Option<String>,
+    collection_name: Option<String>,
     project_id: String,
     description: Option<String>,
     documents: Vec<DocumentInput>,
@@ -413,12 +419,25 @@ pub async fn rag_ingest_documents(
     // Convert DocumentInput to chunker::Document
     let docs: Vec<Document> = documents.into_iter().map(|d| d.into_document()).collect();
 
-    let desc = description.as_deref().unwrap_or("");
+    let result = if let Some(collection_id) = collection_id {
+        pipeline
+            .ingest_into_collection_with_progress(&collection_id, docs, Some(&app_handle), None)
+            .await
+    } else {
+        let name = if let Some(name) = collection_name.as_deref() {
+            name
+        } else {
+            return Ok(CommandResponse::err(
+                "collection_name is required when collection_id is not provided",
+            ));
+        };
+        let desc = description.as_deref().unwrap_or("");
+        pipeline
+            .ingest_with_progress(name, &project_id, desc, docs, Some(&app_handle))
+            .await
+    };
 
-    match pipeline
-        .ingest_with_progress(&collection_name, &project_id, desc, docs, Some(&app_handle))
-        .await
-    {
+    match result {
         Ok(collection) => {
             // Persist TF-IDF vocabulary after successful ingest
             if is_tfidf_pipeline(&pipeline) {
@@ -435,10 +454,13 @@ pub async fn rag_ingest_documents(
 pub async fn rag_query(
     knowledge_state: State<'_, KnowledgeState>,
     app_state: State<'_, crate::state::AppState>,
-    collection_name: String,
     project_id: String,
     query: String,
     top_k: Option<usize>,
+    collection_name: Option<String>,
+    collection_ids: Option<Vec<String>>,
+    document_filters: Option<Vec<ScopedDocumentRef>>,
+    retrieval_profile: Option<String>,
 ) -> Result<CommandResponse<RagQueryResult>, String> {
     ensure_initialized(&knowledge_state, &app_state).await?;
 
@@ -449,11 +471,45 @@ pub async fn rag_query(
 
     let k = top_k.unwrap_or(5);
 
-    match pipeline
-        .query(&collection_name, &project_id, &query, k)
-        .await
-    {
+    let result = if let Some(name) = collection_name.as_deref() {
+        pipeline.query(name, &project_id, &query, k).await
+    } else {
+        pipeline
+            .query_scoped(
+                &project_id,
+                &query,
+                k,
+                collection_ids.as_deref(),
+                document_filters.as_deref(),
+                retrieval_profile.as_deref(),
+            )
+            .await
+    };
+
+    match result {
         Ok(result) => Ok(CommandResponse::ok(result)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// List recent knowledge query runs for local observability.
+#[tauri::command]
+pub async fn rag_list_query_runs(
+    knowledge_state: State<'_, KnowledgeState>,
+    app_state: State<'_, crate::state::AppState>,
+    project_id: String,
+    collection_ids: Option<Vec<String>>,
+    limit: Option<usize>,
+) -> Result<CommandResponse<Vec<QueryRunSummary>>, String> {
+    ensure_initialized(&knowledge_state, &app_state).await?;
+
+    let pipeline = match knowledge_state.get_pipeline().await {
+        Ok(p) => p,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+
+    match pipeline.list_query_runs(&project_id, collection_ids.as_deref(), limit.unwrap_or(20)) {
+        Ok(runs) => Ok(CommandResponse::ok(runs)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
 }
@@ -556,7 +612,7 @@ pub async fn rag_delete_document(
     knowledge_state: State<'_, KnowledgeState>,
     app_state: State<'_, crate::state::AppState>,
     collection_id: String,
-    document_id: String,
+    document_uid: String,
 ) -> Result<CommandResponse<bool>, String> {
     ensure_initialized(&knowledge_state, &app_state).await?;
 
@@ -565,7 +621,7 @@ pub async fn rag_delete_document(
         Err(e) => return Ok(CommandResponse::err(e.to_string())),
     };
 
-    match pipeline.delete_document(&collection_id, &document_id).await {
+    match pipeline.delete_document(&collection_id, &document_uid).await {
         Ok(()) => Ok(CommandResponse::ok(true)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -1209,7 +1265,7 @@ mod tests {
             max_context_chunks: 5,
             minimum_relevance_score: 0.3,
             collection_ids: None,
-            document_ids: None,
+            document_refs: None,
         };
 
         let chunks = provider

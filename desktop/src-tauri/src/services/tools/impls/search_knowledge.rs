@@ -8,10 +8,7 @@
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use crate::services::knowledge::context_provider::KnowledgeContextConfig;
-use crate::services::knowledge::context_provider::KnowledgeContextProvider;
 use crate::services::llm::types::ParameterSchema;
 use crate::services::tools::executor::ToolResult;
 use crate::services::tools::trait_def::{Tool, ToolExecutionContext};
@@ -80,7 +77,7 @@ impl Tool for SearchKnowledgeTool {
     async fn execute(&self, ctx: &ToolExecutionContext, args: Value) -> ToolResult {
         // 1. Get pipeline from context
         let pipeline = match &ctx.knowledge_pipeline {
-            Some(p) => Arc::clone(p),
+            Some(p) => p.clone(),
             None => {
                 return ToolResult::err(
                     "Knowledge base is not configured for this project. No collections are available to search.",
@@ -115,63 +112,79 @@ impl Tool for SearchKnowledgeTool {
             .unwrap_or(5)
             .min(20);
 
-        // 3. Execute search
+        // 3. Build effective scoped collection filter
+        let mut effective_collection_ids = ctx.knowledge_collection_filter.clone();
+        let mut selected_collection_name: Option<String> = None;
+
         if let Some(ref specific_collection) = collection_filter {
-            // Search a specific collection by name
-            match pipeline
-                .query(specific_collection, &project_id, query, top_k)
-                .await
-            {
-                Ok(result) => {
-                    if result.results.is_empty() {
-                        return ToolResult::ok(format!(
-                            "No relevant results found in collection '{}' for query: {}",
-                            specific_collection, query,
-                        ));
-                    }
-                    ToolResult::ok(format_search_results(
-                        &result.results,
-                        Some(specific_collection),
+            let all_collections = match pipeline.list_collections(&project_id) {
+                Ok(cols) => cols,
+                Err(e) => {
+                    return ToolResult::err(format!(
+                        "Failed to load knowledge collections: {}",
+                        e
                     ))
+                    .with_error_code("knowledge_collections_load_failed")
+                    .with_retryable(true);
                 }
-                Err(e) => ToolResult::err(format!(
-                    "Failed to search collection '{}': {}. Try omitting the collection parameter to search all collections.",
-                    specific_collection, e,
-                ))
-                .with_error_code("knowledge_collection_search_failed")
-                .with_retryable(true),
-            }
-        } else {
-            // Search across all collections (respecting user filters)
-            let provider = KnowledgeContextProvider::new(Arc::clone(&pipeline));
-            let config = KnowledgeContextConfig {
-                enabled: true,
-                max_context_chunks: top_k,
-                minimum_relevance_score: 0.2,
-                collection_ids: ctx.knowledge_collection_filter.clone(),
-                document_ids: ctx.knowledge_document_filter.clone(),
+            };
+            let selected = all_collections
+                .iter()
+                .find(|c| c.name == *specific_collection)
+                .cloned();
+            let Some(selected) = selected else {
+                return ToolResult::ok(format!(
+                    "Collection '{}' was not found in this project.",
+                    specific_collection
+                ));
             };
 
-            match provider
-                .query_for_context(&project_id, query, &config)
-                .await
-            {
-                Ok(chunks) => {
-                    if chunks.is_empty() {
+            selected_collection_name = Some(selected.name.clone());
+            effective_collection_ids = match effective_collection_ids {
+                Some(existing) => {
+                    if existing.iter().any(|id| id == &selected.id) {
+                        Some(vec![selected.id])
+                    } else {
                         return ToolResult::ok(format!(
-                            "No relevant results found in the knowledge base for query: {}",
-                            query,
+                            "Collection '{}' is outside the current knowledge filter scope.",
+                            specific_collection
                         ));
                     }
-                    ToolResult::ok(format_context_chunks(&chunks))
                 }
-                Err(e) => ToolResult::err(format!(
-                    "Knowledge base search failed: {}. The knowledge base may not be fully initialized.",
-                    e,
+                None => Some(vec![selected.id]),
+            };
+        }
+
+        // 4. Execute scoped query with unified retrieval pipeline
+        match pipeline
+            .query_scoped(
+                &project_id,
+                query,
+                top_k,
+                effective_collection_ids.as_deref(),
+                ctx.knowledge_document_filter.as_deref(),
+                None,
+            )
+            .await
+        {
+            Ok(result) => {
+                if result.results.is_empty() {
+                    return ToolResult::ok(format!(
+                        "No relevant results found in the knowledge base for query: {}",
+                        query,
+                    ));
+                }
+                ToolResult::ok(format_search_results(
+                    &result.results,
+                    selected_collection_name.as_deref(),
                 ))
-                .with_error_code("knowledge_search_failed")
-                .with_retryable(true),
             }
+            Err(e) => ToolResult::err(format!(
+                "Knowledge base search failed: {}. The knowledge base may not be fully initialized.",
+                e,
+            ))
+            .with_error_code("knowledge_search_failed")
+            .with_retryable(true),
         }
     }
 }
@@ -202,27 +215,6 @@ fn format_search_results(
             result.collection_name,
         ));
         output.push_str(&result.chunk_text);
-        output.push_str("\n\n---\n\n");
-    }
-
-    output
-}
-
-/// Format ContextChunk entries into a readable markdown block.
-fn format_context_chunks(
-    chunks: &[crate::services::knowledge::context_provider::ContextChunk],
-) -> String {
-    let mut output = format!("Found {} relevant knowledge chunks:\n\n", chunks.len());
-
-    for (i, chunk) in chunks.iter().enumerate() {
-        output.push_str(&format!(
-            "### Result {} (relevance: {:.2}, source: {}, collection: {})\n\n",
-            i + 1,
-            chunk.relevance_score,
-            chunk.source_document,
-            chunk.collection_name,
-        ));
-        output.push_str(&chunk.content);
         output.push_str("\n\n---\n\n");
     }
 

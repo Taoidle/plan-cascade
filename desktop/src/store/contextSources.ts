@@ -8,7 +8,7 @@
 
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import type { KnowledgeCollection, DocumentSummary } from '../lib/knowledgeApi';
+import type { KnowledgeCollection, DocumentSummary, ScopedDocumentRef } from '../lib/knowledgeApi';
 import { ragListCollections, ragListDocuments, ragEnsureDocsCollection } from '../lib/knowledgeApi';
 import type { MemoryEntry, MemoryScope, MemoryStats, MemorySearchResult, SkillSummary } from '../types/skillMemory';
 import { useProjectsStore } from './projects';
@@ -62,7 +62,7 @@ export interface ContextSourceConfig {
   knowledge?: {
     enabled: boolean;
     selected_collections: string[];
-    selected_documents: string[];
+    selected_documents: ScopedDocumentRef[];
   };
   memory?: {
     enabled: boolean;
@@ -82,7 +82,7 @@ export interface ContextSourcesState {
   // === Knowledge State ===
   knowledgeEnabled: boolean;
   selectedCollections: string[];
-  selectedDocuments: string[];
+  selectedDocuments: ScopedDocumentRef[];
   availableCollections: KnowledgeCollection[];
   collectionDocuments: Record<string, DocumentSummary[]>;
   isLoadingCollections: boolean;
@@ -120,7 +120,7 @@ export interface ContextSourcesState {
   // === Knowledge Actions ===
   toggleKnowledge: (enabled: boolean) => void;
   toggleCollection: (collectionId: string) => void;
-  toggleDocument: (collectionId: string, documentId: string) => void;
+  toggleDocument: (collectionId: string, documentUid: string) => void;
   selectAllInCollection: (collectionId: string) => void;
   deselectAllInCollection: (collectionId: string) => void;
   loadCollections: (projectId: string) => Promise<void>;
@@ -155,6 +155,14 @@ function normalizeMemoryScopes(scopes: MemoryScope[], sessionId: string | null):
   }
   const filtered = unique.filter((scope) => scope !== 'session' || !!sessionId?.trim());
   return filtered.length > 0 ? filtered : ['project', 'global'];
+}
+
+function scopedRefKey(collectionId: string, documentUid: string): string {
+  return `${collectionId}::${documentUid}`;
+}
+
+function toScopedRef(collectionId: string, documentUid: string): ScopedDocumentRef {
+  return { collection_id: collectionId, document_uid: documentUid };
 }
 
 // ---------------------------------------------------------------------------
@@ -289,38 +297,52 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
     const isSelected = selectedCollections.includes(collectionId);
 
     if (isSelected) {
-      const docs = collectionDocuments[collectionId] || [];
-      const docIds = new Set(docs.map((d) => d.document_id));
       set({
         selectedCollections: selectedCollections.filter((id) => id !== collectionId),
-        selectedDocuments: selectedDocuments.filter((id) => !docIds.has(id)),
+        selectedDocuments: selectedDocuments.filter((ref) => ref.collection_id !== collectionId),
       });
     } else {
       const docs = collectionDocuments[collectionId] || [];
-      const docIds = docs.map((d) => d.document_id);
-      const newDocs = new Set([...selectedDocuments, ...docIds]);
+      const existingKeys = new Set(selectedDocuments.map((ref) => scopedRefKey(ref.collection_id, ref.document_uid)));
+      const merged: ScopedDocumentRef[] = [...selectedDocuments];
+      docs.forEach((doc) => {
+        const key = scopedRefKey(collectionId, doc.document_uid);
+        if (!existingKeys.has(key)) {
+          existingKeys.add(key);
+          merged.push(toScopedRef(collectionId, doc.document_uid));
+        }
+      });
       set({
         selectedCollections: [...selectedCollections, collectionId],
-        selectedDocuments: [...newDocs],
+        selectedDocuments: merged,
       });
     }
   },
 
-  toggleDocument: (collectionId, documentId) => {
+  toggleDocument: (collectionId, documentUid) => {
     const { selectedDocuments, selectedCollections, collectionDocuments } = get();
-    const isSelected = selectedDocuments.includes(documentId);
+    const isSelected = selectedDocuments.some(
+      (ref) => ref.collection_id === collectionId && ref.document_uid === documentUid,
+    );
 
-    let newDocs: string[];
+    let newDocs: ScopedDocumentRef[];
     if (isSelected) {
-      newDocs = selectedDocuments.filter((id) => id !== documentId);
+      newDocs = selectedDocuments.filter(
+        (ref) => !(ref.collection_id === collectionId && ref.document_uid === documentUid),
+      );
     } else {
-      newDocs = [...selectedDocuments, documentId];
+      newDocs = [...selectedDocuments, toScopedRef(collectionId, documentUid)];
     }
 
     const allDocs = collectionDocuments[collectionId] || [];
-    const allDocIds = allDocs.map((d) => d.document_id);
-    const allSelected = allDocIds.length > 0 && allDocIds.every((id) => newDocs.includes(id));
-    const anySelected = allDocIds.some((id) => newDocs.includes(id));
+    const allSelected =
+      allDocs.length > 0 &&
+      allDocs.every((doc) =>
+        newDocs.some((ref) => ref.collection_id === collectionId && ref.document_uid === doc.document_uid),
+      );
+    const anySelected = allDocs.some((doc) =>
+      newDocs.some((ref) => ref.collection_id === collectionId && ref.document_uid === doc.document_uid),
+    );
 
     let newCollections = selectedCollections;
     if (allSelected && !selectedCollections.includes(collectionId)) {
@@ -335,20 +357,25 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
   selectAllInCollection: (collectionId) => {
     const { collectionDocuments, selectedDocuments, selectedCollections } = get();
     const docs = collectionDocuments[collectionId] || [];
-    const docIds = docs.map((d) => d.document_id);
-    const newDocs = new Set([...selectedDocuments, ...docIds]);
+    const existingKeys = new Set(selectedDocuments.map((ref) => scopedRefKey(ref.collection_id, ref.document_uid)));
+    const merged: ScopedDocumentRef[] = [...selectedDocuments];
+    docs.forEach((doc) => {
+      const key = scopedRefKey(collectionId, doc.document_uid);
+      if (!existingKeys.has(key)) {
+        existingKeys.add(key);
+        merged.push(toScopedRef(collectionId, doc.document_uid));
+      }
+    });
     const newCollections = selectedCollections.includes(collectionId)
       ? selectedCollections
       : [...selectedCollections, collectionId];
-    set({ selectedDocuments: [...newDocs], selectedCollections: newCollections });
+    set({ selectedDocuments: merged, selectedCollections: newCollections });
   },
 
   deselectAllInCollection: (collectionId) => {
-    const { collectionDocuments, selectedDocuments, selectedCollections } = get();
-    const docs = collectionDocuments[collectionId] || [];
-    const docIds = new Set(docs.map((d) => d.document_id));
+    const { selectedDocuments, selectedCollections } = get();
     set({
-      selectedDocuments: selectedDocuments.filter((id) => !docIds.has(id)),
+      selectedDocuments: selectedDocuments.filter((ref) => ref.collection_id !== collectionId),
       selectedCollections: selectedCollections.filter((id) => id !== collectionId),
     });
   },

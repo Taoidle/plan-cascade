@@ -13,6 +13,12 @@ import type { CommandResponse } from './tauri';
 // Types
 // ---------------------------------------------------------------------------
 
+/** Scoped document reference used by knowledge filters. */
+export interface ScopedDocumentRef {
+  collection_id: string;
+  document_uid: string;
+}
+
 /** A knowledge collection containing indexed documents. */
 export interface KnowledgeCollection {
   id: string;
@@ -38,6 +44,8 @@ export interface DocumentInput {
 
 /** A search result from a RAG query. */
 export interface SearchResult {
+  collection_id: string;
+  document_uid: string;
   chunk_text: string;
   document_id: string;
   collection_name: string;
@@ -47,9 +55,19 @@ export interface SearchResult {
 
 /** Summary of a document within a collection. */
 export interface DocumentSummary {
-  document_id: string;
+  document_uid: string;
+  display_name: string;
+  source_kind: string;
+  source_locator: string;
+  source_type: string;
+  trackable: boolean;
+  last_indexed_at: string;
   chunk_count: number;
   preview: string;
+  /** Legacy compatibility alias (display_name). */
+  document_id?: string;
+  /** Legacy compatibility alias (source_locator). */
+  source_path?: string;
 }
 
 /** Result of a RAG query. */
@@ -61,12 +79,18 @@ export interface RagQueryResult {
 
 /** Information about a document whose content changed or was deleted. */
 export interface DocUpdateInfo {
-  document_id: string;
-  source_path: string;
+  document_uid: string;
+  display_name: string;
+  source_kind: string;
+  source_locator: string;
   source_type: string;
   old_hash: string;
   /** `null` if file was deleted from disk. */
   new_hash: string | null;
+  /** Legacy compatibility alias (display_name). */
+  document_id?: string;
+  /** Legacy compatibility alias (source_locator). */
+  source_path?: string;
 }
 
 /** Result of comparing stored hashes with disk state. */
@@ -88,6 +112,55 @@ export interface DocsKbStatus {
   status: string;
 }
 
+export interface RagIngestRequest {
+  projectId: string;
+  documents: DocumentInput[];
+  collectionId?: string;
+  collectionName?: string;
+  description?: string | null;
+}
+
+export interface RagQueryRequest {
+  projectId: string;
+  query: string;
+  topK?: number;
+  collectionName?: string;
+  collectionIds?: string[];
+  documentFilters?: ScopedDocumentRef[];
+  retrievalProfile?: string;
+}
+
+/** Recorded retrieval execution metadata for observability. */
+export interface QueryRunSummary {
+  id: number;
+  query: string;
+  collection_scope: string;
+  top_k: number;
+  vector_candidates: number;
+  bm25_candidates: number;
+  merged_candidates: number;
+  rerank_ms: number;
+  total_ms: number;
+  result_count: number;
+  created_at: string;
+}
+
+function normalizeDocumentSummary(document: DocumentSummary): DocumentSummary {
+  return {
+    ...document,
+    document_id: document.document_id ?? document.display_name,
+    source_path: document.source_path ?? document.source_locator,
+  };
+}
+
+function normalizeDocUpdateInfo(info: DocUpdateInfo): DocUpdateInfo {
+  return {
+    ...info,
+    document_id: info.document_id ?? info.display_name,
+    source_path: info.source_path ?? info.source_locator,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // rag_ingest_documents
 // ---------------------------------------------------------------------------
@@ -95,18 +168,17 @@ export interface DocsKbStatus {
 /**
  * Ingest documents into a knowledge collection.
  */
-export async function ragIngestDocuments(
-  collectionName: string,
-  projectId: string,
-  description: string | null,
-  documents: DocumentInput[],
-): Promise<CommandResponse<KnowledgeCollection>> {
+export async function ragIngestDocuments(request: RagIngestRequest): Promise<CommandResponse<KnowledgeCollection>> {
   try {
     return await invoke<CommandResponse<KnowledgeCollection>>('rag_ingest_documents', {
-      collectionName,
-      projectId,
-      description,
-      documents,
+      collectionId: request.collectionId ?? null,
+      collection_id: request.collectionId ?? null,
+      collectionName: request.collectionName ?? null,
+      collection_name: request.collectionName ?? null,
+      projectId: request.projectId,
+      project_id: request.projectId,
+      description: request.description ?? null,
+      documents: request.documents,
     });
   } catch (error) {
     return {
@@ -124,18 +196,51 @@ export async function ragIngestDocuments(
 /**
  * Query a knowledge collection for relevant documents.
  */
-export async function ragQuery(
-  collectionName: string,
-  projectId: string,
-  query: string,
-  topK?: number,
-): Promise<CommandResponse<RagQueryResult>> {
+export async function ragQuery(request: RagQueryRequest): Promise<CommandResponse<RagQueryResult>> {
   try {
     return await invoke<CommandResponse<RagQueryResult>>('rag_query', {
-      collectionName,
+      projectId: request.projectId,
+      project_id: request.projectId,
+      query: request.query,
+      topK: request.topK ?? 10,
+      top_k: request.topK ?? 10,
+      collectionName: request.collectionName ?? null,
+      collection_name: request.collectionName ?? null,
+      collectionIds: request.collectionIds ?? null,
+      collection_ids: request.collectionIds ?? null,
+      documentFilters: request.documentFilters ?? null,
+      document_filters: request.documentFilters ?? null,
+      retrievalProfile: request.retrievalProfile ?? null,
+      retrieval_profile: request.retrievalProfile ?? null,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// rag_list_query_runs
+// ---------------------------------------------------------------------------
+
+/**
+ * List recent retrieval runs for observability.
+ */
+export async function ragListQueryRuns(
+  projectId: string,
+  collectionIds?: string[],
+  limit?: number,
+): Promise<CommandResponse<QueryRunSummary[]>> {
+  try {
+    return await invoke<CommandResponse<QueryRunSummary[]>>('rag_list_query_runs', {
       projectId,
-      query,
-      topK: topK ?? 10,
+      project_id: projectId,
+      collectionIds: collectionIds ?? null,
+      collection_ids: collectionIds ?? null,
+      limit: limit ?? null,
     });
   } catch (error) {
     return {
@@ -230,9 +335,15 @@ export async function ragUpdateCollection(
  */
 export async function ragListDocuments(collectionId: string): Promise<CommandResponse<DocumentSummary[]>> {
   try {
-    return await invoke<CommandResponse<DocumentSummary[]>>('rag_list_documents', {
+    const response = await invoke<CommandResponse<DocumentSummary[]>>('rag_list_documents', {
       collectionId,
+      collection_id: collectionId,
     });
+    if (!response.success || !response.data) return response;
+    return {
+      ...response,
+      data: response.data.map(normalizeDocumentSummary),
+    };
   } catch (error) {
     return {
       success: false,
@@ -249,11 +360,13 @@ export async function ragListDocuments(collectionId: string): Promise<CommandRes
 /**
  * Delete a single document from a knowledge collection.
  */
-export async function ragDeleteDocument(collectionId: string, documentId: string): Promise<CommandResponse<boolean>> {
+export async function ragDeleteDocument(collectionId: string, documentUid: string): Promise<CommandResponse<boolean>> {
   try {
     return await invoke<CommandResponse<boolean>>('rag_delete_document', {
       collectionId,
-      documentId,
+      collection_id: collectionId,
+      documentUid,
+      document_uid: documentUid,
     });
   } catch (error) {
     return {
@@ -273,9 +386,19 @@ export async function ragDeleteDocument(collectionId: string, documentId: string
  */
 export async function ragCheckCollectionUpdates(collectionId: string): Promise<CommandResponse<CollectionUpdateCheck>> {
   try {
-    return await invoke<CommandResponse<CollectionUpdateCheck>>('rag_check_collection_updates', {
+    const response = await invoke<CommandResponse<CollectionUpdateCheck>>('rag_check_collection_updates', {
       collectionId,
+      collection_id: collectionId,
     });
+    if (!response.success || !response.data) return response;
+    return {
+      ...response,
+      data: {
+        ...response.data,
+        modified: response.data.modified.map(normalizeDocUpdateInfo),
+        deleted: response.data.deleted.map(normalizeDocUpdateInfo),
+      },
+    };
   } catch (error) {
     return {
       success: false,

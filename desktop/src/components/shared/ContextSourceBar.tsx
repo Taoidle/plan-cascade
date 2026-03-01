@@ -79,9 +79,12 @@ export function ContextSourceBar() {
   const foregroundOriginSessionId = useExecutionStore((s) => s.foregroundOriginSessionId);
   const projectId = selectedProject?.id ?? 'default';
   const activeSessionId = useMemo(() => {
-    if (foregroundOriginSessionId?.trim()) return foregroundOriginSessionId.trim();
-    if (taskId?.trim()) return `claude:${taskId.trim()}`;
-    if (standaloneSessionId?.trim()) return `standalone:${standaloneSessionId.trim()}`;
+    const normalizedForeground = typeof foregroundOriginSessionId === 'string' ? foregroundOriginSessionId.trim() : '';
+    const normalizedTaskId = typeof taskId === 'string' ? taskId.trim() : '';
+    const normalizedStandaloneId = typeof standaloneSessionId === 'string' ? standaloneSessionId.trim() : '';
+    if (normalizedForeground) return normalizedForeground;
+    if (normalizedTaskId) return `claude:${normalizedTaskId}`;
+    if (normalizedStandaloneId) return `standalone:${normalizedStandaloneId}`;
     return null;
   }, [foregroundOriginSessionId, taskId, standaloneSessionId]);
 

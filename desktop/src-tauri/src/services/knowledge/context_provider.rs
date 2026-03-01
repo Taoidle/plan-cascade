@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::services::knowledge::pipeline::RagPipeline;
+use crate::services::knowledge::pipeline::{RagPipeline, ScopedDocumentRef};
 use crate::utils::error::AppResult;
 
 // ---------------------------------------------------------------------------
@@ -31,6 +31,10 @@ pub struct ContextChunk {
     pub content: String,
     /// Name of the source document.
     pub source_document: String,
+    /// Stable source document UID.
+    pub document_uid: String,
+    /// Source collection ID.
+    pub collection_id: String,
     /// Name of the collection this came from.
     pub collection_name: String,
     /// Relevance score (0.0 to 1.0).
@@ -49,9 +53,9 @@ pub struct KnowledgeContextConfig {
     /// Optional: only query these collection IDs. `None` = query all.
     #[serde(default)]
     pub collection_ids: Option<Vec<String>>,
-    /// Optional: only keep results from these document IDs. `None` = keep all.
+    /// Optional: only keep results from these scoped document refs. `None` = keep all.
     #[serde(default)]
-    pub document_ids: Option<Vec<String>>,
+    pub document_refs: Option<Vec<ScopedDocumentRef>>,
 }
 
 impl Default for KnowledgeContextConfig {
@@ -61,7 +65,7 @@ impl Default for KnowledgeContextConfig {
             max_context_chunks: 5,
             minimum_relevance_score: 0.3,
             collection_ids: None,
-            document_ids: None,
+            document_refs: None,
         }
     }
 }
@@ -147,6 +151,8 @@ impl KnowledgeContextProvider {
                             all_chunks.push(ContextChunk {
                                 content: search_result.chunk_text,
                                 source_document: search_result.document_id,
+                                document_uid: search_result.document_uid,
+                                collection_id: search_result.collection_id,
                                 collection_name: search_result.collection_name,
                                 relevance_score: search_result.score,
                             });
@@ -169,11 +175,16 @@ impl KnowledgeContextProvider {
             );
         }
 
-        // Filter by document_ids if specified
-        if let Some(ref doc_ids) = config.document_ids {
-            if !doc_ids.is_empty() {
-                let doc_id_set: HashSet<&str> = doc_ids.iter().map(|s| s.as_str()).collect();
-                all_chunks.retain(|chunk| doc_id_set.contains(chunk.source_document.as_str()));
+        // Filter by scoped document refs if specified
+        if let Some(ref doc_refs) = config.document_refs {
+            if !doc_refs.is_empty() {
+                let scoped: HashSet<(String, String)> = doc_refs
+                    .iter()
+                    .map(|d| (d.collection_id.clone(), d.document_uid.clone()))
+                    .collect();
+                all_chunks.retain(|chunk| {
+                    scoped.contains(&(chunk.collection_id.clone(), chunk.document_uid.clone()))
+                });
             }
         }
 
@@ -241,6 +252,8 @@ mod tests {
         let chunk = ContextChunk {
             content: "Some content".to_string(),
             source_document: "doc-1".to_string(),
+            document_uid: "uid-1".to_string(),
+            collection_id: "col-1-id".to_string(),
             collection_name: "col-1".to_string(),
             relevance_score: 0.85,
         };
@@ -269,7 +282,7 @@ mod tests {
             max_context_chunks: 10,
             minimum_relevance_score: 0.5,
             collection_ids: None,
-            document_ids: None,
+            document_refs: None,
         };
         let json = serde_json::to_string(&config).unwrap();
         let deserialized: KnowledgeContextConfig = serde_json::from_str(&json).unwrap();
@@ -293,12 +306,16 @@ mod tests {
             ContextChunk {
                 content: "Rust uses ownership".to_string(),
                 source_document: "rust-guide".to_string(),
+                document_uid: "uid-rust-guide".to_string(),
+                collection_id: "docs-id".to_string(),
                 collection_name: "docs".to_string(),
                 relevance_score: 0.95,
             },
             ContextChunk {
                 content: "Lifetimes prevent dangling references".to_string(),
                 source_document: "rust-guide".to_string(),
+                document_uid: "uid-rust-guide".to_string(),
+                collection_id: "docs-id".to_string(),
                 collection_name: "docs".to_string(),
                 relevance_score: 0.8,
             },
@@ -369,7 +386,7 @@ mod tests {
             max_context_chunks: 5,
             minimum_relevance_score: 0.3,
             collection_ids: None,
-            document_ids: None,
+            document_refs: None,
         };
 
         let chunks = provider

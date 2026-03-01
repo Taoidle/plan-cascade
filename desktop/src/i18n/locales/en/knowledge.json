@@ -39,6 +39,10 @@
   },
 
   "tabs": {
+    "collections": "Collections",
+    "documents": "Documents",
+    "retrieval": "Retrieval Lab",
+    "health": "Sync & Health",
     "details": "Details",
     "upload": "Upload",
     "query": "Query"
@@ -98,5 +102,59 @@
     "clearResults": "Clear",
     "resultsFound": "{{count}} results from {{total}} chunks searched",
     "noResults": "No matching results found"
+  },
+
+  "retrievalLab": {
+    "title": "Retrieval Lab",
+    "subtitle": "Run scoped retrieval and inspect candidate quality/latency telemetry.",
+    "profile": "Profile",
+    "profiles": {
+      "balanced": "Balanced",
+      "precision": "Precision",
+      "recall": "Recall"
+    },
+    "enableDocFilter": "Enable document filter",
+    "selectAllDocs": "Select all",
+    "clearDocSelection": "Clear selection",
+    "selectedDocs": "{{count}} selected",
+    "refreshRuns": "Refresh Runs",
+    "loadingRuns": "Loading runs...",
+    "runHistory": "Query Run History",
+    "lastRuns": "Last {{count}} runs",
+    "emptyResults": "Run a query to inspect results.",
+    "emptyRuns": "No run telemetry yet.",
+    "totalMs": "Total",
+    "rerankMs": "Rerank",
+    "resultCount": "Results"
+  },
+
+  "syncHealth": {
+    "title": "Sync & Health",
+    "subtitle": "Monitor documentation indexing and workspace-to-knowledge sync health.",
+    "docsStatus": "Docs Collection Status",
+    "workspaceMissing": "No workspace path configured.",
+    "totalDocs": "Total Docs",
+    "pendingChanges": "Pending Changes",
+    "collectionName": "Docs Collection",
+    "collectionMissing": "Not created yet",
+    "refresh": "Refresh Status",
+    "refreshing": "Refreshing...",
+    "ensureCollection": "Ensure Docs Collection",
+    "ensuring": "Ensuring...",
+    "syncNow": "Sync Docs Now",
+    "syncing": "Syncing...",
+    "pendingFiles": "Pending File Changes",
+    "collectionDiff": "Collection Sync Diff",
+    "checkDiff": "Check Diff",
+    "applyDiff": "Apply Diff",
+    "modified": "Modified",
+    "deleted": "Deleted",
+    "newFiles": "New Files",
+    "unchanged": "Unchanged",
+    "noDiffData": "Run \"Check Diff\" to inspect workspace drift.",
+    "statusIndexed": "Indexed",
+    "statusChangesPending": "Changes Pending",
+    "statusIndexing": "Indexing",
+    "statusNone": "Not Initialized"
   }
 }

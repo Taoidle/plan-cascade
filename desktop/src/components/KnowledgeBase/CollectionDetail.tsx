@@ -42,8 +42,8 @@ export function CollectionDetail({ collection }: CollectionDetailProps) {
     }
   };
 
-  const handleDeleteDocument = async (documentId: string) => {
-    const ok = await deleteDocument(collection.id, documentId);
+  const handleDeleteDocument = async (documentUid: string) => {
+    const ok = await deleteDocument(collection.id, documentUid);
     if (ok) {
       // Refresh document list
       fetchDocuments(collection.id);
@@ -117,8 +117,8 @@ export function CollectionDetail({ collection }: CollectionDetailProps) {
                     {t('updates.modifiedDocs', { count: pendingUpdates.modified.length })}
                     <ul className="ml-4 list-disc">
                       {pendingUpdates.modified.map((d) => (
-                        <li key={d.document_id} className="truncate">
-                          {d.source_path || d.document_id}
+                        <li key={d.document_uid} className="truncate">
+                          {d.source_locator || d.display_name}
                         </li>
                       ))}
                     </ul>
@@ -129,8 +129,8 @@ export function CollectionDetail({ collection }: CollectionDetailProps) {
                     {t('updates.deletedDocs', { count: pendingUpdates.deleted.length })}
                     <ul className="ml-4 list-disc">
                       {pendingUpdates.deleted.map((d) => (
-                        <li key={d.document_id} className="truncate">
-                          {d.source_path || d.document_id}
+                        <li key={d.document_uid} className="truncate">
+                          {d.source_locator || d.display_name}
                         </li>
                       ))}
                     </ul>
@@ -172,20 +172,23 @@ export function CollectionDetail({ collection }: CollectionDetailProps) {
           </h4>
           <div className="divide-y divide-gray-200 dark:divide-gray-700 rounded-lg border border-gray-200 dark:border-gray-700">
             {documents.map((doc) => (
-              <div key={doc.document_id} className="flex items-center justify-between px-4 py-3">
+              <div key={doc.document_uid} className="flex items-center justify-between px-4 py-3">
                 <div className="min-w-0 flex-1 mr-3">
-                  <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{doc.document_id}</p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{doc.display_name}</p>
                   <div className="flex items-center gap-3 mt-1">
                     <span className="text-xs text-gray-500 dark:text-gray-400">
                       {t('documents.chunks', { count: doc.chunk_count })}
                     </span>
+                    {doc.source_locator && (
+                      <span className="text-xs text-gray-400 dark:text-gray-500 truncate">{doc.source_locator}</span>
+                    )}
                     {doc.preview && (
                       <span className="text-xs text-gray-400 dark:text-gray-500 truncate">{doc.preview}</span>
                     )}
                   </div>
                 </div>
                 <button
-                  onClick={() => handleDeleteDocument(doc.document_id)}
+                  onClick={() => handleDeleteDocument(doc.document_uid)}
                   disabled={isDeleting}
                   className={clsx(
                     'text-xs px-2.5 py-1 rounded',

@@ -58,11 +58,12 @@ export function KnowledgeSourcePicker() {
       return isCollectionSelected ? 'checked' : 'unchecked';
     }
 
-    const docIds = docs.map((d) => d.document_id);
-    const selectedCount = docIds.filter((id) => selectedDocuments.includes(id)).length;
+    const selectedCount = docs.filter((doc) =>
+      selectedDocuments.some((ref) => ref.collection_id === collectionId && ref.document_uid === doc.document_uid),
+    ).length;
 
     if (selectedCount === 0 && !isCollectionSelected) return 'unchecked';
-    if (selectedCount === docIds.length) return 'checked';
+    if (selectedCount === docs.length) return 'checked';
     return 'indeterminate';
   };
 
@@ -75,7 +76,7 @@ export function KnowledgeSourcePicker() {
       if (col.name.toLowerCase().includes(lowerQuery)) return true;
       // Match any document in the collection
       const docs = collectionDocuments[col.id] || [];
-      return docs.some((d) => d.document_id.toLowerCase().includes(lowerQuery));
+      return docs.some((d) => (d.display_name || d.document_id || '').toLowerCase().includes(lowerQuery));
     });
   }, [availableCollections, collectionDocuments, lowerQuery]);
 
@@ -140,7 +141,7 @@ export function KnowledgeSourcePicker() {
           const docs = lowerQuery
             ? allDocs.filter(
                 (d) =>
-                  d.document_id.toLowerCase().includes(lowerQuery) ||
+                  (d.display_name || d.document_id || '').toLowerCase().includes(lowerQuery) ||
                   collection.name.toLowerCase().includes(lowerQuery),
               )
             : allDocs;
@@ -199,7 +200,7 @@ export function KnowledgeSourcePicker() {
                   )}
                   {docs.map((doc) => (
                     <div
-                      key={doc.document_id}
+                      key={doc.document_uid}
                       className={clsx(
                         'flex items-center gap-1.5 px-2 py-1',
                         'hover:bg-gray-50 dark:hover:bg-gray-750',
@@ -208,12 +209,14 @@ export function KnowledgeSourcePicker() {
                     >
                       <input
                         type="checkbox"
-                        checked={selectedDocuments.includes(doc.document_id)}
-                        onChange={() => toggleDocument(collection.id, doc.document_id)}
+                        checked={selectedDocuments.some(
+                          (ref) => ref.collection_id === collection.id && ref.document_uid === doc.document_uid,
+                        )}
+                        onChange={() => toggleDocument(collection.id, doc.document_uid)}
                         className="w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-600 text-amber-600 focus:ring-amber-500"
                       />
                       <span className="flex-1 text-2xs text-gray-600 dark:text-gray-400 truncate">
-                        {doc.document_id}
+                        {doc.display_name}
                       </span>
                       <span className="text-2xs text-gray-400 dark:text-gray-500">{doc.chunk_count}</span>
                     </div>

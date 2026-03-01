@@ -248,6 +248,7 @@ pub use commands::{
     // Knowledge commands
     rag_ingest_documents,
     rag_list_collections,
+    rag_list_query_runs,
     rag_query,
     read_claude_md,
     recompute_costs,

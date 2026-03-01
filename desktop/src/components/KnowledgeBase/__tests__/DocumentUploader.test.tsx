@@ -50,14 +50,25 @@ function resetStore() {
     collections: [],
     activeCollection: null,
     documents: [],
+    documentsByCollection: {},
     queryResults: [],
+    queryStateByCollection: {},
     totalSearched: 0,
     searchQuery: '',
+    queryRuns: [],
+    queryRunsByCollection: {},
+    docsStatus: null,
     isLoading: false,
     isIngesting: false,
     isQuerying: false,
     isDeleting: false,
+    isLoadingQueryRuns: false,
+    isLoadingDocsStatus: false,
+    isSyncingDocs: false,
     uploadProgress: 0,
+    pendingUpdates: null,
+    isCheckingUpdates: false,
+    isApplyingUpdates: false,
     error: null,
   });
 }
@@ -67,7 +78,7 @@ function createMockFile(name: string, content: string, type: string): File {
 }
 
 function renderUploader() {
-  return render(<DocumentUploader projectId="proj-1" collectionName="test-col" />);
+  return render(<DocumentUploader projectId="proj-1" collectionId="col-1" />);
 }
 
 // ---------------------------------------------------------------------------

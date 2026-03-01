@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::services::file_change_tracker::FileChangeTracker;
-use crate::services::knowledge::pipeline::RagPipeline;
+use crate::services::knowledge::pipeline::{RagPipeline, ScopedDocumentRef};
 use crate::services::llm::types::{ParameterSchema, ToolDefinition};
 use crate::services::orchestrator::embedding_manager::EmbeddingManager;
 use crate::services::orchestrator::embedding_service::EmbeddingService;
@@ -94,7 +94,7 @@ pub struct ToolExecutionContext {
     /// Empty/None = search all collections.
     pub knowledge_collection_filter: Option<Vec<String>>,
     /// Optional filter: only return results from these document IDs.
-    pub knowledge_document_filter: Option<Vec<String>>,
+    pub knowledge_document_filter: Option<Vec<ScopedDocumentRef>>,
 }
 
 impl ToolExecutionContext {

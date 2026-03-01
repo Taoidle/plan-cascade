@@ -15,6 +15,7 @@ use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
 use crate::models::CommandResponse;
+use crate::services::knowledge::pipeline::ScopedDocumentRef;
 use crate::services::design::GenerateResult;
 use crate::services::strategy::analyzer::{analyze_task_for_mode, StrategyAnalysis};
 use crate::services::task_mode::agent_resolver::AgentResolver;
@@ -45,7 +46,7 @@ struct KnowledgeToolParams {
     pipeline: Arc<crate::services::knowledge::pipeline::RagPipeline>,
     project_id: String,
     collection_filter: Option<Vec<String>>,
-    document_filter: Option<Vec<String>>,
+    document_filter: Option<Vec<ScopedDocumentRef>>,
     awareness_section: String,
 }
 

@@ -3,7 +3,7 @@
  *
  * Main container for the Project Knowledge Base feature with two-panel layout:
  * - Left: Collection list with create/delete actions
- * - Right: Collection details, document upload, and query interface
+ * - Right: Operations workspace (collections/documents/retrieval/sync-health)
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -14,7 +14,8 @@ import { useKnowledgeStore } from '../../store/knowledge';
 import { useProjectsStore } from '../../store/projects';
 import { CollectionDetail } from './CollectionDetail';
 import { DocumentUploader } from './DocumentUploader';
-import { KnowledgeQuery } from './KnowledgeQuery';
+import { RetrievalLab } from './RetrievalLab';
+import { SyncHealthPanel } from './SyncHealthPanel';
 
 // ---------------------------------------------------------------------------
 // WorkspacePathPicker
@@ -406,7 +407,7 @@ function DeleteConfirmDialog({ isOpen, collectionName, onClose, onConfirm, isLoa
 // ---------------------------------------------------------------------------
 
 /** Active tab in the right panel. */
-type RightTab = 'details' | 'upload' | 'query';
+type RightTab = 'collections' | 'documents' | 'retrieval' | 'health';
 
 export function KnowledgeBasePanel() {
   const { t } = useTranslation('knowledge');
@@ -431,7 +432,7 @@ export function KnowledgeBasePanel() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [editTarget, setEditTarget] = useState<KnowledgeCollection | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<RightTab>('details');
+  const [activeTab, setActiveTab] = useState<RightTab>('collections');
 
   // Fetch collections on mount and project change
   useEffect(() => {
@@ -544,13 +545,13 @@ export function KnowledgeBasePanel() {
                       tabIndex={0}
                       onClick={() => {
                         selectCollection(collection);
-                        setActiveTab('details');
+                        setActiveTab('collections');
                       }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault();
                           selectCollection(collection);
-                          setActiveTab('details');
+                          setActiveTab('collections');
                         }
                       }}
                       className={clsx(
@@ -620,7 +621,7 @@ export function KnowledgeBasePanel() {
           </div>
         </div>
 
-        {/* Right Panel - Detail / Upload / Query */}
+        {/* Right Panel - Collections / Documents / Retrieval / Health */}
         <div
           className={clsx(
             'h-full flex-1',
@@ -642,7 +643,7 @@ export function KnowledgeBasePanel() {
                   </svg>
                 </button>
 
-                {(['details', 'upload', 'query'] as RightTab[]).map((tab) => (
+                {(['collections', 'documents', 'retrieval', 'health'] as RightTab[]).map((tab) => (
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
@@ -660,13 +661,12 @@ export function KnowledgeBasePanel() {
 
               {/* Tab content */}
               <div className="flex-1 overflow-y-auto">
-                {activeTab === 'details' && <CollectionDetail collection={activeCollection} />}
-                {activeTab === 'upload' && (
-                  <DocumentUploader projectId={projectId} collectionName={activeCollection.name} />
+                {activeTab === 'collections' && <CollectionDetail collection={activeCollection} />}
+                {activeTab === 'documents' && (
+                  <DocumentUploader projectId={projectId} collectionId={activeCollection.id} />
                 )}
-                {activeTab === 'query' && (
-                  <KnowledgeQuery projectId={projectId} collectionName={activeCollection.name} />
-                )}
+                {activeTab === 'retrieval' && <RetrievalLab projectId={projectId} collectionId={activeCollection.id} />}
+                {activeTab === 'health' && <SyncHealthPanel projectId={projectId} collection={activeCollection} />}
               </div>
             </div>
           ) : (

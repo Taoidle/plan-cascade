@@ -12,10 +12,10 @@ import { useKnowledgeStore } from '../../store/knowledge';
 
 interface KnowledgeQueryProps {
   projectId: string;
-  collectionName: string;
+  collectionId: string;
 }
 
-export function KnowledgeQuery({ projectId, collectionName }: KnowledgeQueryProps) {
+export function KnowledgeQuery({ projectId, collectionId }: KnowledgeQueryProps) {
   const { t } = useTranslation('knowledge');
   const { queryResults, totalSearched, searchQuery, isQuerying, queryCollection, setSearchQuery, clearQueryResults } =
     useKnowledgeStore();
@@ -24,8 +24,8 @@ export function KnowledgeQuery({ projectId, collectionName }: KnowledgeQueryProp
 
   const handleSearch = useCallback(async () => {
     if (!searchQuery.trim()) return;
-    await queryCollection(projectId, collectionName, searchQuery.trim(), topK);
-  }, [projectId, collectionName, searchQuery, topK, queryCollection]);
+    await queryCollection(projectId, collectionId, searchQuery.trim(), topK);
+  }, [projectId, collectionId, searchQuery, topK, queryCollection]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

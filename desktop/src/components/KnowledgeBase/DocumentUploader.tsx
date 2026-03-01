@@ -27,10 +27,10 @@ const ACCEPTED_MIME_TYPES = [
 
 interface DocumentUploaderProps {
   projectId: string;
-  collectionName: string;
+  collectionId: string;
 }
 
-export function DocumentUploader({ projectId, collectionName }: DocumentUploaderProps) {
+export function DocumentUploader({ projectId, collectionId }: DocumentUploaderProps) {
   const { t } = useTranslation('knowledge');
   const { ingestDocuments, isIngesting, uploadProgress } = useKnowledgeStore();
 
@@ -142,14 +142,14 @@ export function DocumentUploader({ projectId, collectionName }: DocumentUploader
         }),
       );
 
-      const ok = await ingestDocuments(projectId, collectionName, documents);
+      const ok = await ingestDocuments(projectId, collectionId, documents);
       if (ok) {
         setSelectedFiles([]);
       }
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : String(err));
     }
-  }, [selectedFiles, projectId, collectionName, ingestDocuments]);
+  }, [selectedFiles, projectId, collectionId, ingestDocuments]);
 
   const formatSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;

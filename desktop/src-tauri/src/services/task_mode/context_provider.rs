@@ -17,6 +17,7 @@ use crate::commands::knowledge::KnowledgeState;
 use crate::services::knowledge::context_provider::{
     KnowledgeContextConfig, KnowledgeContextProvider,
 };
+use crate::services::knowledge::pipeline::ScopedDocumentRef;
 use crate::services::memory::retrieval::search_memories;
 use crate::services::memory::store::{
     build_session_project_path, MemoryCategory, GLOBAL_PROJECT_PATH,
@@ -62,7 +63,7 @@ pub struct KnowledgeSourceConfig {
     #[serde(default)]
     pub selected_collections: Vec<String>,
     #[serde(default)]
-    pub selected_documents: Vec<String>,
+    pub selected_documents: Vec<ScopedDocumentRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -352,7 +353,7 @@ pub async fn query_knowledge_for_task(
 
 /// Query the Knowledge Base with optional collection/document filtering.
 ///
-/// When `collection_ids` or `document_ids` are non-empty, they are passed to
+/// When `collection_ids` or `document_refs` are non-empty, they are passed to
 /// the `KnowledgeContextConfig` so the pipeline filters accordingly.
 /// Empty vectors are treated as "no filter" (query all).
 pub async fn query_knowledge_for_task_filtered(
@@ -360,7 +361,7 @@ pub async fn query_knowledge_for_task_filtered(
     project_id: &str,
     query: &str,
     collection_ids: &[String],
-    document_ids: &[String],
+    document_refs: &[ScopedDocumentRef],
 ) -> String {
     let pipeline = match knowledge_state.get_pipeline().await {
         Ok(p) => p,
@@ -374,10 +375,10 @@ pub async fn query_knowledge_for_task_filtered(
         } else {
             Some(collection_ids.to_vec())
         },
-        document_ids: if document_ids.is_empty() {
+        document_refs: if document_refs.is_empty() {
             None
         } else {
-            Some(document_ids.to_vec())
+            Some(document_refs.to_vec())
         },
         ..KnowledgeContextConfig::default()
     };

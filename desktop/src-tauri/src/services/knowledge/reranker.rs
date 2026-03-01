@@ -22,8 +22,12 @@ use crate::utils::error::AppResult;
 pub struct SearchResult {
     /// Chunk text content.
     pub chunk_text: String,
+    /// Source collection ID.
+    pub collection_id: String,
     /// Source document ID.
     pub document_id: String,
+    /// Stable source document UID.
+    pub document_uid: String,
     /// Collection name this result came from.
     pub collection_name: String,
     /// Relevance score (0.0 to 1.0).
@@ -262,7 +266,9 @@ mod tests {
     fn make_result(text: &str, score: f32) -> SearchResult {
         SearchResult {
             chunk_text: text.to_string(),
+            collection_id: "c1".to_string(),
             document_id: "d1".to_string(),
+            document_uid: "uid-d1".to_string(),
             collection_name: "col".to_string(),
             score,
             metadata: Default::default(),

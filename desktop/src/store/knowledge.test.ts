@@ -33,14 +33,25 @@ function resetStore() {
     collections: [],
     activeCollection: null,
     documents: [],
+    documentsByCollection: {},
     queryResults: [],
+    queryStateByCollection: {},
     totalSearched: 0,
     searchQuery: '',
+    queryRuns: [],
+    queryRunsByCollection: {},
+    docsStatus: null,
     isLoading: false,
     isIngesting: false,
     isQuerying: false,
     isDeleting: false,
+    isLoadingQueryRuns: false,
+    isLoadingDocsStatus: false,
+    isSyncingDocs: false,
     uploadProgress: 0,
+    pendingUpdates: null,
+    isCheckingUpdates: false,
+    isApplyingUpdates: false,
     error: null,
   });
 }
@@ -60,6 +71,33 @@ const MOCK_COLLECTION_2 = {
   id: 'col-2',
   name: 'second-collection',
 };
+
+function mockDocument(documentUid: string, preview = 'preview') {
+  return {
+    document_uid: documentUid,
+    display_name: documentUid,
+    source_kind: 'workspace',
+    source_locator: `/tmp/${documentUid}.md`,
+    source_type: 'md',
+    trackable: true,
+    last_indexed_at: '2025-01-01T00:00:00Z',
+    chunk_count: 3,
+    preview,
+    document_id: documentUid,
+  };
+}
+
+function mockSearchResult(documentUid: string, score = 0.9) {
+  return {
+    collection_id: 'col-1',
+    document_uid: documentUid,
+    chunk_text: 'Relevant text',
+    document_id: documentUid,
+    collection_name: 'col',
+    score,
+    metadata: {},
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -142,8 +180,8 @@ describe('Knowledge Store', () => {
   describe('selectCollection', () => {
     it('sets active collection and clears related state', () => {
       useKnowledgeStore.setState({
-        documents: [{ document_id: 'd1', chunk_count: 5, preview: 'test' }],
-        queryResults: [{ chunk_text: 'text', document_id: 'd1', collection_name: 'col', score: 0.9, metadata: {} }],
+        documents: [mockDocument('d1', 'test')],
+        queryResults: [mockSearchResult('d1', 0.9)],
         searchQuery: 'old query',
         totalSearched: 100,
       });
@@ -330,7 +368,7 @@ describe('Knowledge Store', () => {
 
       const result = await useKnowledgeStore
         .getState()
-        .ingestDocuments('proj-1', 'test-collection', [{ id: 'd1', content: 'hello' }]);
+        .ingestDocuments('proj-1', 'col-1', [{ id: 'd1', content: 'hello' }]);
 
       expect(result).toBe(true);
       expect(useKnowledgeStore.getState().collections[0].chunk_count).toBe(20);
@@ -346,7 +384,7 @@ describe('Knowledge Store', () => {
 
       mockInvoke.mockResolvedValueOnce({ success: true, data: updated, error: null });
 
-      await useKnowledgeStore.getState().ingestDocuments('proj-1', 'test-collection', [{ id: 'd1', content: 'hello' }]);
+      await useKnowledgeStore.getState().ingestDocuments('proj-1', 'col-1', [{ id: 'd1', content: 'hello' }]);
 
       expect(useKnowledgeStore.getState().activeCollection?.chunk_count).toBe(20);
     });
@@ -358,7 +396,7 @@ describe('Knowledge Store', () => {
         error: 'Ingest failed',
       });
 
-      const result = await useKnowledgeStore.getState().ingestDocuments('proj-1', 'test-collection', []);
+      const result = await useKnowledgeStore.getState().ingestDocuments('proj-1', 'col-1', []);
 
       expect(result).toBe(false);
       expect(useKnowledgeStore.getState().error).toBe('Ingest failed');
@@ -371,10 +409,8 @@ describe('Knowledge Store', () => {
 
   describe('fetchDocuments', () => {
     it('fetches and sets documents on success', async () => {
-      const docs = [
-        { document_id: 'doc-1', chunk_count: 5, preview: 'Hello world' },
-        { document_id: 'doc-2', chunk_count: 3, preview: 'Foo bar' },
-      ];
+      const docs = [mockDocument('doc-1', 'Hello world'), mockDocument('doc-2', 'Foo bar')];
+      useKnowledgeStore.setState({ activeCollection: MOCK_COLLECTION });
       mockInvoke.mockResolvedValueOnce({ success: true, data: docs, error: null });
 
       await useKnowledgeStore.getState().fetchDocuments('col-1');
@@ -405,10 +441,11 @@ describe('Knowledge Store', () => {
   describe('deleteDocument', () => {
     it('removes document from list on success', async () => {
       useKnowledgeStore.setState({
-        documents: [
-          { document_id: 'doc-1', chunk_count: 5, preview: 'Hello' },
-          { document_id: 'doc-2', chunk_count: 3, preview: 'World' },
-        ],
+        activeCollection: MOCK_COLLECTION,
+        documentsByCollection: {
+          'col-1': [mockDocument('doc-1', 'Hello'), mockDocument('doc-2', 'World')],
+        },
+        documents: [mockDocument('doc-1', 'Hello'), mockDocument('doc-2', 'World')],
       });
 
       mockInvoke.mockResolvedValueOnce({ success: true, data: true, error: null });
@@ -442,15 +479,15 @@ describe('Knowledge Store', () => {
   describe('queryCollection', () => {
     it('sets query results on success', async () => {
       const queryResult = {
-        results: [
-          { chunk_text: 'Relevant text', document_id: 'd1', collection_name: 'col', score: 0.95, metadata: {} },
-        ],
+        results: [mockSearchResult('d1', 0.95)],
         total_searched: 50,
         collection_name: 'test-collection',
       };
+      useKnowledgeStore.setState({ activeCollection: MOCK_COLLECTION });
       mockInvoke.mockResolvedValueOnce({ success: true, data: queryResult, error: null });
+      mockInvoke.mockResolvedValueOnce({ success: true, data: [], error: null });
 
-      await useKnowledgeStore.getState().queryCollection('proj-1', 'test-collection', 'search term');
+      await useKnowledgeStore.getState().queryCollection('proj-1', 'col-1', 'search term');
 
       const state = useKnowledgeStore.getState();
       expect(state.queryResults).toHaveLength(1);
@@ -467,7 +504,7 @@ describe('Knowledge Store', () => {
         error: 'Query failed',
       });
 
-      await useKnowledgeStore.getState().queryCollection('proj-1', 'col', 'query');
+      await useKnowledgeStore.getState().queryCollection('proj-1', 'col-1', 'query');
 
       expect(useKnowledgeStore.getState().error).toBe('Query failed');
       expect(useKnowledgeStore.getState().isQuerying).toBe(false);
@@ -486,7 +523,7 @@ describe('Knowledge Store', () => {
 
     it('clearQueryResults resets query state', () => {
       useKnowledgeStore.setState({
-        queryResults: [{ chunk_text: 't', document_id: 'd', collection_name: 'c', score: 0.5, metadata: {} }],
+        queryResults: [mockSearchResult('d', 0.5)],
         totalSearched: 10,
         searchQuery: 'old',
       });

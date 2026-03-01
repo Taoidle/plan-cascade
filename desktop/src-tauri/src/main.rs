@@ -371,6 +371,7 @@ fn main() {
             // Knowledge commands
             plan_cascade_desktop::commands::knowledge::rag_ingest_documents,
             plan_cascade_desktop::commands::knowledge::rag_query,
+            plan_cascade_desktop::commands::knowledge::rag_list_query_runs,
             plan_cascade_desktop::commands::knowledge::rag_list_collections,
             plan_cascade_desktop::commands::knowledge::rag_delete_collection,
             plan_cascade_desktop::commands::knowledge::rag_update_collection,

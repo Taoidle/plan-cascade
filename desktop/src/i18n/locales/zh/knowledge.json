@@ -39,6 +39,10 @@
   },
 
   "tabs": {
+    "collections": "集合",
+    "documents": "文档",
+    "retrieval": "检索实验室",
+    "health": "同步与健康",
     "details": "详情",
     "upload": "上传",
     "query": "查询"
@@ -98,5 +102,59 @@
     "clearResults": "清除",
     "resultsFound": "从 {{total}} 个分块中找到 {{count}} 条结果",
     "noResults": "未找到匹配结果"
+  },
+
+  "retrievalLab": {
+    "title": "检索实验室",
+    "subtitle": "执行范围化检索并查看候选质量与延迟观测数据。",
+    "profile": "配置",
+    "profiles": {
+      "balanced": "均衡",
+      "precision": "精确优先",
+      "recall": "召回优先"
+    },
+    "enableDocFilter": "启用文档过滤",
+    "selectAllDocs": "全选",
+    "clearDocSelection": "清空选择",
+    "selectedDocs": "已选 {{count}} 个",
+    "refreshRuns": "刷新运行记录",
+    "loadingRuns": "加载运行记录中...",
+    "runHistory": "查询运行历史",
+    "lastRuns": "最近 {{count}} 次",
+    "emptyResults": "执行一次查询以查看结果。",
+    "emptyRuns": "暂无运行观测数据。",
+    "totalMs": "总耗时",
+    "rerankMs": "重排耗时",
+    "resultCount": "结果数"
+  },
+
+  "syncHealth": {
+    "title": "同步与健康",
+    "subtitle": "监控文档索引与工作区到知识库的同步健康状态。",
+    "docsStatus": "文档集合状态",
+    "workspaceMissing": "未配置工作区路径。",
+    "totalDocs": "文档总数",
+    "pendingChanges": "待处理变更",
+    "collectionName": "文档集合",
+    "collectionMissing": "尚未创建",
+    "refresh": "刷新状态",
+    "refreshing": "刷新中...",
+    "ensureCollection": "确保文档集合",
+    "ensuring": "创建中...",
+    "syncNow": "立即同步文档",
+    "syncing": "同步中...",
+    "pendingFiles": "待处理文件变更",
+    "collectionDiff": "集合差异",
+    "checkDiff": "检查差异",
+    "applyDiff": "应用差异",
+    "modified": "已修改",
+    "deleted": "已删除",
+    "newFiles": "新文件",
+    "unchanged": "未变更",
+    "noDiffData": "点击“检查差异”以查看工作区漂移。",
+    "statusIndexed": "已索引",
+    "statusChangesPending": "有待同步变更",
+    "statusIndexing": "索引中",
+    "statusNone": "未初始化"
   }
 }

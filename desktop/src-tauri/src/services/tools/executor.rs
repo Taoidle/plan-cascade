@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use crate::services::file_change_tracker::FileChangeTracker;
-use crate::services::knowledge::pipeline::RagPipeline;
+use crate::services::knowledge::pipeline::{RagPipeline, ScopedDocumentRef};
 use crate::services::orchestrator::embedding_manager::EmbeddingManager;
 use crate::services::orchestrator::embedding_service::EmbeddingService;
 use crate::services::orchestrator::hnsw_index::HnswIndex;
@@ -359,8 +359,8 @@ pub struct ToolExecutor {
     knowledge_project_id: Option<String>,
     /// Optional filter: only search within these collection IDs.
     knowledge_collection_filter: Option<Vec<String>>,
-    /// Optional filter: only return results from these document IDs.
-    knowledge_document_filter: Option<Vec<String>>,
+    /// Optional filter: only return results from these scoped document refs.
+    knowledge_document_filter: Option<Vec<ScopedDocumentRef>>,
 }
 
 impl ToolExecutor {
@@ -579,7 +579,7 @@ impl ToolExecutor {
     pub fn set_knowledge_filters(
         &mut self,
         collections: Option<Vec<String>>,
-        documents: Option<Vec<String>>,
+        documents: Option<Vec<ScopedDocumentRef>>,
     ) {
         self.knowledge_collection_filter = collections;
         self.knowledge_document_filter = documents;
@@ -601,7 +601,7 @@ impl ToolExecutor {
     }
 
     /// Get the knowledge document filter (if set).
-    pub fn get_knowledge_document_filter(&self) -> Option<Vec<String>> {
+    pub fn get_knowledge_document_filter(&self) -> Option<Vec<ScopedDocumentRef>> {
         self.knowledge_document_filter.clone()
     }
 
