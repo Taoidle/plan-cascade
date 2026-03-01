@@ -112,6 +112,7 @@
 
   "indexing": {
     "idle": "Not indexed",
+    "queued": "Queued",
     "indexing": "Indexing...",
     "indexingProgress": "Indexing... {{current}}/{{total}} files",
     "indexingPhase1": "Phase 1: Indexing files... ({{current}}/{{total}})",
@@ -127,6 +128,7 @@
     "searchCapabilities": "Search capabilities",
     "embeddingProgress": "Building embeddings... ({{current}}/{{total}})",
     "embeddingComplete": "{{count}} embeddings",
+    "stale": "Stale index",
     "lspEnrichmentReady": "LSP enriched",
     "lspEnrichmentInProgress": "LSP enriching...",
     "lspEnrichmentUnavailable": "LSP unavailable"
@@ -394,6 +396,12 @@
       "projectsDesc": "Browse and resume Claude Code sessions",
       "analytics": "Go to Analytics",
       "analyticsDesc": "View usage statistics and cost tracking",
+      "knowledge": "Go to Knowledge",
+      "knowledgeDesc": "Browse and search knowledge collections",
+      "codebase": "Go to Codebase",
+      "codebaseDesc": "Inspect indexed files, symbols, and semantic search",
+      "artifacts": "Go to Artifacts",
+      "artifactsDesc": "Browse generated artifacts and versions",
       "nextMode": "Next Mode",
       "nextModeDesc": "Cycle to the next application mode",
       "prevMode": "Previous Mode",

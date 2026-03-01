@@ -9,6 +9,7 @@ import { useState, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { useCodebaseStore } from '../../store/codebase';
+import { openCodebaseFileInEditor } from '../../lib/codebaseApi';
 
 interface CodebaseSearchProps {
   projectPath: string;
@@ -16,14 +17,24 @@ interface CodebaseSearchProps {
 
 export function CodebaseSearch({ projectPath }: CodebaseSearchProps) {
   const { t } = useTranslation('codebase');
-  const { searchResults, searchLoading, searchProject, clearSearch } = useCodebaseStore();
+  const {
+    searchResults,
+    searchLoading,
+    searchProject,
+    clearSearch,
+    addContextItem,
+    contextItems,
+    pushContextToMode,
+    setError,
+  } = useCodebaseStore();
   const [query, setQuery] = useState('');
+  const [mode, setMode] = useState<'hybrid' | 'semantic' | 'symbol' | 'path'>('hybrid');
 
   const handleSearch = useCallback(() => {
     if (query.trim()) {
-      searchProject(projectPath, query.trim());
+      searchProject(projectPath, query.trim(), 20, [mode]);
     }
-  }, [projectPath, query, searchProject]);
+  }, [mode, projectPath, query, searchProject]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -53,7 +64,22 @@ export function CodebaseSearch({ projectPath }: CodebaseSearchProps) {
     <div className="flex flex-col h-full">
       {/* Search input */}
       <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value as 'hybrid' | 'semantic' | 'symbol' | 'path')}
+            className={clsx(
+              'px-3 py-2 rounded-lg text-sm',
+              'border border-gray-300 dark:border-gray-600',
+              'bg-white dark:bg-gray-800',
+              'text-gray-900 dark:text-white',
+            )}
+          >
+            <option value="hybrid">Hybrid</option>
+            <option value="semantic">Semantic</option>
+            <option value="symbol">Symbol</option>
+            <option value="path">Path</option>
+          </select>
           <input
             type="text"
             value={query}
@@ -81,6 +107,19 @@ export function CodebaseSearch({ projectPath }: CodebaseSearchProps) {
             )}
           >
             {searchLoading ? '...' : t('search')}
+          </button>
+          <button
+            onClick={() => pushContextToMode('chat')}
+            disabled={contextItems.length === 0}
+            className={clsx(
+              'px-3 py-2 rounded-lg text-sm',
+              'bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700',
+              'text-gray-700 dark:text-gray-300',
+              'disabled:opacity-50 disabled:cursor-not-allowed',
+            )}
+            title="Push context basket to Chat"
+          >
+            Context ({contextItems.length})
           </button>
           {searchResults.length > 0 && (
             <button
@@ -117,7 +156,7 @@ export function CodebaseSearch({ projectPath }: CodebaseSearchProps) {
           <div className="divide-y divide-gray-200 dark:divide-gray-800">
             {searchResults.map((result, idx) => (
               <div
-                key={`${result.file_path}-${result.chunk_index}-${idx}`}
+                key={`${result.file_path}-${idx}`}
                 className="px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
               >
                 <div className="flex items-center justify-between mb-1.5">
@@ -130,23 +169,71 @@ export function CodebaseSearch({ projectPath }: CodebaseSearchProps) {
                   <span
                     className={clsx(
                       'px-2 py-0.5 rounded text-xs font-medium shrink-0',
-                      getSimilarityColor(result.similarity),
+                      getSimilarityColor(result.similarity ?? result.score),
                     )}
                   >
-                    {t('similarity')} {formatSimilarity(result.similarity)}
+                    {t('similarity')} {formatSimilarity(result.similarity ?? result.score)}
                   </span>
                 </div>
-                <pre
-                  className={clsx(
-                    'text-xs font-mono p-2 rounded',
-                    'bg-gray-100 dark:bg-gray-800',
-                    'text-gray-700 dark:text-gray-300',
-                    'overflow-x-auto max-h-32',
-                    'whitespace-pre-wrap break-words',
-                  )}
-                >
-                  {result.chunk_text.length > 500 ? result.chunk_text.slice(0, 500) + '...' : result.chunk_text}
-                </pre>
+                {result.snippet ? (
+                  <pre
+                    className={clsx(
+                      'text-xs font-mono p-2 rounded',
+                      'bg-gray-100 dark:bg-gray-800',
+                      'text-gray-700 dark:text-gray-300',
+                      'overflow-x-auto max-h-32',
+                      'whitespace-pre-wrap break-words',
+                    )}
+                  >
+                    {result.snippet.length > 500 ? result.snippet.slice(0, 500) + '...' : result.snippet}
+                  </pre>
+                ) : (
+                  <div className="text-xs text-gray-500 dark:text-gray-400">No snippet available</div>
+                )}
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      const opened = await openCodebaseFileInEditor(projectPath, result.file_path, 1, 1);
+                      if (!opened.success) {
+                        setError(opened.error ?? 'Failed to open file');
+                      }
+                    }}
+                    className="px-2 py-1 rounded text-xs bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+                  >
+                    Open
+                  </button>
+                  <button
+                    onClick={() =>
+                      addContextItem({
+                        type: 'search_result',
+                        project_path: projectPath,
+                        file_path: result.file_path,
+                        symbol_name: result.symbol_name ?? null,
+                        snippet: result.snippet ?? null,
+                        score: result.score,
+                        metadata: {
+                          score_breakdown: result.score_breakdown,
+                        },
+                      })
+                    }
+                    className="px-2 py-1 rounded text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:hover:bg-blue-900/60"
+                  >
+                    Add Context
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const ref = `${result.file_path}${result.symbol_name ? `#${result.symbol_name}` : ''}`;
+                      try {
+                        await navigator.clipboard.writeText(ref);
+                      } catch {
+                        setError('Failed to copy reference');
+                      }
+                    }}
+                    className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                  >
+                    Copy Ref
+                  </button>
+                </div>
               </div>
             ))}
           </div>

@@ -102,7 +102,7 @@ IMPORTANT / 重要提示:
 
 搜索符号和代码 (Search symbols and code with index):
 ```tool_call
-{{"tool": "CodebaseSearch", "arguments": {{"query": "authenticate", "scope": "all"}}}}
+{{"tool": "CodebaseSearch", "arguments": {{"query": "authenticate", "scope": "hybrid"}}}}
 ```
 
 When you receive a tool result, analyze it and decide whether to make more tool calls or provide your final response.
@@ -1350,8 +1350,8 @@ mod tests {
             "Should include CodebaseSearch example"
         );
         assert!(
-            instructions.contains("\"scope\": \"all\""),
-            "Should include scope=all in CodebaseSearch example"
+            instructions.contains("\"scope\": \"hybrid\""),
+            "Should include scope=hybrid in CodebaseSearch example"
         );
     }
 

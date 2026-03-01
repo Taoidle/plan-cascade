@@ -1708,8 +1708,8 @@ mod tests {
 
         let args = serde_json::json!({ "query": "main" });
         let result = executor.execute("CodebaseSearch", &args).await;
-        assert!(result.is_success());
-        let output = result.success_message_owned().unwrap();
+        assert!(result.is_error());
+        let output = result.error_message_owned().unwrap_or_default();
         assert!(
             output.contains("index not available"),
             "should indicate index is unavailable, got: {}",
@@ -1734,12 +1734,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_codebase_search_symbols_scope() {
+    async fn test_codebase_search_symbol_scope() {
         let (_dir, executor) = create_test_executor_with_index();
 
         let args = serde_json::json!({
             "query": "App",
-            "scope": "symbols"
+            "scope": "symbol"
         });
         let result = executor.execute("CodebaseSearch", &args).await;
         assert!(result.is_success());
@@ -1762,13 +1762,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_codebase_search_files_scope_with_component() {
+    async fn test_codebase_search_path_scope_with_component() {
         let (_dir, executor) = create_test_executor_with_index();
 
         let args = serde_json::json!({
             "query": "main",
-            "scope": "files",
-            "component": "desktop-rust"
+            "scope": "path",
+            "filters": {
+                "component": "desktop-rust"
+            }
         });
         let result = executor.execute("CodebaseSearch", &args).await;
         assert!(result.is_success());
@@ -1792,12 +1794,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_codebase_search_files_scope_without_component() {
+    async fn test_codebase_search_path_scope_without_component() {
         let (_dir, executor) = create_test_executor_with_index();
 
         let args = serde_json::json!({
             "query": "lib",
-            "scope": "files"
+            "scope": "path"
         });
         let result = executor.execute("CodebaseSearch", &args).await;
         assert!(result.is_success());
@@ -1810,18 +1812,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_codebase_search_all_scope() {
+    async fn test_codebase_search_hybrid_scope() {
         let (_dir, executor) = create_test_executor_with_index();
 
         let args = serde_json::json!({
             "query": "App",
-            "scope": "all"
+            "scope": "hybrid"
         });
         let result = executor.execute("CodebaseSearch", &args).await;
         assert!(result.is_success());
         let output = result.success_message_owned().unwrap();
 
-        // scope=all uses HybridSearchEngine with RRF fusion
+        // scope=hybrid uses HybridSearchEngine with RRF fusion
         assert!(
             output.contains("Hybrid search") || output.contains("Symbols matching"),
             "should have hybrid or symbols section, got: {}",
@@ -1836,10 +1838,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_codebase_search_default_scope_is_all() {
+    async fn test_codebase_search_default_scope_is_hybrid() {
         let (_dir, executor) = create_test_executor_with_index();
 
-        // No scope parameter — should default to "all"
+        // No scope parameter — should default to "hybrid"
         let args = serde_json::json!({ "query": "App" });
         let result = executor.execute("CodebaseSearch", &args).await;
         assert!(result.is_success());
@@ -1855,10 +1857,10 @@ mod tests {
     async fn test_codebase_search_component_filter_narrows_symbols() {
         let (_dir, executor) = create_test_executor_with_index();
 
-        // Search for "App" with symbols scope — should find both AppConfig and AppProps
+        // Search for "App" with symbol scope — should find both AppConfig and AppProps
         let args_all = serde_json::json!({
             "query": "App",
-            "scope": "symbols"
+            "scope": "symbol"
         });
         let result_all = executor.execute("CodebaseSearch", &args_all).await;
         let output_all = result_all.success_message_owned().unwrap();
@@ -1872,7 +1874,7 @@ mod tests {
 
         let args = serde_json::json!({
             "query": "NonExistentThing",
-            "scope": "symbols"
+            "scope": "symbol"
         });
         let result = executor.execute("CodebaseSearch", &args).await;
         assert!(result.is_success());
@@ -1890,7 +1892,7 @@ mod tests {
 
         let args = serde_json::json!({
             "query": "main",
-            "scope": "symbols"
+            "scope": "symbol"
         });
         let result = executor.execute("CodebaseSearch", &args).await;
         assert!(result.is_success());
@@ -1936,7 +1938,7 @@ mod tests {
     }
 
     // =========================================================================
-    // CodebaseSearch scope=all semantic tests (feature-004 story-001)
+    // CodebaseSearch scope=hybrid semantic tests (feature-004 story-001)
     // =========================================================================
 
     /// Helper to create a ToolExecutor with IndexStore and EmbeddingService
@@ -2008,42 +2010,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_codebase_search_scope_all_includes_semantic() {
+    async fn test_codebase_search_scope_hybrid_includes_semantic() {
         let (_dir, executor) = create_test_executor_with_embedding();
 
         let args = serde_json::json!({
             "query": "main",
-            "scope": "all"
+            "scope": "hybrid"
         });
         let result = executor.execute("CodebaseSearch", &args).await;
         assert!(result.is_success());
         let output = result.success_message_owned().unwrap();
 
-        // scope=all uses HybridSearchEngine with RRF fusion, which combines
+        // scope=hybrid uses HybridSearchEngine with RRF fusion, which combines
         // symbol + file + semantic channels internally
         assert!(
             output.contains("Hybrid search") || output.contains("Symbols matching"),
-            "scope=all should include results, got: {}",
+            "scope=hybrid should include results, got: {}",
             output
         );
         // When embedding is available, semantic channel contributes to RRF;
         // with TF-IDF the embedding may contribute semantic similarity scores
         assert!(
             output.contains("main"),
-            "scope=all should find 'main' results, got: {}",
+            "scope=hybrid should find 'main' results, got: {}",
             output
         );
     }
 
     #[tokio::test]
-    async fn test_codebase_search_scope_all_without_embedding() {
+    async fn test_codebase_search_scope_hybrid_without_embedding() {
         let (_dir, executor) = create_test_executor_with_index();
-        // No embedding service set — scope=all should still return results via
+        // No embedding service set — scope=hybrid should still return results via
         // HybridSearchEngine (symbol + file channels, semantic silently skipped)
 
         let args = serde_json::json!({
             "query": "App",
-            "scope": "all"
+            "scope": "hybrid"
         });
         let result = executor.execute("CodebaseSearch", &args).await;
         assert!(result.is_success());
@@ -2052,7 +2054,7 @@ mod tests {
         // HybridSearchEngine runs symbol+file channels even without embedding
         assert!(
             output.contains("Hybrid search") || output.contains("Symbols matching"),
-            "scope=all without embedding should still have results, got: {}",
+            "scope=hybrid without embedding should still have results, got: {}",
             output
         );
         // Should find App-related results
@@ -2064,7 +2066,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_codebase_search_scope_all_with_unready_embedding() {
+    async fn test_codebase_search_scope_hybrid_with_unready_embedding() {
         use crate::services::orchestrator::embedding_service::EmbeddingService;
 
         let (_dir, mut executor) = create_test_executor_with_index();
@@ -2074,7 +2076,7 @@ mod tests {
 
         let args = serde_json::json!({
             "query": "App",
-            "scope": "all"
+            "scope": "hybrid"
         });
         let result = executor.execute("CodebaseSearch", &args).await;
         assert!(result.is_success());
@@ -2114,7 +2116,7 @@ mod tests {
             output
         );
         assert!(
-            output.contains("Use 'symbols' or 'files' scope instead"),
+            output.contains("Use 'symbol' or 'path' scope instead"),
             "scope=semantic should suggest alternatives, got: {}",
             output
         );
@@ -2317,10 +2319,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_codebase_search_no_provider_message() {
-        // When neither EmbeddingManager nor EmbeddingService is configured,
-        // semantic scope should report "not configured".
-        let dir = setup_test_dir();
-        let executor = ToolExecutor::new(dir.path());
+        // When index exists but neither EmbeddingManager nor EmbeddingService is
+        // configured, semantic scope should report "not configured".
+        let (_dir, executor) = create_test_executor_with_index();
 
         let args = serde_json::json!({
             "query": "test query",
@@ -2330,10 +2331,8 @@ mod tests {
         let result = executor.execute("CodebaseSearch", &args).await;
         assert!(result.is_success());
         let output = result.success_message_owned().unwrap_or_default();
-        // Without an index store, it falls back to the "index not available" message
         assert!(
-            output.contains("not available")
-                || output.contains("not indexed")
+            output.contains("no embedding provider configured")
                 || output.contains("not configured"),
             "should indicate semantic search is not available, got: {}",
             output

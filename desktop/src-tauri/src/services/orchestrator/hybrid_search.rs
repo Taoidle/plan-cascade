@@ -244,7 +244,7 @@ impl HybridSearchEngine {
         let mut semantic_error: Option<String> = None;
 
         // --- Channel 1: Symbol search ---
-        let symbol_entries = self.search_symbols(query)?;
+        let symbol_entries = self.search_symbols(query, project_path)?;
         if !symbol_entries.is_empty() {
             channel_results.push((SearchChannel::Symbol, symbol_entries));
         }
@@ -324,11 +324,11 @@ impl HybridSearchEngine {
     ///
     /// Attempts FTS5 BM25-ranked search first. Falls back to LIKE-based search
     /// if FTS returns empty results or encounters an error (graceful degradation).
-    fn search_symbols(&self, query: &str) -> AppResult<Vec<ChannelEntry>> {
+    fn search_symbols(&self, query: &str, project_path: &str) -> AppResult<Vec<ChannelEntry>> {
         // Try FTS5 first for BM25-ranked results
         match self
             .index_store
-            .fts_search_symbols(query, self.config.channel_max_results)
+            .fts_search_symbols(query, project_path, self.config.channel_max_results)
         {
             Ok(fts_results) if !fts_results.is_empty() => {
                 let entries: Vec<ChannelEntry> = fts_results
@@ -354,7 +354,7 @@ impl HybridSearchEngine {
 
         // Fallback: LIKE-based search
         let pattern = format!("%{}%", query);
-        let symbols = self.index_store.query_symbols(&pattern)?;
+        let symbols = self.index_store.query_symbols(project_path, &pattern)?;
 
         let entries: Vec<ChannelEntry> = symbols
             .into_iter()
@@ -1174,7 +1174,7 @@ mod tests {
         store.upsert_file_index("/project", &item, "hash1").unwrap();
 
         let engine = HybridSearchEngine::with_defaults(store, None);
-        let results = engine.search_symbols("Controller").unwrap();
+        let results = engine.search_symbols("Controller", "/project").unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].file_path, "src/controller.rs");
@@ -1545,7 +1545,7 @@ mod tests {
         let engine = HybridSearchEngine::with_defaults(store, None);
 
         // Search for "auth" - should use FTS and find auth_handler
-        let results = engine.search_symbols("auth").unwrap();
+        let results = engine.search_symbols("auth", "/project").unwrap();
         assert!(
             !results.is_empty(),
             "FTS should find symbols matching 'auth'"
@@ -1627,7 +1627,7 @@ mod tests {
         let engine = HybridSearchEngine::with_defaults(store, None);
 
         // Very short query ("x") should still return results via LIKE fallback
-        let results = engine.search_symbols("x").unwrap();
+        let results = engine.search_symbols("x", "/project").unwrap();
         // Should find "x" via either FTS or LIKE fallback
         assert!(!results.is_empty(), "Short query should still find results");
     }
@@ -1661,7 +1661,7 @@ mod tests {
         let engine = HybridSearchEngine::with_defaults(store, None);
 
         // "auth" should appear in both symbol and filepath channels
-        let symbol_results = engine.search_symbols("auth").unwrap();
+        let symbol_results = engine.search_symbols("auth", "/project").unwrap();
         let filepath_results = engine.search_file_paths("auth", "/project").unwrap();
 
         // Both channels should have results
@@ -1709,7 +1709,7 @@ mod tests {
         store.upsert_file_index("/project", &item, "hash1").unwrap();
 
         let engine = HybridSearchEngine::with_defaults(store, None);
-        let results = engine.search_symbols("user_controller").unwrap();
+        let results = engine.search_symbols("user_controller", "/project").unwrap();
 
         assert!(!results.is_empty());
         assert_eq!(results[0].file_path, "src/controller.rs");

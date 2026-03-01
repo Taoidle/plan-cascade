@@ -45,7 +45,8 @@ const INDEX_PROGRESS_EVENT: &str = "index-progress";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexStatusEvent {
     pub project_path: String,
-    /// One of `"indexing"`, `"indexed"`, or `"error"`.
+    /// One of `"idle"`, `"queued"`, `"indexing"`, `"indexed"`,
+    /// `"indexed_no_embedding"`, `"stale"`, or `"error"`.
     pub status: String,
     pub indexed_files: usize,
     pub total_files: usize,
@@ -295,10 +296,10 @@ impl IndexManager {
         let app_handle_opt = app_handle_lock.clone();
         drop(app_handle_lock);
 
-        // Emit initial "indexing" status.
+        // Emit initial "queued" status before the first indexing progress callback.
         let initial_event = IndexStatusEvent {
             project_path: project_path_owned.clone(),
-            status: "indexing".to_string(),
+            status: "queued".to_string(),
             indexed_files: 0,
             total_files: 0,
             error_message: None,
@@ -694,6 +695,11 @@ impl IndexManager {
     /// Get a reference to the inner `IndexStore`.
     pub fn index_store(&self) -> &IndexStore {
         &self.index_store
+    }
+
+    /// Clone the shared `Arc<IndexStore>`.
+    pub fn index_store_arc(&self) -> Arc<IndexStore> {
+        Arc::clone(&self.index_store)
     }
 
     /// Manually trigger LLM-based component classification for a project.

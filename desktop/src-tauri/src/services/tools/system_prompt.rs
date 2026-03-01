@@ -570,8 +570,9 @@ pub fn build_tool_priority_section(
                      → **CodebaseSearch**\n\
                      当你不确定代码在哪里、需要理解「某个功能是怎么实现的」、或探索不熟悉的代码模块时，\
                      使用 CodebaseSearch（基于预构建索引，比 Grep 更快更准确）。\n\
-                     - `scope=\"all\"` — 综合搜索（默认推荐）\n\
-                     - `scope=\"symbols\"` — 按名称查找函数/类/结构体定义\n\
+                     - `scope=\"hybrid\"` — 综合搜索（默认推荐）\n\
+                     - `scope=\"symbol\"` — 按名称查找函数/类/结构体定义\n\
+                     - `scope=\"path\"` — 按路径/文件名查找文件\n\
                      - `scope=\"semantic\"` — 用自然语言描述搜索概念\n\n",
                 );
             }
@@ -665,8 +666,9 @@ pub fn build_tool_priority_section(
                      When you're unsure where code lives, need to understand how a feature is \
                      implemented, or are exploring unfamiliar modules, use CodebaseSearch \
                      (pre-built index, faster and more accurate than Grep).\n\
-                     - `scope=\"all\"` — comprehensive search (default, recommended)\n\
-                     - `scope=\"symbols\"` — find function/class/struct definitions by name\n\
+                     - `scope=\"hybrid\"` — comprehensive search (default, recommended)\n\
+                     - `scope=\"symbol\"` — find function/class/struct definitions by name\n\
+                     - `scope=\"path\"` — find files by path/name patterns\n\
                      - `scope=\"semantic\"` — search concepts using natural language\n\n",
                 );
             }
@@ -785,7 +787,7 @@ pub fn build_sub_agent_tool_guidance(
         Some("explore") => {
             lines.push("- **Browse directory structure** → **LS** / 浏览目录结构 → LS".to_string());
             lines.push(
-                "- **Find symbols / locate files** → **CodebaseSearch** (scope=\"all\") / 查找符号、定位文件 → CodebaseSearch"
+                "- **Find symbols / locate files** → **CodebaseSearch** (scope=\"hybrid\") / 查找符号、定位文件 → CodebaseSearch"
                     .to_string(),
             );
             if has_semantic {
@@ -814,7 +816,7 @@ pub fn build_sub_agent_tool_guidance(
             );
             lines.push(String::new());
             lines.push(
-                "- **Understand architecture / locate implementations** → **CodebaseSearch** (scope=\"all\")"
+                "- **Understand architecture / locate implementations** → **CodebaseSearch** (scope=\"hybrid\")"
                     .to_string(),
             );
             lines.push(
@@ -822,10 +824,10 @@ pub fn build_sub_agent_tool_guidance(
                     .to_string(),
             );
             lines.push(
-                "- **Find function/class/struct definitions** → **CodebaseSearch** (scope=\"symbols\")"
+                "- **Find function/class/struct definitions** → **CodebaseSearch** (scope=\"symbol\")"
                     .to_string(),
             );
-            lines.push("  按名称查找函数/类/结构体定义 → CodebaseSearch(symbols)".to_string());
+            lines.push("  按名称查找函数/类/结构体定义 → CodebaseSearch(symbol)".to_string());
             if has_semantic {
                 lines.push(
                     "- **Conceptual / natural language search** → **CodebaseSearch** (scope=\"semantic\")"
@@ -1707,8 +1709,8 @@ mod tests {
             "Should mention CodebaseSearch when index is available"
         );
         assert!(
-            guidance.contains("scope=\"all\""),
-            "Should recommend scope=all"
+            guidance.contains("scope=\"hybrid\""),
+            "Should recommend scope=hybrid"
         );
         assert!(guidance.contains("Grep"), "Should mention Grep as fallback");
         // No semantic search

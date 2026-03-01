@@ -112,6 +112,7 @@
 
   "indexing": {
     "idle": "未インデックス",
+    "queued": "キュー待機中",
     "indexing": "インデックス中...",
     "indexingProgress": "インデックス中... {{current}}/{{total}} ファイル",
     "indexingPhase1": "フェーズ1：ファイルインデックス中... ({{current}}/{{total}})",
@@ -126,7 +127,8 @@
     "semanticSearchUnavailable": "セマンティック検索利用不可",
     "searchCapabilities": "検索機能",
     "embeddingProgress": "エンベディング構築中... ({{current}}/{{total}})",
-    "embeddingComplete": "{{count}} エンベディング"
+    "embeddingComplete": "{{count}} エンベディング",
+    "stale": "インデックスが古い"
   },
 
   "docsIndexing": {

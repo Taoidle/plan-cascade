@@ -10,15 +10,19 @@ import type {
   IndexedProjectEntry,
   CodebaseProjectDetail,
   FileIndexRow,
-  SemanticSearchResult,
+  SearchHit,
+  CodeSearchMode,
+  ContextItem,
 } from '../lib/codebaseApi';
 import {
+  addCodebaseContext,
   listCodebaseProjects,
   getCodebaseDetail,
   listCodebaseFiles,
   deleteCodebaseProject,
   searchCodebase,
   triggerReindex,
+  getIndexStatus,
 } from '../lib/codebaseApi';
 
 // ---------------------------------------------------------------------------
@@ -34,7 +38,8 @@ export interface CodebaseState {
   projectDetail: CodebaseProjectDetail | null;
   files: FileIndexRow[];
   filesTotalCount: number;
-  searchResults: SemanticSearchResult[];
+  searchResults: SearchHit[];
+  contextItems: ContextItem[];
 
   // UI state
   loading: boolean;
@@ -55,10 +60,15 @@ export interface CodebaseState {
   loadFiles: (path: string) => Promise<void>;
   deleteProject: (path: string) => Promise<void>;
   reindexProject: (path: string) => Promise<void>;
-  searchProject: (path: string, query: string, topK?: number) => Promise<void>;
+  searchProject: (path: string, query: string, topK?: number, modes?: CodeSearchMode[]) => Promise<void>;
   setFilesPage: (page: number) => void;
   setFilesLanguageFilter: (lang: string | null) => void;
   setFilesSearchPattern: (pattern: string) => void;
+  addContextItem: (item: ContextItem) => void;
+  removeContextItem: (index: number) => void;
+  clearContextItems: () => void;
+  pushContextToMode: (targetMode: 'simple' | 'expert' | 'task' | 'plan' | 'chat') => Promise<void>;
+  setError: (message: string | null) => void;
   clearSearch: () => void;
   clearError: () => void;
 }
@@ -74,6 +84,7 @@ export const useCodebaseStore = create<CodebaseState>()((set, get) => ({
   files: [],
   filesTotalCount: 0,
   searchResults: [],
+  contextItems: [],
 
   loading: false,
   detailLoading: false,
@@ -164,21 +175,47 @@ export const useCodebaseStore = create<CodebaseState>()((set, get) => ({
   },
 
   reindexProject: async (path) => {
-    await triggerReindex(path);
-    // Reload detail after a brief delay to let indexing start
-    setTimeout(() => {
-      get().loadProjectDetail(path);
-    }, 1000);
+    const res = await triggerReindex(path);
+    if (!res.success) {
+      set({ error: res.error ?? 'Failed to trigger reindex' });
+      return;
+    }
+
+    // Poll status so UI updates are event-driven, not a blind timeout.
+    const maxAttempts = 12;
+    for (let i = 0; i < maxAttempts; i++) {
+      const status = await getIndexStatus(path);
+      if (status.success && status.data) {
+        const s = status.data.status;
+        if (s !== 'idle') {
+          await get().loadProjectDetail(path);
+          return;
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+
+    // Fallback refresh even if status polling did not observe transition.
+    await get().loadProjectDetail(path);
   },
 
-  searchProject: async (path, query, topK) => {
+  searchProject: async (path, query, topK, modes) => {
     set({ searchLoading: true, searchResults: [] });
-    const res = await searchCodebase(path, query, topK);
-    if (res.success && res.data) {
-      set({ searchResults: res.data, searchLoading: false });
-    } else {
-      set({ searchLoading: false, error: res.error ?? 'Search failed' });
+    const v2 = await searchCodebase({
+      project_path: path,
+      query,
+      modes: modes ?? ['hybrid'],
+      limit: topK ?? 20,
+      include_snippet: true,
+    });
+    if (v2.success && v2.data) {
+      set({ searchResults: v2.data.hits, searchLoading: false });
+      return;
     }
+    set({
+      searchLoading: false,
+      error: v2.error ?? 'Search failed',
+    });
   },
 
   setFilesPage: (page) => {
@@ -197,6 +234,49 @@ export const useCodebaseStore = create<CodebaseState>()((set, get) => ({
     set({ filesSearchPattern: pattern, filesPage: 0 });
     const { selectedProjectPath } = get();
     if (selectedProjectPath) get().loadFiles(selectedProjectPath);
+  },
+
+  addContextItem: (item) => {
+    set((state) => {
+      const exists = state.contextItems.some(
+        (it) =>
+          it.type === item.type &&
+          it.project_path === item.project_path &&
+          it.file_path === item.file_path &&
+          (it.symbol_name ?? null) === (item.symbol_name ?? null) &&
+          (it.line_start ?? null) === (item.line_start ?? null) &&
+          (it.line_end ?? null) === (item.line_end ?? null),
+      );
+      if (exists) return state;
+      return { contextItems: [...state.contextItems, item] };
+    });
+  },
+
+  removeContextItem: (index) => {
+    set((state) => ({
+      contextItems: state.contextItems.filter((_, i) => i !== index),
+    }));
+  },
+
+  clearContextItems: () => {
+    set({ contextItems: [] });
+  },
+
+  pushContextToMode: async (targetMode) => {
+    const { contextItems } = get();
+    if (contextItems.length === 0) {
+      return;
+    }
+    const res = await addCodebaseContext(targetMode, contextItems);
+    if (!res.success) {
+      set({ error: res.error ?? 'Failed to add context' });
+      return;
+    }
+    set({ contextItems: [] });
+  },
+
+  setError: (message) => {
+    set({ error: message });
   },
 
   clearSearch: () => {

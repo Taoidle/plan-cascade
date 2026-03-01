@@ -144,18 +144,27 @@ mod tests {
         // scope param with enum values
         let scope = props.get("scope").unwrap();
         let enum_vals = scope.enum_values.as_ref().unwrap();
-        assert!(enum_vals.contains(&"files".to_string()));
-        assert!(enum_vals.contains(&"symbols".to_string()));
+        assert!(enum_vals.contains(&"hybrid".to_string()));
+        assert!(enum_vals.contains(&"symbol".to_string()));
+        assert!(enum_vals.contains(&"path".to_string()));
         assert!(enum_vals.contains(&"semantic".to_string()));
-        assert!(enum_vals.contains(&"all".to_string()));
+        assert!(!enum_vals.contains(&"all".to_string()));
 
-        // scope default is "all"
+        // scope default is "hybrid"
         let default_val = scope.default.as_ref().unwrap();
-        assert_eq!(default_val, &serde_json::Value::String("all".to_string()));
+        assert_eq!(
+            default_val,
+            &serde_json::Value::String("hybrid".to_string())
+        );
 
-        // component param exists and is optional
-        assert!(props.contains_key("component"));
-        assert!(!required.contains(&"component".to_string()));
+        // V2 params exist and are optional
+        assert!(props.contains_key("project_path"));
+        assert!(props.contains_key("workspace_root_id"));
+        assert!(props.contains_key("limit"));
+        assert!(props.contains_key("include_snippet"));
+        assert!(props.contains_key("filters"));
+        assert!(!required.contains(&"project_path".to_string()));
+        assert!(!required.contains(&"workspace_root_id".to_string()));
     }
 
     #[test]

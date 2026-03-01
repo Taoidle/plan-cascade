@@ -197,7 +197,10 @@ fn main() {
             plan_cascade_desktop::commands::codebase::codebase_get_project_detail,
             plan_cascade_desktop::commands::codebase::codebase_list_files,
             plan_cascade_desktop::commands::codebase::codebase_delete_project,
-            plan_cascade_desktop::commands::codebase::codebase_search,
+            plan_cascade_desktop::commands::codebase::codebase_search_v2,
+            plan_cascade_desktop::commands::codebase::codebase_get_file_excerpt,
+            plan_cascade_desktop::commands::codebase::codebase_open_in_editor,
+            plan_cascade_desktop::commands::codebase::codebase_add_context,
             plan_cascade_desktop::commands::codebase::classify_codebase_components,
             // Strategy commands
             plan_cascade_desktop::commands::strategy::analyze_task_strategy,

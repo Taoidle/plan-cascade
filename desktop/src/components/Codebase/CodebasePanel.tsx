@@ -11,7 +11,7 @@ import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { listen } from '@tauri-apps/api/event';
 import { useCodebaseStore } from '../../store/codebase';
-import type { IndexStatusEvent } from '../../lib/codebaseApi';
+import type { CodebaseIndexStatus, IndexStatusEvent } from '../../lib/codebaseApi';
 import { CodebaseDetail } from './CodebaseDetail';
 
 // ---------------------------------------------------------------------------
@@ -74,15 +74,21 @@ function DeleteConfirmDialog({
 // StatusDot
 // ---------------------------------------------------------------------------
 
-function StatusDot({ status }: { status: string }) {
+function StatusDot({ status }: { status: CodebaseIndexStatus }) {
   const color =
-    status === 'indexing'
-      ? 'bg-blue-500 animate-pulse'
-      : status === 'indexed'
-        ? 'bg-green-500'
-        : status === 'error'
-          ? 'bg-red-500'
-          : 'bg-gray-400';
+    status === 'queued'
+      ? 'bg-slate-500 animate-pulse'
+      : status === 'indexing'
+        ? 'bg-blue-500 animate-pulse'
+        : status === 'indexed'
+          ? 'bg-green-500'
+          : status === 'indexed_no_embedding'
+            ? 'bg-amber-500'
+            : status === 'stale'
+              ? 'bg-orange-500'
+              : status === 'error'
+                ? 'bg-red-500'
+                : 'bg-gray-400';
 
   return <span className={clsx('inline-block w-2 h-2 rounded-full', color)} />;
 }
@@ -134,8 +140,11 @@ export function CodebasePanel() {
     setDeleteTarget(null);
   }, [deleteTarget, deleteProject]);
 
-  const getStatusForProject = (projectPath: string): string => {
-    return liveStatuses[projectPath]?.status ?? 'idle';
+  const getStatusForProject = (projectPath: string, fileCount: number): CodebaseIndexStatus => {
+    const live = liveStatuses[projectPath]?.status;
+    if (live) return live;
+    if (fileCount > 0) return 'indexed';
+    return 'idle';
   };
 
   const formatPath = (path: string): string => {
@@ -193,7 +202,7 @@ export function CodebasePanel() {
               ) : (
                 <div className="divide-y divide-gray-200 dark:divide-gray-700">
                   {projects.map((project) => {
-                    const status = getStatusForProject(project.project_path);
+                    const status = getStatusForProject(project.project_path, project.file_count);
                     const isSelected = selectedProjectPath === project.project_path;
 
                     return (

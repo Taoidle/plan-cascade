@@ -43,16 +43,30 @@ export interface EmbeddingMetadata {
   embedding_dimension: number;
 }
 
+export type CodebaseIndexStatus =
+  | 'idle'
+  | 'queued'
+  | 'indexing'
+  | 'indexed'
+  | 'indexed_no_embedding'
+  | 'error'
+  | 'stale';
+
+export type LspEnrichmentStatus = 'none' | 'enriching' | 'enriched';
+
 export interface IndexStatusEvent {
   project_path: string;
-  status: string;
+  status: CodebaseIndexStatus;
   indexed_files: number;
   total_files: number;
   error_message: string | null;
   total_symbols: number;
   embedding_chunks: number;
   embedding_provider_name: string | null;
-  lsp_enrichment: string;
+  lsp_enrichment: LspEnrichmentStatus;
+  phase?: 'queued' | 'parse' | 'embedding' | 'lsp' | 'done';
+  job_id?: string | null;
+  updated_at?: string | null;
 }
 
 export interface CodebaseProjectDetail {
@@ -82,11 +96,64 @@ export interface CodebaseFileListResult {
   total: number;
 }
 
-export interface SemanticSearchResult {
+export type CodeSearchMode = 'symbol' | 'path' | 'semantic' | 'hybrid';
+
+export interface CodeSearchFilters {
+  component?: string | null;
+  language?: string | null;
+  file_path_prefix?: string | null;
+}
+
+export interface SearchChannelScore {
+  channel: CodeSearchMode;
+  rank: number;
+  score: number;
+}
+
+export interface SearchHit {
   file_path: string;
-  chunk_index: number;
-  chunk_text: string;
-  similarity: number;
+  symbol_name?: string | null;
+  snippet?: string | null;
+  similarity?: number | null;
+  score: number;
+  score_breakdown: SearchChannelScore[];
+}
+
+export interface CodeSearchRequest {
+  project_path: string;
+  query: string;
+  modes?: CodeSearchMode[];
+  limit?: number;
+  offset?: number;
+  include_snippet?: boolean;
+  filters?: CodeSearchFilters;
+}
+
+export interface CodeSearchResponse {
+  hits: SearchHit[];
+  total: number;
+  semantic_degraded: boolean;
+  semantic_error?: string | null;
+}
+
+export interface FileExcerptResult {
+  file_path: string;
+  line_start: number;
+  line_end: number;
+  total_lines: number;
+  content: string;
+}
+
+export interface ContextItem {
+  type: 'file' | 'symbol' | 'snippet' | 'search_result';
+  project_path: string;
+  file_path: string;
+  symbol_name?: string | null;
+  snippet?: string | null;
+  line_start?: number | null;
+  line_end?: number | null;
+  score?: number | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,16 +210,15 @@ export async function deleteCodebaseProject(projectPath: string): Promise<Comman
   }
 }
 
-export async function searchCodebase(
-  projectPath: string,
-  query: string,
-  topK?: number,
-): Promise<CommandResponse<SemanticSearchResult[]>> {
+export async function searchCodebase(request: CodeSearchRequest): Promise<CommandResponse<CodeSearchResponse>> {
   try {
-    return await invoke<CommandResponse<SemanticSearchResult[]>>('codebase_search', {
-      projectPath,
-      query,
-      topK: topK ?? 10,
+    return await invoke<CommandResponse<CodeSearchResponse>>('codebase_search_v2', {
+      request: {
+        ...request,
+        limit: request.limit ?? 20,
+        offset: request.offset ?? 0,
+        include_snippet: request.include_snippet ?? true,
+      },
     });
   } catch (e) {
     return { success: false, data: null, error: String(e) };
@@ -189,6 +255,56 @@ export async function classifyComponents(projectPath: string): Promise<CommandRe
   try {
     return await invoke<CommandResponse<ClassifyComponentsResult>>('classify_codebase_components', {
       projectPath,
+    });
+  } catch (e) {
+    return { success: false, data: null, error: String(e) };
+  }
+}
+
+export async function getCodebaseFileExcerpt(
+  projectPath: string,
+  filePath: string,
+  lineStart: number,
+  lineEnd: number,
+): Promise<CommandResponse<FileExcerptResult>> {
+  try {
+    return await invoke<CommandResponse<FileExcerptResult>>('codebase_get_file_excerpt', {
+      projectPath,
+      filePath,
+      lineStart,
+      lineEnd,
+    });
+  } catch (e) {
+    return { success: false, data: null, error: String(e) };
+  }
+}
+
+export async function openCodebaseFileInEditor(
+  projectPath: string,
+  filePath: string,
+  line?: number,
+  column?: number,
+): Promise<CommandResponse<boolean>> {
+  try {
+    return await invoke<CommandResponse<boolean>>('codebase_open_in_editor', {
+      projectPath,
+      filePath,
+      line,
+      column,
+    });
+  } catch (e) {
+    return { success: false, data: null, error: String(e) };
+  }
+}
+
+export async function addCodebaseContext(
+  targetMode: 'simple' | 'expert' | 'task' | 'plan' | 'chat',
+  items: ContextItem[],
+): Promise<CommandResponse<number>> {
+  try {
+    return await invoke<CommandResponse<number>>('codebase_add_context', {
+      targetMode,
+      items,
     });
   } catch (e) {
     return { success: false, data: null, error: String(e) };

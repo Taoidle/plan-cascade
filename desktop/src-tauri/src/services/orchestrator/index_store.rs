@@ -234,10 +234,14 @@ impl IndexStore {
         Ok(())
     }
 
-    /// Query symbols whose name matches a SQL LIKE pattern.
+    /// Query symbols within a project whose name matches a SQL LIKE pattern.
     ///
     /// The `name_pattern` should use `%` as wildcard, e.g. `"%Controller%"`.
-    pub fn query_symbols(&self, name_pattern: &str) -> AppResult<Vec<SymbolMatch>> {
+    pub fn query_symbols(
+        &self,
+        project_path: &str,
+        name_pattern: &str,
+    ) -> AppResult<Vec<SymbolMatch>> {
         let conn = self.get_connection()?;
 
         let mut stmt = conn.prepare(
@@ -247,11 +251,12 @@ impl IndexStore {
              FROM file_symbols fs
              JOIN file_index fi ON fi.id = fs.file_index_id
              WHERE fs.name LIKE ?1
+               AND fi.project_path = ?2
              ORDER BY fs.name, fi.file_path",
         )?;
 
         let rows = stmt
-            .query_map(params![name_pattern], |row| {
+            .query_map(params![name_pattern, project_path], |row| {
                 Ok(SymbolMatch {
                     file_path: row.get(0)?,
                     project_path: row.get(1)?,
@@ -1203,7 +1208,12 @@ impl IndexStore {
     /// Returns up to `limit` results.
     ///
     /// Returns an empty Vec for empty queries without error.
-    pub fn fts_search_symbols(&self, query: &str, limit: usize) -> AppResult<Vec<SymbolMatch>> {
+    pub fn fts_search_symbols(
+        &self,
+        query: &str,
+        project_path: &str,
+        limit: usize,
+    ) -> AppResult<Vec<SymbolMatch>> {
         let sanitized = sanitize_fts_query(query);
         if sanitized.is_empty() {
             return Ok(Vec::new());
@@ -1226,12 +1236,13 @@ impl IndexStore {
              JOIN file_symbols fs ON fs.id = symbol_fts.rowid
              JOIN file_index fi ON fi.id = fs.file_index_id
              WHERE symbol_fts MATCH ?1
+               AND fi.project_path = ?2
              ORDER BY symbol_fts.rank
-             LIMIT ?2",
+             LIMIT ?3",
         )?;
 
         let rows = stmt
-            .query_map(params![fts_expr, limit as i64], |row| {
+            .query_map(params![fts_expr, project_path, limit as i64], |row| {
                 Ok(SymbolMatch {
                     file_path: row.get(0)?,
                     project_path: row.get(1)?,
@@ -2207,7 +2218,7 @@ mod tests {
         store.upsert_file_index("/project", &item1, "h1").unwrap();
         store.upsert_file_index("/project", &item2, "h2").unwrap();
 
-        let results = store.query_symbols("%Controller%").unwrap();
+        let results = store.query_symbols("/project", "%Controller%").unwrap();
         assert_eq!(results.len(), 2);
         assert!(results.iter().any(|r| r.symbol_name == "UserController"));
         assert!(results.iter().any(|r| r.symbol_name == "AdminController"));
@@ -2229,7 +2240,7 @@ mod tests {
         );
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
-        let results = store.query_symbols("%NonExistent%").unwrap();
+        let results = store.query_symbols("/project", "%NonExistent%").unwrap();
         assert!(results.is_empty());
     }
 
@@ -2248,9 +2259,50 @@ mod tests {
         );
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
-        let results = store.query_symbols("Config").unwrap();
+        let results = store.query_symbols("/project", "Config").unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].symbol_name, "Config");
+    }
+
+    #[test]
+    fn query_symbols_is_scoped_by_project() {
+        let store = create_test_store();
+
+        let item_a = make_item(
+            "src/main.rs",
+            "desktop-rust",
+            "rust",
+            vec![SymbolInfo::basic(
+                "SharedController".to_string(),
+                SymbolKind::Struct,
+                1,
+            )],
+        );
+        let item_b = make_item(
+            "src/main.rs",
+            "desktop-rust",
+            "rust",
+            vec![SymbolInfo::basic(
+                "SharedController".to_string(),
+                SymbolKind::Struct,
+                1,
+            )],
+        );
+
+        store.upsert_file_index("/project-a", &item_a, "ha").unwrap();
+        store.upsert_file_index("/project-b", &item_b, "hb").unwrap();
+
+        let results_a = store
+            .query_symbols("/project-a", "%SharedController%")
+            .unwrap();
+        let results_b = store
+            .query_symbols("/project-b", "%SharedController%")
+            .unwrap();
+
+        assert_eq!(results_a.len(), 1);
+        assert_eq!(results_a[0].project_path, "/project-a");
+        assert_eq!(results_b.len(), 1);
+        assert_eq!(results_b[0].project_path, "/project-b");
     }
 
     // =========================================================================
@@ -2433,7 +2485,7 @@ mod tests {
         assert!(symbols.is_empty());
 
         // Verify no orphaned symbols remain via query
-        let matches = store.query_symbols("%main%").unwrap();
+        let matches = store.query_symbols("/project", "%main%").unwrap();
         assert!(matches.is_empty());
     }
 
@@ -2553,7 +2605,7 @@ mod tests {
         assert_eq!(summary.total_files, 50);
 
         // Query for a specific symbol pattern
-        let results = store.query_symbols("symbol_25_%").unwrap();
+        let results = store.query_symbols("/project", "symbol_25_%").unwrap();
         assert_eq!(results.len(), 5);
     }
 
@@ -2932,7 +2984,7 @@ mod tests {
         let item = make_item("src/handler.rs", "desktop-rust", "rust", symbols);
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
-        let results = store.query_symbols("%process%").unwrap();
+        let results = store.query_symbols("/project", "%process%").unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].parent_symbol.as_deref(), Some("Handler"));
         assert_eq!(
@@ -3532,7 +3584,9 @@ mod tests {
 
         // With tokenchars='_', "user_controller" tokenizes as a single token.
         // The query "user_controller" should match via prefix.
-        let results = store.fts_search_symbols("user_controller", 10).unwrap();
+        let results = store
+            .fts_search_symbols("user_controller", "/project", 10)
+            .unwrap();
         assert!(!results.is_empty(), "Should find user_controller symbol");
         assert_eq!(results[0].symbol_name, "user_controller");
 
@@ -3561,12 +3615,48 @@ mod tests {
 
         // "user" should match "user_controller" via prefix matching
         // (with tokenchars='_', user_controller is a single token; "user"* matches prefix)
-        let results = store.fts_search_symbols("user", 10).unwrap();
+        let results = store.fts_search_symbols("user", "/project", 10).unwrap();
         assert!(
             !results.is_empty(),
             "Prefix 'user' should match 'user_controller'"
         );
         assert_eq!(results[0].symbol_name, "user_controller");
+    }
+
+    #[test]
+    fn fts_search_symbols_is_scoped_by_project() {
+        let store = create_test_store();
+
+        let item_a = make_item(
+            "src/controller.rs",
+            "backend",
+            "rust",
+            vec![SymbolInfo::basic(
+                "shared_controller".to_string(),
+                SymbolKind::Struct,
+                1,
+            )],
+        );
+        let item_b = make_item(
+            "src/controller.rs",
+            "backend",
+            "rust",
+            vec![SymbolInfo::basic(
+                "shared_controller".to_string(),
+                SymbolKind::Struct,
+                1,
+            )],
+        );
+
+        store.upsert_file_index("/project-a", &item_a, "ha").unwrap();
+        store.upsert_file_index("/project-b", &item_b, "hb").unwrap();
+
+        let results = store
+            .fts_search_symbols("shared_controller", "/project-a", 10)
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].project_path, "/project-a");
     }
 
     #[test]
@@ -3585,7 +3675,7 @@ mod tests {
         );
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
-        let results = store.fts_search_symbols("", 10).unwrap();
+        let results = store.fts_search_symbols("", "/project", 10).unwrap();
         assert!(
             results.is_empty(),
             "Empty query should return empty results"
@@ -3646,7 +3736,9 @@ mod tests {
         store.upsert_file_index("/project", &item, "h1").unwrap();
 
         // Queries with special characters should not cause SQL errors
-        let results = store.fts_search_symbols("test\"value OR DROP", 10).unwrap();
+        let results = store
+            .fts_search_symbols("test\"value OR DROP", "/project", 10)
+            .unwrap();
         // Just verify it doesn't panic/error
         let _ = results;
     }

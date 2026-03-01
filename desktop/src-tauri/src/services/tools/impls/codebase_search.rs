@@ -6,7 +6,7 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::services::llm::types::ParameterSchema;
@@ -20,7 +20,7 @@ use crate::utils::error::AppError;
 /// CodebaseSearch tool -- searches the project index for symbols, files, and semantic matches.
 ///
 /// Uses `ctx.index_store`, `ctx.embedding_manager`, `ctx.embedding_service`,
-/// and `ctx.hnsw_index` from the ToolExecutionContext. When `scope="all"`,
+/// and `ctx.hnsw_index` from the ToolExecutionContext. When `scope="hybrid"`,
 /// uses `HybridSearchEngine` for RRF-fused multi-channel search
 /// (FTS5 BM25 + semantic HNSW). Falls back to manual channel logic on error.
 pub struct CodebaseSearchTool;
@@ -36,6 +36,10 @@ impl CodebaseSearchTool {
         query: &str,
         project_path: &str,
         component: Option<&str>,
+        file_path_prefix: Option<&str>,
+        allowed_language_paths: Option<&HashSet<String>>,
+        limit: usize,
+        include_snippet: bool,
         index_store: &Arc<IndexStore>,
     ) -> Result<String, String> {
         let mut engine = HybridSearchEngine::with_defaults(
@@ -55,9 +59,9 @@ impl CodebaseSearchTool {
 
         if results.is_empty() {
             let mut hint = format!(
-                "No results found for '{}' (scope: all, hybrid RRF).\n\
+                "No results found for '{}' (scope: hybrid, RRF).\n\
                  Hint: Try shorter queries (1-2 keywords). \
-                 Use scope=\"files\" or scope=\"symbols\" for narrower search. \
+                 Use scope=\"path\" or scope=\"symbol\" for narrower search. \
                  Use LS to browse directories or Grep for full-text content search.",
                 query
             );
@@ -76,15 +80,28 @@ impl CodebaseSearchTool {
             return Ok(hint);
         }
 
-        // Apply component filter if specified
-        let results: Vec<&HybridSearchResult> = if let Some(comp) = component {
-            results
-                .iter()
-                .filter(|r| r.file_path.contains(comp))
-                .collect()
-        } else {
-            results.iter().collect()
-        };
+        // Apply optional V2 filters
+        let results: Vec<&HybridSearchResult> = results
+            .iter()
+            .filter(|r| {
+                if let Some(comp) = component {
+                    if !r.file_path.contains(comp) {
+                        return false;
+                    }
+                }
+                if let Some(prefix) = file_path_prefix {
+                    if !r.file_path.starts_with(prefix) {
+                        return false;
+                    }
+                }
+                if let Some(paths) = allowed_language_paths {
+                    if !paths.contains(&r.file_path) {
+                        return false;
+                    }
+                }
+                true
+            })
+            .collect();
 
         if results.is_empty() {
             return Ok(format!(
@@ -143,7 +160,7 @@ impl CodebaseSearchTool {
             query,
             results.len()
         ));
-        for result in results.iter().take(30) {
+        for result in results.iter().take(limit) {
             // Build provenance tag
             let channels: Vec<String> = result
                 .provenance
@@ -160,18 +177,20 @@ impl CodebaseSearchTool {
             if let Some(ref sym) = result.symbol_name {
                 line.push_str(&format!("    symbol: {}\n", sym));
             }
-            if let Some(ref chunk) = result.chunk_text {
-                let display_text = if chunk.len() > 200 {
-                    let mut end = 200;
-                    while end > 0 && !chunk.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    format!("{}...", &chunk[..end])
-                } else {
-                    chunk.clone()
-                };
-                let display_text = display_text.replace('\n', " ");
-                line.push_str(&format!("    snippet: {}\n", display_text));
+            if include_snippet {
+                if let Some(ref chunk) = result.chunk_text {
+                    let display_text = if chunk.len() > 200 {
+                        let mut end = 200;
+                        while end > 0 && !chunk.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        format!("{}...", &chunk[..end])
+                    } else {
+                        chunk.clone()
+                    };
+                    let display_text = display_text.replace('\n', " ");
+                    line.push_str(&format!("    snippet: {}\n", display_text));
+                }
             }
             if let Some(sim) = result.semantic_similarity {
                 line.push_str(&format!("    similarity: {:.3}\n", sim));
@@ -184,8 +203,8 @@ impl CodebaseSearchTool {
             }
             output.push_str(&line);
         }
-        if results.len() > 30 {
-            output.push_str(&format!("  ... and {} more\n", results.len() - 30));
+        if results.len() > limit {
+            output.push_str(&format!("  ... and {} more\n", results.len() - limit));
         }
 
         Ok(output)
@@ -195,31 +214,47 @@ impl CodebaseSearchTool {
     fn search_symbols_channel(
         query: &str,
         component: Option<&str>,
+        file_path_prefix: Option<&str>,
+        allowed_language_paths: Option<&HashSet<String>>,
         project_path: &str,
         scope: &str,
+        limit: usize,
         index_store: &Arc<IndexStore>,
         output_sections: &mut Vec<String>,
     ) {
         // Try FTS5 BM25 first, fall back to LIKE
-        let symbols_result = match index_store.fts_search_symbols(query, 50) {
+        let symbols_result = match index_store.fts_search_symbols(query, project_path, limit) {
             Ok(fts_results) if !fts_results.is_empty() => Ok(fts_results),
             _ => {
                 // Fallback to LIKE
                 let pattern = format!("%{}%", query);
-                index_store.query_symbols(&pattern)
+                index_store.query_symbols(project_path, &pattern)
             }
         };
 
         match symbols_result {
             Ok(symbols) => {
-                let filtered: Vec<_> = if let Some(comp) = component {
-                    symbols
-                        .into_iter()
-                        .filter(|s| s.file_path.contains(comp) && s.project_path == *project_path)
-                        .collect()
-                } else {
-                    symbols
-                };
+                let filtered: Vec<_> = symbols
+                    .into_iter()
+                    .filter(|s| {
+                        if let Some(comp) = component {
+                            if !s.file_path.contains(comp) {
+                                return false;
+                            }
+                        }
+                        if let Some(prefix) = file_path_prefix {
+                            if !s.file_path.starts_with(prefix) {
+                                return false;
+                            }
+                        }
+                        if let Some(paths) = allowed_language_paths {
+                            if !paths.contains(&s.file_path) {
+                                return false;
+                            }
+                        }
+                        true
+                    })
+                    .collect();
 
                 if !filtered.is_empty() {
                     let mut section = format!(
@@ -227,7 +262,7 @@ impl CodebaseSearchTool {
                         query,
                         filtered.len()
                     );
-                    for sym in filtered.iter().take(50) {
+                    for sym in filtered.iter().take(limit) {
                         let mut line = format!(
                             "  {} ({}) — {}:{}",
                             sym.symbol_name, sym.symbol_kind, sym.file_path, sym.line_number
@@ -262,11 +297,11 @@ impl CodebaseSearchTool {
                             section.push_str(&format!("    refs: {}\n", sym.reference_count));
                         }
                     }
-                    if filtered.len() > 50 {
-                        section.push_str(&format!("  ... and {} more\n", filtered.len() - 50));
+                    if filtered.len() > limit {
+                        section.push_str(&format!("  ... and {} more\n", filtered.len() - limit));
                     }
                     output_sections.push(section);
-                } else if scope == "symbols" {
+                } else if scope == "symbol" {
                     output_sections.push(format!("No symbols matching '{}'.", query));
                 }
             }
@@ -280,8 +315,11 @@ impl CodebaseSearchTool {
     fn search_files_channel(
         query: &str,
         component: Option<&str>,
+        file_path_prefix: Option<&str>,
+        allowed_language_paths: Option<&HashSet<String>>,
         project_path: &str,
         scope: &str,
+        limit: usize,
         index_store: &Arc<IndexStore>,
         output_sections: &mut Vec<String>,
     ) {
@@ -293,6 +331,19 @@ impl CodebaseSearchTool {
                     let filtered: Vec<_> = files
                         .into_iter()
                         .filter(|f| f.file_path.to_lowercase().contains(&query_lower))
+                        .filter(|f| {
+                            if let Some(prefix) = file_path_prefix {
+                                if !f.file_path.starts_with(prefix) {
+                                    return false;
+                                }
+                            }
+                            if let Some(paths) = allowed_language_paths {
+                                if !paths.contains(&f.file_path) {
+                                    return false;
+                                }
+                            }
+                            true
+                        })
                         .collect();
 
                     if !filtered.is_empty() {
@@ -302,17 +353,18 @@ impl CodebaseSearchTool {
                             comp,
                             filtered.len()
                         );
-                        for file in filtered.iter().take(50) {
+                        for file in filtered.iter().take(limit) {
                             section.push_str(&format!(
                                 "  {} ({}, {} lines)\n",
                                 file.file_path, file.language, file.line_count
                             ));
                         }
-                        if filtered.len() > 50 {
-                            section.push_str(&format!("  ... and {} more\n", filtered.len() - 50));
+                        if filtered.len() > limit {
+                            section
+                                .push_str(&format!("  ... and {} more\n", filtered.len() - limit));
                         }
                         output_sections.push(section);
-                    } else if scope == "files" {
+                    } else if scope == "path" {
                         output_sections.push(format!(
                             "No files matching '{}' in component '{}'.",
                             query, comp
@@ -325,21 +377,43 @@ impl CodebaseSearchTool {
             }
         } else {
             // No component filter -- try FTS5 first, then fall back to component scan
-            match index_store.fts_search_files(query, project_path, 50) {
+            match index_store.fts_search_files(query, project_path, limit) {
                 Ok(fts_results) if !fts_results.is_empty() => {
+                    let filtered: Vec<_> = fts_results
+                        .into_iter()
+                        .filter(|f| {
+                            if let Some(prefix) = file_path_prefix {
+                                if !f.file_path.starts_with(prefix) {
+                                    return false;
+                                }
+                            }
+                            if let Some(paths) = allowed_language_paths {
+                                if !paths.contains(&f.file_path) {
+                                    return false;
+                                }
+                            }
+                            true
+                        })
+                        .collect();
+                    if filtered.is_empty() {
+                        if scope == "path" {
+                            output_sections.push(format!("No files matching '{}'.", query));
+                        }
+                        return;
+                    }
                     let mut section = format!(
                         "## Files matching '{}' ({} results)\n",
                         query,
-                        fts_results.len()
+                        filtered.len()
                     );
-                    for file in fts_results.iter().take(50) {
+                    for file in filtered.iter().take(limit) {
                         section.push_str(&format!(
                             "  {} ({}, {} lines)\n",
                             file.file_path, file.language, file.line_count
                         ));
                     }
-                    if fts_results.len() > 50 {
-                        section.push_str(&format!("  ... and {} more\n", fts_results.len() - 50));
+                    if filtered.len() > limit {
+                        section.push_str(&format!("  ... and {} more\n", filtered.len() - limit));
                     }
                     output_sections.push(section);
                 }
@@ -356,6 +430,16 @@ impl CodebaseSearchTool {
                                 {
                                     for file in files {
                                         if file.file_path.to_lowercase().contains(&query_lower) {
+                                            if let Some(prefix) = file_path_prefix {
+                                                if !file.file_path.starts_with(prefix) {
+                                                    continue;
+                                                }
+                                            }
+                                            if let Some(paths) = allowed_language_paths {
+                                                if !paths.contains(&file.file_path) {
+                                                    continue;
+                                                }
+                                            }
                                             matching_files.push(format!(
                                                 "  {} [{}] ({}, {} lines)",
                                                 file.file_path,
@@ -372,15 +456,16 @@ impl CodebaseSearchTool {
                                 let count = matching_files.len();
                                 let mut section =
                                     format!("## Files matching '{}' ({} results)\n", query, count);
-                                for line in matching_files.iter().take(50) {
+                                for line in matching_files.iter().take(limit) {
                                     section.push_str(line);
                                     section.push('\n');
                                 }
-                                if count > 50 {
-                                    section.push_str(&format!("  ... and {} more\n", count - 50));
+                                if count > limit {
+                                    section
+                                        .push_str(&format!("  ... and {} more\n", count - limit));
                                 }
                                 output_sections.push(section);
-                            } else if scope == "files" {
+                            } else if scope == "path" {
                                 output_sections.push(format!("No files matching '{}'.", query));
                             }
                         }
@@ -397,8 +482,13 @@ impl CodebaseSearchTool {
     async fn search_semantic_channel(
         ctx: &ToolExecutionContext,
         query: &str,
+        component: Option<&str>,
+        file_path_prefix: Option<&str>,
+        allowed_language_paths: Option<&HashSet<String>>,
         project_path: &str,
         scope: &str,
+        limit: usize,
+        include_snippet: bool,
         index_store: &Arc<IndexStore>,
         output_sections: &mut Vec<String>,
     ) {
@@ -438,7 +528,7 @@ impl CodebaseSearchTool {
                     Ok(query_embedding) if !query_embedding.is_empty() => {
                         let search_result = if let Some(ref hnsw) = ctx.hnsw_index {
                             if hnsw.is_ready().await {
-                                let hnsw_hits = hnsw.search(&query_embedding, 10).await;
+                                let hnsw_hits = hnsw.search(&query_embedding, limit).await;
                                 if !hnsw_hits.is_empty() {
                                     let rowids: Vec<usize> =
                                         hnsw_hits.iter().map(|(id, _)| *id).collect();
@@ -467,13 +557,22 @@ impl CodebaseSearchTool {
                                     Ok(Vec::new())
                                 }
                             } else {
-                                index_store.semantic_search(&query_embedding, project_path, 10)
+                                index_store.semantic_search(&query_embedding, project_path, limit)
                             }
                         } else {
-                            index_store.semantic_search(&query_embedding, project_path, 10)
+                            index_store.semantic_search(&query_embedding, project_path, limit)
                         };
 
-                        Self::format_semantic_results(query, search_result, output_sections);
+                        Self::format_semantic_results(
+                            query,
+                            component,
+                            file_path_prefix,
+                            allowed_language_paths,
+                            limit,
+                            include_snippet,
+                            search_result,
+                            output_sections,
+                        );
                     }
                     Ok(_) => {
                         output_sections.push(
@@ -486,7 +585,7 @@ impl CodebaseSearchTool {
                         let msg = format!(
                             "Semantic search failed: embedding provider error — {}. \
                              The provider may be unhealthy or unreachable. \
-                             Use 'symbols' or 'files' scope instead.",
+                             Use 'symbol' or 'path' scope instead.",
                             e
                         );
                         if is_standalone_semantic {
@@ -504,8 +603,17 @@ impl CodebaseSearchTool {
                 let query_embedding = emb_svc.embed_text(query);
                 if !query_embedding.is_empty() {
                     let search_result =
-                        index_store.semantic_search(&query_embedding, project_path, 10);
-                    Self::format_semantic_results(query, search_result, output_sections);
+                        index_store.semantic_search(&query_embedding, project_path, limit);
+                    Self::format_semantic_results(
+                        query,
+                        component,
+                        file_path_prefix,
+                        allowed_language_paths,
+                        limit,
+                        include_snippet,
+                        search_result,
+                        output_sections,
+                    );
                 } else {
                     output_sections.push(
                         "Semantic search: embedding service produced empty vector. \
@@ -517,7 +625,7 @@ impl CodebaseSearchTool {
                 output_sections.push(
                     "Semantic search not available: embedding vocabulary has not been built yet. \
                      The project needs to be re-indexed with embedding generation enabled. \
-                     Use 'symbols' or 'files' scope instead."
+                     Use 'symbol' or 'path' scope instead."
                         .to_string(),
                 );
             } else {
@@ -530,7 +638,7 @@ impl CodebaseSearchTool {
                 output_sections.push(
                     "Semantic search not available: no embedding provider configured. \
                      The project has not been indexed with embedding support. \
-                     Use 'symbols' or 'files' scope instead."
+                     Use 'symbol' or 'path' scope instead."
                         .to_string(),
                 );
             } else {
@@ -542,31 +650,71 @@ impl CodebaseSearchTool {
     /// Format semantic search results into output sections.
     fn format_semantic_results(
         query: &str,
+        component: Option<&str>,
+        file_path_prefix: Option<&str>,
+        allowed_language_paths: Option<&HashSet<String>>,
+        limit: usize,
+        include_snippet: bool,
         search_result: Result<Vec<SemanticSearchResult>, AppError>,
         output_sections: &mut Vec<String>,
     ) {
         match search_result {
             Ok(results) if !results.is_empty() => {
+                let filtered: Vec<SemanticSearchResult> = results
+                    .into_iter()
+                    .filter(|result| {
+                        if let Some(comp) = component {
+                            if !result.file_path.contains(comp) {
+                                return false;
+                            }
+                        }
+                        if let Some(prefix) = file_path_prefix {
+                            if !result.file_path.starts_with(prefix) {
+                                return false;
+                            }
+                        }
+                        if let Some(paths) = allowed_language_paths {
+                            if !paths.contains(&result.file_path) {
+                                return false;
+                            }
+                        }
+                        true
+                    })
+                    .collect();
+
+                if filtered.is_empty() {
+                    output_sections.push(format!("No semantic matches found for '{}'.", query));
+                    return;
+                }
+
                 let mut section = format!(
                     "## Semantic search for '{}' ({} results)\n",
                     query,
-                    results.len()
+                    filtered.len()
                 );
-                for result in &results {
-                    let display_text = if result.chunk_text.len() > 200 {
-                        let mut end = 200;
-                        while end > 0 && !result.chunk_text.is_char_boundary(end) {
-                            end -= 1;
-                        }
-                        format!("{}...", &result.chunk_text[..end])
-                    } else {
-                        result.chunk_text.clone()
-                    };
-                    let display_text = display_text.replace('\n', " ");
-                    section.push_str(&format!(
-                        "  {} (chunk {}, similarity: {:.3})\n    {}\n",
-                        result.file_path, result.chunk_index, result.similarity, display_text
-                    ));
+                for result in filtered.iter().take(limit) {
+                    let mut line = format!(
+                        "  {} (chunk {}, similarity: {:.3})",
+                        result.file_path, result.chunk_index, result.similarity
+                    );
+                    if include_snippet {
+                        let display_text = if result.chunk_text.len() > 200 {
+                            let mut end = 200;
+                            while end > 0 && !result.chunk_text.is_char_boundary(end) {
+                                end -= 1;
+                            }
+                            format!("{}...", &result.chunk_text[..end])
+                        } else {
+                            result.chunk_text.clone()
+                        };
+                        let display_text = display_text.replace('\n', " ");
+                        line.push_str(&format!("\n    {}", display_text));
+                    }
+                    line.push('\n');
+                    section.push_str(&line);
+                }
+                if filtered.len() > limit {
+                    section.push_str(&format!("  ... and {} more\n", filtered.len() - limit));
                 }
                 output_sections.push(section);
             }
@@ -587,7 +735,7 @@ impl Tool for CodebaseSearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search the project's indexed codebase for symbols, files, or semantic similarity. Uses the pre-built SQLite index for fast lookups without scanning the filesystem. The 'semantic' scope performs vector similarity search over code chunks. Preferred over Grep/Glob for initial code exploration when the index is available."
+        "Search the indexed codebase with V2 scopes and filters. Supports 'hybrid', 'symbol', 'path', and 'semantic' scopes with optional project/workspace targeting, result limits, and structured filters."
     }
 
     fn parameters_schema(&self) -> ParameterSchema {
@@ -602,22 +750,57 @@ impl Tool for CodebaseSearchTool {
         );
 
         let mut scope_schema = ParameterSchema::string(Some(
-            "Search scope: 'symbols' (search symbol names), 'files' (search file paths/components), 'semantic' (vector similarity search over code chunks), 'all' (merge symbols + files). Default: 'all'",
+            "Search scope: 'hybrid' (RRF merged channels), 'symbol', 'path', or 'semantic'. Default: 'hybrid'.",
         ));
         scope_schema.enum_values = Some(vec![
-            "files".to_string(),
-            "symbols".to_string(),
+            "hybrid".to_string(),
+            "symbol".to_string(),
+            "path".to_string(),
             "semantic".to_string(),
-            "all".to_string(),
         ]);
-        scope_schema.default = Some(serde_json::Value::String("all".to_string()));
+        scope_schema.default = Some(serde_json::Value::String("hybrid".to_string()));
         properties.insert("scope".to_string(), scope_schema);
 
         properties.insert(
-            "component".to_string(),
+            "project_path".to_string(),
             ParameterSchema::string(Some(
-                "Optional component name to narrow results (e.g., 'desktop-rust', 'desktop-web')",
+                "Optional project path override. Defaults to current project root in tool context.",
             )),
+        );
+        properties.insert(
+            "workspace_root_id".to_string(),
+            ParameterSchema::string(Some(
+                "Optional workspace root identifier for multi-root routing (reserved for workspace-aware dispatch).",
+            )),
+        );
+
+        let mut limit_schema = ParameterSchema::integer(Some(
+            "Maximum number of results to return (1-100). Default: 20.",
+        ));
+        limit_schema.default = Some(serde_json::json!(20));
+        properties.insert("limit".to_string(), limit_schema);
+
+        let mut include_snippet_schema =
+            ParameterSchema::boolean(Some("Whether to include snippet/chunk text in results."));
+        include_snippet_schema.default = Some(serde_json::json!(true));
+        properties.insert("include_snippet".to_string(), include_snippet_schema);
+
+        let mut filter_props = HashMap::new();
+        filter_props.insert(
+            "component".to_string(),
+            ParameterSchema::string(Some("Filter by component/path fragment.")),
+        );
+        filter_props.insert(
+            "language".to_string(),
+            ParameterSchema::string(Some("Filter by file language (e.g. 'rust', 'typescript').")),
+        );
+        filter_props.insert(
+            "file_path_prefix".to_string(),
+            ParameterSchema::string(Some("Filter by file path prefix.")),
+        );
+        properties.insert(
+            "filters".to_string(),
+            ParameterSchema::object(Some("Optional search filters."), filter_props, vec![]),
         );
 
         ParameterSchema::object(
@@ -640,9 +823,45 @@ impl Tool for CodebaseSearchTool {
             }
         };
 
-        let scope = args.get("scope").and_then(|v| v.as_str()).unwrap_or("all");
+        let scope_input = args
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .unwrap_or("hybrid");
+        let scope_normalized = scope_input.trim().to_ascii_lowercase();
+        let scope = match scope_normalized.as_str() {
+            "hybrid" | "symbol" | "path" | "semantic" => scope_normalized.as_str(),
+            _ => {
+                return ToolResult::err(format!(
+                    "Invalid scope '{}'. Use one of: hybrid, symbol, path, semantic.",
+                    scope_input
+                ))
+                .with_error_code("invalid_scope");
+            }
+        };
 
-        let component = args.get("component").and_then(|v| v.as_str());
+        let normalized_arg = |value: Option<&Value>| -> Option<String> {
+            value
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+        };
+
+        let filters = args.get("filters").and_then(|v| v.as_object());
+        let component = normalized_arg(filters.and_then(|f| f.get("component")));
+        let language_filter = normalized_arg(filters.and_then(|f| f.get("language")));
+        let file_path_prefix = normalized_arg(filters.and_then(|f| f.get("file_path_prefix")));
+
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize)
+            .unwrap_or(20)
+            .clamp(1, 100);
+        let include_snippet = args
+            .get("include_snippet")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
 
         let index_store = match &ctx.index_store {
             Some(store) => store,
@@ -652,12 +871,47 @@ impl Tool for CodebaseSearchTool {
             }
         };
 
-        let project_path = ctx.project_root.to_string_lossy().to_string();
+        let project_path = normalized_arg(args.get("project_path"))
+            .unwrap_or_else(|| ctx.project_root.to_string_lossy().to_string());
+        if let Some(workspace_root_id) = normalized_arg(args.get("workspace_root_id")) {
+            tracing::debug!(
+                "CodebaseSearch workspace_root_id provided but not yet used in tool routing: {}",
+                workspace_root_id
+            );
+        }
 
-        // --- scope="all": Use HybridSearchEngine with RRF fusion ---
-        if scope == "all" {
-            match Self::execute_hybrid_search(ctx, query, &project_path, component, index_store)
-                .await
+        let allowed_language_paths: Option<HashSet<String>> = if let Some(language) =
+            language_filter.as_deref()
+        {
+            match index_store.list_project_files(&project_path, Some(language), None, 0, 100_000) {
+                Ok((files, _)) => Some(files.into_iter().map(|f| f.file_path).collect()),
+                Err(e) => {
+                    tracing::warn!(
+                        "CodebaseSearch language filter failed for project '{}': {}",
+                        project_path,
+                        e
+                    );
+                    Some(HashSet::new())
+                }
+            }
+        } else {
+            None
+        };
+
+        // --- scope="hybrid": Use HybridSearchEngine with RRF fusion ---
+        if scope == "hybrid" {
+            match Self::execute_hybrid_search(
+                ctx,
+                query,
+                &project_path,
+                component.as_deref(),
+                file_path_prefix.as_deref(),
+                allowed_language_paths.as_ref(),
+                limit,
+                include_snippet,
+                index_store,
+            )
+            .await
             {
                 Ok(output) => return ToolResult::ok(output),
                 Err(e) => {
@@ -674,36 +928,47 @@ impl Tool for CodebaseSearchTool {
         let mut output_sections: Vec<String> = Vec::new();
 
         // --- Symbol search ---
-        if scope == "symbols" || scope == "all" {
+        if scope == "symbol" || scope == "hybrid" {
             Self::search_symbols_channel(
                 query,
-                component,
+                component.as_deref(),
+                file_path_prefix.as_deref(),
+                allowed_language_paths.as_ref(),
                 &project_path,
                 scope,
+                limit,
                 index_store,
                 &mut output_sections,
             );
         }
 
         // --- File search ---
-        if scope == "files" || scope == "all" {
+        if scope == "path" || scope == "hybrid" {
             Self::search_files_channel(
                 query,
-                component,
+                component.as_deref(),
+                file_path_prefix.as_deref(),
+                allowed_language_paths.as_ref(),
                 &project_path,
                 scope,
+                limit,
                 index_store,
                 &mut output_sections,
             );
         }
 
         // --- Semantic search ---
-        if scope == "semantic" || scope == "all" {
+        if scope == "semantic" || scope == "hybrid" {
             Self::search_semantic_channel(
                 ctx,
                 query,
+                component.as_deref(),
+                file_path_prefix.as_deref(),
+                allowed_language_paths.as_ref(),
                 &project_path,
                 scope,
+                limit,
+                include_snippet,
                 index_store,
                 &mut output_sections,
             )
@@ -714,7 +979,7 @@ impl Tool for CodebaseSearchTool {
             let mut hint = format!(
                 "No results found for '{}' (scope: {}).\n\
                  Hint: Try a shorter or different keyword. \
-                 Use scope=\"files\" for file paths, scope=\"symbols\" for function/class names. \
+                 Use scope=\"path\" for file paths, scope=\"symbol\" for function/class names. \
                  You can also use Grep for regex search or LS to browse directories.",
                 query, scope
             );
@@ -756,14 +1021,23 @@ mod tests {
         let props = schema.properties.as_ref().unwrap();
         assert!(props.contains_key("query"));
         assert!(props.contains_key("scope"));
-        assert!(props.contains_key("component"));
+        assert!(props.contains_key("project_path"));
+        assert!(props.contains_key("workspace_root_id"));
+        assert!(props.contains_key("limit"));
+        assert!(props.contains_key("include_snippet"));
+        assert!(props.contains_key("filters"));
 
         let scope = props.get("scope").unwrap();
         let enum_vals = scope.enum_values.as_ref().unwrap();
-        assert!(enum_vals.contains(&"files".to_string()));
-        assert!(enum_vals.contains(&"symbols".to_string()));
+        assert!(enum_vals.contains(&"hybrid".to_string()));
+        assert!(enum_vals.contains(&"symbol".to_string()));
+        assert!(enum_vals.contains(&"path".to_string()));
         assert!(enum_vals.contains(&"semantic".to_string()));
-        assert!(enum_vals.contains(&"all".to_string()));
+        let default_val = scope.default.as_ref().unwrap();
+        assert_eq!(
+            default_val,
+            &serde_json::Value::String("hybrid".to_string())
+        );
     }
 
     #[test]
@@ -789,5 +1063,22 @@ mod tests {
         let result = tool.execute(&ctx, serde_json::json!({})).await;
         assert!(result.is_error());
         assert!(result.error_message().unwrap().contains("query"));
+    }
+
+    #[tokio::test]
+    async fn test_codebase_search_rejects_legacy_scope_aliases() {
+        let tool = CodebaseSearchTool::new();
+        let ctx = make_test_ctx(Path::new("/tmp"));
+        let result = tool
+            .execute(
+                &ctx,
+                serde_json::json!({
+                    "query": "App",
+                    "scope": "all"
+                }),
+            )
+            .await;
+        assert!(result.is_error());
+        assert!(result.error_message().unwrap().contains("Invalid scope"));
     }
 }

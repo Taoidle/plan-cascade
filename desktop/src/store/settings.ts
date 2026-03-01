@@ -361,7 +361,9 @@ export const useSettingsStore = create<SettingsState>()(
         }
         // Sync to backend StandaloneState for tool executor working directory
         import('@tauri-apps/api/core').then(({ invoke }) => {
-          invoke('set_working_directory', { path: workspacePath }).catch(() => {});
+          invoke('set_working_directory', { path: workspacePath }).catch((error) => {
+            console.warn('[settings] Failed to sync working directory', error);
+          });
         });
       },
 

@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { useCodebaseStore } from '../../store/codebase';
-import type { IndexStatusEvent } from '../../lib/codebaseApi';
+import type { CodebaseIndexStatus, IndexStatusEvent } from '../../lib/codebaseApi';
 import { classifyComponents } from '../../lib/codebaseApi';
 import { CodebaseFileList } from './CodebaseFileList';
 import { CodebaseSearch } from './CodebaseSearch';
@@ -25,7 +25,7 @@ interface CodebaseDetailProps {
 
 export function CodebaseDetail({ projectPath, liveStatus, onBack }: CodebaseDetailProps) {
   const { t } = useTranslation('codebase');
-  const { projectDetail, detailLoading, reindexProject, loadProjectDetail } = useCodebaseStore();
+  const { projectDetail, detailLoading, reindexProject, loadProjectDetail, setError } = useCodebaseStore();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [classifying, setClassifying] = useState(false);
 
@@ -92,7 +92,11 @@ export function CodebaseDetail({ projectPath, liveStatus, onBack }: CodebaseDeta
             onClassify={async () => {
               setClassifying(true);
               try {
-                await classifyComponents(projectPath);
+                const result = await classifyComponents(projectPath);
+                if (!result.success) {
+                  setError(result.error ?? 'Component classification failed');
+                  return;
+                }
                 await loadProjectDetail(projectPath);
               } finally {
                 setClassifying(false);
@@ -114,8 +118,13 @@ export function CodebaseDetail({ projectPath, liveStatus, onBack }: CodebaseDeta
 // StatusBadge
 // ---------------------------------------------------------------------------
 
-function StatusBadge({ status, t }: { status: string; t: (key: string) => string }) {
+function StatusBadge({ status, t }: { status: CodebaseIndexStatus; t: (key: string) => string }) {
   const config: Record<string, { bg: string; text: string; label: string }> = {
+    queued: {
+      bg: 'bg-slate-100 dark:bg-slate-800',
+      text: 'text-slate-700 dark:text-slate-300',
+      label: t('queued'),
+    },
     indexing: {
       bg: 'bg-blue-100 dark:bg-blue-900/30',
       text: 'text-blue-700 dark:text-blue-300',
@@ -125,6 +134,16 @@ function StatusBadge({ status, t }: { status: string; t: (key: string) => string
       bg: 'bg-green-100 dark:bg-green-900/30',
       text: 'text-green-700 dark:text-green-300',
       label: t('indexed'),
+    },
+    indexed_no_embedding: {
+      bg: 'bg-amber-100 dark:bg-amber-900/30',
+      text: 'text-amber-700 dark:text-amber-300',
+      label: t('indexedNoEmbedding'),
+    },
+    stale: {
+      bg: 'bg-orange-100 dark:bg-orange-900/30',
+      text: 'text-orange-700 dark:text-orange-300',
+      label: t('stale'),
     },
     error: {
       bg: 'bg-red-100 dark:bg-red-900/30',
@@ -156,7 +175,7 @@ function OverviewTab({
   t,
 }: {
   detail: ReturnType<typeof useCodebaseStore.getState>['projectDetail'];
-  status: string;
+  status: CodebaseIndexStatus;
   liveStatus?: IndexStatusEvent;
   onReindex: () => void;
   classifying: boolean;

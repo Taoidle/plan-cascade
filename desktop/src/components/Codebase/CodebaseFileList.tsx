@@ -9,6 +9,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { useCodebaseStore } from '../../store/codebase';
+import { openCodebaseFileInEditor } from '../../lib/codebaseApi';
 
 const PAGE_SIZE = 50;
 
@@ -16,7 +17,7 @@ interface CodebaseFileListProps {
   projectPath: string;
 }
 
-export function CodebaseFileList({ projectPath: _projectPath }: CodebaseFileListProps) {
+export function CodebaseFileList({ projectPath }: CodebaseFileListProps) {
   const { t } = useTranslation('codebase');
   const {
     files,
@@ -29,6 +30,7 @@ export function CodebaseFileList({ projectPath: _projectPath }: CodebaseFileList
     setFilesPage,
     setFilesLanguageFilter,
     setFilesSearchPattern,
+    setError,
   } = useCodebaseStore();
 
   const [searchInput, setSearchInput] = useState(filesSearchPattern);
@@ -124,7 +126,16 @@ export function CodebaseFileList({ projectPath: _projectPath }: CodebaseFileList
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
               {files.map((file) => (
-                <tr key={file.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                <tr
+                  key={file.id}
+                  className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer"
+                  onClick={async () => {
+                    const result = await openCodebaseFileInEditor(projectPath, file.file_path, 1, 1);
+                    if (!result.success) {
+                      setError(result.error ?? 'Failed to open file');
+                    }
+                  }}
+                >
                   <td className="px-4 py-2">
                     <div className="flex items-center gap-2">
                       <span

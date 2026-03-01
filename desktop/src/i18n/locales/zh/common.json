@@ -112,6 +112,7 @@
 
   "indexing": {
     "idle": "未索引",
+    "queued": "排队中",
     "indexing": "索引中...",
     "indexingProgress": "索引中... {{current}}/{{total}} 个文件",
     "indexingPhase1": "阶段1：索引文件中... ({{current}}/{{total}})",
@@ -127,6 +128,7 @@
     "searchCapabilities": "搜索能力",
     "embeddingProgress": "构建嵌入向量中... ({{current}}/{{total}})",
     "embeddingComplete": "{{count}} 个嵌入",
+    "stale": "索引已过期",
     "lspEnrichmentReady": "LSP 已增强",
     "lspEnrichmentInProgress": "LSP 增强中...",
     "lspEnrichmentUnavailable": "LSP 不可用"
