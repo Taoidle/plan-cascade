@@ -3,7 +3,8 @@
     "changes": "変更",
     "aiChanges": "AI 変更",
     "history": "履歴",
-    "branches": "ブランチ"
+    "branches": "ブランチ",
+    "remotes": "リモート"
   },
 
   "aiChanges": {
@@ -204,14 +205,62 @@
     "behind_other": "{{count}} 後方",
     "currentBranch": "現在のブランチ",
     "checkout": "チェックアウト",
+    "checkoutTracking": "追跡ブランチとしてチェックアウト",
+    "checkoutTrackingFailed": "{{branch}} のチェックアウトに失敗しました",
     "moreActions": "その他の操作",
     "mergeInto": "{{branch}} にマージ",
     "push": "プッシュ",
+    "pushFailed": "プッシュに失敗しました",
     "pull": "プル",
+    "pullFailed": "プルに失敗しました",
+    "setUpstream": "上流を設定",
+    "setUpstreamFailed": "上流の設定に失敗しました",
     "rename": "名前を変更",
     "delete": "削除",
+    "deleteRemoteBranch": "リモートブランチを削除",
+    "deleteRemoteBranchFailed": "リモートブランチ {{branch}} の削除に失敗しました",
+    "confirmDeleteRemoteBranch": "リモートブランチ \"{{branch}}\" を削除しますか？",
+    "noRemoteConfigured": "Git リモートが設定されていません",
     "fetch": "フェッチ",
+    "fetchFailed": "フェッチに失敗しました",
     "fetchAll": "すべてのリモートをフェッチ"
+  },
+
+  "remotesTab": {
+    "title": "リモートとタグ",
+    "refresh": "更新",
+    "noWorkspace": "ワークスペースが選択されていません",
+    "remotes": "リモート",
+    "remoteName": "リモート名（例: origin）",
+    "remoteUrl": "リモート URL",
+    "addRemote": "リモートを追加",
+    "setUrl": "URL を設定",
+    "remove": "削除",
+    "fetch": "フェッチ",
+    "fetchPrune": "フェッチ + Prune",
+    "syncing": "同期中...",
+    "pushTags": "タグをプッシュ",
+    "pushingTags": "タグをプッシュ中...",
+    "noRemotes": "リモートが設定されていません",
+    "confirmRemoveRemote": "リモート \"{{name}}\" を削除しますか？",
+    "editRemoteUrl": "{{name}} の URL を設定",
+    "cancel": "キャンセル",
+    "save": "保存",
+    "tags": "タグ",
+    "tagName": "タグ名（例: v1.0.0）",
+    "tagTarget": "対象コミット（任意、デフォルトは HEAD）",
+    "tagMessage": "注釈メッセージ（任意）",
+    "createTag": "タグを作成",
+    "deleteTag": "削除",
+    "noTags": "タグがありません",
+    "confirmDeleteTag": "タグ \"{{name}}\" を削除しますか？",
+    "fetchRemoteFailed": "{{name}} のフェッチに失敗しました",
+    "pushTagsFailed": "{{name}} へのタグプッシュに失敗しました",
+    "validation": {
+      "remoteNameUrlRequired": "リモート名と URL は必須です",
+      "remoteUrlRequired": "リモート URL は必須です",
+      "tagNameRequired": "タグ名は必須です"
+    }
   },
 
   "branchActions": {

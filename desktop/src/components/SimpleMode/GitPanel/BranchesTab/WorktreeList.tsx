@@ -11,7 +11,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
-import type { Worktree, WorktreeStatus } from '../../../../types/git';
+import type { BranchInfo, Worktree, WorktreeStatus } from '../../../../types/git';
 import type { CommandResponse } from '../../../../lib/tauri';
 
 // ---------------------------------------------------------------------------
@@ -116,6 +116,114 @@ function ConfirmRemoveDialog({
   );
 }
 
+function CreateWorktreeDialog({
+  taskName,
+  setTaskName,
+  targetBranch,
+  setTargetBranch,
+  basePath,
+  setBasePath,
+  branches,
+  isCreating,
+  error,
+  onCreate,
+  onCancel,
+}: {
+  taskName: string;
+  setTaskName: (value: string) => void;
+  targetBranch: string;
+  setTargetBranch: (value: string) => void;
+  basePath: string;
+  setBasePath: (value: string) => void;
+  branches: BranchInfo[];
+  isCreating: boolean;
+  error: string | null;
+  onCreate: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation('git');
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40 dark:bg-black/60" onClick={onCancel} />
+      <div className="relative z-10 w-full max-w-md mx-4 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 p-5">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-3">
+          {t('worktreeList.createTitle', { defaultValue: 'Create Worktree' })}
+        </h3>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
+              {t('worktreeList.taskNameLabel', { defaultValue: 'Task name' })}
+            </label>
+            <input
+              type="text"
+              value={taskName}
+              onChange={(e) => setTaskName(e.target.value)}
+              placeholder={t('worktreeList.taskNamePlaceholder', { defaultValue: 'feature-user-auth' })}
+              className="w-full px-2 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
+              {t('worktreeList.targetBranchLabel', { defaultValue: 'Target branch' })}
+            </label>
+            <select
+              value={targetBranch}
+              onChange={(e) => setTargetBranch(e.target.value)}
+              className="w-full px-2 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200"
+            >
+              {branches.map((branch) => (
+                <option key={branch.name} value={branch.name}>
+                  {branch.name}
+                  {branch.is_head ? ` (${t('worktreeList.current', { defaultValue: 'current' })})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
+              {t('worktreeList.basePathLabel', { defaultValue: 'Base path (optional)' })}
+            </label>
+            <input
+              type="text"
+              value={basePath}
+              onChange={(e) => setBasePath(e.target.value)}
+              placeholder={t('worktreeList.basePathPlaceholder', { defaultValue: '.worktree' })}
+              className="w-full px-2 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200"
+            />
+          </div>
+
+          {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+        </div>
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            onClick={onCancel}
+            className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            {t('worktreeList.cancel')}
+          </button>
+          <button
+            onClick={onCreate}
+            disabled={isCreating}
+            className={clsx(
+              'px-3 py-1.5 text-sm rounded-lg font-medium text-white transition-colors',
+              isCreating ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700',
+            )}
+          >
+            {isCreating
+              ? t('worktreeList.creating', { defaultValue: 'Creating...' })
+              : t('worktreeList.createButton', { defaultValue: 'Create' })}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // WorktreeCard
 // ---------------------------------------------------------------------------
@@ -189,8 +297,15 @@ function WorktreeCard({ worktree, onRemove }: { worktree: Worktree; onRemove: (w
 export function WorktreeList({ repoPath }: WorktreeListProps) {
   const { t } = useTranslation('git');
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
+  const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<Worktree | null>(null);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [taskName, setTaskName] = useState('');
+  const [targetBranch, setTargetBranch] = useState('');
+  const [basePath, setBasePath] = useState('');
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const fetchWorktrees = useCallback(async () => {
     if (!repoPath) return;
@@ -209,9 +324,35 @@ export function WorktreeList({ repoPath }: WorktreeListProps) {
     }
   }, [repoPath]);
 
+  const fetchBranches = useCallback(async () => {
+    if (!repoPath) return;
+    try {
+      const res = await invoke<CommandResponse<BranchInfo[]>>('git_list_branches', { repoPath });
+      if (res.success && res.data) {
+        const data = res.data;
+        setBranches(data);
+        const current = data.find((branch) => branch.is_head);
+        setTargetBranch((prev) => {
+          if (prev && data.some((branch) => branch.name === prev)) {
+            return prev;
+          }
+          return current?.name || data[0]?.name || '';
+        });
+      }
+    } catch {
+      // Keep branch list empty and rely on server validation
+    }
+  }, [repoPath]);
+
   useEffect(() => {
     fetchWorktrees();
   }, [fetchWorktrees]);
+
+  useEffect(() => {
+    if (showCreateDialog) {
+      void fetchBranches();
+    }
+  }, [showCreateDialog, fetchBranches]);
 
   const handleRemove = useCallback(
     async (force: boolean) => {
@@ -231,11 +372,51 @@ export function WorktreeList({ repoPath }: WorktreeListProps) {
     [removeTarget, repoPath, fetchWorktrees],
   );
 
+  const handleCreateWorktree = useCallback(async () => {
+    if (!repoPath) return;
+    const trimmedTaskName = taskName.trim();
+    if (!trimmedTaskName) {
+      setCreateError(t('worktreeList.taskNameRequired', { defaultValue: 'Task name is required' }));
+      return;
+    }
+    if (!targetBranch.trim()) {
+      setCreateError(t('worktreeList.targetBranchRequired', { defaultValue: 'Target branch is required' }));
+      return;
+    }
+
+    setIsCreating(true);
+    setCreateError(null);
+    try {
+      const res = await invoke<CommandResponse<Worktree>>('create_worktree', {
+        repoPath,
+        taskName: trimmedTaskName,
+        targetBranch: targetBranch.trim(),
+        basePath: basePath.trim() || null,
+        prdPath: null,
+        executionMode: 'auto',
+      });
+      if (!res.success) {
+        setCreateError(res.error || 'Failed to create worktree');
+        return;
+      }
+
+      setShowCreateDialog(false);
+      setTaskName('');
+      setBasePath('');
+      setCreateError(null);
+      await fetchWorktrees();
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsCreating(false);
+    }
+  }, [repoPath, taskName, targetBranch, basePath, fetchWorktrees, t]);
+
   const handleNewWorktree = useCallback(() => {
-    // For now, this is a placeholder. In a full implementation, this would
-    // open a dialog to create a new worktree.
-    // The worktree creation is complex (needs task name, target branch, etc.)
-    // and is better suited for the task mode workflow.
+    setTaskName('');
+    setBasePath('');
+    setCreateError(null);
+    setShowCreateDialog(true);
   }, []);
 
   // Filter out completed/terminal worktrees for display
@@ -297,6 +478,22 @@ export function WorktreeList({ repoPath }: WorktreeListProps) {
       {/* Remove Confirmation Dialog */}
       {removeTarget && (
         <ConfirmRemoveDialog worktree={removeTarget} onConfirm={handleRemove} onCancel={() => setRemoveTarget(null)} />
+      )}
+
+      {showCreateDialog && (
+        <CreateWorktreeDialog
+          taskName={taskName}
+          setTaskName={setTaskName}
+          targetBranch={targetBranch}
+          setTargetBranch={setTargetBranch}
+          basePath={basePath}
+          setBasePath={setBasePath}
+          branches={branches}
+          isCreating={isCreating}
+          error={createError}
+          onCreate={handleCreateWorktree}
+          onCancel={() => setShowCreateDialog(false)}
+        />
       )}
     </div>
   );

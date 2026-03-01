@@ -3,7 +3,8 @@
     "changes": "变更",
     "aiChanges": "AI 变更",
     "history": "历史",
-    "branches": "分支"
+    "branches": "分支",
+    "remotes": "远端"
   },
 
   "aiChanges": {
@@ -204,14 +205,62 @@
     "behind_other": "落后 {{count}}",
     "currentBranch": "当前分支",
     "checkout": "检出",
+    "checkoutTracking": "检出为跟踪分支",
+    "checkoutTrackingFailed": "检出 {{branch}} 失败",
     "moreActions": "更多操作",
     "mergeInto": "合并到 {{branch}}",
     "push": "推送",
+    "pushFailed": "推送失败",
     "pull": "拉取",
+    "pullFailed": "拉取失败",
+    "setUpstream": "设置上游",
+    "setUpstreamFailed": "设置上游失败",
     "rename": "重命名",
     "delete": "删除",
+    "deleteRemoteBranch": "删除远程分支",
+    "deleteRemoteBranchFailed": "删除远程分支 {{branch}} 失败",
+    "confirmDeleteRemoteBranch": "确认删除远程分支 \"{{branch}}\"？",
+    "noRemoteConfigured": "未配置 Git 远端",
     "fetch": "获取",
+    "fetchFailed": "获取失败",
     "fetchAll": "获取所有远程"
+  },
+
+  "remotesTab": {
+    "title": "远端与标签",
+    "refresh": "刷新",
+    "noWorkspace": "未选择工作区",
+    "remotes": "远端",
+    "remoteName": "远端名称（如 origin）",
+    "remoteUrl": "远端 URL",
+    "addRemote": "添加远端",
+    "setUrl": "设置 URL",
+    "remove": "移除",
+    "fetch": "获取",
+    "fetchPrune": "获取并清理",
+    "syncing": "同步中...",
+    "pushTags": "推送标签",
+    "pushingTags": "标签推送中...",
+    "noRemotes": "暂无远端配置",
+    "confirmRemoveRemote": "确认移除远端 \"{{name}}\"？",
+    "editRemoteUrl": "为 {{name}} 设置 URL",
+    "cancel": "取消",
+    "save": "保存",
+    "tags": "标签",
+    "tagName": "标签名（如 v1.0.0）",
+    "tagTarget": "目标提交（可选，默认 HEAD）",
+    "tagMessage": "附注信息（可选）",
+    "createTag": "创建标签",
+    "deleteTag": "删除",
+    "noTags": "暂无标签",
+    "confirmDeleteTag": "确认删除标签 \"{{name}}\"？",
+    "fetchRemoteFailed": "获取 {{name}} 失败",
+    "pushTagsFailed": "向 {{name}} 推送标签失败",
+    "validation": {
+      "remoteNameUrlRequired": "远端名称和 URL 不能为空",
+      "remoteUrlRequired": "远端 URL 不能为空",
+      "tagNameRequired": "标签名不能为空"
+    }
   },
 
   "branchActions": {

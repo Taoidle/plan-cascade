@@ -3,7 +3,8 @@
     "changes": "Changes",
     "aiChanges": "AI Changes",
     "history": "History",
-    "branches": "Branches"
+    "branches": "Branches",
+    "remotes": "Remotes"
   },
 
   "aiChanges": {
@@ -204,14 +205,62 @@
     "behind_other": "{{count}} behind",
     "currentBranch": "Current branch",
     "checkout": "Checkout",
+    "checkoutTracking": "Checkout as tracking branch",
+    "checkoutTrackingFailed": "Failed to checkout {{branch}}",
     "moreActions": "More actions",
     "mergeInto": "Merge into {{branch}}",
     "push": "Push",
+    "pushFailed": "Push failed",
     "pull": "Pull",
+    "pullFailed": "Pull failed",
+    "setUpstream": "Set upstream",
+    "setUpstreamFailed": "Failed to set upstream",
     "rename": "Rename",
     "delete": "Delete",
+    "deleteRemoteBranch": "Delete remote branch",
+    "deleteRemoteBranchFailed": "Failed to delete remote branch {{branch}}",
+    "confirmDeleteRemoteBranch": "Delete remote branch \"{{branch}}\"?",
+    "noRemoteConfigured": "No git remote configured",
     "fetch": "Fetch",
+    "fetchFailed": "Fetch failed",
     "fetchAll": "Fetch all remotes"
+  },
+
+  "remotesTab": {
+    "title": "Remotes & Tags",
+    "refresh": "Refresh",
+    "noWorkspace": "No workspace selected",
+    "remotes": "Remotes",
+    "remoteName": "Remote name (e.g. origin)",
+    "remoteUrl": "Remote URL",
+    "addRemote": "Add Remote",
+    "setUrl": "Set URL",
+    "remove": "Remove",
+    "fetch": "Fetch",
+    "fetchPrune": "Fetch + Prune",
+    "syncing": "Syncing...",
+    "pushTags": "Push Tags",
+    "pushingTags": "Pushing tags...",
+    "noRemotes": "No remotes configured",
+    "confirmRemoveRemote": "Remove remote \"{{name}}\"?",
+    "editRemoteUrl": "Set URL for {{name}}",
+    "cancel": "Cancel",
+    "save": "Save",
+    "tags": "Tags",
+    "tagName": "Tag name (e.g. v1.0.0)",
+    "tagTarget": "Target commit (optional, default HEAD)",
+    "tagMessage": "Annotated message (optional)",
+    "createTag": "Create Tag",
+    "deleteTag": "Delete",
+    "noTags": "No tags found",
+    "confirmDeleteTag": "Delete tag \"{{name}}\"?",
+    "fetchRemoteFailed": "Failed to fetch {{name}}",
+    "pushTagsFailed": "Failed to push tags to {{name}}",
+    "validation": {
+      "remoteNameUrlRequired": "Remote name and URL are required",
+      "remoteUrlRequired": "Remote URL is required",
+      "tagNameRequired": "Tag name is required"
+    }
   },
 
   "branchActions": {

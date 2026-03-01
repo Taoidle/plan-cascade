@@ -11,7 +11,7 @@ import { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
-import type { BranchInfo, RemoteBranchInfo } from '../../../../types/git';
+import type { BranchInfo, RemoteBranchInfo, RemoteInfo } from '../../../../types/git';
 import type { CommandResponse } from '../../../../lib/tauri';
 import { useGitStore } from '../../../../store/git';
 
@@ -57,11 +57,13 @@ function CollapsibleSection({
 
   return (
     <div>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
-      >
-        <div className="flex items-center gap-1.5">
+      <div className="w-full flex items-center justify-between px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="flex-1 min-w-0 flex items-center gap-1.5 text-left"
+        >
           <svg
             className={clsx('w-3 h-3 transition-transform', open && 'rotate-90')}
             fill="none"
@@ -72,9 +74,13 @@ function CollapsibleSection({
           </svg>
           <span>{title}</span>
           <span className="text-2xs font-normal text-gray-400 dark:text-gray-500">({count})</span>
-        </div>
-        {actions && <div onClick={(e) => e.stopPropagation()}>{actions}</div>}
-      </button>
+        </button>
+        {actions && (
+          <div className="ml-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+            {actions}
+          </div>
+        )}
+      </div>
       {open && children}
     </div>
   );
@@ -135,13 +141,22 @@ function BranchRow({
           name: branch.name,
         });
         await onRefresh();
-      } catch {
-        // Handle error silently for now
+      } catch (e) {
+        useGitStore
+          .getState()
+          .setError(
+            e instanceof Error
+              ? e.message
+              : t('branchList.checkoutFailed', {
+                  branch: branch.name,
+                  defaultValue: `Failed to checkout ${branch.name}`,
+                }),
+          );
       } finally {
         setCheckingOut(false);
       }
     },
-    [branch, repoPath, onRefresh, checkingOut],
+    [branch, repoPath, onRefresh, checkingOut, t],
   );
 
   return (
@@ -214,16 +229,121 @@ function BranchRow({
 // RemoteBranchRow
 // ---------------------------------------------------------------------------
 
-function RemoteBranchRow({ branch }: { branch: RemoteBranchInfo }) {
+function RemoteBranchRow({
+  branch,
+  repoPath,
+  onRefresh,
+}: {
+  branch: RemoteBranchInfo;
+  repoPath: string;
+  onRefresh: () => Promise<void>;
+}) {
+  const { t } = useTranslation('git');
+  const [checkingOut, setCheckingOut] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleCheckout = useCallback(async () => {
+    if (checkingOut || deleting) return;
+    setCheckingOut(true);
+    try {
+      const res = await invoke<CommandResponse<string>>('git_checkout_remote_branch', {
+        repoPath,
+        remote: branch.remote,
+        branch: branch.branch,
+      });
+      if (!res.success) {
+        useGitStore.getState().setError(res.error || t('branchList.checkoutTrackingFailed', { branch: branch.name }));
+        return;
+      }
+      await onRefresh();
+    } catch (err) {
+      useGitStore.getState().setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCheckingOut(false);
+    }
+  }, [checkingOut, deleting, repoPath, branch, onRefresh, t]);
+
+  const handleDeleteRemoteBranch = useCallback(async () => {
+    if (checkingOut || deleting) return;
+    const confirmed = window.confirm(
+      t('branchList.confirmDeleteRemoteBranch', {
+        branch: branch.name,
+        defaultValue: `Delete remote branch "${branch.name}"?`,
+      }),
+    );
+    if (!confirmed) return;
+
+    setDeleting(true);
+    try {
+      const res = await invoke<CommandResponse<void>>('git_delete_remote_branch', {
+        repoPath,
+        remote: branch.remote,
+        branch: branch.branch,
+      });
+      if (!res.success) {
+        useGitStore.getState().setError(res.error || t('branchList.deleteRemoteBranchFailed', { branch: branch.name }));
+        return;
+      }
+      await onRefresh();
+    } catch (err) {
+      useGitStore.getState().setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeleting(false);
+    }
+  }, [checkingOut, deleting, repoPath, branch, onRefresh, t]);
+
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+    <div className="flex items-center gap-2 px-3 py-1.5 group hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
       <span className="w-2 shrink-0" />
       <span className="flex-1 text-sm text-gray-600 dark:text-gray-400 truncate" title={branch.name}>
         {branch.name}
       </span>
-      <span className="text-2xs font-mono text-gray-400 dark:text-gray-500 truncate max-w-[60px]">
+      <span className="text-2xs font-mono text-gray-400 dark:text-gray-500 truncate max-w-[72px]">
         {branch.tip_sha}
       </span>
+      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          onClick={() => void handleCheckout()}
+          disabled={checkingOut || deleting}
+          className={clsx(
+            'p-1 rounded transition-colors',
+            'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200',
+            (checkingOut || deleting) && 'opacity-50 cursor-not-allowed',
+          )}
+          title={t('branchList.checkoutTracking')}
+        >
+          {checkingOut ? (
+            <div className="w-3.5 h-3.5 border border-gray-400 border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 17l9.2-9.2M17 17V7H7" />
+            </svg>
+          )}
+        </button>
+        <button
+          onClick={() => void handleDeleteRemoteBranch()}
+          disabled={checkingOut || deleting}
+          className={clsx(
+            'p-1 rounded transition-colors',
+            'text-red-500 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-300',
+            (checkingOut || deleting) && 'opacity-50 cursor-not-allowed',
+          )}
+          title={t('branchList.deleteRemoteBranch')}
+        >
+          {deleting ? (
+            <div className="w-3.5 h-3.5 border border-red-400 border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+              />
+            </svg>
+          )}
+        </button>
+      </div>
     </div>
   );
 }
@@ -254,17 +374,57 @@ function BranchContextMenu({
   const { t } = useTranslation('git');
   const [loading, setLoading] = useState(false);
 
+  const splitUpstream = useCallback((upstream?: string | null) => {
+    if (!upstream) return { remote: null, branch: null };
+    const slash = upstream.indexOf('/');
+    if (slash <= 0 || slash === upstream.length - 1) {
+      return { remote: upstream, branch: null };
+    }
+    return {
+      remote: upstream.slice(0, slash),
+      branch: upstream.slice(slash + 1),
+    };
+  }, []);
+
+  const resolveRemoteName = useCallback(
+    async (preferredRemote?: string | null) => {
+      try {
+        const res = await invoke<CommandResponse<RemoteInfo[]>>('git_get_remotes', { repoPath });
+        if (!res.success || !res.data || res.data.length === 0) {
+          return preferredRemote || null;
+        }
+        if (preferredRemote) {
+          const preferred = res.data.find((remote) => remote.name === preferredRemote);
+          if (preferred) return preferred.name;
+        }
+        return res.data[0].name;
+      } catch {
+        return preferredRemote || null;
+      }
+    },
+    [repoPath],
+  );
+
   const handlePush = useCallback(async () => {
     setLoading(true);
     try {
+      const upstream = splitUpstream(menu.branch.upstream);
+      const remote = await resolveRemoteName(upstream.remote);
+      if (!remote) {
+        useGitStore
+          .getState()
+          .setError(t('branchList.noRemoteConfigured', { defaultValue: 'No git remote configured' }));
+        return;
+      }
+
       const res = await invoke<CommandResponse<void>>('git_push', {
         repoPath,
-        remote: 'origin',
+        remote,
         branch: menu.branch.name,
         setUpstream: !menu.branch.upstream,
       });
       if (!res.success) {
-        useGitStore.getState().setError(res.error || 'Push failed');
+        useGitStore.getState().setError(res.error || t('branchList.pushFailed', { defaultValue: 'Push failed' }));
       }
       await onRefresh();
     } catch (e) {
@@ -273,14 +433,28 @@ function BranchContextMenu({
       setLoading(false);
       onClose();
     }
-  }, [repoPath, menu.branch, onRefresh, onClose]);
+  }, [repoPath, menu.branch, onRefresh, onClose, splitUpstream, resolveRemoteName, t]);
 
   const handlePull = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await invoke<CommandResponse<void>>('git_pull', { repoPath });
+      const targetBranch = currentBranch && currentBranch.is_head ? currentBranch : menu.branch;
+      const upstream = splitUpstream(targetBranch.upstream);
+      const remote = await resolveRemoteName(upstream.remote);
+      if (!remote) {
+        useGitStore
+          .getState()
+          .setError(t('branchList.noRemoteConfigured', { defaultValue: 'No git remote configured' }));
+        return;
+      }
+
+      const res = await invoke<CommandResponse<void>>('git_pull', {
+        repoPath,
+        remote,
+        branch: upstream.branch || targetBranch.name,
+      });
       if (!res.success) {
-        useGitStore.getState().setError(res.error || 'Pull failed');
+        useGitStore.getState().setError(res.error || t('branchList.pullFailed', { defaultValue: 'Pull failed' }));
       }
       await onRefresh();
     } catch (e) {
@@ -289,7 +463,44 @@ function BranchContextMenu({
       setLoading(false);
       onClose();
     }
-  }, [repoPath, onRefresh, onClose]);
+  }, [repoPath, onRefresh, onClose, currentBranch, menu.branch, splitUpstream, resolveRemoteName, t]);
+
+  const handleSetUpstream = useCallback(async () => {
+    setLoading(true);
+    try {
+      const upstream = splitUpstream(menu.branch.upstream);
+      const remote = await resolveRemoteName(upstream.remote);
+      if (!remote) {
+        useGitStore
+          .getState()
+          .setError(t('branchList.noRemoteConfigured', { defaultValue: 'No git remote configured' }));
+        return;
+      }
+
+      const upstreamRef = `${remote}/${menu.branch.name}`;
+      const res = await invoke<CommandResponse<void>>('git_set_upstream_branch', {
+        repoPath,
+        localBranch: menu.branch.name,
+        upstream: upstreamRef,
+      });
+      if (!res.success) {
+        useGitStore.getState().setError(
+          res.error ||
+            t('branchList.setUpstreamFailed', {
+              defaultValue: `Failed to set upstream to ${upstreamRef}`,
+            }),
+        );
+        return;
+      }
+
+      await onRefresh();
+    } catch (e) {
+      useGitStore.getState().setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+      onClose();
+    }
+  }, [repoPath, menu.branch, onRefresh, onClose, splitUpstream, resolveRemoteName, t]);
 
   const items = [
     {
@@ -312,6 +523,12 @@ function BranchContextMenu({
       action: handlePull,
       disabled: loading || !menu.branch.is_head,
       show: menu.branch.is_head,
+    },
+    {
+      label: t('branchList.setUpstream'),
+      action: handleSetUpstream,
+      disabled: loading,
+      show: true,
     },
     { label: 'divider', action: () => {}, disabled: false, show: true },
     {
@@ -407,7 +624,7 @@ export function BranchList({
     try {
       const res = await invoke<CommandResponse<void>>('git_fetch', { repoPath });
       if (!res.success) {
-        useGitStore.getState().setError(res.error || 'Fetch failed');
+        useGitStore.getState().setError(res.error || t('branchList.fetchFailed', { defaultValue: 'Fetch failed' }));
       }
       await onRefresh();
     } catch (e) {
@@ -415,7 +632,7 @@ export function BranchList({
     } finally {
       setIsFetching(false);
     }
-  }, [repoPath, onRefresh, isFetching]);
+  }, [repoPath, onRefresh, isFetching, t]);
 
   // Sort: current branch first, then alphabetically
   const sortedLocal = [...localBranches].sort((a, b) => {
@@ -423,6 +640,7 @@ export function BranchList({
     if (b.is_head) return 1;
     return a.name.localeCompare(b.name);
   });
+  const sortedRemote = [...remoteBranches].sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto">
@@ -471,8 +689,8 @@ export function BranchList({
         }
       >
         <div>
-          {remoteBranches.map((branch) => (
-            <RemoteBranchRow key={branch.name} branch={branch} />
+          {sortedRemote.map((branch) => (
+            <RemoteBranchRow key={branch.name} branch={branch} repoPath={repoPath} onRefresh={onRefresh} />
           ))}
           {remoteBranches.length === 0 && (
             <div className="px-3 py-4 text-center text-sm text-gray-500 dark:text-gray-400">

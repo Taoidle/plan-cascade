@@ -15,6 +15,7 @@ import { TabBar } from './TabBar';
 import { ChangesTab } from './ChangesTab';
 import { HistoryTab } from './HistoryTab';
 import { BranchesTab } from './BranchesTab';
+import { RemotesTab } from './RemotesTab';
 import { AIChangesTab } from './AIChangesTab';
 import { ToolChangesBar } from './ToolChangesBar';
 import type { StreamLine } from '../../../store/execution';
@@ -64,6 +65,7 @@ export function GitPanel({ streamingOutput, workspacePath }: GitPanelProps) {
       { id: 'ai-changes' as const, label: t('tabs.aiChanges'), count: aiChangeCount },
       { id: 'history' as const, label: t('tabs.history'), count: commitLog.length },
       { id: 'branches' as const, label: t('tabs.branches'), count: branches.length },
+      { id: 'remotes' as const, label: t('tabs.remotes') },
     ];
   }, [status, commitLog.length, branches.length, aiChangeCount, t]);
 
@@ -85,6 +87,7 @@ export function GitPanel({ streamingOutput, workspacePath }: GitPanelProps) {
         {selectedTab === 'ai-changes' && <AIChangesTab sessionId={activeSessionId} projectRoot={workspacePath} />}
         {selectedTab === 'history' && <HistoryTab />}
         {selectedTab === 'branches' && <BranchesTab />}
+        {selectedTab === 'remotes' && <RemotesTab />}
       </div>
 
       {/* Bottom persistent bar for tool changes */}

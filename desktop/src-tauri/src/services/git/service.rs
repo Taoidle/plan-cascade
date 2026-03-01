@@ -197,6 +197,15 @@ impl GitService {
         Ok(parse_unified_diff(&output))
     }
 
+    /// Get diff between two revisions.
+    pub fn diff_between(&self, repo_path: &Path, base: &str, compare: &str) -> AppResult<DiffOutput> {
+        let output = self
+            .git
+            .execute(repo_path, &["diff", base, compare])?
+            .into_result()?;
+        Ok(parse_unified_diff(&output))
+    }
+
     // -----------------------------------------------------------------------
     // Log
     // -----------------------------------------------------------------------
@@ -254,6 +263,35 @@ impl GitService {
     /// Checkout a branch.
     pub fn checkout_branch(&self, repo_path: &Path, name: &str) -> AppResult<()> {
         self.git.checkout(repo_path, name)
+    }
+
+    /// Checkout a remote branch, creating a local tracking branch when needed.
+    pub fn checkout_remote_branch(
+        &self,
+        repo_path: &Path,
+        remote: &str,
+        branch: &str,
+        local_name: Option<&str>,
+    ) -> AppResult<String> {
+        let local_branch = local_name
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or(branch);
+
+        if self.git.branch_exists(repo_path, local_branch)? {
+            self.git.checkout(repo_path, local_branch)?;
+            return Ok(local_branch.to_string());
+        }
+
+        let remote_ref = format!("{}/{}", remote, branch);
+        self.git
+            .execute(
+                repo_path,
+                &["checkout", "-b", local_branch, "--track", &remote_ref],
+            )?
+            .into_result()?;
+
+        Ok(local_branch.to_string())
     }
 
     /// Rename a branch.
@@ -619,9 +657,63 @@ impl GitService {
         Ok(parse_remotes(&output))
     }
 
+    /// Add a new remote.
+    pub fn add_remote(&self, repo_path: &Path, name: &str, url: &str) -> AppResult<()> {
+        self.git
+            .execute(repo_path, &["remote", "add", name, url])?
+            .into_result()?;
+        Ok(())
+    }
+
+    /// Remove an existing remote.
+    pub fn remove_remote(&self, repo_path: &Path, name: &str) -> AppResult<()> {
+        self.git
+            .execute(repo_path, &["remote", "remove", name])?
+            .into_result()?;
+        Ok(())
+    }
+
+    /// Update URL for an existing remote.
+    pub fn set_remote_url(&self, repo_path: &Path, name: &str, url: &str) -> AppResult<()> {
+        self.git
+            .execute(repo_path, &["remote", "set-url", name, url])?
+            .into_result()?;
+        Ok(())
+    }
+
+    /// Set the upstream tracking branch for a local branch.
+    pub fn set_upstream_branch(
+        &self,
+        repo_path: &Path,
+        local_branch: &str,
+        upstream: &str,
+    ) -> AppResult<()> {
+        let upstream_arg = format!("--set-upstream-to={}", upstream);
+        self.git
+            .execute(repo_path, &["branch", &upstream_arg, local_branch])?
+            .into_result()?;
+        Ok(())
+    }
+
+    /// Delete a remote branch via push --delete.
+    pub fn delete_remote_branch(
+        &self,
+        repo_path: &Path,
+        remote: &str,
+        branch: &str,
+    ) -> AppResult<()> {
+        self.git
+            .execute(repo_path, &["push", remote, "--delete", branch])?
+            .into_result()?;
+        Ok(())
+    }
+
     /// Fetch from a remote (or all).
-    pub fn fetch(&self, repo_path: &Path, remote: Option<&str>) -> AppResult<()> {
+    pub fn fetch(&self, repo_path: &Path, remote: Option<&str>, prune: bool) -> AppResult<()> {
         let mut args = vec!["fetch"];
+        if prune {
+            args.push("--prune");
+        }
         if let Some(r) = remote {
             args.push(r);
         } else {
@@ -646,6 +738,14 @@ impl GitService {
             args.push(b);
         }
         self.git.execute(repo_path, &args)?.into_result()?;
+        Ok(())
+    }
+
+    /// Push all local tags to a remote.
+    pub fn push_tags(&self, repo_path: &Path, remote: &str) -> AppResult<()> {
+        self.git
+            .execute(repo_path, &["push", remote, "--tags"])?
+            .into_result()?;
         Ok(())
     }
 

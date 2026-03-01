@@ -9,11 +9,14 @@
  */
 
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { useGitStore } from '../../../../store/git';
 import { useSettingsStore } from '../../../../store/settings';
 import { useGitGraph } from '../../../../hooks/useGitGraph';
+import type { CommandResponse } from '../../../../lib/tauri';
+import type { DiffOutput } from '../../../../types/git';
 import CommitGraph from './CommitGraph';
 import CommitDetail from './CommitDetail';
 import ContextMenu, { type ContextMenuState } from './ContextMenu';
@@ -42,6 +45,7 @@ export function HistoryTab() {
     setBranchFilter,
     setSearchQuery,
     setSelectedCommitDiff,
+    setError,
   } = useGitStore();
 
   // Local state
@@ -62,6 +66,33 @@ export function HistoryTab() {
   const filteredCommits = useMemo(() => {
     let filtered = commits;
 
+    // Filter by selected branch lineage (within currently loaded commits)
+    if (branchFilter) {
+      const selectedBranch = branches.find((branch) => branch.name === branchFilter);
+      if (selectedBranch?.tip_sha) {
+        const commitBySha = new Map(commits.map((commit) => [commit.sha, commit]));
+        const reachable = new Set<string>();
+        const stack = [selectedBranch.tip_sha];
+
+        while (stack.length > 0) {
+          const currentSha = stack.pop();
+          if (!currentSha || reachable.has(currentSha)) continue;
+          reachable.add(currentSha);
+
+          const commit = commitBySha.get(currentSha);
+          if (!commit) continue;
+
+          for (const parent of commit.parents) {
+            if (!reachable.has(parent) && commitBySha.has(parent)) {
+              stack.push(parent);
+            }
+          }
+        }
+
+        filtered = filtered.filter((commit) => reachable.has(commit.sha));
+      }
+    }
+
     // Filter by search query
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -76,7 +107,7 @@ export function HistoryTab() {
     }
 
     return filtered;
-  }, [commits, searchQuery]);
+  }, [commits, searchQuery, branchFilter, branches]);
 
   /** Build a filtered graph layout that only includes filtered commits */
   const filteredGraphLayout = useMemo(() => {
@@ -116,63 +147,22 @@ export function HistoryTab() {
 
       if (!repoPath) return;
 
-      // Fetch diff for the selected commit via git show --numstat
       try {
-        const { Command } = await import('@tauri-apps/plugin-shell');
-        const commit = commits.find((c) => c.sha === sha);
-        if (!commit) return;
-
-        // Use git show --numstat to get file stats
-        const cmd = Command.create('git', ['show', '--numstat', '--format=', sha], {
-          cwd: repoPath,
+        const response = await invoke<CommandResponse<DiffOutput>>('git_diff_commit', {
+          repoPath,
+          sha,
         });
-        const output = await cmd.execute();
 
-        if (output.code === 0 && output.stdout) {
-          let totalAdditions = 0;
-          let totalDeletions = 0;
-
-          // Parse numstat: "added\tdeleted\tpath"
-          const files = output.stdout
-            .trim()
-            .split('\n')
-            .filter((line: string) => line.trim())
-            .map((line: string) => {
-              const parts = line.split('\t');
-              const additions = parseInt(parts[0], 10) || 0;
-              const deletions = parseInt(parts[1], 10) || 0;
-              const path = parts[2] || '';
-              totalAdditions += additions;
-              totalDeletions += deletions;
-
-              // Create synthetic hunks with proper line counts for stats display
-              const lines: { kind: 'addition' | 'deletion' | 'context'; content: string }[] = [];
-              for (let i = 0; i < additions; i++) lines.push({ kind: 'addition', content: '' });
-              for (let i = 0; i < deletions; i++) lines.push({ kind: 'deletion', content: '' });
-
-              return {
-                path,
-                is_new: additions > 0 && deletions === 0,
-                is_deleted: deletions > 0 && additions === 0,
-                is_renamed: false,
-                hunks:
-                  lines.length > 0
-                    ? [{ header: '', old_start: 1, old_count: deletions, new_start: 1, new_count: additions, lines }]
-                    : [],
-              };
-            });
-
-          setSelectedCommitDiff({
-            files,
-            total_additions: totalAdditions,
-            total_deletions: totalDeletions,
-          });
+        if (response.success && response.data) {
+          setSelectedCommitDiff(response.data);
+        } else {
+          setError(response.error || 'Failed to load commit diff');
         }
-      } catch {
-        // Silently fail - diff is optional enhancement
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
       }
     },
-    [repoPath, commits, setSelectedCommitSha, setSelectedCommitDiff],
+    [repoPath, setSelectedCommitSha, setSelectedCommitDiff, setError],
   );
 
   const handleCompareCommit = useCallback(
@@ -185,6 +175,41 @@ export function HistoryTab() {
     },
     [selectedCommitSha, setCompareSelection],
   );
+
+  useEffect(() => {
+    if (!compareSelection || !repoPath) return;
+
+    let isCancelled = false;
+
+    const loadCompareDiff = async () => {
+      setSelectedCommitDiff(null);
+      try {
+        const response = await invoke<CommandResponse<DiffOutput>>('git_diff_range', {
+          repoPath,
+          base: compareSelection.baseSha,
+          compare: compareSelection.compareSha,
+        });
+
+        if (isCancelled) return;
+
+        if (response.success && response.data) {
+          setSelectedCommitDiff(response.data);
+        } else {
+          setError(response.error || 'Failed to load compare diff');
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      }
+    };
+
+    loadCompareDiff();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [compareSelection, repoPath, setSelectedCommitDiff, setError]);
 
   // ---------------------------------------------------------------------------
   // Context menu
@@ -346,7 +371,12 @@ export function HistoryTab() {
             })}
           </span>
           <button
-            onClick={() => setCompareSelection(null)}
+            onClick={() => {
+              setCompareSelection(null);
+              if (selectedCommitSha) {
+                void handleSelectCommit(selectedCommitSha);
+              }
+            }}
             className="text-xs text-purple-600 dark:text-purple-400 hover:text-purple-800 dark:hover:text-purple-200"
           >
             {t('historyTab.clear')}

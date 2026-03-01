@@ -287,6 +287,39 @@ pub async fn git_diff_file(
     }
 }
 
+/// Get diff for a specific commit.
+#[tauri::command]
+pub async fn git_diff_commit(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    sha: String,
+) -> Result<CommandResponse<DiffOutput>, String> {
+    let path = PathBuf::from(&repo_path);
+    match run_git_blocking(&state.service, move |svc| svc.diff_for_commit(&path, &sha)).await? {
+        Ok(diff) => Ok(CommandResponse::ok(diff)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Get diff between two revisions (base -> compare).
+#[tauri::command]
+pub async fn git_diff_range(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    base: String,
+    compare: String,
+) -> Result<CommandResponse<DiffOutput>, String> {
+    let path = PathBuf::from(&repo_path);
+    match run_git_blocking(&state.service, move |svc| {
+        svc.diff_between(&path, &base, &compare)
+    })
+    .await?
+    {
+        Ok(diff) => Ok(CommandResponse::ok(diff)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
 // ===========================================================================
 // Log / Graph Commands
 // ===========================================================================
@@ -392,6 +425,26 @@ pub async fn git_checkout_branch(
     let path = PathBuf::from(&repo_path);
     match run_git_blocking(&state.service, move |svc| svc.checkout_branch(&path, &name)).await? {
         Ok(()) => Ok(CommandResponse::ok(())),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Checkout a remote branch as a local tracking branch.
+#[tauri::command]
+pub async fn git_checkout_remote_branch(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    remote: String,
+    branch: String,
+    local_name: Option<String>,
+) -> Result<CommandResponse<String>, String> {
+    let path = PathBuf::from(&repo_path);
+    match run_git_blocking(&state.service, move |svc| {
+        svc.checkout_remote_branch(&path, &remote, &branch, local_name.as_deref())
+    })
+    .await?
+    {
+        Ok(local_branch) => Ok(CommandResponse::ok(local_branch)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
 }
@@ -543,10 +596,12 @@ pub async fn git_fetch(
     state: tauri::State<'_, GitState>,
     repo_path: String,
     remote: Option<String>,
+    prune: Option<bool>,
 ) -> Result<CommandResponse<()>, String> {
     let path = PathBuf::from(&repo_path);
+    let should_prune = prune.unwrap_or(false);
     match run_git_blocking_with_timeout(&state.service, 60, move |svc| {
-        svc.fetch(&path, remote.as_deref())
+        svc.fetch(&path, remote.as_deref(), should_prune)
     })
     .await
     {
@@ -610,6 +665,116 @@ pub async fn git_get_remotes(
     match run_git_blocking(&state.service, move |svc| svc.get_remotes(&path)).await? {
         Ok(remotes) => Ok(CommandResponse::ok(remotes)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Add a git remote.
+#[tauri::command]
+pub async fn git_remote_add(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    name: String,
+    url: String,
+) -> Result<CommandResponse<()>, String> {
+    let path = PathBuf::from(&repo_path);
+    match run_git_blocking(&state.service, move |svc| {
+        svc.add_remote(&path, &name, &url)
+    })
+    .await?
+    {
+        Ok(()) => Ok(CommandResponse::ok(())),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Remove a git remote.
+#[tauri::command]
+pub async fn git_remote_remove(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    name: String,
+) -> Result<CommandResponse<()>, String> {
+    let path = PathBuf::from(&repo_path);
+    match run_git_blocking(&state.service, move |svc| svc.remove_remote(&path, &name)).await? {
+        Ok(()) => Ok(CommandResponse::ok(())),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Set URL for a git remote.
+#[tauri::command]
+pub async fn git_remote_set_url(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    name: String,
+    url: String,
+) -> Result<CommandResponse<()>, String> {
+    let path = PathBuf::from(&repo_path);
+    match run_git_blocking(&state.service, move |svc| {
+        svc.set_remote_url(&path, &name, &url)
+    })
+    .await?
+    {
+        Ok(()) => Ok(CommandResponse::ok(())),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Set upstream tracking branch for a local branch.
+#[tauri::command]
+pub async fn git_set_upstream_branch(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    local_branch: String,
+    upstream: String,
+) -> Result<CommandResponse<()>, String> {
+    let path = PathBuf::from(&repo_path);
+    match run_git_blocking(&state.service, move |svc| {
+        svc.set_upstream_branch(&path, &local_branch, &upstream)
+    })
+    .await?
+    {
+        Ok(()) => Ok(CommandResponse::ok(())),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Delete a remote branch.
+#[tauri::command]
+pub async fn git_delete_remote_branch(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    remote: String,
+    branch: String,
+) -> Result<CommandResponse<()>, String> {
+    let path = PathBuf::from(&repo_path);
+    match run_git_blocking_with_timeout(&state.service, 120, move |svc| {
+        svc.delete_remote_branch(&path, &remote, &branch)
+    })
+    .await
+    {
+        Ok(Ok(())) => Ok(CommandResponse::ok(())),
+        Ok(Err(e)) => Ok(CommandResponse::err(e.to_string())),
+        Err(e) => Ok(CommandResponse::err(e)),
+    }
+}
+
+/// Push all tags to a remote.
+#[tauri::command]
+pub async fn git_push_tags(
+    state: tauri::State<'_, GitState>,
+    repo_path: String,
+    remote: String,
+) -> Result<CommandResponse<()>, String> {
+    let path = PathBuf::from(&repo_path);
+    match run_git_blocking_with_timeout(&state.service, 120, move |svc| {
+        svc.push_tags(&path, &remote)
+    })
+    .await
+    {
+        Ok(Ok(())) => Ok(CommandResponse::ok(())),
+        Ok(Err(e)) => Ok(CommandResponse::err(e.to_string())),
+        Err(e) => Ok(CommandResponse::err(e)),
     }
 }
 
