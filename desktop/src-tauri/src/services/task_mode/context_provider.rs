@@ -619,9 +619,11 @@ async fn build_unified_skill_index_for_task(
     // Load config
     let config_path = project_root.join("external-skills.json");
     let config = load_skills_config(&config_path).unwrap_or_default();
+    let plan_cascade_dir = crate::utils::paths::plan_cascade_dir().ok();
 
     // Discover and build file-based index
-    let discovered = discover_all_skills(project_root, &config, None).ok()?;
+    let discovered =
+        discover_all_skills(project_root, &config, plan_cascade_dir.as_deref()).ok()?;
     let mut index = build_index(discovered).ok()?;
 
     // Apply persisted disabled state from the database for file-based skills.

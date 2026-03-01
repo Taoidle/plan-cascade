@@ -45,7 +45,8 @@ export type HookEvent =
   | 'PostLlmCall'
   | 'Notification'
   | 'Error'
-  | 'SessionEnd';
+  | 'SessionEnd'
+  | 'QualityGateRegistration';
 
 /** Hook execution type */
 export type HookType = 'command' | 'prompt';
@@ -86,6 +87,31 @@ export interface PluginPermissions {
   allow: string[];
   deny: string[];
   always_approve: string[];
+}
+
+export type PluginCompatLevel = 'full' | 'partial' | 'degraded';
+
+export interface CompatCapability {
+  name: string;
+  supported: boolean;
+  details?: string | null;
+}
+
+export interface CompatGap {
+  capability: string;
+  reason: string;
+  severity: 'high' | 'medium' | 'low';
+}
+
+export interface PluginCompatReport {
+  plugin_name: string;
+  level: PluginCompatLevel;
+  summary: string;
+  capabilities: CompatCapability[];
+  gaps: CompatGap[];
+  checked_at: number;
+  prompt_budget_impact: number;
+  injection_truncated: boolean;
 }
 
 /** Plugin manifest (from plugin.json) */
@@ -132,12 +158,43 @@ export interface PluginInfo {
   hook_count: number;
   has_instructions: boolean;
   author: string | null;
+  compat_level: PluginCompatLevel;
+  compat_summary: string;
+  compat_checked_at: number;
 }
 
 /** Full plugin detail */
 export interface PluginDetail {
   plugin: LoadedPlugin;
   root_path: string;
+  compat_report: PluginCompatReport;
+}
+
+export interface InvocablePluginSkill {
+  plugin_name: string;
+  skill_name: string;
+  description: string;
+  allowed_tools: string[];
+}
+
+export interface PluginInvocation {
+  plugin_name: string;
+  skill_name: string;
+  args?: Record<string, string>;
+  source?: string;
+}
+
+export interface PluginRuntimeEvent {
+  event_id: string;
+  plugin_name: string;
+  hook_event: string;
+  phase: 'start' | 'finish';
+  session_id?: string | null;
+  success?: boolean | null;
+  duration_ms?: number | null;
+  exit_code?: number | null;
+  stderr_snippet?: string | null;
+  created_at: number;
 }
 
 // ============================================================================

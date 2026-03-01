@@ -381,9 +381,10 @@ async fn build_skill_index_for_project(
     // Load config (try project-local, then global)
     let config_path = project_root.join("external-skills.json");
     let config = load_skills_config(&config_path).unwrap_or_default();
+    let plan_cascade_dir = crate::utils::paths::plan_cascade_dir().ok();
 
     // Discover skills from all sources
-    let discovered = discover_all_skills(project_root, &config, None)
+    let discovered = discover_all_skills(project_root, &config, plan_cascade_dir.as_deref())
         .map_err(|e| format!("Discovery failed: {}", e))?;
 
     // Build the index

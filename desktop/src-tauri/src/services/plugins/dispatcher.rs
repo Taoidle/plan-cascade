@@ -20,7 +20,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use regex::Regex;
 use tokio::sync::mpsc;
@@ -29,6 +29,7 @@ use crate::services::llm::provider::LlmProvider;
 use crate::services::llm::types::{LlmRequestOptions, Message};
 use crate::services::orchestrator::hooks::{AfterToolResult, AgenticHooks, BeforeToolResult};
 use crate::services::plugins::models::*;
+use crate::services::plugins::runtime;
 use crate::services::streaming::UnifiedStreamEvent;
 
 // ============================================================================
@@ -310,9 +311,14 @@ pub fn register_plugin_hooks(
                     event_tx.clone(),
                 );
             }
-            // Remaining events: SubAgentSpawn, SubAgentComplete, Notification, Error
-            // These require new hook vectors in AgenticHooks — deferred to follow-up PR.
-            _ => {
+            HookEvent::QualityGateRegistration => {
+                // Quality gates are discovered via PluginManager::collect_quality_gates(),
+                // not by runtime hook registration.
+            }
+            HookEvent::SubAgentSpawn
+            | HookEvent::SubAgentComplete
+            | HookEvent::Notification
+            | HookEvent::Error => {
                 eprintln!(
                     "[plugin:{}] Hook event {:?} not yet mapped to Desktop hooks (deferred)",
                     plugin_name, plugin_hook.event
@@ -364,6 +370,50 @@ async fn execute_hook(
     }
 }
 
+fn stderr_snippet(stderr: &str) -> Option<String> {
+    let trimmed = stderr.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let chars = trimmed.chars().take(400).collect::<String>();
+    Some(chars)
+}
+
+async fn execute_hook_logged(
+    plugin_name: &str,
+    hook_event: &str,
+    session_id: Option<&str>,
+    hook_type: &HookType,
+    command: &str,
+    env: &HashMap<String, String>,
+    stdin_json: Option<&str>,
+    timeout_ms: u64,
+    llm_provider: &Option<Arc<dyn LlmProvider>>,
+) -> ShellResult {
+    let runtime_id = runtime::record_hook_start(plugin_name, hook_event, session_id);
+    let start = Instant::now();
+    let result = execute_hook(
+        hook_type,
+        command,
+        env,
+        stdin_json,
+        timeout_ms,
+        llm_provider,
+    )
+    .await;
+    runtime::record_hook_finish(
+        &runtime_id,
+        plugin_name,
+        hook_event,
+        session_id,
+        result.is_success(),
+        start.elapsed().as_millis() as u64,
+        result.exit_code,
+        stderr_snippet(&result.stderr),
+    );
+    result
+}
+
 fn register_session_start_hook(
     hooks: &mut AgenticHooks,
     plugin_hook: PluginHook,
@@ -397,9 +447,20 @@ fn register_session_start_hook(
             .to_string();
 
             if is_async {
+                let session_id = ctx.session_id.clone();
                 tokio::spawn(async move {
-                    let result =
-                        execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
+                    let result = execute_hook_logged(
+                        &name,
+                        "SessionStart",
+                        Some(session_id.as_str()),
+                        &ht,
+                        &cmd,
+                        &env,
+                        Some(&stdin),
+                        timeout_ms,
+                        &provider,
+                    )
+                    .await;
                     if !result.is_success() {
                         eprintln!(
                             "[plugin:{}] Async SessionStart hook failed: {}",
@@ -410,8 +471,18 @@ fn register_session_start_hook(
                 });
                 Ok(())
             } else {
-                let result =
-                    execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
+                let result = execute_hook_logged(
+                    &name,
+                    "SessionStart",
+                    Some(ctx.session_id.as_str()),
+                    &ht,
+                    &cmd,
+                    &env,
+                    Some(&stdin),
+                    timeout_ms,
+                    &provider,
+                )
+                .await;
                 if !result.is_success() {
                     eprintln!(
                         "[plugin:{}] SessionStart hook failed: {}",
@@ -456,7 +527,18 @@ fn register_user_message_hook(
             })
             .to_string();
 
-            let result = execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
+            let result = execute_hook_logged(
+                &name,
+                "UserPromptSubmit",
+                Some(ctx.session_id.as_str()),
+                &ht,
+                &cmd,
+                &env,
+                Some(&stdin),
+                timeout_ms,
+                &provider,
+            )
+            .await;
             if result.is_success() && !result.stdout.trim().is_empty() {
                 Ok(Some(result.stdout.trim().to_string()))
             } else {
@@ -523,7 +605,18 @@ fn register_before_tool_hook(
             })
             .to_string();
 
-            let result = execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
+            let result = execute_hook_logged(
+                &name,
+                "PreToolUse",
+                Some(ctx.session_id.as_str()),
+                &ht,
+                &cmd,
+                &env,
+                Some(&stdin),
+                timeout_ms,
+                &provider,
+            )
+            .await;
 
             if result.is_block() {
                 let reason = if result.stderr.trim().is_empty() {
@@ -620,9 +713,20 @@ fn register_after_tool_hook(
             if is_async {
                 let name_cloned = name.clone();
                 let etx_cloned = etx.clone();
+                let session_id = ctx.session_id.clone();
                 tokio::spawn(async move {
-                    let result =
-                        execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
+                    let result = execute_hook_logged(
+                        &name_cloned,
+                        "PostToolUse",
+                        Some(session_id.as_str()),
+                        &ht,
+                        &cmd,
+                        &env,
+                        Some(&stdin),
+                        timeout_ms,
+                        &provider,
+                    )
+                    .await;
                     if !result.is_success() {
                         eprintln!(
                             "[plugin:{}] Async PostToolUse hook failed: {}",
@@ -633,8 +737,18 @@ fn register_after_tool_hook(
                 });
                 Ok(AfterToolResult::default())
             } else {
-                let result =
-                    execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
+                let result = execute_hook_logged(
+                    &name,
+                    "PostToolUse",
+                    Some(ctx.session_id.as_str()),
+                    &ht,
+                    &cmd,
+                    &env,
+                    Some(&stdin),
+                    timeout_ms,
+                    &provider,
+                )
+                .await;
                 if !result.is_success() {
                     eprintln!(
                         "[plugin:{}] PostToolUse hook failed: {}",
@@ -693,9 +807,20 @@ fn register_session_end_hook(
             .to_string();
 
             if is_async {
+                let session_id = ctx.session_id.clone();
                 tokio::spawn(async move {
-                    let result =
-                        execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
+                    let result = execute_hook_logged(
+                        &name,
+                        "SessionEnd",
+                        Some(session_id.as_str()),
+                        &ht,
+                        &cmd,
+                        &env,
+                        Some(&stdin),
+                        timeout_ms,
+                        &provider,
+                    )
+                    .await;
                     if !result.is_success() {
                         eprintln!(
                             "[plugin:{}] Async SessionEnd hook failed: {}",
@@ -705,8 +830,18 @@ fn register_session_end_hook(
                     }
                 });
             } else {
-                let result =
-                    execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
+                let result = execute_hook_logged(
+                    &name,
+                    "SessionEnd",
+                    Some(ctx.session_id.as_str()),
+                    &ht,
+                    &cmd,
+                    &env,
+                    Some(&stdin),
+                    timeout_ms,
+                    &provider,
+                )
+                .await;
                 if !result.is_success() {
                     eprintln!(
                         "[plugin:{}] SessionEnd hook failed: {}",
@@ -753,7 +888,18 @@ fn register_compaction_hook(
             })
             .to_string();
 
-            let result = execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
+            let result = execute_hook_logged(
+                &name,
+                &evt_name,
+                Some(ctx.session_id.as_str()),
+                &ht,
+                &cmd,
+                &env,
+                Some(&stdin),
+                timeout_ms,
+                &provider,
+            )
+            .await;
             if !result.is_success() {
                 eprintln!(
                     "[plugin:{}] {} hook failed: {}",
@@ -802,7 +948,18 @@ fn register_before_llm_hook(
             })
             .to_string();
 
-            let result = execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
+            let result = execute_hook_logged(
+                &name,
+                "PreLlmCall",
+                Some(ctx.session_id.as_str()),
+                &ht,
+                &cmd,
+                &env,
+                Some(&stdin),
+                timeout_ms,
+                &provider,
+            )
+            .await;
             if !result.is_success() {
                 eprintln!(
                     "[plugin:{}] PreLlmCall hook failed: {}",
@@ -855,7 +1012,18 @@ fn register_after_llm_hook(
             })
             .to_string();
 
-            let result = execute_hook(&ht, &cmd, &env, Some(&stdin), timeout_ms, &provider).await;
+            let result = execute_hook_logged(
+                &name,
+                "PostLlmCall",
+                Some(ctx.session_id.as_str()),
+                &ht,
+                &cmd,
+                &env,
+                Some(&stdin),
+                timeout_ms,
+                &provider,
+            )
+            .await;
             if !result.is_success() {
                 eprintln!(
                     "[plugin:{}] PostLlmCall hook failed: {}",

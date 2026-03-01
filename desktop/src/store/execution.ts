@@ -14,6 +14,7 @@ import type { StreamEventPayload } from '../lib/claudeCodeClient';
 import { ToolCallStreamFilter } from '../utils/toolCallFilter';
 import { deriveConversationTurns, rebuildStandaloneTurns, buildPromptWithAttachments } from '../lib/conversationUtils';
 import type { FileAttachmentData } from '../types/attachment';
+import type { PluginInvocation } from '../types/plugin';
 import { useAgentsStore } from './agents';
 import {
   DEFAULT_MODEL_BY_PROVIDER,
@@ -691,6 +692,55 @@ function buildStandaloneConversationMessage(
   ].join('\n');
 }
 
+const PLUGIN_SKILL_LINE_REGEX = /^\s*\/([A-Za-z0-9._-]+):([A-Za-z0-9._-]+)(?:\s+(.*))?\s*$/;
+
+function parsePluginInvocationArgs(rawArgs: string | undefined): Record<string, string> {
+  if (!rawArgs) return {};
+  const args: Record<string, string> = {};
+  const argRegex = /([A-Za-z0-9_.-]+)=("([^"]*)"|'([^']*)'|([^\s]+))/g;
+  let match: RegExpExecArray | null = null;
+  while ((match = argRegex.exec(rawArgs)) !== null) {
+    const key = match[1];
+    const value = match[3] ?? match[4] ?? match[5] ?? '';
+    args[key] = value;
+  }
+  return args;
+}
+
+function extractPluginInvocationsFromPrompt(prompt: string): {
+  cleanedPrompt: string;
+  pluginInvocations: PluginInvocation[];
+} {
+  const lines = prompt.split('\n');
+  const cleanedLines: string[] = [];
+  const pluginInvocations: PluginInvocation[] = [];
+
+  for (const line of lines) {
+    const matched = line.match(PLUGIN_SKILL_LINE_REGEX);
+    if (!matched) {
+      cleanedLines.push(line);
+      continue;
+    }
+    pluginInvocations.push({
+      plugin_name: matched[1],
+      skill_name: matched[2],
+      args: parsePluginInvocationArgs(matched[3]),
+      source: 'slash',
+    });
+  }
+
+  return {
+    cleanedPrompt: cleanedLines.join('\n').trim(),
+    pluginInvocations,
+  };
+}
+
+function ensurePromptContent(prompt: string, invocationCount: number): string {
+  if (prompt.trim().length > 0) return prompt;
+  if (invocationCount > 0) return 'Apply the selected plugin skill instructions.';
+  return prompt;
+}
+
 function createStandaloneSessionId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return `simple-${crypto.randomUUID()}`;
@@ -1330,13 +1380,18 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         const standaloneSessionId = get().standaloneSessionId;
         const contextTurnsLimit = getStandaloneContextTurnsLimit();
         const recentStandaloneTurns = trimStandaloneTurns(existingStandaloneTurns, contextTurnsLimit);
+        const { cleanedPrompt, pluginInvocations } = extractPluginInvocationsFromPrompt(description);
+        const normalizedPrompt = ensurePromptContent(cleanedPrompt, pluginInvocations.length);
         const messageToSend =
           isSimpleStandalone && recentStandaloneTurns.length > 0
-            ? buildStandaloneConversationMessage(existingStandaloneTurns, description, contextTurnsLimit)
-            : description;
+            ? buildStandaloneConversationMessage(existingStandaloneTurns, normalizedPrompt, contextTurnsLimit)
+            : normalizedPrompt;
         get().addLog(
           `Resolved provider: ${provider} (backend=${backendValue || 'empty'}, setting=${providerValue || 'empty'}, model=${modelValue || 'empty'})`,
         );
+        if (pluginInvocations.length > 0) {
+          get().addLog(`Applying ${pluginInvocations.length} plugin invocation(s)`);
+        }
         if (isSimpleStandalone && recentStandaloneTurns.length > 0) {
           const contextLabel =
             contextTurnsLimit === STANDALONE_CONTEXT_UNLIMITED ? 'unlimited' : String(contextTurnsLimit);
@@ -1369,6 +1424,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           enableThinking: settings.enableThinking ?? false,
           maxIterations: settings.maxIterations ?? undefined,
           maxConcurrentSubagents: settings.maxConcurrentSubagents || undefined,
+          pluginInvocations: pluginInvocations.length > 0 ? pluginInvocations : null,
           systemPrompt: activeAgent?.system_prompt ?? null,
           contextSources,
         });
@@ -2837,10 +2893,12 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       const model = settingsSnapshot.model || DEFAULT_MODEL_BY_PROVIDER[provider] || 'claude-sonnet-4-6-20260219';
       const contextTurnsLimit = getStandaloneContextTurnsLimit();
       const recentTurns = trimStandaloneTurns(rebuiltTurns, contextTurnsLimit);
+      const { cleanedPrompt, pluginInvocations } = extractPluginInvocationsFromPrompt(userContent);
+      const normalizedPrompt = ensurePromptContent(cleanedPrompt, pluginInvocations.length);
       const messageToSend =
         recentTurns.length > 0
-          ? buildStandaloneConversationMessage(rebuiltTurns, userContent, contextTurnsLimit)
-          : userContent;
+          ? buildStandaloneConversationMessage(rebuiltTurns, normalizedPrompt, contextTurnsLimit)
+          : normalizedPrompt;
       const baseUrl = resolveProviderBaseUrl(provider, settingsSnapshot);
       const standaloneSessionId = get().standaloneSessionId;
 
@@ -2860,6 +2918,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           enableThinking: settingsSnapshot.enableThinking ?? false,
           maxIterations: settingsSnapshot.maxIterations ?? undefined,
           maxConcurrentSubagents: settingsSnapshot.maxConcurrentSubagents || undefined,
+          pluginInvocations: pluginInvocations.length > 0 ? pluginInvocations : null,
           contextSources: regenContextSources,
         });
 
@@ -3024,10 +3083,12 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       const model = settingsSnapshot.model || DEFAULT_MODEL_BY_PROVIDER[provider] || 'claude-sonnet-4-6-20260219';
       const contextTurnsLimit = getStandaloneContextTurnsLimit();
       const recentTurns = trimStandaloneTurns(rebuiltTurns, contextTurnsLimit);
+      const { cleanedPrompt, pluginInvocations } = extractPluginInvocationsFromPrompt(newContent);
+      const normalizedPrompt = ensurePromptContent(cleanedPrompt, pluginInvocations.length);
       const messageToSend =
         recentTurns.length > 0
-          ? buildStandaloneConversationMessage(rebuiltTurns, newContent, contextTurnsLimit)
-          : newContent;
+          ? buildStandaloneConversationMessage(rebuiltTurns, normalizedPrompt, contextTurnsLimit)
+          : normalizedPrompt;
       const baseUrl = resolveProviderBaseUrl(provider, settingsSnapshot);
       const standaloneSessionId = get().standaloneSessionId;
 
@@ -3047,6 +3108,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           enableThinking: settingsSnapshot.enableThinking ?? false,
           maxIterations: settingsSnapshot.maxIterations ?? undefined,
           maxConcurrentSubagents: settingsSnapshot.maxConcurrentSubagents || undefined,
+          pluginInvocations: pluginInvocations.length > 0 ? pluginInvocations : null,
           contextSources: editContextSources,
         });
 

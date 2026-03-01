@@ -301,6 +301,8 @@ fn main() {
             plan_cascade_desktop::commands::plugins::toggle_plugin,
             plan_cascade_desktop::commands::plugins::refresh_plugins,
             plan_cascade_desktop::commands::plugins::get_plugin_detail,
+            plan_cascade_desktop::commands::plugins::get_plugin_compat_report,
+            plan_cascade_desktop::commands::plugins::list_plugin_runtime_events,
             plan_cascade_desktop::commands::plugins::install_plugin,
             plan_cascade_desktop::commands::plugins::fetch_marketplace,
             plan_cascade_desktop::commands::plugins::install_plugin_from_git,

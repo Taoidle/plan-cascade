@@ -26,6 +26,9 @@ function createMockPluginInfo(overrides: Partial<PluginInfo> = {}): PluginInfo {
     hook_count: 3,
     has_instructions: true,
     author: 'Test Author',
+    compat_level: 'partial',
+    compat_summary: '1 compatibility gap detected',
+    compat_checked_at: 1_700_000_000,
     ...overrides,
   };
 }
@@ -52,6 +55,16 @@ function createMockPluginDetail(overrides: Partial<PluginDetail> = {}): PluginDe
       permissions: { allow: [], deny: [], always_approve: [] },
     },
     root_path: '/plugins/test-plugin',
+    compat_report: {
+      plugin_name: 'test-plugin',
+      level: 'partial',
+      summary: '1 compatibility gap detected',
+      capabilities: [],
+      gaps: [],
+      checked_at: 1_700_000_000,
+      prompt_budget_impact: 0,
+      injection_truncated: false,
+    },
     ...overrides,
   };
 }

@@ -127,6 +127,7 @@ pub use commands::{
     get_memory_stats,
     get_model_pricing,
     // Plugin commands
+    get_plugin_compat_report,
     get_plugin_detail,
     get_project,
     get_provider_api_key,
@@ -226,7 +227,9 @@ pub use commands::{
     list_mcp_servers,
     list_mcp_tools,
     list_model_pricing,
+    list_plugin_runtime_events,
     list_plugins,
+    list_invocable_plugin_skills,
     list_project_memories,
     // Project commands
     list_projects,

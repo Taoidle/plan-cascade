@@ -6,7 +6,15 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import type { PluginInfo, PluginDetail, PluginSkill, MarketplacePlugin, MarketplaceInfo } from '../types/plugin';
+import type {
+  InvocablePluginSkill,
+  MarketplaceInfo,
+  MarketplacePlugin,
+  PluginCompatReport,
+  PluginDetail,
+  PluginInfo,
+  PluginRuntimeEvent,
+} from '../types/plugin';
 
 interface CommandResponse<T> {
   success: boolean;
@@ -33,9 +41,47 @@ export async function listPlugins(): Promise<CommandResponse<PluginInfo[]>> {
  * List user-invocable plugin skills.
  * Returns skills from enabled plugins where user_invocable is true.
  */
-export async function listInvocableSkills(): Promise<CommandResponse<PluginSkill[]>> {
+export async function listInvocableSkills(): Promise<CommandResponse<InvocablePluginSkill[]>> {
   try {
-    return await invoke<CommandResponse<PluginSkill[]>>('list_invocable_plugin_skills');
+    return await invoke<CommandResponse<InvocablePluginSkill[]>>('list_invocable_plugin_skills');
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Get compatibility report for a specific plugin.
+ */
+export async function getPluginCompatReport(name: string): Promise<CommandResponse<PluginCompatReport>> {
+  try {
+    return await invoke<CommandResponse<PluginCompatReport>>('get_plugin_compat_report', { name });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * List runtime hook events for plugin observability.
+ */
+export async function listPluginRuntimeEvents(params?: {
+  pluginName?: string;
+  sessionId?: string;
+  limit?: number;
+}): Promise<CommandResponse<PluginRuntimeEvent[]>> {
+  try {
+    return await invoke<CommandResponse<PluginRuntimeEvent[]>>('list_plugin_runtime_events', {
+      pluginName: params?.pluginName ?? null,
+      sessionId: params?.sessionId ?? null,
+      limit: params?.limit ?? null,
+    });
   } catch (error) {
     return {
       success: false,

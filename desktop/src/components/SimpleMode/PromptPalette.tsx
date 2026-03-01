@@ -11,7 +11,7 @@ import { clsx } from 'clsx';
 import { usePromptsStore } from '../../store/prompts';
 import { substituteVariables } from '../../types/prompt';
 import { listInvocableSkills } from '../../lib/pluginApi';
-import type { PluginSkill } from '../../types/plugin';
+import type { InvocablePluginSkill, PluginInvocation } from '../../types/plugin';
 
 // ============================================================================
 // Types
@@ -19,7 +19,8 @@ import type { PluginSkill } from '../../types/plugin';
 
 interface PromptPaletteProps {
   query: string;
-  onSelect: (resolvedText: string) => void;
+  onSelectText: (resolvedText: string) => void;
+  onSelectPluginSkill: (invocation: PluginInvocation, displayText: string) => void;
   onClose: () => void;
   onKeyboardNav?: (handler: (e: React.KeyboardEvent) => boolean) => void;
 }
@@ -27,13 +28,19 @@ interface PromptPaletteProps {
 /** Unified palette item representing either a prompt template or a plugin skill. */
 type PaletteItem =
   | { kind: 'prompt'; id: string; title: string; description?: string; category: string }
-  | { kind: 'skill'; name: string; description: string; body: string };
+  | {
+      kind: 'skill';
+      plugin_name: string;
+      skill_name: string;
+      description: string;
+      allowed_tools: string[];
+    };
 
 // ============================================================================
 // PromptPalette
 // ============================================================================
 
-export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) {
+export function PromptPalette({ query, onSelectText, onSelectPluginSkill, onClose }: PromptPaletteProps) {
   const { t } = useTranslation('simpleMode');
 
   const prompts = usePromptsStore((s) => s.prompts);
@@ -44,7 +51,7 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
   const [variableMode, setVariableMode] = useState(false);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
-  const [pluginSkills, setPluginSkills] = useState<PluginSkill[]>([]);
+  const [pluginSkills, setPluginSkills] = useState<InvocablePluginSkill[]>([]);
   const paletteRef = useRef<HTMLDivElement>(null);
 
   // Fetch prompts on mount
@@ -74,9 +81,10 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
     }));
     const skillItems: PaletteItem[] = pluginSkills.map((s) => ({
       kind: 'skill' as const,
-      name: s.name,
+      plugin_name: s.plugin_name,
+      skill_name: s.skill_name,
       description: s.description,
-      body: s.body,
+      allowed_tools: s.allowed_tools,
     }));
 
     const all = [...promptItems, ...skillItems];
@@ -112,7 +120,8 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
             (item.description && item.description.toLowerCase().includes(q))
           );
         }
-        return item.name.toLowerCase().includes(q) || item.description.toLowerCase().includes(q);
+        const display = `${item.plugin_name}:${item.skill_name}`.toLowerCase();
+        return display.includes(q) || item.description.toLowerCase().includes(q);
       })
       .slice(0, 8);
   }, [prompts, pluginSkills, query]);
@@ -127,9 +136,16 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
   const handleSelectItem = useCallback(
     (item: PaletteItem) => {
       if (item.kind === 'skill') {
-        // Prepend skill body as a system instruction
-        const text = `[Plugin Skill: ${item.name}]\n${item.body}`;
-        onSelect(text);
+        const display = `/${item.plugin_name}:${item.skill_name}`;
+        onSelectPluginSkill(
+          {
+            plugin_name: item.plugin_name,
+            skill_name: item.skill_name,
+            args: {},
+            source: 'slash',
+          },
+          display,
+        );
         return;
       }
 
@@ -143,17 +159,17 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
         setVariableMode(true);
         setVariableValues({});
       } else {
-        onSelect(prompt.content);
+        onSelectText(prompt.content);
       }
     },
-    [prompts, recordUse, onSelect],
+    [onSelectPluginSkill, onSelectText, prompts, recordUse],
   );
 
   const handleVariableSubmit = useCallback(() => {
     if (!selectedPrompt) return;
     const resolved = substituteVariables(selectedPrompt.content, variableValues);
-    onSelect(resolved);
-  }, [selectedPrompt, variableValues, onSelect]);
+    onSelectText(resolved);
+  }, [selectedPrompt, variableValues, onSelectText]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -271,8 +287,8 @@ export function PromptPalette({ query, onSelect, onClose }: PromptPaletteProps) 
           </div>
           <div className="py-1">
             {filteredItems.map((item, index) => {
-              const key = item.kind === 'prompt' ? item.id : `skill:${item.name}`;
-              const title = item.kind === 'prompt' ? item.title : item.name;
+              const key = item.kind === 'prompt' ? item.id : `skill:${item.plugin_name}:${item.skill_name}`;
+              const title = item.kind === 'prompt' ? item.title : `${item.plugin_name}:${item.skill_name}`;
               const desc = item.description;
               const badge = item.kind === 'prompt' ? item.category : 'plugin';
 

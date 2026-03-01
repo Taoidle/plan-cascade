@@ -14,6 +14,7 @@ use crate::services::plugins::manager::PluginManager;
 use crate::services::plugins::marketplace;
 use crate::services::plugins::models::*;
 use crate::services::plugins::registry;
+use crate::services::plugins::runtime;
 use crate::services::plugins::settings as plugin_settings;
 
 // ============================================================================
@@ -100,6 +101,20 @@ impl PluginState {
             None => vec![],
         }
     }
+
+    /// Resolve structured plugin invocations against enabled plugins/skills.
+    ///
+    /// Returns an empty vector if plugin system is not initialized.
+    pub async fn resolve_invocations(
+        &self,
+        invocations: &[PluginInvocation],
+    ) -> Vec<ResolvedPluginInvocation> {
+        let guard = self.inner.read().await;
+        match &*guard {
+            Some(manager) => manager.resolve_invocations(invocations),
+            None => vec![],
+        }
+    }
 }
 
 impl Default for PluginState {
@@ -139,16 +154,8 @@ pub async fn list_plugins(
 #[tauri::command]
 pub async fn list_invocable_plugin_skills(
     state: State<'_, PluginState>,
-) -> Result<CommandResponse<Vec<PluginSkill>>, String> {
-    match state
-        .with_manager(|m| {
-            m.collect_skills()
-                .into_iter()
-                .filter(|s| s.user_invocable)
-                .collect::<Vec<_>>()
-        })
-        .await
-    {
+) -> Result<CommandResponse<Vec<InvocablePluginSkill>>, String> {
+    match state.with_manager(|m| m.list_invocable_skills()).await {
         Ok(skills) => Ok(CommandResponse::ok(skills)),
         Err(e) => Ok(CommandResponse::err(e)),
     }
@@ -211,6 +218,9 @@ pub async fn get_plugin_detail(
             m.get_plugin(&name).map(|p| PluginDetail {
                 plugin: p.clone(),
                 root_path: p.root_path.clone(),
+                compat_report: m
+                    .get_compat_report(&name)
+                    .unwrap_or_else(|| crate::services::plugins::compat::evaluate_plugin_compat(p)),
             })
         })
         .await
@@ -219,6 +229,31 @@ pub async fn get_plugin_detail(
         Ok(None) => Ok(CommandResponse::err(format!("Plugin not found: {}", name))),
         Err(e) => Ok(CommandResponse::err(e)),
     }
+}
+
+/// Get a compatibility report for a specific plugin.
+#[tauri::command]
+pub async fn get_plugin_compat_report(
+    name: String,
+    state: State<'_, PluginState>,
+) -> Result<CommandResponse<PluginCompatReport>, String> {
+    match state.with_manager(|m| m.get_compat_report(&name)).await {
+        Ok(Some(report)) => Ok(CommandResponse::ok(report)),
+        Ok(None) => Ok(CommandResponse::err(format!("Plugin not found: {}", name))),
+        Err(e) => Ok(CommandResponse::err(e)),
+    }
+}
+
+/// List plugin runtime events (hook start/finish observability).
+#[tauri::command]
+pub async fn list_plugin_runtime_events(
+    plugin_name: Option<String>,
+    session_id: Option<String>,
+    limit: Option<usize>,
+) -> Result<CommandResponse<Vec<PluginRuntimeEvent>>, String> {
+    let limit = limit.unwrap_or(100).clamp(1, 500);
+    let events = runtime::list_runtime_events(plugin_name.as_deref(), session_id.as_deref(), limit);
+    Ok(CommandResponse::ok(events))
 }
 
 /// Install a plugin from a source directory.

@@ -3,10 +3,12 @@
 //! Filesystem scanning from 4 sources (builtin, external, user, project-local)
 //! plus convention file detection.
 
+use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::services::skills::config::{resolve_skill_path, SkillsConfig};
-use crate::services::skills::model::{DiscoveredSkill, InjectionPhase, SkillSource};
+use crate::services::skills::model::{DiscoveredSkill, InjectionPhase, SkillDetection, SkillSource};
 use crate::utils::error::AppResult;
 
 /// Convention file names to discover in project root and subdirectories
@@ -127,7 +129,8 @@ pub fn discover_all_skills(
         }
     }
 
-    // 3. USER: Not implemented yet (would scan ~/.plan-cascade/skills.json)
+    // 3. USER: Load from .plan-cascade/skills.json (project) and ~/.plan-cascade/skills.json (user)
+    all_skills.extend(discover_user_skills(project_root, plan_cascade_dir));
 
     // 4. PROJECT-LOCAL: Scan project .skills/ directory + convention files
     let project_skills = discover_project_skills(project_root)?;
@@ -149,6 +152,141 @@ pub fn discover_all_skills(
     all_skills.sort_by(|a, b| a.priority.cmp(&b.priority));
 
     Ok(all_skills)
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct UserSkillsConfig {
+    #[serde(default)]
+    skills: Vec<UserSkillEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct UserSkillEntry {
+    name: String,
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    detect: Option<UserSkillDetect>,
+    #[serde(default)]
+    priority: Option<u32>,
+    #[serde(default)]
+    inject_into: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct UserSkillDetect {
+    #[serde(default)]
+    files: Vec<String>,
+    #[serde(default)]
+    patterns: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct UserSkillCandidate {
+    entry: UserSkillEntry,
+    base_dir: PathBuf,
+}
+
+fn load_user_skills_config(config_path: &Path) -> Option<UserSkillsConfig> {
+    let content = std::fs::read_to_string(config_path).ok()?;
+    serde_json::from_str::<UserSkillsConfig>(&content).ok()
+}
+
+fn discover_user_skills(project_root: &Path, plan_cascade_dir: Option<&Path>) -> Vec<DiscoveredSkill> {
+    let mut merged: HashMap<String, UserSkillCandidate> = HashMap::new();
+
+    if let Some(plan_dir) = plan_cascade_dir {
+        let user_config_path = plan_dir.join("skills.json");
+        if let Some(user_cfg) = load_user_skills_config(&user_config_path) {
+            let user_base = user_config_path
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| plan_dir.to_path_buf());
+            for entry in user_cfg.skills {
+                merged.insert(
+                    entry.name.clone(),
+                    UserSkillCandidate {
+                        entry,
+                        base_dir: user_base.clone(),
+                    },
+                );
+            }
+        }
+    }
+
+    let project_config_path = project_root.join(".plan-cascade").join("skills.json");
+    if let Some(project_cfg) = load_user_skills_config(&project_config_path) {
+        let project_base = project_config_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| project_root.to_path_buf());
+        for entry in project_cfg.skills {
+            merged.insert(
+                entry.name.clone(),
+                UserSkillCandidate {
+                    entry,
+                    base_dir: project_base.clone(),
+                },
+            );
+        }
+    }
+
+    let mut discovered = Vec::new();
+    for (_, candidate) in merged {
+        if candidate.entry.path.is_none() {
+            // URL-backed user skills are intentionally skipped in desktop for now.
+            if candidate.entry.url.is_some() {
+                tracing::warn!(
+                    "Skipping user skill '{}' from URL source (not yet supported in desktop)",
+                    candidate.entry.name
+                );
+            }
+            continue;
+        }
+
+        let relative_path = candidate.entry.path.as_deref().unwrap_or_default();
+        let resolved = candidate.base_dir.join(relative_path);
+        let files = if resolved.is_dir() {
+            find_skill_files_in_dir(&resolved)
+        } else if resolved.is_file() && is_skill_file(&resolved) {
+            vec![resolved]
+        } else {
+            Vec::new()
+        };
+
+        if files.is_empty() {
+            continue;
+        }
+
+        let detect = candidate.entry.detect.as_ref().map(|d| SkillDetection {
+            files: d.files.clone(),
+            patterns: d.patterns.clone(),
+        });
+        let inject_into = if candidate.entry.inject_into.is_empty() {
+            vec![InjectionPhase::Implementation, InjectionPhase::Retry]
+        } else {
+            parse_injection_phases(&candidate.entry.inject_into)
+        };
+        let priority = candidate.entry.priority.unwrap_or(150).clamp(101, 200);
+
+        for file_path in files {
+            if let Ok(content) = std::fs::read_to_string(&file_path) {
+                discovered.push(DiscoveredSkill {
+                    path: file_path,
+                    content,
+                    source: SkillSource::User,
+                    priority,
+                    detect: detect.clone(),
+                    inject_into: inject_into.clone(),
+                    enabled: true,
+                });
+            }
+        }
+    }
+
+    discovered
 }
 
 /// Discover project-local skills only (fast path for session start).

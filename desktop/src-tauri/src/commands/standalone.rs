@@ -20,6 +20,7 @@ use crate::services::orchestrator::index_manager::{IndexManager, IndexStatusEven
 use crate::services::orchestrator::{
     ExecutionResult, OrchestratorConfig, OrchestratorService, SessionExecutionResult,
 };
+use crate::services::plugins::models::{PluginInvocation, ResolvedPluginInvocation};
 use crate::services::streaming::UnifiedStreamEvent;
 use crate::state::AppState;
 use crate::storage::KeyringService;
@@ -197,6 +198,58 @@ fn provider_key_candidates(provider: &str) -> &'static [&'static str] {
         "ollama" => &["ollama"],
         _ => &[],
     }
+}
+
+fn render_plugin_invocation_body(invocation: &ResolvedPluginInvocation) -> String {
+    let mut body = invocation.body.clone();
+    for (key, value) in &invocation.args {
+        body = body.replace(&format!("{{{{{}}}}}", key), value);
+    }
+    body
+}
+
+fn build_plugin_invocation_block(invocations: &[ResolvedPluginInvocation]) -> Option<String> {
+    if invocations.is_empty() {
+        return None;
+    }
+
+    let mut lines = Vec::new();
+    lines.push("## Invoked Plugin Skills".to_string());
+    lines.push(
+        "The user explicitly requested these plugin skills. Treat them as high-priority guidance."
+            .to_string(),
+    );
+
+    for invocation in invocations {
+        lines.push(format!(
+            "### {}/{}",
+            invocation.plugin_name, invocation.skill_name
+        ));
+        if !invocation.description.trim().is_empty() {
+            lines.push(format!("Description: {}", invocation.description.trim()));
+        }
+        if !invocation.allowed_tools.is_empty() {
+            lines.push(format!(
+                "Allowed Tools: {}",
+                invocation.allowed_tools.join(", ")
+            ));
+        }
+        if !invocation.args.is_empty() {
+            let mut args: Vec<_> = invocation.args.iter().collect();
+            args.sort_by(|a, b| a.0.cmp(b.0));
+            let args_line = args
+                .into_iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!("Arguments: {}", args_line));
+        }
+        lines.push("Skill Body:".to_string());
+        lines.push(render_plugin_invocation_body(invocation));
+        lines.push(String::new());
+    }
+
+    Some(lines.join("\n"))
 }
 
 fn canonical_providers() -> &'static [&'static str] {
@@ -1066,6 +1119,8 @@ pub async fn execute_standalone(
     max_total_tokens: Option<u32>,
     max_iterations: Option<u32>,
     max_concurrent_subagents: Option<u32>,
+    plugin_invocations: Option<Vec<PluginInvocation>>,
+    pluginInvocations: Option<Vec<PluginInvocation>>,
     context_sources: Option<crate::services::task_mode::context_provider::ContextSourceConfig>,
     app: AppHandle,
     app_state: State<'_, AppState>,
@@ -1170,6 +1225,16 @@ pub async fn execute_standalone(
     // Clone session_id before it's moved into orchestrator_config
     let event_session_id = analysis_session_id.clone().unwrap_or_default();
 
+    let requested_plugin_invocations = plugin_invocations.or(pluginInvocations).unwrap_or_default();
+    let resolved_plugin_invocations = if requested_plugin_invocations.is_empty() {
+        Vec::new()
+    } else {
+        plugin_state
+            .resolve_invocations(&requested_plugin_invocations)
+            .await
+    };
+    let plugin_invocation_block = build_plugin_invocation_block(&resolved_plugin_invocations);
+
     // Query Skills-only context for standalone system prompt.
     // Memory injection is handled by memory hooks so it can be centrally filtered.
     let system_prompt = if let Some(ref cs) = context_sources {
@@ -1210,6 +1275,12 @@ pub async fn execute_standalone(
         }
     } else {
         system_prompt
+    };
+    let system_prompt = match (system_prompt, plugin_invocation_block) {
+        (Some(sp), Some(invocations)) => Some(format!("{}\n\n{}", sp, invocations)),
+        (Some(sp), None) => Some(sp),
+        (None, Some(invocations)) => Some(invocations),
+        (None, None) => None,
     };
 
     let orchestrator_config = OrchestratorConfig {

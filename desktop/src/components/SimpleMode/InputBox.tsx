@@ -698,10 +698,16 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
             {isPromptPaletteOpen && (
               <PromptPalette
                 query={promptPaletteQuery}
-                onSelect={(resolvedText) => {
+                onSelectText={(resolvedText) => {
                   const before = value.substring(0, slashTriggerPos);
                   const after = value.substring(slashTriggerPos + 1 + promptPaletteQuery.length);
                   onChange(before + resolvedText + after);
+                  setIsPromptPaletteOpen(false);
+                }}
+                onSelectPluginSkill={(_invocation, displayText) => {
+                  const before = value.substring(0, slashTriggerPos);
+                  const after = value.substring(slashTriggerPos + 1 + promptPaletteQuery.length);
+                  onChange(before + displayText + after);
                   setIsPromptPaletteOpen(false);
                 }}
                 onClose={() => setIsPromptPaletteOpen(false)}

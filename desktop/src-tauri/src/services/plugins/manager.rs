@@ -15,6 +15,7 @@ use tokio::sync::mpsc;
 
 use crate::services::llm::provider::LlmProvider;
 use crate::services::orchestrator::hooks::AgenticHooks;
+use crate::services::plugins::compat::evaluate_plugin_compat;
 use crate::services::plugins::dispatcher::register_plugin_hooks;
 use crate::services::plugins::loader::{discover_all_plugins, discover_all_plugins_with_home};
 use crate::services::plugins::models::*;
@@ -255,7 +256,17 @@ impl PluginManager {
 
     /// List all plugins with lightweight info summaries.
     pub fn list_plugins(&self) -> Vec<PluginInfo> {
-        self.plugins.iter().map(|p| p.to_info()).collect()
+        self.plugins
+            .iter()
+            .map(|p| {
+                let report = evaluate_plugin_compat(p);
+                let mut info = p.to_info();
+                info.compat_level = report.level;
+                info.compat_summary = report.summary;
+                info.compat_checked_at = report.checked_at;
+                info
+            })
+            .collect()
     }
 
     /// Get full details for a plugin by name.
@@ -307,6 +318,67 @@ impl PluginManager {
         self.plugins
             .iter()
             .any(|p| p.manifest.name == name && p.enabled)
+    }
+
+    /// Build compatibility report for one plugin.
+    pub fn get_compat_report(&self, name: &str) -> Option<PluginCompatReport> {
+        self.get_plugin(name).map(evaluate_plugin_compat)
+    }
+
+    /// Collect user-invocable skills with explicit plugin namespace.
+    pub fn list_invocable_skills(&self) -> Vec<InvocablePluginSkill> {
+        let mut skills = Vec::new();
+        for plugin in &self.plugins {
+            if !plugin.enabled {
+                continue;
+            }
+            for skill in &plugin.skills {
+                if !skill.user_invocable {
+                    continue;
+                }
+                skills.push(InvocablePluginSkill {
+                    plugin_name: plugin.manifest.name.clone(),
+                    skill_name: skill.name.clone(),
+                    description: skill.description.clone(),
+                    allowed_tools: skill.allowed_tools.clone(),
+                });
+            }
+        }
+        skills
+    }
+
+    /// Resolve structured plugin invocations against enabled plugins/skills.
+    pub fn resolve_invocations(
+        &self,
+        invocations: &[PluginInvocation],
+    ) -> Vec<ResolvedPluginInvocation> {
+        let mut resolved = Vec::new();
+        for inv in invocations {
+            let Some(plugin) = self
+                .plugins
+                .iter()
+                .find(|p| p.enabled && p.manifest.name == inv.plugin_name)
+            else {
+                continue;
+            };
+            let Some(skill) = plugin
+                .skills
+                .iter()
+                .find(|s| s.user_invocable && s.name == inv.skill_name)
+            else {
+                continue;
+            };
+
+            resolved.push(ResolvedPluginInvocation {
+                plugin_name: plugin.manifest.name.clone(),
+                skill_name: skill.name.clone(),
+                description: skill.description.clone(),
+                body: skill.body.clone(),
+                allowed_tools: skill.allowed_tools.clone(),
+                args: inv.args.clone(),
+            });
+        }
+        resolved
     }
 
     /// Collect quality gate definitions from enabled plugins.

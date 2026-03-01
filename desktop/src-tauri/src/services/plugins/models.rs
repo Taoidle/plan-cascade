@@ -44,6 +44,64 @@ impl std::fmt::Display for PluginSource {
     }
 }
 
+/// Plugin compatibility level against Claude Code plugin semantics.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginCompatLevel {
+    /// All declared capabilities are supported end-to-end.
+    Full,
+    /// Core capability works but some non-blocking gaps exist.
+    Partial,
+    /// Significant semantic gaps exist.
+    Degraded,
+}
+
+impl std::fmt::Display for PluginCompatLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Full => write!(f, "full"),
+            Self::Partial => write!(f, "partial"),
+            Self::Degraded => write!(f, "degraded"),
+        }
+    }
+}
+
+/// Compatibility support status for one capability.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompatCapability {
+    pub name: String,
+    pub supported: bool,
+    #[serde(default)]
+    pub details: Option<String>,
+}
+
+/// A specific compatibility gap detected for a plugin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompatGap {
+    pub capability: String,
+    pub reason: String,
+    /// "high" | "medium" | "low"
+    pub severity: String,
+}
+
+/// Full compatibility report for one plugin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginCompatReport {
+    pub plugin_name: String,
+    pub level: PluginCompatLevel,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub capabilities: Vec<CompatCapability>,
+    #[serde(default)]
+    pub gaps: Vec<CompatGap>,
+    pub checked_at: i64,
+    #[serde(default)]
+    pub prompt_budget_impact: usize,
+    #[serde(default)]
+    pub injection_truncated: bool,
+}
+
 // ============================================================================
 // Plugin Manifest (compatible with Claude Code plugin.json)
 // ============================================================================
@@ -302,6 +360,16 @@ pub struct PluginSkill {
     pub hooks: Vec<PluginHook>,
 }
 
+/// User-invocable plugin skill with plugin namespace.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InvocablePluginSkill {
+    pub plugin_name: String,
+    pub skill_name: String,
+    pub description: String,
+    #[serde(default)]
+    pub allowed_tools: Vec<String>,
+}
+
 // ============================================================================
 // Plugin Command
 // ============================================================================
@@ -424,6 +492,12 @@ pub struct PluginInfo {
     pub has_instructions: bool,
     /// Author name
     pub author: Option<String>,
+    /// Compatibility level summary
+    pub compat_level: PluginCompatLevel,
+    /// Short human-readable compatibility summary
+    pub compat_summary: String,
+    /// Unix timestamp (seconds) when compatibility was last checked
+    pub compat_checked_at: i64,
 }
 
 /// Detailed plugin info for the detail view.
@@ -433,6 +507,8 @@ pub struct PluginDetail {
     pub plugin: LoadedPlugin,
     /// Plugin root path
     pub root_path: String,
+    /// Compatibility report with gaps and capability breakdown.
+    pub compat_report: PluginCompatReport,
 }
 
 impl LoadedPlugin {
@@ -449,8 +525,60 @@ impl LoadedPlugin {
             hook_count: self.hooks.len(),
             has_instructions: self.instructions.is_some(),
             author: self.manifest.author.clone(),
+            compat_level: PluginCompatLevel::Degraded,
+            compat_summary: "Compatibility not evaluated".to_string(),
+            compat_checked_at: 0,
         }
     }
+}
+
+/// Structured invocation payload for executing a plugin skill.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginInvocation {
+    pub plugin_name: String,
+    pub skill_name: String,
+    #[serde(default)]
+    pub args: std::collections::HashMap<String, String>,
+    #[serde(default = "default_invocation_source")]
+    pub source: String,
+}
+
+fn default_invocation_source() -> String {
+    "slash".to_string()
+}
+
+/// Fully resolved invocation used by orchestrator prompt injection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvedPluginInvocation {
+    pub plugin_name: String,
+    pub skill_name: String,
+    pub description: String,
+    pub body: String,
+    #[serde(default)]
+    pub allowed_tools: Vec<String>,
+    #[serde(default)]
+    pub args: std::collections::HashMap<String, String>,
+}
+
+/// Runtime event emitted for plugin hook observability.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginRuntimeEvent {
+    pub event_id: String,
+    pub plugin_name: String,
+    pub hook_event: String,
+    /// "start" | "finish"
+    pub phase: String,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub success: Option<bool>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+    #[serde(default)]
+    pub stderr_snippet: Option<String>,
+    pub created_at: i64,
 }
 
 // ============================================================================
@@ -1017,6 +1145,9 @@ mod tests {
             hook_count: 3,
             has_instructions: false,
             author: None,
+            compat_level: PluginCompatLevel::Partial,
+            compat_summary: "1 compatibility gap detected".to_string(),
+            compat_checked_at: 1_700_000_000,
         };
 
         let json = serde_json::to_string(&info).unwrap();

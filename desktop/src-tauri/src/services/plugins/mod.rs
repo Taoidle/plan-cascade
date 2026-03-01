@@ -10,6 +10,7 @@
 //! - manager.rs:     Unified entry point for plugin management
 
 pub mod dispatcher;
+pub mod compat;
 pub mod installer;
 pub mod lifecycle;
 pub mod loader;
@@ -17,6 +18,7 @@ pub mod manager;
 pub mod marketplace;
 pub mod models;
 pub mod registry;
+pub mod runtime;
 pub mod settings;
 
 pub use models::*;

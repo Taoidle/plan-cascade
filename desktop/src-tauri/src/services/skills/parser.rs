@@ -522,17 +522,204 @@ fn parse_hooks(fields: &HashMap<String, YamlValue>) -> Option<SkillHooks> {
 }
 
 /// Parse hook rules from a YAML value (simplified - extracts what we can).
-fn parse_hook_rules(_val: Option<&YamlValue>) -> Vec<ToolHookRule> {
-    // Hook parsing from the lightweight YAML parser is limited.
-    // In production, hooks are complex nested YAML structures.
-    // For now we return empty - hooks will be fully supported when
-    // we add serde_yaml dependency in a future iteration.
-    vec![]
+fn parse_hook_rules(val: Option<&YamlValue>) -> Vec<ToolHookRule> {
+    let Some(value) = val else {
+        return vec![];
+    };
+
+    match value {
+        YamlValue::Block(block) => parse_tool_hook_rules_from_block(block),
+        YamlValue::String(s) => {
+            let command = s.trim();
+            if command.is_empty() {
+                vec![]
+            } else {
+                vec![ToolHookRule {
+                    matcher: ".*".to_string(),
+                    hooks: vec![HookAction {
+                        hook_type: "command".to_string(),
+                        command: command.to_string(),
+                    }],
+                }]
+            }
+        }
+        YamlValue::List(items) => {
+            let hooks: Vec<HookAction> = items
+                .iter()
+                .map(|item| item.trim())
+                .filter(|item| !item.is_empty())
+                .map(|command| HookAction {
+                    hook_type: "command".to_string(),
+                    command: command.to_string(),
+                })
+                .collect();
+            if hooks.is_empty() {
+                vec![]
+            } else {
+                vec![ToolHookRule {
+                    matcher: ".*".to_string(),
+                    hooks,
+                }]
+            }
+        }
+        YamlValue::Map(_) => vec![],
+    }
 }
 
 /// Parse stop hooks from a YAML value.
-fn parse_stop_hooks(_val: Option<&YamlValue>) -> Vec<HookAction> {
-    vec![]
+fn parse_stop_hooks(val: Option<&YamlValue>) -> Vec<HookAction> {
+    let Some(value) = val else {
+        return vec![];
+    };
+
+    match value {
+        YamlValue::Block(block) => parse_hook_actions_from_block(block),
+        YamlValue::String(s) => {
+            let command = s.trim();
+            if command.is_empty() {
+                vec![]
+            } else {
+                vec![HookAction {
+                    hook_type: "command".to_string(),
+                    command: command.to_string(),
+                }]
+            }
+        }
+        YamlValue::List(items) => items
+            .iter()
+            .map(|item| item.trim())
+            .filter(|item| !item.is_empty())
+            .map(|command| HookAction {
+                hook_type: "command".to_string(),
+                command: command.to_string(),
+            })
+            .collect(),
+        YamlValue::Map(_) => vec![],
+    }
+}
+
+fn parse_tool_hook_rules_from_block(block: &str) -> Vec<ToolHookRule> {
+    let mut rules = Vec::new();
+    let mut current_matcher: Option<String> = None;
+    let mut current_hooks: Vec<HookAction> = Vec::new();
+    let mut pending_type = "command".to_string();
+
+    for raw_line in block.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        if let Some(rest) = line
+            .strip_prefix("- matcher:")
+            .or_else(|| line.strip_prefix("matcher:"))
+        {
+            if let Some(matcher) = current_matcher.take() {
+                if !current_hooks.is_empty() {
+                    rules.push(ToolHookRule {
+                        matcher,
+                        hooks: current_hooks.clone(),
+                    });
+                }
+            }
+            current_hooks.clear();
+            current_matcher = Some(unquote(rest.trim()));
+            pending_type = "command".to_string();
+            continue;
+        }
+
+        if let Some(rest) = line
+            .strip_prefix("- type:")
+            .or_else(|| line.strip_prefix("type:"))
+        {
+            let parsed = unquote(rest.trim());
+            pending_type = if parsed.is_empty() {
+                "command".to_string()
+            } else {
+                parsed
+            };
+            continue;
+        }
+
+        if let Some(rest) = line
+            .strip_prefix("- command:")
+            .or_else(|| line.strip_prefix("command:"))
+        {
+            let command = unquote(rest.trim());
+            if command.is_empty() {
+                continue;
+            }
+            current_hooks.push(HookAction {
+                hook_type: pending_type.clone(),
+                command,
+            });
+            pending_type = "command".to_string();
+            continue;
+        }
+    }
+
+    if let Some(matcher) = current_matcher.take() {
+        if !current_hooks.is_empty() {
+            rules.push(ToolHookRule {
+                matcher,
+                hooks: current_hooks,
+            });
+        }
+    }
+
+    rules
+}
+
+fn parse_hook_actions_from_block(block: &str) -> Vec<HookAction> {
+    let mut actions = Vec::new();
+    let mut pending_type = "command".to_string();
+
+    for raw_line in block.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(rest) = line
+            .strip_prefix("- type:")
+            .or_else(|| line.strip_prefix("type:"))
+        {
+            let parsed = unquote(rest.trim());
+            pending_type = if parsed.is_empty() {
+                "command".to_string()
+            } else {
+                parsed
+            };
+            continue;
+        }
+        if let Some(rest) = line
+            .strip_prefix("- command:")
+            .or_else(|| line.strip_prefix("command:"))
+        {
+            let command = unquote(rest.trim());
+            if command.is_empty() {
+                continue;
+            }
+            actions.push(HookAction {
+                hook_type: pending_type.clone(),
+                command,
+            });
+            pending_type = "command".to_string();
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("- ") {
+            let command = unquote(rest.trim());
+            if command.is_empty() || command.contains(':') {
+                continue;
+            }
+            actions.push(HookAction {
+                hook_type: pending_type.clone(),
+                command,
+            });
+            pending_type = "command".to_string();
+        }
+    }
+
+    actions
 }
 
 #[cfg(test)]
@@ -611,6 +798,39 @@ tags: [bootstrap, setup]
         assert!(skill.allowed_tools.is_empty());
         assert!(skill.version.is_none());
         assert!(skill.body.contains("# ADK Rust App Bootstrap"));
+    }
+
+    #[test]
+    fn test_parse_hooks_from_frontmatter_block() {
+        let content = r#"---
+name: hook-skill
+description: Skill with hooks
+hooks:
+  PreToolUse:
+    - matcher: "Write|Edit"
+      hooks:
+        - type: command
+          command: echo pre
+  Stop:
+    - command: echo stop
+---
+
+# Hook Skill
+"#;
+        let result = parse_skill_file(&PathBuf::from("/skills/hook-skill/SKILL.md"), content);
+        assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+        let skill = result.unwrap();
+        let hooks = skill.hooks.expect("hooks should be parsed");
+
+        assert_eq!(hooks.pre_tool_use.len(), 1);
+        assert_eq!(hooks.pre_tool_use[0].matcher, "Write|Edit");
+        assert_eq!(hooks.pre_tool_use[0].hooks.len(), 1);
+        assert_eq!(hooks.pre_tool_use[0].hooks[0].hook_type, "command");
+        assert_eq!(hooks.pre_tool_use[0].hooks[0].command, "echo pre");
+
+        assert_eq!(hooks.stop.len(), 1);
+        assert_eq!(hooks.stop[0].hook_type, "command");
+        assert_eq!(hooks.stop[0].command, "echo stop");
     }
 
     #[test]

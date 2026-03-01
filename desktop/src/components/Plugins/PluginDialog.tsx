@@ -60,6 +60,19 @@ function PluginListItem({
           >
             {getPluginSourceLabel(plugin.source)}
           </span>
+          <span
+            className={clsx(
+              'px-1.5 py-0.5 text-2xs rounded',
+              plugin.compat_level === 'full' &&
+                'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300',
+              plugin.compat_level === 'partial' &&
+                'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300',
+              plugin.compat_level === 'degraded' && 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300',
+            )}
+            title={plugin.compat_summary}
+          >
+            {plugin.compat_level}
+          </span>
         </div>
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
           {plugin.description || 'No description'}
@@ -162,6 +175,22 @@ function PluginDetailView({ detail, onBack }: { detail: PluginDetail; onBack: ()
           ))}
         </div>
       )}
+
+      {/* Skills */}
+      <DetailSection title="Compatibility">
+        <div className="p-2 rounded border border-gray-200 dark:border-gray-700">
+          <p className="text-2xs text-gray-700 dark:text-gray-300">{detail.compat_report.summary}</p>
+          {detail.compat_report.gaps.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {detail.compat_report.gaps.slice(0, 6).map((gap, idx) => (
+                <li key={`${gap.capability}-${idx}`} className="text-2xs text-gray-500 dark:text-gray-400">
+                  <span className="font-medium">{gap.severity.toUpperCase()}</span> {gap.capability}: {gap.reason}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </DetailSection>
 
       {/* Skills */}
       {plugin.skills.length > 0 && (
