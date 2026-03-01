@@ -423,6 +423,8 @@ struct OrchestratorTaskSpawner {
     /// are not duplicated across the parent/child boundary.
     shared_read_cache:
         Arc<Mutex<HashMap<(PathBuf, usize, usize), crate::services::tools::ReadCacheEntry>>>,
+    /// Optional web search service for sub-agent WebSearch tool calls.
+    shared_web_search: Option<Arc<crate::services::tools::web_search::WebSearchService>>,
     /// Optional index store for CodebaseSearch in sub-agents.
     shared_index_store: Option<Arc<IndexStore>>,
     /// Optional embedding service for semantic search in sub-agents.

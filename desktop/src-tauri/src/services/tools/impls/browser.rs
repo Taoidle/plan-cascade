@@ -1331,8 +1331,8 @@ mod tests {
             "url": "https://example.com"
         });
         let result = tool.execute(&ctx, args).await;
-        // On machines without Chrome, result.success should be false
-        // On machines with Chrome but without browser feature, result.success should be false
+        // On machines without Chrome, result should be error
+        // On machines with Chrome but without browser feature, result should be error
         // On machines with Chrome AND browser feature, it might succeed or fail (browser launch)
         // In all cases: no panic
         let _ = result;
@@ -1350,8 +1350,8 @@ mod tests {
         let result = tool.execute(&ctx, args).await;
 
         // Only check error content when we know the result was an error
-        if !result.success {
-            let err = result.error.as_deref().unwrap_or("");
+        if result.is_error() {
+            let err = result.error_message().unwrap_or("");
             // Error should mention either "No Chrome" or "not compiled"
             assert!(
                 err.contains("Chrome") || err.contains("browser") || err.contains("Chromium"),
@@ -1367,8 +1367,8 @@ mod tests {
         let ctx = make_ctx();
         let args = serde_json::json!({});
         let result = tool.execute(&ctx, args).await;
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("Missing required"));
+        assert!(result.is_error());
+        assert!(result.error_message_owned().unwrap().contains("Missing required"));
     }
 
     // ── BrowserAction serialization tests ────────────────────────────
@@ -1637,8 +1637,8 @@ mod tests {
             )
             .await;
         // Should not panic; error message should reference the action
-        if !result.success {
-            let err = result.error.as_deref().unwrap_or("");
+        if result.is_error() {
+            let err = result.error_message().unwrap_or("");
             assert!(
                 err.contains("click") || err.contains("Chrome") || err.contains("browser"),
                 "Error should be descriptive: {}",
@@ -1661,8 +1661,8 @@ mod tests {
                 }),
             )
             .await;
-        if !result.success {
-            let err = result.error.as_deref().unwrap_or("");
+        if result.is_error() {
+            let err = result.error_message().unwrap_or("");
             assert!(
                 err.contains("type_text") || err.contains("Chrome") || err.contains("browser"),
                 "Error should be descriptive: {}",
@@ -1678,8 +1678,8 @@ mod tests {
         let result = tool
             .execute(&ctx, serde_json::json!({"action": "screenshot"}))
             .await;
-        if !result.success {
-            let err = result.error.as_deref().unwrap_or("");
+        if result.is_error() {
+            let err = result.error_message().unwrap_or("");
             assert!(
                 err.contains("screenshot") || err.contains("Chrome") || err.contains("browser"),
                 "Error should be descriptive: {}",
@@ -1701,8 +1701,8 @@ mod tests {
                 }),
             )
             .await;
-        if !result.success {
-            let err = result.error.as_deref().unwrap_or("");
+        if result.is_error() {
+            let err = result.error_message().unwrap_or("");
             assert!(
                 err.contains("extract_text") || err.contains("Chrome") || err.contains("browser"),
                 "Error should be descriptive: {}",
@@ -1725,8 +1725,8 @@ mod tests {
                 }),
             )
             .await;
-        if !result.success {
-            let err = result.error.as_deref().unwrap_or("");
+        if result.is_error() {
+            let err = result.error_message().unwrap_or("");
             assert!(
                 err.contains("wait_for") || err.contains("Chrome") || err.contains("browser"),
                 "Error should be descriptive: {}",

@@ -155,8 +155,8 @@ mod tests {
             "path": dir.path().to_string_lossy().to_string()
         });
         let result = tool.execute(&ctx, args).await;
-        assert!(result.success);
-        let output = result.output.unwrap();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap();
         assert!(output.contains("test.txt"));
         assert!(output.contains("nested.txt"));
     }
@@ -168,7 +168,7 @@ mod tests {
         let ctx = make_test_ctx(dir.path());
 
         let result = tool.execute(&ctx, serde_json::json!({})).await;
-        assert!(!result.success);
+        assert!(result.is_error());
     }
 
     #[test]

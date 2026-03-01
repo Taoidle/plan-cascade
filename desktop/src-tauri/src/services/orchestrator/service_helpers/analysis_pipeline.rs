@@ -1223,16 +1223,8 @@ impl OrchestratorService {
             .await;
         let result_event = UnifiedStreamEvent::ToolResult {
             tool_id: tool_id.clone(),
-            result: if result.success {
-                result.output.clone()
-            } else {
-                None
-            },
-            error: if result.success {
-                None
-            } else {
-                result.error.clone()
-            },
+            result: result.success_message_owned(),
+            error: result.error_message_owned(),
         };
         let _ = tx.send(result_event.clone()).await;
         self.observe_analysis_event(phase, &result_event, capture, tx)
@@ -1258,7 +1250,7 @@ impl OrchestratorService {
                 tool_name: Some(effective_tool_name.clone()),
                 file_path: primary_path,
                 summary: truncate_for_log(&summary, 400),
-                success: result.success,
+                success: result.is_success(),
                 timestamp: chrono::Utc::now().timestamp(),
             };
             let _ = run.append_evidence(&record);

@@ -60,12 +60,12 @@ pub fn value_to_parameter_schema(value: &Value) -> ParameterSchema {
 /// Maps successful results to `Ok(Value::String(...))` and errors to
 /// `Err(CoreError::Command(...))`.
 pub fn tool_result_to_core_result(result: ToolResult) -> CoreResult<Value> {
-    if result.success {
-        Ok(Value::String(result.output.unwrap_or_default()))
+    if result.is_success() {
+        Ok(Value::String(result.success_message_owned().unwrap_or_default()))
     } else {
         Err(CoreError::command(
             result
-                .error
+                .error_message_owned()
                 .unwrap_or_else(|| "Unknown tool error".to_string()),
         ))
     }
@@ -76,12 +76,12 @@ pub fn tool_result_to_core_result(result: ToolResult) -> CoreResult<Value> {
 /// Maps successful results to `Ok(Value::String(...))` and errors to
 /// `Err(AppError::Command(...))`.
 pub fn tool_result_to_app_result(result: ToolResult) -> AppResult<Value> {
-    if result.success {
-        Ok(Value::String(result.output.unwrap_or_default()))
+    if result.is_success() {
+        Ok(Value::String(result.success_message_owned().unwrap_or_default()))
     } else {
         Err(AppError::command(
             result
-                .error
+                .error_message_owned()
                 .unwrap_or_else(|| "Unknown tool error".to_string()),
         ))
     }
@@ -551,24 +551,24 @@ mod tests {
     fn test_app_result_to_tool_result_success_string() {
         let result: AppResult<Value> = Ok(Value::String("output text".to_string()));
         let tool_result = app_result_to_tool_result(result);
-        assert!(tool_result.success);
-        assert_eq!(tool_result.output.unwrap(), "output text");
+        assert!(tool_result.is_success());
+        assert_eq!(tool_result.success_message_owned().unwrap(), "output text");
     }
 
     #[test]
     fn test_app_result_to_tool_result_success_json() {
         let result: AppResult<Value> = Ok(serde_json::json!({"key": "value"}));
         let tool_result = app_result_to_tool_result(result);
-        assert!(tool_result.success);
-        assert!(tool_result.output.unwrap().contains("key"));
+        assert!(tool_result.is_success());
+        assert!(tool_result.success_message_owned().unwrap().contains("key"));
     }
 
     #[test]
     fn test_app_result_to_tool_result_error() {
         let result: AppResult<Value> = Err(AppError::command("it broke"));
         let tool_result = app_result_to_tool_result(result);
-        assert!(!tool_result.success);
-        assert!(tool_result.error.unwrap().contains("it broke"));
+        assert!(tool_result.is_error());
+        assert!(tool_result.error_message_owned().unwrap().contains("it broke"));
     }
 
     #[test]
@@ -693,8 +693,8 @@ mod tests {
         let ctx = make_tool_execution_context();
         let args = serde_json::json!({"input": "pattern"});
         let result = adapter.execute(&ctx, args).await;
-        assert!(result.success);
-        assert_eq!(result.output.unwrap(), "new-Grep: pattern");
+        assert!(result.is_success());
+        assert_eq!(result.success_message_owned().unwrap(), "new-Grep: pattern");
     }
 
     #[tokio::test]
@@ -704,8 +704,8 @@ mod tests {
 
         let ctx = make_tool_execution_context();
         let result = adapter.execute(&ctx, Value::Null).await;
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("new tool failed"));
+        assert!(result.is_error());
+        assert!(result.error_message_owned().unwrap().contains("new tool failed"));
     }
 
     // ── Registry import tests ──────────────────────────────────────────
@@ -777,8 +777,8 @@ mod tests {
         let ctx = make_tool_execution_context();
         let args = serde_json::json!({"input": "rt"});
         let result = back_to_old.execute(&ctx, args).await;
-        assert!(result.success);
-        assert_eq!(result.output.unwrap(), "old-Roundtrip: rt");
+        assert!(result.is_success());
+        assert_eq!(result.success_message_owned().unwrap(), "old-Roundtrip: rt");
     }
 
     #[tokio::test]

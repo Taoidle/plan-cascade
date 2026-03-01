@@ -35,7 +35,7 @@ pub mod web_search;
 pub use definitions::{
     get_basic_tool_definitions_from_registry, get_tool_definitions_from_registry,
 };
-pub use executor::{ReadCacheEntry, ToolExecutor, ToolResult};
+pub use executor::{ReadCacheEntry, ToolCitation, ToolExecutor, ToolResult, ToolResultStatus};
 pub use mcp_adapter::McpToolAdapter;
 pub use mcp_client::{McpClient, McpServerConfig, McpToolInfo, McpTransportConfig};
 pub use mcp_manager::{ConnectedServerInfo, McpManager};

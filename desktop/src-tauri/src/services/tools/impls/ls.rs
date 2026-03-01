@@ -197,8 +197,8 @@ mod tests {
             "path": dir.path().to_string_lossy().to_string()
         });
         let result = tool.execute(&ctx, args).await;
-        assert!(result.success);
-        let output = result.output.unwrap();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap();
         assert!(output.contains("DIR"));
         assert!(output.contains("subdir"));
         assert!(output.contains("test.txt"));
@@ -216,8 +216,8 @@ mod tests {
             "path": dir.path().join("test.txt").to_string_lossy().to_string()
         });
         let result = tool.execute(&ctx, args).await;
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("Not a directory"));
+        assert!(result.is_error());
+        assert!(result.error_message_owned().unwrap().contains("Not a directory"));
     }
 
     #[test]

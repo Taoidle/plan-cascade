@@ -504,7 +504,7 @@ pub(super) fn prepare_tool_call_for_execution(
             if has_nonempty_string_arg(&map, "mode").is_none() {
                 map.insert(
                     "mode".to_string(),
-                    serde_json::Value::String("auto".to_string()),
+                    serde_json::Value::String("quick".to_string()),
                 );
             }
         }

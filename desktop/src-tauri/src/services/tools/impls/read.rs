@@ -369,8 +369,8 @@ mod tests {
             "file_path": dir.path().join("test.txt").to_string_lossy().to_string()
         });
         let result = tool.execute(&ctx, args).await;
-        assert!(result.success);
-        assert!(result.output.unwrap().contains("line 1"));
+        assert!(result.is_success());
+        assert!(result.success_message_owned().unwrap().contains("line 1"));
     }
 
     #[tokio::test]
@@ -383,8 +383,8 @@ mod tests {
             "file_path": dir.path().join("nonexistent.txt").to_string_lossy().to_string()
         });
         let result = tool.execute(&ctx, args).await;
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("not found"));
+        assert!(result.is_error());
+        assert!(result.error_message_owned().unwrap().contains("not found"));
     }
 
     #[tokio::test]
@@ -400,14 +400,14 @@ mod tests {
 
         // First read
         let r1 = tool.execute(&ctx, args.clone()).await;
-        assert!(r1.success);
+        assert!(r1.is_success());
         assert!(!r1.is_dedup);
 
         // Second read - should dedup
         let r2 = tool.execute(&ctx, args).await;
-        assert!(r2.success);
+        assert!(r2.is_success());
         assert!(r2.is_dedup);
-        assert!(r2.output.unwrap().contains("[DEDUP]"));
+        assert!(r2.success_message_owned().unwrap().contains("[DEDUP]"));
     }
 
     #[tokio::test]
@@ -417,8 +417,8 @@ mod tests {
         let ctx = make_test_ctx(dir.path());
 
         let result = tool.execute(&ctx, serde_json::json!({})).await;
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("file_path"));
+        assert!(result.is_error());
+        assert!(result.error_message_owned().unwrap().contains("file_path"));
     }
 
     #[test]

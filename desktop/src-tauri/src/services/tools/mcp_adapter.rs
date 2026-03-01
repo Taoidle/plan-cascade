@@ -325,8 +325,8 @@ for line in sys.stdin:
         };
 
         let result = adapter.execute(&ctx, json!({"name": "Rust"})).await;
-        assert!(result.success, "Error: {:?}", result.error);
-        assert_eq!(result.output.unwrap(), "Hello, Rust!");
+        assert!(result.is_success(), "Error: {:?}", result.error_message());
+        assert_eq!(result.success_message_owned().unwrap(), "Hello, Rust!");
 
         client.disconnect().await.unwrap();
     }

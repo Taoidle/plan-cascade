@@ -317,8 +317,8 @@ mod tests {
             "path": dir.path().to_string_lossy().to_string()
         });
         let result = tool.execute(&ctx, args).await;
-        assert!(result.success);
-        assert!(result.output.unwrap().contains("test.txt"));
+        assert!(result.is_success());
+        assert!(result.success_message_owned().unwrap().contains("test.txt"));
     }
 
     #[tokio::test]
@@ -335,8 +335,8 @@ mod tests {
             "output_mode": "content"
         });
         let result = tool.execute(&ctx, args).await;
-        assert!(result.success);
-        assert!(result.output.unwrap().contains("line 1"));
+        assert!(result.is_success());
+        assert!(result.success_message_owned().unwrap().contains("line 1"));
     }
 
     #[tokio::test]
@@ -346,7 +346,7 @@ mod tests {
         let ctx = make_test_ctx(dir.path());
 
         let result = tool.execute(&ctx, serde_json::json!({})).await;
-        assert!(!result.success);
+        assert!(result.is_error());
     }
 
     #[test]

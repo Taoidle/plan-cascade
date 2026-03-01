@@ -314,8 +314,8 @@ mod tests {
 
         let args = serde_json::json!({"command": "echo hello"});
         let result = tool.execute(&ctx, args).await;
-        assert!(result.success);
-        assert!(result.output.unwrap().contains("hello"));
+        assert!(result.is_success());
+        assert!(result.success_message_owned().unwrap().contains("hello"));
     }
 
     #[tokio::test]
@@ -326,8 +326,8 @@ mod tests {
 
         let args = serde_json::json!({"command": "rm -rf /"});
         let result = tool.execute(&ctx, args).await;
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("blocked"));
+        assert!(result.is_error());
+        assert!(result.error_message_owned().unwrap().contains("blocked"));
     }
 
     #[tokio::test]
@@ -337,8 +337,8 @@ mod tests {
         let ctx = make_test_ctx(dir.path());
 
         let result = tool.execute(&ctx, serde_json::json!({})).await;
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("command"));
+        assert!(result.is_error());
+        assert!(result.error_message_owned().unwrap().contains("command"));
     }
 
     #[test]
@@ -364,7 +364,11 @@ mod tests {
         // Execute cd command
         let args = serde_json::json!({"command": "cd sub"});
         let result = tool.execute(&ctx, args).await;
-        assert!(result.success, "cd failed: {:?}", result.error);
+        assert!(
+            result.is_success(),
+            "cd failed: {:?}",
+            result.error_message()
+        );
 
         // Verify shared working directory was updated
         let new_cwd = ctx.working_directory_snapshot();

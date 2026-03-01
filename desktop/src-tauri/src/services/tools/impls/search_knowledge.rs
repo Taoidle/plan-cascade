@@ -12,7 +12,6 @@ use std::sync::Arc;
 
 use crate::services::knowledge::context_provider::KnowledgeContextConfig;
 use crate::services::knowledge::context_provider::KnowledgeContextProvider;
-use crate::services::knowledge::pipeline::RagPipeline;
 use crate::services::llm::types::ParameterSchema;
 use crate::services::tools::executor::ToolResult;
 use crate::services::tools::trait_def::{Tool, ToolExecutionContext};
@@ -20,8 +19,7 @@ use crate::services::tools::trait_def::{Tool, ToolExecutionContext};
 /// Tool for on-demand semantic search of project knowledge collections.
 ///
 /// Reads `knowledge_pipeline`, `knowledge_project_id`, and optional
-/// filter fields from `ToolExecutionContext`. When the pipeline is not
-/// configured, returns a helpful message instead of failing.
+/// filter fields from `ToolExecutionContext`.
 pub struct SearchKnowledgeTool;
 
 impl SearchKnowledgeTool {
@@ -84,10 +82,10 @@ impl Tool for SearchKnowledgeTool {
         let pipeline = match &ctx.knowledge_pipeline {
             Some(p) => Arc::clone(p),
             None => {
-                return ToolResult::ok(
-                    "Knowledge base is not configured for this project. \
-                     No collections are available to search.",
-                );
+                return ToolResult::err(
+                    "Knowledge base is not configured for this project. No collections are available to search.",
+                )
+                .with_error_code("knowledge_not_configured");
             }
         };
 
@@ -99,7 +97,10 @@ impl Tool for SearchKnowledgeTool {
         // 2. Parse arguments
         let query = match args.get("query").and_then(|v| v.as_str()) {
             Some(q) if !q.trim().is_empty() => q.trim(),
-            _ => return ToolResult::err("Missing required parameter: query"),
+            _ => {
+                return ToolResult::err("Missing required parameter: query")
+                    .with_error_code("missing_query");
+            }
         };
 
         let collection_filter = args
@@ -133,11 +134,12 @@ impl Tool for SearchKnowledgeTool {
                         Some(specific_collection),
                     ))
                 }
-                Err(e) => ToolResult::ok(format!(
-                    "Failed to search collection '{}': {}. \
-                     Try omitting the collection parameter to search all collections.",
+                Err(e) => ToolResult::err(format!(
+                    "Failed to search collection '{}': {}. Try omitting the collection parameter to search all collections.",
                     specific_collection, e,
-                )),
+                ))
+                .with_error_code("knowledge_collection_search_failed")
+                .with_retryable(true),
             }
         } else {
             // Search across all collections (respecting user filters)
@@ -163,11 +165,12 @@ impl Tool for SearchKnowledgeTool {
                     }
                     ToolResult::ok(format_context_chunks(&chunks))
                 }
-                Err(e) => ToolResult::ok(format!(
-                    "Knowledge base search failed: {}. \
-                     The knowledge base may not be fully initialized.",
+                Err(e) => ToolResult::err(format!(
+                    "Knowledge base search failed: {}. The knowledge base may not be fully initialized.",
                     e,
-                )),
+                ))
+                .with_error_code("knowledge_search_failed")
+                .with_retryable(true),
             }
         }
     }
@@ -224,4 +227,34 @@ fn format_context_chunks(
     }
 
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::test_helpers::make_test_ctx;
+    use super::*;
+    use std::path::Path;
+
+    #[tokio::test]
+    async fn test_search_knowledge_without_pipeline_is_error() {
+        let tool = SearchKnowledgeTool::new();
+        let ctx = make_test_ctx(Path::new("/tmp"));
+        let result = tool
+            .execute(&ctx, serde_json::json!({ "query": "architecture" }))
+            .await;
+        assert!(result.is_error());
+        assert!(result
+            .error_message()
+            .unwrap()
+            .contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn test_search_knowledge_missing_query_is_error() {
+        let tool = SearchKnowledgeTool::new();
+        let ctx = make_test_ctx(Path::new("/tmp"));
+        let result = tool.execute(&ctx, serde_json::json!({})).await;
+        assert!(result.is_error());
+        assert!(result.error_message().unwrap().contains("query"));
+    }
 }

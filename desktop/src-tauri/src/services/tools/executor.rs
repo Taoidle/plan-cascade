@@ -42,16 +42,59 @@ pub struct ReadCacheEntry {
 }
 
 /// Result of a tool execution
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolResultStatus {
+    Success,
+    Error,
+    Partial,
+}
+
+/// Structured citation attached to a tool result.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ToolCitation {
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+}
+
+impl ToolCitation {
+    pub fn new(url: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            title: None,
+            snippet: None,
+            source: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolResult {
-    /// Whether the execution was successful
-    pub success: bool,
-    /// Output from the tool (if successful)
+    /// Structured status for V2 tool result handling.
+    pub status: ToolResultStatus,
+    /// Primary textual payload.
+    ///
+    /// For `success`/`partial`, this is the tool output.
+    /// For `error`, this is the error message.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub output: Option<String>,
-    /// Error message (if failed)
+    pub message: Option<String>,
+    /// Stable machine-readable error code (when available).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
+    pub error_code: Option<String>,
+    /// Whether retrying might succeed (for transient failures).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retryable: Option<bool>,
+    /// Optional structured citations associated with this result.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub citations: Option<Vec<ToolCitation>>,
+    /// Optional machine-readable metadata payload.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
     /// Optional image data for multimodal responses: (mime_type, base64_data)
     #[serde(skip)]
     pub image_data: Option<(String, String)>,
@@ -74,9 +117,12 @@ impl ToolResult {
     /// Create a successful result
     pub fn ok(output: impl Into<String>) -> Self {
         Self {
-            success: true,
-            output: Some(output.into()),
-            error: None,
+            status: ToolResultStatus::Success,
+            message: Some(output.into()),
+            error_code: None,
+            retryable: None,
+            citations: None,
+            metadata: None,
             image_data: None,
             is_dedup: false,
             event_actions: None,
@@ -86,9 +132,12 @@ impl ToolResult {
     /// Create an error result
     pub fn err(error: impl Into<String>) -> Self {
         Self {
-            success: false,
-            output: None,
-            error: Some(error.into()),
+            status: ToolResultStatus::Error,
+            message: Some(error.into()),
+            error_code: None,
+            retryable: None,
+            citations: None,
+            metadata: None,
             image_data: None,
             is_dedup: false,
             event_actions: None,
@@ -102,9 +151,12 @@ impl ToolResult {
         base64_data: String,
     ) -> Self {
         Self {
-            success: true,
-            output: Some(output.into()),
-            error: None,
+            status: ToolResultStatus::Success,
+            message: Some(output.into()),
+            error_code: None,
+            retryable: None,
+            citations: None,
+            metadata: None,
             image_data: Some((mime_type, base64_data)),
             is_dedup: false,
             event_actions: None,
@@ -117,9 +169,12 @@ impl ToolResult {
     /// the full content from the LLM conversation.
     pub fn ok_dedup(output: impl Into<String>) -> Self {
         Self {
-            success: true,
-            output: Some(output.into()),
-            error: None,
+            status: ToolResultStatus::Success,
+            message: Some(output.into()),
+            error_code: None,
+            retryable: None,
+            citations: None,
+            metadata: None,
             image_data: None,
             is_dedup: true,
             event_actions: None,
@@ -139,14 +194,108 @@ impl ToolResult {
         self
     }
 
+    /// Attach a stable machine-readable error code.
+    pub fn with_error_code(mut self, code: impl Into<String>) -> Self {
+        self.error_code = Some(code.into());
+        self
+    }
+
+    /// Mark whether the failure is retryable.
+    pub fn with_retryable(mut self, retryable: bool) -> Self {
+        self.retryable = Some(retryable);
+        self
+    }
+
+    /// Attach structured citations.
+    pub fn with_citations(mut self, citations: Vec<ToolCitation>) -> Self {
+        if !citations.is_empty() {
+            self.citations = Some(citations);
+        }
+        self
+    }
+
+    /// Attach arbitrary metadata payload.
+    pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
+        if !metadata.is_null() {
+            self.metadata = Some(metadata);
+        }
+        self
+    }
+
+    /// Create a partial-success result.
+    pub fn partial(output: impl Into<String>) -> Self {
+        Self {
+            status: ToolResultStatus::Partial,
+            message: Some(output.into()),
+            error_code: None,
+            retryable: None,
+            citations: None,
+            metadata: None,
+            image_data: None,
+            is_dedup: false,
+            event_actions: None,
+        }
+    }
+
+    /// Whether the result is non-error (`success` or `partial`).
+    pub fn is_success(&self) -> bool {
+        matches!(
+            self.status,
+            ToolResultStatus::Success | ToolResultStatus::Partial
+        )
+    }
+
+    /// Whether the result is an error.
+    pub fn is_error(&self) -> bool {
+        self.status == ToolResultStatus::Error
+    }
+
+    /// Message visible to callers when the result is non-error.
+    pub fn success_message(&self) -> Option<&str> {
+        if self.is_success() {
+            self.message.as_deref()
+        } else {
+            None
+        }
+    }
+
+    /// Message visible to callers when the result is an error.
+    pub fn error_message(&self) -> Option<&str> {
+        if self.is_error() {
+            self.message.as_deref()
+        } else {
+            None
+        }
+    }
+
+    /// Clone message text when non-error.
+    pub fn success_message_owned(&self) -> Option<String> {
+        self.success_message().map(ToOwned::to_owned)
+    }
+
+    /// Clone message text when error.
+    pub fn error_message_owned(&self) -> Option<String> {
+        self.error_message().map(ToOwned::to_owned)
+    }
+
+    /// Take the underlying message payload.
+    pub fn take_message(&mut self) -> Option<String> {
+        self.message.take()
+    }
+
+    /// Replace the underlying message payload.
+    pub fn set_message(&mut self, message: impl Into<String>) {
+        self.message = Some(message.into());
+    }
+
     /// Convert to string for LLM consumption
     pub fn to_content(&self) -> String {
-        if self.success {
-            self.output.clone().unwrap_or_default()
+        if self.is_success() {
+            self.message.clone().unwrap_or_default()
         } else {
             format!(
                 "Error: {}",
-                self.error.as_deref().unwrap_or("Unknown error")
+                self.message.as_deref().unwrap_or("Unknown error")
             )
         }
     }
@@ -328,6 +477,19 @@ impl ToolExecutor {
                 self.web_search = None;
             }
         }
+    }
+
+    /// Inject a prebuilt web search service instance.
+    ///
+    /// Used by sub-agents to inherit the parent's already configured search
+    /// capability without reconstructing provider state.
+    pub fn set_web_search_service(&mut self, service: Arc<super::web_search::WebSearchService>) {
+        self.web_search = Some(service);
+    }
+
+    /// Get the configured web search service (if any), for sharing with sub-agents.
+    pub fn get_web_search_service(&self) -> Option<Arc<super::web_search::WebSearchService>> {
+        self.web_search.clone()
     }
 
     /// Set the index store for CodebaseSearch tool
@@ -678,8 +840,8 @@ mod tests {
         });
 
         let result = executor.execute("Read", &args).await;
-        assert!(result.success);
-        assert!(result.output.unwrap().contains("line 1"));
+        assert!(result.is_success());
+        assert!(result.success_message_owned().unwrap().contains("line 1"));
     }
 
     #[tokio::test]
@@ -698,8 +860,8 @@ mod tests {
         });
 
         let result = executor.execute("Read", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap_or_default();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap_or_default();
         assert!(output.contains("[non-utf8 decoded with replacement]"));
         assert!(output.contains("foo"));
     }
@@ -716,8 +878,8 @@ mod tests {
         });
 
         let result = executor.execute("Read", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap_or_default();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap_or_default();
         assert!(output.contains("[binary file skipped]"));
         assert!(output.contains("archive.zip"));
     }
@@ -732,8 +894,8 @@ mod tests {
         });
 
         let result = executor.execute("Read", &args).await;
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("not found"));
+        assert!(result.is_error());
+        assert!(result.error_message_owned().unwrap().contains("not found"));
     }
 
     #[tokio::test]
@@ -748,7 +910,7 @@ mod tests {
         });
 
         let result = executor.execute("Write", &args).await;
-        assert!(result.success);
+        assert!(result.is_success());
         assert!(new_file.exists());
         assert_eq!(std::fs::read_to_string(&new_file).unwrap(), "new content");
     }
@@ -771,7 +933,7 @@ mod tests {
         });
 
         let result = executor.execute("Edit", &args).await;
-        assert!(result.success);
+        assert!(result.is_success());
 
         let content = std::fs::read_to_string(dir.path().join("test.txt")).unwrap();
         assert!(content.contains("modified line 2"));
@@ -796,8 +958,8 @@ mod tests {
         });
 
         let result = executor.execute("Edit", &args).await;
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("appears 3 times"));
+        assert!(result.is_error());
+        assert!(result.error_message_owned().unwrap().contains("appears 3 times"));
     }
 
     #[tokio::test]
@@ -815,8 +977,8 @@ mod tests {
         });
 
         let result = executor.execute("Bash", &args).await;
-        assert!(result.success);
-        assert!(result.output.unwrap().contains("hello"));
+        assert!(result.is_success());
+        assert!(result.success_message_owned().unwrap().contains("hello"));
     }
 
     #[tokio::test]
@@ -829,8 +991,8 @@ mod tests {
         });
 
         let result = executor.execute("Bash", &args).await;
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("blocked"));
+        assert!(result.is_error());
+        assert!(result.error_message_owned().unwrap().contains("blocked"));
     }
 
     #[tokio::test]
@@ -844,8 +1006,8 @@ mod tests {
         });
 
         let result = executor.execute("Glob", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap();
         assert!(output.contains("test.txt"));
         assert!(output.contains("nested.txt"));
     }
@@ -861,8 +1023,12 @@ mod tests {
         });
 
         let result = executor.execute("Glob", &args).await;
-        assert!(result.success, "glob should succeed: {:?}", result.error);
-        let output = result.output.unwrap_or_default();
+        assert!(
+            result.is_success(),
+            "glob should succeed: {:?}",
+            result.error_message()
+        );
+        let output = result.success_message_owned().unwrap_or_default();
         assert!(
             output.contains("test.txt"),
             "expected test.txt in output, got: {}",
@@ -883,8 +1049,8 @@ mod tests {
         });
 
         let result = executor.execute("Glob", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap_or_default();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap_or_default();
         let lines = output.lines().collect::<Vec<_>>();
         assert_eq!(lines.len(), 1, "expected one line, got: {}", output);
     }
@@ -901,8 +1067,8 @@ mod tests {
         });
 
         let result = executor.execute("Grep", &args).await;
-        assert!(result.success);
-        assert!(result.output.as_ref().unwrap().contains("test.txt"));
+        assert!(result.is_success());
+        assert!(result.success_message().unwrap().contains("test.txt"));
 
         // Test content mode — returns matching lines
         let args = serde_json::json!({
@@ -912,8 +1078,8 @@ mod tests {
         });
 
         let result = executor.execute("Grep", &args).await;
-        assert!(result.success);
-        assert!(result.output.unwrap().contains("line 1"));
+        assert!(result.is_success());
+        assert!(result.success_message_owned().unwrap().contains("line 1"));
     }
 
     #[tokio::test]
@@ -927,8 +1093,12 @@ mod tests {
         });
 
         let result = executor.execute("Grep", &args).await;
-        assert!(result.success, "grep should succeed: {:?}", result.error);
-        let output = result.output.unwrap_or_default();
+        assert!(
+            result.is_success(),
+            "grep should succeed: {:?}",
+            result.error_message()
+        );
+        let output = result.success_message_owned().unwrap_or_default();
         assert!(
             output.contains("nested.txt"),
             "expected nested.txt in output, got: {}",
@@ -946,8 +1116,8 @@ mod tests {
         });
 
         let result = executor.execute("LS", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap();
         assert!(output.contains("DIR"));
         assert!(output.contains("subdir"));
         assert!(output.contains("FILE"));
@@ -965,8 +1135,8 @@ mod tests {
             "path": dir.path().to_string_lossy().to_string()
         });
         let result = executor.execute("LS", &args).await;
-        assert!(result.success);
-        assert!(!result.output.unwrap().contains(".hidden"));
+        assert!(result.is_success());
+        assert!(!result.success_message_owned().unwrap().contains(".hidden"));
 
         // With show_hidden
         let args = serde_json::json!({
@@ -974,8 +1144,8 @@ mod tests {
             "show_hidden": true
         });
         let result = executor.execute("LS", &args).await;
-        assert!(result.success);
-        assert!(result.output.unwrap().contains(".hidden"));
+        assert!(result.is_success());
+        assert!(result.success_message_owned().unwrap().contains(".hidden"));
     }
 
     #[tokio::test]
@@ -988,8 +1158,8 @@ mod tests {
         });
 
         let result = executor.execute("LS", &args).await;
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("Not a directory"));
+        assert!(result.is_error());
+        assert!(result.error_message_owned().unwrap().contains("Not a directory"));
     }
 
     #[tokio::test]
@@ -1002,8 +1172,8 @@ mod tests {
         });
 
         let result = executor.execute("LS", &args).await;
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("not found"));
+        assert!(result.is_error());
+        assert!(result.error_message_owned().unwrap().contains("not found"));
     }
 
     #[tokio::test]
@@ -1020,8 +1190,8 @@ mod tests {
         });
 
         let result = executor.execute("LS", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap();
 
         // Should show exactly LS_MAX_ENTRIES (200) file entries in the listing
         let file_lines: Vec<&str> = output
@@ -1065,8 +1235,8 @@ mod tests {
         });
 
         let result = executor.execute("LS", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap();
 
         // Should show all 200 entries
         let file_lines: Vec<&str> = output
@@ -1097,8 +1267,8 @@ mod tests {
         });
 
         let result = executor.execute("LS", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap();
 
         // Small directory should NOT have truncation note
         assert!(
@@ -1115,20 +1285,35 @@ mod tests {
         let args = serde_json::json!({});
 
         let result = executor.execute("Cwd", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap();
         assert_eq!(output, dir.path().to_string_lossy().to_string());
     }
 
     #[test]
     fn test_tool_result() {
         let ok = ToolResult::ok("success");
-        assert!(ok.success);
+        assert!(ok.is_success());
+        assert_eq!(ok.status, ToolResultStatus::Success);
         assert_eq!(ok.to_content(), "success");
 
         let err = ToolResult::err("failed");
-        assert!(!err.success);
+        assert!(err.is_error());
+        assert_eq!(err.status, ToolResultStatus::Error);
         assert!(err.to_content().contains("Error"));
+    }
+
+    #[test]
+    fn test_tool_result_structured_metadata_builders() {
+        let result = ToolResult::err("failed")
+            .with_error_code("network_timeout")
+            .with_retryable(true)
+            .with_citations(vec![ToolCitation::new("https://example.com")])
+            .with_metadata(serde_json::json!({"provider":"test"}));
+        assert_eq!(result.error_code.as_deref(), Some("network_timeout"));
+        assert_eq!(result.retryable, Some(true));
+        assert_eq!(result.citations.as_ref().map(|c| c.len()), Some(1));
+        assert!(result.metadata.is_some());
     }
 
     // =========================================================================
@@ -1146,16 +1331,16 @@ mod tests {
 
         // First read: full content, is_dedup = false
         let result1 = executor.execute("Read", &args).await;
-        assert!(result1.success);
+        assert!(result1.is_success());
         assert!(!result1.is_dedup, "first read should NOT be dedup");
-        let output1 = result1.output.unwrap();
+        let output1 = result1.success_message_owned().unwrap();
         assert!(output1.contains("line 1"), "first read should have content");
 
         // Second read: dedup message with is_dedup = true
         let result2 = executor.execute("Read", &args).await;
-        assert!(result2.success);
+        assert!(result2.is_success());
         assert!(result2.is_dedup, "second unchanged read should be dedup");
-        let output2 = result2.output.unwrap();
+        let output2 = result2.success_message_owned().unwrap();
         assert!(
             output2.contains("[DEDUP]"),
             "second read should be dedup message, got: {}",
@@ -1179,9 +1364,9 @@ mod tests {
         executor.execute("Read", &args).await;
         // Second read should return short dedup with is_dedup flag
         let result = executor.execute("Read", &args).await;
-        assert!(result.success);
+        assert!(result.is_success());
         assert!(result.is_dedup, "should have is_dedup = true");
-        let output = result.output.unwrap();
+        let output = result.success_message_owned().unwrap();
         assert!(
             output.contains("[DEDUP]"),
             "should use [DEDUP] format, got: {}",
@@ -1214,9 +1399,9 @@ mod tests {
 
         // First read
         let result1 = executor.execute("Read", &args).await;
-        assert!(result1.success);
+        assert!(result1.is_success());
         assert!(!result1.is_dedup);
-        assert!(result1.output.unwrap().contains("original line 1"));
+        assert!(result1.success_message_owned().unwrap().contains("original line 1"));
 
         // Modify the file and force a different mtime.
         std::thread::sleep(std::time::Duration::from_secs(1));
@@ -1224,9 +1409,9 @@ mod tests {
 
         // Second read after modification — should NOT be dedup
         let result2 = executor.execute("Read", &args).await;
-        assert!(result2.success);
+        assert!(result2.is_success());
         assert!(!result2.is_dedup, "modified file should NOT be dedup");
-        let output2 = result2.output.unwrap();
+        let output2 = result2.success_message_owned().unwrap();
         assert!(
             !output2.contains("[DEDUP]"),
             "modified file should NOT return dedup message, got: {}",
@@ -1251,16 +1436,16 @@ mod tests {
         // First read with default offset/limit
         let args1 = serde_json::json!({ "file_path": &file_path });
         let result1 = executor.execute("Read", &args1).await;
-        assert!(result1.success);
+        assert!(result1.is_success());
         assert!(!result1.is_dedup);
-        assert!(result1.output.unwrap().contains("line 1"));
+        assert!(result1.success_message_owned().unwrap().contains("line 1"));
 
         // Second read with different offset — should NOT be dedup
         let args2 = serde_json::json!({ "file_path": &file_path, "offset": 2 });
         let result2 = executor.execute("Read", &args2).await;
-        assert!(result2.success);
+        assert!(result2.is_success());
         assert!(!result2.is_dedup);
-        let output2 = result2.output.unwrap();
+        let output2 = result2.success_message_owned().unwrap();
         assert!(
             !output2.contains("[DEDUP]"),
             "different offset should return full content, got: {}",
@@ -1271,9 +1456,9 @@ mod tests {
         // Third read with different limit — should NOT be dedup
         let args3 = serde_json::json!({ "file_path": &file_path, "limit": 1 });
         let result3 = executor.execute("Read", &args3).await;
-        assert!(result3.success);
+        assert!(result3.is_success());
         assert!(!result3.is_dedup);
-        let output3 = result3.output.unwrap();
+        let output3 = result3.success_message_owned().unwrap();
         assert!(
             !output3.contains("[DEDUP]"),
             "different limit should return full content, got: {}",
@@ -1292,16 +1477,16 @@ mod tests {
 
         // First read
         let result1 = executor.execute("Read", &args).await;
-        assert!(result1.success);
+        assert!(result1.is_success());
         assert!(!result1.is_dedup);
-        assert!(result1.output.unwrap().contains("line 2"));
+        assert!(result1.success_message_owned().unwrap().contains("line 2"));
 
         // Second read with identical args — should dedup
         let result2 = executor.execute("Read", &args).await;
-        assert!(result2.success);
+        assert!(result2.is_success());
         assert!(result2.is_dedup, "same offset/limit should set is_dedup");
         assert!(
-            result2.output.unwrap().contains("[DEDUP]"),
+            result2.success_message_owned().unwrap().contains("[DEDUP]"),
             "same offset/limit should dedup"
         );
     }
@@ -1316,7 +1501,7 @@ mod tests {
     fn test_tool_result_ok_dedup_is_dedup() {
         let result = ToolResult::ok_dedup("dedup msg");
         assert!(result.is_dedup);
-        assert!(result.success);
+        assert!(result.is_success());
     }
 
     #[test]
@@ -1414,9 +1599,9 @@ mod tests {
 
         // Reading again after clear should return full content, not dedup
         let result = executor.execute("Read", &args).await;
-        assert!(result.success);
+        assert!(result.is_success());
         assert!(!result.is_dedup, "after clear, should not be dedup");
-        let output = result.output.unwrap();
+        let output = result.success_message_owned().unwrap();
         assert!(
             !output.contains("[DEDUP]"),
             "after clear, should get full content, got: {}",
@@ -1514,8 +1699,8 @@ mod tests {
 
         let args = serde_json::json!({ "query": "main" });
         let result = executor.execute("CodebaseSearch", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap();
         assert!(
             output.contains("index not available"),
             "should indicate index is unavailable, got: {}",
@@ -1535,8 +1720,8 @@ mod tests {
 
         let args = serde_json::json!({});
         let result = executor.execute("CodebaseSearch", &args).await;
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("query"));
+        assert!(result.is_error());
+        assert!(result.error_message_owned().unwrap().contains("query"));
     }
 
     #[tokio::test]
@@ -1548,8 +1733,8 @@ mod tests {
             "scope": "symbols"
         });
         let result = executor.execute("CodebaseSearch", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap();
         assert!(
             output.contains("AppConfig"),
             "should find AppConfig symbol, got: {}",
@@ -1577,8 +1762,8 @@ mod tests {
             "component": "desktop-rust"
         });
         let result = executor.execute("CodebaseSearch", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap();
         assert!(
             output.contains("src/main.rs"),
             "should find main.rs, got: {}",
@@ -1606,8 +1791,8 @@ mod tests {
             "scope": "files"
         });
         let result = executor.execute("CodebaseSearch", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap();
         assert!(
             output.contains("src/lib.rs"),
             "should find lib.rs, got: {}",
@@ -1624,8 +1809,8 @@ mod tests {
             "scope": "all"
         });
         let result = executor.execute("CodebaseSearch", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap();
 
         // scope=all uses HybridSearchEngine with RRF fusion
         assert!(
@@ -1648,8 +1833,8 @@ mod tests {
         // No scope parameter — should default to "all"
         let args = serde_json::json!({ "query": "App" });
         let result = executor.execute("CodebaseSearch", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap();
         assert!(
             output.contains("Hybrid search") || output.contains("Symbols matching"),
             "default scope should search via hybrid or symbols, got: {}",
@@ -1667,7 +1852,7 @@ mod tests {
             "scope": "symbols"
         });
         let result_all = executor.execute("CodebaseSearch", &args_all).await;
-        let output_all = result_all.output.unwrap();
+        let output_all = result_all.success_message_owned().unwrap();
         assert!(output_all.contains("AppConfig"));
         assert!(output_all.contains("AppProps"));
     }
@@ -1681,8 +1866,8 @@ mod tests {
             "scope": "symbols"
         });
         let result = executor.execute("CodebaseSearch", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap();
         assert!(
             output.contains("No symbols matching"),
             "should indicate no results found, got: {}",
@@ -1699,8 +1884,8 @@ mod tests {
             "scope": "symbols"
         });
         let result = executor.execute("CodebaseSearch", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap();
 
         // Output should include file path, line number, and kind
         assert!(
@@ -1822,8 +2007,8 @@ mod tests {
             "scope": "all"
         });
         let result = executor.execute("CodebaseSearch", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap();
 
         // scope=all uses HybridSearchEngine with RRF fusion, which combines
         // symbol + file + semantic channels internally
@@ -1852,8 +2037,8 @@ mod tests {
             "scope": "all"
         });
         let result = executor.execute("CodebaseSearch", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap();
 
         // HybridSearchEngine runs symbol+file channels even without embedding
         assert!(
@@ -1883,8 +2068,8 @@ mod tests {
             "scope": "all"
         });
         let result = executor.execute("CodebaseSearch", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap();
 
         // HybridSearchEngine doesn't use EmbeddingService (only EmbeddingManager),
         // so it will run symbol+file channels and skip semantic silently
@@ -1910,8 +2095,8 @@ mod tests {
             "scope": "semantic"
         });
         let result = executor.execute("CodebaseSearch", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap();
 
         // Should have full error message (no embedding provider configured)
         assert!(
@@ -1939,8 +2124,8 @@ mod tests {
 
         // Parent reads the file
         let result1 = parent.execute("Read", &args).await;
-        assert!(result1.success);
-        assert!(result1.output.unwrap().contains("line 1"));
+        assert!(result1.is_success());
+        assert!(result1.success_message_owned().unwrap().contains("line 1"));
 
         // Create child with shared cache
         let shared_cache = parent.shared_read_cache();
@@ -1948,8 +2133,8 @@ mod tests {
 
         // Child reads the same file — should get dedup message
         let result2 = child.execute("Read", &args).await;
-        assert!(result2.success);
-        let output2 = result2.output.unwrap();
+        assert!(result2.is_success());
+        let output2 = result2.success_message_owned().unwrap();
         assert!(
             output2.contains("[DEDUP]") && output2.contains("already read"),
             "child should see parent's cached read, got: {}",
@@ -1975,8 +2160,8 @@ mod tests {
             .to_string();
         let args = serde_json::json!({ "file_path": &nested_path });
         let result1 = child.execute("Read", &args).await;
-        assert!(result1.success);
-        assert!(result1.output.unwrap().contains("nested content"));
+        assert!(result1.is_success());
+        assert!(result1.success_message_owned().unwrap().contains("nested content"));
 
         // Parent should see the child's cache entry
         let summary = parent.get_read_file_summary();
@@ -2029,8 +2214,8 @@ mod tests {
             child.execute("Read", &args_b),
         );
 
-        assert!(res_a.success);
-        assert!(res_b.success);
+        assert!(res_a.is_success());
+        assert!(res_b.is_success());
 
         // Both entries should be visible from either executor
         let summary = parent.get_read_file_summary();
@@ -2131,8 +2316,8 @@ mod tests {
         });
 
         let result = executor.execute("CodebaseSearch", &args).await;
-        assert!(result.success);
-        let output = result.output.unwrap_or_default();
+        assert!(result.is_success());
+        let output = result.success_message_owned().unwrap_or_default();
         // Without an index store, it falls back to the "index not available" message
         assert!(
             output.contains("not available")

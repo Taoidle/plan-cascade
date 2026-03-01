@@ -186,7 +186,9 @@ impl KeyringService {
                 "google".to_string(),
                 "ollama".to_string(),
                 "tavily".to_string(),
+                "brave".to_string(),
                 "brave_search".to_string(),
+                "searxng".to_string(),
             ],
             inner,
         }

@@ -339,7 +339,7 @@ impl OrchestratorService {
             .and_then(|v| v.as_str())
             .map(|s| s.trim().to_ascii_lowercase())
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "auto".to_string());
+            .unwrap_or_else(|| "quick".to_string());
 
         let query = arguments
             .get("query")
@@ -422,6 +422,24 @@ impl OrchestratorService {
                 result.iterations,
             )
         }
+    }
+
+    async fn execute_tool_with_usage(
+        &self,
+        session_id: &str,
+        tool_name: &str,
+        arguments: &serde_json::Value,
+        task_ctx: Option<&crate::services::tools::task_spawner::TaskContext>,
+        tx: &mpsc::Sender<UnifiedStreamEvent>,
+    ) -> (crate::services::tools::executor::ToolResult, UsageStats, u32) {
+        if tool_name == "Analyze" {
+            return self.execute_analyze_tool_result(arguments, tx).await;
+        }
+        let result = self
+            .tool_executor
+            .execute_with_context_for_session(session_id, tool_name, arguments, task_ctx)
+            .await;
+        (result, UsageStats::default(), 0)
     }
 
     pub(super) async fn execute_story_with_request_options(
@@ -1043,25 +1061,11 @@ impl OrchestratorService {
                         );
 
                         // Emit tool result event
-                        let _ = tx
-                            .send(UnifiedStreamEvent::ToolResult {
-                                tool_id: tc_id.clone(),
-                                result: if result.success {
-                                    result.output.clone()
-                                } else {
-                                    None
-                                },
-                                error: if !result.success {
-                                    result.error.clone()
-                                } else {
-                                    None
-                                },
-                            })
-                            .await;
+                        emit_tool_result_event(&tx, tc_id.clone(), &result).await;
 
                         // Add to messages
                         if result.is_dedup {
-                            let dedup_msg = result.output.as_deref().unwrap_or(
+                            let dedup_msg = result.success_message().unwrap_or(
                                 "[File already read] Content is in session memory above. Do NOT re-read."
                             );
                             messages.push(Message::tool_result(
@@ -1084,20 +1088,20 @@ impl OrchestratorService {
                                 messages.push(Message::tool_result_multimodal(
                                     &tc_id,
                                     blocks,
-                                    !result.success,
+                                    result.is_error(),
                                 ));
                             } else {
                                 messages.push(Message::tool_result(
                                     &tc_id,
                                     context_tool_output.clone(),
-                                    !result.success,
+                                    result.is_error(),
                                 ));
                             }
                         } else {
                             messages.push(Message::tool_result(
                                 &tc_id,
                                 context_tool_output.clone(),
-                                !result.success,
+                                result.is_error(),
                             ));
                         }
 
@@ -1189,25 +1193,11 @@ impl OrchestratorService {
                         );
 
                         // Emit tool result event
-                        let _ = tx
-                            .send(UnifiedStreamEvent::ToolResult {
-                                tool_id: tc_id.clone(),
-                                result: if result.success {
-                                    result.output.clone()
-                                } else {
-                                    None
-                                },
-                                error: if !result.success {
-                                    result.error.clone()
-                                } else {
-                                    None
-                                },
-                            })
-                            .await;
+                        emit_tool_result_event(&tx, tc_id.clone(), &result).await;
 
                         // Handle dedup and message construction
                         if result.is_dedup {
-                            let dedup_msg = result.output.as_deref().unwrap_or(
+                            let dedup_msg = result.success_message().unwrap_or(
                                 "[File already read] Content is in session memory above. Do NOT re-read."
                             );
                             messages.push(Message::tool_result(
@@ -1230,20 +1220,20 @@ impl OrchestratorService {
                                 messages.push(Message::tool_result_multimodal(
                                     tc_id,
                                     blocks,
-                                    !result.success,
+                                    result.is_error(),
                                 ));
                             } else {
                                 messages.push(Message::tool_result(
                                     tc_id,
                                     context_tool_output.clone(),
-                                    !result.success,
+                                    result.is_error(),
                                 ));
                             }
                         } else {
                             messages.push(Message::tool_result(
                                 tc_id,
                                 context_tool_output.clone(),
-                                !result.success,
+                                result.is_error(),
                             ));
                         }
 
@@ -1438,24 +1428,10 @@ impl OrchestratorService {
                             &result,
                             analysis_phase,
                         );
-                        let _ = tx
-                            .send(UnifiedStreamEvent::ToolResult {
-                                tool_id: tool_id.clone(),
-                                result: if result.success {
-                                    result.output.clone()
-                                } else {
-                                    None
-                                },
-                                error: if !result.success {
-                                    result.error.clone()
-                                } else {
-                                    None
-                                },
-                            })
-                            .await;
+                        emit_tool_result_event(&tx, tool_id.clone(), &result).await;
 
                         if result.is_dedup {
-                            let dedup_msg = result.output.as_deref().unwrap_or(
+                            let dedup_msg = result.success_message().unwrap_or(
                                 "[File already read] Content is in session memory above. Do NOT re-read."
                             );
                             tool_results.push(format_tool_result(
@@ -1469,7 +1445,7 @@ impl OrchestratorService {
                                 &effective_tool_name,
                                 &tool_id,
                                 &context_tool_output,
-                                !result.success,
+                                result.is_error(),
                             ));
                         }
 
@@ -1559,24 +1535,10 @@ impl OrchestratorService {
                             request_options.analysis_phase.as_deref(),
                         );
 
-                        let _ = tx
-                            .send(UnifiedStreamEvent::ToolResult {
-                                tool_id: tool_id.clone(),
-                                result: if result.success {
-                                    result.output.clone()
-                                } else {
-                                    None
-                                },
-                                error: if !result.success {
-                                    result.error.clone()
-                                } else {
-                                    None
-                                },
-                            })
-                            .await;
+                        emit_tool_result_event(&tx, tool_id.clone(), &result).await;
 
                         if result.is_dedup {
-                            let dedup_msg = result.output.as_deref().unwrap_or(
+                            let dedup_msg = result.success_message().unwrap_or(
                                 "[File already read] Content is in session memory above. Do NOT re-read."
                             );
                             tool_results.push(format_tool_result(
@@ -1590,7 +1552,7 @@ impl OrchestratorService {
                                 effective_tool_name,
                                 tool_id,
                                 &context_tool_output,
-                                !result.success,
+                                result.is_error(),
                             ));
                         }
 
@@ -1860,6 +1822,7 @@ impl OrchestratorService {
             project_root: self.config.project_root.clone(),
             context_window: self.provider.context_window(),
             shared_read_cache: self.tool_executor.shared_read_cache(),
+            shared_web_search: self.tool_executor.get_web_search_service(),
             shared_index_store: self.tool_executor.get_index_store(),
             shared_embedding_service: self.tool_executor.get_embedding_service(),
             shared_embedding_manager: self.tool_executor.get_embedding_manager(),
@@ -2290,10 +2253,9 @@ impl OrchestratorService {
 
                 // Step 2: Check if all validated calls are parallel-safe
                 let all_parallel = valid_calls.len() > 1
-                    && valid_calls.iter().all(|(_, name, _)| {
-                        name != "Analyze"
-                            && crate::services::tools::definitions::is_tool_parallel_safe(name)
-                    });
+                    && valid_calls
+                        .iter()
+                        .all(|(_, name, _)| crate::services::tools::definitions::is_tool_parallel_safe(name));
 
                 if all_parallel {
                     // ═══════════════════════════════════════════════════════
@@ -2361,21 +2323,7 @@ impl OrchestratorService {
                     // Process results in original order (events, messages, loop detection)
                     for (tc_id, effective_tool_name, mut result) in results {
                         // Emit tool result event
-                        let _ = tx
-                            .send(UnifiedStreamEvent::ToolResult {
-                                tool_id: tc_id.clone(),
-                                result: if result.success {
-                                    result.output.clone()
-                                } else {
-                                    None
-                                },
-                                error: if !result.success {
-                                    result.error.clone()
-                                } else {
-                                    None
-                                },
-                            })
-                            .await;
+                        emit_tool_result_event(&tx, tc_id.clone(), &result).await;
 
                         // Hook: on_after_tool — capture injected context
                         let after_tool_ctx = self
@@ -2383,20 +2331,20 @@ impl OrchestratorService {
                             .fire_on_after_tool(
                                 &hook_ctx,
                                 &effective_tool_name,
-                                result.success,
-                                result.output.as_ref().map(|o| truncate_for_log(o, 200)),
+                                result.is_success(),
+                                result.success_message().map(|o| truncate_for_log(o, 200)),
                             )
                             .await;
 
                         // Append plugin-injected context to tool output
                         if let Some(ref injected) = after_tool_ctx {
-                            let existing = result.output.take().unwrap_or_default();
-                            result.output = Some(format!("{}\n\n{}", existing, injected));
+                            let existing = result.take_message().unwrap_or_default();
+                            result.set_message(format!("{}\n\n{}", existing, injected));
                         }
 
                         // Add to messages
                         if result.is_dedup {
-                            let dedup_msg = result.output.as_deref().unwrap_or(
+                            let dedup_msg = result.success_message().unwrap_or(
                                 "[File already read] Content is in session memory above. Do NOT re-read."
                             );
                             messages.push(Message::tool_result(
@@ -2424,20 +2372,20 @@ impl OrchestratorService {
                                     messages.push(Message::tool_result_multimodal(
                                         &tc_id,
                                         blocks,
-                                        !result.success,
+                                        result.is_error(),
                                     ));
                                 } else {
                                     messages.push(Message::tool_result(
                                         &tc_id,
                                         context_content,
-                                        !result.success,
+                                        result.is_error(),
                                     ));
                                 }
                             } else {
                                 messages.push(Message::tool_result(
                                     &tc_id,
                                     context_content,
-                                    !result.success,
+                                    result.is_error(),
                                 ));
                             }
                         }
@@ -2539,42 +2487,20 @@ impl OrchestratorService {
                             continue;
                         }
 
-                        let (mut result, nested_usage, nested_iterations) =
-                            if effective_tool_name == "Analyze" {
-                                self.execute_analyze_tool_result(effective_args, &tx).await
-                            } else {
-                                (
-                                    self.tool_executor
-                                        .execute_with_context_for_session(
-                                            &hook_ctx.session_id,
-                                            effective_tool_name,
-                                            effective_args,
-                                            task_ctx.as_ref(),
-                                        )
-                                        .await,
-                                    UsageStats::default(),
-                                    0,
-                                )
-                            };
+                        let (mut result, nested_usage, nested_iterations) = self
+                            .execute_tool_with_usage(
+                                &hook_ctx.session_id,
+                                effective_tool_name,
+                                effective_args,
+                                task_ctx.as_ref(),
+                                &tx,
+                            )
+                            .await;
                         merge_usage(&mut total_usage, &nested_usage);
                         iterations += nested_iterations;
 
                         // Emit tool result event (always for frontend display)
-                        let _ = tx
-                            .send(UnifiedStreamEvent::ToolResult {
-                                tool_id: tc_id.clone(),
-                                result: if result.success {
-                                    result.output.clone()
-                                } else {
-                                    None
-                                },
-                                error: if !result.success {
-                                    result.error.clone()
-                                } else {
-                                    None
-                                },
-                            })
-                            .await;
+                        emit_tool_result_event(&tx, tc_id.clone(), &result).await;
 
                         // Hook: on_after_tool — capture injected context
                         let after_tool_ctx = self
@@ -2582,15 +2508,15 @@ impl OrchestratorService {
                             .fire_on_after_tool(
                                 &hook_ctx,
                                 effective_tool_name,
-                                result.success,
-                                result.output.as_ref().map(|o| truncate_for_log(o, 200)),
+                                result.is_success(),
+                                result.success_message().map(|o| truncate_for_log(o, 200)),
                             )
                             .await;
 
                         // Append plugin-injected context to tool output
                         if let Some(ref injected) = after_tool_ctx {
-                            let existing = result.output.take().unwrap_or_default();
-                            result.output = Some(format!("{}\n\n{}", existing, injected));
+                            let existing = result.take_message().unwrap_or_default();
+                            result.set_message(format!("{}\n\n{}", existing, injected));
                         }
 
                         // Apply EventActions if the tool declared any side effects.
@@ -2631,7 +2557,7 @@ impl OrchestratorService {
 
                         // Handle dedup and message construction
                         if result.is_dedup {
-                            let dedup_msg = result.output.as_deref().unwrap_or(
+                            let dedup_msg = result.success_message().unwrap_or(
                                 "[File already read] Content is in session memory above. Do NOT re-read."
                             );
                             messages.push(Message::tool_result(
@@ -2659,20 +2585,20 @@ impl OrchestratorService {
                                     messages.push(Message::tool_result_multimodal(
                                         tc_id,
                                         blocks,
-                                        !result.success,
+                                        result.is_error(),
                                     ));
                                 } else {
                                     messages.push(Message::tool_result(
                                         tc_id,
                                         context_content,
-                                        !result.success,
+                                        result.is_error(),
                                     ));
                                 }
                             } else {
                                 messages.push(Message::tool_result(
                                     tc_id,
                                     context_content,
-                                    !result.success,
+                                    result.is_error(),
                                 ));
                             }
                         }
@@ -2792,12 +2718,10 @@ impl OrchestratorService {
                 }
 
                 // Step 2: Check if all valid calls are parallel-safe
-                // Exclude Analyze from parallel (needs special handler)
                 let all_parallel_fb = valid_fallback_calls.len() > 1
-                    && valid_fallback_calls.iter().all(|(_, name, _)| {
-                        name != "Analyze"
-                            && crate::services::tools::definitions::is_tool_parallel_safe(name)
-                    });
+                    && valid_fallback_calls
+                        .iter()
+                        .all(|(_, name, _)| crate::services::tools::definitions::is_tool_parallel_safe(name));
 
                 if all_parallel_fb {
                     // ═══════════════════════════════════════════════════
@@ -2861,21 +2785,7 @@ impl OrchestratorService {
                     };
 
                     for (tool_id, effective_tool_name, mut result) in results {
-                        let _ = tx
-                            .send(UnifiedStreamEvent::ToolResult {
-                                tool_id: tool_id.clone(),
-                                result: if result.success {
-                                    result.output.clone()
-                                } else {
-                                    None
-                                },
-                                error: if !result.success {
-                                    result.error.clone()
-                                } else {
-                                    None
-                                },
-                            })
-                            .await;
+                        emit_tool_result_event(&tx, tool_id.clone(), &result).await;
 
                         // Hook: on_after_tool — capture injected context
                         let after_tool_ctx = self
@@ -2883,19 +2793,19 @@ impl OrchestratorService {
                             .fire_on_after_tool(
                                 &hook_ctx,
                                 &effective_tool_name,
-                                result.success,
-                                result.output.as_ref().map(|o| truncate_for_log(o, 200)),
+                                result.is_success(),
+                                result.success_message().map(|o| truncate_for_log(o, 200)),
                             )
                             .await;
 
                         // Append plugin-injected context to tool output
                         if let Some(ref injected) = after_tool_ctx {
-                            let existing = result.output.take().unwrap_or_default();
-                            result.output = Some(format!("{}\n\n{}", existing, injected));
+                            let existing = result.take_message().unwrap_or_default();
+                            result.set_message(format!("{}\n\n{}", existing, injected));
                         }
 
                         if result.is_dedup {
-                            let dedup_msg = result.output.as_deref().unwrap_or(
+                            let dedup_msg = result.success_message().unwrap_or(
                                 "[File already read] Content is in session memory above. Do NOT re-read."
                             );
                             tool_results.push(format_tool_result(
@@ -2913,7 +2823,7 @@ impl OrchestratorService {
                                 &effective_tool_name,
                                 &tool_id,
                                 &context_content,
-                                !result.success,
+                                result.is_error(),
                             ));
                         }
 
@@ -3015,41 +2925,19 @@ impl OrchestratorService {
                             continue;
                         }
 
-                        let (mut result, nested_usage, nested_iterations) =
-                            if effective_tool_name == "Analyze" {
-                                self.execute_analyze_tool_result(effective_args, &tx).await
-                            } else {
-                                (
-                                    self.tool_executor
-                                        .execute_with_context_for_session(
-                                            &hook_ctx.session_id,
-                                            effective_tool_name,
-                                            effective_args,
-                                            task_ctx.as_ref(),
-                                        )
-                                        .await,
-                                    UsageStats::default(),
-                                    0,
-                                )
-                            };
+                        let (mut result, nested_usage, nested_iterations) = self
+                            .execute_tool_with_usage(
+                                &hook_ctx.session_id,
+                                effective_tool_name,
+                                effective_args,
+                                task_ctx.as_ref(),
+                                &tx,
+                            )
+                            .await;
                         merge_usage(&mut total_usage, &nested_usage);
                         iterations += nested_iterations;
 
-                        let _ = tx
-                            .send(UnifiedStreamEvent::ToolResult {
-                                tool_id: tool_id.clone(),
-                                result: if result.success {
-                                    result.output.clone()
-                                } else {
-                                    None
-                                },
-                                error: if !result.success {
-                                    result.error.clone()
-                                } else {
-                                    None
-                                },
-                            })
-                            .await;
+                        emit_tool_result_event(&tx, tool_id.clone(), &result).await;
 
                         // Hook: on_after_tool — capture injected context
                         let after_tool_ctx = self
@@ -3057,15 +2945,15 @@ impl OrchestratorService {
                             .fire_on_after_tool(
                                 &hook_ctx,
                                 effective_tool_name,
-                                result.success,
-                                result.output.as_ref().map(|o| truncate_for_log(o, 200)),
+                                result.is_success(),
+                                result.success_message().map(|o| truncate_for_log(o, 200)),
                             )
                             .await;
 
                         // Append plugin-injected context to tool output
                         if let Some(ref injected) = after_tool_ctx {
-                            let existing = result.output.take().unwrap_or_default();
-                            result.output = Some(format!("{}\n\n{}", existing, injected));
+                            let existing = result.take_message().unwrap_or_default();
+                            result.set_message(format!("{}\n\n{}", existing, injected));
                         }
 
                         // Apply EventActions if the tool declared any side effects
@@ -3098,7 +2986,7 @@ impl OrchestratorService {
                         }
 
                         if result.is_dedup {
-                            let dedup_msg = result.output.as_deref().unwrap_or(
+                            let dedup_msg = result.success_message().unwrap_or(
                                 "[File already read] Content is in session memory above. Do NOT re-read."
                             );
                             tool_results.push(format_tool_result(
@@ -3116,7 +3004,7 @@ impl OrchestratorService {
                                 effective_tool_name,
                                 tool_id,
                                 &context_content,
-                                !result.success,
+                                result.is_error(),
                             ));
                         }
 

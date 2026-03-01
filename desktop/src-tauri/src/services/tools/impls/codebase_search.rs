@@ -215,7 +215,7 @@ impl CodebaseSearchTool {
                 let filtered: Vec<_> = if let Some(comp) = component {
                     symbols
                         .into_iter()
-                        .filter(|s| s.file_path.contains(comp) || s.project_path == *project_path)
+                        .filter(|s| s.file_path.contains(comp) && s.project_path == *project_path)
                         .collect()
                 } else {
                     symbols
@@ -634,7 +634,10 @@ impl Tool for CodebaseSearchTool {
     async fn execute(&self, ctx: &ToolExecutionContext, args: Value) -> ToolResult {
         let query = match args.get("query").and_then(|v| v.as_str()) {
             Some(q) => q,
-            None => return ToolResult::err("Missing required parameter: query"),
+            None => {
+                return ToolResult::err("Missing required parameter: query")
+                    .with_error_code("missing_query");
+            }
         };
 
         let scope = args.get("scope").and_then(|v| v.as_str()).unwrap_or("all");
@@ -644,10 +647,8 @@ impl Tool for CodebaseSearchTool {
         let index_store = match &ctx.index_store {
             Some(store) => store,
             None => {
-                return ToolResult::ok(
-                    "Codebase index not available. The project has not been indexed yet. \
-                     Use Grep for content search or Glob/LS for file discovery instead.",
-                );
+                return ToolResult::err("Codebase index not available. The project has not been indexed yet. Use Grep for content search or Glob/LS for file discovery instead.")
+                    .with_error_code("codebase_index_unavailable");
             }
         };
 
@@ -777,8 +778,8 @@ mod tests {
         let ctx = make_test_ctx(Path::new("/tmp"));
         let args = serde_json::json!({"query": "test_function"});
         let result = tool.execute(&ctx, args).await;
-        assert!(result.success);
-        assert!(result.output.as_ref().unwrap().contains("not been indexed"));
+        assert!(result.is_error());
+        assert!(result.error_message().unwrap().contains("not been indexed"));
     }
 
     #[tokio::test]
@@ -786,7 +787,7 @@ mod tests {
         let tool = CodebaseSearchTool::new();
         let ctx = make_test_ctx(Path::new("/tmp"));
         let result = tool.execute(&ctx, serde_json::json!({})).await;
-        assert!(!result.success);
-        assert!(result.error.as_ref().unwrap().contains("query"));
+        assert!(result.is_error());
+        assert!(result.error_message().unwrap().contains("query"));
     }
 }

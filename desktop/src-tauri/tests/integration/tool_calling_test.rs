@@ -430,8 +430,12 @@ async fn test_executor_read_tool() {
     });
 
     let result = executor.execute("Read", &args).await;
-    assert!(result.success, "Read should succeed: {:?}", result.error);
-    let output = result.output.unwrap();
+    assert!(
+        result.is_success(),
+        "Read should succeed: {:?}",
+        result.error_message()
+    );
+    let output = result.success_message_owned().unwrap();
     assert!(
         output.contains("hello world"),
         "Read output should contain file content"
@@ -454,8 +458,8 @@ async fn test_executor_read_tool_with_offset_and_limit() {
     });
 
     let result = executor.execute("Read", &args).await;
-    assert!(result.success);
-    let output = result.output.unwrap();
+    assert!(result.is_success());
+    let output = result.success_message_owned().unwrap();
     assert!(
         output.contains("foo bar"),
         "Should contain line 2 (offset=2)"
@@ -477,7 +481,11 @@ async fn test_executor_write_tool() {
     });
 
     let result = executor.execute("Write", &args).await;
-    assert!(result.success, "Write should succeed: {:?}", result.error);
+    assert!(
+        result.is_success(),
+        "Write should succeed: {:?}",
+        result.error_message()
+    );
     assert!(new_file.exists(), "File should be created");
 
     let content = std::fs::read_to_string(&new_file).unwrap();
@@ -497,9 +505,9 @@ async fn test_executor_write_tool_creates_parent_dirs() {
 
     let result = executor.execute("Write", &args).await;
     assert!(
-        result.success,
+        result.is_success(),
         "Write should create parent dirs: {:?}",
-        result.error
+        result.error_message()
     );
     assert!(deep_file.exists());
 }
@@ -514,9 +522,13 @@ async fn test_executor_bash_tool() {
     });
 
     let result = executor.execute("Bash", &args).await;
-    assert!(result.success, "Bash should succeed: {:?}", result.error);
     assert!(
-        result.output.unwrap().contains("integration_test_output"),
+        result.is_success(),
+        "Bash should succeed: {:?}",
+        result.error_message()
+    );
+    assert!(
+        result.success_message_owned().unwrap().contains("integration_test_output"),
         "Bash output should contain echoed string"
     );
 }
@@ -531,8 +543,8 @@ async fn test_executor_bash_tool_blocked_command() {
     });
 
     let result = executor.execute("Bash", &args).await;
-    assert!(!result.success, "Blocked command should fail");
-    assert!(result.error.unwrap().contains("blocked"));
+    assert!(result.is_error(), "Blocked command should fail");
+    assert!(result.error_message_owned().unwrap().contains("blocked"));
 }
 
 #[tokio::test]
@@ -552,7 +564,7 @@ async fn test_executor_bash_tool_with_working_dir() {
     });
 
     let result = executor.execute("Bash", &args).await;
-    assert!(result.success);
+    assert!(result.is_success());
 }
 
 #[tokio::test]
@@ -566,8 +578,12 @@ async fn test_executor_glob_tool() {
     });
 
     let result = executor.execute("Glob", &args).await;
-    assert!(result.success, "Glob should succeed: {:?}", result.error);
-    let output = result.output.unwrap();
+    assert!(
+        result.is_success(),
+        "Glob should succeed: {:?}",
+        result.error_message()
+    );
+    let output = result.success_message_owned().unwrap();
     assert!(output.contains("hello.txt"), "Glob should find hello.txt");
     assert!(
         output.contains("search_target.txt"),
@@ -586,8 +602,8 @@ async fn test_executor_glob_tool_rs_files() {
     });
 
     let result = executor.execute("Glob", &args).await;
-    assert!(result.success);
-    let output = result.output.unwrap();
+    assert!(result.is_success());
+    let output = result.success_message_owned().unwrap();
     assert!(output.contains("nested.rs"), "Glob should find nested.rs");
     assert!(
         !output.contains("hello.txt"),
@@ -607,8 +623,12 @@ async fn test_executor_grep_tool() {
     });
 
     let result = executor.execute("Grep", &args).await;
-    assert!(result.success, "Grep should succeed: {:?}", result.error);
-    let output = result.output.unwrap();
+    assert!(
+        result.is_success(),
+        "Grep should succeed: {:?}",
+        result.error_message()
+    );
+    let output = result.success_message_owned().unwrap();
     assert!(
         output.contains("UNIQUE_MARKER"),
         "Grep should find the marker"
@@ -632,8 +652,8 @@ async fn test_executor_grep_tool_case_insensitive() {
     });
 
     let result = executor.execute("Grep", &args).await;
-    assert!(result.success);
-    let output = result.output.unwrap();
+    assert!(result.is_success());
+    let output = result.success_message_owned().unwrap();
     assert!(
         output.contains("UNIQUE_MARKER"),
         "Case insensitive grep should find UNIQUE_MARKER"
@@ -651,8 +671,8 @@ async fn test_executor_grep_tool_no_matches() {
     });
 
     let result = executor.execute("Grep", &args).await;
-    assert!(result.success);
-    assert!(result.output.unwrap().contains("No matches found"));
+    assert!(result.is_success());
+    assert!(result.success_message_owned().unwrap().contains("No matches found"));
 }
 
 #[tokio::test]
@@ -665,8 +685,12 @@ async fn test_executor_ls_tool() {
     });
 
     let result = executor.execute("LS", &args).await;
-    assert!(result.success, "LS should succeed: {:?}", result.error);
-    let output = result.output.unwrap();
+    assert!(
+        result.is_success(),
+        "LS should succeed: {:?}",
+        result.error_message()
+    );
+    let output = result.success_message_owned().unwrap();
     assert!(
         output.contains("DIR"),
         "LS should show directory indicators"
@@ -687,8 +711,8 @@ async fn test_executor_ls_tool_show_hidden() {
         "path": dir.path().to_string_lossy().to_string()
     });
     let result = executor.execute("LS", &args).await;
-    assert!(result.success);
-    assert!(!result.output.unwrap().contains(".hidden_file"));
+    assert!(result.is_success());
+    assert!(!result.success_message_owned().unwrap().contains(".hidden_file"));
 
     // With show_hidden
     let args = serde_json::json!({
@@ -696,8 +720,8 @@ async fn test_executor_ls_tool_show_hidden() {
         "show_hidden": true
     });
     let result = executor.execute("LS", &args).await;
-    assert!(result.success);
-    assert!(result.output.unwrap().contains(".hidden_file"));
+    assert!(result.is_success());
+    assert!(result.success_message_owned().unwrap().contains(".hidden_file"));
 }
 
 #[tokio::test]
@@ -710,8 +734,8 @@ async fn test_executor_ls_tool_nonexistent_dir() {
     });
 
     let result = executor.execute("LS", &args).await;
-    assert!(!result.success);
-    assert!(result.error.unwrap().contains("not found"));
+    assert!(result.is_error());
+    assert!(result.error_message_owned().unwrap().contains("not found"));
 }
 
 #[tokio::test]
@@ -722,8 +746,12 @@ async fn test_executor_cwd_tool() {
     let args = serde_json::json!({});
 
     let result = executor.execute("Cwd", &args).await;
-    assert!(result.success, "Cwd should succeed: {:?}", result.error);
-    let output = result.output.unwrap();
+    assert!(
+        result.is_success(),
+        "Cwd should succeed: {:?}",
+        result.error_message()
+    );
+    let output = result.success_message_owned().unwrap();
     assert_eq!(
         output,
         dir.path().to_string_lossy().to_string(),
@@ -739,8 +767,8 @@ async fn test_executor_unknown_tool() {
     let args = serde_json::json!({});
 
     let result = executor.execute("UnknownTool", &args).await;
-    assert!(!result.success);
-    assert!(result.error.unwrap().contains("Unknown tool"));
+    assert!(result.is_error());
+    assert!(result.error_message_owned().unwrap().contains("Unknown tool"));
 }
 
 // ============================================================================
@@ -754,7 +782,7 @@ async fn test_tool_result_ok_to_content() {
 
     let args = serde_json::json!({});
     let result = executor.execute("Cwd", &args).await;
-    assert!(result.success);
+    assert!(result.is_success());
 
     let content = result.to_content();
     assert!(!content.is_empty());
@@ -770,7 +798,7 @@ async fn test_tool_result_error_to_content() {
         "file_path": dir.path().join("nonexistent.txt").to_string_lossy().to_string()
     });
     let result = executor.execute("Read", &args).await;
-    assert!(!result.success);
+    assert!(result.is_error());
 
     let content = result.to_content();
     assert!(content.starts_with("Error:"));
@@ -796,15 +824,15 @@ async fn test_write_then_read_flow() {
         "content": "Hello from flow test!\nLine 2.\n"
     });
     let write_result = executor.execute("Write", &write_args).await;
-    assert!(write_result.success);
+    assert!(write_result.is_success());
 
     // Step 2: Read the file back
     let read_args = serde_json::json!({
         "file_path": &file_path
     });
     let read_result = executor.execute("Read", &read_args).await;
-    assert!(read_result.success);
-    let output = read_result.output.unwrap();
+    assert!(read_result.is_success());
+    let output = read_result.success_message_owned().unwrap();
     assert!(output.contains("Hello from flow test!"));
     assert!(output.contains("Line 2."));
 }
@@ -819,8 +847,8 @@ async fn test_ls_then_glob_then_grep_flow() {
         "path": dir.path().to_string_lossy().to_string()
     });
     let ls_result = executor.execute("LS", &ls_args).await;
-    assert!(ls_result.success);
-    let ls_output = ls_result.output.unwrap();
+    assert!(ls_result.is_success());
+    let ls_output = ls_result.success_message_owned().unwrap();
     assert!(ls_output.contains("subdir"));
 
     // Step 2: Glob to find .rs files
@@ -829,8 +857,8 @@ async fn test_ls_then_glob_then_grep_flow() {
         "path": dir.path().to_string_lossy().to_string()
     });
     let glob_result = executor.execute("Glob", &glob_args).await;
-    assert!(glob_result.success);
-    let glob_output = glob_result.output.unwrap();
+    assert!(glob_result.is_success());
+    let glob_output = glob_result.success_message_owned().unwrap();
     assert!(glob_output.contains("nested.rs"));
 
     // Step 3: Grep for function definitions
@@ -841,8 +869,8 @@ async fn test_ls_then_glob_then_grep_flow() {
         "output_mode": "content"
     });
     let grep_result = executor.execute("Grep", &grep_args).await;
-    assert!(grep_result.success);
-    let grep_output = grep_result.output.unwrap();
+    assert!(grep_result.is_success());
+    let grep_output = grep_result.success_message_owned().unwrap();
     assert!(grep_output.contains("fn main"));
 }
 
@@ -863,9 +891,9 @@ async fn test_bash_then_read_flow() {
     });
     let write_result = executor.execute("Write", &write_args).await;
     assert!(
-        write_result.success,
+        write_result.is_success(),
         "Write should succeed: {:?}",
-        write_result.error
+        write_result.error_message()
     );
 
     // Step 2: Use bash to verify the file exists (cross-platform echo)
@@ -875,19 +903,19 @@ async fn test_bash_then_read_flow() {
     });
     let bash_result = executor.execute("Bash", &bash_args).await;
     assert!(
-        bash_result.success,
+        bash_result.is_success(),
         "Bash should succeed: {:?}",
-        bash_result.error
+        bash_result.error_message()
     );
-    assert!(bash_result.output.unwrap().contains("file_verified"));
+    assert!(bash_result.success_message_owned().unwrap().contains("file_verified"));
 
     // Step 3: Read the file back
     let read_args = serde_json::json!({
         "file_path": &file_path
     });
     let read_result = executor.execute("Read", &read_args).await;
-    assert!(read_result.success);
-    assert!(read_result.output.unwrap().contains("bash_created_content"));
+    assert!(read_result.is_success());
+    assert!(read_result.success_message_owned().unwrap().contains("bash_created_content"));
 }
 
 // ============================================================================
@@ -901,8 +929,8 @@ async fn test_read_missing_file_path() {
 
     let args = serde_json::json!({});
     let result = executor.execute("Read", &args).await;
-    assert!(!result.success);
-    assert!(result.error.unwrap().contains("file_path"));
+    assert!(result.is_error());
+    assert!(result.error_message_owned().unwrap().contains("file_path"));
 }
 
 #[tokio::test]
@@ -914,8 +942,8 @@ async fn test_write_missing_content() {
         "file_path": dir.path().join("test.txt").to_string_lossy().to_string()
     });
     let result = executor.execute("Write", &args).await;
-    assert!(!result.success);
-    assert!(result.error.unwrap().contains("content"));
+    assert!(result.is_error());
+    assert!(result.error_message_owned().unwrap().contains("content"));
 }
 
 #[tokio::test]
@@ -928,8 +956,8 @@ async fn test_edit_missing_old_string() {
         "new_string": "replacement"
     });
     let result = executor.execute("Edit", &args).await;
-    assert!(!result.success);
-    assert!(result.error.unwrap().contains("old_string"));
+    assert!(result.is_error());
+    assert!(result.error_message_owned().unwrap().contains("old_string"));
 }
 
 #[tokio::test]
@@ -939,8 +967,8 @@ async fn test_bash_missing_command() {
 
     let args = serde_json::json!({});
     let result = executor.execute("Bash", &args).await;
-    assert!(!result.success);
-    assert!(result.error.unwrap().contains("command"));
+    assert!(result.is_error());
+    assert!(result.error_message_owned().unwrap().contains("command"));
 }
 
 #[tokio::test]
@@ -950,8 +978,8 @@ async fn test_glob_missing_pattern() {
 
     let args = serde_json::json!({});
     let result = executor.execute("Glob", &args).await;
-    assert!(!result.success);
-    assert!(result.error.unwrap().contains("pattern"));
+    assert!(result.is_error());
+    assert!(result.error_message_owned().unwrap().contains("pattern"));
 }
 
 #[tokio::test]
@@ -961,8 +989,8 @@ async fn test_grep_missing_pattern() {
 
     let args = serde_json::json!({});
     let result = executor.execute("Grep", &args).await;
-    assert!(!result.success);
-    assert!(result.error.unwrap().contains("pattern"));
+    assert!(result.is_error());
+    assert!(result.error_message_owned().unwrap().contains("pattern"));
 }
 
 #[tokio::test]
@@ -972,8 +1000,8 @@ async fn test_ls_missing_path() {
 
     let args = serde_json::json!({});
     let result = executor.execute("LS", &args).await;
-    assert!(!result.success);
-    assert!(result.error.unwrap().contains("path"));
+    assert!(result.is_error());
+    assert!(result.error_message_owned().unwrap().contains("path"));
 }
 
 // ============================================================================
@@ -999,8 +1027,8 @@ async fn test_web_fetch_missing_url() {
 
     let args = serde_json::json!({});
     let result = executor.execute("WebFetch", &args).await;
-    assert!(!result.success);
-    assert!(result.error.unwrap().contains("url"));
+    assert!(result.is_error());
+    assert!(result.error_message_owned().unwrap().contains("url"));
 }
 
 #[tokio::test]
@@ -1012,8 +1040,8 @@ async fn test_web_fetch_blocks_private_urls() {
         "url": "http://127.0.0.1:8080/admin"
     });
     let result = executor.execute("WebFetch", &args).await;
-    assert!(!result.success);
-    let error = result.error.unwrap();
+    assert!(result.is_error());
+    let error = result.error_message_owned().unwrap();
     assert!(
         error.contains("private") || error.contains("blocked") || error.contains("local"),
         "Should block private IP access, got: {}",
@@ -1030,7 +1058,7 @@ async fn test_web_fetch_blocks_localhost() {
         "url": "http://localhost/secret"
     });
     let result = executor.execute("WebFetch", &args).await;
-    assert!(!result.success);
+    assert!(result.is_error());
 }
 
 // ============================================================================
@@ -1055,8 +1083,8 @@ async fn test_web_search_missing_query() {
 
     let args = serde_json::json!({});
     let result = executor.execute("WebSearch", &args).await;
-    assert!(!result.success);
-    assert!(result.error.unwrap().contains("query"));
+    assert!(result.is_error());
+    assert!(result.error_message_owned().unwrap().contains("query"));
 }
 
 #[tokio::test]
@@ -1068,8 +1096,8 @@ async fn test_web_search_not_configured() {
         "query": "test search"
     });
     let result = executor.execute("WebSearch", &args).await;
-    assert!(!result.success);
-    assert!(result.error.unwrap().contains("not configured"));
+    assert!(result.is_error());
+    assert!(result.error_message_owned().unwrap().contains("not configured"));
 }
 
 // ============================================================================
@@ -1095,8 +1123,8 @@ async fn test_notebook_edit_missing_params() {
 
     let args = serde_json::json!({});
     let result = executor.execute("NotebookEdit", &args).await;
-    assert!(!result.success);
-    assert!(result.error.unwrap().contains("notebook_path"));
+    assert!(result.is_error());
+    assert!(result.error_message_owned().unwrap().contains("notebook_path"));
 }
 
 #[tokio::test]
@@ -1127,8 +1155,8 @@ async fn test_notebook_edit_requires_read_first() {
         "new_source": "print('world')"
     });
     let result = executor.execute("NotebookEdit", &args).await;
-    assert!(!result.success, "Should fail without reading first");
-    assert!(result.error.unwrap().contains("read"));
+    assert!(result.is_error(), "Should fail without reading first");
+    assert!(result.error_message_owned().unwrap().contains("read"));
 }
 
 #[tokio::test]
@@ -1155,9 +1183,9 @@ async fn test_notebook_edit_replace_after_read() {
     let read_args = serde_json::json!({ "file_path": &nb_path_str });
     let read_result = executor.execute("Read", &read_args).await;
     assert!(
-        read_result.success,
+        read_result.is_success(),
         "Read should succeed: {:?}",
-        read_result.error
+        read_result.error_message()
     );
 
     // Now edit
@@ -1169,9 +1197,9 @@ async fn test_notebook_edit_replace_after_read() {
     });
     let edit_result = executor.execute("NotebookEdit", &edit_args).await;
     assert!(
-        edit_result.success,
+        edit_result.is_success(),
         "NotebookEdit should succeed: {:?}",
-        edit_result.error
+        edit_result.error_message()
     );
 
     // Verify the change
@@ -1214,11 +1242,11 @@ async fn test_read_jupyter_notebook() {
     });
     let result = executor.execute("Read", &args).await;
     assert!(
-        result.success,
+        result.is_success(),
         "Read .ipynb should succeed: {:?}",
-        result.error
+        result.error_message()
     );
-    let output = result.output.unwrap();
+    let output = result.success_message_owned().unwrap();
     assert!(
         output.contains("Title"),
         "Should contain markdown cell content"
@@ -1242,8 +1270,8 @@ fn test_tool_result_ok_with_image() {
         "image/png".to_string(),
         "base64data".to_string(),
     );
-    assert!(result.success);
-    assert_eq!(result.output.as_deref(), Some("Image metadata"));
+    assert!(result.is_success());
+    assert_eq!(result.success_message(), Some("Image metadata"));
     assert!(result.image_data.is_some());
     let (mime, data) = result.image_data.unwrap();
     assert_eq!(mime, "image/png");

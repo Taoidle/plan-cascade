@@ -1,12 +1,10 @@
 //! Analyze Tool Implementation
 //!
 //! Provides project analysis via the codebase index, with quick and deep modes.
-//! This is a proxy tool — it delegates to the Analyze command in the executor
-//! which manages the index store. Since the Analyze tool requires access to
-//! the IndexStore (which is not in ToolExecutionContext), this implementation
-//! serves as a placeholder that returns a not-available message when called
-//! directly through the trait. The actual Analyze execution goes through
-//! ToolExecutor which has access to the IndexStore.
+//! The orchestrator owns the full Analyze pipeline and intercepts Analyze calls
+//! in the agentic loop so usage/iteration accounting remains accurate.
+//! If this trait implementation is reached directly, return a hard error
+//! instead of a fake success result.
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -63,17 +61,15 @@ impl Tool for AnalyzeTool {
     }
 
     async fn execute(&self, _ctx: &ToolExecutionContext, args: Value) -> ToolResult {
-        // The Analyze tool requires IndexStore access which is managed by ToolExecutor.
-        // When called through the registry, we return a helpful message.
-        // In practice, ToolExecutor intercepts "Analyze" calls before they reach here.
         let query = args
             .get("query")
             .and_then(|v| v.as_str())
             .unwrap_or("(no query)");
-        ToolResult::ok(format!(
-            "Analyze tool received query '{}'. Note: Analysis requires the codebase index. Use Grep, Glob, or LS for direct file exploration.",
+        ToolResult::err(format!(
+            "Analyze tool is orchestrator-managed and was invoked through the generic tool path for query '{}'. Retry via orchestrator Analyze flow.",
             query
         ))
+        .with_error_code("analyze_orchestrator_required")
     }
 }
 
@@ -91,8 +87,8 @@ mod tests {
 
         let args = serde_json::json!({"query": "test analysis"});
         let result = tool.execute(&ctx, args).await;
-        assert!(result.success);
-        assert!(result.output.unwrap().contains("test analysis"));
+        assert!(result.is_error());
+        assert!(result.error_message_owned().unwrap().contains("test analysis"));
     }
 
     #[test]

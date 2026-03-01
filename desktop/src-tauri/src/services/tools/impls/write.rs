@@ -185,7 +185,7 @@ mod tests {
             "content": "new content"
         });
         let result = tool.execute(&ctx, args).await;
-        assert!(result.success);
+        assert!(result.is_success());
         assert!(new_file.exists());
         assert_eq!(std::fs::read_to_string(&new_file).unwrap(), "new content");
     }
@@ -202,7 +202,7 @@ mod tests {
             "content": "deep content"
         });
         let result = tool.execute(&ctx, args).await;
-        assert!(result.success);
+        assert!(result.is_success());
         assert!(nested.exists());
     }
 
@@ -213,8 +213,8 @@ mod tests {
         let ctx = make_test_ctx(dir.path());
 
         let result = tool.execute(&ctx, serde_json::json!({})).await;
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("file_path"));
+        assert!(result.is_error());
+        assert!(result.error_message_owned().unwrap().contains("file_path"));
     }
 
     #[test]
@@ -241,7 +241,7 @@ mod tests {
             "content": "new\ncontent\n"
         });
         let result = tool.execute(&ctx, args).await;
-        assert!(result.success);
+        assert!(result.is_success());
 
         let written = std::fs::read(&file).unwrap();
         let decoded = decode_text_with_format(&written, "txt").unwrap();
@@ -263,9 +263,9 @@ mod tests {
             "content": "text"
         });
         let result = tool.execute(&ctx, args).await;
-        assert!(!result.success);
+        assert!(result.is_error());
         assert!(result
-            .error
+            .error_message_owned()
             .unwrap()
             .contains("Cannot overwrite binary/non-text file"));
     }

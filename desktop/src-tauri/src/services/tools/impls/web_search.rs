@@ -8,8 +8,9 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::services::llm::types::ParameterSchema;
-use crate::services::tools::executor::ToolResult;
+use crate::services::tools::executor::{ToolCitation, ToolResult};
 use crate::services::tools::trait_def::{Tool, ToolExecutionContext};
+use crate::services::tools::web_search::SearchConstraints;
 
 /// WebSearch tool — searches the web via configured providers.
 ///
@@ -30,7 +31,7 @@ impl Tool for WebSearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search the web for current information. Returns titles, URLs, and snippets. Supports Tavily, Brave Search, and DuckDuckGo providers (configured in settings)."
+        "Search the web for current information. Returns titles, URLs, snippets, and structured citations. Supports optional domain allow/block filters and provider backends (Tavily, Brave Search, DuckDuckGo, SearXNG)."
     }
 
     fn parameters_schema(&self) -> ParameterSchema {
@@ -42,6 +43,20 @@ impl Tool for WebSearchTool {
         properties.insert(
             "max_results".to_string(),
             ParameterSchema::integer(Some("Maximum number of results (default: 5, max: 10)")),
+        );
+        properties.insert(
+            "allow_domains".to_string(),
+            ParameterSchema::array(
+                Some("Optional domain allowlist. Only these domains/subdomains are kept."),
+                ParameterSchema::string(Some("Domain (e.g., docs.rs or rust-lang.org)")),
+            ),
+        );
+        properties.insert(
+            "block_domains".to_string(),
+            ParameterSchema::array(
+                Some("Optional domain blocklist. Matching domains/subdomains are excluded."),
+                ParameterSchema::string(Some("Domain to block (e.g., reddit.com)")),
+            ),
         );
         ParameterSchema::object(
             Some("WebSearch parameters"),
@@ -70,14 +85,74 @@ impl Tool for WebSearchTool {
             .unwrap_or(5)
             .min(10) as u32;
 
+        fn parse_domains(args: &Value, key: &str) -> Vec<String> {
+            args.get(key)
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str())
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        }
+
+        let allow_domains = parse_domains(&args, "allow_domains");
+        let block_domains = parse_domains(&args, "block_domains");
+        let constraints = SearchConstraints::new(
+            if allow_domains.is_empty() {
+                None
+            } else {
+                Some(allow_domains.clone())
+            },
+            block_domains.clone(),
+        );
+
         match &ctx.web_search {
-            Some(service) => match service.search(query, Some(max_results)).await {
-                Ok(content) => ToolResult::ok(content),
-                Err(e) => ToolResult::err(e),
+            Some(service) => match service
+                .search_with_constraints(query, Some(max_results), &constraints)
+                .await
+            {
+                Ok(results) => {
+                    let content = service.format_results_markdown(query, &results);
+                    let citations = results
+                        .iter()
+                        .map(|r| {
+                            let mut c = ToolCitation::new(r.url.clone());
+                            c.title = if r.title.is_empty() {
+                                None
+                            } else {
+                                Some(r.title.clone())
+                            };
+                            c.snippet = if r.snippet.is_empty() {
+                                None
+                            } else {
+                                Some(r.snippet.clone())
+                            };
+                            c.source = Some(service.provider_name().to_string());
+                            c
+                        })
+                        .collect::<Vec<_>>();
+                    let metadata = serde_json::json!({
+                        "provider": service.provider_name(),
+                        "max_results": max_results,
+                        "allow_domains": allow_domains,
+                        "block_domains": block_domains,
+                        "result_count": citations.len(),
+                    });
+                    ToolResult::ok(content)
+                        .with_metadata(metadata)
+                        .with_citations(citations)
+                }
+                Err(e) => ToolResult::err(e)
+                    .with_error_code("web_search_failed")
+                    .with_retryable(true),
             },
             None => ToolResult::err(
-                "WebSearch is not configured. Set a search provider (tavily, brave, or duckduckgo) in Settings > LLM Backend > Search Provider, and provide an API key if required."
-            ),
+                "WebSearch is not configured. Set a search provider (tavily, brave, duckduckgo, or searxng) in Settings > LLM Backend > Search Provider, and provide an API key if required."
+            )
+            .with_error_code("web_search_not_configured"),
         }
     }
 }
@@ -106,8 +181,8 @@ mod tests {
         let ctx = make_test_ctx(Path::new("/tmp"));
         let args = serde_json::json!({"query": "test query"});
         let result = tool.execute(&ctx, args).await;
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("not configured"));
+        assert!(result.is_error());
+        assert!(result.error_message_owned().unwrap().contains("not configured"));
     }
 
     #[tokio::test]
@@ -115,7 +190,7 @@ mod tests {
         let tool = WebSearchTool::new();
         let ctx = make_test_ctx(Path::new("/tmp"));
         let result = tool.execute(&ctx, serde_json::json!({})).await;
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("query"));
+        assert!(result.is_error());
+        assert!(result.error_message_owned().unwrap().contains("query"));
     }
 }

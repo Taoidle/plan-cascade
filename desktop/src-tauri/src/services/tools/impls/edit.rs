@@ -225,7 +225,7 @@ mod tests {
             "new_string": "modified line 2"
         });
         let result = tool.execute(&ctx, args).await;
-        assert!(result.success);
+        assert!(result.is_success());
 
         let content = std::fs::read_to_string(&file_path).unwrap();
         assert!(content.contains("modified line 2"));
@@ -246,8 +246,8 @@ mod tests {
             "new_string": "bar"
         });
         let result = tool.execute(&ctx, args).await;
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("appears 3 times"));
+        assert!(result.is_error());
+        assert!(result.error_message_owned().unwrap().contains("appears 3 times"));
     }
 
     #[tokio::test]
@@ -266,7 +266,7 @@ mod tests {
             "replace_all": true
         });
         let result = tool.execute(&ctx, args).await;
-        assert!(result.success);
+        assert!(result.is_success());
         let content = std::fs::read_to_string(&file_path).unwrap();
         assert_eq!(content, "bar bar bar");
     }
@@ -286,9 +286,9 @@ mod tests {
             "new_string": "modified"
         });
         let result = tool.execute(&ctx, args).await;
-        assert!(!result.success);
+        assert!(result.is_error());
         assert!(result
-            .error
+            .error_message_owned()
             .unwrap()
             .contains("must read the file before editing"));
     }
@@ -319,7 +319,7 @@ mod tests {
             "new_string": "baz"
         });
         let result = tool.execute(&ctx, args).await;
-        assert!(result.success);
+        assert!(result.is_success());
 
         let bytes = std::fs::read(&file_path).unwrap();
         let decoded = decode_text_with_format(&bytes, "txt").unwrap();

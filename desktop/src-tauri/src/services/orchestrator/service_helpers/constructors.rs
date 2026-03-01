@@ -227,6 +227,7 @@ impl TaskSpawner for OrchestratorTaskSpawner {
             sub_config,
             cancellation_token,
             isolated_read_cache,
+            self.shared_web_search.clone(),
             self.shared_index_store.clone(),
             self.shared_embedding_service.clone(),
             self.shared_embedding_manager.clone(),
@@ -547,9 +548,9 @@ impl OrchestratorService {
         }
     }
 
-    /// Create a sub-agent orchestrator that shares the parent's read cache, index store,
-    /// embedding service, and embedding manager. This avoids redundant file reads and
-    /// enables CodebaseSearch in sub-agents.
+    /// Create a sub-agent orchestrator that shares the parent's read cache,
+    /// web search service, index store, embedding service, and embedding manager.
+    /// This avoids redundant file reads and preserves search/index capabilities.
     pub(super) fn new_sub_agent_with_shared_state(
         config: OrchestratorConfig,
         cancellation_token: CancellationToken,
@@ -561,6 +562,7 @@ impl OrchestratorService {
                 >,
             >,
         >,
+        shared_web_search: Option<Arc<crate::services::tools::web_search::WebSearchService>>,
         shared_index_store: Option<Arc<IndexStore>>,
         shared_embedding_service: Option<Arc<EmbeddingService>>,
         shared_embedding_manager: Option<Arc<EmbeddingManager>>,
@@ -588,6 +590,10 @@ impl OrchestratorService {
         let mut tool_executor =
             ToolExecutor::new_with_shared_cache(&config.project_root, shared_read_cache);
         tool_executor.set_cancellation_token(cancellation_token.clone());
+
+        if let Some(search) = &shared_web_search {
+            tool_executor.set_web_search_service(Arc::clone(search));
+        }
 
         // Wire the parent's index store and embedding service to the sub-agent's tool executor
         if let Some(store) = &shared_index_store {
@@ -678,6 +684,12 @@ impl OrchestratorService {
     /// Wire an embedding service to the tool executor for semantic CodebaseSearch.
     pub fn with_embedding_service(mut self, svc: Arc<EmbeddingService>) -> Self {
         self.tool_executor.set_embedding_service(svc);
+        self
+    }
+
+    /// Configure web search provider so the WebSearch tool is actually executable.
+    pub fn with_search_provider(mut self, provider_name: &str, api_key: Option<String>) -> Self {
+        self.tool_executor.set_search_provider(provider_name, api_key);
         self
     }
 

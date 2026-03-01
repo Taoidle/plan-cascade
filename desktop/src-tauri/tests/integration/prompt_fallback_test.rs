@@ -529,15 +529,15 @@ I'll analyze the results."#,
     let result = executor
         .execute(&calls[0].tool_name, &calls[0].arguments)
         .await;
-    assert!(result.success);
-    assert!(result.output.as_ref().unwrap().contains("Hello World"));
+    assert!(result.is_success());
+    assert!(result.success_message().unwrap().contains("Hello World"));
 
     // Step 3: Format result for re-injection
     let formatted = format_tool_result(
         &calls[0].tool_name,
         "fallback_1",
         &result.to_content(),
-        !result.success,
+        result.is_error(),
     );
     assert!(formatted.contains("Tool Result: Read"));
     assert!(formatted.contains("Hello World"));
@@ -586,16 +586,17 @@ I'll look at the results."#,
     for (i, call) in calls.iter().enumerate() {
         let result = executor.execute(&call.tool_name, &call.arguments).await;
         assert!(
-            result.success,
+            result.is_success(),
             "Tool '{}' should succeed: {:?}",
-            call.tool_name, result.error
+            call.tool_name,
+            result.error_message()
         );
 
         let formatted = format_tool_result(
             &call.tool_name,
             &format!("fallback_{}", i + 1),
             &result.to_content(),
-            !result.success,
+            result.is_error(),
         );
         tool_results.push(formatted);
     }
@@ -634,7 +635,11 @@ async fn test_fallback_write_then_verify_flow() {
     let result = executor
         .execute(&calls[0].tool_name, &calls[0].arguments)
         .await;
-    assert!(result.success, "Write failed: {:?}", result.error);
+    assert!(
+        result.is_success(),
+        "Write failed: {:?}",
+        result.error_message()
+    );
 
     // Simulate LLM then reading it back
     let read_response = format!(
@@ -648,9 +653,9 @@ async fn test_fallback_write_then_verify_flow() {
     let read_result = executor
         .execute(&read_calls[0].tool_name, &read_calls[0].arguments)
         .await;
-    assert!(read_result.success);
+    assert!(read_result.is_success());
     assert!(read_result
-        .output
+        .success_message_owned()
         .unwrap()
         .contains("Created by fallback test."));
 }

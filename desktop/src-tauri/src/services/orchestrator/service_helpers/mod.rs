@@ -85,6 +85,49 @@ async fn emit_usage(tx: &mpsc::Sender<UnifiedStreamEvent>, usage: &UsageStats) {
         .await;
 }
 
+/// Emit tool result and optional citation events to the stream channel.
+async fn emit_tool_result_event(
+    tx: &mpsc::Sender<UnifiedStreamEvent>,
+    tool_id: String,
+    result: &crate::services::tools::executor::ToolResult,
+) {
+    let _ = tx
+        .send(UnifiedStreamEvent::ToolResult {
+            tool_id,
+            result: result.success_message_owned(),
+            error: result.error_message_owned(),
+        })
+        .await;
+
+    if let Some(citations) = result.citations.as_ref() {
+        if citations.is_empty() {
+            return;
+        }
+        let mapped = citations
+            .iter()
+            .enumerate()
+            .map(|(idx, c)| {
+                let site_name = c.source.clone().unwrap_or_else(|| {
+                    url::Url::parse(&c.url)
+                        .ok()
+                        .and_then(|u| u.host_str().map(|h| h.trim_start_matches("www.").to_string()))
+                        .unwrap_or_else(|| "web".to_string())
+                });
+                plan_cascade_core::streaming::SearchCitationEntry {
+                    index: (idx + 1) as i32,
+                    title: c.title.clone(),
+                    url: c.url.clone(),
+                    site_name,
+                    icon: None,
+                }
+            })
+            .collect::<Vec<_>>();
+        let _ = tx
+            .send(UnifiedStreamEvent::SearchCitations { citations: mapped })
+            .await;
+    }
+}
+
 /// Persist a single LLM call's usage to the analytics database (non-blocking).
 /// Silently drops when the channel is full or not configured.
 fn track_analytics(

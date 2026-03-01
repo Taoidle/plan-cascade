@@ -59,9 +59,9 @@ mod tests {
         let ctx = make_test_ctx(dir.path());
 
         let result = tool.execute(&ctx, serde_json::json!({})).await;
-        assert!(result.success);
+        assert!(result.is_success());
         assert_eq!(
-            result.output.unwrap(),
+            result.success_message_owned().unwrap(),
             dir.path().to_string_lossy().to_string()
         );
     }

@@ -285,10 +285,9 @@ mod tests {
         // task_context is None
         let args = serde_json::json!({"prompt": "explore the codebase"});
         let result = tool.execute(&ctx, args).await;
-        assert!(!result.success);
+        assert!(result.is_error());
         assert!(result
-            .error
-            .as_ref()
+            .error_message()
             .unwrap()
             .contains("not available at this depth"));
     }
@@ -298,8 +297,8 @@ mod tests {
         let tool = TaskTool::new();
         let ctx = make_test_ctx(Path::new("/tmp"));
         let result = tool.execute(&ctx, serde_json::json!({})).await;
-        assert!(!result.success);
-        assert!(result.error.as_ref().unwrap().contains("prompt"));
+        assert!(result.is_error());
+        assert!(result.error_message().unwrap().contains("prompt"));
     }
 
     #[tokio::test]

@@ -200,6 +200,25 @@ fn provider_key_candidates(provider: &str) -> &'static [&'static str] {
     }
 }
 
+fn normalize_search_provider_name(provider: &str) -> &'static str {
+    match provider.trim().to_lowercase().as_str() {
+        "tavily" => "tavily",
+        "brave" | "brave_search" => "brave",
+        "searxng" => "searxng",
+        "duckduckgo" | "" => "duckduckgo",
+        _ => "duckduckgo",
+    }
+}
+
+fn search_provider_key_candidates(provider: &str) -> &'static [&'static str] {
+    match provider {
+        "tavily" => &["tavily"],
+        "brave" => &["brave", "brave_search"],
+        "searxng" => &["searxng"],
+        _ => &[],
+    }
+}
+
 fn render_plugin_invocation_body(invocation: &ResolvedPluginInvocation) -> String {
     let mut body = invocation.body.clone();
     for (key, value) in &invocation.args {
@@ -273,6 +292,21 @@ pub(crate) fn get_api_key_with_aliases(
             Ok(Some(key)) => return Ok(Some(key)),
             Ok(None) => continue,
             Err(e) => return Err(format!("Failed to get API key: {}", e)),
+        }
+    }
+    Ok(None)
+}
+
+pub(crate) fn get_search_api_key_with_aliases(
+    keyring: &KeyringService,
+    search_provider: &str,
+) -> Result<Option<String>, String> {
+    let canonical = normalize_search_provider_name(search_provider);
+    for candidate in search_provider_key_candidates(canonical) {
+        match keyring.get_api_key(candidate) {
+            Ok(Some(key)) => return Ok(Some(key)),
+            Ok(None) => continue,
+            Err(e) => return Err(format!("Failed to get search provider API key: {}", e)),
         }
     }
     Ok(None)
@@ -1220,6 +1254,21 @@ pub async fn execute_standalone(
             .map(|v| v as usize),
         ..Default::default()
     };
+    let search_provider = app_state
+        .get_config()
+        .await
+        .map(|cfg| normalize_search_provider_name(&cfg.search_provider).to_string())
+        .unwrap_or_else(|_| "duckduckgo".to_string());
+    let search_api_key = match get_search_api_key_with_aliases(&keyring, &search_provider) {
+        Ok(key) => key,
+        Err(e) => {
+            eprintln!(
+                "[execute_standalone] Failed to resolve search provider API key for '{}': {}",
+                search_provider, e
+            );
+            None
+        }
+    };
     let analysis_session_id = analysis_session_id
         .or(analysisSessionId)
         .map(|s| s.trim().to_string())
@@ -1318,6 +1367,7 @@ pub async fn execute_standalone(
     let provider_config_for_index = orchestrator_config.provider.clone();
 
     let mut orchestrator = OrchestratorService::new(orchestrator_config)
+        .with_search_provider(&search_provider, search_api_key)
         .with_permission_gate(permission_state.gate.clone());
 
     // Wire file change tracker for AI file modification tracking
@@ -2604,6 +2654,28 @@ mod tests {
         assert_eq!(normalize_provider_name("dashscope"), Some("qwen"));
         assert_eq!(normalize_provider_name("ollama"), Some("ollama"));
         assert_eq!(normalize_provider_name("unknown"), None);
+    }
+
+    #[test]
+    fn test_normalize_search_provider_name() {
+        assert_eq!(normalize_search_provider_name("duckduckgo"), "duckduckgo");
+        assert_eq!(normalize_search_provider_name(""), "duckduckgo");
+        assert_eq!(normalize_search_provider_name("tavily"), "tavily");
+        assert_eq!(normalize_search_provider_name("brave"), "brave");
+        assert_eq!(normalize_search_provider_name("brave_search"), "brave");
+        assert_eq!(normalize_search_provider_name("searxng"), "searxng");
+        assert_eq!(normalize_search_provider_name("unknown-provider"), "duckduckgo");
+    }
+
+    #[test]
+    fn test_search_provider_key_candidates() {
+        assert_eq!(search_provider_key_candidates("duckduckgo"), &[] as &[&str]);
+        assert_eq!(search_provider_key_candidates("tavily"), &["tavily"]);
+        assert_eq!(
+            search_provider_key_candidates("brave"),
+            &["brave", "brave_search"]
+        );
+        assert_eq!(search_provider_key_candidates("searxng"), &["searxng"]);
     }
 
     #[test]

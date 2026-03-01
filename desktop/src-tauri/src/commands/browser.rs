@@ -60,11 +60,11 @@ pub async fn execute_browser_action(
 
     let result = tool.execute(&ctx, args).await;
 
-    if result.success {
-        let action_result: BrowserActionResult = if let Some(output) = &result.output {
+    if result.is_success() {
+        let action_result: BrowserActionResult = if let Some(output) = result.success_message() {
             serde_json::from_str(output).unwrap_or(BrowserActionResult {
                 success: true,
-                output: result.output.clone(),
+                output: result.success_message_owned(),
                 current_url: None,
                 page_title: None,
             })
@@ -78,11 +78,9 @@ pub async fn execute_browser_action(
         };
         Ok(CommandResponse::ok(action_result))
     } else {
-        Ok(CommandResponse::err(
-            result
-                .error
-                .unwrap_or_else(|| "Unknown browser error".to_string()),
-        ))
+        Ok(CommandResponse::err(result.error_message_owned().unwrap_or_else(
+            || "Unknown browser error".to_string(),
+        )))
     }
 }
 

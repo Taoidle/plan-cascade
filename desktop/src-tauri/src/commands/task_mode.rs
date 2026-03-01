@@ -29,7 +29,7 @@ use crate::services::task_mode::exploration::{
 use crate::services::task_mode::prd_generator;
 
 use crate::state::AppState;
-use crate::storage::KeyringService;
+use crate::storage::{ConfigService, KeyringService};
 
 // ============================================================================
 // Types
@@ -985,8 +985,9 @@ pub async fn explore_project(
                     sub_agent_depth: Some(0), // Allow spawning explore sub-agents
                 };
 
-                let mut coordinator =
-                    crate::services::orchestrator::OrchestratorService::new(config);
+                let (search_provider, search_api_key) = resolve_search_provider_for_tools();
+                let mut coordinator = crate::services::orchestrator::OrchestratorService::new(config)
+                    .with_search_provider(&search_provider, search_api_key);
 
                 // Wire database pool for CodebaseSearch
                 if let Ok(pool) = app_state.with_database(|db| Ok(db.pool().clone())).await {
@@ -1368,6 +1369,24 @@ async fn resolve_provider_config(
         proxy,
         ..Default::default()
     })
+}
+
+fn resolve_search_provider_for_tools() -> (String, Option<String>) {
+    use crate::commands::standalone::get_search_api_key_with_aliases;
+
+    let provider = ConfigService::new()
+        .map(|svc| svc.get_config_clone().search_provider)
+        .map(|p| p.trim().to_ascii_lowercase())
+        .unwrap_or_else(|_| "duckduckgo".to_string());
+    let provider = if provider.is_empty() {
+        "duckduckgo".to_string()
+    } else {
+        provider
+    };
+
+    let keyring = KeyringService::new();
+    let api_key = get_search_api_key_with_aliases(&keyring, &provider).unwrap_or(None);
+    (provider, api_key)
 }
 
 /// Approve a task PRD and trigger batch execution.
@@ -3325,7 +3344,9 @@ async fn execute_story_via_llm(
         sub_agent_depth: None,
     };
 
-    let mut orchestrator = OrchestratorService::new(config);
+    let (search_provider, search_api_key) = resolve_search_provider_for_tools();
+    let mut orchestrator = OrchestratorService::new(config)
+        .with_search_provider(&search_provider, search_api_key);
 
     // Wire database pool for CodebaseSearch if available
     if let Some(pool) = db_pool {

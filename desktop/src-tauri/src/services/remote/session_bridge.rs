@@ -8,15 +8,16 @@ use super::adapters::RemoteAdapter;
 use super::types::{RemoteError, RemoteResponse, RemoteSessionMapping, SessionType, StreamingMode};
 use crate::commands::proxy::resolve_provider_proxy;
 use crate::commands::standalone::{
-    get_api_key_with_aliases, normalize_provider_name, provider_type_from_name,
+    get_api_key_with_aliases, get_search_api_key_with_aliases, normalize_provider_name,
+    provider_type_from_name,
 };
 use crate::services::llm::{ProviderConfig, ProviderType};
 use crate::services::orchestrator::{OrchestratorConfig, OrchestratorService};
 use crate::services::streaming::UnifiedStreamEvent;
-use crate::storage::{Database, KeyringService};
+use crate::storage::{ConfigService, Database, KeyringService};
 use rusqlite::params;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{mpsc, RwLock};
@@ -65,6 +66,21 @@ pub struct SessionBridge {
 }
 
 impl SessionBridge {
+    fn resolve_search_provider(&self) -> String {
+        match ConfigService::new() {
+            Ok(svc) => {
+                let provider = svc.get_config_clone().search_provider;
+                let normalized = provider.trim().to_ascii_lowercase();
+                if normalized.is_empty() {
+                    "duckduckgo".to_string()
+                } else {
+                    normalized
+                }
+            }
+            Err(_) => "duckduckgo".to_string(),
+        }
+    }
+
     /// Create a new SessionBridge (test-friendly, no orchestrator creation).
     pub fn new(db: Arc<Database>) -> Self {
         Self {
@@ -368,6 +384,9 @@ impl SessionBridge {
             };
 
             let analysis_artifacts_root = self.analysis_artifacts_root();
+            let search_provider = self.resolve_search_provider();
+            let search_api_key =
+                get_search_api_key_with_aliases(&svc.keyring, &search_provider).unwrap_or(None);
 
             let orchestrator_config = OrchestratorConfig {
                 provider: provider_config,
@@ -387,7 +406,8 @@ impl SessionBridge {
                 sub_agent_depth: None,
             };
 
-            let mut orchestrator = OrchestratorService::new(orchestrator_config);
+            let mut orchestrator = OrchestratorService::new(orchestrator_config)
+                .with_search_provider(&search_provider, search_api_key);
 
             // Wire database pool for CodebaseSearch/IndexStore
             {
@@ -670,6 +690,9 @@ impl SessionBridge {
         };
 
         let analysis_artifacts_root = self.analysis_artifacts_root();
+        let search_provider = self.resolve_search_provider();
+        let search_api_key =
+            get_search_api_key_with_aliases(&svc.keyring, &search_provider).unwrap_or(None);
 
         let orchestrator_config = OrchestratorConfig {
             provider: provider_config,
@@ -689,7 +712,8 @@ impl SessionBridge {
             sub_agent_depth: None,
         };
 
-        let mut orchestrator = OrchestratorService::new(orchestrator_config);
+        let mut orchestrator = OrchestratorService::new(orchestrator_config)
+            .with_search_provider(&search_provider, search_api_key);
 
         {
             let pool = self.db.pool().clone();
@@ -1117,7 +1141,7 @@ mod tests {
         assert!(result.is_ok());
 
         // /etc should be denied (if it exists)
-        if Path::new("/etc").exists() {
+        if std::path::Path::new("/etc").exists() {
             let result = bridge.validate_project_path("/etc", bridge.services.as_ref());
             assert!(matches!(result, Err(RemoteError::PathSandboxViolation(_))));
         }

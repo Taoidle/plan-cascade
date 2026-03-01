@@ -18,6 +18,95 @@ pub struct SearchResult {
     pub snippet: String,
 }
 
+/// Domain allow/block policy for web search results.
+#[derive(Debug, Clone, Default)]
+pub struct SearchConstraints {
+    /// If set and non-empty, only results from these domains are kept.
+    pub allow_domains: Option<Vec<String>>,
+    /// Results from these domains are always excluded.
+    pub block_domains: Vec<String>,
+}
+
+impl SearchConstraints {
+    pub fn new(allow_domains: Option<Vec<String>>, block_domains: Vec<String>) -> Self {
+        let allow_domains = allow_domains
+            .map(normalize_domain_list)
+            .filter(|domains| !domains.is_empty());
+        let block_domains = normalize_domain_list(block_domains);
+        Self {
+            allow_domains,
+            block_domains,
+        }
+    }
+}
+
+fn normalize_domain(value: &str) -> Option<String> {
+    let mut domain = value
+        .trim()
+        .to_ascii_lowercase()
+        .trim_start_matches("http://")
+        .trim_start_matches("https://")
+        .trim_start_matches("www.")
+        .trim_end_matches('/')
+        .to_string();
+    if let Some(idx) = domain.find('/') {
+        domain.truncate(idx);
+    }
+    if domain.is_empty() || domain.contains(' ') {
+        None
+    } else {
+        Some(domain)
+    }
+}
+
+fn normalize_domain_list(input: Vec<String>) -> Vec<String> {
+    let mut out = input
+        .into_iter()
+        .filter_map(|d| normalize_domain(&d))
+        .collect::<Vec<_>>();
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn extract_result_domain(url: &str) -> Option<String> {
+    if let Ok(parsed) = url::Url::parse(url) {
+        return parsed
+            .host_str()
+            .and_then(normalize_domain)
+            .or_else(|| parsed.host_str().map(|h| h.to_ascii_lowercase()));
+    }
+    let with_scheme = format!("https://{}", url);
+    url::Url::parse(&with_scheme)
+        .ok()
+        .and_then(|u| u.host_str().and_then(normalize_domain))
+}
+
+fn domain_matches(domain: &str, rule: &str) -> bool {
+    domain == rule || domain.ends_with(&format!(".{}", rule))
+}
+
+fn is_result_allowed(url: &str, constraints: &SearchConstraints) -> bool {
+    let domain = match extract_result_domain(url) {
+        Some(d) => d,
+        None => return true,
+    };
+
+    if constraints
+        .block_domains
+        .iter()
+        .any(|rule| domain_matches(&domain, rule))
+    {
+        return false;
+    }
+
+    if let Some(allow) = constraints.allow_domains.as_ref() {
+        allow.iter().any(|rule| domain_matches(&domain, rule))
+    } else {
+        true
+    }
+}
+
 /// Trait for pluggable search providers
 #[async_trait]
 pub trait SearchProvider: Send + Sync {
@@ -455,8 +544,13 @@ impl WebSearchService {
         })
     }
 
-    /// Execute a web search and format results as markdown.
-    pub async fn search(&self, query: &str, max_results: Option<u32>) -> Result<String, String> {
+    /// Execute a web search and return structured results.
+    pub async fn search_with_constraints(
+        &self,
+        query: &str,
+        max_results: Option<u32>,
+        constraints: &SearchConstraints,
+    ) -> Result<Vec<SearchResult>, String> {
         let max_results = max_results.unwrap_or(5).min(10);
 
         // Sanitize query: strip control chars
@@ -486,13 +580,18 @@ impl WebSearchService {
             ));
         }
 
-        let results = self.provider.search(&query, max_results).await?;
+        let raw_results = self.provider.search(&query, max_results).await?;
+        let filtered = raw_results
+            .into_iter()
+            .filter(|r| is_result_allowed(&r.url, constraints))
+            .collect::<Vec<_>>();
+        Ok(filtered)
+    }
 
+    /// Format structured search results as markdown text.
+    pub fn format_results_markdown(&self, query: &str, results: &[SearchResult]) -> String {
         if results.is_empty() {
-            return Ok(format!(
-                "## Search Results for: \"{}\"\n\nNo results found.",
-                query
-            ));
+            return format!("## Search Results for: \"{}\"\n\nNo results found.", query);
         }
 
         let mut output = format!(
@@ -510,8 +609,19 @@ impl WebSearchService {
                 result.snippet
             ));
         }
+        output
+    }
 
-        Ok(output)
+    /// Execute a web search and format results as markdown.
+    pub async fn search(&self, query: &str, max_results: Option<u32>) -> Result<String, String> {
+        let normalized_query: String = query
+            .chars()
+            .filter(|c| !c.is_control() || *c == ' ')
+            .collect();
+        let results = self
+            .search_with_constraints(&normalized_query, max_results, &SearchConstraints::default())
+            .await?;
+        Ok(self.format_results_markdown(&normalized_query, &results))
     }
 
     /// Get the name of the underlying search provider
@@ -575,5 +685,37 @@ mod tests {
     fn test_searxng_requires_base_url() {
         let service = WebSearchService::new("searxng", None);
         assert!(service.is_err());
+    }
+
+    #[test]
+    fn test_search_constraints_normalization() {
+        let constraints = SearchConstraints::new(
+            Some(vec![
+                "https://WWW.Example.com/".to_string(),
+                "example.com".to_string(),
+            ]),
+            vec!["Bad.com".to_string(), "http://bad.com/path".to_string()],
+        );
+        assert_eq!(constraints.allow_domains, Some(vec!["example.com".to_string()]));
+        assert_eq!(constraints.block_domains, vec!["bad.com".to_string()]);
+    }
+
+    #[test]
+    fn test_domain_matching_allows_subdomains() {
+        assert!(domain_matches("docs.example.com", "example.com"));
+        assert!(domain_matches("example.com", "example.com"));
+        assert!(!domain_matches("evil-example.com", "example.com"));
+    }
+
+    #[test]
+    fn test_is_result_allowed_with_allow_and_block() {
+        let constraints = SearchConstraints::new(
+            Some(vec!["example.com".to_string()]),
+            vec!["blocked.example.com".to_string()],
+        );
+        assert!(is_result_allowed("https://example.com/page", &constraints));
+        assert!(is_result_allowed("https://docs.example.com/page", &constraints));
+        assert!(!is_result_allowed("https://blocked.example.com/a", &constraints));
+        assert!(!is_result_allowed("https://rust-lang.org", &constraints));
     }
 }

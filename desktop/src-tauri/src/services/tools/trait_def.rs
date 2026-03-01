@@ -661,8 +661,8 @@ mod tests {
 
         let ctx = make_test_context();
         let result = registry.execute("Read", &ctx, Value::Null).await;
-        assert!(result.success);
-        assert_eq!(result.output.unwrap(), "Read executed");
+        assert!(result.is_success());
+        assert_eq!(result.success_message_owned().unwrap(), "Read executed");
     }
 
     #[tokio::test]
@@ -671,8 +671,8 @@ mod tests {
 
         let ctx = make_test_context();
         let result = registry.execute("Unknown", &ctx, Value::Null).await;
-        assert!(!result.success);
-        assert!(result.error.unwrap().contains("Unknown tool"));
+        assert!(result.is_error());
+        assert!(result.error_message_owned().unwrap().contains("Unknown tool"));
     }
 
     #[test]
@@ -758,8 +758,8 @@ mod tests {
         let ctx = make_test_context();
         let args = serde_json::json!({"message": "hello"});
         let result = tool.execute(&ctx, args).await;
-        assert!(result.success);
-        assert_eq!(result.output.unwrap(), "echo: hello");
+        assert!(result.is_success());
+        assert_eq!(result.success_message_owned().unwrap(), "echo: hello");
     }
 
     #[tokio::test]
@@ -792,8 +792,8 @@ mod tests {
 
         let ctx = make_test_context();
         let result = registry.execute("Counter", &ctx, Value::Null).await;
-        assert!(result.success);
-        assert_eq!(result.output.unwrap(), "42");
+        assert!(result.is_success());
+        assert_eq!(result.success_message_owned().unwrap(), "42");
     }
 
     // ── ToolFilterContext tests ──────────────────────────────────────
@@ -899,7 +899,7 @@ mod tests {
 
         let ctx = make_test_context();
         let result = registry.execute("ToolsetA", &ctx, Value::Null).await;
-        assert!(result.success);
-        assert_eq!(result.output.unwrap(), "ToolsetA executed");
+        assert!(result.is_success());
+        assert_eq!(result.success_message_owned().unwrap(), "ToolsetA executed");
     }
 }

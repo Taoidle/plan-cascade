@@ -3274,7 +3274,7 @@ fn test_tool_result_ok_dedup_sets_flag() {
     use crate::services::tools::ToolResult;
     let result = ToolResult::ok_dedup("[DEDUP] file.rs (50 lines) already read.");
     assert!(result.is_dedup, "ToolResult::ok_dedup should set is_dedup to true");
-    assert!(result.success, "dedup result should still be successful");
+    assert!(result.is_success(), "dedup result should still be successful");
 }
 
 #[test]
@@ -3995,6 +3995,7 @@ fn test_sub_agent_inherits_skills_snapshot() {
         None,
         None,
         None,
+        None,
         skills.clone(),
         vec![],
         None,
@@ -4044,6 +4045,7 @@ fn test_sub_agent_inherits_memories_snapshot() {
         None,
         None,
         None,
+        None,
         vec![],
         memories.clone(),
         None,
@@ -4076,6 +4078,7 @@ fn test_sub_agent_knowledge_block_capped() {
         project_root: std::env::temp_dir(),
         context_window: 100000,
         shared_read_cache: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        shared_web_search: None,
         shared_index_store: None,
         shared_embedding_service: None,
         shared_embedding_manager: None,
@@ -4130,6 +4133,7 @@ fn test_sub_agent_detected_language_wired() {
         None,
         None,
         None,
+        None,
         Some("zh".to_string()),
         vec![],
         vec![],
@@ -4153,6 +4157,7 @@ fn test_sub_agent_empty_snapshots_remain_none() {
         config,
         CancellationToken::new(),
         shared_cache,
+        None,
         None,
         None,
         None,
