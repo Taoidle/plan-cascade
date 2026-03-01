@@ -5,26 +5,34 @@
 //! permission level and "always allow" rule set.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 use uuid::Uuid;
 
 use super::permissions::{classify_tool_risk, needs_approval, PermissionLevel, PermissionResponse};
 use crate::services::streaming::UnifiedStreamEvent;
 
+/// Max time to wait for a frontend permission decision before auto-deny.
+const PERMISSION_RESPONSE_TIMEOUT_SECS: u64 = 300;
+
+struct PendingPermissionRequest {
+    session_id: String,
+    sender: oneshot::Sender<PermissionResponse>,
+}
+
 /// Central permission gate shared across the orchestrator and its sub-agents.
 ///
 /// Thread-safe: all fields use interior mutability (RwLock / Mutex).
 /// Designed to be wrapped in `Arc` and cloned into sub-agents.
 pub struct PermissionGate {
-    /// Per-session permission levels. Missing key → defaults to Standard.
+    /// Per-session permission levels. Missing key → defaults to Strict.
     session_levels: RwLock<HashMap<String, PermissionLevel>>,
     /// Per-session "always allow" tool sets.
     /// Key: session_id, Value: set of tool names that have been permanently allowed.
     session_allow_rules: RwLock<HashMap<String, HashSet<String>>>,
     /// Pending approval requests awaiting frontend response.
     /// Key: request_id, Value: oneshot sender to unblock the waiting future.
-    pending_requests: Mutex<HashMap<String, oneshot::Sender<PermissionResponse>>>,
+    pending_requests: Mutex<HashMap<String, PendingPermissionRequest>>,
     /// Event sender connected to the agentic loop's stream channel.
     /// Set at the start of each execution via `set_event_tx`.
     event_tx: RwLock<Option<mpsc::Sender<UnifiedStreamEvent>>>,
@@ -54,12 +62,22 @@ impl PermissionGate {
     }
 
     /// Set the permission level for a session.
+    ///
+    /// If the level changes, previously granted session-level "always allow"
+    /// rules are cleared to avoid stale policy carry-over across modes.
     pub async fn set_session_level(&self, session_id: &str, level: PermissionLevel) {
-        let mut levels = self.session_levels.write().await;
-        levels.insert(session_id.to_string(), level);
+        let previous = {
+            let mut levels = self.session_levels.write().await;
+            levels.insert(session_id.to_string(), level)
+        };
+
+        if previous.is_some_and(|prev| prev != level) {
+            let mut rules = self.session_allow_rules.write().await;
+            rules.remove(session_id);
+        }
     }
 
-    /// Get the permission level for a session (defaults to Standard).
+    /// Get the permission level for a session (defaults to Strict).
     pub async fn get_session_level(&self, session_id: &str) -> PermissionLevel {
         let levels = self.session_levels.read().await;
         levels.get(session_id).copied().unwrap_or_default()
@@ -103,7 +121,13 @@ impl PermissionGate {
         // Register the pending request
         {
             let mut pending = self.pending_requests.lock().await;
-            pending.insert(request_id.clone(), resp_tx);
+            pending.insert(
+                request_id.clone(),
+                PendingPermissionRequest {
+                    session_id: session_id.to_string(),
+                    sender: resp_tx,
+                },
+            );
         }
 
         // Send the permission request event to the frontend
@@ -133,9 +157,14 @@ impl PermissionGate {
             }
         }
 
-        // Block until the frontend responds (no timeout — user may take any amount of time)
-        match resp_rx.await {
-            Ok(response) => {
+        // Block until the frontend responds (with timeout for robustness).
+        match tokio::time::timeout(
+            Duration::from_secs(PERMISSION_RESPONSE_TIMEOUT_SECS),
+            resp_rx,
+        )
+        .await
+        {
+            Ok(Ok(response)) => {
                 if response.always_allow {
                     // Add to session allow rules
                     let mut rules = self.session_allow_rules.write().await;
@@ -150,9 +179,17 @@ impl PermissionGate {
                     Err(format!("Tool '{}' execution denied by user", tool_name))
                 }
             }
-            Err(_) => {
+            Ok(Err(_)) => {
                 // Sender was dropped (e.g., cancellation)
                 Err("Permission request was cancelled".to_string())
+            }
+            Err(_) => {
+                let mut pending = self.pending_requests.lock().await;
+                pending.remove(&request_id);
+                Err(format!(
+                    "Permission request timed out after {} seconds",
+                    PERMISSION_RESPONSE_TIMEOUT_SECS
+                ))
             }
         }
     }
@@ -160,9 +197,9 @@ impl PermissionGate {
     /// Resolve a pending permission request (called by the Tauri command handler).
     pub async fn resolve(&self, request_id: &str, response: PermissionResponse) {
         let mut pending = self.pending_requests.lock().await;
-        if let Some(tx) = pending.remove(request_id) {
+        if let Some(entry) = pending.remove(request_id) {
             // If the receiver has already been dropped (e.g., timeout), this is a no-op
-            let _ = tx.send(response);
+            let _ = entry.sender.send(response);
         }
     }
 
@@ -172,15 +209,7 @@ impl PermissionGate {
     /// causing the waiting futures to receive `Err(RecvError)`.
     pub async fn cancel_session_requests(&self, session_id: &str) {
         let mut pending = self.pending_requests.lock().await;
-        // We can't filter by session_id from the request alone since we only
-        // store the sender, but we drop ALL pending requests when a session is
-        // cancelled. In practice, there is only one active session at a time.
-        // For more granular control, we'd need to store session_id alongside the sender.
-        //
-        // Note: Dropping the oneshot::Sender causes the receiver to get RecvError,
-        // which the `check()` method handles as "cancelled".
-        let _ = session_id; // used for documentation; drop all pending
-        pending.clear();
+        pending.retain(|_, req| req.session_id != session_id);
     }
 
     /// Clean up all permission state for a session.
@@ -209,6 +238,7 @@ impl Default for PermissionGate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_read_only_tool_auto_passes() {
@@ -223,6 +253,8 @@ mod tests {
     #[tokio::test]
     async fn test_safe_write_passes_in_standard() {
         let gate = PermissionGate::new();
+        gate.set_session_level("session-1", PermissionLevel::Standard)
+            .await;
         // Standard level: Write is SafeWrite → should pass without approval
         let result = gate
             .check("session-1", "Write", &serde_json::json!({}))
@@ -378,7 +410,7 @@ mod tests {
         // Clean up
         gate.cleanup_session("session-1").await;
 
-        // Should now default to Standard (Bash needs approval, no event_tx → error)
+        // Should now default to Strict (Bash needs approval, no event_tx → error)
         let result = gate
             .check("session-1", "Bash", &serde_json::json!({}))
             .await;
@@ -386,10 +418,55 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_default_session_level_is_standard() {
+    async fn test_default_session_level_is_strict() {
         let gate = PermissionGate::new();
         let level = gate.get_session_level("unregistered-session").await;
-        assert_eq!(level, PermissionLevel::Standard);
+        assert_eq!(level, PermissionLevel::Strict);
+    }
+
+    #[tokio::test]
+    async fn test_level_change_clears_always_allow_rules() {
+        let gate = Arc::new(PermissionGate::new());
+        let (tx, mut rx) = mpsc::channel::<UnifiedStreamEvent>(16);
+        gate.set_event_tx(tx).await;
+        gate.set_session_level("session-1", PermissionLevel::Standard)
+            .await;
+
+        let gate_clone = Arc::clone(&gate);
+        let check_handle = tokio::spawn(async move {
+            gate_clone
+                .check("session-1", "Bash", &serde_json::json!({}))
+                .await
+        });
+
+        let event = rx.recv().await.unwrap();
+        let request_id = if let UnifiedStreamEvent::ToolPermissionRequest { request_id, .. } = event {
+            request_id
+        } else {
+            panic!("Expected ToolPermissionRequest");
+        };
+
+        gate.resolve(
+            &request_id,
+            PermissionResponse {
+                request_id: request_id.clone(),
+                allowed: true,
+                always_allow: true,
+            },
+        )
+        .await;
+        assert!(check_handle.await.unwrap().is_ok());
+
+        // Change level -> stale allow rules must be cleared.
+        gate.set_session_level("session-1", PermissionLevel::Strict)
+            .await;
+        gate.clear_event_tx().await;
+
+        let result = gate
+            .check("session-1", "Bash", &serde_json::json!({}))
+            .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No event channel"));
     }
 
     #[tokio::test]

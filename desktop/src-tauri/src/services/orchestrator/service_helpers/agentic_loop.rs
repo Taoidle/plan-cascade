@@ -452,6 +452,13 @@ impl OrchestratorService {
         // do direct work more often).
         let mut consecutive_task_only_iterations = 0u32;
         const SUB_AGENT_MAX_CONSECUTIVE_TASK_ONLY: u32 = 2;
+        let execution_session_id = self
+            .config
+            .analysis_session_id
+            .as_ref()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
         // Build TaskContext so coordinator sub-agents can spawn nested sub-agents.
         let task_ctx = self.build_task_context(&tx);
@@ -981,9 +988,17 @@ impl OrchestratorService {
 
                     // Build execution context once (shared across parallel calls)
                     let exec_ctx = Arc::new(match task_ctx.as_ref() {
-                        Some(tc) => self.tool_executor.build_tool_context_with_task(tc),
-                        None => self.tool_executor.build_tool_context(),
+                        Some(tc) => self
+                            .tool_executor
+                            .build_tool_context_with_task_for_session(
+                                execution_session_id.clone(),
+                                tc,
+                            ),
+                        None => self
+                            .tool_executor
+                            .build_tool_context_for_session(execution_session_id.clone()),
                     });
+                    let registry = self.tool_executor.registry();
 
                     // Spawn all tool executions concurrently
                     let mut futures = Vec::with_capacity(valid_calls.len());
@@ -993,7 +1008,6 @@ impl OrchestratorService {
                         let args = args.clone();
                         let tc_id = tc_id.clone();
                         futures.push(async move {
-                            let registry = crate::services::tools::definitions::cached_registry();
                             let result = registry.execute(&name, &ctx_ref, args).await;
                             (tc_id, name, result)
                         });
@@ -1161,7 +1175,8 @@ impl OrchestratorService {
                         // Execute the tool with TaskContext for sub-agent spawning support
                         let result = self
                             .tool_executor
-                            .execute_with_context(
+                            .execute_with_context_for_session(
+                                &execution_session_id,
                                 effective_tool_name,
                                 effective_args,
                                 task_ctx.as_ref(),
@@ -1375,9 +1390,17 @@ impl OrchestratorService {
 
                     // Spawn all futures
                     let exec_ctx = Arc::new(match task_ctx.as_ref() {
-                        Some(tc) => self.tool_executor.build_tool_context_with_task(tc),
-                        None => self.tool_executor.build_tool_context(),
+                        Some(tc) => self
+                            .tool_executor
+                            .build_tool_context_with_task_for_session(
+                                execution_session_id.clone(),
+                                tc,
+                            ),
+                        None => self
+                            .tool_executor
+                            .build_tool_context_for_session(execution_session_id.clone()),
                     });
+                    let registry = self.tool_executor.registry();
                     let mut futures = Vec::with_capacity(valid_fallback_calls.len());
                     for (tool_id, name, args) in &valid_fallback_calls {
                         let ctx_ref = Arc::clone(&exec_ctx);
@@ -1385,7 +1408,6 @@ impl OrchestratorService {
                         let args = args.clone();
                         let tool_id = tool_id.clone();
                         futures.push(async move {
-                            let registry = crate::services::tools::definitions::cached_registry();
                             let result = registry.execute(&name, &ctx_ref, args).await;
                             (tool_id, name, result)
                         });
@@ -1524,7 +1546,8 @@ impl OrchestratorService {
 
                         let result = self
                             .tool_executor
-                            .execute_with_context(
+                            .execute_with_context_for_session(
+                                &execution_session_id,
                                 effective_tool_name,
                                 effective_args,
                                 task_ctx.as_ref(),
@@ -2290,10 +2313,18 @@ impl OrchestratorService {
 
                     // Build execution context once (shared across parallel calls)
                     let exec_ctx = match task_ctx.as_ref() {
-                        Some(tc) => self.tool_executor.build_tool_context_with_task(tc),
-                        None => self.tool_executor.build_tool_context(),
+                        Some(tc) => self
+                            .tool_executor
+                            .build_tool_context_with_task_for_session(
+                                hook_ctx.session_id.clone(),
+                                tc,
+                            ),
+                        None => self
+                            .tool_executor
+                            .build_tool_context_for_session(hook_ctx.session_id.clone()),
                     };
                     let exec_ctx = Arc::new(exec_ctx);
+                    let registry = self.tool_executor.registry();
 
                     // Spawn all tool executions concurrently
                     let mut futures = Vec::with_capacity(valid_calls.len());
@@ -2303,7 +2334,6 @@ impl OrchestratorService {
                         let args = args.clone();
                         let tc_id = tc_id.clone();
                         futures.push(async move {
-                            let registry = crate::services::tools::definitions::cached_registry();
                             let result = registry.execute(&name, &ctx_ref, args).await;
                             (tc_id, name, result)
                         });
@@ -2515,7 +2545,8 @@ impl OrchestratorService {
                             } else {
                                 (
                                     self.tool_executor
-                                        .execute_with_context(
+                                        .execute_with_context_for_session(
+                                            &hook_ctx.session_id,
                                             effective_tool_name,
                                             effective_args,
                                             task_ctx.as_ref(),
@@ -2787,10 +2818,18 @@ impl OrchestratorService {
                     }
 
                     let exec_ctx = match task_ctx.as_ref() {
-                        Some(tc) => self.tool_executor.build_tool_context_with_task(tc),
-                        None => self.tool_executor.build_tool_context(),
+                        Some(tc) => self
+                            .tool_executor
+                            .build_tool_context_with_task_for_session(
+                                hook_ctx.session_id.clone(),
+                                tc,
+                            ),
+                        None => self
+                            .tool_executor
+                            .build_tool_context_for_session(hook_ctx.session_id.clone()),
                     };
                     let exec_ctx = Arc::new(exec_ctx);
+                    let registry = self.tool_executor.registry();
 
                     let mut futures = Vec::with_capacity(valid_fallback_calls.len());
                     for (tool_id, name, args) in &valid_fallback_calls {
@@ -2799,7 +2838,6 @@ impl OrchestratorService {
                         let args = args.clone();
                         let tool_id = tool_id.clone();
                         futures.push(async move {
-                            let registry = crate::services::tools::definitions::cached_registry();
                             let result = registry.execute(&name, &ctx_ref, args).await;
                             (tool_id, name, result)
                         });
@@ -2983,7 +3021,8 @@ impl OrchestratorService {
                             } else {
                                 (
                                     self.tool_executor
-                                        .execute_with_context(
+                                        .execute_with_context_for_session(
+                                            &hook_ctx.session_id,
                                             effective_tool_name,
                                             effective_args,
                                             task_ctx.as_ref(),

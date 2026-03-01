@@ -1114,6 +1114,8 @@ pub async fn execute_standalone(
     baseUrl: Option<String>,
     analysis_session_id: Option<String>,
     analysisSessionId: Option<String>,
+    permission_level: Option<crate::services::orchestrator::permissions::PermissionLevel>,
+    permissionLevel: Option<crate::services::orchestrator::permissions::PermissionLevel>,
     enable_compaction: Option<bool>,
     enable_thinking: Option<bool>,
     max_total_tokens: Option<u32>,
@@ -1128,6 +1130,7 @@ pub async fn execute_standalone(
     knowledge_state: State<'_, super::knowledge::KnowledgeState>,
     file_changes_state: State<'_, super::file_changes::FileChangesState>,
     analytics_state: State<'_, super::analytics::AnalyticsState>,
+    permission_state: State<'_, super::permissions::PermissionState>,
     plugin_state: State<'_, super::plugins::PluginState>,
 ) -> Result<CommandResponse<ExecutionResult>, String> {
     let keyring = KeyringService::new();
@@ -1221,9 +1224,19 @@ pub async fn execute_standalone(
         .or(analysisSessionId)
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    let effective_permission_level = permission_level.or(permissionLevel).unwrap_or_default();
 
     // Clone session_id before it's moved into orchestrator_config
     let event_session_id = analysis_session_id.clone().unwrap_or_default();
+
+    // Apply the current frontend-selected permission mode before execution starts.
+    // This avoids race windows where a reused session may retain stale mode.
+    if !event_session_id.is_empty() {
+        permission_state
+            .gate
+            .set_session_level(&event_session_id, effective_permission_level)
+            .await;
+    }
 
     let requested_plugin_invocations = plugin_invocations.or(pluginInvocations).unwrap_or_default();
     let resolved_plugin_invocations = if requested_plugin_invocations.is_empty() {
@@ -1304,7 +1317,8 @@ pub async fn execute_standalone(
     // Clone provider config before orchestrator_config is moved
     let provider_config_for_index = orchestrator_config.provider.clone();
 
-    let mut orchestrator = OrchestratorService::new(orchestrator_config);
+    let mut orchestrator = OrchestratorService::new(orchestrator_config)
+        .with_permission_gate(permission_state.gate.clone());
 
     // Wire file change tracker for AI file modification tracking
     {

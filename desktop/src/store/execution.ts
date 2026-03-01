@@ -16,6 +16,7 @@ import { deriveConversationTurns, rebuildStandaloneTurns, buildPromptWithAttachm
 import type { FileAttachmentData } from '../types/attachment';
 import type { PluginInvocation } from '../types/plugin';
 import { useAgentsStore } from './agents';
+import { useToolPermissionStore } from './toolPermission';
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   isClaudeCodeBackend,
@@ -1378,6 +1379,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         const turnStartLineId = get().streamLineCounter;
         set({ currentTurnStartLineId: turnStartLineId });
         const standaloneSessionId = get().standaloneSessionId;
+        const permissionLevel = useToolPermissionStore.getState().sessionLevel;
         const contextTurnsLimit = getStandaloneContextTurnsLimit();
         const recentStandaloneTurns = trimStandaloneTurns(existingStandaloneTurns, contextTurnsLimit);
         const { cleanedPrompt, pluginInvocations } = extractPluginInvocationsFromPrompt(description);
@@ -1420,6 +1422,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           enableTools: true,
           baseUrl,
           analysisSessionId: standaloneSessionId,
+          permissionLevel,
           enableCompaction: settings.enableContextCompaction ?? true,
           enableThinking: settings.enableThinking ?? false,
           maxIterations: settings.maxIterations ?? undefined,
@@ -2904,6 +2907,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           : normalizedPrompt;
       const baseUrl = resolveProviderBaseUrl(provider, settingsSnapshot);
       const standaloneSessionId = get().standaloneSessionId;
+      const permissionLevel = useToolPermissionStore.getState().sessionLevel;
 
       try {
         const regenContextState = (await import('./contextSources')).useContextSourcesStore.getState();
@@ -2917,6 +2921,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           enableTools: true,
           baseUrl,
           analysisSessionId: standaloneSessionId,
+          permissionLevel,
           enableCompaction: settingsSnapshot.enableContextCompaction ?? true,
           enableThinking: settingsSnapshot.enableThinking ?? false,
           maxIterations: settingsSnapshot.maxIterations ?? undefined,
@@ -3094,6 +3099,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           : normalizedPrompt;
       const baseUrl = resolveProviderBaseUrl(provider, settingsSnapshot);
       const standaloneSessionId = get().standaloneSessionId;
+      const permissionLevel = useToolPermissionStore.getState().sessionLevel;
 
       try {
         const editContextState = (await import('./contextSources')).useContextSourcesStore.getState();
@@ -3107,6 +3113,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           enableTools: true,
           baseUrl,
           analysisSessionId: standaloneSessionId,
+          permissionLevel,
           enableCompaction: settingsSnapshot.enableContextCompaction ?? true,
           enableThinking: settingsSnapshot.enableThinking ?? false,
           maxIterations: settingsSnapshot.maxIterations ?? undefined,
@@ -3190,6 +3197,7 @@ interface UnifiedEventPayload {
   run_id?: string;
   run_dir?: string;
   request?: string;
+  request_id?: string;
   session_id?: string;
   content?: string;
   phase_id?: string;
@@ -3214,6 +3222,7 @@ interface UnifiedEventPayload {
   required_tools?: string[];
   gate_failures?: string[];
   reasons?: string[];
+  risk?: string;
   worker_count?: number;
   layers?: string[];
   phase_results?: string[];
@@ -3392,6 +3401,19 @@ function handleUnifiedExecutionEvent(
         }
         break;
       }
+      case 'tool_permission_request':
+        if (payload.request_id && payload.tool_name && payload.session_id) {
+          import('./toolPermission').then(({ useToolPermissionStore }) => {
+            useToolPermissionStore.getState().enqueueRequest({
+              requestId: payload.request_id!,
+              sessionId: payload.session_id!,
+              toolName: payload.tool_name!,
+              arguments: payload.arguments || '{}',
+              risk: (payload.risk || 'Dangerous') as 'ReadOnly' | 'SafeWrite' | 'Dangerous',
+            });
+          });
+        }
+        break;
       default:
         break;
     }
@@ -3404,6 +3426,19 @@ function handleUnifiedExecutionEvent(
   const showAnalysisDetails = useSettingsStore.getState().showSubAgentEvents && !isSimpleMode;
 
   switch (payload.type) {
+    case 'tool_permission_request':
+      if (payload.request_id && payload.tool_name && payload.session_id) {
+        import('./toolPermission').then(({ useToolPermissionStore }) => {
+          useToolPermissionStore.getState().enqueueRequest({
+            requestId: payload.request_id!,
+            sessionId: payload.session_id!,
+            toolName: payload.tool_name!,
+            arguments: payload.arguments || '{}',
+            risk: (payload.risk || 'Dangerous') as 'ReadOnly' | 'SafeWrite' | 'Dangerous',
+          });
+        });
+      }
+      return;
     case 'analysis_run_started': {
       const runId = toShortText(payload.run_id, 'run');
       const runDir = toShortText(payload.run_dir);
@@ -4338,6 +4373,17 @@ async function setupTauriEventListeners(get: () => ExecutionState, set: (partial
             }
             break;
           }
+          case 'tool_permission_request':
+            import('./toolPermission').then(({ useToolPermissionStore }) => {
+              useToolPermissionStore.getState().enqueueRequest({
+                requestId: streamEvent.request_id,
+                sessionId: streamEvent.session_id,
+                toolName: streamEvent.tool_name,
+                arguments: streamEvent.arguments,
+                risk: streamEvent.risk,
+              });
+            });
+            break;
           // thinking_start, thinking_delta: skip for background sessions
           // (not needed for background display)
           default:
@@ -4346,29 +4392,19 @@ async function setupTauriEventListeners(get: () => ExecutionState, set: (partial
         return;
       }
 
-      // ---- Tool permission request (not in typed union, handled separately) ----
-      if ((streamEvent as { type: string }).type === 'tool_permission_request') {
-        const evt = streamEvent as unknown as {
-          request_id: string;
-          session_id: string;
-          tool_name: string;
-          arguments: string;
-          risk: string;
-        };
-        import('./toolPermission').then(({ useToolPermissionStore }) => {
-          useToolPermissionStore.getState().enqueueRequest({
-            requestId: evt.request_id,
-            sessionId: evt.session_id,
-            toolName: evt.tool_name,
-            arguments: evt.arguments,
-            risk: evt.risk as 'ReadOnly' | 'SafeWrite' | 'Dangerous',
-          });
-        });
-        return;
-      }
-
       // ---- Foreground session processing (existing logic, unchanged) ----
       switch (streamEvent.type) {
+        case 'tool_permission_request':
+          import('./toolPermission').then(({ useToolPermissionStore }) => {
+            useToolPermissionStore.getState().enqueueRequest({
+              requestId: streamEvent.request_id,
+              sessionId: streamEvent.session_id,
+              toolName: streamEvent.tool_name,
+              arguments: streamEvent.arguments,
+              risk: streamEvent.risk,
+            });
+          });
+          return;
         case 'text_delta': {
           const filterResult = get().toolCallFilter.processChunk(streamEvent.content);
           if (filterResult.toolIndicator) {

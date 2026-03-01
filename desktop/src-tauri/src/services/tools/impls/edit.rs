@@ -36,7 +36,9 @@ impl Tool for EditTool {
         let mut properties = HashMap::new();
         properties.insert(
             "file_path".to_string(),
-            ParameterSchema::string(Some("The absolute path to the file to edit")),
+            ParameterSchema::string(Some(
+                "Path to the file to edit (relative to workspace, or absolute path within workspace)",
+            )),
         );
         properties.insert(
             "old_string".to_string(),

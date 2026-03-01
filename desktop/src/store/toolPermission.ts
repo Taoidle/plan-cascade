@@ -10,7 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { PermissionLevel, ToolPermissionRequest, PermissionResponseType } from '../types/permission';
 
 interface ToolPermissionState {
-  /** Current session's permission level (default: standard) */
+  /** Current session's permission level (default: strict) */
   sessionLevel: PermissionLevel;
   /** Currently displayed permission request (head of queue) */
   pendingRequest: ToolPermissionRequest | null;
@@ -32,12 +32,16 @@ interface ToolPermissionState {
 }
 
 export const useToolPermissionStore = create<ToolPermissionState>((set, get) => ({
-  sessionLevel: 'standard',
+  sessionLevel: 'strict',
   pendingRequest: null,
   requestQueue: [],
   isResponding: false,
 
   setSessionLevel: async (sessionId: string, level: PermissionLevel) => {
+    if (!sessionId || sessionId.trim().length === 0) {
+      set({ sessionLevel: level });
+      return;
+    }
     try {
       await invoke('set_session_permission_level', {
         request: { session_id: sessionId, level },
@@ -100,7 +104,7 @@ export const useToolPermissionStore = create<ToolPermissionState>((set, get) => 
 
   reset: () => {
     set({
-      sessionLevel: 'standard',
+      sessionLevel: 'strict',
       pendingRequest: null,
       requestQueue: [],
       isResponding: false,

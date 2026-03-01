@@ -39,8 +39,16 @@ fn missing_param_error(param: &str) -> String {
 pub(crate) fn validate_path(
     path_str: &str,
     working_dir: &Path,
-    _project_root: &Path,
+    project_root: &Path,
 ) -> Result<PathBuf, String> {
+    if path_str.trim().is_empty() {
+        return Err("Path cannot be empty".to_string());
+    }
+
+    let canonical_root = project_root
+        .canonicalize()
+        .map_err(|e| format!("Invalid project root: {}", e))?;
+
     let path = Path::new(path_str);
     let abs_path = if path.is_absolute() {
         path.to_path_buf()
@@ -48,20 +56,33 @@ pub(crate) fn validate_path(
         working_dir.join(path)
     };
 
-    let check_path = if abs_path.exists() {
-        abs_path.clone()
-    } else if let Some(parent) = abs_path.parent() {
-        if parent.exists() {
-            parent.to_path_buf()
-        } else {
-            return Ok(abs_path);
+    // Resolve the nearest existing ancestor for non-existent paths.
+    // This ensures path normalization (including symlink traversal) before
+    // enforcing the workspace-root boundary.
+    let mut check_path = abs_path.as_path();
+    while !check_path.exists() {
+        match check_path.parent() {
+            Some(parent) => check_path = parent,
+            None => {
+                return Err(format!(
+                    "Invalid path '{}': no existing ancestor",
+                    abs_path.display()
+                ));
+            }
         }
-    } else {
-        return Ok(abs_path);
-    };
+    }
 
     match check_path.canonicalize() {
-        Ok(_canonical) => Ok(abs_path),
+        Ok(canonical) => {
+            if !canonical.starts_with(&canonical_root) {
+                return Err(format!(
+                    "Path '{}' is outside workspace root '{}'",
+                    abs_path.display(),
+                    canonical_root.display()
+                ));
+            }
+            Ok(abs_path)
+        }
         Err(e) => Err(format!("Invalid path: {}", e)),
     }
 }
@@ -80,7 +101,9 @@ impl Tool for ReadTool {
         let mut properties = HashMap::new();
         properties.insert(
             "file_path".to_string(),
-            ParameterSchema::string(Some("The absolute path to the file to read")),
+            ParameterSchema::string(Some(
+                "Path to the file to read (relative to workspace, or absolute path within workspace)",
+            )),
         );
         properties.insert(
             "offset".to_string(),

@@ -325,10 +325,7 @@ pub(super) fn parse_fallback_tool_calls(
     let mut parsed = ParsedFallbackCalls::default();
     let mut seen = HashSet::new();
 
-    for text in [response.content.as_deref(), response.thinking.as_deref()]
-        .into_iter()
-        .flatten()
-    {
+    if let Some(text) = response.content.as_deref() {
         for call in parse_tool_calls(text) {
             match prepare_tool_call_for_execution(&call.tool_name, &call.arguments, analysis_phase)
             {
@@ -367,6 +364,7 @@ pub(super) fn canonical_tool_name(name: &str) -> Option<&'static str> {
         "notebookedit" => Some("NotebookEdit"),
         "codebasesearch" => Some("CodebaseSearch"),
         "searchknowledge" => Some("SearchKnowledge"),
+        "browser" => Some("Browser"),
         _ => None,
     }
 }

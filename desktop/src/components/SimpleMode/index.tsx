@@ -72,6 +72,8 @@ export function SimpleMode() {
     restoreFromHistory,
     sessionUsageTotals,
     turnUsageTotals,
+    taskId,
+    standaloneSessionId,
     attachments,
     addAttachment,
     removeAttachment,
@@ -180,8 +182,6 @@ export function SimpleMode() {
   // Both backends emit `file-change-recorded` events keyed by session ID:
   //   - Claude Code backend uses `taskId`
   //   - Standalone/multi-LLM backend uses `standaloneSessionId`
-  const taskId = useExecutionStore((s) => s.taskId);
-  const standaloneSessionId = useExecutionStore((s) => s.standaloneSessionId);
   const bridgeSessionId = taskId || standaloneSessionId;
   useEffect(() => {
     if (!bridgeSessionId || !workspacePath) return;
@@ -234,6 +234,12 @@ export function SimpleMode() {
   const respondPermission = useToolPermissionStore((s) => s.respond);
   const permissionLevel = useToolPermissionStore((s) => s.sessionLevel);
   const setPermissionLevel = useToolPermissionStore((s) => s.setSessionLevel);
+  const permissionSessionId = taskId || standaloneSessionId || '';
+
+  useEffect(() => {
+    if (!permissionSessionId) return;
+    void setPermissionLevel(permissionSessionId, permissionLevel);
+  }, [permissionSessionId, permissionLevel, setPermissionLevel]);
 
   const handleStart = useCallback(async () => {
     if (!description.trim() || isSubmitting || isAnalyzingStrategy) return;
@@ -740,8 +746,8 @@ export function SimpleMode() {
         connectionStatus={connectionStatus}
         workspacePath={workspacePath}
         permissionLevel={permissionLevel}
-        onPermissionLevelChange={(level) => setPermissionLevel('current-session', level)}
-        sessionId="current-session"
+        onPermissionLevelChange={(level) => setPermissionLevel(permissionSessionId, level)}
+        sessionId={permissionSessionId}
         turnUsage={turnUsageTotals}
         sessionUsage={sessionUsageTotals}
       />

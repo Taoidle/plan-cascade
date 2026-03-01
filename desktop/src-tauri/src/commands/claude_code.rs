@@ -134,7 +134,12 @@ pub async fn send_message(
 pub async fn cancel_execution(
     session_id: String,
     state: State<'_, ClaudeCodeState>,
+    permission_state: State<'_, super::permissions::PermissionState>,
 ) -> Result<CommandResponse<bool>, String> {
+    permission_state
+        .gate
+        .cancel_session_requests(&session_id)
+        .await;
     match state.session_manager.cancel_session(&session_id).await {
         Ok(_) => Ok(CommandResponse::ok(true)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),

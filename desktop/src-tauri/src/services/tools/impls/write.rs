@@ -47,7 +47,9 @@ impl Tool for WriteTool {
         let mut properties = HashMap::new();
         properties.insert(
             "file_path".to_string(),
-            ParameterSchema::string(Some("The absolute path to the file to write")),
+            ParameterSchema::string(Some(
+                "Path to the file to write (relative to workspace, or absolute path within workspace)",
+            )),
         );
         properties.insert(
             "content".to_string(),

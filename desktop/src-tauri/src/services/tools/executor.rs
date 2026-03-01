@@ -202,7 +202,7 @@ pub struct ToolExecutor {
     /// Optional permission gate for tool execution approval.
     permission_gate: Option<Arc<crate::services::orchestrator::permission_gate::PermissionGate>>,
     /// Cancellation token propagated from the orchestrator.
-    /// Used by `build_tool_context()` so that tools can respond to cancellation.
+    /// Included in built tool contexts so tools can respond to cancellation.
     cancellation_token: tokio_util::sync::CancellationToken,
     /// Optional knowledge base pipeline for SearchKnowledge tool.
     knowledge_pipeline: Option<Arc<RagPipeline>>,
@@ -389,9 +389,8 @@ impl ToolExecutor {
 
     /// Set the cancellation token propagated from the orchestrator.
     ///
-    /// When set, `build_tool_context()` uses this token instead of creating
-    /// a fresh one, enabling tools (e.g., Bash) to respond to orchestrator
-    /// cancellation requests.
+    /// Built tool contexts reuse this token so tools (e.g., Bash) can
+    /// respond to orchestrator cancellation requests.
     pub fn set_cancellation_token(&mut self, token: tokio_util::sync::CancellationToken) {
         self.cancellation_token = token;
     }
@@ -484,9 +483,12 @@ impl ToolExecutor {
     /// Used to pass shared state to trait-based tool implementations.
     /// Populates ALL fields so tools can access services through context
     /// instead of requiring executor-private state.
-    pub(crate) fn build_tool_context(&self) -> super::trait_def::ToolExecutionContext {
+    pub(crate) fn build_tool_context_for_session(
+        &self,
+        session_id: impl Into<String>,
+    ) -> super::trait_def::ToolExecutionContext {
         super::trait_def::ToolExecutionContext {
-            session_id: String::new(),
+            session_id: session_id.into(),
             project_root: self.project_root.clone(),
             working_directory: Arc::clone(&self.current_working_dir),
             read_cache: Arc::clone(&self.read_cache),
@@ -510,14 +512,12 @@ impl ToolExecutor {
         }
     }
 
-    /// Build a ToolExecutionContext with a TaskContext for sub-agent support.
-    ///
-    /// Used by execute_with_context() when TaskContext is available.
-    pub fn build_tool_context_with_task(
+    pub fn build_tool_context_with_task_for_session(
         &self,
+        session_id: impl Into<String>,
         task_ctx: &super::task_spawner::TaskContext,
     ) -> super::trait_def::ToolExecutionContext {
-        let mut ctx = self.build_tool_context();
+        let mut ctx = self.build_tool_context_for_session(session_id);
         ctx.task_context = Some(Arc::new(super::task_spawner::TaskContext {
             spawner: Arc::clone(&task_ctx.spawner),
             tx: task_ctx.tx.clone(),
@@ -538,21 +538,22 @@ impl ToolExecutor {
     /// When no `TaskContext` is available (e.g., sub-agent execution), the
     /// Task tool will return a depth-limit error.
     pub async fn execute(&self, tool_name: &str, arguments: &serde_json::Value) -> ToolResult {
-        let ctx = self.build_tool_context();
+        let ctx = self.build_tool_context_for_session(String::new());
         self.registry
             .execute(tool_name, &ctx, arguments.clone())
             .await
     }
 
-    pub async fn execute_with_context(
+    pub async fn execute_with_context_for_session(
         &self,
+        session_id: &str,
         tool_name: &str,
         arguments: &serde_json::Value,
         task_ctx: Option<&super::task_spawner::TaskContext>,
     ) -> ToolResult {
         let ctx = match task_ctx {
-            Some(tc) => self.build_tool_context_with_task(tc),
-            None => self.build_tool_context(),
+            Some(tc) => self.build_tool_context_with_task_for_session(session_id.to_string(), tc),
+            None => self.build_tool_context_for_session(session_id.to_string()),
         };
         self.registry
             .execute(tool_name, &ctx, arguments.clone())

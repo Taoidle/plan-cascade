@@ -697,6 +697,9 @@ const KNOWN_TOOLS: &[&str] = &[
     "WebFetch",
     "WebSearch",
     "NotebookEdit",
+    "CodebaseSearch",
+    "SearchKnowledge",
+    "Browser",
 ];
 
 /// Attempt to parse lenient tool calls from freeform text.

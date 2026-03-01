@@ -35,7 +35,9 @@ impl Tool for NotebookEditTool {
         let mut properties = HashMap::new();
         properties.insert(
             "notebook_path".to_string(),
-            ParameterSchema::string(Some("Absolute path to the .ipynb file")),
+            ParameterSchema::string(Some(
+                "Path to the .ipynb file (relative to workspace, or absolute path within workspace)",
+            )),
         );
         properties.insert(
             "cell_index".to_string(),

@@ -12,7 +12,7 @@ use serde_json::Value;
 pub enum PermissionLevel {
     /// All write and dangerous operations require approval
     Strict,
-    /// Only dangerous operations require approval (default)
+    /// Only dangerous operations require approval
     Standard,
     /// All operations auto-approved
     Permissive,
@@ -20,7 +20,7 @@ pub enum PermissionLevel {
 
 impl Default for PermissionLevel {
     fn default() -> Self {
-        Self::Standard
+        Self::Strict
     }
 }
 
@@ -206,8 +206,8 @@ mod tests {
     }
 
     #[test]
-    fn test_default_permission_level_is_standard() {
-        assert_eq!(PermissionLevel::default(), PermissionLevel::Standard);
+    fn test_default_permission_level_is_strict() {
+        assert_eq!(PermissionLevel::default(), PermissionLevel::Strict);
     }
 
     #[test]

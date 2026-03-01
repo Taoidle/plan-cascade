@@ -15,6 +15,7 @@ use tokio::process::Command;
 use crate::services::llm::types::ParameterSchema;
 use crate::services::tools::executor::ToolResult;
 use crate::services::tools::trait_def::{Tool, ToolExecutionContext};
+use super::read::validate_path;
 
 /// Blocked bash commands for security
 const BLOCKED_COMMANDS: &[&str] = &[
@@ -48,7 +49,12 @@ impl BashTool {
     }
 
     /// Detect simple `cd <path>` commands and update the shared working directory
-    fn detect_cd_command(command: &str, working_dir: &Path, shared_cwd: &Mutex<PathBuf>) {
+    fn detect_cd_command(
+        command: &str,
+        working_dir: &Path,
+        project_root: &Path,
+        shared_cwd: &Mutex<PathBuf>,
+    ) {
         let trimmed = command.trim();
         if trimmed.contains("&&") || trimmed.contains(';') || trimmed.contains('|') {
             return;
@@ -58,10 +64,9 @@ impl BashTool {
             if target.is_empty() {
                 return;
             }
-            let target_path = if Path::new(target).is_absolute() {
-                PathBuf::from(target)
-            } else {
-                working_dir.join(target)
+            let target_path = match validate_path(target, working_dir, project_root) {
+                Ok(path) => path,
+                Err(_) => return,
             };
             if let Ok(canonical) = target_path.canonicalize() {
                 if canonical.is_dir() {
@@ -105,7 +110,9 @@ impl Tool for BashTool {
         );
         properties.insert(
             "working_dir".to_string(),
-            ParameterSchema::string(Some("Working directory for the command")),
+            ParameterSchema::string(Some(
+                "Working directory for the command (must be inside workspace)",
+            )),
         );
         ParameterSchema::object(
             Some("Bash command parameters"),
@@ -130,11 +137,41 @@ impl Tool for BashTool {
             .unwrap_or(DEFAULT_TIMEOUT_MS)
             .min(MAX_TIMEOUT_MS);
 
-        let working_dir = args
+        let cwd_snapshot = ctx.working_directory_snapshot();
+        let requested_working_dir = args
             .get("working_dir")
             .and_then(|v| v.as_str())
             .map(PathBuf::from)
-            .unwrap_or_else(|| ctx.working_directory_snapshot());
+            .unwrap_or_else(|| cwd_snapshot.clone());
+        let requested_path_str = requested_working_dir.to_string_lossy().to_string();
+        let working_dir = match validate_path(&requested_path_str, &cwd_snapshot, &ctx.project_root)
+        {
+            Ok(path) => path,
+            Err(e) => return ToolResult::err(format!("Invalid working directory: {}", e)),
+        };
+        let working_dir = if working_dir.exists() {
+            match working_dir.canonicalize() {
+                Ok(path) => path,
+                Err(e) => {
+                    return ToolResult::err(format!(
+                        "Failed to resolve working directory '{}': {}",
+                        working_dir.display(),
+                        e
+                    ));
+                }
+            }
+        } else {
+            return ToolResult::err(format!(
+                "Working directory does not exist: {}",
+                working_dir.display()
+            ));
+        };
+        if !working_dir.is_dir() {
+            return ToolResult::err(format!(
+                "Working directory is not a directory: {}",
+                working_dir.display()
+            ));
+        }
 
         // Check for blocked commands
         for blocked in BLOCKED_COMMANDS {
@@ -235,7 +272,12 @@ impl Tool for BashTool {
 
                 // Detect simple `cd <path>` and update persistent working directory
                 if output.status.success() {
-                    Self::detect_cd_command(command, &working_dir, &ctx.working_directory);
+                    Self::detect_cd_command(
+                        command,
+                        &working_dir,
+                        &ctx.project_root,
+                        &ctx.working_directory,
+                    );
                 }
 
                 if output.status.success() {

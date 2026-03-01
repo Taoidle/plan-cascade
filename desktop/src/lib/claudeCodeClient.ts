@@ -71,6 +71,14 @@ export type UnifiedStreamEvent =
   | { type: 'thinking_end'; thinking_id?: string }
   | { type: 'tool_start'; tool_id: string; tool_name: string; arguments?: string }
   | { type: 'tool_result'; tool_id: string; result?: string; error?: string }
+  | {
+      type: 'tool_permission_request';
+      request_id: string;
+      session_id: string;
+      tool_name: string;
+      arguments: string;
+      risk: 'ReadOnly' | 'SafeWrite' | 'Dangerous';
+    }
   | { type: 'usage'; input_tokens: number; output_tokens: number; thinking_tokens?: number }
   | { type: 'error'; message: string; code?: string }
   | { type: 'complete'; stop_reason?: string }
