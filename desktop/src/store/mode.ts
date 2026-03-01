@@ -13,6 +13,7 @@ import { persist } from 'zustand/middleware';
 export type Mode =
   | 'simple'
   | 'expert'
+  | 'mcp'
   | 'claude-code'
   | 'projects'
   | 'analytics'
@@ -24,6 +25,7 @@ export type Mode =
 export const MODES: Mode[] = [
   'simple',
   'expert',
+  'mcp',
   'claude-code',
   'projects',
   'analytics',
@@ -36,6 +38,7 @@ export const MODES: Mode[] = [
 export const MODE_LABELS: Record<Mode, string> = {
   simple: 'Simple',
   expert: 'Expert',
+  mcp: 'MCP',
   'claude-code': 'Claude Code',
   projects: 'Projects',
   analytics: 'Analytics',
@@ -48,6 +51,7 @@ export const MODE_LABELS: Record<Mode, string> = {
 export const MODE_DESCRIPTIONS: Record<Mode, string> = {
   simple: 'One-click execution with AI-driven automation',
   expert: 'Full control over PRD editing, agents, and execution',
+  mcp: 'Manage MCP servers and external tool integrations',
   'claude-code': 'Interactive chat with Claude Code CLI',
   projects: 'Browse and resume Claude Code sessions',
   analytics: 'Track usage, costs, and API analytics',

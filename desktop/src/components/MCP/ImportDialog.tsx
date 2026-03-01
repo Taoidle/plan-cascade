@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Cross2Icon, DownloadIcon, CheckIcon, CrossCircledIcon } from '@radix-ui/react-icons';
 import type { ImportResult, CommandResponse } from '../../types/mcp';
@@ -35,10 +36,42 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
       if (response.success && response.data) {
         setResult(response.data);
       } else {
-        setError(response.error || 'Failed to import servers');
+        setError(response.error || t('mcp.errors.importServers'));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to import servers');
+      setError(err instanceof Error ? err.message : t('mcp.errors.importServers'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleImportFromFile = async () => {
+    setLoading(true);
+    setError(null);
+    setResult(null);
+
+    try {
+      const filePath = await openDialog({
+        multiple: false,
+        filters: [{ name: t('mcp.importJsonFile'), extensions: ['json'] }],
+      });
+
+      if (!filePath || Array.isArray(filePath)) {
+        setLoading(false);
+        return;
+      }
+
+      const response = await invoke<CommandResponse<ImportResult>>('import_mcp_from_file', {
+        path: filePath,
+      });
+
+      if (response.success && response.data) {
+        setResult(response.data);
+      } else {
+        setError(response.error || t('mcp.errors.importServers'));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('mcp.errors.importServers'));
     } finally {
       setLoading(false);
     }
@@ -111,6 +144,21 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
                       <span>{t('mcp.importNow')}</span>
                     </>
                   )}
+                </button>
+
+                <button
+                  onClick={handleImportFromFile}
+                  disabled={loading}
+                  className={clsx(
+                    'w-full mt-2 flex items-center justify-center gap-2 py-2.5 rounded-md',
+                    'bg-gray-700 hover:bg-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600',
+                    'text-white text-sm font-medium',
+                    'disabled:opacity-50',
+                    'transition-colors',
+                  )}
+                >
+                  <DownloadIcon className="w-4 h-4" />
+                  <span>{t('mcp.importJsonFile')}</span>
                 </button>
               </>
             )}

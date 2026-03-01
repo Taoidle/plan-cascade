@@ -689,7 +689,8 @@ impl OrchestratorService {
 
     /// Configure web search provider so the WebSearch tool is actually executable.
     pub fn with_search_provider(mut self, provider_name: &str, api_key: Option<String>) -> Self {
-        self.tool_executor.set_search_provider(provider_name, api_key);
+        self.tool_executor
+            .set_search_provider(provider_name, api_key);
         self
     }
 

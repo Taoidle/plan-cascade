@@ -265,6 +265,7 @@ for line in sys.stdin:
         use std::collections::HashMap;
 
         let config = McpServerConfig {
+            id: "adapter-test".to_string(),
             name: "adapter-test".to_string(),
             transport: McpTransportConfig::Stdio {
                 command: "python3".to_string(),

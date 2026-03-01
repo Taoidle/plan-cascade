@@ -461,11 +461,11 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         category: 'mcp' as CommandCategory,
         icon: MixerHorizontalIcon,
         action: () => {
-          // Open MCP server registry
+          setMode('mcp');
         },
         keywords: ['mcp', 'server', 'registry', 'browse'],
         priority: 90,
-        contexts: ['expert', 'global'],
+        contexts: ['expert', 'mcp', 'global'],
       },
       {
         id: 'mcp-add-server',
@@ -474,11 +474,11 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         category: 'mcp' as CommandCategory,
         icon: PlusIcon,
         action: () => {
-          // Open add MCP server dialog
+          setMode('mcp');
         },
         keywords: ['mcp', 'add', 'server', 'new'],
         priority: 85,
-        contexts: ['expert'],
+        contexts: ['expert', 'mcp'],
       },
       {
         id: 'mcp-refresh-servers',
@@ -487,11 +487,11 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         category: 'mcp' as CommandCategory,
         icon: ResetIcon,
         action: () => {
-          // Refresh MCP servers
+          setMode('mcp');
         },
         keywords: ['mcp', 'refresh', 'servers', 'reload'],
         priority: 70,
-        contexts: ['expert'],
+        contexts: ['expert', 'mcp'],
       },
       {
         id: 'mcp-import-config',
@@ -500,11 +500,11 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         category: 'mcp' as CommandCategory,
         icon: ArchiveIcon,
         action: () => {
-          // Import MCP config
+          setMode('mcp');
         },
         keywords: ['mcp', 'import', 'config', 'configuration'],
         priority: 60,
-        contexts: ['expert'],
+        contexts: ['expert', 'mcp'],
       },
       {
         id: 'mcp-export-config',
@@ -513,11 +513,11 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         category: 'mcp' as CommandCategory,
         icon: DownloadIcon,
         action: () => {
-          // Export MCP config
+          setMode('mcp');
         },
         keywords: ['mcp', 'export', 'config', 'backup'],
         priority: 55,
-        contexts: ['expert'],
+        contexts: ['expert', 'mcp'],
       },
       {
         id: 'mcp-test-connection',
@@ -526,14 +526,14 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         category: 'mcp' as CommandCategory,
         icon: CheckCircledIcon,
         action: () => {
-          // Test MCP server connections
+          setMode('mcp');
         },
         keywords: ['mcp', 'test', 'connection', 'verify'],
         priority: 65,
-        contexts: ['expert'],
+        contexts: ['expert', 'mcp'],
       },
     ],
-    [t],
+    [t, setMode],
   );
 
   // ============================================================================

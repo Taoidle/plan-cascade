@@ -217,14 +217,61 @@ impl Database {
                 env TEXT,
                 url TEXT,
                 headers TEXT,
+                has_env_secret INTEGER NOT NULL DEFAULT 0,
+                has_headers_secret INTEGER NOT NULL DEFAULT 0,
                 enabled INTEGER DEFAULT 1,
+                auto_connect INTEGER NOT NULL DEFAULT 1,
                 status TEXT DEFAULT 'unknown',
+                last_error TEXT,
+                last_connected_at TEXT,
+                retry_count INTEGER NOT NULL DEFAULT 0,
                 last_checked TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             )",
             [],
         )?;
+
+        // Migration: add MCP columns introduced after initial releases.
+        if !Self::table_has_column(&conn, "mcp_servers", "has_env_secret") {
+            let _ = conn.execute(
+                "ALTER TABLE mcp_servers ADD COLUMN has_env_secret INTEGER NOT NULL DEFAULT 0",
+                [],
+            );
+        }
+        if !Self::table_has_column(&conn, "mcp_servers", "has_headers_secret") {
+            let _ = conn.execute(
+                "ALTER TABLE mcp_servers ADD COLUMN has_headers_secret INTEGER NOT NULL DEFAULT 0",
+                [],
+            );
+        }
+        if !Self::table_has_column(&conn, "mcp_servers", "auto_connect") {
+            let _ = conn.execute(
+                "ALTER TABLE mcp_servers ADD COLUMN auto_connect INTEGER NOT NULL DEFAULT 1",
+                [],
+            );
+        }
+        if !Self::table_has_column(&conn, "mcp_servers", "last_error") {
+            let _ = conn.execute("ALTER TABLE mcp_servers ADD COLUMN last_error TEXT", []);
+        }
+        if !Self::table_has_column(&conn, "mcp_servers", "last_connected_at") {
+            let _ = conn.execute(
+                "ALTER TABLE mcp_servers ADD COLUMN last_connected_at TEXT",
+                [],
+            );
+        }
+        if !Self::table_has_column(&conn, "mcp_servers", "retry_count") {
+            let _ = conn.execute(
+                "ALTER TABLE mcp_servers ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0",
+                [],
+            );
+        }
+
+        // Normalize legacy transport label.
+        let _ = conn.execute(
+            "UPDATE mcp_servers SET server_type = 'stream_http' WHERE server_type = 'sse'",
+            [],
+        );
 
         // Create checkpoints table
         conn.execute(
@@ -1231,12 +1278,22 @@ impl Database {
         let headers_json = serde_json::to_string(&server.headers).unwrap_or_default();
         let server_type = match server.server_type {
             crate::models::McpServerType::Stdio => "stdio",
-            crate::models::McpServerType::Sse => "sse",
+            crate::models::McpServerType::StreamHttp => "stream_http",
         };
 
         conn.execute(
-            "INSERT INTO mcp_servers (id, name, server_type, command, args, env, url, headers, enabled, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+            "INSERT INTO mcp_servers (
+                id, name, server_type, command, args, env, url, headers,
+                has_env_secret, has_headers_secret, enabled, auto_connect,
+                status, last_error, last_connected_at, retry_count, last_checked,
+                created_at, updated_at
+             )
+             VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+                ?9, ?10, ?11, ?12,
+                ?13, ?14, ?15, ?16, ?17,
+                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+             )",
             params![
                 server.id,
                 server.name,
@@ -1246,7 +1303,20 @@ impl Database {
                 env_json,
                 server.url,
                 headers_json,
+                server.has_env_secret as i32,
+                server.has_headers_secret as i32,
                 server.enabled as i32,
+                server.auto_connect as i32,
+                match &server.status {
+                    crate::models::McpServerStatus::Connected => "connected".to_string(),
+                    crate::models::McpServerStatus::Disconnected => "disconnected".to_string(),
+                    crate::models::McpServerStatus::Error(msg) => format!("error:{}", msg),
+                    crate::models::McpServerStatus::Unknown => "unknown".to_string(),
+                },
+                server.last_error,
+                server.last_connected_at,
+                server.retry_count as i64,
+                server.last_checked,
             ],
         )?;
 
@@ -1258,7 +1328,10 @@ impl Database {
         let conn = self.get_connection()?;
 
         let result = conn.query_row(
-            "SELECT id, name, server_type, command, args, env, url, headers, enabled, status, last_checked, created_at, updated_at
+            "SELECT id, name, server_type, command, args, env, url, headers,
+                    has_env_secret, has_headers_secret, enabled, auto_connect, status,
+                    last_error, last_connected_at, retry_count,
+                    last_checked, created_at, updated_at
              FROM mcp_servers WHERE id = ?1",
             params![id],
             |row| Self::row_to_mcp_server(row),
@@ -1276,8 +1349,11 @@ impl Database {
         let conn = self.get_connection()?;
 
         let mut stmt = conn.prepare(
-            "SELECT id, name, server_type, command, args, env, url, headers, enabled, status, last_checked, created_at, updated_at
-             FROM mcp_servers ORDER BY name ASC"
+            "SELECT id, name, server_type, command, args, env, url, headers,
+                    has_env_secret, has_headers_secret, enabled, auto_connect, status,
+                    last_error, last_connected_at, retry_count,
+                    last_checked, created_at, updated_at
+             FROM mcp_servers ORDER BY name ASC",
         )?;
 
         let servers = stmt
@@ -1297,7 +1373,7 @@ impl Database {
         let headers_json = serde_json::to_string(&server.headers).unwrap_or_default();
         let server_type = match server.server_type {
             crate::models::McpServerType::Stdio => "stdio",
-            crate::models::McpServerType::Sse => "sse",
+            crate::models::McpServerType::StreamHttp => "stream_http",
         };
         let status = match &server.status {
             crate::models::McpServerStatus::Connected => "connected".to_string(),
@@ -1308,7 +1384,9 @@ impl Database {
 
         conn.execute(
             "UPDATE mcp_servers SET name = ?2, server_type = ?3, command = ?4, args = ?5, env = ?6,
-             url = ?7, headers = ?8, enabled = ?9, status = ?10, last_checked = ?11, updated_at = CURRENT_TIMESTAMP
+             url = ?7, headers = ?8, has_env_secret = ?9, has_headers_secret = ?10, enabled = ?11,
+             auto_connect = ?12, status = ?13, last_error = ?14, last_connected_at = ?15,
+             retry_count = ?16, last_checked = ?17, updated_at = CURRENT_TIMESTAMP
              WHERE id = ?1",
             params![
                 server.id,
@@ -1319,8 +1397,14 @@ impl Database {
                 env_json,
                 server.url,
                 headers_json,
+                server.has_env_secret as i32,
+                server.has_headers_secret as i32,
                 server.enabled as i32,
+                server.auto_connect as i32,
                 status,
+                server.last_error,
+                server.last_connected_at,
+                server.retry_count as i64,
                 server.last_checked,
             ],
         )?;
@@ -1375,7 +1459,10 @@ impl Database {
         let conn = self.get_connection()?;
 
         let result = conn.query_row(
-            "SELECT id, name, server_type, command, args, env, url, headers, enabled, status, last_checked, created_at, updated_at
+            "SELECT id, name, server_type, command, args, env, url, headers,
+                    has_env_secret, has_headers_secret, enabled, auto_connect, status,
+                    last_error, last_connected_at, retry_count,
+                    last_checked, created_at, updated_at
              FROM mcp_servers WHERE name = ?1",
             params![name],
             |row| Self::row_to_mcp_server(row),
@@ -1398,16 +1485,22 @@ impl Database {
         let env_json: String = row.get::<_, String>(5).unwrap_or_default();
         let url: Option<String> = row.get(6)?;
         let headers_json: String = row.get::<_, String>(7).unwrap_or_default();
-        let enabled: i32 = row.get(8)?;
+        let has_env_secret: i32 = row.get::<_, i32>(8).unwrap_or(0);
+        let has_headers_secret: i32 = row.get::<_, i32>(9).unwrap_or(0);
+        let enabled: i32 = row.get(10)?;
+        let auto_connect: i32 = row.get::<_, i32>(11).unwrap_or(1);
         let status_str: String = row
-            .get::<_, String>(9)
+            .get::<_, String>(12)
             .unwrap_or_else(|_| "unknown".to_string());
-        let last_checked: Option<String> = row.get(10)?;
-        let created_at: Option<String> = row.get(11)?;
-        let updated_at: Option<String> = row.get(12)?;
+        let last_error: Option<String> = row.get::<_, Option<String>>(13).unwrap_or(None);
+        let last_connected_at: Option<String> = row.get::<_, Option<String>>(14).unwrap_or(None);
+        let retry_count: i64 = row.get::<_, i64>(15).unwrap_or(0);
+        let last_checked: Option<String> = row.get(16)?;
+        let created_at: Option<String> = row.get(17)?;
+        let updated_at: Option<String> = row.get(18)?;
 
         let server_type = match server_type_str.as_str() {
-            "sse" => crate::models::McpServerType::Sse,
+            "stream_http" | "sse" => crate::models::McpServerType::StreamHttp,
             _ => crate::models::McpServerType::Stdio,
         };
 
@@ -1436,8 +1529,14 @@ impl Database {
             env,
             url,
             headers,
+            has_env_secret: has_env_secret != 0,
+            has_headers_secret: has_headers_secret != 0,
             enabled: enabled != 0,
+            auto_connect: auto_connect != 0,
             status,
+            last_error,
+            last_connected_at,
+            retry_count: retry_count.max(0) as u32,
             last_checked,
             created_at,
             updated_at,

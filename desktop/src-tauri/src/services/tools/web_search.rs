@@ -619,7 +619,11 @@ impl WebSearchService {
             .filter(|c| !c.is_control() || *c == ' ')
             .collect();
         let results = self
-            .search_with_constraints(&normalized_query, max_results, &SearchConstraints::default())
+            .search_with_constraints(
+                &normalized_query,
+                max_results,
+                &SearchConstraints::default(),
+            )
             .await?;
         Ok(self.format_results_markdown(&normalized_query, &results))
     }
@@ -696,7 +700,10 @@ mod tests {
             ]),
             vec!["Bad.com".to_string(), "http://bad.com/path".to_string()],
         );
-        assert_eq!(constraints.allow_domains, Some(vec!["example.com".to_string()]));
+        assert_eq!(
+            constraints.allow_domains,
+            Some(vec!["example.com".to_string()])
+        );
         assert_eq!(constraints.block_domains, vec!["bad.com".to_string()]);
     }
 
@@ -714,8 +721,14 @@ mod tests {
             vec!["blocked.example.com".to_string()],
         );
         assert!(is_result_allowed("https://example.com/page", &constraints));
-        assert!(is_result_allowed("https://docs.example.com/page", &constraints));
-        assert!(!is_result_allowed("https://blocked.example.com/a", &constraints));
+        assert!(is_result_allowed(
+            "https://docs.example.com/page",
+            &constraints
+        ));
+        assert!(!is_result_allowed(
+            "https://blocked.example.com/a",
+            &constraints
+        ));
         assert!(!is_result_allowed("https://rust-lang.org", &constraints));
     }
 }

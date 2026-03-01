@@ -247,7 +247,10 @@ mod tests {
         });
         let result = tool.execute(&ctx, args).await;
         assert!(result.is_error());
-        assert!(result.error_message_owned().unwrap().contains("appears 3 times"));
+        assert!(result
+            .error_message_owned()
+            .unwrap()
+            .contains("appears 3 times"));
     }
 
     #[tokio::test]

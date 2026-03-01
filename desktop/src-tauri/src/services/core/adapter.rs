@@ -61,7 +61,9 @@ pub fn value_to_parameter_schema(value: &Value) -> ParameterSchema {
 /// `Err(CoreError::Command(...))`.
 pub fn tool_result_to_core_result(result: ToolResult) -> CoreResult<Value> {
     if result.is_success() {
-        Ok(Value::String(result.success_message_owned().unwrap_or_default()))
+        Ok(Value::String(
+            result.success_message_owned().unwrap_or_default(),
+        ))
     } else {
         Err(CoreError::command(
             result
@@ -77,7 +79,9 @@ pub fn tool_result_to_core_result(result: ToolResult) -> CoreResult<Value> {
 /// `Err(AppError::Command(...))`.
 pub fn tool_result_to_app_result(result: ToolResult) -> AppResult<Value> {
     if result.is_success() {
-        Ok(Value::String(result.success_message_owned().unwrap_or_default()))
+        Ok(Value::String(
+            result.success_message_owned().unwrap_or_default(),
+        ))
     } else {
         Err(AppError::command(
             result
@@ -568,7 +572,10 @@ mod tests {
         let result: AppResult<Value> = Err(AppError::command("it broke"));
         let tool_result = app_result_to_tool_result(result);
         assert!(tool_result.is_error());
-        assert!(tool_result.error_message_owned().unwrap().contains("it broke"));
+        assert!(tool_result
+            .error_message_owned()
+            .unwrap()
+            .contains("it broke"));
     }
 
     #[test]
@@ -705,7 +712,10 @@ mod tests {
         let ctx = make_tool_execution_context();
         let result = adapter.execute(&ctx, Value::Null).await;
         assert!(result.is_error());
-        assert!(result.error_message_owned().unwrap().contains("new tool failed"));
+        assert!(result
+            .error_message_owned()
+            .unwrap()
+            .contains("new tool failed"));
     }
 
     // ── Registry import tests ──────────────────────────────────────────

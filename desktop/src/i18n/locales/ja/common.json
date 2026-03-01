@@ -156,6 +156,79 @@
     "retryAttempts": "リトライ回数"
   },
 
+  "common": {
+    "retry": "再試行",
+    "cancel": "キャンセル",
+    "done": "完了",
+    "adding": "追加中..."
+  },
+
+  "mcp": {
+    "title": "MCP サーバー",
+    "description": "Model Context Protocol サーバーを管理して AI 機能を拡張します",
+    "refresh": "更新",
+    "import": "インポート",
+    "addServer": "サーバーを追加",
+    "noServers": "MCP サーバーがありません",
+    "noServersDescription": "MCP サーバーを追加して Claude の外部ツール連携を拡張します",
+    "importFromClaude": "Claude Desktop からインポート",
+    "addManually": "手動で追加",
+    "test": "テスト",
+    "edit": "編集",
+    "connect": "接続",
+    "disconnect": "切断",
+    "confirmDelete": "このサーバーを削除してもよろしいですか？",
+    "addServerTitle": "MCP サーバーを追加",
+    "serverType": "サーバー種別",
+    "serverTypeStdio": "Stdio",
+    "serverTypeStreamHttp": "Stream HTTP",
+    "serverName": "サーバー名",
+    "command": "コマンド",
+    "arguments": "引数",
+    "envVariables": "環境変数",
+    "addEnvVar": "変数を追加",
+    "serverUrl": "サーバー URL",
+    "headers": "ヘッダー",
+    "addHeader": "ヘッダーを追加",
+    "placeholders": {
+      "serverName": "My MCP Server",
+      "command": "node",
+      "arguments": "server.js --port 3000",
+      "envKey": "KEY",
+      "envValue": "value",
+      "serverUrl": "http://localhost:8080/mcp",
+      "headerKey": "Authorization",
+      "headerValue": "Bearer xxx"
+    },
+    "importTitle": "Claude Desktop からインポート",
+    "importDescription": "Claude Desktop の設定から MCP サーバー構成を取り込みます",
+    "configPath": "設定パス",
+    "importing": "インポート中...",
+    "importNow": "今すぐインポート",
+    "importJsonFile": "JSON ファイルをインポート",
+    "added": "追加",
+    "skipped": "スキップ",
+    "failed": "失敗",
+    "importedServers": "インポート済みサーバー",
+    "importErrors": "エラー",
+    "status": {
+      "connected": "接続済み",
+      "disconnected": "切断済み",
+      "unknown": "不明",
+      "error": "エラー: {{message}}"
+    },
+    "errors": {
+      "fetchServers": "MCP サーバー一覧の取得に失敗しました",
+      "testConnection": "MCP サーバーの接続テストに失敗しました",
+      "toggleServer": "MCP サーバー状態の更新に失敗しました",
+      "connectServer": "MCP サーバーへの接続に失敗しました",
+      "disconnectServer": "MCP サーバーの切断に失敗しました",
+      "deleteServer": "MCP サーバーの削除に失敗しました",
+      "addServer": "MCP サーバーの追加に失敗しました",
+      "importServers": "MCP サーバーのインポートに失敗しました"
+    }
+  },
+
   "timeline": {
     "title": "タイムライン",
     "noCheckpoints": "チェックポイントがありません",

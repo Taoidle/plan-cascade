@@ -8,13 +8,17 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
+use crate::commands::mcp::McpRuntimeState;
 use crate::commands::plugins::PluginState;
 use crate::commands::remote::RemoteState;
 use crate::commands::spec_interview::SpecInterviewState;
 use crate::commands::standalone::StandaloneState;
 use crate::models::response::CommandResponse;
+use crate::services::mcp::McpService;
 use crate::services::orchestrator::index_manager::IndexManager;
 use crate::services::recovery::detector::{IncompleteTask, RecoveryDetector};
+use crate::services::tools::mcp_manager::McpManager;
+use crate::services::tools::runtime_tools;
 use crate::state::AppState;
 
 /// Result of application initialization
@@ -80,6 +84,7 @@ pub async fn init_app(
     remote_state: State<'_, RemoteState>,
     plugin_state: State<'_, PluginState>,
     spec_interview_state: State<'_, SpecInterviewState>,
+    mcp_state: State<'_, McpRuntimeState>,
     app: AppHandle,
 ) -> Result<CommandResponse<InitResult>, String> {
     emit_init_progress(&app, InitStage::CoreState, 1);
@@ -160,6 +165,39 @@ pub async fn init_app(
                 .with_database(|db| RecoveryDetector::detect(db))
                 .await
                 .unwrap_or_default();
+
+            // Auto-connect enabled MCP servers. Non-fatal.
+            if let Ok(service) = McpService::new() {
+                if let Ok(servers) = service.list_enabled_auto_connect_servers() {
+                    let mut registry = mcp_state.registry.write().await;
+                    for server in servers {
+                        let config = match McpManager::config_from_model(&server) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Skipping MCP server '{}' during init: {}",
+                                    server.name,
+                                    e
+                                );
+                                continue;
+                            }
+                        };
+
+                        if let Err(e) = mcp_state
+                            .manager
+                            .connect_server(&config, &mut registry)
+                            .await
+                        {
+                            tracing::warn!(
+                                "Failed to auto-connect MCP server '{}' during init: {}",
+                                server.name,
+                                e
+                            );
+                        }
+                    }
+                    runtime_tools::replace_from_registry(&registry);
+                }
+            }
 
             emit_init_progress(&app, InitStage::RemoteGateway, 6);
 

@@ -2664,7 +2664,10 @@ mod tests {
         assert_eq!(normalize_search_provider_name("brave"), "brave");
         assert_eq!(normalize_search_provider_name("brave_search"), "brave");
         assert_eq!(normalize_search_provider_name("searxng"), "searxng");
-        assert_eq!(normalize_search_provider_name("unknown-provider"), "duckduckgo");
+        assert_eq!(
+            normalize_search_provider_name("unknown-provider"),
+            "duckduckgo"
+        );
     }
 
     #[test]

@@ -81,8 +81,10 @@ fn main() {
             plan_cascade_desktop::commands::mcp::test_mcp_server,
             plan_cascade_desktop::commands::mcp::toggle_mcp_server,
             plan_cascade_desktop::commands::mcp::import_from_claude_desktop,
+            plan_cascade_desktop::commands::mcp::import_mcp_from_file,
             plan_cascade_desktop::commands::mcp::connect_mcp_server,
             plan_cascade_desktop::commands::mcp::disconnect_mcp_server,
+            plan_cascade_desktop::commands::mcp::connect_enabled_mcp_servers,
             plan_cascade_desktop::commands::mcp::list_connected_mcp_servers,
             plan_cascade_desktop::commands::mcp::list_mcp_tools,
             // Claude Code commands

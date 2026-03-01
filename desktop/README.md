@@ -90,7 +90,7 @@ AI-powered code search and understanding:
 Full [Model Context Protocol](https://modelcontextprotocol.io/) support:
 - Server registry management
 - Custom tool and resource provider configuration
-- SSE and stdio transport support
+- Streamable HTTP and stdio transport support
 
 ### Analytics Dashboard
 

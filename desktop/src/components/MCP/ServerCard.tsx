@@ -6,25 +6,39 @@
 
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import * as Switch from '@radix-ui/react-switch';
 import { PlayIcon, Pencil1Icon, TrashIcon, GearIcon, Link2Icon } from '@radix-ui/react-icons';
 import type { McpServer, McpServerStatus } from '../../types/mcp';
-import { getStatusDisplay, isStatusError } from '../../types/mcp';
+import { isStatusError } from '../../types/mcp';
 
 interface ServerCardProps {
   server: McpServer;
+  connected?: boolean;
   onTest: () => void;
   onToggle: (enabled: boolean) => void;
+  onConnect: () => void;
+  onDisconnect: () => void;
   onEdit: () => void;
   onDelete: () => void;
   isLoading?: boolean;
 }
 
-export function ServerCard({ server, onTest, onToggle, onEdit, onDelete, isLoading = false }: ServerCardProps) {
+export function ServerCard({
+  server,
+  connected = false,
+  onTest,
+  onToggle,
+  onConnect,
+  onDisconnect,
+  onEdit,
+  onDelete,
+  isLoading = false,
+}: ServerCardProps) {
   const { t } = useTranslation();
 
   const statusColor = getServerStatusColor(server.status, server.enabled);
-  const statusLabel = getStatusDisplay(server.status);
+  const statusLabel = getStatusDisplay(server.status, t);
 
   return (
     <div
@@ -53,10 +67,10 @@ export function ServerCard({ server, onTest, onToggle, onEdit, onDelete, isLoadi
                   'px-1.5 py-0.5 rounded text-xs font-medium',
                   server.server_type === 'stdio'
                     ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
-                    : 'bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300',
+                    : 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300',
                 )}
               >
-                {server.server_type.toUpperCase()}
+                {server.server_type === 'stdio' ? t('mcp.serverTypeStdio') : t('mcp.serverTypeStreamHttp')}
               </span>
               {/* Status Label */}
               <span className={clsx('text-xs', getStatusTextColor(server.status))}>{statusLabel}</span>
@@ -100,7 +114,7 @@ export function ServerCard({ server, onTest, onToggle, onEdit, onDelete, isLoadi
             </code>
           </div>
         )}
-        {server.server_type === 'sse' && server.url && (
+        {server.server_type === 'stream_http' && server.url && (
           <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
             <Link2Icon className="w-3.5 h-3.5" />
             <code className="truncate max-w-xs">{server.url}</code>
@@ -110,6 +124,21 @@ export function ServerCard({ server, onTest, onToggle, onEdit, onDelete, isLoadi
 
       {/* Action Buttons */}
       <div className="flex items-center gap-2">
+        <button
+          onClick={connected ? onDisconnect : onConnect}
+          disabled={isLoading || !server.enabled}
+          className={clsx(
+            'flex items-center gap-1 px-2.5 py-1.5 rounded-md',
+            connected
+              ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800'
+              : 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-800',
+            'disabled:opacity-50 disabled:cursor-not-allowed',
+            'text-xs font-medium transition-colors',
+          )}
+        >
+          <span>{connected ? t('mcp.disconnect') : t('mcp.connect')}</span>
+        </button>
+
         <button
           onClick={onTest}
           disabled={isLoading || !server.enabled}
@@ -159,6 +188,14 @@ export function ServerCard({ server, onTest, onToggle, onEdit, onDelete, isLoadi
       </div>
     </div>
   );
+}
+
+function getStatusDisplay(status: McpServerStatus, t: TFunction): string {
+  if (status === 'connected') return t('mcp.status.connected');
+  if (status === 'disconnected') return t('mcp.status.disconnected');
+  if (status === 'unknown') return t('mcp.status.unknown');
+  if (isStatusError(status)) return t('mcp.status.error', { message: status.error });
+  return t('mcp.status.unknown');
 }
 
 function getServerStatusColor(status: McpServerStatus, enabled: boolean): string {

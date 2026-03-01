@@ -528,7 +528,10 @@ async fn test_executor_bash_tool() {
         result.error_message()
     );
     assert!(
-        result.success_message_owned().unwrap().contains("integration_test_output"),
+        result
+            .success_message_owned()
+            .unwrap()
+            .contains("integration_test_output"),
         "Bash output should contain echoed string"
     );
 }
@@ -672,7 +675,10 @@ async fn test_executor_grep_tool_no_matches() {
 
     let result = executor.execute("Grep", &args).await;
     assert!(result.is_success());
-    assert!(result.success_message_owned().unwrap().contains("No matches found"));
+    assert!(result
+        .success_message_owned()
+        .unwrap()
+        .contains("No matches found"));
 }
 
 #[tokio::test]
@@ -712,7 +718,10 @@ async fn test_executor_ls_tool_show_hidden() {
     });
     let result = executor.execute("LS", &args).await;
     assert!(result.is_success());
-    assert!(!result.success_message_owned().unwrap().contains(".hidden_file"));
+    assert!(!result
+        .success_message_owned()
+        .unwrap()
+        .contains(".hidden_file"));
 
     // With show_hidden
     let args = serde_json::json!({
@@ -721,7 +730,10 @@ async fn test_executor_ls_tool_show_hidden() {
     });
     let result = executor.execute("LS", &args).await;
     assert!(result.is_success());
-    assert!(result.success_message_owned().unwrap().contains(".hidden_file"));
+    assert!(result
+        .success_message_owned()
+        .unwrap()
+        .contains(".hidden_file"));
 }
 
 #[tokio::test]
@@ -768,7 +780,10 @@ async fn test_executor_unknown_tool() {
 
     let result = executor.execute("UnknownTool", &args).await;
     assert!(result.is_error());
-    assert!(result.error_message_owned().unwrap().contains("Unknown tool"));
+    assert!(result
+        .error_message_owned()
+        .unwrap()
+        .contains("Unknown tool"));
 }
 
 // ============================================================================
@@ -907,7 +922,10 @@ async fn test_bash_then_read_flow() {
         "Bash should succeed: {:?}",
         bash_result.error_message()
     );
-    assert!(bash_result.success_message_owned().unwrap().contains("file_verified"));
+    assert!(bash_result
+        .success_message_owned()
+        .unwrap()
+        .contains("file_verified"));
 
     // Step 3: Read the file back
     let read_args = serde_json::json!({
@@ -915,7 +933,10 @@ async fn test_bash_then_read_flow() {
     });
     let read_result = executor.execute("Read", &read_args).await;
     assert!(read_result.is_success());
-    assert!(read_result.success_message_owned().unwrap().contains("bash_created_content"));
+    assert!(read_result
+        .success_message_owned()
+        .unwrap()
+        .contains("bash_created_content"));
 }
 
 // ============================================================================
@@ -1097,7 +1118,10 @@ async fn test_web_search_not_configured() {
     });
     let result = executor.execute("WebSearch", &args).await;
     assert!(result.is_error());
-    assert!(result.error_message_owned().unwrap().contains("not configured"));
+    assert!(result
+        .error_message_owned()
+        .unwrap()
+        .contains("not configured"));
 }
 
 // ============================================================================
@@ -1124,7 +1148,10 @@ async fn test_notebook_edit_missing_params() {
     let args = serde_json::json!({});
     let result = executor.execute("NotebookEdit", &args).await;
     assert!(result.is_error());
-    assert!(result.error_message_owned().unwrap().contains("notebook_path"));
+    assert!(result
+        .error_message_owned()
+        .unwrap()
+        .contains("notebook_path"));
 }
 
 #[tokio::test]

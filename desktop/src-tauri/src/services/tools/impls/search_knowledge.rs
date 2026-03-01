@@ -243,10 +243,7 @@ mod tests {
             .execute(&ctx, serde_json::json!({ "query": "architecture" }))
             .await;
         assert!(result.is_error());
-        assert!(result
-            .error_message()
-            .unwrap()
-            .contains("not configured"));
+        assert!(result.error_message().unwrap().contains("not configured"));
     }
 
     #[tokio::test]

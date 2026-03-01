@@ -11,8 +11,9 @@ use std::collections::HashMap;
 pub enum McpServerType {
     /// Standard I/O based server (spawns a process)
     Stdio,
-    /// Server-Sent Events based server (HTTP connection)
-    Sse,
+    /// Streamable HTTP based server (HTTP connection)
+    #[serde(rename = "stream_http", alias = "sse")]
+    StreamHttp,
 }
 
 impl Default for McpServerType {
@@ -48,7 +49,7 @@ pub struct McpServer {
     pub id: String,
     /// Display name
     pub name: String,
-    /// Server type (stdio or sse)
+    /// Server type (stdio or stream_http)
     #[serde(default)]
     pub server_type: McpServerType,
     /// Command to run (for stdio)
@@ -59,17 +60,35 @@ pub struct McpServer {
     /// Environment variables (for stdio)
     #[serde(default)]
     pub env: HashMap<String, String>,
-    /// URL for SSE server
+    /// URL for Streamable HTTP server
     pub url: Option<String>,
-    /// HTTP headers for SSE server
+    /// HTTP headers for Streamable HTTP server
     #[serde(default)]
     pub headers: HashMap<String, String>,
+    /// Whether environment variables are stored in secret storage
+    #[serde(default)]
+    pub has_env_secret: bool,
+    /// Whether headers are stored in secret storage
+    #[serde(default)]
+    pub has_headers_secret: bool,
     /// Whether the server is enabled
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    /// Whether this server should auto-connect on app startup
+    #[serde(default = "default_auto_connect")]
+    pub auto_connect: bool,
     /// Current connection status
     #[serde(default)]
     pub status: McpServerStatus,
+    /// Last connection error message (if any)
+    #[serde(default)]
+    pub last_error: Option<String>,
+    /// Last successful connection timestamp
+    #[serde(default)]
+    pub last_connected_at: Option<String>,
+    /// Connection retry count (for diagnostics)
+    #[serde(default)]
+    pub retry_count: u32,
     /// Last time the server was checked
     pub last_checked: Option<String>,
     /// When the server was created
@@ -79,6 +98,10 @@ pub struct McpServer {
 }
 
 fn default_enabled() -> bool {
+    true
+}
+
+fn default_auto_connect() -> bool {
     true
 }
 
@@ -94,27 +117,39 @@ impl McpServer {
             env: HashMap::new(),
             url: None,
             headers: HashMap::new(),
+            has_env_secret: false,
+            has_headers_secret: false,
             enabled: true,
+            auto_connect: true,
             status: McpServerStatus::Unknown,
+            last_error: None,
+            last_connected_at: None,
+            retry_count: 0,
             last_checked: None,
             created_at: None,
             updated_at: None,
         }
     }
 
-    /// Create a new SSE-type MCP server
-    pub fn new_sse(id: String, name: String, url: String) -> Self {
+    /// Create a new Streamable HTTP-type MCP server
+    pub fn new_stream_http(id: String, name: String, url: String) -> Self {
         Self {
             id,
             name,
-            server_type: McpServerType::Sse,
+            server_type: McpServerType::StreamHttp,
             command: None,
             args: Vec::new(),
             env: HashMap::new(),
             url: Some(url),
             headers: HashMap::new(),
+            has_env_secret: false,
+            has_headers_secret: false,
             enabled: true,
+            auto_connect: true,
             status: McpServerStatus::Unknown,
+            last_error: None,
+            last_connected_at: None,
+            retry_count: 0,
             last_checked: None,
             created_at: None,
             updated_at: None,
@@ -135,9 +170,9 @@ impl McpServer {
                     return Err("Command is required for stdio servers".to_string());
                 }
             }
-            McpServerType::Sse => {
+            McpServerType::StreamHttp => {
                 if self.url.is_none() || self.url.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
-                    return Err("URL is required for SSE servers".to_string());
+                    return Err("URL is required for stream_http servers".to_string());
                 }
             }
         }
@@ -209,14 +244,14 @@ mod tests {
     }
 
     #[test]
-    fn test_new_sse_server() {
-        let server = McpServer::new_sse(
+    fn test_new_stream_http_server() {
+        let server = McpServer::new_stream_http(
             "sse-id".to_string(),
             "SSE Server".to_string(),
             "http://localhost:8080".to_string(),
         );
 
-        assert_eq!(server.server_type, McpServerType::Sse);
+        assert_eq!(server.server_type, McpServerType::StreamHttp);
         assert_eq!(server.url, Some("http://localhost:8080".to_string()));
     }
 
@@ -238,8 +273,8 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_sse_server() {
-        let server = McpServer::new_sse(
+    fn test_validate_stream_http_server() {
+        let server = McpServer::new_stream_http(
             "id".to_string(),
             "Name".to_string(),
             "http://localhost".to_string(),

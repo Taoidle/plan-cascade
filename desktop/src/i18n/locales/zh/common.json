@@ -159,6 +159,79 @@
     "retryAttempts": "重试次数"
   },
 
+  "common": {
+    "retry": "重试",
+    "cancel": "取消",
+    "done": "完成",
+    "adding": "添加中..."
+  },
+
+  "mcp": {
+    "title": "MCP 服务器",
+    "description": "管理 Model Context Protocol 服务器，以扩展 AI 能力",
+    "refresh": "刷新",
+    "import": "导入",
+    "addServer": "添加服务器",
+    "noServers": "暂无 MCP 服务器",
+    "noServersDescription": "添加 MCP 服务器以扩展 Claude 的外部工具与数据能力",
+    "importFromClaude": "从 Claude Desktop 导入",
+    "addManually": "手动添加",
+    "test": "测试",
+    "edit": "编辑",
+    "connect": "连接",
+    "disconnect": "断开连接",
+    "confirmDelete": "确定要删除该服务器吗？",
+    "addServerTitle": "添加 MCP 服务器",
+    "serverType": "服务器类型",
+    "serverTypeStdio": "Stdio",
+    "serverTypeStreamHttp": "Stream HTTP",
+    "serverName": "服务器名称",
+    "command": "命令",
+    "arguments": "参数",
+    "envVariables": "环境变量",
+    "addEnvVar": "添加变量",
+    "serverUrl": "服务器 URL",
+    "headers": "请求头",
+    "addHeader": "添加 Header",
+    "placeholders": {
+      "serverName": "我的 MCP 服务器",
+      "command": "node",
+      "arguments": "server.js --port 3000",
+      "envKey": "KEY",
+      "envValue": "value",
+      "serverUrl": "http://localhost:8080/mcp",
+      "headerKey": "Authorization",
+      "headerValue": "Bearer xxx"
+    },
+    "importTitle": "从 Claude Desktop 导入",
+    "importDescription": "从你的 Claude Desktop 安装中导入 MCP 服务器配置",
+    "configPath": "配置路径",
+    "importing": "导入中...",
+    "importNow": "立即导入",
+    "importJsonFile": "导入 JSON 文件",
+    "added": "新增",
+    "skipped": "跳过",
+    "failed": "失败",
+    "importedServers": "已导入服务器",
+    "importErrors": "错误",
+    "status": {
+      "connected": "已连接",
+      "disconnected": "已断开",
+      "unknown": "未知",
+      "error": "错误：{{message}}"
+    },
+    "errors": {
+      "fetchServers": "获取 MCP 服务器列表失败",
+      "testConnection": "测试 MCP 服务器失败",
+      "toggleServer": "更新 MCP 服务器状态失败",
+      "connectServer": "连接 MCP 服务器失败",
+      "disconnectServer": "断开 MCP 服务器失败",
+      "deleteServer": "删除 MCP 服务器失败",
+      "addServer": "添加 MCP 服务器失败",
+      "importServers": "导入 MCP 服务器失败"
+    }
+  },
+
   "timeline": {
     "title": "时间线",
     "noCheckpoints": "暂无检查点",

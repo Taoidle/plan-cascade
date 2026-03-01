@@ -5,7 +5,7 @@
  */
 
 /** Type of MCP server connection */
-export type McpServerType = 'stdio' | 'sse';
+export type McpServerType = 'stdio' | 'stream_http';
 
 /** Status of an MCP server connection */
 export type McpServerStatus = 'connected' | 'disconnected' | 'unknown' | { error: string };
@@ -20,8 +20,14 @@ export interface McpServer {
   env: Record<string, string>;
   url: string | null;
   headers: Record<string, string>;
+  has_env_secret?: boolean;
+  has_headers_secret?: boolean;
   enabled: boolean;
+  auto_connect?: boolean;
   status: McpServerStatus;
+  last_error?: string | null;
+  last_connected_at?: string | null;
+  retry_count?: number;
   last_checked: string | null;
   created_at: string | null;
   updated_at: string | null;
@@ -63,6 +69,32 @@ export interface ImportResult {
   failed: number;
   servers: string[];
   errors: string[];
+}
+
+/** Connected MCP server runtime state */
+export interface ConnectedServerInfo {
+  server_id: string;
+  server_name: string;
+  connection_state: string;
+  tool_names: string[];
+  qualified_tool_names: string[];
+  protocol_version: string;
+  connected_at?: string | null;
+  last_error?: string | null;
+  retry_count?: number;
+}
+
+/** Auto-connect result returned on app startup/manual run */
+export interface McpAutoConnectResult {
+  connected: ConnectedServerInfo[];
+  failed: string[];
+}
+
+/** Tool definition shape from backend */
+export interface McpToolDefinition {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
 }
 
 /** Generic command response from Tauri */

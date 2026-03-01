@@ -672,7 +672,10 @@ mod tests {
         let ctx = make_test_context();
         let result = registry.execute("Unknown", &ctx, Value::Null).await;
         assert!(result.is_error());
-        assert!(result.error_message_owned().unwrap().contains("Unknown tool"));
+        assert!(result
+            .error_message_owned()
+            .unwrap()
+            .contains("Unknown tool"));
     }
 
     #[test]

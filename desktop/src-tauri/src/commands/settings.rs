@@ -467,8 +467,28 @@ fn import_mcp_servers(
     db: &crate::storage::Database,
     servers: &[serde_json::Value],
 ) -> crate::utils::error::AppResult<()> {
+    let keyring = crate::storage::KeyringService::new();
+
     for server_value in servers {
         let server: crate::models::McpServer = serde_json::from_value(server_value.clone())?;
+        let mut server = server;
+
+        if !server.env.is_empty() {
+            let key = format!("mcp/{}/env", server.id);
+            let raw = serde_json::to_string(&server.env)?;
+            let _ = keyring.set_api_key(&key, &raw);
+            server.has_env_secret = true;
+            server.env.clear();
+        }
+
+        if !server.headers.is_empty() {
+            let key = format!("mcp/{}/headers", server.id);
+            let raw = serde_json::to_string(&server.headers)?;
+            let _ = keyring.set_api_key(&key, &raw);
+            server.has_headers_secret = true;
+            server.headers.clear();
+        }
+
         match db.get_mcp_server(&server.id)? {
             Some(_) => db.update_mcp_server(&server)?,
             None => db.insert_mcp_server(&server)?,
@@ -494,6 +514,14 @@ fn reset_backend_settings(db: &crate::storage::Database) -> crate::utils::error:
 
     for prefix in ["proxy_strategy_", "proxy_custom_", "provider_"] {
         delete_settings_by_prefix(db, prefix)?;
+    }
+
+    let keyring = crate::storage::KeyringService::new();
+    if let Ok(servers) = db.list_mcp_servers() {
+        for server in servers {
+            let _ = keyring.delete_api_key(&format!("mcp/{}/env", server.id));
+            let _ = keyring.delete_api_key(&format!("mcp/{}/headers", server.id));
+        }
     }
 
     let conn = db.get_connection()?;

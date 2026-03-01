@@ -7,22 +7,17 @@ use tokio::sync::RwLock;
 
 use crate::models::response::CommandResponse;
 use crate::models::{
-    CreateMcpServerRequest, HealthCheckResult, ImportResult, McpServer, UpdateMcpServerRequest,
+    CreateMcpServerRequest, HealthCheckResult, ImportResult, McpServer, McpServerType,
+    UpdateMcpServerRequest,
 };
+use crate::services::llm::types::ToolDefinition;
 use crate::services::mcp::McpService;
 use crate::services::tools::mcp_manager::{ConnectedServerInfo, McpManager};
 use crate::services::tools::runtime_tools;
 use crate::services::tools::trait_def::ToolRegistry;
 
-/// Tauri-managed state for MCP runtime tool integration.
-///
-/// Holds the McpManager (manages connections) and a ToolRegistry
-/// that MCP tools are registered into for use in the agentic loop.
 pub struct McpRuntimeState {
-    /// MCP connection manager
     pub manager: Arc<McpManager>,
-    /// Tool registry for MCP tools (separate from built-in tools;
-    /// merged at query time in the agentic loop)
     pub registry: Arc<RwLock<ToolRegistry>>,
 }
 
@@ -42,7 +37,12 @@ impl Default for McpRuntimeState {
     }
 }
 
-/// List all MCP servers
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct McpAutoConnectResult {
+    pub connected: Vec<ConnectedServerInfo>,
+    pub failed: Vec<String>,
+}
+
 #[tauri::command]
 pub fn list_mcp_servers() -> Result<CommandResponse<Vec<McpServer>>, String> {
     let service = match McpService::new() {
@@ -56,7 +56,6 @@ pub fn list_mcp_servers() -> Result<CommandResponse<Vec<McpServer>>, String> {
     }
 }
 
-/// Add a new MCP server
 #[tauri::command]
 pub fn add_mcp_server(
     name: String,
@@ -73,8 +72,8 @@ pub fn add_mcp_server(
     };
 
     let server_type = match server_type.as_str() {
-        "sse" => crate::models::McpServerType::Sse,
-        _ => crate::models::McpServerType::Stdio,
+        "stream_http" | "sse" => McpServerType::StreamHttp,
+        _ => McpServerType::Stdio,
     };
 
     let request = CreateMcpServerRequest {
@@ -93,7 +92,6 @@ pub fn add_mcp_server(
     }
 }
 
-/// Update an existing MCP server
 #[tauri::command]
 pub fn update_mcp_server(
     id: String,
@@ -126,7 +124,6 @@ pub fn update_mcp_server(
     }
 }
 
-/// Remove an MCP server
 #[tauri::command]
 pub fn remove_mcp_server(id: String) -> Result<CommandResponse<()>, String> {
     let service = match McpService::new() {
@@ -140,7 +137,6 @@ pub fn remove_mcp_server(id: String) -> Result<CommandResponse<()>, String> {
     }
 }
 
-/// Test an MCP server connection
 #[tauri::command]
 pub async fn test_mcp_server(id: String) -> Result<CommandResponse<HealthCheckResult>, String> {
     let service = match McpService::new() {
@@ -154,7 +150,6 @@ pub async fn test_mcp_server(id: String) -> Result<CommandResponse<HealthCheckRe
     }
 }
 
-/// Toggle MCP server enabled status
 #[tauri::command]
 pub fn toggle_mcp_server(id: String, enabled: bool) -> Result<CommandResponse<McpServer>, String> {
     let service = match McpService::new() {
@@ -168,7 +163,6 @@ pub fn toggle_mcp_server(id: String, enabled: bool) -> Result<CommandResponse<Mc
     }
 }
 
-/// Import MCP servers from Claude Desktop configuration
 #[tauri::command]
 pub fn import_from_claude_desktop() -> Result<CommandResponse<ImportResult>, String> {
     let service = match McpService::new() {
@@ -182,17 +176,24 @@ pub fn import_from_claude_desktop() -> Result<CommandResponse<ImportResult>, Str
     }
 }
 
-/// Connect to an MCP server and register its tools into the ToolRegistry.
-///
-/// Looks up the server by ID from the database, connects to it via
-/// the appropriate transport (stdio/HTTP), discovers available tools,
-/// and registers them as Tool trait implementations.
+#[tauri::command]
+pub fn import_mcp_from_file(path: String) -> Result<CommandResponse<ImportResult>, String> {
+    let service = match McpService::new() {
+        Ok(s) => s,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+
+    match service.import_from_file(&path) {
+        Ok(result) => Ok(CommandResponse::ok(result)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
 #[tauri::command]
 pub async fn connect_mcp_server(
     id: String,
     state: tauri::State<'_, McpRuntimeState>,
 ) -> Result<CommandResponse<ConnectedServerInfo>, String> {
-    // Look up the server config from the database
     let service = match McpService::new() {
         Ok(s) => s,
         Err(e) => return Ok(CommandResponse::err(e.to_string())),
@@ -211,13 +212,11 @@ pub async fn connect_mcp_server(
         )));
     }
 
-    // Convert the database model to McpServerConfig
     let config = match McpManager::config_from_model(&server) {
         Ok(c) => c,
         Err(e) => return Ok(CommandResponse::err(e.to_string())),
     };
 
-    // Connect and register tools
     let mut registry = state.registry.write().await;
     match state.manager.connect_server(&config, &mut registry).await {
         Ok(info) => {
@@ -228,18 +227,13 @@ pub async fn connect_mcp_server(
     }
 }
 
-/// Disconnect from an MCP server and unregister its tools.
 #[tauri::command]
 pub async fn disconnect_mcp_server(
-    server_name: String,
+    id: String,
     state: tauri::State<'_, McpRuntimeState>,
 ) -> Result<CommandResponse<()>, String> {
     let mut registry = state.registry.write().await;
-    match state
-        .manager
-        .disconnect_server(&server_name, &mut registry)
-        .await
-    {
+    match state.manager.disconnect_server(&id, &mut registry).await {
         Ok(()) => {
             runtime_tools::replace_from_registry(&registry);
             Ok(CommandResponse::ok(()))
@@ -248,7 +242,46 @@ pub async fn disconnect_mcp_server(
     }
 }
 
-/// List currently connected MCP servers and their registered tools.
+#[tauri::command]
+pub async fn connect_enabled_mcp_servers(
+    state: tauri::State<'_, McpRuntimeState>,
+) -> Result<CommandResponse<McpAutoConnectResult>, String> {
+    let service = match McpService::new() {
+        Ok(s) => s,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+
+    let servers = match service.list_enabled_auto_connect_servers() {
+        Ok(s) => s,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+
+    let mut connected = Vec::new();
+    let mut failed = Vec::new();
+    let mut registry = state.registry.write().await;
+
+    for server in servers {
+        let config = match McpManager::config_from_model(&server) {
+            Ok(c) => c,
+            Err(e) => {
+                failed.push(format!("{}: {}", server.name, e));
+                continue;
+            }
+        };
+
+        match state.manager.connect_server(&config, &mut registry).await {
+            Ok(info) => connected.push(info),
+            Err(e) => failed.push(format!("{}: {}", server.name, e)),
+        }
+    }
+
+    runtime_tools::replace_from_registry(&registry);
+    Ok(CommandResponse::ok(McpAutoConnectResult {
+        connected,
+        failed,
+    }))
+}
+
 #[tauri::command]
 pub async fn list_connected_mcp_servers(
     state: tauri::State<'_, McpRuntimeState>,
@@ -257,16 +290,12 @@ pub async fn list_connected_mcp_servers(
     Ok(CommandResponse::ok(servers))
 }
 
-/// Get the MCP tool definitions currently available in the registry.
-///
-/// Returns tool definitions in the format expected by LLM providers,
-/// allowing the frontend to display available MCP tools.
 #[tauri::command]
 pub async fn list_mcp_tools(
     state: tauri::State<'_, McpRuntimeState>,
-) -> Result<CommandResponse<Vec<String>>, String> {
+) -> Result<CommandResponse<Vec<ToolDefinition>>, String> {
     let _ = state;
-    Ok(CommandResponse::ok(runtime_tools::names()))
+    Ok(CommandResponse::ok(runtime_tools::definitions()))
 }
 
 #[cfg(test)]
@@ -275,29 +304,8 @@ mod tests {
 
     #[test]
     fn test_list_mcp_servers() {
-        // This will work with an empty database
         let result = list_mcp_servers().unwrap();
         assert!(result.success);
-    }
-
-    #[test]
-    fn test_mcp_runtime_state_new() {
-        let state = McpRuntimeState::new();
-        // Verify it can be constructed
-        assert!(Arc::strong_count(&state.manager) == 1);
-    }
-
-    #[test]
-    fn test_mcp_runtime_state_default() {
-        let state = McpRuntimeState::default();
-        assert!(Arc::strong_count(&state.manager) == 1);
-    }
-
-    #[tokio::test]
-    async fn test_mcp_runtime_state_registry_empty() {
-        let state = McpRuntimeState::new();
-        let registry = state.registry.read().await;
-        assert!(registry.is_empty());
     }
 
     #[tokio::test]

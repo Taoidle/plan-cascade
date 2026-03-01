@@ -90,7 +90,7 @@ AI 驱动的代码搜索与理解：
 完整的 [Model Context Protocol](https://modelcontextprotocol.io/) 支持：
 - 服务器注册表管理
 - 自定义工具和资源提供者配置
-- 支持 SSE 和 stdio 传输协议
+- 支持 Streamable HTTP 和 stdio 传输协议
 
 ### 分析仪表板
 

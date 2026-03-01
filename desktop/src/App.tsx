@@ -23,6 +23,7 @@ import { Dashboard } from './components/Analytics';
 import { KnowledgeBasePanel } from './components/KnowledgeBase';
 import { CodebasePanel } from './components/Codebase';
 import { ArtifactBrowserPanel } from './components/ArtifactBrowser';
+import { ServerRegistry } from './components/MCP';
 import { SetupWizard } from './components/Settings';
 import { FeatureTour } from './components/shared/FeatureTour';
 import { GlobalCommandPaletteProvider, useGlobalCommandPalette } from './components/shared/CommandPalette';
@@ -299,6 +300,11 @@ function AppContent() {
           {mode === 'expert' && (
             <div data-tour="mode-expert" className="h-full">
               <ExpertMode />
+            </div>
+          )}
+          {mode === 'mcp' && (
+            <div data-tour="mode-mcp" className="h-full">
+              <ServerRegistry />
             </div>
           )}
           {mode === 'claude-code' && (

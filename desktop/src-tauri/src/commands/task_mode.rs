@@ -3345,8 +3345,8 @@ async fn execute_story_via_llm(
     };
 
     let (search_provider, search_api_key) = resolve_search_provider_for_tools();
-    let mut orchestrator = OrchestratorService::new(config)
-        .with_search_provider(&search_provider, search_api_key);
+    let mut orchestrator =
+        OrchestratorService::new(config).with_search_provider(&search_provider, search_api_key);
 
     // Wire database pool for CodebaseSearch if available
     if let Some(pool) = db_pool {

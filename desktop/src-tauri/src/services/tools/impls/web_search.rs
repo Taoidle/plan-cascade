@@ -182,7 +182,10 @@ mod tests {
         let args = serde_json::json!({"query": "test query"});
         let result = tool.execute(&ctx, args).await;
         assert!(result.is_error());
-        assert!(result.error_message_owned().unwrap().contains("not configured"));
+        assert!(result
+            .error_message_owned()
+            .unwrap()
+            .contains("not configured"));
     }
 
     #[tokio::test]

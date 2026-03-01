@@ -431,7 +431,11 @@ impl OrchestratorService {
         arguments: &serde_json::Value,
         task_ctx: Option<&crate::services::tools::task_spawner::TaskContext>,
         tx: &mpsc::Sender<UnifiedStreamEvent>,
-    ) -> (crate::services::tools::executor::ToolResult, UsageStats, u32) {
+    ) -> (
+        crate::services::tools::executor::ToolResult,
+        UsageStats,
+        u32,
+    ) {
         if tool_name == "Analyze" {
             return self.execute_analyze_tool_result(arguments, tx).await;
         }
@@ -2253,9 +2257,9 @@ impl OrchestratorService {
 
                 // Step 2: Check if all validated calls are parallel-safe
                 let all_parallel = valid_calls.len() > 1
-                    && valid_calls
-                        .iter()
-                        .all(|(_, name, _)| crate::services::tools::definitions::is_tool_parallel_safe(name));
+                    && valid_calls.iter().all(|(_, name, _)| {
+                        crate::services::tools::definitions::is_tool_parallel_safe(name)
+                    });
 
                 if all_parallel {
                     // ═══════════════════════════════════════════════════════
@@ -2719,9 +2723,9 @@ impl OrchestratorService {
 
                 // Step 2: Check if all valid calls are parallel-safe
                 let all_parallel_fb = valid_fallback_calls.len() > 1
-                    && valid_fallback_calls
-                        .iter()
-                        .all(|(_, name, _)| crate::services::tools::definitions::is_tool_parallel_safe(name));
+                    && valid_fallback_calls.iter().all(|(_, name, _)| {
+                        crate::services::tools::definitions::is_tool_parallel_safe(name)
+                    });
 
                 if all_parallel_fb {
                     // ═══════════════════════════════════════════════════

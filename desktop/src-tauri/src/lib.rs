@@ -45,6 +45,7 @@ pub use commands::{
     compile_spec,
     complete_worktree,
     configure_provider,
+    connect_enabled_mcp_servers,
     // MCP commands
     connect_mcp_server,
     count_usage_records,
@@ -199,6 +200,7 @@ pub use commands::{
     import_all_settings,
     import_design_doc,
     import_from_claude_desktop,
+    import_mcp_from_file,
     init_analytics,
     // Init commands
     init_app,

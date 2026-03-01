@@ -1368,7 +1368,10 @@ mod tests {
         let args = serde_json::json!({});
         let result = tool.execute(&ctx, args).await;
         assert!(result.is_error());
-        assert!(result.error_message_owned().unwrap().contains("Missing required"));
+        assert!(result
+            .error_message_owned()
+            .unwrap()
+            .contains("Missing required"));
     }
 
     // ── BrowserAction serialization tests ────────────────────────────

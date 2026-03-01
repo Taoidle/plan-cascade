@@ -12,6 +12,7 @@ import * as Tooltip from '@radix-ui/react-tooltip';
 import {
   LightningBoltIcon,
   MixerHorizontalIcon,
+  Link2Icon,
   ChatBubbleIcon,
   FileIcon,
   BarChartIcon,
@@ -32,6 +33,7 @@ import { SettingsDialog } from './Settings';
 const MODE_ICONS: Record<Mode, typeof LightningBoltIcon> = {
   simple: LightningBoltIcon,
   expert: MixerHorizontalIcon,
+  mcp: Link2Icon,
   'claude-code': ChatBubbleIcon,
   projects: FileIcon,
   analytics: BarChartIcon,
@@ -192,6 +194,7 @@ export function IconRail({ onOpenCommandPalette }: IconRailProps) {
     const labels: Record<Mode, string> = {
       simple: t('modeSwitch.simple.name'),
       expert: t('modeSwitch.expert.name'),
+      mcp: t('mcp.title'),
       'claude-code': t('modeSwitch.claudeCode.name'),
       projects: t('modeSwitch.projects.name'),
       analytics: t('modeSwitch.analytics.name'),
@@ -206,6 +209,7 @@ export function IconRail({ onOpenCommandPalette }: IconRailProps) {
     const descriptions: Record<Mode, string> = {
       simple: t('modeSwitch.simple.description'),
       expert: t('modeSwitch.expert.description'),
+      mcp: t('mcp.description'),
       'claude-code': t('modeSwitch.claudeCode.description'),
       projects: t('modeSwitch.projects.description'),
       analytics: t('modeSwitch.analytics.description'),

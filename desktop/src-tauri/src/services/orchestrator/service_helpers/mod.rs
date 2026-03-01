@@ -110,7 +110,10 @@ async fn emit_tool_result_event(
                 let site_name = c.source.clone().unwrap_or_else(|| {
                     url::Url::parse(&c.url)
                         .ok()
-                        .and_then(|u| u.host_str().map(|h| h.trim_start_matches("www.").to_string()))
+                        .and_then(|u| {
+                            u.host_str()
+                                .map(|h| h.trim_start_matches("www.").to_string())
+                        })
                         .unwrap_or_else(|| "web".to_string())
                 });
                 plan_cascade_core::streaming::SearchCitationEntry {

@@ -88,7 +88,10 @@ mod tests {
         let args = serde_json::json!({"query": "test analysis"});
         let result = tool.execute(&ctx, args).await;
         assert!(result.is_error());
-        assert!(result.error_message_owned().unwrap().contains("test analysis"));
+        assert!(result
+            .error_message_owned()
+            .unwrap()
+            .contains("test analysis"));
     }
 
     #[test]

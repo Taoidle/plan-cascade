@@ -959,7 +959,10 @@ mod tests {
 
         let result = executor.execute("Edit", &args).await;
         assert!(result.is_error());
-        assert!(result.error_message_owned().unwrap().contains("appears 3 times"));
+        assert!(result
+            .error_message_owned()
+            .unwrap()
+            .contains("appears 3 times"));
     }
 
     #[tokio::test]
@@ -1159,7 +1162,10 @@ mod tests {
 
         let result = executor.execute("LS", &args).await;
         assert!(result.is_error());
-        assert!(result.error_message_owned().unwrap().contains("Not a directory"));
+        assert!(result
+            .error_message_owned()
+            .unwrap()
+            .contains("Not a directory"));
     }
 
     #[tokio::test]
@@ -1401,7 +1407,10 @@ mod tests {
         let result1 = executor.execute("Read", &args).await;
         assert!(result1.is_success());
         assert!(!result1.is_dedup);
-        assert!(result1.success_message_owned().unwrap().contains("original line 1"));
+        assert!(result1
+            .success_message_owned()
+            .unwrap()
+            .contains("original line 1"));
 
         // Modify the file and force a different mtime.
         std::thread::sleep(std::time::Duration::from_secs(1));
@@ -2161,7 +2170,10 @@ mod tests {
         let args = serde_json::json!({ "file_path": &nested_path });
         let result1 = child.execute("Read", &args).await;
         assert!(result1.is_success());
-        assert!(result1.success_message_owned().unwrap().contains("nested content"));
+        assert!(result1
+            .success_message_owned()
+            .unwrap()
+            .contains("nested content"));
 
         // Parent should see the child's cache entry
         let summary = parent.get_read_file_summary();

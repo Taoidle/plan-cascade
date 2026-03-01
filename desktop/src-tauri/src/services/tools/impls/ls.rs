@@ -217,7 +217,10 @@ mod tests {
         });
         let result = tool.execute(&ctx, args).await;
         assert!(result.is_error());
-        assert!(result.error_message_owned().unwrap().contains("Not a directory"));
+        assert!(result
+            .error_message_owned()
+            .unwrap()
+            .contains("Not a directory"));
     }
 
     #[test]

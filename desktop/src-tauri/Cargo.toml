@@ -45,6 +45,9 @@ tokio-util = "0.7"
 # HTTP client (kept for future external API calls, not for sidecar)
 reqwest = { version = "0.12", features = ["json", "stream", "socks"] }
 
+# Official MCP Rust SDK (client transports + protocol handling)
+rmcp = { version = "0.17.0", default-features = false, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+
 # Byte buffer types (shared with reqwest for streaming)
 bytes = "1"
 

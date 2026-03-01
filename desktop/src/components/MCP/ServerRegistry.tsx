@@ -9,7 +9,7 @@ import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { PlusIcon, DownloadIcon, ReloadIcon } from '@radix-ui/react-icons';
-import type { McpServer, CommandResponse, HealthCheckResult } from '../../types/mcp';
+import type { McpServer, CommandResponse, HealthCheckResult, ConnectedServerInfo } from '../../types/mcp';
 import { ServerCard } from './ServerCard';
 import { AddServerDialog } from './AddServerDialog';
 import { ImportDialog } from './ImportDialog';
@@ -20,6 +20,7 @@ export function ServerRegistry() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [testingServerId, setTestingServerId] = useState<string | null>(null);
+  const [connectedServerIds, setConnectedServerIds] = useState<Set<string>>(new Set());
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
 
@@ -33,18 +34,30 @@ export function ServerRegistry() {
       if (response.success && response.data) {
         setServers(response.data);
       } else {
-        setError(response.error || 'Failed to fetch servers');
+        setError(response.error || t('mcp.errors.fetchServers'));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch servers');
+      setError(err instanceof Error ? err.message : t('mcp.errors.fetchServers'));
     } finally {
       setLoading(false);
+    }
+  }, [t]);
+
+  const fetchConnectedServers = useCallback(async () => {
+    try {
+      const response = await invoke<CommandResponse<ConnectedServerInfo[]>>('list_connected_mcp_servers');
+      if (response.success && response.data) {
+        setConnectedServerIds(new Set(response.data.map((s) => s.server_id)));
+      }
+    } catch (err) {
+      console.warn('Failed to fetch connected MCP servers', err);
     }
   }, []);
 
   useEffect(() => {
     fetchServers();
-  }, [fetchServers]);
+    fetchConnectedServers();
+  }, [fetchServers, fetchConnectedServers]);
 
   // Test server connection
   const handleTest = async (serverId: string) => {
@@ -64,6 +77,7 @@ export function ServerRegistry() {
         );
       }
     } catch (err) {
+      setError(err instanceof Error ? err.message : t('mcp.errors.testConnection'));
       console.error('Test failed:', err);
     } finally {
       setTestingServerId(null);
@@ -80,9 +94,42 @@ export function ServerRegistry() {
 
       if (response.success && response.data) {
         setServers((prev) => prev.map((s) => (s.id === serverId ? response.data! : s)));
+        if (!enabled && connectedServerIds.has(serverId)) {
+          await invoke<CommandResponse<void>>('disconnect_mcp_server', { id: serverId });
+          await fetchConnectedServers();
+        }
       }
     } catch (err) {
+      setError(err instanceof Error ? err.message : t('mcp.errors.toggleServer'));
       console.error('Toggle failed:', err);
+    }
+  };
+
+  const handleConnect = async (serverId: string) => {
+    try {
+      const response = await invoke<CommandResponse<ConnectedServerInfo>>('connect_mcp_server', { id: serverId });
+      if (response.success) {
+        await fetchConnectedServers();
+      } else {
+        setError(response.error || t('mcp.errors.connectServer'));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('mcp.errors.connectServer'));
+      console.error('Connect failed:', err);
+    }
+  };
+
+  const handleDisconnect = async (serverId: string) => {
+    try {
+      const response = await invoke<CommandResponse<void>>('disconnect_mcp_server', { id: serverId });
+      if (response.success) {
+        await fetchConnectedServers();
+      } else {
+        setError(response.error || t('mcp.errors.disconnectServer'));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('mcp.errors.disconnectServer'));
+      console.error('Disconnect failed:', err);
     }
   };
 
@@ -97,8 +144,16 @@ export function ServerRegistry() {
 
       if (response.success) {
         setServers((prev) => prev.filter((s) => s.id !== serverId));
+        setConnectedServerIds((prev) => {
+          const next = new Set(prev);
+          next.delete(serverId);
+          return next;
+        });
+      } else {
+        setError(response.error || t('mcp.errors.deleteServer'));
       }
     } catch (err) {
+      setError(err instanceof Error ? err.message : t('mcp.errors.deleteServer'));
       console.error('Delete failed:', err);
     }
   };
@@ -238,8 +293,11 @@ export function ServerRegistry() {
               <ServerCard
                 key={server.id}
                 server={server}
+                connected={connectedServerIds.has(server.id)}
                 onTest={() => handleTest(server.id)}
                 onToggle={(enabled) => handleToggle(server.id, enabled)}
+                onConnect={() => handleConnect(server.id)}
+                onDisconnect={() => handleDisconnect(server.id)}
                 onEdit={() => {
                   // TODO: Open edit dialog
                   console.log('Edit:', server.id);
