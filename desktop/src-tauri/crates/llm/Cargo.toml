@@ -31,11 +31,8 @@ zai-rs = "0.1"
 # Async trait support
 async-trait = "0.1"
 
-# DashScope SDK for Qwen
-async-dashscope = "0.12"
-
-# Exponential backoff (used by DashScope SDK)
-backoff = "0.4"
+# OpenAI-compatible SDK (used by OpenAI/DeepSeek/Qwen providers)
+openai-api-rs = "9.0.1"
 
 # Anthropic SDK types (used by MiniMax provider)
 anthropic-async = "0.4"

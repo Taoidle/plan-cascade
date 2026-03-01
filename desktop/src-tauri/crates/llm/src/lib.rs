@@ -18,6 +18,7 @@ pub mod http_client;
 pub mod minimax;
 pub mod ollama;
 pub mod openai;
+pub mod openai_compat;
 pub mod provider;
 pub mod qwen;
 pub mod reliable_catalog;

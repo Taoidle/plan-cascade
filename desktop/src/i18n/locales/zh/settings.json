@@ -151,17 +151,17 @@
         "china": {
           "name": "中国（北京）",
           "description": "适用于在中国平台 (dashscope.aliyuncs.com) 注册的 API 密钥。",
-          "url": "https://dashscope.aliyuncs.com/api/v1"
+          "url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
         },
         "singapore": {
           "name": "国际版（新加坡）",
           "description": "适用于在国际平台 (dashscope-intl.aliyuncs.com) 注册的 API 密钥。",
-          "url": "https://dashscope-intl.aliyuncs.com/api/v1"
+          "url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"
         },
         "us": {
           "name": "国际版（美国 - 弗吉尼亚）",
           "description": "适用于在美国平台 (dashscope-us.aliyuncs.com) 注册的 API 密钥。",
-          "url": "https://dashscope-us.aliyuncs.com/api/v1"
+          "url": "https://dashscope-us.aliyuncs.com/compatible-mode/v1/chat/completions"
         }
       }
     },

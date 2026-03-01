@@ -41,6 +41,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Sync vendored openai-api-rs
+        run: ./scripts/vendor-openai-api-rs-sync.sh
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -62,7 +65,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             desktop/src-tauri/target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('desktop/src-tauri/Cargo.lock', 'desktop/src-tauri/vendor/openai-api-rs/**') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
@@ -154,6 +157,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Sync vendored openai-api-rs
+        run: ./scripts/vendor-openai-api-rs-sync.sh
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -184,7 +190,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             desktop/src-tauri/target/
-          key: ${{ runner.os }}-cargo-build-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('desktop/src-tauri/Cargo.lock', 'desktop/src-tauri/vendor/openai-api-rs/**') }}
           restore-keys: |
             ${{ runner.os }}-cargo-build-
 

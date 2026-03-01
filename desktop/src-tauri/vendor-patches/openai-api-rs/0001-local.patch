@@ -1,0 +1,590 @@
+diff --git examples/chat_completion_stream.rs examples/chat_completion_stream.rs
+index 010e3f6..283d8a3 100644
+--- examples/chat_completion_stream.rs
++++ examples/chat_completion_stream.rs
+@@ -32,6 +32,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+             ChatCompletionStreamResponse::Content(content) => {
+                 println!("Content: {:?}", content);
+             }
++            ChatCompletionStreamResponse::ReasoningContent(content) => {
++                println!("Reasoning: {:?}", content);
++            }
+             ChatCompletionStreamResponse::Done => {
+                 println!("Done");
+             }
+diff --git src/v1/api.rs src/v1/api.rs
+index a780d1e..f0dfe63 100644
+--- src/v1/api.rs
++++ src/v1/api.rs
+@@ -53,11 +53,11 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+ use reqwest::multipart::{Form, Part};
+ use reqwest::{Client, Method, Response};
+ use serde::Serialize;
+-use serde_json::{to_value, Value};
++use serde_json::{Value, to_value};
+ use url::Url;
+ 
+ use std::error::Error;
+-use std::fs::{create_dir_all, File};
++use std::fs::{File, create_dir_all};
+ use std::io::Read;
+ use std::io::Write;
+ use std::path::Path;
+@@ -70,6 +70,7 @@ pub struct OpenAIClientBuilder {
+     api_key: Option<String>,
+     organization: Option<String>,
+     proxy: Option<String>,
++    no_proxy: bool,
+     timeout: Option<u64>,
+     headers: Option<HeaderMap>,
+ }
+@@ -80,6 +81,7 @@ pub struct OpenAIClient {
+     api_key: Option<String>,
+     organization: Option<String>,
+     proxy: Option<String>,
++    no_proxy: bool,
+     timeout: Option<u64>,
+     headers: Option<HeaderMap>,
+     pub response_headers: Option<HeaderMap>,
+@@ -110,6 +112,11 @@ impl OpenAIClientBuilder {
+         self
+     }
+ 
++    pub fn with_no_proxy(mut self, no_proxy: bool) -> Self {
++        self.no_proxy = no_proxy;
++        self
++    }
++
+     pub fn with_timeout(mut self, timeout: u64) -> Self {
+         self.timeout = Some(timeout);
+         self
+@@ -134,6 +141,7 @@ impl OpenAIClientBuilder {
+             api_key: self.api_key,
+             organization: self.organization,
+             proxy: self.proxy,
++            no_proxy: self.no_proxy,
+             timeout: self.timeout,
+             headers: self.headers,
+             response_headers: None,
+@@ -164,6 +172,8 @@ impl OpenAIClient {
+ 
+         let client = if let Some(proxy) = &self.proxy {
+             client.proxy(reqwest::Proxy::all(proxy).unwrap())
++        } else if self.no_proxy {
++            client.no_proxy()
+         } else {
+             client
+         };
+@@ -357,7 +367,11 @@ impl OpenAIClient {
+         }
+ 
+         let request = self.build_request(Method::POST, "chat/completions").await;
+-        let request = request.json(&payload);
++        let request = request
++            .header("Accept", "text/event-stream")
++            .header("Cache-Control", "no-cache")
++            .header("Accept-Encoding", "identity")
++            .json(&payload);
+         let response = request.send().await?;
+ 
+         if response.status().is_success() {
+@@ -365,6 +379,7 @@ impl OpenAIClient {
+                 response: Box::pin(response.bytes_stream()),
+                 buffer: String::new(),
+                 first_chunk: true,
++                pending_events: std::collections::VecDeque::new(),
+             })
+         } else {
+             let error_text = response
+@@ -452,7 +467,7 @@ impl OpenAIClient {
+                 Err(e) => {
+                     return Err(APIError::CustomError {
+                         message: e.to_string(),
+-                    })
++                    });
+                 }
+             }
+         }
+@@ -462,13 +477,13 @@ impl OpenAIClient {
+                 Err(e) => {
+                     return Err(APIError::CustomError {
+                         message: e.to_string(),
+-                    })
++                    });
+                 }
+             },
+             Err(e) => {
+                 return Err(APIError::CustomError {
+                     message: e.to_string(),
+-                })
++                });
+             }
+         }
+ 
+@@ -994,7 +1009,7 @@ impl OpenAIClient {
+             Err(e) => {
+                 return Err(APIError::CustomError {
+                     message: e.to_string(),
+-                })
++                });
+             }
+         };
+         let file_path = if let Value::Object(map) = &json {
+@@ -1014,7 +1029,7 @@ impl OpenAIClient {
+             Err(e) => {
+                 return Err(APIError::CustomError {
+                     message: e.to_string(),
+-                })
++                });
+             }
+         };
+         let mut buffer = Vec::new();
+@@ -1023,7 +1038,7 @@ impl OpenAIClient {
+             Err(e) => {
+                 return Err(APIError::CustomError {
+                     message: e.to_string(),
+-                })
++                });
+             }
+         }
+ 
+@@ -1058,7 +1073,7 @@ impl OpenAIClient {
+             Err(e) => {
+                 return Err(APIError::CustomError {
+                     message: e.to_string(),
+-                })
++                });
+             }
+         };
+ 
+diff --git src/v1/chat_completion/chat_completion.rs src/v1/chat_completion/chat_completion.rs
+index bd2807a..b53ccf9 100644
+--- src/v1/chat_completion/chat_completion.rs
++++ src/v1/chat_completion/chat_completion.rs
+@@ -51,6 +51,9 @@ pub struct ChatCompletionRequest {
+     /// preprocessing steps. When None, no transforms are applied.
+     #[serde(skip_serializing_if = "Option::is_none")]
+     pub transforms: Option<Vec<String>>,
++    #[serde(default)]
++    #[serde(flatten)]
++    pub extra: HashMap<String, Value>,
+ }
+ 
+ impl ChatCompletionRequest {
+@@ -74,6 +77,7 @@ impl ChatCompletionRequest {
+             tool_choice: None,
+             reasoning: None,
+             transforms: None,
++            extra: HashMap::new(),
+         }
+     }
+ }
+@@ -105,7 +109,7 @@ pub struct ChatCompletionResponse {
+     pub created: i64,
+     pub model: String,
+     pub choices: Vec<ChatCompletionChoice>,
+-    pub usage: common::Usage,
++    pub usage: Option<common::Usage>,
+     pub system_fingerprint: Option<String>,
+ }
+ 
+diff --git src/v1/chat_completion/chat_completion_stream.rs src/v1/chat_completion/chat_completion_stream.rs
+index f5b3283..aa432c7 100644
+--- src/v1/chat_completion/chat_completion_stream.rs
++++ src/v1/chat_completion/chat_completion_stream.rs
+@@ -1,13 +1,14 @@
+-use crate::v1::chat_completion::{Reasoning, Tool, ToolCall, ToolChoiceType};
++use crate::v1::chat_completion::{Reasoning, Tool, ToolCall, ToolCallFunction, ToolChoiceType};
+ use crate::{
+     impl_builder_methods,
+-    v1::chat_completion::{serialize_tool_choice, ChatCompletionMessage},
++    v1::chat_completion::{ChatCompletionMessage, serialize_tool_choice},
+ };
+ 
+ use futures_util::Stream;
+ use serde::{Deserialize, Serialize};
+ use serde_json::Value;
+ use std::collections::HashMap;
++use std::collections::VecDeque;
+ use std::pin::Pin;
+ use std::task::{Context, Poll};
+ 
+@@ -53,6 +54,9 @@ pub struct ChatCompletionStreamRequest {
+     /// preprocessing steps. When None, no transforms are applied.
+     #[serde(skip_serializing_if = "Option::is_none")]
+     pub transforms: Option<Vec<String>>,
++    #[serde(default)]
++    #[serde(flatten)]
++    pub extra: HashMap<String, Value>,
+ }
+ 
+ impl ChatCompletionStreamRequest {
+@@ -76,6 +80,7 @@ impl ChatCompletionStreamRequest {
+             tool_choice: None,
+             reasoning: None,
+             transforms: None,
++            extra: HashMap::new(),
+         }
+     }
+ }
+@@ -103,6 +108,7 @@ impl_builder_methods!(
+ #[derive(Debug, Clone)]
+ pub enum ChatCompletionStreamResponse {
+     Content(String),
++    ReasoningContent(String),
+     ToolCall(Vec<ToolCall>),
+     Done,
+ }
+@@ -111,12 +117,154 @@ pub struct ChatCompletionStream<S: Stream<Item = Result<bytes::Bytes, reqwest::E
+     pub response: S,
+     pub buffer: String,
+     pub first_chunk: bool,
++    pub pending_events: VecDeque<ChatCompletionStreamResponse>,
+ }
+ 
+ impl<S> ChatCompletionStream<S>
+ where
+     S: Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Unpin,
+ {
++    fn parse_data_payload(&mut self, data_payload: &str) -> Option<ChatCompletionStreamResponse> {
++        if data_payload.is_empty() {
++            return None;
++        }
++
++        if data_payload == "[DONE]" {
++            return Some(ChatCompletionStreamResponse::Done);
++        }
++
++        match serde_json::from_str::<Value>(data_payload) {
++            Ok(json) => {
++                if let Some(delta) = json
++                    .get("choices")
++                    .and_then(|choices| choices.get(0))
++                    .and_then(|choice| choice.get("delta"))
++                {
++                    let mut emitted = false;
++
++                    if let Some(reasoning_content) =
++                        delta.get("reasoning_content").and_then(|c| c.as_str())
++                    {
++                        let output = reasoning_content.replace("\\n", "\n");
++                        if !output.is_empty() {
++                            self.pending_events
++                                .push_back(ChatCompletionStreamResponse::ReasoningContent(output));
++                            emitted = true;
++                        }
++                    }
++
++                    if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
++                        let output = content.replace("\\n", "\n");
++                        if !output.is_empty() {
++                            self.pending_events
++                                .push_back(ChatCompletionStreamResponse::Content(output));
++                            emitted = true;
++                        }
++                    }
++
++                    if let Some(tool_call_response) =
++                        Self::parse_tool_calls(delta).map(ChatCompletionStreamResponse::ToolCall)
++                    {
++                        self.pending_events.push_back(tool_call_response);
++                        emitted = true;
++                    }
++
++                    if emitted {
++                        return self.pending_events.pop_front();
++                    }
++                }
++            }
++            Err(error) => {
++                eprintln!("Failed to parse SSE payload as JSON: {}", error);
++            }
++        }
++
++        None
++    }
++
++    fn next_response_from_lines(&mut self) -> Option<ChatCompletionStreamResponse> {
++        loop {
++            let Some(line_end) = self.buffer.find('\n') else {
++                return None;
++            };
++
++            let line = self.buffer[..line_end].trim_end_matches('\r').to_string();
++            let remaining = self.buffer[line_end + 1..].to_string();
++
++            if line.trim().is_empty() {
++                self.buffer = remaining;
++                continue;
++            }
++
++            if let Some(content) = line
++                .strip_prefix("data: ")
++                .or_else(|| line.strip_prefix("data:"))
++            {
++                if content.is_empty() {
++                    self.buffer = remaining;
++                    continue;
++                }
++
++                if content == "[DONE]" {
++                    self.buffer = remaining;
++                    return Some(ChatCompletionStreamResponse::Done);
++                }
++
++                if serde_json::from_str::<Value>(content).is_ok() {
++                    self.buffer = remaining;
++                    return self.parse_data_payload(content);
++                }
++
++                // Probably a multi-line event; keep buffer intact for block parsing.
++                return None;
++            }
++
++            // Ignore non-data SSE lines (e.g., event:, id:).
++            self.buffer = remaining;
++        }
++    }
++
++    fn parse_tool_calls(delta: &Value) -> Option<Vec<ToolCall>> {
++        delta
++            .get("tool_calls")
++            .and_then(|tool_calls| tool_calls.as_array())
++            .map(|tool_calls_array| {
++                tool_calls_array
++                    .iter()
++                    .filter_map(|v| {
++                        let obj = v.as_object()?;
++                        let id = obj
++                            .get("id")
++                            .and_then(|x| x.as_str())
++                            .unwrap_or_default()
++                            .to_string();
++                        let tool_type = obj
++                            .get("type")
++                            .and_then(|x| x.as_str())
++                            .unwrap_or("function")
++                            .to_string();
++
++                        let function_obj = obj.get("function").and_then(|f| f.as_object());
++                        let name = function_obj
++                            .and_then(|f| f.get("name"))
++                            .and_then(|x| x.as_str())
++                            .map(ToString::to_string);
++                        let arguments = function_obj
++                            .and_then(|f| f.get("arguments"))
++                            .and_then(|x| x.as_str())
++                            .map(ToString::to_string);
++
++                        Some(ToolCall {
++                            id,
++                            r#type: tool_type,
++                            function: ToolCallFunction { name, arguments },
++                        })
++                    })
++                    .collect::<Vec<ToolCall>>()
++            })
++            .filter(|tool_calls_vec| !tool_calls_vec.is_empty())
++    }
++
+     fn find_event_delimiter(buffer: &str) -> Option<(usize, usize)> {
+         let carriage_idx = buffer.find("\r\n\r\n");
+         let newline_idx = buffer.find("\n\n");
+@@ -136,6 +284,14 @@ where
+     }
+ 
+     fn next_response_from_buffer(&mut self) -> Option<ChatCompletionStreamResponse> {
++        if let Some(event) = self.pending_events.pop_front() {
++            return Some(event);
++        }
++
++        if let Some(event) = self.next_response_from_lines() {
++            return Some(event);
++        }
++
+         while let Some((idx, delimiter_len)) = Self::find_event_delimiter(&self.buffer) {
+             let event = self.buffer[..idx].to_owned();
+             self.buffer = self.buffer[idx + delimiter_len..].to_owned();
+@@ -156,45 +312,8 @@ where
+                 }
+             }
+ 
+-            if data_payload.is_empty() {
+-                continue;
+-            }
+-
+-            if data_payload == "[DONE]" {
+-                return Some(ChatCompletionStreamResponse::Done);
+-            }
+-
+-            match serde_json::from_str::<Value>(&data_payload) {
+-                Ok(json) => {
+-                    if let Some(delta) = json
+-                        .get("choices")
+-                        .and_then(|choices| choices.get(0))
+-                        .and_then(|choice| choice.get("delta"))
+-                    {
+-                        if let Some(tool_call_response) = delta
+-                            .get("tool_calls")
+-                            .and_then(|tool_calls| tool_calls.as_array())
+-                            .map(|tool_calls_array| {
+-                                tool_calls_array
+-                                    .iter()
+-                                    .filter_map(|v| serde_json::from_value(v.clone()).ok())
+-                                    .collect::<Vec<ToolCall>>()
+-                            })
+-                            .filter(|tool_calls_vec| !tool_calls_vec.is_empty())
+-                            .map(ChatCompletionStreamResponse::ToolCall)
+-                        {
+-                            return Some(tool_call_response);
+-                        }
+-
+-                        if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
+-                            let output = content.replace("\\n", "\n");
+-                            return Some(ChatCompletionStreamResponse::Content(output));
+-                        }
+-                    }
+-                }
+-                Err(error) => {
+-                    eprintln!("Failed to parse SSE chunk as JSON: {}", error);
+-                }
++            if let Some(event) = self.parse_data_payload(&data_payload) {
++                return Some(event);
+             }
+         }
+ 
+@@ -358,4 +477,122 @@ mod tests {
+         // Verify that the transforms field is properly set through the builder method
+         assert_eq!(req.transforms, Some(transforms));
+     }
++
++    #[test]
++    fn test_next_response_from_buffer_emits_all_delta_kinds() {
++        let sse = concat!(
++            "data: {\"choices\":[{\"delta\":{",
++            "\"reasoning_content\":\"thinking\",",
++            "\"content\":\"answer\",",
++            "\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"pwd\",\"arguments\":\"{}\"}}]",
++            "}}]}\n\n",
++            "data: [DONE]\n\n"
++        );
++
++        let response = futures_util::stream::empty::<Result<bytes::Bytes, reqwest::Error>>();
++        let mut stream = ChatCompletionStream {
++            response,
++            buffer: sse.to_string(),
++            first_chunk: true,
++            pending_events: VecDeque::new(),
++        };
++
++        match stream.next_response_from_buffer() {
++            Some(ChatCompletionStreamResponse::ReasoningContent(text)) => {
++                assert_eq!(text, "thinking");
++            }
++            other => panic!("expected ReasoningContent, got {:?}", other),
++        }
++
++        match stream.next_response_from_buffer() {
++            Some(ChatCompletionStreamResponse::Content(text)) => {
++                assert_eq!(text, "answer");
++            }
++            other => panic!("expected Content, got {:?}", other),
++        }
++
++        match stream.next_response_from_buffer() {
++            Some(ChatCompletionStreamResponse::ToolCall(tool_calls)) => {
++                assert_eq!(tool_calls.len(), 1);
++                assert_eq!(tool_calls[0].id, "call_1");
++                assert_eq!(tool_calls[0].r#type, "function");
++                assert_eq!(tool_calls[0].function.name.as_deref(), Some("pwd"));
++            }
++            other => panic!("expected ToolCall, got {:?}", other),
++        }
++
++        assert!(matches!(
++            stream.next_response_from_buffer(),
++            Some(ChatCompletionStreamResponse::Done)
++        ));
++        assert!(stream.next_response_from_buffer().is_none());
++    }
++
++    #[test]
++    fn test_next_response_from_buffer_parses_tool_call_continuation_without_type() {
++        let sse = concat!(
++            "data: {\"choices\":[{\"delta\":{",
++            "\"tool_calls\":[{\"id\":\"\",\"function\":{\"arguments\":\"\\\"src/main.rs\\\"}\"}}]",
++            "}}]}\n\n",
++            "data: [DONE]\n\n"
++        );
++
++        let response = futures_util::stream::empty::<Result<bytes::Bytes, reqwest::Error>>();
++        let mut stream = ChatCompletionStream {
++            response,
++            buffer: sse.to_string(),
++            first_chunk: true,
++            pending_events: VecDeque::new(),
++        };
++
++        match stream.next_response_from_buffer() {
++            Some(ChatCompletionStreamResponse::ToolCall(tool_calls)) => {
++                assert_eq!(tool_calls.len(), 1);
++                assert_eq!(tool_calls[0].id, "");
++                assert_eq!(tool_calls[0].r#type, "function");
++                assert_eq!(
++                    tool_calls[0].function.arguments.as_deref(),
++                    Some("\"src/main.rs\"}")
++                );
++            }
++            other => panic!("expected ToolCall, got {:?}", other),
++        }
++
++        assert!(matches!(
++            stream.next_response_from_buffer(),
++            Some(ChatCompletionStreamResponse::Done)
++        ));
++    }
++
++    #[test]
++    fn test_next_response_from_buffer_parses_single_line_data_without_blank_delimiter() {
++        let sse = concat!(
++            "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n",
++            "data: {\"choices\":[{\"delta\":{\"content\":\" world\"}}]}\n",
++            "data: [DONE]\n"
++        );
++
++        let response = futures_util::stream::empty::<Result<bytes::Bytes, reqwest::Error>>();
++        let mut stream = ChatCompletionStream {
++            response,
++            buffer: sse.to_string(),
++            first_chunk: true,
++            pending_events: VecDeque::new(),
++        };
++
++        match stream.next_response_from_buffer() {
++            Some(ChatCompletionStreamResponse::Content(text)) => assert_eq!(text, "hello"),
++            other => panic!("expected first content, got {:?}", other),
++        }
++
++        match stream.next_response_from_buffer() {
++            Some(ChatCompletionStreamResponse::Content(text)) => assert_eq!(text, " world"),
++            other => panic!("expected second content, got {:?}", other),
++        }
++
++        assert!(matches!(
++            stream.next_response_from_buffer(),
++            Some(ChatCompletionStreamResponse::Done)
++        ));
++    }
+ }
+diff --git src/v1/types.rs src/v1/types.rs
+index 45c6b9a..69deb8e 100644
+--- src/v1/types.rs
++++ src/v1/types.rs
+@@ -24,6 +24,7 @@ pub struct FunctionParameters {
+ pub enum JSONSchemaType {
+     Object,
+     Number,
++    Integer,
+     String,
+     Array,
+     Null,

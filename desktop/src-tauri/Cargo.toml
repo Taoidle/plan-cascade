@@ -77,12 +77,6 @@ anyhow = "1"
 # Async trait support
 async-trait = "0.1"
 
-# DashScope SDK for Qwen LLM provider
-async-dashscope = "0.12"
-
-# Exponential backoff (used by DashScope SDK client builder)
-backoff = "0.4"
-
 # Anthropic SDK types (used by MiniMax provider via Anthropic-compatible endpoint)
 anthropic-async = "0.4"
 
@@ -179,6 +173,9 @@ custom-protocol = ["tauri/custom-protocol"]
 # Optional browser automation support. Adds chromiumoxide dependency.
 # Enable with: cargo build --features browser
 browser = ["dep:chromiumoxide", "dep:futures"]
+
+[patch.crates-io]
+openai-api-rs = { path = "vendor/openai-api-rs" }
 
 [profile.release]
 panic = "abort"

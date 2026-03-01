@@ -34,6 +34,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Sync vendored openai-api-rs
+        run: ./scripts/vendor-openai-api-rs-sync.sh
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -59,7 +62,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('desktop/src-tauri/Cargo.lock', 'desktop/src-tauri/vendor/openai-api-rs/**') }}
           restore-keys: |
             ${{ runner.os }}-cargo-release-
             ${{ runner.os }}-cargo-

@@ -22,8 +22,8 @@ const GLM_CODING_BASE_URL = 'https://open.bigmodel.cn/api/coding/paas/v4/chat/co
 const GLM_INTL_BASE_URL = 'https://api.z.ai/api/paas/v4/chat/completions';
 const GLM_INTL_CODING_BASE_URL = 'https://api.z.ai/api/coding/paas/v4/chat/completions';
 const MINIMAX_CHINA_BASE_URL = 'https://api.minimaxi.com/v1/chat/completions';
-const QWEN_SINGAPORE_BASE_URL = 'https://dashscope-intl.aliyuncs.com/api/v1';
-const QWEN_US_BASE_URL = 'https://dashscope-us.aliyuncs.com/api/v1';
+const QWEN_SINGAPORE_BASE_URL = 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions';
+const QWEN_US_BASE_URL = 'https://dashscope-us.aliyuncs.com/compatible-mode/v1/chat/completions';
 
 /** Default model per provider, used when user selects "Provider default". */
 export const DEFAULT_MODEL_BY_PROVIDER: Record<string, string> = {

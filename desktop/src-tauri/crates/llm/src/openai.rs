@@ -4,17 +4,20 @@
 //! Supports GPT-4, o1, and o3 models with tool calling and reasoning.
 
 use async_trait::async_trait;
+use futures_util::StreamExt;
+use openai_api_rs::v1::chat_completion::chat_completion_stream::ChatCompletionStreamResponse;
 use serde::Deserialize;
 use tokio::sync::mpsc;
 
-use super::provider::{missing_api_key_error, parse_http_error, LlmProvider};
+use super::openai_compat::{
+    build_client, map_api_error, value_to_chat_request, value_to_chat_stream_request,
+};
+use super::provider::LlmProvider;
 use super::types::{
     LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message, MessageContent, MessageRole,
     ProviderConfig, StopReason, ToolCall, ToolCallMode, ToolDefinition, UsageStats,
 };
-use crate::http_client::build_http_client;
-use crate::streaming_adapters::OpenAIAdapter;
-use plan_cascade_core::streaming::{StreamAdapter, UnifiedStreamEvent};
+use plan_cascade_core::streaming::UnifiedStreamEvent;
 
 /// Default OpenAI API endpoint
 const OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
@@ -22,19 +25,16 @@ const OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
 /// OpenAI provider
 pub struct OpenAIProvider {
     config: ProviderConfig,
-    client: reqwest::Client,
 }
 
 impl OpenAIProvider {
     /// Create a new OpenAI provider with the given configuration
     pub fn new(config: ProviderConfig) -> Self {
-        let client = build_http_client(config.proxy.as_ref());
-        Self { config, client }
+        Self { config }
     }
 
-    /// Get the API base URL
-    fn base_url(&self) -> &str {
-        self.config.base_url.as_deref().unwrap_or(OPENAI_API_URL)
+    fn build_compat_client(&self) -> LlmResult<openai_api_rs::v1::api::OpenAIClient> {
+        build_client(&self.config, "openai", OPENAI_API_URL, false)
     }
 
     /// Check if model supports reasoning (o1/o3 models)
@@ -415,12 +415,6 @@ impl LlmProvider for OpenAIProvider {
         tools: Vec<ToolDefinition>,
         request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
-        let api_key = self
-            .config
-            .api_key
-            .as_ref()
-            .ok_or_else(|| missing_api_key_error("openai"))?;
-
         let body = self.build_request_body(
             &messages,
             system.as_deref(),
@@ -428,30 +422,21 @@ impl LlmProvider for OpenAIProvider {
             false,
             &request_options,
         );
+        let request = value_to_chat_request("openai", body)?;
+        let mut client = self.build_compat_client()?;
 
-        let response = self
-            .client
-            .post(self.base_url())
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
+        let response = client
+            .chat_completion(request)
             .await
-            .map_err(|e| LlmError::NetworkError {
-                message: e.to_string(),
-            })?;
-
-        let status = response.status().as_u16();
-        let body_text = response.text().await.map_err(|e| LlmError::NetworkError {
-            message: e.to_string(),
-        })?;
-
-        if status != 200 {
-            return Err(parse_http_error(status, &body_text, "openai"));
-        }
+            .map_err(|e| map_api_error("openai", e))?;
 
         let openai_response: OpenAIResponse =
-            serde_json::from_str(&body_text).map_err(|e| LlmError::ParseError {
+            serde_json::from_value(serde_json::to_value(response).map_err(|e| {
+                LlmError::ParseError {
+                    message: format!("Failed to serialize response: {}", e),
+                }
+            })?)
+            .map_err(|e| LlmError::ParseError {
                 message: format!("Failed to parse response: {}", e),
             })?;
 
@@ -466,129 +451,100 @@ impl LlmProvider for OpenAIProvider {
         tx: mpsc::Sender<UnifiedStreamEvent>,
         request_options: LlmRequestOptions,
     ) -> LlmResult<LlmResponse> {
-        let api_key = self
-            .config
-            .api_key
-            .as_ref()
-            .ok_or_else(|| missing_api_key_error("openai"))?;
-
         let body =
             self.build_request_body(&messages, system.as_deref(), &tools, true, &request_options);
+        let request = value_to_chat_stream_request("openai", body)?;
+        let mut client = self.build_compat_client()?;
 
-        let response = self
-            .client
-            .post(self.base_url())
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
+        let mut stream = client
+            .chat_completion_stream(request)
             .await
-            .map_err(|e| LlmError::NetworkError {
-                message: e.to_string(),
-            })?;
+            .map_err(|e| map_api_error("openai", e))?;
 
-        let status = response.status().as_u16();
-        if status != 200 {
-            let body_text = response.text().await.map_err(|e| LlmError::NetworkError {
-                message: e.to_string(),
-            })?;
-            return Err(parse_http_error(status, &body_text, "openai"));
-        }
-
-        // Process SSE stream
-        let mut adapter = OpenAIAdapter::new(&self.config.model);
         let mut accumulated_content = String::new();
         let mut accumulated_thinking = String::new();
         let mut tool_calls = Vec::new();
-        let mut usage = UsageStats::default();
+        let usage = UsageStats::default();
         let mut stop_reason = StopReason::EndTurn;
+        let mut in_thinking = false;
 
-        let mut stream = response.bytes_stream();
-        use futures_util::StreamExt;
+        let mut pending_tools: std::collections::HashMap<String, (Option<String>, String)> =
+            std::collections::HashMap::new();
+        let mut pending_order: Vec<String> = Vec::new();
 
-        let mut buffer = String::new();
-
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| LlmError::NetworkError {
-                message: e.to_string(),
-            })?;
-
-            buffer.push_str(&String::from_utf8_lossy(&chunk));
-
-            // Process complete lines
-            while let Some(line_end) = buffer.find('\n') {
-                let line = buffer[..line_end].to_string();
-                buffer = buffer[line_end + 1..].to_string();
-
-                if line.trim().is_empty() {
-                    continue;
-                }
-
-                match adapter.adapt(&line) {
-                    Ok(events) => {
-                        for event in events {
-                            match &event {
-                                UnifiedStreamEvent::TextDelta { content } => {
-                                    accumulated_content.push_str(content);
-                                }
-                                UnifiedStreamEvent::ThinkingDelta { content, .. } => {
-                                    accumulated_thinking.push_str(content);
-                                }
-                                UnifiedStreamEvent::ToolComplete {
-                                    tool_id,
-                                    tool_name,
-                                    arguments,
-                                } => {
-                                    if let Ok(input) = serde_json::from_str(arguments) {
-                                        tool_calls.push(ToolCall {
-                                            id: tool_id.clone(),
-                                            name: tool_name.clone(),
-                                            arguments: input,
-                                        });
-                                    }
-                                }
-                                UnifiedStreamEvent::Usage {
-                                    input_tokens,
-                                    output_tokens,
-                                    thinking_tokens,
-                                    ..
-                                } => {
-                                    usage.input_tokens = *input_tokens;
-                                    usage.output_tokens = *output_tokens;
-                                    usage.thinking_tokens = *thinking_tokens;
-                                }
-                                UnifiedStreamEvent::Complete {
-                                    stop_reason: Some(reason),
-                                } => {
-                                    stop_reason = StopReason::from(reason.as_str());
-                                }
-                                _ => {}
-                            }
-
-                            // Forward streaming events but suppress internal signals —
-                            // the orchestrator emits its own Complete, Usage, and
-                            // tool lifecycle events after executing tools.
-                            if !matches!(
-                                &event,
-                                UnifiedStreamEvent::Complete { .. }
-                                    | UnifiedStreamEvent::Usage { .. }
-                                    | UnifiedStreamEvent::ToolStart { .. }
-                                    | UnifiedStreamEvent::ToolComplete { .. }
-                            ) {
-                                let _ = tx.send(event).await;
-                            }
-                        }
+        while let Some(event) = stream.next().await {
+            match event {
+                ChatCompletionStreamResponse::Content(content) => {
+                    if !content.is_empty() {
+                        accumulated_content.push_str(&content);
+                        let _ = tx.send(UnifiedStreamEvent::TextDelta { content }).await;
                     }
-                    Err(e) => {
+                }
+                ChatCompletionStreamResponse::ReasoningContent(content) => {
+                    if !content.is_empty() {
+                        if !in_thinking {
+                            in_thinking = true;
+                            let _ = tx
+                                .send(UnifiedStreamEvent::ThinkingStart { thinking_id: None })
+                                .await;
+                        }
+                        accumulated_thinking.push_str(&content);
                         let _ = tx
-                            .send(UnifiedStreamEvent::Error {
-                                message: e.to_string(),
-                                code: None,
+                            .send(UnifiedStreamEvent::ThinkingDelta {
+                                content,
+                                thinking_id: None,
                             })
                             .await;
                     }
                 }
+                ChatCompletionStreamResponse::ToolCall(chunks) => {
+                    for chunk in chunks {
+                        let id = chunk.id;
+                        if id.is_empty() {
+                            continue;
+                        }
+                        if !pending_tools.contains_key(&id) {
+                            pending_order.push(id.clone());
+                        }
+                        let entry = pending_tools
+                            .entry(id)
+                            .or_insert_with(|| (None, String::new()));
+                        if let Some(name) = chunk.function.name {
+                            if !name.is_empty() {
+                                entry.0 = Some(name);
+                            }
+                        }
+                        if let Some(arguments) = chunk.function.arguments {
+                            entry.1.push_str(&arguments);
+                        }
+                    }
+                }
+                ChatCompletionStreamResponse::Done => break,
             }
+        }
+
+        if in_thinking {
+            let _ = tx
+                .send(UnifiedStreamEvent::ThinkingEnd { thinking_id: None })
+                .await;
+        }
+
+        for id in pending_order {
+            if let Some((name, args)) = pending_tools.remove(&id) {
+                if let Some(name) = name {
+                    if let Ok(arguments) = serde_json::from_str::<serde_json::Value>(&args) {
+                        tool_calls.push(ToolCall {
+                            id,
+                            name,
+                            arguments,
+                        });
+                    }
+                }
+            }
+        }
+
+        if !tool_calls.is_empty() {
+            stop_reason = StopReason::ToolUse;
         }
 
         Ok(LlmResponse {
@@ -611,34 +567,12 @@ impl LlmProvider for OpenAIProvider {
     }
 
     async fn health_check(&self) -> LlmResult<()> {
-        let api_key = self
-            .config
-            .api_key
-            .as_ref()
-            .ok_or_else(|| missing_api_key_error("openai"))?;
-
-        // List models to verify API key
-        let response = self
-            .client
-            .get("https://api.openai.com/v1/models")
-            .header("Authorization", format!("Bearer {}", api_key))
-            .send()
+        let mut client = self.build_compat_client()?;
+        client
+            .list_models()
             .await
-            .map_err(|e| LlmError::NetworkError {
-                message: e.to_string(),
-            })?;
-
-        let status = response.status().as_u16();
-        if status == 200 {
-            Ok(())
-        } else if status == 401 {
-            Err(LlmError::AuthenticationFailed {
-                message: "Invalid API key".to_string(),
-            })
-        } else {
-            let body = response.text().await.unwrap_or_default();
-            Err(parse_http_error(status, &body, "openai"))
-        }
+            .map(|_| ())
+            .map_err(|e| map_api_error("openai", e))
     }
 
     fn config(&self) -> &ProviderConfig {
@@ -646,43 +580,18 @@ impl LlmProvider for OpenAIProvider {
     }
 
     async fn list_models(&self) -> LlmResult<Option<Vec<String>>> {
-        let api_key = self
-            .config
-            .api_key
-            .as_ref()
-            .ok_or_else(|| missing_api_key_error("openai"))?;
-
-        let response = self
-            .client
-            .get("https://api.openai.com/v1/models")
-            .header("Authorization", format!("Bearer {}", api_key))
-            .send()
+        let mut client = self.build_compat_client()?;
+        let response = client
+            .list_models()
             .await
-            .map_err(|e| LlmError::NetworkError {
-                message: e.to_string(),
-            })?;
+            .map_err(|e| map_api_error("openai", e))?;
 
-        let status = response.status().as_u16();
-        if status != 200 {
-            let body = response.text().await.unwrap_or_default();
-            return Err(parse_http_error(status, &body, "openai"));
-        }
-
-        let body: serde_json::Value = response.json().await.map_err(|e| LlmError::ParseError {
-            message: e.to_string(),
-        })?;
-
-        let models = body["data"]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|m| m["id"].as_str().map(|s| s.to_string()))
-                    .filter(|id| {
-                        id.starts_with("gpt") || id.starts_with("o1") || id.starts_with("o3")
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        let models: Vec<String> = response
+            .data
+            .iter()
+            .filter_map(|m| m.id.clone())
+            .filter(|id| id.starts_with("gpt") || id.starts_with("o1") || id.starts_with("o3"))
+            .collect();
 
         Ok(Some(models))
     }

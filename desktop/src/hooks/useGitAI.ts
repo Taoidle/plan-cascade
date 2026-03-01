@@ -114,9 +114,9 @@ export function useGitAI(): UseGitAIReturn {
           } else if (canonicalProvider === 'glm' && glmEndpoint === 'international-coding') {
             resolvedBaseUrl = 'https://api.z.ai/api/coding/paas/v4/chat/completions';
           } else if (canonicalProvider === 'qwen' && qwenEndpoint === 'singapore') {
-            resolvedBaseUrl = 'https://dashscope-intl.aliyuncs.com/api/v1';
+            resolvedBaseUrl = 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions';
           } else if (canonicalProvider === 'qwen' && qwenEndpoint === 'us') {
-            resolvedBaseUrl = 'https://dashscope-us.aliyuncs.com/api/v1';
+            resolvedBaseUrl = 'https://dashscope-us.aliyuncs.com/compatible-mode/v1/chat/completions';
           }
 
           // Configure the LLM provider on the backend GitState

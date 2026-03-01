@@ -429,6 +429,14 @@ impl QwenProvider {
             LlmError::NetworkError { message: msg }
         }
     }
+
+    /// Detect stream deserialization failures caused by partial/incompatible
+    /// incremental chunks from DashScope.
+    fn is_recoverable_stream_deserialization_error(message: &str) -> bool {
+        let msg = message.to_lowercase();
+        msg.contains("failed to deserialize api response")
+            && (msg.contains("missing field") || msg.contains("invalid type"))
+    }
 }
 
 #[async_trait]
@@ -548,6 +556,7 @@ impl LlmProvider for QwenProvider {
         let mut usage = UsageStats::default();
         let mut stop_reason = StopReason::EndTurn;
         let mut in_reasoning = false;
+        let mut recoverable_stream_error: Option<String> = None;
 
         let mut pending_tool_id: Option<String> = None;
         let mut pending_tool_name: Option<String> = None;
@@ -706,19 +715,24 @@ impl LlmProvider for QwenProvider {
                     }
                 }
                 Err(e) => {
+                    let err_message = e.to_string();
+                    if Self::is_recoverable_stream_deserialization_error(&err_message) {
+                        warn!(
+                            error = %err_message,
+                            event_count,
+                            "qwen: recoverable stream deserialization error, will attempt non-stream fallback if needed"
+                        );
+                        recoverable_stream_error = Some(err_message);
+                        break;
+                    }
+
                     warn!(
-                        error = %e,
+                        error = %err_message,
                         event_count,
                         "qwen: stream error after {} events",
                         event_count
                     );
-                    let _ = tx
-                        .send(UnifiedStreamEvent::Error {
-                            message: e.to_string(),
-                            code: None,
-                        })
-                        .await;
-                    break;
+                    return Err(Self::convert_sdk_error(e));
                 }
             }
         }
@@ -740,6 +754,57 @@ impl LlmProvider for QwenProvider {
                     thinking_id: None,
                 })
                 .await;
+        }
+
+        // If streaming failed due to SDK deserialization on incremental chunks
+        // and nothing useful was accumulated, fall back to a non-stream call.
+        if recoverable_stream_error.is_some()
+            && accumulated_content.trim().is_empty()
+            && tool_calls.is_empty()
+        {
+            debug!(
+                event_count,
+                "qwen: falling back to non-stream request after recoverable stream error"
+            );
+
+            let fallback_param =
+                self.build_generation_param(&messages, system.as_deref(), &tools, false)?;
+            let fallback_output = self
+                .client
+                .generation()
+                .call(fallback_param)
+                .await
+                .map_err(Self::convert_sdk_error)?;
+            let fallback_response = self.convert_output_to_response(&fallback_output);
+
+            if let Some(thinking) = &fallback_response.thinking {
+                if !thinking.is_empty() {
+                    let _ = tx
+                        .send(UnifiedStreamEvent::ThinkingStart { thinking_id: None })
+                        .await;
+                    let _ = tx
+                        .send(UnifiedStreamEvent::ThinkingDelta {
+                            content: thinking.clone(),
+                            thinking_id: None,
+                        })
+                        .await;
+                    let _ = tx
+                        .send(UnifiedStreamEvent::ThinkingEnd { thinking_id: None })
+                        .await;
+                }
+            }
+
+            if let Some(content) = &fallback_response.content {
+                if !content.is_empty() {
+                    let _ = tx
+                        .send(UnifiedStreamEvent::TextDelta {
+                            content: content.clone(),
+                        })
+                        .await;
+                }
+            }
+
+            return Ok(fallback_response);
         }
 
         debug!(
@@ -893,6 +958,19 @@ mod tests {
             provider.default_fallback_mode(),
             FallbackToolFormatMode::Soft
         );
+    }
+
+    #[test]
+    fn test_recoverable_stream_deserialization_error_detection() {
+        assert!(QwenProvider::is_recoverable_stream_deserialization_error(
+            "failed to deserialize api response: missing field name"
+        ));
+        assert!(QwenProvider::is_recoverable_stream_deserialization_error(
+            "Failed to deserialize API response: missing field output"
+        ));
+        assert!(!QwenProvider::is_recoverable_stream_deserialization_error(
+            "stream error: connection reset by peer"
+        ));
     }
 
     #[test]
