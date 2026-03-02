@@ -24,7 +24,7 @@ import {
   resolveStandaloneProvider,
 } from './execution/providerUtils';
 import type { ContextSourceConfig } from './contextSources';
-import type { ContextEnvelope } from '../lib/contextApi';
+import { assembleTurnContext, type ContextEnvelope } from '../lib/contextApi';
 import { useContextOpsStore } from './contextOps';
 import { DEFAULT_PROMPT_TOKEN_BUDGET, resolvePromptTokenBudget } from '../lib/promptTokenBudget';
 
@@ -717,10 +717,102 @@ interface ExecutionState {
 }
 
 const HISTORY_KEY = 'plan-cascade-execution-history';
+const HISTORY_MIGRATION_KEY = 'plan-cascade-execution-history-migrated-v2';
 const SESSION_STATE_KEY = 'plan-cascade-execution-sessions-v1';
-const MAX_HISTORY_ITEMS = 10;
+const MAX_HISTORY_ITEMS = 200;
 const DEFAULT_STANDALONE_CONTEXT_TURNS = 8;
 const STANDALONE_CONTEXT_UNLIMITED = -1;
+const HANDOFF_TURN_THRESHOLD = 120;
+const HANDOFF_RECENT_TURNS_TO_KEEP = 60;
+const HANDOFF_MAX_POINTS = 12;
+
+async function listHistoryFromSQLite(limit = MAX_HISTORY_ITEMS): Promise<ExecutionHistoryItem[] | null> {
+  try {
+    const result = await invoke<CommandResponse<ExecutionHistoryItem[]>>('list_execution_history', { limit });
+    if (!result.success || !result.data) return null;
+    return result.data;
+  } catch {
+    return null;
+  }
+}
+
+async function upsertHistoryToSQLite(item: ExecutionHistoryItem): Promise<void> {
+  try {
+    await invoke<CommandResponse<ExecutionHistoryItem>>('upsert_execution_history', { item });
+  } catch {
+    // Non-fatal: in-memory state remains source of truth for current UI session.
+  }
+}
+
+async function importHistoryToSQLite(items: ExecutionHistoryItem[]): Promise<boolean> {
+  if (items.length === 0) return true;
+  try {
+    const result = await invoke<CommandResponse<number>>('import_execution_history', { items });
+    return Boolean(result.success);
+  } catch {
+    // Keep fallback local history when import fails.
+    return false;
+  }
+}
+
+async function deleteHistoryFromSQLite(historyId: string): Promise<void> {
+  try {
+    await invoke<CommandResponse<boolean>>('delete_execution_history', {
+      historyId,
+      history_id: historyId,
+    });
+  } catch {
+    // Ignore persistence failures.
+  }
+}
+
+async function renameHistoryInSQLite(historyId: string, title?: string): Promise<void> {
+  try {
+    await invoke<CommandResponse<boolean>>('rename_execution_history', {
+      historyId,
+      history_id: historyId,
+      title: title?.trim().length ? title.trim() : null,
+    });
+  } catch {
+    // Ignore persistence failures.
+  }
+}
+
+async function clearHistoryInSQLite(): Promise<void> {
+  try {
+    await invoke<CommandResponse<boolean>>('clear_execution_history');
+  } catch {
+    // Ignore persistence failures.
+  }
+}
+
+function loadLegacyHistoryFromLocalStorage(): ExecutionHistoryItem[] {
+  try {
+    const stored = localStorage.getItem(HISTORY_KEY);
+    if (!stored) return [];
+    const parsed = JSON.parse(stored) as ExecutionHistoryItem[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function markHistoryMigrationDone(): void {
+  try {
+    localStorage.setItem(HISTORY_MIGRATION_KEY, '1');
+    localStorage.removeItem(HISTORY_KEY);
+  } catch {
+    // Ignore localStorage errors.
+  }
+}
+
+function isHistoryMigrationDone(): boolean {
+  try {
+    return localStorage.getItem(HISTORY_MIGRATION_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
 
 function getStandaloneContextTurnsLimit(): number {
   const rawValue = (useSettingsStore.getState() as { standaloneContextTurns?: unknown }).standaloneContextTurns;
@@ -770,6 +862,55 @@ function buildContextConversationTurns(
   return conversation;
 }
 
+function buildHandoffManualBlock(conversation: ContextConversationTurnInput[]): {
+  id: string;
+  title: string;
+  content: string;
+  priority: number;
+} | null {
+  if (conversation.length < HANDOFF_TURN_THRESHOLD) return null;
+
+  const olderTurns = conversation.slice(0, Math.max(0, conversation.length - HANDOFF_RECENT_TURNS_TO_KEEP));
+  if (olderTurns.length === 0) return null;
+
+  const stride = Math.max(1, Math.floor(olderTurns.length / HANDOFF_MAX_POINTS));
+  const points: string[] = [];
+  for (let idx = 0; idx < olderTurns.length && points.length < HANDOFF_MAX_POINTS; idx += stride) {
+    const turn = olderTurns[idx];
+    const role = turn.role === 'user' ? 'user' : 'assistant';
+    const snippet = turn.content.replace(/\s+/g, ' ').trim().slice(0, 180);
+    if (snippet.length > 0) {
+      points.push(`- [${role}] ${snippet}`);
+    }
+  }
+  if (points.length === 0) return null;
+
+  return {
+    id: 'handoff:capsule',
+    title: 'Long Thread Handoff Capsule',
+    content: [
+      'Condensed handoff capsule for earlier conversation turns.',
+      'Use this as continuity anchor before the recent detailed turns.',
+      ...points,
+    ].join('\n'),
+    priority: 110,
+  };
+}
+
+function inferInjectedSourceKinds(params: {
+  hasHistory: boolean;
+  contextSources: ContextSourceConfig | null;
+}): string[] {
+  const kinds: string[] = [];
+  if (params.hasHistory) kinds.push('history');
+  const sources = params.contextSources;
+  if (!sources) return kinds;
+  if (sources.memory?.enabled) kinds.push('memory');
+  if (sources.knowledge?.enabled) kinds.push('knowledge');
+  if (sources.skills?.enabled) kinds.push('skills');
+  return kinds;
+}
+
 async function buildStandaloneMessageWithContextEnvelope(params: {
   query: string;
   turns: StandaloneTurn[];
@@ -778,46 +919,159 @@ async function buildStandaloneMessageWithContextEnvelope(params: {
   sessionId: string | null;
   contextSources: ContextSourceConfig | null;
   addLog: (message: string) => void;
-}): Promise<string> {
+}): Promise<{ message: string; injectedSourceKinds: string[]; externalContextInjected: boolean }> {
   const fallbackMessage =
     trimStandaloneTurns(params.turns, params.contextTurnsLimit).length > 0
       ? buildStandaloneConversationMessage(params.turns, params.query, params.contextTurnsLimit)
       : params.query;
+  const fallbackInjectedSourceKinds = inferInjectedSourceKinds({
+    hasHistory: trimStandaloneTurns(params.turns, params.contextTurnsLimit).length > 0,
+    contextSources: params.contextSources,
+  });
+  const conversationHistory = buildContextConversationTurns(params.turns, params.contextTurnsLimit);
+  const handoffCapsule = buildHandoffManualBlock(conversationHistory);
+  const settings = useSettingsStore.getState();
+  const hardLimit = await resolvePromptTokenBudget({
+    backend: settings.backend,
+    provider: settings.provider,
+    model: settings.model,
+    fallbackBudget: DEFAULT_PROMPT_TOKEN_BUDGET,
+  });
+  const reservedOutputTokens = Math.max(2_048, Math.round(hardLimit * 0.2));
+  const inputTokenBudget = Math.max(256, hardLimit - reservedOutputTokens);
 
   const request = {
     project_path: params.projectPath,
     query: params.query,
     session_id: params.sessionId ? `standalone:${params.sessionId}` : undefined,
     mode: 'standalone',
-    conversation_history: buildContextConversationTurns(params.turns, params.contextTurnsLimit),
+    conversation_history: conversationHistory,
     context_sources: params.contextSources ?? undefined,
+    manual_blocks: handoffCapsule ? [handoffCapsule] : undefined,
+    input_token_budget: inputTokenBudget,
+    reserved_output_tokens: reservedOutputTokens,
+    hard_limit: hardLimit,
   };
 
   try {
-    const result = await invoke<CommandResponse<ContextEnvelopeV2>>('prepare_turn_context_v2', {
-      request,
-    });
+    const result = await assembleTurnContext(request);
     if (result.success && result.data?.assembled_prompt) {
-      useContextOpsStore.getState().setLatestEnvelope(result.data);
+      const envelope: ContextEnvelopeV2 = {
+        request_meta: result.data.request_meta,
+        budget: result.data.budget,
+        sources: result.data.sources,
+        blocks: result.data.blocks,
+        compaction: result.data.compaction,
+        trace_id: result.data.trace_id,
+        assembled_prompt: result.data.assembled_prompt,
+      };
+      useContextOpsStore.getState().setLatestEnvelope(envelope);
       const used = result.data.budget?.used_input_tokens;
       const total = result.data.budget?.input_token_budget;
       if (typeof used === 'number' && typeof total === 'number') {
-        params.addLog(`Context v2 prepared (${used}/${total} tokens, trace=${result.data.trace_id})`);
+        const fallbackTag = result.data.fallback_used ? ', fallback' : '';
+        const handoffTag = handoffCapsule ? ', handoff_capsule' : '';
+        params.addLog(
+          `Context assembled (${used}/${total} tokens, trace=${result.data.trace_id}${fallbackTag}${handoffTag})`,
+        );
       } else {
-        params.addLog(`Context v2 prepared (trace=${result.data.trace_id})`);
+        params.addLog(`Context assembled (trace=${result.data.trace_id}${handoffCapsule ? ', handoff_capsule' : ''})`);
       }
-      return result.data.assembled_prompt;
+      return {
+        message: result.data.assembled_prompt,
+        injectedSourceKinds: result.data.injected_source_kinds ?? fallbackInjectedSourceKinds,
+        externalContextInjected: true,
+      };
     }
 
     if (result.error) {
-      params.addLog(`Context v2 fallback to legacy path: ${result.error}`);
+      params.addLog(`Context assemble fallback to legacy path: ${result.error}`);
     }
-    return fallbackMessage;
+    return {
+      message: fallbackMessage,
+      injectedSourceKinds: fallbackInjectedSourceKinds,
+      externalContextInjected: fallbackInjectedSourceKinds.length > 0,
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    params.addLog(`Context v2 invocation failed, fallback to legacy path: ${message}`);
-    return fallbackMessage;
+    params.addLog(`Context assemble invocation failed, fallback to legacy path: ${message}`);
+    return {
+      message: fallbackMessage,
+      injectedSourceKinds: fallbackInjectedSourceKinds,
+      externalContextInjected: fallbackInjectedSourceKinds.length > 0,
+    };
   }
+}
+
+function buildChatConversationTurns(lines: StreamLine[]): ContextConversationTurnInput[] {
+  const turns = deriveConversationTurns(lines);
+  const conversation: ContextConversationTurnInput[] = [];
+  for (const turn of turns) {
+    if (turn.userContent.trim().length > 0) {
+      conversation.push({ role: 'user', content: turn.userContent });
+    }
+    if (turn.assistantText.trim().length > 0) {
+      conversation.push({ role: 'assistant', content: turn.assistantText });
+    }
+  }
+  return conversation;
+}
+
+async function buildClaudePromptWithContextEnvelope(params: {
+  query: string;
+  lines: StreamLine[];
+  projectPath: string;
+  sessionId: string | null;
+  contextSources: ContextSourceConfig | null;
+  addLog: (message: string) => void;
+}): Promise<string> {
+  const conversationHistory = buildChatConversationTurns(params.lines);
+  const handoffCapsule = buildHandoffManualBlock(conversationHistory);
+  const settings = useSettingsStore.getState();
+  const hardLimit = await resolvePromptTokenBudget({
+    backend: settings.backend,
+    provider: settings.provider,
+    model: settings.model,
+    fallbackBudget: DEFAULT_PROMPT_TOKEN_BUDGET,
+  });
+  const reservedOutputTokens = Math.max(2_048, Math.round(hardLimit * 0.2));
+  const inputTokenBudget = Math.max(256, hardLimit - reservedOutputTokens);
+  const request = {
+    project_path: params.projectPath,
+    query: params.query,
+    session_id: params.sessionId ? `claude:${params.sessionId}` : undefined,
+    mode: 'chat',
+    conversation_history: conversationHistory,
+    context_sources: params.contextSources ?? undefined,
+    manual_blocks: handoffCapsule ? [handoffCapsule] : undefined,
+    input_token_budget: inputTokenBudget,
+    reserved_output_tokens: reservedOutputTokens,
+    hard_limit: hardLimit,
+  };
+
+  try {
+    const result = await assembleTurnContext(request);
+    if (result.success && result.data?.assembled_prompt) {
+      const envelope: ContextEnvelopeV2 = {
+        request_meta: result.data.request_meta,
+        budget: result.data.budget,
+        sources: result.data.sources,
+        blocks: result.data.blocks,
+        compaction: result.data.compaction,
+        trace_id: result.data.trace_id,
+        assembled_prompt: result.data.assembled_prompt,
+      };
+      useContextOpsStore.getState().setLatestEnvelope(envelope);
+      const fallbackTag = result.data.fallback_used ? ', fallback' : '';
+      const handoffTag = handoffCapsule ? ', handoff_capsule' : '';
+      params.addLog(`Context assembled (trace=${result.data.trace_id}${fallbackTag}${handoffTag})`);
+      return result.data.assembled_prompt;
+    }
+  } catch {
+    // Best-effort fallback below.
+  }
+
+  return params.query;
 }
 
 const PLUGIN_SKILL_LINE_REGEX = /^\s*\/([A-Za-z0-9._-]+):([A-Za-z0-9._-]+)(?:\s+(.*))?\s*$/;
@@ -1592,9 +1846,21 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         // Show user's message in the conversation
         get().appendStreamLine(description, 'info');
 
+        const claudeContextState = (await import('./contextSources')).useContextSourcesStore.getState();
+        claudeContextState.setMemorySessionId(sessionId ? `claude:${sessionId}` : null);
+        const claudeContextSources = claudeContextState.buildConfig() ?? null;
+        const assembledPrompt = await buildClaudePromptWithContextEnvelope({
+          query: description,
+          lines: get().streamingOutput,
+          projectPath: projectPath,
+          sessionId,
+          contextSources: claudeContextSources,
+          addLog: get().addLog,
+        });
+
         // Enrich prompt with file attachments if any
         const claudeAttachments = get().attachments;
-        const claudePrompt = await preparePromptWithAttachmentContext(description, claudeAttachments, get().addLog);
+        const claudePrompt = await preparePromptWithAttachmentContext(assembledPrompt, claudeAttachments, get().addLog);
         get().clearAttachments();
 
         // Send the message to the session
@@ -1655,7 +1921,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         const contextSources = contextSourcesState.buildConfig() ?? null;
         const { cleanedPrompt, pluginInvocations } = extractPluginInvocationsFromPrompt(description);
         const normalizedPrompt = ensurePromptContent(cleanedPrompt, pluginInvocations.length);
-        const messageToSend = isSimpleStandalone
+        const assembledContext = isSimpleStandalone
           ? await buildStandaloneMessageWithContextEnvelope({
               query: normalizedPrompt,
               turns: existingStandaloneTurns,
@@ -1665,7 +1931,15 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
               contextSources,
               addLog: get().addLog,
             })
-          : normalizedPrompt;
+          : {
+              message: normalizedPrompt,
+              injectedSourceKinds: inferInjectedSourceKinds({
+                hasHistory: recentStandaloneTurns.length > 0,
+                contextSources,
+              }),
+              externalContextInjected: false,
+            };
+        const messageToSend = assembledContext.message;
         get().addLog(
           `Resolved provider: ${provider} (backend=${backendValue || 'empty'}, setting=${providerValue || 'empty'}, model=${modelValue || 'empty'})`,
         );
@@ -1711,6 +1985,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           pluginInvocations: pluginInvocations.length > 0 ? pluginInvocations : null,
           systemPrompt: activeAgent?.system_prompt ?? null,
           contextSources,
+          externalContextInjected: assembledContext.externalContextInjected,
+          injectedSourceKinds: assembledContext.injectedSourceKinds,
         });
 
         if (!result.success || !result.data) {
@@ -2019,9 +2295,21 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       set({ _pendingTaskContext: null });
     }
 
+    const followUpContextState = (await import('./contextSources')).useContextSourcesStore.getState();
+    followUpContextState.setMemorySessionId(sessionId ? `claude:${sessionId}` : null);
+    const followUpContextSources = followUpContextState.buildConfig() ?? null;
+    const assembledPrompt = await buildClaudePromptWithContextEnvelope({
+      query: basePrompt,
+      lines: get().streamingOutput,
+      projectPath: useSettingsStore.getState().workspacePath || '.',
+      sessionId,
+      contextSources: followUpContextSources,
+      addLog: get().addLog,
+    });
+
     // Enrich prompt with file attachments if any
     const followUpAttachments = get().attachments;
-    const enrichedPrompt = await preparePromptWithAttachmentContext(basePrompt, followUpAttachments, get().addLog);
+    const enrichedPrompt = await preparePromptWithAttachmentContext(assembledPrompt, followUpAttachments, get().addLog);
     get().clearAttachments();
 
     get().addLog(`Follow-up: ${prompt}`);
@@ -2299,15 +2587,37 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
   },
 
   loadHistory: () => {
-    try {
-      const stored = localStorage.getItem(HISTORY_KEY);
-      if (stored) {
-        const history = JSON.parse(stored) as ExecutionHistoryItem[];
-        set({ history });
+    void (async () => {
+      const dbHistory = await listHistoryFromSQLite(MAX_HISTORY_ITEMS);
+      const migrated = isHistoryMigrationDone();
+
+      if (!migrated) {
+        const legacy = loadLegacyHistoryFromLocalStorage();
+        if (legacy.length > 0) {
+          const imported = await importHistoryToSQLite(legacy);
+          if (imported) {
+            markHistoryMigrationDone();
+          } else {
+            set({ history: legacy });
+            return;
+          }
+        } else {
+          markHistoryMigrationDone();
+        }
       }
-    } catch {
-      // Ignore localStorage errors
-    }
+
+      const finalHistory = (await listHistoryFromSQLite(MAX_HISTORY_ITEMS)) ?? dbHistory;
+      if (finalHistory) {
+        set({ history: finalHistory });
+        return;
+      }
+
+      // Compatibility fallback when DB command is unavailable.
+      const legacyFallback = loadLegacyHistoryFromLocalStorage();
+      if (legacyFallback.length > 0) {
+        set({ history: legacyFallback });
+      }
+    })();
   },
 
   saveToHistory: () => {
@@ -2366,6 +2676,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       llmModel: settings.model,
     };
 
+    let itemToPersist: ExecutionHistoryItem | null = null;
     set((prevState) => {
       let newHistory: ExecutionHistoryItem[] = prevState.history;
       if (sessionId) {
@@ -2383,12 +2694,14 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           const cloned = [...prevState.history];
           cloned.splice(existingIndex, 1);
           newHistory = [updated, ...cloned].slice(0, MAX_HISTORY_ITEMS);
+          itemToPersist = updated;
         } else {
           const created: ExecutionHistoryItem = {
             ...baseItem,
             id: `history_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
           };
           newHistory = [created, ...prevState.history].slice(0, MAX_HISTORY_ITEMS);
+          itemToPersist = created;
         }
       } else {
         const created: ExecutionHistoryItem = {
@@ -2396,29 +2709,23 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           id: `history_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         };
         newHistory = [created, ...prevState.history].slice(0, MAX_HISTORY_ITEMS);
-      }
-
-      // Save to localStorage
-      try {
-        localStorage.setItem(HISTORY_KEY, JSON.stringify(newHistory));
-      } catch {
-        // Ignore localStorage errors
+        itemToPersist = created;
       }
 
       return { history: newHistory };
     });
+
+    if (itemToPersist) {
+      void upsertHistoryToSQLite(itemToPersist);
+    }
   },
 
   clearHistory: () => {
     const sessionIds = get()
       .history.map((item) => item.sessionId || null)
       .filter((sid): sid is string => Boolean(sid && sid.trim()));
-    try {
-      localStorage.removeItem(HISTORY_KEY);
-    } catch {
-      // Ignore localStorage errors
-    }
     set({ history: [] });
+    void clearHistoryInSQLite();
     for (const sid of sessionIds) {
       clearSessionScopedMemory(sid);
     }
@@ -2428,13 +2735,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
     const removedSessionId = get().history.find((item) => item.id === historyId)?.sessionId;
     set((state) => {
       const next = state.history.filter((item) => item.id !== historyId);
-      try {
-        localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
-      } catch {
-        // Ignore localStorage errors
-      }
       return { history: next };
     });
+    void deleteHistoryFromSQLite(historyId);
     clearSessionScopedMemory(removedSessionId);
   },
 
@@ -2449,13 +2752,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
             }
           : item,
       );
-      try {
-        localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
-      } catch {
-        // Ignore localStorage errors
-      }
       return { history: next };
     });
+    void renameHistoryInSQLite(historyId, trimmed.length > 0 ? trimmed : undefined);
   },
 
   restoreFromHistory: (historyId: string) => {
@@ -3286,9 +3585,28 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           return;
         }
 
+        const regenContextState = (await import('./contextSources')).useContextSourcesStore.getState();
+        regenContextState.setMemorySessionId(sessionId ? `claude:${sessionId}` : null);
+        const regenContextSources = regenContextState.buildConfig() ?? null;
+        const assembledPrompt = await buildClaudePromptWithContextEnvelope({
+          query: userContent,
+          lines: get().streamingOutput,
+          projectPath,
+          sessionId,
+          contextSources: regenContextSources,
+          addLog: get().addLog,
+        });
+        const regenAttachments = get().attachments;
+        const enrichedPrompt = await preparePromptWithAttachmentContext(
+          assembledPrompt,
+          regenAttachments,
+          get().addLog,
+        );
+        get().clearAttachments();
+
         // Send the user message
         const sendResult = await invoke<CommandResponse<ClaudeSendMessageResponse | boolean>>('send_message', {
-          request: { session_id: sessionId, prompt: userContent },
+          request: { session_id: sessionId, prompt: enrichedPrompt },
         });
         if (!sendResult.success) {
           throw new Error(sendResult.error || 'Failed to send regenerate request');
@@ -3372,7 +3690,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       const regenContextSources = regenContextState.buildConfig() ?? null;
       const { cleanedPrompt, pluginInvocations } = extractPluginInvocationsFromPrompt(userContent);
       const normalizedPrompt = ensurePromptContent(cleanedPrompt, pluginInvocations.length);
-      const messageToSend = await buildStandaloneMessageWithContextEnvelope({
+      const assembledContext = await buildStandaloneMessageWithContextEnvelope({
         query: normalizedPrompt,
         turns: rebuiltTurns,
         contextTurnsLimit,
@@ -3381,6 +3699,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         contextSources: regenContextSources,
         addLog: get().addLog,
       });
+      const messageToSend = assembledContext.message;
       const baseUrl = resolveProviderBaseUrl(provider, settingsSnapshot);
       const permissionLevel = useToolPermissionStore.getState().sessionLevel;
       const standaloneExecutionId = createStandaloneExecutionId();
@@ -3403,6 +3722,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           executionId: standaloneExecutionId,
           pluginInvocations: pluginInvocations.length > 0 ? pluginInvocations : null,
           contextSources: regenContextSources,
+          externalContextInjected: assembledContext.externalContextInjected,
+          injectedSourceKinds: assembledContext.injectedSourceKinds,
         });
 
         if (!result.success || !result.data) {
@@ -3572,8 +3893,23 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           return;
         }
 
+        const editContextState = (await import('./contextSources')).useContextSourcesStore.getState();
+        editContextState.setMemorySessionId(sessionId ? `claude:${sessionId}` : null);
+        const editContextSources = editContextState.buildConfig() ?? null;
+        const assembledPrompt = await buildClaudePromptWithContextEnvelope({
+          query: newContent,
+          lines: get().streamingOutput,
+          projectPath,
+          sessionId,
+          contextSources: editContextSources,
+          addLog: get().addLog,
+        });
+        const editAttachments = get().attachments;
+        const enrichedPrompt = await preparePromptWithAttachmentContext(assembledPrompt, editAttachments, get().addLog);
+        get().clearAttachments();
+
         const sendResult = await invoke<CommandResponse<ClaudeSendMessageResponse | boolean>>('send_message', {
-          request: { session_id: sessionId, prompt: newContent },
+          request: { session_id: sessionId, prompt: enrichedPrompt },
         });
         if (!sendResult.success) {
           throw new Error(sendResult.error || 'Failed to send edited prompt');
@@ -3657,7 +3993,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       const editContextSources = editContextState.buildConfig() ?? null;
       const { cleanedPrompt, pluginInvocations } = extractPluginInvocationsFromPrompt(newContent);
       const normalizedPrompt = ensurePromptContent(cleanedPrompt, pluginInvocations.length);
-      const messageToSend = await buildStandaloneMessageWithContextEnvelope({
+      const assembledContext = await buildStandaloneMessageWithContextEnvelope({
         query: normalizedPrompt,
         turns: rebuiltTurns,
         contextTurnsLimit,
@@ -3666,6 +4002,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         contextSources: editContextSources,
         addLog: get().addLog,
       });
+      const messageToSend = assembledContext.message;
       const baseUrl = resolveProviderBaseUrl(provider, settingsSnapshot);
       const permissionLevel = useToolPermissionStore.getState().sessionLevel;
       const standaloneExecutionId = createStandaloneExecutionId();
@@ -3688,6 +4025,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           executionId: standaloneExecutionId,
           pluginInvocations: pluginInvocations.length > 0 ? pluginInvocations : null,
           contextSources: editContextSources,
+          externalContextInjected: assembledContext.externalContextInjected,
+          injectedSourceKinds: assembledContext.injectedSourceKinds,
         });
 
         if (!result.success || !result.data) {

@@ -1161,6 +1161,10 @@ pub async fn execute_standalone(
     plugin_invocations: Option<Vec<PluginInvocation>>,
     pluginInvocations: Option<Vec<PluginInvocation>>,
     context_sources: Option<crate::services::task_mode::context_provider::ContextSourceConfig>,
+    external_context_injected: Option<bool>,
+    externalContextInjected: Option<bool>,
+    injected_source_kinds: Option<Vec<String>>,
+    injectedSourceKinds: Option<Vec<String>>,
     app: AppHandle,
     app_state: State<'_, AppState>,
     standalone_state: State<'_, StandaloneState>,
@@ -1170,6 +1174,17 @@ pub async fn execute_standalone(
     permission_state: State<'_, super::permissions::PermissionState>,
     plugin_state: State<'_, super::plugins::PluginState>,
 ) -> Result<CommandResponse<ExecutionResult>, String> {
+    let external_context_injected = external_context_injected
+        .or(externalContextInjected)
+        .unwrap_or(false);
+    let injected_source_kinds: std::collections::HashSet<String> = injected_source_kinds
+        .or(injectedSourceKinds)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|kind| kind.trim().to_ascii_lowercase())
+        .filter(|kind| !kind.is_empty())
+        .collect();
+
     let keyring = KeyringService::new();
     let canonical_provider = match normalize_provider_name(&provider) {
         Some(p) => p,
@@ -1309,6 +1324,11 @@ pub async fn execute_standalone(
     // Memory injection is handled by memory hooks so it can be centrally filtered.
     let system_prompt = if let Some(ref cs) = context_sources {
         let mut prompt_context_config = cs.clone();
+        if external_context_injected && injected_source_kinds.contains("skills") {
+            if let Some(skills_cfg) = prompt_context_config.skills.as_mut() {
+                skills_cfg.enabled = false;
+            }
+        }
         if let Some(memory_cfg) = prompt_context_config.memory.as_mut() {
             memory_cfg.enabled = false;
         }
@@ -1438,7 +1458,12 @@ pub async fn execute_standalone(
     // Wire memory hooks for automatic memory loading and extraction
     if let Ok(memory_store) = app_state.get_memory_store_arc().await {
         let loaded_memories = std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new()));
-        let memory_hook_config = build_memory_hook_config(context_sources.as_ref());
+        let mut memory_hook_config = build_memory_hook_config(context_sources.as_ref());
+        if external_context_injected && injected_source_kinds.contains("memory") {
+            if let Some(config) = memory_hook_config.as_mut() {
+                config.injection_enabled = false;
+            }
+        }
         orchestrator = orchestrator.with_memory_hooks_with_config(
             memory_store,
             loaded_memories,

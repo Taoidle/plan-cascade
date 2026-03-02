@@ -2154,7 +2154,7 @@ describe('Execution Store - Standalone cancellation/regenerate consistency', () 
 
     let executeStandaloneArgs: Record<string, unknown> | null = null;
     mockInvoke.mockImplementation(async (command: string, args?: unknown) => {
-      if (command === 'prepare_turn_context_v2') {
+      if (command === 'assemble_turn_context' || command === 'prepare_turn_context_v2') {
         return { success: false, data: null, error: 'fallback' };
       }
       if (command === 'execute_standalone') {

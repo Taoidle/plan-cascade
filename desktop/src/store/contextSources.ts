@@ -90,10 +90,13 @@ export interface ContextSourcesState {
 
   // === Memory State ===
   memoryEnabled: boolean;
+  memorySelectionMode: 'auto' | 'only_selected';
   selectedMemoryScopes: MemoryScope[];
   memorySessionId: string | null;
   selectedMemoryCategories: string[];
-  selectedMemoryIds: string[]; // excluded ids for default-included memory injection
+  selectedMemoryIds: string[]; // compat alias of excludedMemoryIds
+  includedMemoryIds: string[];
+  excludedMemoryIds: string[];
   availableMemoryStats: MemoryStats | null;
   categoryMemories: Record<string, MemoryEntry[]>;
   isLoadingMemoryStats: boolean;
@@ -130,6 +133,7 @@ export interface ContextSourcesState {
   toggleMemory: (enabled: boolean) => void;
   toggleMemoryScope: (scope: MemoryScope) => void;
   setMemorySessionId: (sessionId: string | null) => void;
+  setMemorySelectionMode: (mode: 'auto' | 'only_selected') => void;
   toggleMemoryCategory: (category: string) => void;
   toggleMemoryItem: (memoryId: string) => void;
   loadMemoryStats: (projectPath: string) => Promise<void>;
@@ -182,10 +186,13 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
 
   // === Memory State ===
   memoryEnabled: true,
+  memorySelectionMode: 'auto',
   selectedMemoryScopes: ['global', 'project', 'session'],
   memorySessionId: null,
   selectedMemoryCategories: [],
   selectedMemoryIds: [],
+  includedMemoryIds: [],
+  excludedMemoryIds: [],
   availableMemoryStats: null,
   categoryMemories: {},
   isLoadingMemoryStats: false,
@@ -421,7 +428,12 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
   toggleMemory: (enabled) => {
     set({ memoryEnabled: enabled });
     if (!enabled) {
-      set({ selectedMemoryCategories: [], selectedMemoryIds: [] });
+      set({
+        selectedMemoryCategories: [],
+        selectedMemoryIds: [],
+        includedMemoryIds: [],
+        excludedMemoryIds: [],
+      });
     }
   },
 
@@ -452,6 +464,16 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
     });
   },
 
+  setMemorySelectionMode: (mode) => {
+    set((state) => {
+      if (mode === state.memorySelectionMode) return state;
+      return {
+        memorySelectionMode: mode,
+        selectedMemoryIds: mode === 'auto' ? state.excludedMemoryIds : state.includedMemoryIds,
+      };
+    });
+  },
+
   toggleMemoryCategory: (category) => {
     const { selectedMemoryCategories } = get();
     const isSelected = selectedMemoryCategories.includes(category);
@@ -468,13 +490,25 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
   },
 
   toggleMemoryItem: (memoryId) => {
-    const { selectedMemoryIds } = get();
-    const isExcluded = selectedMemoryIds.includes(memoryId);
-    if (isExcluded) {
-      set({ selectedMemoryIds: selectedMemoryIds.filter((id) => id !== memoryId) });
-    } else {
-      set({ selectedMemoryIds: [...selectedMemoryIds, memoryId] });
+    const { memorySelectionMode, includedMemoryIds, excludedMemoryIds } = get();
+    if (memorySelectionMode === 'only_selected') {
+      const exists = includedMemoryIds.includes(memoryId);
+      const nextIncluded = exists
+        ? includedMemoryIds.filter((id) => id !== memoryId)
+        : [...includedMemoryIds, memoryId];
+      set({
+        includedMemoryIds: nextIncluded,
+        selectedMemoryIds: nextIncluded,
+      });
+      return;
     }
+
+    const exists = excludedMemoryIds.includes(memoryId);
+    const nextExcluded = exists ? excludedMemoryIds.filter((id) => id !== memoryId) : [...excludedMemoryIds, memoryId];
+    set({
+      excludedMemoryIds: nextExcluded,
+      selectedMemoryIds: nextExcluded,
+    });
   },
 
   loadMemoryStats: async (projectPath) => {
@@ -690,10 +724,13 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
       selectedCollections,
       selectedDocuments,
       memoryEnabled,
+      memorySelectionMode,
       selectedMemoryScopes,
       memorySessionId,
       selectedMemoryCategories,
       selectedMemoryIds,
+      includedMemoryIds,
+      excludedMemoryIds,
       skillsEnabled,
       selectedSkillIds,
     } = get();
@@ -702,11 +739,14 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
     const config: ContextSourceConfig = { project_id: projectId };
 
     const normalizedScopes = normalizeMemoryScopes(selectedMemoryScopes, memorySessionId);
+    const compatExcluded = excludedMemoryIds.length > 0 ? excludedMemoryIds : selectedMemoryIds;
+    const selectedIds = memorySelectionMode === 'only_selected' ? includedMemoryIds : [];
+    const excludedIds = memorySelectionMode === 'only_selected' ? [] : compatExcluded;
     config.memory = {
       enabled: memoryEnabled,
       selected_categories: selectedMemoryCategories,
-      selected_memory_ids: [],
-      excluded_memory_ids: selectedMemoryIds,
+      selected_memory_ids: selectedIds,
+      excluded_memory_ids: excludedIds,
       selected_scopes: normalizedScopes,
       session_id: memorySessionId,
     };

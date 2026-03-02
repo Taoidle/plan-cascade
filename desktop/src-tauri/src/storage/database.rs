@@ -801,6 +801,65 @@ impl Database {
             [],
         )?;
 
+        // UI execution history (session + turn level) for durable chat restore.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS execution_history_sessions (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                task_description TEXT NOT NULL,
+                workspace_path TEXT,
+                strategy TEXT,
+                status TEXT,
+                started_at INTEGER NOT NULL,
+                completed_at INTEGER,
+                duration_ms INTEGER,
+                completed_stories INTEGER NOT NULL DEFAULT 0,
+                total_stories INTEGER NOT NULL DEFAULT 0,
+                success INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT,
+                conversation_content TEXT,
+                conversation_lines_json TEXT,
+                session_id TEXT,
+                llm_backend TEXT,
+                llm_provider TEXT,
+                llm_model TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_execution_history_sessions_started
+             ON execution_history_sessions(started_at DESC)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_execution_history_sessions_session
+             ON execution_history_sessions(session_id)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS execution_history_turns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                history_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                line_type TEXT NOT NULL,
+                content TEXT NOT NULL,
+                sub_agent_id TEXT,
+                sub_agent_depth INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(history_id, seq),
+                FOREIGN KEY(history_id) REFERENCES execution_history_sessions(id) ON DELETE CASCADE
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_execution_history_turns_history_seq
+             ON execution_history_turns(history_id, seq)",
+            [],
+        )?;
+
         // Episodic records for learning from past interactions
         conn.execute(
             "CREATE TABLE IF NOT EXISTS episodic_records (

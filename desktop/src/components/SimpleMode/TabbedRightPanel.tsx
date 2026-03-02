@@ -7,7 +7,7 @@
  */
 
 import { clsx } from 'clsx';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { GitPanel } from './GitPanel';
 import { ContextOpsPanel } from './ContextOpsPanel';
@@ -15,6 +15,7 @@ import { WorkflowKernelProgressPanel } from './WorkflowKernelProgressPanel';
 import { StreamingOutput, ErrorState } from '../shared';
 import type { StreamLine } from '../../store/execution';
 import type { AnalysisCoverageSnapshot } from '../../store/execution';
+import { useContextOpsStore } from '../../store/contextOps';
 
 export type RightPanelTab = 'output' | 'git' | 'context';
 
@@ -44,12 +45,21 @@ export function TabbedRightPanel({
   contextSessionId,
 }: TabbedRightPanelProps) {
   const { t } = useTranslation('simpleMode');
+  const contextInspectorEnabled = useContextOpsStore((s) => s.policy.context_inspector_ui);
+  const refreshPolicy = useContextOpsStore((s) => s.refreshPolicy);
+  const showContextTab = contextInspectorEnabled;
+  const effectiveActiveTab: RightPanelTab = !showContextTab && activeTab === 'context' ? 'output' : activeTab;
 
-  const tabs: { id: RightPanelTab; label: string }[] = [
+  useEffect(() => {
+    void refreshPolicy();
+  }, [refreshPolicy]);
+
+  const allTabs: { id: RightPanelTab; label: string }[] = [
     { id: 'output', label: t('rightPanel.outputTab', { defaultValue: 'Output' }) },
     { id: 'git', label: t('rightPanel.gitTab', { defaultValue: 'Git' }) },
     { id: 'context', label: t('rightPanel.contextTab', { defaultValue: 'Context' }) },
   ];
+  const tabs = showContextTab ? allTabs : allTabs.filter((tab) => tab.id !== 'context');
 
   return (
     <div className="h-full flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
@@ -61,14 +71,14 @@ export function TabbedRightPanel({
             onClick={() => onTabChange(tab.id)}
             className={clsx(
               'px-3 py-2 text-xs font-medium transition-colors relative',
-              activeTab === tab.id
+              effectiveActiveTab === tab.id
                 ? 'text-primary-600 dark:text-primary-400'
                 : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300',
             )}
           >
             {tab.label}
             {/* Active indicator */}
-            {activeTab === tab.id && (
+            {effectiveActiveTab === tab.id && (
               <span className="absolute bottom-0 left-1 right-1 h-0.5 bg-primary-600 dark:bg-primary-400 rounded-full" />
             )}
           </button>
@@ -77,13 +87,13 @@ export function TabbedRightPanel({
 
       {/* Tab content */}
       <div
-        key={activeTab}
+        key={effectiveActiveTab}
         className={clsx(
           'flex-1 min-h-0 animate-fade-in',
-          activeTab === 'output' ? 'overflow-hidden' : 'overflow-y-auto',
+          effectiveActiveTab === 'output' ? 'overflow-hidden' : 'overflow-y-auto',
         )}
       >
-        {activeTab === 'output' ? (
+        {effectiveActiveTab === 'output' ? (
           <div className="min-h-0 flex flex-col h-full">
             <div className="shrink-0 space-y-2 p-2 max-h-[42%] overflow-y-auto border-b border-gray-200 dark:border-gray-700">
               <WorkflowKernelProgressPanel workflowMode={workflowMode} workflowPhase={workflowPhase} />
@@ -95,7 +105,7 @@ export function TabbedRightPanel({
               <StreamingOutput maxHeight="none" compact={false} showClear className="flex-1 min-h-0 px-2 pb-2" />
             </div>
           </div>
-        ) : activeTab === 'git' ? (
+        ) : effectiveActiveTab === 'git' ? (
           <GitPanel streamingOutput={streamingOutput} workspacePath={workspacePath} />
         ) : (
           <ContextOpsPanel projectPath={workspacePath} sessionId={contextSessionId} />

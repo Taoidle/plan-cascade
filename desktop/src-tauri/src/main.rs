@@ -280,6 +280,7 @@ fn main() {
             plan_cascade_desktop::commands::memory::run_memory_maintenance,
             plan_cascade_desktop::commands::memory::extract_session_memories,
             // Context V2 commands
+            plan_cascade_desktop::commands::context_v2::assemble_turn_context,
             plan_cascade_desktop::commands::context_v2::prepare_turn_context_v2,
             plan_cascade_desktop::commands::context_v2::get_context_trace,
             plan_cascade_desktop::commands::context_v2::set_context_policy,
@@ -293,6 +294,13 @@ fn main() {
             plan_cascade_desktop::commands::context_v2::get_context_ops_dashboard,
             plan_cascade_desktop::commands::context_v2::run_context_chaos_probe,
             plan_cascade_desktop::commands::context_v2::list_context_chaos_runs,
+            // Execution history commands
+            plan_cascade_desktop::commands::execution_history::list_execution_history,
+            plan_cascade_desktop::commands::execution_history::upsert_execution_history,
+            plan_cascade_desktop::commands::execution_history::import_execution_history,
+            plan_cascade_desktop::commands::execution_history::rename_execution_history,
+            plan_cascade_desktop::commands::execution_history::delete_execution_history,
+            plan_cascade_desktop::commands::execution_history::clear_execution_history,
             // Skill commands
             plan_cascade_desktop::commands::skills::list_skills,
             plan_cascade_desktop::commands::skills::get_skill,

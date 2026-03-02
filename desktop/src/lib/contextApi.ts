@@ -50,6 +50,15 @@ export interface CompactionReport {
   compaction_tokens: number;
   net_saving: number;
   quality_score: number;
+  compaction_actions?: Array<{
+    stage: string;
+    action: string;
+    source_id: string;
+    before_tokens: number;
+    after_tokens: number;
+    reason: string;
+  }>;
+  quality_basis?: Record<string, unknown>;
 }
 
 export interface ContextEnvelope {
@@ -66,6 +75,25 @@ export interface ContextEnvelope {
   compaction: CompactionReport;
   trace_id: string;
   assembled_prompt: string;
+}
+
+export interface ContextAssemblyResponse {
+  request_meta: {
+    turn_id: string;
+    session_id?: string | null;
+    mode: string;
+    query: string;
+    intent?: string | null;
+  };
+  assembled_prompt: string;
+  trace_id: string;
+  budget: ContextBudget;
+  sources: ContextSourceRef[];
+  blocks: ContextBlock[];
+  compaction: CompactionReport;
+  injected_source_kinds: string[];
+  fallback_used: boolean;
+  fallback_reason?: string | null;
 }
 
 export interface ContextTraceEvent {
@@ -196,7 +224,54 @@ export async function prepareTurnContextV2(request: {
   context_sources?: ContextSourceConfig;
 }): Promise<CommandResponse<ContextEnvelope>> {
   try {
-    return await invoke<CommandResponse<ContextEnvelope>>('prepare_turn_context_v2', { request });
+    const assembled = await assembleTurnContext(request);
+    if (!assembled.success || !assembled.data) {
+      return {
+        success: false,
+        data: null,
+        error: assembled.error || 'assemble_turn_context returned no data',
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        request_meta: assembled.data.request_meta,
+        assembled_prompt: assembled.data.assembled_prompt,
+        trace_id: assembled.data.trace_id,
+        budget: assembled.data.budget,
+        sources: assembled.data.sources,
+        blocks: assembled.data.blocks,
+        compaction: assembled.data.compaction,
+      },
+      error: null,
+    };
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function assembleTurnContext(request: {
+  project_path: string;
+  query: string;
+  project_id?: string;
+  session_id?: string;
+  mode?: string;
+  intent?: string;
+  conversation_history?: ContextConversationTurn[];
+  context_sources?: ContextSourceConfig;
+  manual_blocks?: Array<{
+    id?: string;
+    title?: string;
+    content: string;
+    priority?: number;
+  }>;
+  input_token_budget?: number;
+  reserved_output_tokens?: number;
+  hard_limit?: number;
+}): Promise<CommandResponse<ContextAssemblyResponse>> {
+  try {
+    return await invoke<CommandResponse<ContextAssemblyResponse>>('assemble_turn_context', { request });
   } catch (error) {
     return errorResponse(error);
   }

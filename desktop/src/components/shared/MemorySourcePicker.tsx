@@ -45,10 +45,13 @@ export function MemorySourcePicker() {
   const { t } = useTranslation('simpleMode');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
   const {
+    memorySelectionMode,
     selectedMemoryScopes,
     memorySessionId,
     selectedMemoryCategories,
     selectedMemoryIds,
+    includedMemoryIds,
+    excludedMemoryIds,
     availableMemoryStats,
     categoryMemories,
     isLoadingMemoryStats,
@@ -57,6 +60,7 @@ export function MemorySourcePicker() {
     memorySearchResults,
     isSearchingMemories,
     toggleMemoryScope,
+    setMemorySelectionMode,
     toggleMemoryCategory,
     toggleMemoryItem,
     loadMemoryStats,
@@ -69,6 +73,19 @@ export function MemorySourcePicker() {
   const [localSearchQuery, setLocalSearchQuery] = useState(memoryPickerSearchQuery);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const scopesKey = useMemo(() => selectedMemoryScopes.join('|'), [selectedMemoryScopes]);
+  const effectiveExcludedMemoryIds = useMemo(
+    () => (excludedMemoryIds.length > 0 ? excludedMemoryIds : selectedMemoryIds),
+    [excludedMemoryIds, selectedMemoryIds],
+  );
+  const isMemoryChecked = useCallback(
+    (memoryId: string) => {
+      if (memorySelectionMode === 'only_selected') {
+        return includedMemoryIds.includes(memoryId);
+      }
+      return !effectiveExcludedMemoryIds.includes(memoryId);
+    },
+    [memorySelectionMode, includedMemoryIds, effectiveExcludedMemoryIds],
+  );
 
   // Load memory stats on mount
   useEffect(() => {
@@ -170,6 +187,32 @@ export function MemorySourcePicker() {
         })}
       </div>
 
+      {/* Selection mode */}
+      <div className="px-2 py-1.5 border-b border-gray-100 dark:border-gray-700 flex items-center gap-1">
+        <button
+          onClick={() => setMemorySelectionMode('auto')}
+          className={clsx(
+            'px-2 py-0.5 rounded text-2xs font-medium transition-colors',
+            memorySelectionMode === 'auto'
+              ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300'
+              : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400',
+          )}
+        >
+          {t('contextSources.memoryPicker.selectionModes.auto', { defaultValue: 'Auto + Exclude' })}
+        </button>
+        <button
+          onClick={() => setMemorySelectionMode('only_selected')}
+          className={clsx(
+            'px-2 py-0.5 rounded text-2xs font-medium transition-colors',
+            memorySelectionMode === 'only_selected'
+              ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300'
+              : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400',
+          )}
+        >
+          {t('contextSources.memoryPicker.selectionModes.onlySelected', { defaultValue: 'Only Selected' })}
+        </button>
+      </div>
+
       {/* Search input */}
       <div className="px-2 py-1.5 border-b border-gray-100 dark:border-gray-700">
         <div className="relative">
@@ -225,7 +268,7 @@ export function MemorySourcePicker() {
               >
                 <input
                   type="checkbox"
-                  checked={!selectedMemoryIds.includes(entry.id)}
+                  checked={isMemoryChecked(entry.id)}
                   onChange={() => toggleMemoryItem(entry.id)}
                   className="w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-600 text-purple-600 focus:ring-purple-500"
                 />
@@ -324,7 +367,7 @@ export function MemorySourcePicker() {
                       >
                         <input
                           type="checkbox"
-                          checked={!selectedMemoryIds.includes(entry.id)}
+                          checked={isMemoryChecked(entry.id)}
                           onChange={() => toggleMemoryItem(entry.id)}
                           className="w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-600 text-purple-600 focus:ring-purple-500"
                         />

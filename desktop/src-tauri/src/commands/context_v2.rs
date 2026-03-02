@@ -12,6 +12,13 @@ use tauri::State;
 
 use crate::commands::knowledge::KnowledgeState;
 use crate::models::response::CommandResponse;
+use crate::services::context::assembly::{
+    apply_budget_and_compaction as apply_budget_and_compaction_core,
+    build_budget as build_budget_core, build_fallback_compaction as build_fallback_compaction_core,
+    infer_injected_source_kinds as infer_injected_source_kinds_core, AssemblyBlock,
+    AssemblyCompactionPolicy, AssemblyFallbackCompaction, AssemblySource,
+};
+use crate::services::context::events::TraceEventType;
 use crate::services::knowledge::context_provider::{
     KnowledgeContextConfig, KnowledgeContextProvider,
 };
@@ -23,7 +30,8 @@ use crate::services::memory::store::{
 };
 use crate::services::skills::model::InjectionPhase;
 use crate::services::task_mode::context_provider::{
-    ensure_knowledge_initialized_public, select_skills_for_task_filtered, ContextSourceConfig,
+    ensure_knowledge_initialized_public, query_selected_context, select_skills_for_task_filtered,
+    ContextSourceConfig, KnowledgeSourceConfig, MemorySourceConfig, SkillsSourceConfig,
 };
 use crate::services::tools::system_prompt::build_memory_section;
 use crate::state::AppState;
@@ -133,6 +141,20 @@ impl Default for CompactionPolicy {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactionAction {
+    pub stage: String,
+    pub action: String,
+    pub source_id: String,
+    pub before_tokens: usize,
+    pub after_tokens: usize,
+    pub reason: String,
+}
+
+fn default_quality_basis() -> serde_json::Value {
+    json!({})
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompactionReport {
     pub triggered: bool,
     pub trigger_reason: String,
@@ -142,6 +164,10 @@ pub struct CompactionReport {
     pub compaction_tokens: u32,
     pub net_saving: i64,
     pub quality_score: f32,
+    #[serde(default)]
+    pub compaction_actions: Vec<CompactionAction>,
+    #[serde(default = "default_quality_basis")]
+    pub quality_basis: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,6 +199,20 @@ pub struct ContextEnvelope {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextAssemblyResponse {
+    pub request_meta: ContextRequestMeta,
+    pub assembled_prompt: String,
+    pub trace_id: String,
+    pub budget: ContextBudget,
+    pub sources: Vec<ContextSourceRef>,
+    pub blocks: Vec<ContextBlock>,
+    pub compaction: CompactionReport,
+    pub injected_source_kinds: Vec<String>,
+    pub fallback_used: bool,
+    pub fallback_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextConversationTurn {
     pub role: String,
     pub content: String,
@@ -184,6 +224,18 @@ pub struct ManualContextBlock {
     pub title: Option<String>,
     pub content: String,
     pub priority: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ContextFaultInjection {
+    #[serde(default)]
+    pub memory_timeout: bool,
+    #[serde(default)]
+    pub knowledge_timeout: bool,
+    #[serde(default)]
+    pub ranker_unavailable: bool,
+    #[serde(default)]
+    pub compaction_quality_fail: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,6 +268,8 @@ pub struct PrepareTurnContextV2Request {
     pub hard_limit: Option<usize>,
     #[serde(default)]
     pub compaction_policy: Option<CompactionPolicy>,
+    #[serde(default)]
+    pub fault_injection: Option<ContextFaultInjection>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -547,7 +601,7 @@ fn is_source_pinned(policy: &ContextPolicy, kind: &ContextSourceKind, source_id:
 
 fn make_trace_event(
     trace_id: &str,
-    event_type: &str,
+    event_type: TraceEventType,
     source_kind: Option<&str>,
     source_id: Option<&str>,
     message: impl Into<String>,
@@ -555,7 +609,7 @@ fn make_trace_event(
 ) -> ContextTraceEvent {
     ContextTraceEvent {
         trace_id: trace_id.to_string(),
-        event_type: event_type.to_string(),
+        event_type: event_type.as_str().to_string(),
         source_kind: source_kind.map(|s| s.to_string()),
         source_id: source_id.map(|s| s.to_string()),
         message: message.into(),
@@ -713,95 +767,261 @@ fn build_prompt(query: &str, blocks: &[ContextBlock]) -> String {
     parts.join("\n\n")
 }
 
+fn map_fallback_compaction(core: AssemblyFallbackCompaction) -> CompactionReport {
+    CompactionReport {
+        triggered: false,
+        trigger_reason: core.trigger_reason,
+        strategy: core.strategy,
+        before_tokens: core.before_tokens,
+        after_tokens: core.after_tokens,
+        compaction_tokens: core.compaction_tokens,
+        net_saving: core.net_saving,
+        quality_score: core.quality_score,
+        compaction_actions: Vec::new(),
+        quality_basis: core.quality_basis,
+    }
+}
+
+fn map_envelope_to_assembly_response(
+    envelope: ContextEnvelope,
+    injected_source_kinds: Vec<String>,
+) -> ContextAssemblyResponse {
+    ContextAssemblyResponse {
+        request_meta: envelope.request_meta,
+        assembled_prompt: envelope.assembled_prompt,
+        trace_id: envelope.trace_id,
+        budget: envelope.budget,
+        sources: envelope.sources,
+        blocks: envelope.blocks,
+        compaction: envelope.compaction,
+        injected_source_kinds,
+        fallback_used: false,
+        fallback_reason: None,
+    }
+}
+
+fn build_legacy_fallback_response(
+    request: &PrepareTurnContextV2Request,
+    fallback_prompt: String,
+    trigger_reason: &str,
+    fallback_reason: Option<String>,
+    injected_source_kinds: Vec<String>,
+) -> ContextAssemblyResponse {
+    let fallback_tokens = estimate_tokens_rough(&fallback_prompt);
+    let fallback_budget = build_budget_core(
+        request.input_token_budget,
+        request.reserved_output_tokens,
+        request.hard_limit,
+        DEFAULT_INPUT_TOKEN_BUDGET,
+        DEFAULT_RESERVED_OUTPUT_TOKENS,
+        fallback_tokens,
+    );
+
+    ContextAssemblyResponse {
+        request_meta: ContextRequestMeta {
+            turn_id: request
+                .turn_id
+                .clone()
+                .unwrap_or_else(|| format!("fallback-{}", uuid::Uuid::new_v4())),
+            session_id: request.session_id.clone(),
+            mode: request
+                .mode
+                .clone()
+                .unwrap_or_else(|| "standalone".to_string()),
+            query: request.query.clone(),
+            intent: request.intent.clone(),
+        },
+        assembled_prompt: fallback_prompt,
+        trace_id: format!("fallback-{}", uuid::Uuid::new_v4()),
+        budget: ContextBudget {
+            input_token_budget: fallback_budget.input_token_budget,
+            reserved_output_tokens: fallback_budget.reserved_output_tokens,
+            hard_limit: fallback_budget.hard_limit,
+            used_input_tokens: fallback_budget.used_input_tokens,
+            over_budget: fallback_budget.over_budget,
+        },
+        sources: Vec::new(),
+        blocks: Vec::new(),
+        compaction: map_fallback_compaction(build_fallback_compaction_core(
+            trigger_reason,
+            "legacy_with_selected_sources",
+            fallback_tokens,
+        )),
+        injected_source_kinds,
+        fallback_used: true,
+        fallback_reason,
+    }
+}
+
+fn infer_injected_source_kinds(request: &PrepareTurnContextV2Request) -> Vec<String> {
+    let config = request.context_sources.as_ref();
+    infer_injected_source_kinds_core(
+        !request.conversation_history.is_empty(),
+        config
+            .and_then(|c| c.memory.as_ref())
+            .map(|m| m.enabled)
+            .unwrap_or(false),
+        config
+            .and_then(|c| c.knowledge.as_ref())
+            .map(|k| k.enabled)
+            .unwrap_or(false),
+        config
+            .and_then(|c| c.skills.as_ref())
+            .map(|s| s.enabled)
+            .unwrap_or(false),
+    )
+}
+
+async fn build_legacy_fallback_prompt(
+    request: &PrepareTurnContextV2Request,
+    app_state: &AppState,
+    knowledge_state: &KnowledgeState,
+) -> String {
+    let mut sections: Vec<String> = Vec::new();
+    if let Some(history_block) = format_history_block(&request.conversation_history) {
+        sections.push(history_block);
+    }
+
+    if let Some(config) = request.context_sources.as_ref() {
+        let enriched = query_selected_context(
+            config,
+            knowledge_state,
+            app_state,
+            &request.project_path,
+            &request.query,
+            InjectionPhase::Always,
+        )
+        .await;
+        if !enriched.knowledge_block.is_empty() {
+            sections.push(enriched.knowledge_block);
+        }
+        if !enriched.memory_block.is_empty() {
+            sections.push(enriched.memory_block);
+        }
+        if !enriched.skills_block.is_empty() {
+            sections.push(enriched.skills_block);
+        }
+    }
+
+    if sections.is_empty() {
+        return request.query.clone();
+    }
+
+    let mut parts = Vec::new();
+    parts.push(
+        "Continue the same conversation. Keep consistency with previous context.".to_string(),
+    );
+    parts.push("Selected context sources were preserved via compatibility fallback.".to_string());
+    parts.push(format!("User Query:\n{}", request.query));
+    for section in sections {
+        parts.push(section);
+    }
+    parts.join("\n\n")
+}
+
 fn apply_budget_and_compaction(
-    mut blocks: Vec<ContextBlock>,
+    blocks: Vec<ContextBlock>,
     sources: &mut [ContextSourceRef],
     input_budget: usize,
     policy: &CompactionPolicy,
 ) -> (Vec<ContextBlock>, CompactionReport) {
-    let before_tokens = blocks.iter().map(|b| b.token_cost).sum::<usize>();
-    if before_tokens <= input_budget {
-        return (
-            blocks,
-            CompactionReport {
-                triggered: false,
-                trigger_reason: "within_budget".to_string(),
-                strategy: "none".to_string(),
-                before_tokens,
-                after_tokens: before_tokens,
-                compaction_tokens: 0,
-                net_saving: 0,
-                quality_score: 1.0,
-            },
-        );
-    }
-
-    let hard_threshold = (input_budget as f32 * policy.hard_threshold_ratio) as usize;
-    let soft_threshold = (input_budget as f32 * policy.soft_threshold_ratio) as usize;
-
-    let trigger_reason = if before_tokens > hard_threshold {
-        "hard_threshold"
-    } else if before_tokens > soft_threshold {
-        "soft_threshold"
-    } else {
-        "input_budget"
+    let assembly_policy = AssemblyCompactionPolicy {
+        soft_threshold_ratio: policy.soft_threshold_ratio,
+        hard_threshold_ratio: policy.hard_threshold_ratio,
+        preserve_anchors: policy.preserve_anchors,
     };
 
-    blocks.sort_by(|a, b| {
-        a.priority
-            .cmp(&b.priority)
-            .then_with(|| b.token_cost.cmp(&a.token_cost))
-    });
+    let assembly_blocks = blocks
+        .into_iter()
+        .map(|block| AssemblyBlock {
+            source_id: block.source_id,
+            title: block.title,
+            content: block.content,
+            token_cost: block.token_cost,
+            priority: block.priority,
+            reason: block.reason,
+            anchor: block.anchor,
+        })
+        .collect::<Vec<_>>();
 
-    let mut current_tokens = before_tokens;
-    for block in &mut blocks {
-        if current_tokens <= input_budget {
-            break;
-        }
-        if policy.preserve_anchors && block.anchor {
-            continue;
-        }
+    let assembly_sources = sources
+        .iter()
+        .map(|source| AssemblySource {
+            id: source.id.clone(),
+            token_cost: source.token_cost,
+            included: source.included,
+            reason: source.reason.clone(),
+        })
+        .collect::<Vec<_>>();
 
-        for source in sources.iter_mut() {
-            if source.id == block.source_id && source.included {
-                source.included = false;
-                source.reason = "trimmed_by_budget".to_string();
-                current_tokens = current_tokens.saturating_sub(block.token_cost);
-                break;
-            }
+    let assembly_result = apply_budget_and_compaction_core(
+        assembly_blocks,
+        assembly_sources,
+        input_budget,
+        &assembly_policy,
+    );
+
+    let source_map = assembly_result
+        .sources
+        .iter()
+        .map(|source| {
+            (
+                source.id.clone(),
+                (source.token_cost, source.included, source.reason.clone()),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+
+    for source in sources.iter_mut() {
+        if let Some(updated) = source_map.get(&source.id) {
+            source.token_cost = updated.0;
+            source.included = updated.1;
+            source.reason = updated.2.clone();
         }
-        block.reason = "trimmed_by_budget".to_string();
-        block.content.clear();
-        block.token_cost = 0;
     }
 
-    let retained: Vec<ContextBlock> = blocks
+    let retained = assembly_result
+        .blocks
         .into_iter()
-        .filter(|b| !b.content.is_empty())
-        .collect();
-    let after_tokens = retained.iter().map(|b| b.token_cost).sum::<usize>();
+        .map(|block| ContextBlock {
+            source_id: block.source_id,
+            title: block.title,
+            content: block.content,
+            token_cost: block.token_cost,
+            priority: block.priority,
+            reason: block.reason,
+            anchor: block.anchor,
+        })
+        .collect::<Vec<_>>();
 
-    (
-        retained,
-        CompactionReport {
-            triggered: true,
-            trigger_reason: trigger_reason.to_string(),
-            strategy: "priority_trim".to_string(),
-            before_tokens,
-            after_tokens,
-            compaction_tokens: 0,
-            net_saving: before_tokens as i64 - after_tokens as i64,
-            quality_score: if before_tokens == 0 {
-                1.0
-            } else {
-                (after_tokens as f32 / before_tokens as f32).min(1.0)
-            },
-        },
-    )
+    let report = CompactionReport {
+        triggered: assembly_result.triggered,
+        trigger_reason: assembly_result.trigger_reason,
+        strategy: assembly_result.strategy,
+        before_tokens: assembly_result.before_tokens,
+        after_tokens: assembly_result.after_tokens,
+        compaction_tokens: assembly_result.compaction_tokens,
+        net_saving: assembly_result.net_saving,
+        quality_score: assembly_result.quality_score,
+        compaction_actions: assembly_result
+            .compaction_actions
+            .into_iter()
+            .map(|action| CompactionAction {
+                stage: action.stage,
+                action: action.action,
+                source_id: action.source_id,
+                before_tokens: action.before_tokens,
+                after_tokens: action.after_tokens,
+                reason: action.reason,
+            })
+            .collect(),
+        quality_basis: assembly_result.quality_basis,
+    };
+
+    (retained, report)
 }
 
-#[tauri::command]
-pub async fn prepare_turn_context_v2(
+async fn prepare_turn_context_v2_internal(
     request: PrepareTurnContextV2Request,
     app_state: State<'_, AppState>,
     knowledge_state: State<'_, KnowledgeState>,
@@ -849,11 +1069,12 @@ pub async fn prepare_turn_context_v2(
         hard_threshold_ratio: context_policy.hard_threshold_ratio,
         preserve_anchors: true,
     });
+    let fault_injection = request.fault_injection.clone().unwrap_or_default();
 
     let mut trace_events = Vec::new();
     trace_events.push(make_trace_event(
         &trace_id,
-        "collect_start",
+        TraceEventType::CollectStart,
         None,
         None,
         "context collection started",
@@ -864,11 +1085,17 @@ pub async fn prepare_turn_context_v2(
             "policy_context_v2_pipeline": context_policy.context_v2_pipeline,
             "policy_excluded_count": context_policy.excluded_sources.len(),
             "policy_pinned_count": context_policy.pinned_sources.len(),
+            "fault_injection": {
+                "memory_timeout": fault_injection.memory_timeout,
+                "knowledge_timeout": fault_injection.knowledge_timeout,
+                "ranker_unavailable": fault_injection.ranker_unavailable,
+                "compaction_quality_fail": fault_injection.compaction_quality_fail,
+            },
         })),
     ));
     trace_events.push(make_trace_event(
         &trace_id,
-        "rollout_assignment",
+        TraceEventType::RolloutAssignment,
         None,
         None,
         "rollout/ab assignment evaluated",
@@ -884,7 +1111,7 @@ pub async fn prepare_turn_context_v2(
     if !context_policy.context_v2_pipeline {
         trace_events.push(make_trace_event(
             &trace_id,
-            "policy_notice",
+            TraceEventType::PolicyNotice,
             None,
             None,
             "context_v2_pipeline feature flag disabled; explicit call continues",
@@ -894,7 +1121,7 @@ pub async fn prepare_turn_context_v2(
     if rollout_config.chaos_enabled && rollout_config.chaos_probability > 0.0 {
         trace_events.push(make_trace_event(
             &trace_id,
-            "chaos_config",
+            TraceEventType::ChaosConfig,
             None,
             None,
             "chaos configuration active for observability",
@@ -923,7 +1150,7 @@ pub async fn prepare_turn_context_v2(
         ) {
             trace_events.push(make_trace_event(
                 &trace_id,
-                "source_collected",
+                TraceEventType::SourceCollected,
                 Some("history"),
                 Some("history:conversation"),
                 "conversation history included",
@@ -932,7 +1159,7 @@ pub async fn prepare_turn_context_v2(
         } else {
             trace_events.push(make_trace_event(
                 &trace_id,
-                "source_skipped",
+                TraceEventType::SourceSkipped,
                 Some("history"),
                 Some("history:conversation"),
                 "history source excluded by policy",
@@ -967,7 +1194,7 @@ pub async fn prepare_turn_context_v2(
         ) {
             trace_events.push(make_trace_event(
                 &trace_id,
-                "source_collected",
+                TraceEventType::SourceCollected,
                 Some("manual"),
                 Some(&source_id),
                 "manual context included",
@@ -976,7 +1203,7 @@ pub async fn prepare_turn_context_v2(
         } else {
             trace_events.push(make_trace_event(
                 &trace_id,
-                "source_skipped",
+                TraceEventType::SourceSkipped,
                 Some("manual"),
                 Some(&source_id),
                 "manual context excluded by policy",
@@ -1009,7 +1236,7 @@ pub async fn prepare_turn_context_v2(
             ) {
                 trace_events.push(make_trace_event(
                     &trace_id,
-                    "source_collected",
+                    TraceEventType::SourceCollected,
                     Some("rules"),
                     Some("rules:session"),
                     "rules included",
@@ -1018,7 +1245,7 @@ pub async fn prepare_turn_context_v2(
             } else {
                 trace_events.push(make_trace_event(
                     &trace_id,
-                    "source_skipped",
+                    TraceEventType::SourceSkipped,
                     Some("rules"),
                     Some("rules:session"),
                     "rules source excluded by policy",
@@ -1039,7 +1266,7 @@ pub async fn prepare_turn_context_v2(
             ) {
                 trace_events.push(make_trace_event(
                     &trace_id,
-                    "source_skipped",
+                    TraceEventType::SourceSkipped,
                     Some("memory"),
                     Some("memory:retrieved"),
                     "memory source excluded by policy",
@@ -1055,93 +1282,46 @@ pub async fn prepare_turn_context_v2(
                     .map(|id| id.as_str())
                     .collect();
 
-                let memory_store = match app_state.get_memory_store_arc().await {
-                    Ok(store) => Some(store),
-                    Err(e) => {
+                if fault_injection.memory_timeout {
+                    trace_events.push(make_trace_event(
+                        &trace_id,
+                        TraceEventType::SourceFailed,
+                        Some("memory"),
+                        Some("memory:search"),
+                        "memory timeout injected by chaos probe",
+                        Some(json!({ "fault": "memory_timeout" })),
+                    ));
+                } else {
+                    if fault_injection.ranker_unavailable {
                         trace_events.push(make_trace_event(
                             &trace_id,
-                            "source_failed",
+                            TraceEventType::SourceFailed,
                             Some("memory"),
-                            Some("memory:store"),
-                            "memory store unavailable",
-                            Some(json!({ "error": e.to_string() })),
+                            Some("memory:ranker"),
+                            "memory ranker unavailable; lexical fallback active",
+                            Some(json!({ "fault": "ranker_unavailable" })),
                         ));
-                        None
-                    }
-                };
-
-                if let Some(memory_store) = memory_store {
-                    if !mcfg.selected_memory_ids.is_empty() {
-                        for id in &mcfg.selected_memory_ids {
-                            if let Ok(Some(entry)) = memory_store.get_memory(id) {
-                                if excluded_ids.contains(entry.id.as_str()) {
-                                    continue;
-                                }
-                                if seen_ids.insert(entry.id.clone()) {
-                                    memory_entries.push(entry);
-                                }
-                            }
-                        }
                     }
 
-                    let categories = if mcfg.selected_categories.is_empty() {
-                        None
-                    } else {
-                        let parsed: Vec<MemoryCategory> = mcfg
-                            .selected_categories
-                            .iter()
-                            .filter_map(|s| MemoryCategory::from_str(s).ok())
-                            .collect();
-                        if parsed.is_empty() {
+                    let memory_store = match app_state.get_memory_store_arc().await {
+                        Ok(store) => Some(store),
+                        Err(e) => {
+                            trace_events.push(make_trace_event(
+                                &trace_id,
+                                TraceEventType::SourceFailed,
+                                Some("memory"),
+                                Some("memory:store"),
+                                "memory store unavailable",
+                                Some(json!({ "error": e.to_string() })),
+                            ));
                             None
-                        } else {
-                            Some(parsed)
                         }
                     };
 
-                    let mut scopes = HashSet::new();
-                    for scope in &mcfg.selected_scopes {
-                        scopes.insert(scope.trim().to_ascii_lowercase());
-                    }
-                    if scopes.is_empty() {
-                        scopes.insert("project".to_string());
-                        scopes.insert("global".to_string());
-                        if mcfg.session_id.is_some() {
-                            scopes.insert("session".to_string());
-                        }
-                    }
-
-                    let mut search_specs: Vec<String> = Vec::new();
-                    if scopes.contains("project") {
-                        search_specs.push(project_path.clone());
-                    }
-                    if scopes.contains("global") {
-                        search_specs.push(GLOBAL_PROJECT_PATH.to_string());
-                    }
-                    if scopes.contains("session") {
-                        if let Some(sid) = mcfg.session_id.as_deref() {
-                            if let Some(scope_path) = build_session_project_path(sid) {
-                                search_specs.push(scope_path);
-                            }
-                        }
-                    }
-
-                    for scope_path in search_specs {
-                        let req = MemorySearchRequestV2 {
-                            project_path: scope_path,
-                            query: request.query.clone(),
-                            categories: categories.clone(),
-                            top_k: 10,
-                            min_importance: 0.3,
-                            intent: parse_memory_intent(request.intent.as_deref()),
-                            enable_semantic: true,
-                            enable_lexical: true,
-                        };
-
-                        match search_memories_v2_async(memory_store.as_ref(), &req).await {
-                            Ok(results) => {
-                                for row in results {
-                                    let entry = row.entry;
+                    if let Some(memory_store) = memory_store {
+                        if !mcfg.selected_memory_ids.is_empty() {
+                            for id in &mcfg.selected_memory_ids {
+                                if let Ok(Some(entry)) = memory_store.get_memory(id) {
                                     if excluded_ids.contains(entry.id.as_str()) {
                                         continue;
                                     }
@@ -1150,15 +1330,85 @@ pub async fn prepare_turn_context_v2(
                                     }
                                 }
                             }
-                            Err(e) => {
-                                trace_events.push(make_trace_event(
-                                    &trace_id,
-                                    "source_failed",
-                                    Some("memory"),
-                                    Some("memory:search"),
-                                    "memory search failed",
-                                    Some(json!({ "error": e.to_string() })),
-                                ));
+                        }
+
+                        let categories = if mcfg.selected_categories.is_empty() {
+                            None
+                        } else {
+                            let parsed: Vec<MemoryCategory> = mcfg
+                                .selected_categories
+                                .iter()
+                                .filter_map(|s| MemoryCategory::from_str(s).ok())
+                                .collect();
+                            if parsed.is_empty() {
+                                None
+                            } else {
+                                Some(parsed)
+                            }
+                        };
+
+                        let mut scopes = HashSet::new();
+                        for scope in &mcfg.selected_scopes {
+                            scopes.insert(scope.trim().to_ascii_lowercase());
+                        }
+                        if scopes.is_empty() {
+                            scopes.insert("project".to_string());
+                            scopes.insert("global".to_string());
+                            if mcfg.session_id.is_some() {
+                                scopes.insert("session".to_string());
+                            }
+                        }
+
+                        let mut search_specs: Vec<String> = Vec::new();
+                        if scopes.contains("project") {
+                            search_specs.push(project_path.clone());
+                        }
+                        if scopes.contains("global") {
+                            search_specs.push(GLOBAL_PROJECT_PATH.to_string());
+                        }
+                        if scopes.contains("session") {
+                            if let Some(sid) = mcfg.session_id.as_deref() {
+                                if let Some(scope_path) = build_session_project_path(sid) {
+                                    search_specs.push(scope_path);
+                                }
+                            }
+                        }
+
+                        for scope_path in search_specs {
+                            let req = MemorySearchRequestV2 {
+                                project_path: scope_path,
+                                query: request.query.clone(),
+                                categories: categories.clone(),
+                                top_k: 10,
+                                min_importance: 0.3,
+                                intent: parse_memory_intent(request.intent.as_deref()),
+                                enable_semantic: context_policy.memory_v2_ranker
+                                    && !fault_injection.ranker_unavailable,
+                                enable_lexical: true,
+                            };
+
+                            match search_memories_v2_async(memory_store.as_ref(), &req).await {
+                                Ok(results) => {
+                                    for row in results {
+                                        let entry = row.entry;
+                                        if excluded_ids.contains(entry.id.as_str()) {
+                                            continue;
+                                        }
+                                        if seen_ids.insert(entry.id.clone()) {
+                                            memory_entries.push(entry);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    trace_events.push(make_trace_event(
+                                        &trace_id,
+                                        TraceEventType::SourceFailed,
+                                        Some("memory"),
+                                        Some("memory:search"),
+                                        "memory search failed",
+                                        Some(json!({ "error": e.to_string() })),
+                                    ));
+                                }
                             }
                         }
                     }
@@ -1181,7 +1431,7 @@ pub async fn prepare_turn_context_v2(
                         ) {
                             trace_events.push(make_trace_event(
                                 &trace_id,
-                                "source_collected",
+                                TraceEventType::SourceCollected,
                                 Some("memory"),
                                 Some("memory:retrieved"),
                                 "memory context included",
@@ -1207,86 +1457,98 @@ pub async fn prepare_turn_context_v2(
             ) {
                 trace_events.push(make_trace_event(
                     &trace_id,
-                    "source_skipped",
+                    TraceEventType::SourceSkipped,
                     Some("knowledge"),
                     Some("knowledge:retrieved"),
                     "knowledge source excluded by policy",
                     None,
                 ));
             } else {
-                let kcfg = config.knowledge.as_ref().unwrap();
-                ensure_knowledge_initialized_public(&knowledge_state, &app_state).await;
-                match knowledge_state.get_pipeline().await {
-                    Ok(pipeline) => {
-                        let provider = KnowledgeContextProvider::new(pipeline);
-                        let project_id = request
-                            .project_id
-                            .clone()
-                            .unwrap_or_else(|| config.project_id.clone());
-                        let query_cfg = KnowledgeContextConfig {
-                            collection_ids: if kcfg.selected_collections.is_empty() {
-                                None
-                            } else {
-                                Some(kcfg.selected_collections.clone())
-                            },
-                            document_refs: if kcfg.selected_documents.is_empty() {
-                                None
-                            } else {
-                                Some(kcfg.selected_documents.clone())
-                            },
-                            ..KnowledgeContextConfig::default()
-                        };
-                        match provider
-                            .query_for_context(&project_id, &request.query, &query_cfg)
-                            .await
-                        {
-                            Ok(chunks) => {
-                                let block = KnowledgeContextProvider::format_context_block(&chunks);
-                                if !block.is_empty() {
-                                    if push_block(
-                                        &context_policy,
-                                        &mut sources,
-                                        &mut blocks,
-                                        "knowledge:retrieved",
-                                        ContextSourceKind::Knowledge,
-                                        "Knowledge Base",
-                                        block,
-                                        75,
-                                        "knowledge_included",
-                                        false,
-                                    ) {
-                                        trace_events.push(make_trace_event(
-                                            &trace_id,
-                                            "source_collected",
-                                            Some("knowledge"),
-                                            Some("knowledge:retrieved"),
-                                            "knowledge context included",
-                                            Some(json!({ "chunks": chunks.len() })),
-                                        ));
+                if fault_injection.knowledge_timeout {
+                    trace_events.push(make_trace_event(
+                        &trace_id,
+                        TraceEventType::SourceFailed,
+                        Some("knowledge"),
+                        Some("knowledge:retrieved"),
+                        "knowledge timeout injected by chaos probe",
+                        Some(json!({ "fault": "knowledge_timeout" })),
+                    ));
+                } else {
+                    let kcfg = config.knowledge.as_ref().unwrap();
+                    ensure_knowledge_initialized_public(&knowledge_state, &app_state).await;
+                    match knowledge_state.get_pipeline().await {
+                        Ok(pipeline) => {
+                            let provider = KnowledgeContextProvider::new(pipeline);
+                            let project_id = request
+                                .project_id
+                                .clone()
+                                .unwrap_or_else(|| config.project_id.clone());
+                            let query_cfg = KnowledgeContextConfig {
+                                collection_ids: if kcfg.selected_collections.is_empty() {
+                                    None
+                                } else {
+                                    Some(kcfg.selected_collections.clone())
+                                },
+                                document_refs: if kcfg.selected_documents.is_empty() {
+                                    None
+                                } else {
+                                    Some(kcfg.selected_documents.clone())
+                                },
+                                ..KnowledgeContextConfig::default()
+                            };
+                            match provider
+                                .query_for_context(&project_id, &request.query, &query_cfg)
+                                .await
+                            {
+                                Ok(chunks) => {
+                                    let block =
+                                        KnowledgeContextProvider::format_context_block(&chunks);
+                                    if !block.is_empty() {
+                                        if push_block(
+                                            &context_policy,
+                                            &mut sources,
+                                            &mut blocks,
+                                            "knowledge:retrieved",
+                                            ContextSourceKind::Knowledge,
+                                            "Knowledge Base",
+                                            block,
+                                            75,
+                                            "knowledge_included",
+                                            false,
+                                        ) {
+                                            trace_events.push(make_trace_event(
+                                                &trace_id,
+                                                TraceEventType::SourceCollected,
+                                                Some("knowledge"),
+                                                Some("knowledge:retrieved"),
+                                                "knowledge context included",
+                                                Some(json!({ "chunks": chunks.len() })),
+                                            ));
+                                        }
                                     }
                                 }
-                            }
-                            Err(e) => {
-                                trace_events.push(make_trace_event(
-                                    &trace_id,
-                                    "source_failed",
-                                    Some("knowledge"),
-                                    Some("knowledge:retrieved"),
-                                    "knowledge query failed",
-                                    Some(json!({ "error": e.to_string() })),
-                                ));
+                                Err(e) => {
+                                    trace_events.push(make_trace_event(
+                                        &trace_id,
+                                        TraceEventType::SourceFailed,
+                                        Some("knowledge"),
+                                        Some("knowledge:retrieved"),
+                                        "knowledge query failed",
+                                        Some(json!({ "error": e.to_string() })),
+                                    ));
+                                }
                             }
                         }
-                    }
-                    Err(e) => {
-                        trace_events.push(make_trace_event(
-                            &trace_id,
-                            "source_failed",
-                            Some("knowledge"),
-                            Some("knowledge:pipeline"),
-                            "knowledge pipeline unavailable",
-                            Some(json!({ "error": e.to_string() })),
-                        ));
+                        Err(e) => {
+                            trace_events.push(make_trace_event(
+                                &trace_id,
+                                TraceEventType::SourceFailed,
+                                Some("knowledge"),
+                                Some("knowledge:pipeline"),
+                                "knowledge pipeline unavailable",
+                                Some(json!({ "error": e.to_string() })),
+                            ));
+                        }
                     }
                 }
             }
@@ -1301,7 +1563,7 @@ pub async fn prepare_turn_context_v2(
             ) {
                 trace_events.push(make_trace_event(
                     &trace_id,
-                    "source_skipped",
+                    TraceEventType::SourceSkipped,
                     Some("skills"),
                     Some("skills:selected"),
                     "skills source excluded by policy",
@@ -1333,7 +1595,7 @@ pub async fn prepare_turn_context_v2(
                     ) {
                         trace_events.push(make_trace_event(
                             &trace_id,
-                            "source_collected",
+                            TraceEventType::SourceCollected,
                             Some("skills"),
                             Some("skills:selected"),
                             "skills context included",
@@ -1345,8 +1607,24 @@ pub async fn prepare_turn_context_v2(
         }
     }
 
-    let (mut retained_blocks, compaction) =
+    let (mut retained_blocks, mut compaction) =
         apply_budget_and_compaction(blocks, &mut sources, input_budget, &compaction_policy);
+
+    if fault_injection.compaction_quality_fail {
+        compaction.quality_score = 0.05;
+        compaction.quality_basis = json!({
+            "fault": "compaction_quality_fail",
+            "note": "quality forced low by chaos probe",
+        });
+        compaction.compaction_actions.push(CompactionAction {
+            stage: "fault_injection".to_string(),
+            action: "quality_override".to_string(),
+            source_id: "compaction".to_string(),
+            before_tokens: compaction.before_tokens,
+            after_tokens: compaction.after_tokens,
+            reason: "chaos_probe".to_string(),
+        });
+    }
 
     retained_blocks.sort_by(|a, b| b.priority.cmp(&a.priority));
 
@@ -1361,7 +1639,7 @@ pub async fn prepare_turn_context_v2(
 
     trace_events.push(make_trace_event(
         &trace_id,
-        "compaction",
+        TraceEventType::Compaction,
         None,
         None,
         if compaction.triggered {
@@ -1374,13 +1652,29 @@ pub async fn prepare_turn_context_v2(
             "after_tokens": compaction.after_tokens,
             "trigger_reason": compaction.trigger_reason,
             "strategy": compaction.strategy,
+            "actions_count": compaction.compaction_actions.len(),
+            "quality_score": compaction.quality_score,
+            "quality_basis": compaction.quality_basis,
         })),
     ));
+
+    if fault_injection.compaction_quality_fail {
+        persist_trace_events(
+            &app_state,
+            request.session_id.as_deref(),
+            Some(&turn_id),
+            &trace_events,
+        )
+        .await;
+        return Ok(CommandResponse::err(
+            "compaction quality below threshold (fault injection)",
+        ));
+    }
 
     let assembled_prompt = build_prompt(&request.query, &retained_blocks);
     trace_events.push(make_trace_event(
         &trace_id,
-        "assemble_done",
+        TraceEventType::AssembleDone,
         None,
         None,
         "context envelope assembled",
@@ -1415,6 +1709,105 @@ pub async fn prepare_turn_context_v2(
     .await;
 
     Ok(CommandResponse::ok(envelope))
+}
+
+#[tauri::command]
+pub async fn assemble_turn_context(
+    request: PrepareTurnContextV2Request,
+    app_state: State<'_, AppState>,
+    knowledge_state: State<'_, KnowledgeState>,
+) -> Result<CommandResponse<ContextAssemblyResponse>, String> {
+    let project_path = request.project_path.trim().to_string();
+    let query = request.query.trim().to_string();
+    if project_path.is_empty() {
+        return Ok(CommandResponse::err("project_path is required"));
+    }
+    if query.is_empty() {
+        return Ok(CommandResponse::err("query is required"));
+    }
+
+    let injected_source_kinds = infer_injected_source_kinds(&request);
+    let context_policy = load_context_policy(app_state.inner()).await;
+    if !context_policy.context_v2_pipeline {
+        let fallback_prompt =
+            build_legacy_fallback_prompt(&request, app_state.inner(), knowledge_state.inner())
+                .await;
+        return Ok(CommandResponse::ok(build_legacy_fallback_response(
+            &request,
+            fallback_prompt,
+            "policy_context_v2_disabled",
+            Some("context_v2_pipeline disabled by policy".to_string()),
+            injected_source_kinds,
+        )));
+    }
+
+    let primary_result = prepare_turn_context_v2_internal(
+        request.clone(),
+        app_state.clone(),
+        knowledge_state.clone(),
+    )
+    .await;
+    if let Ok(primary) = &primary_result {
+        if primary.success {
+            if let Some(envelope) = primary.data.clone() {
+                return Ok(CommandResponse::ok(map_envelope_to_assembly_response(
+                    envelope,
+                    injected_source_kinds,
+                )));
+            }
+        }
+    }
+
+    let fallback_reason = match primary_result {
+        Ok(primary) => primary
+            .error
+            .or_else(|| Some("prepare_turn_context_v2 returned no envelope".to_string())),
+        Err(err) => Some(format!("prepare_turn_context_v2 failed: {}", err)),
+    };
+    let fallback_prompt =
+        build_legacy_fallback_prompt(&request, app_state.inner(), knowledge_state.inner()).await;
+
+    Ok(CommandResponse::ok(build_legacy_fallback_response(
+        &request,
+        fallback_prompt,
+        "legacy_fallback",
+        fallback_reason,
+        injected_source_kinds,
+    )))
+}
+
+#[tauri::command]
+pub async fn prepare_turn_context_v2(
+    request: PrepareTurnContextV2Request,
+    app_state: State<'_, AppState>,
+    knowledge_state: State<'_, KnowledgeState>,
+) -> Result<CommandResponse<ContextEnvelope>, String> {
+    tracing::warn!(
+        "prepare_turn_context_v2 is deprecated; routing request through assemble_turn_context"
+    );
+    let assembled = assemble_turn_context(request, app_state, knowledge_state).await?;
+    if !assembled.success {
+        return Ok(CommandResponse::err(
+            assembled
+                .error
+                .unwrap_or_else(|| "assemble_turn_context failed".to_string()),
+        ));
+    }
+
+    match assembled.data {
+        Some(data) => Ok(CommandResponse::ok(ContextEnvelope {
+            request_meta: data.request_meta,
+            budget: data.budget,
+            sources: data.sources,
+            blocks: data.blocks,
+            compaction: data.compaction,
+            trace_id: data.trace_id,
+            assembled_prompt: data.assembled_prompt,
+        })),
+        None => Ok(CommandResponse::err(
+            "assemble_turn_context returned no data".to_string(),
+        )),
+    }
 }
 
 #[tauri::command]
@@ -1818,34 +2211,40 @@ pub async fn get_context_ops_dashboard(
         let entry = grouped.entry(trace_id).or_default();
         let metadata = serde_json::from_str::<serde_json::Value>(&metadata_text).ok();
         let created_at_dt = parse_event_time(&created_at);
-
-        if event_type == "collect_start" {
-            if let Some(ref m) = metadata {
-                if let Some(path) = m.get("project_path").and_then(|v| v.as_str()) {
-                    entry.project_path = Some(path.to_string());
+        match TraceEventType::from_str(&event_type) {
+            Some(TraceEventType::CollectStart) => {
+                if let Some(ref m) = metadata {
+                    if let Some(path) = m.get("project_path").and_then(|v| v.as_str()) {
+                        entry.project_path = Some(path.to_string());
+                    }
+                }
+                if entry.start_at.is_none() {
+                    entry.start_at = created_at_dt;
                 }
             }
-            if entry.start_at.is_none() {
-                entry.start_at = created_at_dt;
+            Some(TraceEventType::AssembleDone) => {
+                entry.end_at = created_at_dt;
             }
-        } else if event_type == "assemble_done" {
-            entry.end_at = created_at_dt;
-        } else if event_type == "source_failed" {
-            entry.source_failed = true;
-            entry.degraded = true;
-        } else if event_type == "rollout_assignment" {
-            if let Some(ref m) = metadata {
-                entry.variant = m
-                    .get("variant")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
+            Some(TraceEventType::SourceFailed) => {
+                entry.source_failed = true;
+                entry.degraded = true;
             }
-        } else if event_type == "compaction_done" {
-            if let Some(ref m) = metadata {
-                let before = m.get("before_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
-                let after = m.get("after_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
-                entry.compaction_saving_tokens += (before - after).max(0);
+            Some(TraceEventType::RolloutAssignment) => {
+                if let Some(ref m) = metadata {
+                    entry.variant = m
+                        .get("variant")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                }
             }
+            Some(TraceEventType::Compaction) => {
+                if let Some(ref m) = metadata {
+                    let before = m.get("before_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let after = m.get("after_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
+                    entry.compaction_saving_tokens += (before - after).max(0);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -2051,6 +2450,7 @@ pub async fn get_context_ops_dashboard(
 pub async fn run_context_chaos_probe(
     request: ContextChaosProbeRequest,
     app_state: State<'_, AppState>,
+    knowledge_state: State<'_, KnowledgeState>,
 ) -> Result<CommandResponse<ContextChaosProbeReport>, String> {
     let project_path = request.project_path.trim().to_string();
     if project_path.is_empty() {
@@ -2063,9 +2463,9 @@ pub async fn run_context_chaos_probe(
     let session_id = request.session_id.clone();
 
     let scenario_names = [
-        "semantic_channel_unavailable",
         "memory_provider_timeout",
         "knowledge_provider_timeout",
+        "ranker_unavailable",
         "compaction_quality_fail",
     ];
 
@@ -2083,14 +2483,96 @@ pub async fn run_context_chaos_probe(
             }
             injected_faults += 1;
 
-            let fallback_seed = format!("{}:{}:{}:fallback", run_id, scenario, i);
-            let fallback_score = stable_bucket(&fallback_seed);
-            let fallback_threshold = if scenario == "compaction_quality_fail" {
-                88
-            } else {
-                95
+            let fault = match scenario {
+                "memory_provider_timeout" => ContextFaultInjection {
+                    memory_timeout: true,
+                    ..ContextFaultInjection::default()
+                },
+                "knowledge_provider_timeout" => ContextFaultInjection {
+                    knowledge_timeout: true,
+                    ..ContextFaultInjection::default()
+                },
+                "ranker_unavailable" => ContextFaultInjection {
+                    ranker_unavailable: true,
+                    ..ContextFaultInjection::default()
+                },
+                "compaction_quality_fail" => ContextFaultInjection {
+                    compaction_quality_fail: true,
+                    ..ContextFaultInjection::default()
+                },
+                _ => ContextFaultInjection::default(),
             };
-            let fallback_ok = fallback_score < fallback_threshold;
+
+            let chaos_context_sources = ContextSourceConfig {
+                project_id: "default".to_string(),
+                knowledge: Some(KnowledgeSourceConfig {
+                    enabled: true,
+                    selected_collections: Vec::new(),
+                    selected_documents: Vec::new(),
+                }),
+                memory: Some(MemorySourceConfig {
+                    enabled: true,
+                    selected_categories: Vec::new(),
+                    selected_memory_ids: Vec::new(),
+                    excluded_memory_ids: Vec::new(),
+                    selected_scopes: vec!["project".to_string(), "global".to_string()],
+                    session_id: session_id.clone(),
+                }),
+                skills: Some(SkillsSourceConfig {
+                    enabled: false,
+                    selected_skill_ids: Vec::new(),
+                }),
+            };
+
+            let probe_request = PrepareTurnContextV2Request {
+                project_path: project_path.clone(),
+                query: format!(
+                    "Chaos probe {} iteration {} - verify fallback behavior.",
+                    scenario, i
+                ),
+                project_id: Some("default".to_string()),
+                session_id: session_id.clone(),
+                mode: Some("chaos_probe".to_string()),
+                turn_id: Some(format!("chaos:{}:{}:{}", run_id, scenario, i)),
+                intent: Some("qa".to_string()),
+                conversation_history: Vec::new(),
+                context_sources: Some(chaos_context_sources),
+                rules: Vec::new(),
+                manual_blocks: Vec::new(),
+                input_token_budget: Some(if scenario == "compaction_quality_fail" {
+                    640
+                } else {
+                    DEFAULT_INPUT_TOKEN_BUDGET
+                }),
+                reserved_output_tokens: Some(2048),
+                hard_limit: Some(if scenario == "compaction_quality_fail" {
+                    2688
+                } else {
+                    DEFAULT_INPUT_TOKEN_BUDGET + DEFAULT_RESERVED_OUTPUT_TOKENS
+                }),
+                compaction_policy: None,
+                fault_injection: Some(fault),
+            };
+
+            let probe_result =
+                assemble_turn_context(probe_request, app_state.clone(), knowledge_state.clone())
+                    .await;
+            let fallback_ok = match probe_result {
+                Ok(response) if response.success => {
+                    if let Some(data) = response.data {
+                        let basic_ok = !data.assembled_prompt.trim().is_empty();
+                        let scenario_requires_fallback = scenario == "compaction_quality_fail";
+                        if scenario_requires_fallback {
+                            basic_ok && data.fallback_used
+                        } else {
+                            basic_ok
+                        }
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            };
             if fallback_ok {
                 fallback_successes += 1;
             }
@@ -2099,7 +2581,7 @@ pub async fn run_context_chaos_probe(
                 scenario: scenario.to_string(),
                 injected: true,
                 fallback_ok,
-                warning_emitted: true,
+                warning_emitted: !fallback_ok,
             });
         }
     }
@@ -2216,6 +2698,33 @@ pub async fn list_context_chaos_runs(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn make_assemble_request() -> PrepareTurnContextV2Request {
+        PrepareTurnContextV2Request {
+            project_path: "/tmp/project".to_string(),
+            query: "test query".to_string(),
+            project_id: Some("default".to_string()),
+            session_id: Some("session-1".to_string()),
+            mode: Some("standalone".to_string()),
+            turn_id: Some("turn-1".to_string()),
+            intent: Some("qa".to_string()),
+            conversation_history: Vec::new(),
+            context_sources: None,
+            rules: Vec::new(),
+            manual_blocks: Vec::new(),
+            input_token_budget: Some(1024),
+            reserved_output_tokens: Some(256),
+            hard_limit: Some(2048),
+            compaction_policy: None,
+            fault_injection: None,
+        }
+    }
+
+    #[test]
+    fn test_compaction_event_contract_name() {
+        assert_eq!(TraceEventType::Compaction.as_str(), "compaction");
+        assert_ne!(TraceEventType::Compaction.as_str(), "compaction_done");
+    }
 
     #[test]
     fn test_source_selector_matches_kind_and_id() {
@@ -2340,5 +2849,113 @@ mod tests {
         assert_eq!(retained.len(), 1);
         assert_eq!(retained[0].source_id, "a");
         assert!(sources.iter().any(|s| s.id == "b" && !s.included));
+    }
+
+    #[test]
+    fn test_apply_budget_emits_compaction_actions() {
+        let mut sources = vec![
+            ContextSourceRef {
+                id: "low".to_string(),
+                kind: ContextSourceKind::Memory,
+                label: "Low".to_string(),
+                token_cost: 360,
+                included: true,
+                reason: "selected".to_string(),
+            },
+            ContextSourceRef {
+                id: "long".to_string(),
+                kind: ContextSourceKind::Knowledge,
+                label: "Long".to_string(),
+                token_cost: 420,
+                included: true,
+                reason: "selected".to_string(),
+            },
+        ];
+        let blocks = vec![
+            ContextBlock {
+                source_id: "low".to_string(),
+                title: "Low".to_string(),
+                content: "low-priority\n".repeat(200),
+                token_cost: 360,
+                priority: 5,
+                reason: "selected".to_string(),
+                anchor: false,
+            },
+            ContextBlock {
+                source_id: "long".to_string(),
+                title: "Long".to_string(),
+                content: "line-a\nline-b\nline-c\nline-d\nline-e\nline-f\n".repeat(160),
+                token_cost: 420,
+                priority: 80,
+                reason: "selected".to_string(),
+                anchor: false,
+            },
+        ];
+
+        let (_retained, report) =
+            apply_budget_and_compaction(blocks, &mut sources, 260, &CompactionPolicy::default());
+
+        assert!(report.triggered);
+        assert!(!report.compaction_actions.is_empty());
+        assert!(
+            report.strategy == "trim_then_semantic_summary" || report.strategy == "priority_trim"
+        );
+        assert!(report.quality_basis.is_object());
+    }
+
+    #[test]
+    fn test_build_legacy_fallback_response_uses_legacy_strategy() {
+        let request = make_assemble_request();
+        let prompt = "fallback prompt with selected source context".to_string();
+        let response = build_legacy_fallback_response(
+            &request,
+            prompt.clone(),
+            "legacy_fallback",
+            Some("prepare failed".to_string()),
+            vec!["memory".to_string(), "knowledge".to_string()],
+        );
+
+        assert!(response.fallback_used);
+        assert_eq!(response.compaction.strategy, "legacy_with_selected_sources");
+        assert_eq!(response.compaction.trigger_reason, "legacy_fallback");
+        assert_eq!(response.fallback_reason.as_deref(), Some("prepare failed"));
+        assert_eq!(response.assembled_prompt, prompt);
+        assert_eq!(response.request_meta.turn_id, "turn-1");
+        assert_eq!(response.request_meta.mode, "standalone");
+        assert_eq!(response.budget.input_token_budget, 1024);
+        assert_eq!(response.budget.reserved_output_tokens, 256);
+        assert_eq!(response.budget.hard_limit, 2048);
+        assert_eq!(
+            response.budget.used_input_tokens,
+            estimate_tokens_rough(&response.assembled_prompt)
+        );
+        assert_eq!(
+            response.injected_source_kinds,
+            vec!["memory".to_string(), "knowledge".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_build_legacy_fallback_response_respects_minimum_budget_clamps() {
+        let mut request = make_assemble_request();
+        request.input_token_budget = Some(12);
+        request.reserved_output_tokens = Some(16);
+        request.hard_limit = Some(32);
+
+        let response = build_legacy_fallback_response(
+            &request,
+            "short prompt".to_string(),
+            "policy_context_v2_disabled",
+            Some("policy off".to_string()),
+            Vec::new(),
+        );
+
+        assert_eq!(response.budget.input_token_budget, 256);
+        assert_eq!(response.budget.reserved_output_tokens, 128);
+        assert_eq!(response.budget.hard_limit, 384);
+        assert_eq!(
+            response.compaction.trigger_reason,
+            "policy_context_v2_disabled"
+        );
     }
 }

@@ -58,9 +58,12 @@ export function ContextSourceBar() {
     skillsEnabled,
     selectedCollections,
     selectedDocuments,
+    memorySelectionMode,
     selectedMemoryScopes,
     selectedMemoryCategories,
     selectedMemoryIds,
+    includedMemoryIds,
+    excludedMemoryIds,
     selectedSkillIds,
     toggleKnowledge,
     toggleMemory,
@@ -222,7 +225,13 @@ export function ContextSourceBar() {
 
   // Badge counts
   const knowledgeCount = selectedCollections.length + selectedDocuments.length;
-  const memoryCount = selectedMemoryScopes.length + selectedMemoryCategories.length + selectedMemoryIds.length;
+  const memoryItemCount =
+    memorySelectionMode === 'only_selected'
+      ? includedMemoryIds.length
+      : excludedMemoryIds.length > 0
+        ? excludedMemoryIds.length
+        : selectedMemoryIds.length;
+  const memoryCount = selectedMemoryScopes.length + selectedMemoryCategories.length + memoryItemCount;
   const skillsCount = selectedSkillIds.length;
 
   return (

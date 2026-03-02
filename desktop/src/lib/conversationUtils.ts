@@ -47,7 +47,7 @@ export interface StandaloneTurn {
  * Derive conversation turns from a flat StreamLine array.
  *
  * Groups lines by 'info' (user message) boundaries. Each 'info' line starts
- * a new turn, and all subsequent 'text' lines until the next 'info' line
+ * a new turn, and all subsequent assistant-relevant lines until the next 'info' line
  * form the assistant response.
  */
 export function deriveConversationTurns(lines: StreamLine[]): ConversationTurn[] {
@@ -67,13 +67,18 @@ export function deriveConversationTurns(lines: StreamLine[]): ConversationTurn[]
       }
     }
 
-    // Concatenate assistant text from 'text' type lines
+    // Concatenate assistant text from assistant-relevant lines.
     const assistantSegments: string[] = [];
     const assistantStartIndex = i + 1;
 
     for (let j = assistantStartIndex; j <= endIndex; j++) {
-      if (lines[j].type === 'text') {
-        assistantSegments.push(lines[j].content);
+      const current = lines[j];
+      if (current.type === 'text') {
+        assistantSegments.push(current.content);
+      } else if (current.type === 'tool') {
+        assistantSegments.push(`[tool] ${current.content}`);
+      } else if (current.type === 'tool_result') {
+        assistantSegments.push(`[tool_result] ${current.content}`);
       }
     }
 
@@ -114,8 +119,14 @@ export function rebuildStandaloneTurns(lines: StreamLine[]): StandaloneTurn[] {
       }
       pendingUser = line.content;
       assistantSegments = [];
-    } else if (line.type === 'text' && pendingUser) {
-      assistantSegments.push(line.content);
+    } else if (pendingUser && (line.type === 'text' || line.type === 'tool' || line.type === 'tool_result')) {
+      if (line.type === 'text') {
+        assistantSegments.push(line.content);
+      } else if (line.type === 'tool') {
+        assistantSegments.push(`[tool] ${line.content}`);
+      } else {
+        assistantSegments.push(`[tool_result] ${line.content}`);
+      }
     }
   }
 
