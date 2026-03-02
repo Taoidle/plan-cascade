@@ -787,9 +787,9 @@ export function SimpleMode() {
     }
 
     if (submitAsFollowUp) {
-      await handleFollowUp(prompt);
+      await handleFollowUp();
     } else {
-      await handleStart(prompt);
+      await handleStart();
     }
   }, [
     description,
@@ -984,8 +984,18 @@ export function SimpleMode() {
       (planPhase === 'clarifying' && pendingClarifyQuestion === null));
   const isStructuredWorkflowCancelling =
     (workflowMode === 'task' && taskWorkflowCancelling) || (workflowMode === 'plan' && planWorkflowCancelling);
+  const canQueueWhileRunning =
+    workflowMode === 'chat' &&
+    isRunning &&
+    !executionIsCancelling &&
+    !isAnalyzingStrategy &&
+    !hasStructuredInterviewQuestion;
   const inputBusy =
-    isSubmitting || executionIsCancelling || isAnalyzingStrategy || isTaskWorkflowBusy || isPlanWorkflowBusy;
+    executionIsCancelling ||
+    isAnalyzingStrategy ||
+    isTaskWorkflowBusy ||
+    isPlanWorkflowBusy ||
+    (isSubmitting && !canQueueWhileRunning);
   const inputDisabled =
     inputBusy ||
     isStructuredWorkflowCancelling ||
@@ -999,8 +1009,6 @@ export function SimpleMode() {
       (workflowMode === 'task' && workflowPhase === 'interviewing' && pendingQuestion === null) ||
       (workflowMode === 'plan' && planPhase === 'clarifying' && pendingClarifyQuestion === null)) &&
     !(workflowMode === 'chat' && isRunning);
-  const canQueueWhileRunning =
-    workflowMode === 'chat' && isRunning && !executionIsCancelling && !inputBusy && !hasStructuredInterviewQuestion;
   const hoverPanelsEnabled = autoPanelHoverEnabled && supportsPointerHover;
   const isLeftPanelOpen = !sidebarCollapsed || leftPanelHoverExpanded;
   const isRightPanelOpen = rightPanelOpen || rightPanelHoverExpanded;

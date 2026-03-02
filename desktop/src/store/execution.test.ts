@@ -2096,6 +2096,96 @@ describe('Execution Store - Cancellation Consistency (Claude backend)', () => {
   });
 });
 
+describe('Execution Store - Standalone cancellation/regenerate consistency', () => {
+  beforeEach(() => {
+    resetStore();
+    for (const key of Object.keys(eventHandlers)) {
+      delete eventHandlers[key];
+    }
+    mockInvoke.mockReset();
+    useSettingsStore.setState({
+      backend: 'deepseek',
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      workspacePath: '/tmp',
+    });
+  });
+
+  it('preserves standaloneSessionId after successful standalone cancellation', async () => {
+    useExecutionStore.setState({
+      status: 'running',
+      standaloneSessionId: 'standalone-session-1',
+      taskId: null,
+      isChatSession: false,
+      isCancelling: false,
+      startedAt: Date.now(),
+      stories: [],
+    });
+
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === 'cancel_standalone_execution') {
+        return { success: true, data: true, error: null };
+      }
+      return { success: true, data: null, error: null };
+    });
+
+    await useExecutionStore.getState().cancel();
+
+    const state = useExecutionStore.getState();
+    expect(state.status).toBe('idle');
+    expect(state.isCancelling).toBe(false);
+    expect(state.standaloneSessionId).toBe('standalone-session-1');
+  });
+
+  it('creates a standaloneSessionId for regenerate when missing and reuses it for execution routing', async () => {
+    useExecutionStore.setState({
+      status: 'completed',
+      isChatSession: false,
+      taskId: null,
+      standaloneSessionId: null,
+      streamingOutput: [
+        { id: 1, content: 'original question', type: 'info', timestamp: 1 },
+        { id: 2, content: 'original answer', type: 'text', timestamp: 2 },
+      ],
+      streamLineCounter: 2,
+      standaloneTurns: [],
+      stories: [],
+    });
+
+    let executeStandaloneArgs: Record<string, unknown> | null = null;
+    mockInvoke.mockImplementation(async (command: string, args?: unknown) => {
+      if (command === 'prepare_turn_context_v2') {
+        return { success: false, data: null, error: 'fallback' };
+      }
+      if (command === 'execute_standalone') {
+        executeStandaloneArgs = (args as Record<string, unknown>) || null;
+        return {
+          success: true,
+          data: {
+            response: '',
+            usage: { input_tokens: 1, output_tokens: 1 },
+            iterations: 1,
+            success: true,
+            error: null,
+          },
+          error: null,
+        };
+      }
+      return { success: true, data: null, error: null };
+    });
+
+    await useExecutionStore.getState().regenerateResponse(1);
+
+    const state = useExecutionStore.getState();
+    expect(state.standaloneSessionId).toMatch(/^simple-/);
+    const routedSessionId =
+      executeStandaloneArgs && typeof executeStandaloneArgs['analysisSessionId'] === 'string'
+        ? executeStandaloneArgs['analysisSessionId']
+        : null;
+    expect(routedSessionId).toBe(state.standaloneSessionId);
+  });
+});
+
 // =============================================================================
 // Story 008: Auto-Background on New Start & Sidebar Background Sessions
 // =============================================================================

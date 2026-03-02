@@ -7,6 +7,7 @@
  */
 
 import { clsx } from 'clsx';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { GitPanel } from './GitPanel';
 import { ContextOpsPanel } from './ContextOpsPanel';
@@ -75,16 +76,24 @@ export function TabbedRightPanel({
       </div>
 
       {/* Tab content */}
-      <div key={activeTab} className="flex-1 min-h-0 overflow-y-auto animate-fade-in">
+      <div
+        key={activeTab}
+        className={clsx(
+          'flex-1 min-h-0 animate-fade-in',
+          activeTab === 'output' ? 'overflow-hidden' : 'overflow-y-auto',
+        )}
+      >
         {activeTab === 'output' ? (
           <div className="min-h-0 flex flex-col h-full">
-            <div className="shrink-0 space-y-2 p-2">
+            <div className="shrink-0 space-y-2 p-2 max-h-[42%] overflow-y-auto border-b border-gray-200 dark:border-gray-700">
               <WorkflowKernelProgressPanel workflowMode={workflowMode} workflowPhase={workflowPhase} />
               {workflowMode !== 'task' && analysisCoverage && <AnalysisCoveragePanel coverage={analysisCoverage} />}
-              <ExecutionLogsCard logs={logs} />
               <ErrorState maxErrors={8} />
             </div>
-            <StreamingOutput maxHeight="none" compact={false} showClear className="flex-1 min-h-0 px-2 pb-2" />
+            <div className="min-h-0 flex-1 flex flex-col">
+              <ExecutionLogsCard logs={logs} />
+              <StreamingOutput maxHeight="none" compact={false} showClear className="flex-1 min-h-0 px-2 pb-2" />
+            </div>
           </div>
         ) : activeTab === 'git' ? (
           <GitPanel streamingOutput={streamingOutput} workspacePath={workspacePath} />
@@ -173,21 +182,40 @@ function MetricBar({ label, value, progress }: { label: string; value: string; p
 
 function ExecutionLogsCard({ logs }: { logs: string[] }) {
   const { t } = useTranslation('simpleMode');
-  const recent = logs.slice(-20).reverse();
+  const [expanded, setExpanded] = useState(false);
+  const recent = logs.slice(-40).reverse();
   if (recent.length === 0) return null;
+  const visible = expanded ? recent : recent.slice(0, 3);
 
   return (
-    <div className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-gray-800 dark:text-gray-200">{t('executionLogs.title')}</p>
-        <span className="text-2xs text-gray-500 dark:text-gray-400">{recent.length}</span>
-      </div>
-      <div className="mt-2 max-h-32 overflow-y-auto rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 p-2 font-mono text-2xs text-gray-700 dark:text-gray-300 space-y-1">
-        {recent.map((line, idx) => (
-          <div key={`${idx}-${line.slice(0, 16)}`} className="whitespace-pre-wrap break-words">
-            {line}
+    <div className="px-2 pt-2 pb-1">
+      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-2">
+        <button
+          onClick={() => setExpanded((value) => !value)}
+          className="w-full flex items-center justify-between gap-2 text-left"
+        >
+          <p className="text-xs font-medium text-gray-800 dark:text-gray-200">{t('executionLogs.title')}</p>
+          <div className="flex items-center gap-2 text-2xs text-gray-500 dark:text-gray-400">
+            <span>{recent.length}</span>
+            <span>
+              {expanded
+                ? t('common.collapse', { defaultValue: 'Collapse' })
+                : t('common.expand', { defaultValue: 'Expand' })}
+            </span>
           </div>
-        ))}
+        </button>
+        <div
+          className={clsx(
+            'mt-2 overflow-y-auto rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 p-2 font-mono text-2xs text-gray-700 dark:text-gray-300 space-y-1',
+            expanded ? 'max-h-36' : 'max-h-16',
+          )}
+        >
+          {visible.map((line, idx) => (
+            <div key={`${idx}-${line.slice(0, 16)}`} className="whitespace-pre-wrap break-words">
+              {line}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

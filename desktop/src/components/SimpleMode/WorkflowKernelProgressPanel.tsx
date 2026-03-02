@@ -137,7 +137,13 @@ export function WorkflowKernelProgressPanel({ workflowMode, workflowPhase }: Wor
         : (session?.modeSnapshots.chat?.phase ?? (workflowMode === 'chat' ? workflowPhase : fallbackPhase));
 
   const phaseList = getPhases(activeMode);
-  const phaseIndex = Math.max(phaseList.indexOf(activePhase), 0);
+  const sessionStatus = session?.status ?? 'active';
+  const isCompletedState = activePhase === 'completed' || sessionStatus === 'completed';
+  const isFailedState = activePhase === 'failed' || sessionStatus === 'failed';
+  const isCancelledState = activePhase === 'cancelled' || sessionStatus === 'cancelled';
+  const isTerminalState = isCompletedState || isFailedState || isCancelledState;
+  const rawPhaseIndex = phaseList.indexOf(activePhase);
+  const phaseIndex = rawPhaseIndex >= 0 ? rawPhaseIndex : isTerminalState ? phaseList.length - 1 : 0;
   const recentEvents = useMemo(() => [...events].slice(-20).reverse(), [events]);
 
   return (
@@ -173,7 +179,13 @@ export function WorkflowKernelProgressPanel({ workflowMode, workflowPhase }: Wor
                   index < phaseIndex
                     ? 'bg-green-500'
                     : index === phaseIndex
-                      ? 'bg-blue-500 animate-pulse'
+                      ? isCompletedState
+                        ? 'bg-green-500'
+                        : isFailedState
+                          ? 'bg-red-500'
+                          : isCancelledState
+                            ? 'bg-amber-500'
+                            : 'bg-blue-500 animate-pulse'
                       : 'bg-gray-200 dark:bg-gray-700',
                 )}
               />
@@ -217,7 +229,7 @@ export function WorkflowKernelProgressPanel({ workflowMode, workflowPhase }: Wor
           <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1.5">
             {t('workflow.progress.kernel.labels.timeline', { defaultValue: 'Event Timeline' })}
           </p>
-          <div className="max-h-40 overflow-y-auto rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 p-2 space-y-1.5">
+          <div className="max-h-28 overflow-y-auto rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 p-2 space-y-1.5">
             {recentEvents.map((event) => {
               const summary = summarizeEvent(t, event);
               return (

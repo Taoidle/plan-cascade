@@ -2131,7 +2131,6 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           pendingCancelBeforeSessionReady: false,
           activeExecutionId: null,
           taskId: null,
-          standaloneSessionId: null,
           currentStoryId: null,
           result: {
             success: false,
@@ -3235,6 +3234,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         isCancelling: false,
         pendingCancelBeforeSessionReady: false,
         activeExecutionId: null,
+        taskId: null,
+        isChatSession: false,
         isSubmitting: false,
         apiError: null,
         result: null,
@@ -3257,6 +3258,33 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
         const sessionId = startResult.data.session_id;
         set({ taskId: sessionId, isChatSession: true, activeExecutionId: null });
+
+        // Cancel may have been requested while waiting for start_chat; avoid
+        // dispatching send_message if cancellation is already pending.
+        if (get().pendingCancelBeforeSessionReady) {
+          const cancelResult = await invoke<CommandResponse<ClaudeCancelExecutionResponse>>('cancel_execution', {
+            session_id: sessionId,
+          });
+          if (cancelResult.success && cancelResult.data?.cancelled) {
+            clearPendingDeltas();
+            set({
+              status: 'idle',
+              isCancelling: false,
+              pendingCancelBeforeSessionReady: false,
+              activeExecutionId: null,
+            });
+            get().addLog('Regeneration cancelled before dispatch.');
+            return;
+          }
+          set({
+            status: 'idle',
+            isCancelling: false,
+            pendingCancelBeforeSessionReady: false,
+            activeExecutionId: null,
+            apiError: cancelResult.error || cancelResult.data?.reason || 'Failed to cancel execution',
+          });
+          return;
+        }
 
         // Send the user message
         const sendResult = await invoke<CommandResponse<ClaudeSendMessageResponse | boolean>>('send_message', {
@@ -3315,6 +3343,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         isCancelling: false,
         pendingCancelBeforeSessionReady: false,
         activeExecutionId: null,
+        taskId: null,
+        isChatSession: false,
         isSubmitting: false,
         apiError: null,
         result: null,
@@ -3332,7 +3362,11 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       const provider = resolveStandaloneProvider(backendValue, providerValue, modelValue);
       const model = settingsSnapshot.model || DEFAULT_MODEL_BY_PROVIDER[provider] || 'claude-sonnet-4-6-20260219';
       const contextTurnsLimit = getStandaloneContextTurnsLimit();
-      const standaloneSessionId = get().standaloneSessionId;
+      const existingStandaloneSessionId = get().standaloneSessionId;
+      const standaloneSessionId = existingStandaloneSessionId || createStandaloneSessionId();
+      if (!existingStandaloneSessionId) {
+        set({ standaloneSessionId });
+      }
       const regenContextState = (await import('./contextSources')).useContextSourcesStore.getState();
       regenContextState.setMemorySessionId(standaloneSessionId ? `standalone:${standaloneSessionId}` : null);
       const regenContextSources = regenContextState.buildConfig() ?? null;
@@ -3487,6 +3521,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         isCancelling: false,
         pendingCancelBeforeSessionReady: false,
         activeExecutionId: null,
+        taskId: null,
+        isChatSession: false,
         isSubmitting: false,
         apiError: null,
         result: null,
@@ -3508,6 +3544,33 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
         const sessionId = startResult.data.session_id;
         set({ taskId: sessionId, isChatSession: true, activeExecutionId: null });
+
+        // Cancel may have been requested while waiting for start_chat; avoid
+        // dispatching send_message if cancellation is already pending.
+        if (get().pendingCancelBeforeSessionReady) {
+          const cancelResult = await invoke<CommandResponse<ClaudeCancelExecutionResponse>>('cancel_execution', {
+            session_id: sessionId,
+          });
+          if (cancelResult.success && cancelResult.data?.cancelled) {
+            clearPendingDeltas();
+            set({
+              status: 'idle',
+              isCancelling: false,
+              pendingCancelBeforeSessionReady: false,
+              activeExecutionId: null,
+            });
+            get().addLog('Edit-and-resend cancelled before dispatch.');
+            return;
+          }
+          set({
+            status: 'idle',
+            isCancelling: false,
+            pendingCancelBeforeSessionReady: false,
+            activeExecutionId: null,
+            apiError: cancelResult.error || cancelResult.data?.reason || 'Failed to cancel execution',
+          });
+          return;
+        }
 
         const sendResult = await invoke<CommandResponse<ClaudeSendMessageResponse | boolean>>('send_message', {
           request: { session_id: sessionId, prompt: newContent },
@@ -3565,6 +3628,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         isCancelling: false,
         pendingCancelBeforeSessionReady: false,
         activeExecutionId: null,
+        taskId: null,
+        isChatSession: false,
         isSubmitting: false,
         apiError: null,
         result: null,
@@ -3582,7 +3647,11 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       const provider = resolveStandaloneProvider(backendValue, providerValue, modelValue);
       const model = settingsSnapshot.model || DEFAULT_MODEL_BY_PROVIDER[provider] || 'claude-sonnet-4-6-20260219';
       const contextTurnsLimit = getStandaloneContextTurnsLimit();
-      const standaloneSessionId = get().standaloneSessionId;
+      const existingStandaloneSessionId = get().standaloneSessionId;
+      const standaloneSessionId = existingStandaloneSessionId || createStandaloneSessionId();
+      if (!existingStandaloneSessionId) {
+        set({ standaloneSessionId });
+      }
       const editContextState = (await import('./contextSources')).useContextSourcesStore.getState();
       editContextState.setMemorySessionId(standaloneSessionId ? `standalone:${standaloneSessionId}` : null);
       const editContextSources = editContextState.buildConfig() ?? null;
@@ -3842,7 +3911,9 @@ function handleUnifiedExecutionEvent(
   set: (partial: Partial<ExecutionState>) => void,
 ) {
   const state = get();
-  if (state.isCancelling && isForegroundSession(state, payload.session_id)) {
+  const isTerminalWhileCancelling =
+    payload.type === 'complete' || payload.type === 'error' || payload.type === 'session_complete';
+  if (state.isCancelling && isForegroundSession(state, payload.session_id) && !isTerminalWhileCancelling) {
     return;
   }
   if (isForegroundSession(state, payload.session_id) && state.activeExecutionId) {
@@ -4574,6 +4645,9 @@ function handleUnifiedExecutionEvent(
 
         set({
           status: 'completed',
+          isSubmitting: false,
+          isCancelling: false,
+          pendingCancelBeforeSessionReady: false,
           activeExecutionId: null,
           progress: 100,
           estimatedTimeRemaining: 0,
@@ -4683,6 +4757,9 @@ function handleUnifiedExecutionEvent(
 
         set({
           status: payload.success ? 'completed' : 'failed',
+          isSubmitting: false,
+          isCancelling: false,
+          pendingCancelBeforeSessionReady: false,
           activeExecutionId: null,
           progress: payload.success ? 100 : get().progress,
           estimatedTimeRemaining: 0,
@@ -4834,7 +4911,8 @@ async function setupTauriEventListeners(get: () => ExecutionState, set: (partial
       const { event: streamEvent, session_id, execution_id } = event.payload;
       const state = get();
 
-      if (state.isCancelling && isForegroundSession(state, session_id)) {
+      const isTerminalWhileCancelling = streamEvent.type === 'complete' || streamEvent.type === 'error';
+      if (state.isCancelling && isForegroundSession(state, session_id) && !isTerminalWhileCancelling) {
         return;
       }
 
