@@ -432,6 +432,14 @@ impl LlmProvider for QwenProvider {
         let model = self.config.model.to_lowercase();
         if model.contains("qwen3-max") {
             262_144
+        } else if model.contains("qwen3.5-plus")
+            || model.contains("qwen3-plus")
+            || model.contains("qwen-plus")
+            || model.contains("qwen-turbo")
+            || model.contains("qwen-flash")
+            || model.contains("qwen-long")
+        {
+            1_000_000
         } else if model.contains("qwen-max-latest")
             || model.contains("qwen-max-2025")
             || model.contains("qwen-max-2026")
@@ -439,12 +447,6 @@ impl LlmProvider for QwenProvider {
             131_072
         } else if model.contains("qwen-max") {
             32_768
-        } else if model.contains("qwen-plus")
-            || model.contains("qwen-turbo")
-            || model.contains("qwen-flash")
-            || model.contains("qwen-long")
-        {
-            1_000_000
         } else if model.contains("qwen3-coder") {
             1_000_000
         } else if model.contains("qwq") {
@@ -454,7 +456,7 @@ impl LlmProvider for QwenProvider {
         } else if model.contains("qwen2.5") {
             131_072
         } else if model.contains("qwen3") {
-            128_000
+            131_072
         } else {
             32_768
         }
@@ -747,6 +749,12 @@ mod tests {
             ..test_config()
         };
         assert_eq!(QwenProvider::new(config_plus).context_window(), 1_000_000);
+
+        let config_35_plus = ProviderConfig {
+            model: "qwen3.5-plus".to_string(),
+            ..test_config()
+        };
+        assert_eq!(QwenProvider::new(config_35_plus).context_window(), 1_000_000);
     }
 
     #[test]

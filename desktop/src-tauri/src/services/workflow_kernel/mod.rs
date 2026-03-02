@@ -876,8 +876,9 @@ impl WorkflowKernelState {
         let content = fs::read_to_string(&path).map_err(|e| {
             format!("Failed to read persisted workflow session '{session_id}': {e}")
         })?;
-        let mut record = serde_json::from_str::<PersistedSessionRecord>(&content)
-            .map_err(|e| format!("Failed to decode persisted workflow session '{session_id}': {e}"))?;
+        let mut record = serde_json::from_str::<PersistedSessionRecord>(&content).map_err(|e| {
+            format!("Failed to decode persisted workflow session '{session_id}': {e}")
+        })?;
 
         for checkpoint in &mut record.checkpoints {
             hydrate_checkpoint_reason_code(checkpoint);

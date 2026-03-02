@@ -182,6 +182,8 @@ pub struct StoryExecutionContext {
     pub retry_context: Option<RetryContext>,
     /// Story-specific context from design_doc.json story_mappings (if available)
     pub story_context: Option<StoryContext>,
+    /// Shared cancellation token for immediate in-flight story interruption
+    pub cancel_token: CancellationToken,
 }
 
 /// Outcome returned by the story executor callback.
@@ -1097,10 +1099,18 @@ impl BatchExecutor {
                 attempt,
                 retry_context,
                 story_context: None,
+                cancel_token: cancel_token.clone(),
             };
 
             // Execute story via the provided executor callback
             let outcome = story_executor(ctx).await;
+
+            if cancel_token.is_cancelled() {
+                let mut s = state.write().await;
+                s.story_states
+                    .insert(story_id.to_string(), StoryExecutionState::Cancelled);
+                return;
+            }
 
             if !outcome.success {
                 last_error = outcome
@@ -2337,6 +2347,7 @@ mod tests {
             attempt: 1,
             retry_context: None,
             story_context: Some(story_ctx),
+            cancel_token: CancellationToken::new(),
         };
 
         assert!(ctx.story_context.is_some());
@@ -2357,6 +2368,7 @@ mod tests {
             attempt: 1,
             retry_context: None,
             story_context: None,
+            cancel_token: CancellationToken::new(),
         };
 
         assert!(ctx.story_context.is_none());

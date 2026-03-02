@@ -48,6 +48,17 @@ export interface SendMessageRequest {
   prompt: string;
 }
 
+export interface SendMessageResponse {
+  execution_id?: string;
+}
+
+export interface CancelExecutionResponse {
+  cancelled: boolean;
+  session_id: string;
+  execution_id?: string | null;
+  reason?: string | null;
+}
+
 export interface CommandResponse<T> {
   success: boolean;
   data: T | null;
@@ -61,6 +72,7 @@ export interface CommandResponse<T> {
 export interface StreamEventPayload {
   event: UnifiedStreamEvent;
   session_id: string;
+  execution_id?: string;
 }
 
 // Matches Rust UnifiedStreamEvent with #[serde(tag = "type", rename_all = "snake_case")]
@@ -286,26 +298,26 @@ export class ClaudeCodeClient {
    * Send a message to a session
    * Events will be emitted through the event system
    */
-  async sendMessage(sessionId: string, prompt: string): Promise<boolean> {
+  async sendMessage(sessionId: string, prompt: string): Promise<SendMessageResponse> {
     const request: SendMessageRequest = { session_id: sessionId, prompt };
-    const result = await invoke<CommandResponse<boolean>>('send_message', { request });
-    if (!result.success) {
+    const result = await invoke<CommandResponse<SendMessageResponse>>('send_message', { request });
+    if (!result.success || !result.data) {
       throw new Error(result.error || 'Failed to send message');
     }
-    return result.data ?? true;
+    return result.data;
   }
 
   /**
    * Cancel execution in a session
    */
-  async cancelExecution(sessionId: string): Promise<boolean> {
-    const result = await invoke<CommandResponse<boolean>>('cancel_execution', {
+  async cancelExecution(sessionId: string): Promise<CancelExecutionResponse> {
+    const result = await invoke<CommandResponse<CancelExecutionResponse>>('cancel_execution', {
       session_id: sessionId,
     });
-    if (!result.success) {
+    if (!result.success || !result.data) {
       throw new Error(result.error || 'Failed to cancel execution');
     }
-    return result.data ?? true;
+    return result.data;
   }
 
   /**

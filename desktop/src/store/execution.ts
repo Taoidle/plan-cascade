@@ -26,6 +26,7 @@ import {
 import type { ContextSourceConfig } from './contextSources';
 import type { ContextEnvelope } from '../lib/contextApi';
 import { useContextOpsStore } from './contextOps';
+import { DEFAULT_PROMPT_TOKEN_BUDGET, resolvePromptTokenBudget } from '../lib/promptTokenBudget';
 
 export type ExecutionStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
 
@@ -79,6 +80,14 @@ function scheduleFlush(get: () => ExecutionState) {
     flushTimer = null;
     flushPendingDeltas(get);
   }, 50);
+}
+
+function clearPendingDeltas(): void {
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  pendingDeltas.clear();
 }
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'reconnecting';
@@ -274,6 +283,17 @@ interface CommandResponse<T> {
   error: string | null;
 }
 
+interface ClaudeSendMessageResponse {
+  execution_id?: string;
+}
+
+interface ClaudeCancelExecutionResponse {
+  cancelled: boolean;
+  session_id: string;
+  execution_id?: string | null;
+  reason?: string | null;
+}
+
 interface AttachmentContextInput {
   name: string;
   path: string;
@@ -438,6 +458,15 @@ interface ExecutionState {
 
   /** Task ID from server */
   taskId: string | null;
+
+  /** Active Claude execution ID for the current turn (session-scoped) */
+  activeExecutionId: string | null;
+
+  /** True while waiting for backend cancel ACK */
+  isCancelling: boolean;
+
+  /** User requested cancel before Claude session_id became available */
+  pendingCancelBeforeSessionReady: boolean;
 
   /** Task description */
   taskDescription: string;
@@ -847,6 +876,13 @@ function createStandaloneSessionId(): string {
   return `simple-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
 }
 
+function createStandaloneExecutionId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `standalone-${crypto.randomUUID()}`;
+  }
+  return `standalone-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+}
+
 function buildHistorySessionId(taskId: string | null, standaloneSessionId: string | null): string | null {
   if (taskId && taskId.trim().length > 0) {
     return `claude:${taskId.trim()}`;
@@ -1201,12 +1237,22 @@ async function preparePromptWithAttachmentContext(
   if (attachments.length === 0) return prompt;
 
   try {
+    const settings = useSettingsStore.getState();
+    const budgetTokens = await resolvePromptTokenBudget({
+      backend: settings.backend,
+      provider: settings.provider,
+      model: settings.model,
+      fallbackBudget: DEFAULT_PROMPT_TOKEN_BUDGET,
+    });
+    const maxAttachmentTokens = Math.max(4_000, Math.min(64_000, Math.floor(budgetTokens * 0.4)));
+    const maxTokensPerFile = Math.min(12_000, maxAttachmentTokens);
+
     const result = await invoke<CommandResponse<AttachmentContextPrepareResult>>('prepare_attachment_context', {
       prompt,
       attachments: toAttachmentContextInputs(attachments),
-      budgetTokens: 160000,
-      maxAttachmentTokens: 64000,
-      maxTokensPerFile: 12000,
+      budgetTokens,
+      maxAttachmentTokens,
+      maxTokensPerFile,
     });
 
     if (result.success && result.data) {
@@ -1322,11 +1368,15 @@ async function triggerMemoryExtraction(state: ExecutionState): Promise<void> {
 let unlisteners: UnlistenFn[] = [];
 let listenerSetupVersion = 0;
 let sessionStatePersistTimer: ReturnType<typeof setTimeout> | null = null;
+let lateEventDroppedCount = 0;
 
 const initialState = {
   status: 'idle' as ExecutionStatus,
   connectionStatus: 'disconnected' as ConnectionStatus,
   taskId: null as string | null,
+  activeExecutionId: null as string | null,
+  isCancelling: false,
+  pendingCancelBeforeSessionReady: false,
   taskDescription: '',
   strategy: null as Strategy,
   stories: [] as Story[],
@@ -1374,6 +1424,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
   ...initialState,
 
   initialize: () => {
+    lateEventDroppedCount = 0;
     const persisted = loadPersistedSessionState();
     if (persisted) {
       set(persisted.state);
@@ -1408,6 +1459,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       clearTimeout(sessionStatePersistTimer);
       sessionStatePersistTimer = null;
     }
+    lateEventDroppedCount = 0;
     set({ connectionStatus: 'disconnected' });
   },
 
@@ -1438,6 +1490,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       isSubmitting: true,
       apiError: null,
       status: 'running',
+      isCancelling: false,
+      pendingCancelBeforeSessionReady: false,
+      activeExecutionId: null,
       taskDescription: description,
       startedAt: Date.now(),
       result: null,
@@ -1504,6 +1559,36 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         set({ taskId: sessionId, isSubmitting: false, isChatSession: true });
         get().addLog(`Claude Code session started: ${sessionId}`);
 
+        // Cancel could have been requested while waiting for start_chat.
+        if (get().pendingCancelBeforeSessionReady) {
+          get().addLog('Cancellation was requested before session became ready; aborting send_message.');
+          const cancelResult = await invoke<CommandResponse<ClaudeCancelExecutionResponse>>('cancel_execution', {
+            session_id: sessionId,
+          });
+          if (cancelResult.success && cancelResult.data?.cancelled) {
+            clearPendingDeltas();
+            set({
+              status: 'idle',
+              isCancelling: false,
+              pendingCancelBeforeSessionReady: false,
+              activeExecutionId: null,
+            });
+            get().addLog('Execution cancelled before first message dispatch.');
+          } else {
+            set({
+              status: 'idle',
+              isCancelling: false,
+              pendingCancelBeforeSessionReady: false,
+              activeExecutionId: null,
+              apiError: null,
+            });
+            get().addLog(
+              `Cancelled before dispatch${cancelResult.data?.reason ? `: ${cancelResult.data.reason}` : ''}.`,
+            );
+          }
+          return;
+        }
+
         // Show user's message in the conversation
         get().appendStreamLine(description, 'info');
 
@@ -1513,9 +1598,45 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         get().clearAttachments();
 
         // Send the message to the session
-        await invoke('send_message', {
+        const sendResult = await invoke<CommandResponse<ClaudeSendMessageResponse | boolean>>('send_message', {
           request: { session_id: sessionId, prompt: claudePrompt },
         });
+        if (!sendResult.success) {
+          throw new Error(sendResult.error || 'Failed to send message');
+        }
+        const sendPayload =
+          sendResult.data && typeof sendResult.data === 'object'
+            ? (sendResult.data as ClaudeSendMessageResponse)
+            : null;
+        if (get().taskId === sessionId && !get().isCancelling) {
+          set({
+            activeExecutionId: sendPayload?.execution_id ?? null,
+          });
+        }
+        if (get().pendingCancelBeforeSessionReady) {
+          const cancelResult = await invoke<CommandResponse<ClaudeCancelExecutionResponse>>('cancel_execution', {
+            session_id: sessionId,
+          });
+          if (cancelResult.success && cancelResult.data?.cancelled) {
+            clearPendingDeltas();
+            set({
+              status: 'idle',
+              isCancelling: false,
+              pendingCancelBeforeSessionReady: false,
+              activeExecutionId: null,
+            });
+            get().addLog('Execution cancelled after dispatch ACK.');
+            return;
+          }
+          set({
+            status: 'idle',
+            isCancelling: false,
+            pendingCancelBeforeSessionReady: false,
+            activeExecutionId: null,
+            apiError: cancelResult.error || cancelResult.data?.reason || 'Failed to cancel execution',
+          });
+          return;
+        }
       } else {
         // Use standalone LLM execution
         const provider = resolveStandaloneProvider(backendValue, providerValue, modelValue);
@@ -1570,6 +1691,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
         // Resolve provider-specific base URL override (e.g. GLM Coding endpoint)
         const baseUrl = resolveProviderBaseUrl(provider, settings);
+        const standaloneExecutionId = createStandaloneExecutionId();
+        set({ activeExecutionId: standaloneExecutionId });
 
         const result = await invoke<CommandResponse<unknown>>('execute_standalone', {
           message: enrichedMessage,
@@ -1584,6 +1707,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           enableThinking: settings.enableThinking ?? false,
           maxIterations: settings.maxIterations ?? undefined,
           maxConcurrentSubagents: settings.maxConcurrentSubagents || undefined,
+          executionId: standaloneExecutionId,
           pluginInvocations: pluginInvocations.length > 0 ? pluginInvocations : null,
           systemPrompt: activeAgent?.system_prompt ?? null,
           contextSources,
@@ -1762,6 +1886,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
             set({
               taskId: null,
               status: succeeded ? 'completed' : 'failed',
+              activeExecutionId: null,
               progress: succeeded ? 100 : get().progress,
               estimatedTimeRemaining: 0,
               apiError: succeeded ? null : execution.error || 'Execution failed',
@@ -1841,6 +1966,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       set({
         status: 'failed',
         isSubmitting: false,
+        isCancelling: false,
+        pendingCancelBeforeSessionReady: false,
+        activeExecutionId: null,
         apiError: errorMessage,
         result: {
           success: false,
@@ -1875,6 +2003,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
     set({
       status: 'running',
       isSubmitting: false,
+      isCancelling: false,
+      pendingCancelBeforeSessionReady: false,
+      activeExecutionId: null,
       apiError: null,
       result: null,
       foregroundDirty: true,
@@ -1896,13 +2027,47 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
     get().addLog(`Follow-up: ${prompt}`);
 
     try {
-      await invoke('send_message', {
+      const sendResult = await invoke<CommandResponse<ClaudeSendMessageResponse | boolean>>('send_message', {
         request: { session_id: sessionId, prompt: enrichedPrompt },
       });
+      if (!sendResult.success) {
+        throw new Error(sendResult.error || 'Failed to send follow-up');
+      }
+      const sendPayload =
+        sendResult.data && typeof sendResult.data === 'object' ? (sendResult.data as ClaudeSendMessageResponse) : null;
+      if (get().taskId === sessionId && !get().isCancelling) {
+        set({ activeExecutionId: sendPayload?.execution_id ?? null });
+      }
+      if (get().pendingCancelBeforeSessionReady) {
+        const cancelResult = await invoke<CommandResponse<ClaudeCancelExecutionResponse>>('cancel_execution', {
+          session_id: sessionId,
+        });
+        if (cancelResult.success && cancelResult.data?.cancelled) {
+          clearPendingDeltas();
+          set({
+            status: 'idle',
+            isCancelling: false,
+            pendingCancelBeforeSessionReady: false,
+            activeExecutionId: null,
+          });
+          get().addLog('Execution cancelled after follow-up dispatch ACK.');
+          return;
+        }
+        set({
+          status: 'idle',
+          isCancelling: false,
+          pendingCancelBeforeSessionReady: false,
+          activeExecutionId: null,
+          apiError: cancelResult.error || cancelResult.data?.reason || 'Failed to cancel execution',
+        });
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       set({
         status: 'failed',
+        isCancelling: false,
+        pendingCancelBeforeSessionReady: false,
+        activeExecutionId: null,
         apiError: errorMessage,
       });
       get().addLog(`Error: ${errorMessage}`);
@@ -1944,29 +2109,76 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
   },
 
   cancel: async () => {
+    if (get().isCancelling) return;
+    if (get().status !== 'running' && get().status !== 'paused') return;
+    set({ isCancelling: true, apiError: null });
+
     try {
       // Cancel current session — use the correct backend command
       const { taskId, standaloneSessionId } = get();
       if (standaloneSessionId) {
-        try {
-          await invoke<CommandResponse<boolean>>('cancel_standalone_execution', {
-            sessionId: standaloneSessionId,
-          });
-        } catch {
-          // Session might already be finished
+        const standaloneCancel = await invoke<CommandResponse<boolean>>('cancel_standalone_execution', {
+          sessionId: standaloneSessionId,
+        });
+        if (!standaloneCancel.success) {
+          throw new Error(standaloneCancel.error || 'Failed to cancel standalone execution');
         }
-      } else if (taskId) {
-        try {
-          await invoke<CommandResponse<boolean>>('cancel_execution', {
-            session_id: taskId,
-          });
-        } catch {
-          // Session might not exist in the new architecture
-        }
+
+        clearPendingDeltas();
+        set({
+          status: 'idle',
+          isCancelling: false,
+          pendingCancelBeforeSessionReady: false,
+          activeExecutionId: null,
+          taskId: null,
+          standaloneSessionId: null,
+          currentStoryId: null,
+          result: {
+            success: false,
+            message: 'Execution cancelled by user',
+            completedStories: get().stories.filter((s) => s.status === 'completed').length,
+            totalStories: get().stories.length,
+            duration: Date.now() - (get().startedAt || Date.now()),
+          },
+        });
+        get().addLog('Execution cancelled');
+        get().saveToHistory();
+        import('./toolPermission').then(({ useToolPermissionStore }) => {
+          useToolPermissionStore.getState().clearAll();
+        });
+        return;
       }
 
+      if (!taskId) {
+        set({ pendingCancelBeforeSessionReady: true });
+        get().addLog('Cancel requested before session was ready. Waiting for backend session initialization.');
+        return;
+      }
+
+      if (!get().activeExecutionId) {
+        set({ pendingCancelBeforeSessionReady: true });
+        get().addLog(
+          'Cancel requested before execution_id was ready. Deferring cancellation until dispatch completes.',
+        );
+        return;
+      }
+
+      const cancelResult = await invoke<CommandResponse<ClaudeCancelExecutionResponse>>('cancel_execution', {
+        session_id: taskId,
+      });
+      if (!cancelResult.success || !cancelResult.data) {
+        throw new Error(cancelResult.error || 'Failed to cancel execution');
+      }
+      if (!cancelResult.data.cancelled) {
+        throw new Error(cancelResult.data.reason || 'No active execution to cancel');
+      }
+
+      clearPendingDeltas();
       set({
         status: 'idle',
+        isCancelling: false,
+        pendingCancelBeforeSessionReady: false,
+        activeExecutionId: null,
         currentStoryId: null,
         result: {
           success: false,
@@ -1985,7 +2197,11 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      set({ apiError: errorMessage });
+      set({
+        isCancelling: false,
+        pendingCancelBeforeSessionReady: false,
+        apiError: errorMessage,
+      });
       get().addLog(`Failed to cancel: ${errorMessage}`);
     }
   },
@@ -2557,6 +2773,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         // Reset foreground state
         taskDescription: '',
         status: 'idle' as ExecutionStatus,
+        isCancelling: false,
+        pendingCancelBeforeSessionReady: false,
+        activeExecutionId: null,
         streamingOutput: [],
         streamLineCounter: 0,
         currentTurnStartLineId: 0,
@@ -2597,6 +2816,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           // Reset foreground state
           taskDescription: '',
           status: 'idle' as ExecutionStatus,
+          isCancelling: false,
+          pendingCancelBeforeSessionReady: false,
+          activeExecutionId: null,
           streamingOutput: [],
           streamLineCounter: 0,
           currentTurnStartLineId: 0,
@@ -2624,6 +2846,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           foregroundDirty: false,
           taskDescription: '',
           status: 'idle' as ExecutionStatus,
+          isCancelling: false,
+          pendingCancelBeforeSessionReady: false,
+          activeExecutionId: null,
           streamingOutput: [],
           streamLineCounter: 0,
           currentTurnStartLineId: 0,
@@ -2726,6 +2951,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       foregroundDirty: false,
       taskDescription: targetSnapshot.taskDescription,
       status: targetSnapshot.status,
+      isCancelling: false,
+      pendingCancelBeforeSessionReady: false,
+      activeExecutionId: null,
       streamingOutput: [...targetSnapshot.streamingOutput],
       streamLineCounter: targetSnapshot.streamLineCounter,
       currentTurnStartLineId: targetSnapshot.currentTurnStartLineId,
@@ -2876,6 +3104,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       streamLineCounter: truncatedLines.length > 0 ? truncatedLines[truncatedLines.length - 1].id : 0,
       standaloneTurns: rebuiltTurns,
       status: 'idle',
+      isCancelling: false,
+      pendingCancelBeforeSessionReady: false,
+      activeExecutionId: null,
       isSubmitting: false,
       apiError: null,
       result: null,
@@ -2934,7 +3165,10 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       standaloneTurns: rebuiltTurns,
       standaloneSessionId: createStandaloneSessionId(),
       status: 'idle' as ExecutionStatus,
+      isCancelling: false,
+      pendingCancelBeforeSessionReady: false,
       isSubmitting: false,
+      activeExecutionId: null,
       taskId: null,
       isChatSession: false,
       latestUsage: null,
@@ -2998,6 +3232,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         streamLineCounter: (truncatedLines.length > 0 ? truncatedLines[truncatedLines.length - 1].id : 0) + 1,
         standaloneTurns: [],
         status: 'running',
+        isCancelling: false,
+        pendingCancelBeforeSessionReady: false,
+        activeExecutionId: null,
         isSubmitting: false,
         apiError: null,
         result: null,
@@ -3019,15 +3256,53 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         }
 
         const sessionId = startResult.data.session_id;
-        set({ taskId: sessionId, isChatSession: true });
+        set({ taskId: sessionId, isChatSession: true, activeExecutionId: null });
 
         // Send the user message
-        await invoke('send_message', {
+        const sendResult = await invoke<CommandResponse<ClaudeSendMessageResponse | boolean>>('send_message', {
           request: { session_id: sessionId, prompt: userContent },
         });
+        if (!sendResult.success) {
+          throw new Error(sendResult.error || 'Failed to send regenerate request');
+        }
+        const sendPayload =
+          sendResult.data && typeof sendResult.data === 'object'
+            ? (sendResult.data as ClaudeSendMessageResponse)
+            : null;
+        set({ activeExecutionId: sendPayload?.execution_id ?? null });
+        if (get().pendingCancelBeforeSessionReady) {
+          const cancelResult = await invoke<CommandResponse<ClaudeCancelExecutionResponse>>('cancel_execution', {
+            session_id: sessionId,
+          });
+          if (cancelResult.success && cancelResult.data?.cancelled) {
+            clearPendingDeltas();
+            set({
+              status: 'idle',
+              isCancelling: false,
+              pendingCancelBeforeSessionReady: false,
+              activeExecutionId: null,
+            });
+            get().addLog('Regeneration cancelled after dispatch ACK.');
+            return;
+          }
+          set({
+            status: 'idle',
+            isCancelling: false,
+            pendingCancelBeforeSessionReady: false,
+            activeExecutionId: null,
+            apiError: cancelResult.error || cancelResult.data?.reason || 'Failed to cancel execution',
+          });
+          return;
+        }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        set({ status: 'failed', apiError: errorMessage });
+        set({
+          status: 'failed',
+          isCancelling: false,
+          pendingCancelBeforeSessionReady: false,
+          activeExecutionId: null,
+          apiError: errorMessage,
+        });
         get().addLog(`Regenerate error: ${errorMessage}`);
       }
     } else {
@@ -3037,6 +3312,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         streamLineCounter: truncatedLines.length > 0 ? truncatedLines[truncatedLines.length - 1].id : 0,
         standaloneTurns: rebuiltTurns,
         status: 'running',
+        isCancelling: false,
+        pendingCancelBeforeSessionReady: false,
+        activeExecutionId: null,
         isSubmitting: false,
         apiError: null,
         result: null,
@@ -3071,6 +3349,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       });
       const baseUrl = resolveProviderBaseUrl(provider, settingsSnapshot);
       const permissionLevel = useToolPermissionStore.getState().sessionLevel;
+      const standaloneExecutionId = createStandaloneExecutionId();
+      set({ activeExecutionId: standaloneExecutionId });
 
       try {
         const result = await invoke<CommandResponse<unknown>>('execute_standalone', {
@@ -3086,6 +3366,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           enableThinking: settingsSnapshot.enableThinking ?? false,
           maxIterations: settingsSnapshot.maxIterations ?? undefined,
           maxConcurrentSubagents: settingsSnapshot.maxConcurrentSubagents || undefined,
+          executionId: standaloneExecutionId,
           pluginInvocations: pluginInvocations.length > 0 ? pluginInvocations : null,
           contextSources: regenContextSources,
         });
@@ -3126,13 +3407,20 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           if (get().status === 'running') {
             set({
               status: execution.success ? 'completed' : 'failed',
+              activeExecutionId: null,
               apiError: execution.success ? null : execution.error || 'Regeneration failed',
             });
           }
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        set({ status: 'failed', apiError: errorMessage });
+        set({
+          status: 'failed',
+          isCancelling: false,
+          pendingCancelBeforeSessionReady: false,
+          activeExecutionId: null,
+          apiError: errorMessage,
+        });
         get().addLog(`Regenerate error: ${errorMessage}`);
       }
     }
@@ -3196,6 +3484,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         streamLineCounter: newInfoId + 1,
         standaloneTurns: [],
         status: 'running',
+        isCancelling: false,
+        pendingCancelBeforeSessionReady: false,
+        activeExecutionId: null,
         isSubmitting: false,
         apiError: null,
         result: null,
@@ -3216,14 +3507,52 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         }
 
         const sessionId = startResult.data.session_id;
-        set({ taskId: sessionId, isChatSession: true });
+        set({ taskId: sessionId, isChatSession: true, activeExecutionId: null });
 
-        await invoke('send_message', {
+        const sendResult = await invoke<CommandResponse<ClaudeSendMessageResponse | boolean>>('send_message', {
           request: { session_id: sessionId, prompt: newContent },
         });
+        if (!sendResult.success) {
+          throw new Error(sendResult.error || 'Failed to send edited prompt');
+        }
+        const sendPayload =
+          sendResult.data && typeof sendResult.data === 'object'
+            ? (sendResult.data as ClaudeSendMessageResponse)
+            : null;
+        set({ activeExecutionId: sendPayload?.execution_id ?? null });
+        if (get().pendingCancelBeforeSessionReady) {
+          const cancelResult = await invoke<CommandResponse<ClaudeCancelExecutionResponse>>('cancel_execution', {
+            session_id: sessionId,
+          });
+          if (cancelResult.success && cancelResult.data?.cancelled) {
+            clearPendingDeltas();
+            set({
+              status: 'idle',
+              isCancelling: false,
+              pendingCancelBeforeSessionReady: false,
+              activeExecutionId: null,
+            });
+            get().addLog('Edit-and-resend cancelled after dispatch ACK.');
+            return;
+          }
+          set({
+            status: 'idle',
+            isCancelling: false,
+            pendingCancelBeforeSessionReady: false,
+            activeExecutionId: null,
+            apiError: cancelResult.error || cancelResult.data?.reason || 'Failed to cancel execution',
+          });
+          return;
+        }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        set({ status: 'failed', apiError: errorMessage });
+        set({
+          status: 'failed',
+          isCancelling: false,
+          pendingCancelBeforeSessionReady: false,
+          activeExecutionId: null,
+          apiError: errorMessage,
+        });
         get().addLog(`Edit and resend error: ${errorMessage}`);
       }
     } else {
@@ -3233,6 +3562,9 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
         streamLineCounter: newInfoId,
         standaloneTurns: rebuiltTurns,
         status: 'running',
+        isCancelling: false,
+        pendingCancelBeforeSessionReady: false,
+        activeExecutionId: null,
         isSubmitting: false,
         apiError: null,
         result: null,
@@ -3267,6 +3599,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       });
       const baseUrl = resolveProviderBaseUrl(provider, settingsSnapshot);
       const permissionLevel = useToolPermissionStore.getState().sessionLevel;
+      const standaloneExecutionId = createStandaloneExecutionId();
+      set({ activeExecutionId: standaloneExecutionId });
 
       try {
         const result = await invoke<CommandResponse<unknown>>('execute_standalone', {
@@ -3282,6 +3616,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           enableThinking: settingsSnapshot.enableThinking ?? false,
           maxIterations: settingsSnapshot.maxIterations ?? undefined,
           maxConcurrentSubagents: settingsSnapshot.maxConcurrentSubagents || undefined,
+          executionId: standaloneExecutionId,
           pluginInvocations: pluginInvocations.length > 0 ? pluginInvocations : null,
           contextSources: editContextSources,
         });
@@ -3322,13 +3657,20 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
           if (get().status === 'running') {
             set({
               status: execution.success ? 'completed' : 'failed',
+              activeExecutionId: null,
               apiError: execution.success ? null : execution.error || 'Edit and resend failed',
             });
           }
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        set({ status: 'failed', apiError: errorMessage });
+        set({
+          status: 'failed',
+          isCancelling: false,
+          pendingCancelBeforeSessionReady: false,
+          activeExecutionId: null,
+          apiError: errorMessage,
+        });
         get().addLog(`Edit and resend error: ${errorMessage}`);
       }
     }
@@ -3358,6 +3700,7 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
 
 interface UnifiedEventPayload {
   type: string;
+  execution_id?: string;
   run_id?: string;
   run_dir?: string;
   request?: string;
@@ -3498,9 +3841,25 @@ function handleUnifiedExecutionEvent(
   get: () => ExecutionState,
   set: (partial: Partial<ExecutionState>) => void,
 ) {
+  const state = get();
+  if (state.isCancelling && isForegroundSession(state, payload.session_id)) {
+    return;
+  }
+  if (isForegroundSession(state, payload.session_id) && state.activeExecutionId) {
+    if (!payload.execution_id || payload.execution_id !== state.activeExecutionId) {
+      lateEventDroppedCount += 1;
+      if (lateEventDroppedCount === 1 || lateEventDroppedCount % 20 === 0) {
+        console.debug(
+          `[execution] dropped late unified event #${lateEventDroppedCount} for session=${payload.session_id}, execution=${payload.execution_id || 'none'}, active=${state.activeExecutionId}`,
+        );
+      }
+      return;
+    }
+  }
+
   // Session isolation: route events from non-foreground sessions to
   // their background snapshot instead of the foreground UI.
-  if (payload.session_id && !isForegroundSession(get(), payload.session_id)) {
+  if (payload.session_id && !isForegroundSession(state, payload.session_id)) {
     const bgSessionId = payload.session_id;
     switch (payload.type) {
       case 'text_delta': {
@@ -4215,6 +4574,7 @@ function handleUnifiedExecutionEvent(
 
         set({
           status: 'completed',
+          activeExecutionId: null,
           progress: 100,
           estimatedTimeRemaining: 0,
           result: {
@@ -4323,6 +4683,7 @@ function handleUnifiedExecutionEvent(
 
         set({
           status: payload.success ? 'completed' : 'failed',
+          activeExecutionId: null,
           progress: payload.success ? 100 : get().progress,
           estimatedTimeRemaining: 0,
           result: {
@@ -4470,8 +4831,26 @@ async function setupTauriEventListeners(get: () => ExecutionState, set: (partial
     // Listen for stream events from Claude Code backend
     // UnifiedStreamEvent uses serde tagged enum: { type: "text_delta", content: "..." }
     const unlistenStream = await listen<StreamEventPayload>('claude_code:stream', (event) => {
-      const { event: streamEvent, session_id } = event.payload;
+      const { event: streamEvent, session_id, execution_id } = event.payload;
       const state = get();
+
+      if (state.isCancelling && isForegroundSession(state, session_id)) {
+        return;
+      }
+
+      if (execution_id && isForegroundSession(state, session_id)) {
+        // Only consume events for the currently ACKed execution_id. This isolates
+        // late stream events from cancelled/previous turns.
+        if (!state.activeExecutionId || state.activeExecutionId !== execution_id) {
+          lateEventDroppedCount += 1;
+          if (lateEventDroppedCount === 1 || lateEventDroppedCount % 20 === 0) {
+            console.debug(
+              `[execution] dropped late stream event #${lateEventDroppedCount} for session=${session_id}, execution=${execution_id}, active=${state.activeExecutionId}`,
+            );
+          }
+          return;
+        }
+      }
 
       // ---- Route to background session if not foreground ----
       if (!isForegroundSession(state, session_id)) {
@@ -4622,6 +5001,9 @@ async function setupTauriEventListeners(get: () => ExecutionState, set: (partial
           });
           set({
             status: 'failed',
+            isCancelling: false,
+            pendingCancelBeforeSessionReady: false,
+            activeExecutionId: null,
             apiError: streamEvent.message,
             result: {
               success: false,
@@ -4650,6 +5032,9 @@ async function setupTauriEventListeners(get: () => ExecutionState, set: (partial
             set({
               status: 'idle',
               isSubmitting: false,
+              isCancelling: false,
+              pendingCancelBeforeSessionReady: false,
+              activeExecutionId: null,
               progress: 100,
               estimatedTimeRemaining: 0,
             });
@@ -4665,6 +5050,9 @@ async function setupTauriEventListeners(get: () => ExecutionState, set: (partial
             get().appendStreamLine('Execution completed successfully.', 'success');
             set({
               status: 'completed',
+              isCancelling: false,
+              pendingCancelBeforeSessionReady: false,
+              activeExecutionId: null,
               progress: 100,
               estimatedTimeRemaining: 0,
               result: {
@@ -4693,6 +5081,10 @@ async function setupTauriEventListeners(get: () => ExecutionState, set: (partial
     }>('claude_code:tool', (event) => {
       const { execution, update_type, session_id } = event.payload;
       const state = get();
+
+      if (state.isCancelling && isForegroundSession(state, session_id)) {
+        return;
+      }
 
       // ---- Route to background session if not foreground ----
       if (!isForegroundSession(state, session_id)) {
@@ -4767,12 +5159,21 @@ async function setupTauriEventListeners(get: () => ExecutionState, set: (partial
           });
           set({
             status: 'failed',
+            isCancelling: false,
+            pendingCancelBeforeSessionReady: false,
+            activeExecutionId: null,
             apiError: session.error_message || 'Session error',
           });
           get().addLog(`Session error: ${session.error_message || 'Unknown error'}`);
         } else if (session.state === 'cancelled') {
           get().appendStreamLine('Session cancelled.', 'warning');
-          set({ status: 'idle' });
+          clearPendingDeltas();
+          set({
+            status: 'idle',
+            isCancelling: false,
+            pendingCancelBeforeSessionReady: false,
+            activeExecutionId: null,
+          });
           get().addLog('Session cancelled');
         }
       }

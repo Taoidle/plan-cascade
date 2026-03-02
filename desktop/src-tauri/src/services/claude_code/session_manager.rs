@@ -4,19 +4,31 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
+use tokio_util::sync::CancellationToken;
 
 use crate::models::claude_code::{ActiveSessionInfo, ClaudeCodeSession, SessionState};
 use crate::utils::error::{AppError, AppResult};
 
 use super::executor::{ClaudeCodeExecutor, ClaudeCodeProcess, SpawnConfig};
 
+/// Active Claude execution bound to a session.
+#[derive(Clone)]
+pub struct ActiveExecution {
+    /// Unique execution ID for this run
+    pub execution_id: String,
+    /// Process handle for termination and status checks
+    pub process: Arc<Mutex<ClaudeCodeProcess>>,
+    /// Cancellation token consumed by stream forwarding tasks
+    pub cancel_token: CancellationToken,
+}
+
 /// Manages active Claude Code sessions
 pub struct ActiveSessionManager {
     /// Map of session ID to session data
     sessions: Arc<RwLock<HashMap<String, ClaudeCodeSession>>>,
-    /// Map of session ID to running process
-    processes: Arc<RwLock<HashMap<String, ClaudeCodeProcess>>>,
+    /// Map of session ID to active execution details
+    executions: Arc<RwLock<HashMap<String, ActiveExecution>>>,
     /// The executor for spawning processes
     executor: ClaudeCodeExecutor,
 }
@@ -26,7 +38,7 @@ impl ActiveSessionManager {
     pub fn new() -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
-            processes: Arc::new(RwLock::new(HashMap::new())),
+            executions: Arc::new(RwLock::new(HashMap::new())),
             executor: ClaudeCodeExecutor::new(),
         }
     }
@@ -98,8 +110,8 @@ impl ActiveSessionManager {
         Ok(session)
     }
 
-    /// Spawn a process for a session
-    pub async fn spawn_process(&self, session_id: &str) -> AppResult<()> {
+    /// Spawn a process for a session (legacy helper).
+    pub async fn spawn_process(&self, session_id: &str) -> AppResult<String> {
         let session = {
             let sessions = self.sessions.read().await;
             sessions.get(session_id).cloned()
@@ -117,15 +129,53 @@ impl ActiveSessionManager {
         }
 
         let process = self.executor.spawn(&config).await?;
-        let pid = process.pid();
+        let execution_id = uuid::Uuid::new_v4().to_string();
+        self.register_execution(session_id, &execution_id, process)
+            .await?;
 
-        // Store the process
+        // Log the process spawn (using eprintln for now, can be replaced with proper logging)
+        eprintln!(
+            "[INFO] Spawned Claude Code process for session {} (execution {})",
+            session_id, execution_id
+        );
+
+        Ok(execution_id)
+    }
+
+    /// Register an active execution process for a session.
+    pub async fn register_execution(
+        &self,
+        session_id: &str,
+        execution_id: &str,
+        process: ClaudeCodeProcess,
+    ) -> AppResult<CancellationToken> {
+        // Ensure session exists
         {
-            let mut processes = self.processes.write().await;
-            processes.insert(session_id.to_string(), process);
+            let sessions = self.sessions.read().await;
+            if !sessions.contains_key(session_id) {
+                return Err(AppError::not_found(format!(
+                    "Session not found: {}",
+                    session_id
+                )));
+            }
         }
 
-        // Update session state
+        let existing_execution = {
+            let executions = self.executions.read().await;
+            executions
+                .get(session_id)
+                .map(|active| active.execution_id.clone())
+        };
+        if let Some(existing_execution_id) = existing_execution {
+            return Err(AppError::validation(format!(
+                "Session {} already has active execution {}",
+                session_id, existing_execution_id
+            )));
+        }
+
+        let cancel_token = CancellationToken::new();
+        let process_arc = Arc::new(Mutex::new(process));
+
         {
             let mut sessions = self.sessions.write().await;
             if let Some(session) = sessions.get_mut(session_id) {
@@ -133,13 +183,35 @@ impl ActiveSessionManager {
             }
         }
 
-        // Log the process spawn (using eprintln for now, can be replaced with proper logging)
-        eprintln!(
-            "[INFO] Spawned Claude Code process {} for session {}",
-            pid, session_id
-        );
+        {
+            let mut executions = self.executions.write().await;
+            executions.insert(
+                session_id.to_string(),
+                ActiveExecution {
+                    execution_id: execution_id.to_string(),
+                    process: process_arc,
+                    cancel_token: cancel_token.clone(),
+                },
+            );
+        }
 
-        Ok(())
+        Ok(cancel_token)
+    }
+
+    /// Get active execution metadata for a session.
+    pub async fn get_active_execution(&self, session_id: &str) -> Option<ActiveExecution> {
+        let executions = self.executions.read().await;
+        executions.get(session_id).cloned()
+    }
+
+    /// Remove an execution if it matches the current active execution ID.
+    pub async fn complete_execution(&self, session_id: &str, execution_id: &str) {
+        let mut executions = self.executions.write().await;
+        if let Some(active) = executions.get(session_id) {
+            if active.execution_id == execution_id {
+                executions.remove(session_id);
+            }
+        }
     }
 
     /// Get a session by ID
@@ -155,13 +227,15 @@ impl ActiveSessionManager {
             sessions.get(session_id).cloned()
         }?;
 
-        let (pid, is_alive) = {
-            let processes = self.processes.read().await;
-            if let Some(process) = processes.get(session_id) {
-                (Some(process.pid()), process.is_running())
-            } else {
-                (None, false)
-            }
+        let active = {
+            let executions = self.executions.read().await;
+            executions.get(session_id).cloned()
+        };
+        let (pid, is_alive) = if let Some(active) = active {
+            let process = active.process.lock().await;
+            (Some(process.pid()), process.is_running())
+        } else {
+            (None, false)
         };
 
         Some(ActiveSessionInfo {
@@ -180,24 +254,25 @@ impl ActiveSessionManager {
     /// List all active session infos
     pub async fn list_session_infos(&self) -> Vec<ActiveSessionInfo> {
         let sessions = self.sessions.read().await;
-        let processes = self.processes.read().await;
+        let executions = self.executions.read().await.clone();
+        let mut infos = Vec::with_capacity(sessions.len());
 
-        sessions
-            .iter()
-            .map(|(id, session)| {
-                let (pid, is_alive) = if let Some(process) = processes.get(id) {
-                    (Some(process.pid()), process.is_running())
-                } else {
-                    (None, false)
-                };
+        for (id, session) in sessions.iter() {
+            let (pid, is_alive) = if let Some(active) = executions.get(id).cloned() {
+                let process = active.process.lock().await;
+                (Some(process.pid()), process.is_running())
+            } else {
+                (None, false)
+            };
 
-                ActiveSessionInfo {
-                    session: session.clone(),
-                    pid,
-                    is_process_alive: is_alive,
-                }
-            })
-            .collect()
+            infos.push(ActiveSessionInfo {
+                session: session.clone(),
+                pid,
+                is_process_alive: is_alive,
+            });
+        }
+
+        infos
     }
 
     /// Update session state
@@ -248,17 +323,25 @@ impl ActiveSessionManager {
         Ok(())
     }
 
-    /// Cancel a session's execution
-    pub async fn cancel_session(&self, session_id: &str) -> AppResult<()> {
-        // Kill the process if it exists
+    /// Cancel an active execution for a session.
+    ///
+    /// Returns the cancelled execution ID on success.
+    pub async fn cancel_session(&self, session_id: &str) -> AppResult<String> {
+        let active = {
+            let mut executions = self.executions.write().await;
+            executions.remove(session_id)
+        };
+
+        let active = active.ok_or_else(|| {
+            AppError::not_found(format!("No active execution for session {}", session_id))
+        })?;
+
+        active.cancel_token.cancel();
         {
-            let mut processes = self.processes.write().await;
-            if let Some(mut process) = processes.remove(session_id) {
-                process.kill().await?;
-            }
+            let mut process = active.process.lock().await;
+            process.kill().await?;
         }
 
-        // Update session state
         {
             let mut sessions = self.sessions.write().await;
             if let Some(session) = sessions.get_mut(session_id) {
@@ -266,13 +349,17 @@ impl ActiveSessionManager {
             }
         }
 
-        Ok(())
+        Ok(active.execution_id)
     }
 
     /// Remove a session completely
     pub async fn remove_session(&self, session_id: &str) -> AppResult<()> {
         // First cancel any running process
-        self.cancel_session(session_id).await?;
+        match self.cancel_session(session_id).await {
+            Ok(_) => {}
+            Err(AppError::NotFound(_)) => {}
+            Err(e) => return Err(e),
+        }
 
         // Remove the session
         {
@@ -281,57 +368,6 @@ impl ActiveSessionManager {
         }
 
         Ok(())
-    }
-
-    /// Take the process for a session (for direct manipulation)
-    pub async fn take_process(&self, session_id: &str) -> Option<ClaudeCodeProcess> {
-        let mut processes = self.processes.write().await;
-        processes.remove(session_id)
-    }
-
-    /// Return a process to the manager
-    pub async fn return_process(&self, session_id: &str, process: ClaudeCodeProcess) {
-        let mut processes = self.processes.write().await;
-        processes.insert(session_id.to_string(), process);
-    }
-
-    /// Check if a session has a running process
-    pub async fn has_running_process(&self, session_id: &str) -> bool {
-        let processes = self.processes.read().await;
-        processes
-            .get(session_id)
-            .map(|p| p.is_running())
-            .unwrap_or(false)
-    }
-
-    /// Clean up dead processes
-    pub async fn cleanup_dead_processes(&self) {
-        let dead_sessions: Vec<String> = {
-            let processes = self.processes.read().await;
-            processes
-                .iter()
-                .filter(|(_, p)| !p.is_running())
-                .map(|(id, _)| id.clone())
-                .collect()
-        };
-
-        for session_id in dead_sessions {
-            // Remove the dead process
-            {
-                let mut processes = self.processes.write().await;
-                processes.remove(&session_id);
-            }
-
-            // Update session state to idle
-            {
-                let mut sessions = self.sessions.write().await;
-                if let Some(session) = sessions.get_mut(&session_id) {
-                    if session.state == SessionState::Running {
-                        session.mark_idle();
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -422,10 +458,17 @@ mod tests {
         let manager = ActiveSessionManager::new();
         let session = manager.start_session("/project", None).await.unwrap();
 
-        manager.cancel_session(&session.id).await.unwrap();
+        let result = manager.cancel_session(&session.id).await;
+        match result {
+            Err(AppError::NotFound(message)) => {
+                assert!(message.contains("No active execution"));
+                assert!(message.contains(&session.id));
+            }
+            other => panic!("Expected NotFound error, got {:?}", other),
+        }
 
         let updated = manager.get_session(&session.id).await.unwrap();
-        assert_eq!(updated.state, SessionState::Cancelled);
+        assert_eq!(updated.state, SessionState::Idle);
     }
 
     #[tokio::test]

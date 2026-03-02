@@ -1,4 +1,6 @@
 import type { FileAttachmentData } from '../../types/attachment';
+import { DEFAULT_PROMPT_TOKEN_BUDGET } from '../../lib/promptTokenBudget';
+export { DEFAULT_PROMPT_TOKEN_BUDGET };
 
 export interface AttachmentTokenEstimateInput {
   name: string;
@@ -19,7 +21,6 @@ export interface PromptTokenEstimateResult {
   exceeds_budget: boolean;
 }
 
-export const DEFAULT_PROMPT_TOKEN_BUDGET = 160_000;
 const DEFAULT_NON_TEXT_ATTACHMENT_TOKENS = 48;
 
 export function estimateTokensRough(text: string): number {

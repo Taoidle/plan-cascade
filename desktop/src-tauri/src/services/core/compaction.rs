@@ -305,9 +305,9 @@ impl ContextCompactor for SlidingWindowCompactor {
 pub type SummarizeFn = Box<
     dyn Fn(
             Vec<Message>,
-        )
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = CoreResult<SummaryOutcome>> + Send>>
-        + Send
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = CoreResult<SummaryOutcome>> + Send>,
+        > + Send
         + Sync,
 >;
 
@@ -330,9 +330,9 @@ impl LlmSummaryCompactor {
     where
         F: Fn(
                 Vec<Message>,
-            )
-                -> std::pin::Pin<Box<dyn std::future::Future<Output = CoreResult<SummaryOutcome>> + Send>>
-            + Send
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = CoreResult<SummaryOutcome>> + Send>,
+            > + Send
             + Sync
             + 'static,
     {

@@ -11,7 +11,9 @@ use crate::models::analytics::{
     PricingRule, RecomputeCostsRequest, RecomputeCostsResult, UsageFilter, UsageRecordV2,
 };
 use crate::models::response::CommandResponse;
-use crate::services::analytics::{AnalyticsService, CostCalculator, UsageTracker, UsageTrackerBuilder};
+use crate::services::analytics::{
+    AnalyticsService, CostCalculator, UsageTracker, UsageTrackerBuilder,
+};
 use crate::state::AppState;
 use crate::utils::error::{AppError, AppResult};
 
@@ -165,7 +167,10 @@ pub async fn get_dashboard_summary_v2(
 pub async fn list_pricing_rules(
     analytics_state: State<'_, AnalyticsState>,
 ) -> Result<CommandResponse<Vec<PricingRule>>, String> {
-    match analytics_state.with_service(|s| s.list_pricing_rules()).await {
+    match analytics_state
+        .with_service(|s| s.list_pricing_rules())
+        .await
+    {
         Ok(rules) => Ok(CommandResponse::ok(rules)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }

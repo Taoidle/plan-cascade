@@ -64,6 +64,8 @@ pub struct StreamEventPayload {
     pub event: UnifiedStreamEvent,
     /// Associated session ID
     pub session_id: String,
+    /// Associated execution ID
+    pub execution_id: String,
 }
 
 /// Event emitter for Claude Code events
@@ -81,10 +83,16 @@ impl<R: Runtime> ClaudeCodeEventEmitter<R> {
     }
 
     /// Emit a stream event
-    pub fn emit_stream_event(&self, session_id: &str, event: UnifiedStreamEvent) {
+    pub fn emit_stream_event(
+        &self,
+        session_id: &str,
+        execution_id: &str,
+        event: UnifiedStreamEvent,
+    ) {
         let payload = StreamEventPayload {
             event,
             session_id: session_id.to_string(),
+            execution_id: execution_id.to_string(),
         };
 
         if let Err(e) = self.app_handle.emit(channels::STREAM, &payload) {
@@ -260,10 +268,12 @@ mod tests {
         let payload = StreamEventPayload {
             event,
             session_id: "sess-1".to_string(),
+            execution_id: "exec-1".to_string(),
         };
 
         let json = serde_json::to_string(&payload).unwrap();
         assert!(json.contains("\"session_id\":\"sess-1\""));
+        assert!(json.contains("\"execution_id\":\"exec-1\""));
         assert!(json.contains("\"content\":\"Hello\""));
     }
 }

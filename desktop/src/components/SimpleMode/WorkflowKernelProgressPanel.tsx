@@ -128,12 +128,13 @@ export function WorkflowKernelProgressPanel({ workflowMode, workflowPhase }: Wor
   const error = useWorkflowKernelStore((s) => s.error);
 
   const activeMode = session?.activeMode ?? workflowMode;
+  const fallbackPhase = activeMode === 'chat' ? 'ready' : 'idle';
   const activePhase =
     activeMode === 'task'
-      ? (session?.modeSnapshots.task?.phase ?? workflowPhase)
+      ? (session?.modeSnapshots.task?.phase ?? (workflowMode === 'task' ? workflowPhase : fallbackPhase))
       : activeMode === 'plan'
-        ? (session?.modeSnapshots.plan?.phase ?? workflowPhase)
-        : (session?.modeSnapshots.chat?.phase ?? workflowPhase);
+        ? (session?.modeSnapshots.plan?.phase ?? (workflowMode === 'plan' ? workflowPhase : fallbackPhase))
+        : (session?.modeSnapshots.chat?.phase ?? (workflowMode === 'chat' ? workflowPhase : fallbackPhase));
 
   const phaseList = getPhases(activeMode);
   const phaseIndex = Math.max(phaseList.indexOf(activePhase), 0);

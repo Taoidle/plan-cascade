@@ -42,6 +42,7 @@ export interface PlanModeState {
   report: PlanExecutionReport | null;
   adapters: AdapterInfo[];
   isLoading: boolean;
+  isCancelling: boolean;
   error: string | null;
   _unlistenFn: UnlistenFn | null;
   _requestId: number;
@@ -115,6 +116,7 @@ const DEFAULT_STATE = {
   report: null,
   adapters: [] as AdapterInfo[],
   isLoading: false,
+  isCancelling: false,
   error: null,
   _unlistenFn: null,
   _requestId: 0,
@@ -138,7 +140,7 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
     locale,
   ) => {
     const requestId = get()._requestId + 1;
-    set({ isLoading: true, error: null, _requestId: requestId });
+    set({ isLoading: true, isCancelling: false, error: null, _requestId: requestId });
     try {
       // Resolve base URL for multi-endpoint providers (Qwen, GLM, MiniMax)
       let finalBaseUrl = baseUrl;
@@ -348,20 +350,19 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
   cancelExecution: async () => {
     const { sessionId } = get();
     if (!sessionId) return;
+    if (get().isCancelling) return;
     const requestId = get()._requestId + 1;
-    set({ _requestId: requestId });
+    set({ _requestId: requestId, isCancelling: true });
 
     try {
       const result = await invoke<CommandResponse<boolean>>('cancel_plan_execution', { sessionId });
       if (get()._requestId !== requestId) return;
-      if (result.success) {
-        set({ sessionPhase: 'cancelled' });
-      } else {
-        set({ error: result.error || 'Failed to cancel plan execution' });
+      if (!result.success) {
+        set({ isCancelling: false, error: result.error || 'Failed to cancel plan execution' });
       }
     } catch (e) {
       if (get()._requestId !== requestId) return;
-      set({ error: String(e) });
+      set({ isCancelling: false, error: String(e) });
     }
   },
 
@@ -453,8 +454,10 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
         const allStatuses = { ...get().stepStatuses, ...updates.stepStatuses };
         const failedCount = Object.values(allStatuses).filter((s) => s === 'failed').length;
         updates.sessionPhase = failedCount > 0 ? 'failed' : 'completed';
+        updates.isCancelling = false;
       } else if (payload.eventType === 'execution_cancelled') {
         updates.sessionPhase = 'cancelled';
+        updates.isCancelling = false;
       }
 
       set(updates);

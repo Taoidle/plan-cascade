@@ -215,6 +215,9 @@ export interface TaskModeState {
   /** Loading state */
   isLoading: boolean;
 
+  /** True while waiting for backend execution_cancelled confirmation */
+  isCancelling: boolean;
+
   /** Error message */
   error: string | null;
 
@@ -285,6 +288,7 @@ const DEFAULT_STATE = {
   qualityGateResults: {},
   report: null,
   isLoading: false,
+  isCancelling: false,
   error: null,
   _unlistenFn: null,
 };
@@ -315,7 +319,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
   },
 
   enterTaskMode: async (description: string) => {
-    set({ isLoading: true, error: null });
+    set({ isLoading: true, isCancelling: false, error: null });
     try {
       const result = await invoke<CommandResponse<TaskModeSession>>('enter_task_mode', { description });
       if (result.success && result.data) {
@@ -453,16 +457,18 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
       set({ error: 'No active session' });
       return;
     }
-    set({ isLoading: true, error: null });
+    if (get().isCancelling) return;
+    set({ isLoading: true, isCancelling: true, error: null });
     try {
       const result = await invoke<CommandResponse<boolean>>('cancel_task_execution', { sessionId });
       if (result.success) {
-        set({ sessionStatus: 'cancelled', isLoading: false });
+        // Await backend execution_cancelled event to finalize state.
+        set({ isLoading: false });
       } else {
-        set({ isLoading: false, error: result.error ?? 'Cancel failed' });
+        set({ isLoading: false, isCancelling: false, error: result.error ?? 'Cancel failed' });
       }
     } catch (e) {
-      set({ isLoading: false, error: String(e) });
+      set({ isLoading: false, isCancelling: false, error: String(e) });
     }
   },
 
@@ -545,8 +551,10 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
           const allStatuses = updates.storyStatuses ?? prevStatuses;
           const failedCount = Object.values(allStatuses).filter((s) => s === 'failed').length;
           updates.sessionStatus = failedCount > 0 ? 'failed' : 'completed';
+          updates.isCancelling = false;
         } else if (payload.eventType === 'execution_cancelled') {
           updates.sessionStatus = 'cancelled';
+          updates.isCancelling = false;
         }
 
         set(updates);

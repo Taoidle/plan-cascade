@@ -3442,7 +3442,12 @@ impl OrchestratorService {
     ///
     /// - Normal mode: 90% of context_window (e.g. Claude 200K → 180K)
     /// - Aggressive mode (analysis): 70% of context_window (e.g. Claude 200K → 140K)
-    fn should_compact(&self, last_input_tokens: u32, message_count: usize, aggressive: bool) -> bool {
+    fn should_compact(
+        &self,
+        last_input_tokens: u32,
+        message_count: usize,
+        aggressive: bool,
+    ) -> bool {
         if !self.config.enable_compaction {
             return false;
         }

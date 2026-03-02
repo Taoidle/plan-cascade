@@ -12,10 +12,10 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use crate::models::analytics::{
-    AggregationPeriod, CostBreakdown, CostStatus, DashboardFilterV2, DashboardSummary, ExportFormat,
-    ExportJob, ExportJobStatus, ExportStreamingJobRequest, ModelPricing, ModelUsage, PricingRule,
-    PricingRuleStatus, ProjectUsage, RecomputeCostsRequest, RecomputeCostsResult, TimeSeriesPoint,
-    UsageFilter, UsageRecord, UsageRecordV2, UsageStats,
+    AggregationPeriod, CostBreakdown, CostStatus, DashboardFilterV2, DashboardSummary,
+    ExportFormat, ExportJob, ExportJobStatus, ExportStreamingJobRequest, ModelPricing, ModelUsage,
+    PricingRule, PricingRuleStatus, ProjectUsage, RecomputeCostsRequest, RecomputeCostsResult,
+    TimeSeriesPoint, UsageFilter, UsageRecord, UsageRecordV2, UsageStats,
 };
 use crate::utils::error::{AppError, AppResult};
 
@@ -292,11 +292,7 @@ impl AnalyticsService {
         Ok(())
     }
 
-    fn column_exists(
-        conn: &rusqlite::Connection,
-        table: &str,
-        column: &str,
-    ) -> AppResult<bool> {
+    fn column_exists(conn: &rusqlite::Connection, table: &str, column: &str) -> AppResult<bool> {
         let pragma = format!("PRAGMA table_info({})", table);
         let mut stmt = conn.prepare(&pragma)?;
         let mut rows = stmt.query([])?;
@@ -854,7 +850,8 @@ impl AnalyticsService {
             }
         }
 
-        let mut existing_stmt = conn.prepare("SELECT created_at FROM pricing_rules WHERE id = ?1")?;
+        let mut existing_stmt =
+            conn.prepare("SELECT created_at FROM pricing_rules WHERE id = ?1")?;
         let existing_created = existing_stmt
             .query_row(params![normalized.id], |row| row.get::<_, i64>(0))
             .ok();
@@ -977,7 +974,9 @@ impl AnalyticsService {
             params_vec.iter().map(|p| p.as_ref()).collect();
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt
-            .query_map(params_refs.as_slice(), |row| Self::row_to_usage_record_v2(row))?
+            .query_map(params_refs.as_slice(), |row| {
+                Self::row_to_usage_record_v2(row)
+            })?
             .filter_map(|r| r.ok())
             .collect();
         Ok(rows)
@@ -1040,7 +1039,10 @@ impl AnalyticsService {
     }
 
     /// Recompute usage costs with current pricing rules for matching records.
-    pub fn recompute_costs(&self, request: &RecomputeCostsRequest) -> AppResult<RecomputeCostsResult> {
+    pub fn recompute_costs(
+        &self,
+        request: &RecomputeCostsRequest,
+    ) -> AppResult<RecomputeCostsResult> {
         let mut conn = self.get_connection()?;
         let tx = conn.unchecked_transaction()?;
         let filter = &request.filter;
@@ -1188,8 +1190,11 @@ impl AnalyticsService {
 
                 let mut offset = 0_i64;
                 loop {
-                    let batch =
-                        self.list_usage_records_v2(&request.filter, Some(chunk_size), Some(offset))?;
+                    let batch = self.list_usage_records_v2(
+                        &request.filter,
+                        Some(chunk_size),
+                        Some(offset),
+                    )?;
                     if batch.is_empty() {
                         break;
                     }
@@ -1217,7 +1222,9 @@ impl AnalyticsService {
                             row.timestamp,
                             formatted,
                             Self::csv_escape_local(row.pricing_rule_id.as_deref().unwrap_or("")),
-                            Self::csv_escape_local(row.cost_breakdown_json.as_deref().unwrap_or("")),
+                            Self::csv_escape_local(
+                                row.cost_breakdown_json.as_deref().unwrap_or("")
+                            ),
                             Self::csv_escape_local(row.metadata.as_deref().unwrap_or("")),
                         )?;
                     }
@@ -1233,8 +1240,16 @@ impl AnalyticsService {
                     let summary = self.get_usage_stats_v2(&request.filter)?;
                     writeln!(writer, "\n# summary")?;
                     writeln!(writer, "# request_count={}", summary.request_count)?;
-                    writeln!(writer, "# total_input_tokens={}", summary.total_input_tokens)?;
-                    writeln!(writer, "# total_output_tokens={}", summary.total_output_tokens)?;
+                    writeln!(
+                        writer,
+                        "# total_input_tokens={}",
+                        summary.total_input_tokens
+                    )?;
+                    writeln!(
+                        writer,
+                        "# total_output_tokens={}",
+                        summary.total_output_tokens
+                    )?;
                     writeln!(
                         writer,
                         "# total_cost_microdollars={}",
@@ -1259,8 +1274,11 @@ impl AnalyticsService {
                 let mut first = true;
                 let mut offset = 0_i64;
                 loop {
-                    let batch =
-                        self.list_usage_records_v2(&request.filter, Some(chunk_size), Some(offset))?;
+                    let batch = self.list_usage_records_v2(
+                        &request.filter,
+                        Some(chunk_size),
+                        Some(offset),
+                    )?;
                     if batch.is_empty() {
                         break;
                     }
@@ -1314,8 +1332,8 @@ impl AnalyticsService {
         let params_refs: Vec<&dyn rusqlite::ToSql> =
             params_vec.iter().map(|p| p.as_ref()).collect();
 
-        let (total_input, total_output, total_cost, request_count): (i64, i64, i64, i64) =
-            conn.query_row(&sql, params_refs.as_slice(), |row| {
+        let (total_input, total_output, total_cost, request_count): (i64, i64, i64, i64) = conn
+            .query_row(&sql, params_refs.as_slice(), |row| {
                 Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
             })?;
 
@@ -1342,8 +1360,8 @@ impl AnalyticsService {
         let params_refs: Vec<&dyn rusqlite::ToSql> =
             params_vec.iter().map(|p| p.as_ref()).collect();
 
-        let (total_input, total_output, total_cost, request_count): (i64, i64, i64, i64) =
-            conn.query_row(&sql, params_refs.as_slice(), |row| {
+        let (total_input, total_output, total_cost, request_count): (i64, i64, i64, i64) = conn
+            .query_row(&sql, params_refs.as_slice(), |row| {
                 Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
             })?;
 
@@ -1408,7 +1426,9 @@ impl AnalyticsService {
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         Self::append_v2_filter_clauses(&mut sql, &mut params_vec, filter, "ue", "uc");
-        sql.push_str(" GROUP BY ue.model, ue.provider ORDER BY total_cost DESC, request_count DESC");
+        sql.push_str(
+            " GROUP BY ue.model, ue.provider ORDER BY total_cost DESC, request_count DESC",
+        );
         let params_refs: Vec<&dyn rusqlite::ToSql> =
             params_vec.iter().map(|p| p.as_ref()).collect();
 
@@ -1488,7 +1508,9 @@ impl AnalyticsService {
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         Self::append_v2_filter_clauses(&mut sql, &mut params_vec, filter, "ue", "uc");
-        sql.push_str(" GROUP BY COALESCE(ue.project_id, '') ORDER BY total_cost DESC, request_count DESC");
+        sql.push_str(
+            " GROUP BY COALESCE(ue.project_id, '') ORDER BY total_cost DESC, request_count DESC",
+        );
         let params_refs: Vec<&dyn rusqlite::ToSql> =
             params_vec.iter().map(|p| p.as_ref()).collect();
 
@@ -1653,7 +1675,10 @@ impl AnalyticsService {
             params_vec.push(Box::new(session_id.clone()));
         }
         if let Some(ref project_id) = filter.project_id {
-            sql.push_str(&format!(" AND COALESCE({}.project_id, '') = ?", event_alias));
+            sql.push_str(&format!(
+                " AND COALESCE({}.project_id, '') = ?",
+                event_alias
+            ));
             params_vec.push(Box::new(project_id.clone()));
         }
         if let Some(cost_status) = &filter.cost_status {
@@ -2220,7 +2245,9 @@ mod tests {
         service.insert_usage_record(&record).unwrap();
 
         let filter = DashboardFilterV2::default();
-        let rows = service.list_usage_records_v2(&filter, Some(10), Some(0)).unwrap();
+        let rows = service
+            .list_usage_records_v2(&filter, Some(10), Some(0))
+            .unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].provider, "anthropic");
         assert_eq!(rows[0].cost_status, CostStatus::Exact);
@@ -2233,7 +2260,12 @@ mod tests {
     fn test_recompute_costs_missing_path() {
         let service = create_test_service().unwrap();
         service
-            .insert_usage_record(&UsageRecord::new("unknown-model", "unknown-provider", 100, 50))
+            .insert_usage_record(&UsageRecord::new(
+                "unknown-model",
+                "unknown-provider",
+                100,
+                50,
+            ))
             .unwrap();
 
         let result = service

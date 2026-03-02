@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
 // Mock Tauri APIs before importing the store
@@ -33,6 +34,8 @@ import { useExecutionStore } from './execution';
 import type { SessionSnapshot } from './execution';
 import { useSettingsStore } from './settings';
 import { ToolCallStreamFilter } from '../utils/toolCallFilter';
+
+const mockInvoke = vi.mocked(invoke);
 
 /** Emit a synthetic event to a captured listener. */
 function emitEvent(eventName: string, payload: unknown) {
@@ -1901,6 +1904,195 @@ describe('Execution Store - Event Routing to Background Sessions', () => {
       // and don't fire duplicate callbacks
       expect((listen as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(listenCallCount1);
     });
+  });
+});
+
+describe('Execution Store - Cancellation Consistency (Claude backend)', () => {
+  beforeEach(() => {
+    resetStore();
+    for (const key of Object.keys(eventHandlers)) {
+      delete eventHandlers[key];
+    }
+    mockInvoke.mockReset();
+    useSettingsStore.setState({ backend: 'claude-code', workspacePath: '/tmp' });
+  });
+
+  it('keeps running state when cancel ACK indicates failure', async () => {
+    useExecutionStore.setState({
+      status: 'running',
+      taskId: 'session-cancel-fail',
+      isChatSession: true,
+      activeExecutionId: 'exec-active',
+      isCancelling: false,
+      pendingCancelBeforeSessionReady: false,
+      apiError: null,
+    });
+
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === 'cancel_execution') {
+        return {
+          success: true,
+          data: {
+            cancelled: false,
+            session_id: 'session-cancel-fail',
+            execution_id: null,
+            reason: 'No active execution to cancel',
+          },
+          error: null,
+        };
+      }
+      return { success: true, data: null, error: null };
+    });
+
+    await useExecutionStore.getState().cancel();
+
+    const state = useExecutionStore.getState();
+    expect(state.status).toBe('running');
+    expect(state.isCancelling).toBe(false);
+    expect(state.apiError).toContain('No active execution');
+  });
+
+  it('does not dispatch send_message when cancelled before start_chat returns', async () => {
+    type StartChatReply = {
+      success: boolean;
+      data: { session_id: string };
+      error: null;
+    };
+    let resolveStartChat: (value: StartChatReply) => void = () => {};
+    const startChatPromise = new Promise<StartChatReply>((resolve) => {
+      resolveStartChat = resolve;
+    });
+
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === 'start_chat') {
+        return startChatPromise as Promise<unknown>;
+      }
+      if (command === 'send_message') {
+        return Promise.resolve({
+          success: true,
+          data: { execution_id: 'exec-should-not-send' },
+          error: null,
+        });
+      }
+      if (command === 'cancel_execution') {
+        return Promise.resolve({
+          success: true,
+          data: {
+            cancelled: false,
+            session_id: 'session-race',
+            execution_id: null,
+            reason: 'No active execution for session session-race',
+          },
+          error: null,
+        });
+      }
+      return Promise.resolve({ success: true, data: null, error: null });
+    });
+
+    const startPromise = useExecutionStore.getState().start('Hello race', 'simple');
+    await Promise.resolve();
+    await useExecutionStore.getState().cancel();
+
+    resolveStartChat({
+      success: true,
+      data: { session_id: 'session-race' },
+      error: null,
+    });
+
+    await startPromise;
+
+    const invokedCommands = mockInvoke.mock.calls.map((call) => call[0]);
+    expect(invokedCommands.filter((name) => name === 'send_message')).toHaveLength(0);
+
+    const state = useExecutionStore.getState();
+    expect(state.status).toBe('idle');
+    expect(state.pendingCancelBeforeSessionReady).toBe(false);
+    expect(state.isCancelling).toBe(false);
+  });
+
+  it('drops stale stream events with old execution_id', async () => {
+    mockInvoke.mockResolvedValue({ success: true, data: null, error: null });
+
+    useExecutionStore.setState({
+      status: 'running',
+      taskId: 'session-live',
+      isChatSession: true,
+      activeExecutionId: 'exec-current',
+      streamingOutput: [],
+      streamLineCounter: 0,
+    });
+
+    useExecutionStore.getState().initialize();
+    await vi.waitFor(() => {
+      expect(eventHandlers['claude_code:stream']).toBeDefined();
+    });
+
+    emitEvent('claude_code:stream', {
+      event: { type: 'text_delta', content: 'stale output' },
+      session_id: 'session-live',
+      execution_id: 'exec-stale',
+    });
+
+    emitEvent('claude_code:stream', {
+      event: { type: 'text_delta', content: 'fresh output' },
+      session_id: 'session-live',
+      execution_id: 'exec-current',
+    });
+
+    await vi.waitFor(() => {
+      expect(useExecutionStore.getState().streamingOutput.some((line) => line.content.includes('fresh output'))).toBe(
+        true,
+      );
+    });
+    expect(useExecutionStore.getState().streamingOutput.some((line) => line.content.includes('stale output'))).toBe(
+      false,
+    );
+
+    useExecutionStore.getState().cleanup();
+  });
+
+  it('drops stale unified standalone events with old execution_id', async () => {
+    mockInvoke.mockResolvedValue({ success: true, data: null, error: null });
+
+    useExecutionStore.setState({
+      status: 'running',
+      taskId: null,
+      standaloneSessionId: 'standalone-live',
+      isChatSession: false,
+      activeExecutionId: 'exec-current',
+      streamingOutput: [],
+      streamLineCounter: 0,
+    });
+
+    useExecutionStore.getState().initialize();
+    await vi.waitFor(() => {
+      expect(eventHandlers['standalone-event']).toBeDefined();
+    });
+
+    emitEvent('standalone-event', {
+      type: 'text_delta',
+      session_id: 'standalone-live',
+      execution_id: 'exec-stale',
+      content: 'stale unified output',
+    });
+
+    emitEvent('standalone-event', {
+      type: 'text_delta',
+      session_id: 'standalone-live',
+      execution_id: 'exec-current',
+      content: 'fresh unified output',
+    });
+
+    await vi.waitFor(() => {
+      expect(
+        useExecutionStore.getState().streamingOutput.some((line) => line.content.includes('fresh unified output')),
+      ).toBe(true);
+    });
+    expect(
+      useExecutionStore.getState().streamingOutput.some((line) => line.content.includes('stale unified output')),
+    ).toBe(false);
+
+    useExecutionStore.getState().cleanup();
   });
 });
 

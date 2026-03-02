@@ -477,13 +477,15 @@ impl LlmProvider for GlmProvider {
             } else {
                 8_192
             }
-        } else if model.contains("4.6v") || model.contains("4.1v") {
-            // glm-4.6v, glm-4.6v-flash, glm-4.6v-flashx: 32k context
-            // glm-4.1v-thinking-flash/flashx: 32k context
-            32_768
-        } else if model.contains("4.7") || model.contains("4.6") {
-            // glm-4.7, glm-4.6: 128k context, max output 131,072
+        } else if model.contains("4.6v") {
+            // glm-4.6v / glm-4.6v-thinking: 128k context
             128_000
+        } else if model.contains("4.1v") {
+            // glm-4.1v-thinking-flash / flashx: 64k context
+            64_000
+        } else if model.contains("4.7") || model.contains("4.6") {
+            // glm-4.7, glm-4.6: 200k context
+            200_000
         } else if model.contains("4.5") {
             // glm-4.5, glm-4.5-air, glm-4.5-x, glm-4.5-flash: 128k context, max output 98,304
             128_000

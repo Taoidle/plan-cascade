@@ -120,12 +120,9 @@ impl Tool for SearchKnowledgeTool {
             let all_collections = match pipeline.list_collections(&project_id) {
                 Ok(cols) => cols,
                 Err(e) => {
-                    return ToolResult::err(format!(
-                        "Failed to load knowledge collections: {}",
-                        e
-                    ))
-                    .with_error_code("knowledge_collections_load_failed")
-                    .with_retryable(true);
+                    return ToolResult::err(format!("Failed to load knowledge collections: {}", e))
+                        .with_error_code("knowledge_collections_load_failed")
+                        .with_retryable(true);
                 }
             };
             let selected = all_collections

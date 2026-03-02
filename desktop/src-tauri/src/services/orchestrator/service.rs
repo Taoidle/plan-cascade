@@ -453,8 +453,7 @@ struct OrchestratorTaskSpawner {
     /// Knowledge collection filter for sub-agent queries.
     knowledge_collection_filter: Option<Vec<String>>,
     /// Knowledge document filter for sub-agent queries.
-    knowledge_document_filter:
-        Option<Vec<crate::services::knowledge::pipeline::ScopedDocumentRef>>,
+    knowledge_document_filter: Option<Vec<crate::services::knowledge::pipeline::ScopedDocumentRef>>,
     /// Pre-built knowledge awareness section for sub-agent system prompts.
     knowledge_awareness_snapshot: Option<String>,
     /// Shared analytics tracking channel from the parent orchestrator.

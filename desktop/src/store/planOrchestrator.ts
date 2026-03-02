@@ -57,6 +57,9 @@ interface PlanOrchestratorState {
   /** Is workflow busy */
   isBusy: boolean;
 
+  /** True while waiting for backend execution_cancelled confirmation */
+  isCancelling: boolean;
+
   /** Unlisten function for progress events */
   _progressUnlisten: UnlistenFn | null;
 
@@ -107,6 +110,7 @@ const DEFAULT_STATE = {
   pendingClarifyQuestion: null as PlanClarifyQuestionCardData | null,
   editablePlan: null as PlanCardData | null,
   isBusy: false,
+  isCancelling: false,
   _progressUnlisten: null as UnlistenFn | null,
   _runToken: 0,
 };
@@ -124,7 +128,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
     const settings = useSettingsStore.getState();
     const { resolveProviderBaseUrl } = await import('../lib/providers');
 
-    set({ isBusy: true, taskDescription: description, phase: 'analyzing', _runToken: runToken });
+    set({ isBusy: true, isCancelling: false, taskDescription: description, phase: 'analyzing', _runToken: runToken });
 
     // Add user message to chat transcript so it appears as a chat bubble
     useExecutionStore.getState().appendStreamLine(description, 'info');
@@ -324,7 +328,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
 
   approvePlan: async (plan: PlanCardData) => {
     const runToken = get()._runToken;
-    set({ phase: 'executing', isBusy: true });
+    set({ phase: 'executing', isBusy: true, isCancelling: false });
 
     injectInfo(i18n.t('planMode:orchestrator.planApproved', 'Plan approved! Starting execution...'));
 
@@ -372,11 +376,11 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
               stepSummaries: report.stepSummaries,
             } satisfies PlanCompletionCardData);
           }
-          set({ phase: report?.success ? 'completed' : 'failed', isBusy: false });
+          set({ phase: report?.success ? 'completed' : 'failed', isBusy: false, isCancelling: false });
         });
       } else if (payload.eventType === 'execution_cancelled') {
         if (get()._runToken !== runToken) return;
-        set({ phase: 'cancelled', isBusy: false });
+        set({ phase: 'cancelled', isBusy: false, isCancelling: false });
       }
     });
 
@@ -413,26 +417,34 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
 
   cancelWorkflow: async () => {
     const { phase, _progressUnlisten, _runToken } = get();
-    const nextRunToken = _runToken + 1;
-    set({ _runToken: nextRunToken });
 
     if (phase === 'executing') {
+      if (get().isCancelling) return;
+      set({ isCancelling: true, isBusy: true });
       const planStore = usePlanModeStore.getState();
       await planStore.cancelExecution();
+      const planState = usePlanModeStore.getState();
+      if (planState.error) {
+        set({ isCancelling: false, isBusy: false });
+        injectError(i18n.t('planMode:orchestrator.cancelFailed', 'Cancel Failed'), planState.error);
+        return;
+      }
+      injectInfo(i18n.t('planMode:orchestrator.cancelling', 'Cancelling plan execution...'));
+      return;
     } else {
+      const nextRunToken = _runToken + 1;
+      set({ _runToken: nextRunToken, isCancelling: false });
       const planStore = usePlanModeStore.getState();
       await planStore.cancelOperation();
+
+      if (_progressUnlisten) {
+        _progressUnlisten();
+      }
+
+      await planStore.exitPlanMode();
+      set({ ...DEFAULT_STATE, _runToken: nextRunToken });
+      injectInfo(i18n.t('planMode:orchestrator.cancelled', 'Plan mode cancelled.'));
     }
-
-    if (_progressUnlisten) {
-      _progressUnlisten();
-    }
-
-    const planStore = usePlanModeStore.getState();
-    await planStore.exitPlanMode();
-
-    set({ ...DEFAULT_STATE, _runToken: nextRunToken });
-    injectInfo(i18n.t('planMode:orchestrator.cancelled', 'Plan mode cancelled.'));
   },
 
   resetWorkflow: () => {

@@ -160,6 +160,26 @@ pub struct SendMessageRequest {
     pub prompt: String,
 }
 
+/// Response when sending a message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendMessageResponse {
+    /// Backend-generated execution ID for this turn
+    pub execution_id: String,
+}
+
+/// Response when cancelling a running execution
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CancelExecutionResponse {
+    /// Whether cancellation was accepted and applied
+    pub cancelled: bool,
+    /// Session identifier that was targeted
+    pub session_id: String,
+    /// Execution identifier that was cancelled, if known
+    pub execution_id: Option<String>,
+    /// Human-readable reason when cancellation did not apply
+    pub reason: Option<String>,
+}
+
 /// Chat message in history
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {

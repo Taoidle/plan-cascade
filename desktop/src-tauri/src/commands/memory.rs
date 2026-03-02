@@ -51,7 +51,12 @@ fn resolve_memory_project_path(
 }
 
 fn parse_memory_intent(intent: Option<&str>) -> MemorySearchIntent {
-    match intent.unwrap_or("default").trim().to_ascii_lowercase().as_str() {
+    match intent
+        .unwrap_or("default")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "bugfix" => MemorySearchIntent::Bugfix,
         "refactor" => MemorySearchIntent::Refactor,
         "qa" => MemorySearchIntent::Qa,

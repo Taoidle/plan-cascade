@@ -1842,10 +1842,7 @@ pub async fn get_context_ops_dashboard(
             }
         } else if event_type == "compaction_done" {
             if let Some(ref m) = metadata {
-                let before = m
-                    .get("before_tokens")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0);
+                let before = m.get("before_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
                 let after = m.get("after_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
                 entry.compaction_saving_tokens += (before - after).max(0);
             }
@@ -2003,20 +2000,22 @@ pub async fn get_context_ops_dashboard(
     {
         Ok(rows) => rows
             .into_iter()
-            .map(|(run_id, project_path, session_id, report_json, created_at)| {
-                let parsed = serde_json::from_str::<ContextChaosProbeReport>(&report_json).ok();
-                ContextChaosRunMeta {
-                    run_id,
-                    project_path,
-                    session_id,
-                    created_at,
-                    iterations: parsed.as_ref().map(|r| r.iterations).unwrap_or(0),
-                    fallback_success_rate: parsed
-                        .as_ref()
-                        .map(|r| r.fallback_success_rate)
-                        .unwrap_or(0.0),
-                }
-            })
+            .map(
+                |(run_id, project_path, session_id, report_json, created_at)| {
+                    let parsed = serde_json::from_str::<ContextChaosProbeReport>(&report_json).ok();
+                    ContextChaosRunMeta {
+                        run_id,
+                        project_path,
+                        session_id,
+                        created_at,
+                        iterations: parsed.as_ref().map(|r| r.iterations).unwrap_or(0),
+                        fallback_success_rate: parsed
+                            .as_ref()
+                            .map(|r| r.fallback_success_rate)
+                            .unwrap_or(0.0),
+                    }
+                },
+            )
             .collect(),
         Err(_) => Vec::new(),
     };
@@ -2058,10 +2057,7 @@ pub async fn run_context_chaos_probe(
         return Ok(CommandResponse::err("project_path is required"));
     }
     let iterations = request.iterations.unwrap_or(20).clamp(1, 500);
-    let failure_probability = request
-        .failure_probability
-        .unwrap_or(0.15)
-        .clamp(0.0, 1.0);
+    let failure_probability = request.failure_probability.unwrap_or(0.15).clamp(0.0, 1.0);
     let created_at = now_string();
     let run_id = uuid::Uuid::new_v4().to_string();
     let session_id = request.session_id.clone();
@@ -2114,7 +2110,8 @@ pub async fn run_context_chaos_probe(
         fallback_successes as f32 / injected_faults as f32
     };
     let recommendation = if fallback_success_rate < 0.85 {
-        "Fallback reliability below target; pause rollout and investigate provider health.".to_string()
+        "Fallback reliability below target; pause rollout and investigate provider health."
+            .to_string()
     } else if fallback_success_rate < 0.95 {
         "Fallback reliability marginal; keep rollout limited and increase monitoring.".to_string()
     } else {
@@ -2191,7 +2188,8 @@ pub async fn list_context_chaos_runs(
                 .filter_map(|r| r.ok())
                 .map(
                     |(run_id, project_path, session_id, report_json, created_at)| {
-                        let parsed = serde_json::from_str::<ContextChaosProbeReport>(&report_json).ok();
+                        let parsed =
+                            serde_json::from_str::<ContextChaosProbeReport>(&report_json).ok();
                         ContextChaosRunMeta {
                             run_id,
                             project_path,

@@ -198,7 +198,12 @@ impl GitService {
     }
 
     /// Get diff between two revisions.
-    pub fn diff_between(&self, repo_path: &Path, base: &str, compare: &str) -> AppResult<DiffOutput> {
+    pub fn diff_between(
+        &self,
+        repo_path: &Path,
+        base: &str,
+        compare: &str,
+    ) -> AppResult<DiffOutput> {
         let output = self
             .git
             .execute(repo_path, &["diff", base, compare])?

@@ -11,7 +11,7 @@ pub mod session_manager;
 pub mod thinking;
 pub mod tools;
 
-pub use chat::{ChatHandler, JsonLineBuffer, SendMessageResult};
+pub use chat::{ChatHandler, JsonLineBuffer, SendMessageResult, SendMessageStream};
 pub use events::{
     channels, ClaudeCodeEventEmitter, SessionUpdateEvent, StreamEventPayload, ThinkingUpdateEvent,
     ToolUpdateEvent,

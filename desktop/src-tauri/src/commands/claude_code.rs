@@ -7,7 +7,8 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::sync::RwLock;
 
 use crate::models::claude_code::{
-    ActiveSessionInfo, ClaudeCodeSession, SendMessageRequest, StartChatRequest, StartChatResponse,
+    ActiveSessionInfo, CancelExecutionResponse, ClaudeCodeSession, SendMessageRequest,
+    SendMessageResponse, StartChatRequest, StartChatResponse,
 };
 use crate::models::response::CommandResponse;
 use crate::services::claude_code::{
@@ -86,18 +87,24 @@ pub async fn send_message(
     request: SendMessageRequest,
     state: State<'_, ClaudeCodeState>,
     app: AppHandle,
-) -> Result<CommandResponse<bool>, String> {
+) -> Result<CommandResponse<SendMessageResponse>, String> {
     let mut chat_handler = state.chat_handler.write().await;
 
     match chat_handler
         .send_message(&request.session_id, &request.prompt)
         .await
     {
-        Ok(mut rx) => {
+        Ok(stream) => {
+            let crate::services::claude_code::SendMessageStream {
+                execution_id,
+                receiver,
+            } = stream;
+            let mut rx = receiver;
             let session_id = request.session_id.clone();
+            let response_execution_id = execution_id.clone();
             eprintln!(
-                "[DEBUG] send_message: spawning event forwarder for session {}",
-                session_id
+                "[DEBUG] send_message: spawning event forwarder for session {} execution {}",
+                session_id, execution_id
             );
             // Spawn a task to forward events from the mpsc channel to Tauri events
             tokio::spawn(async move {
@@ -111,17 +118,20 @@ pub async fn send_message(
                     let payload = StreamEventPayload {
                         event,
                         session_id: session_id.clone(),
+                        execution_id: execution_id.clone(),
                     };
                     if let Err(e) = app.emit(channels::STREAM, &payload) {
                         eprintln!("[WARN] Failed to emit stream event: {}", e);
                     }
                 }
                 eprintln!(
-                    "[DEBUG] event forwarder ended after {} events for session {}",
-                    event_count, session_id
+                    "[DEBUG] event forwarder ended after {} events for session {} execution {}",
+                    event_count, session_id, execution_id
                 );
             });
-            Ok(CommandResponse::ok(true))
+            Ok(CommandResponse::ok(SendMessageResponse {
+                execution_id: response_execution_id,
+            }))
         }
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -135,13 +145,26 @@ pub async fn cancel_execution(
     session_id: String,
     state: State<'_, ClaudeCodeState>,
     permission_state: State<'_, super::permissions::PermissionState>,
-) -> Result<CommandResponse<bool>, String> {
+) -> Result<CommandResponse<CancelExecutionResponse>, String> {
     permission_state
         .gate
         .cancel_session_requests(&session_id)
         .await;
     match state.session_manager.cancel_session(&session_id).await {
-        Ok(_) => Ok(CommandResponse::ok(true)),
+        Ok(execution_id) => Ok(CommandResponse::ok(CancelExecutionResponse {
+            cancelled: true,
+            session_id,
+            execution_id: Some(execution_id),
+            reason: None,
+        })),
+        Err(crate::utils::error::AppError::NotFound(message)) => {
+            Ok(CommandResponse::ok(CancelExecutionResponse {
+                cancelled: false,
+                session_id,
+                execution_id: None,
+                reason: Some(message),
+            }))
+        }
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
 }

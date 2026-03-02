@@ -426,7 +426,8 @@ fn load_candidates_v2(
                 entry: MemoryEntry {
                     id: row.get(0)?,
                     project_path: row.get(1)?,
-                    category: MemoryCategory::from_str(&category_str).unwrap_or(MemoryCategory::Fact),
+                    category: MemoryCategory::from_str(&category_str)
+                        .unwrap_or(MemoryCategory::Fact),
                     content: row.get(3)?,
                     keywords,
                     importance: row.get(5)?,
@@ -467,7 +468,11 @@ fn compute_tfidf_semantic_scores(
             .as_ref()
             .filter(|emb| !emb.is_empty() && emb.len() == query_embedding.len())
             .cloned()
-            .unwrap_or_else(|| store.embedding_service().embed_text(&candidate.entry.content));
+            .unwrap_or_else(|| {
+                store
+                    .embedding_service()
+                    .embed_text(&candidate.entry.content)
+            });
 
         let similarity = if mem_emb.is_empty() {
             0.0
@@ -551,7 +556,8 @@ fn rank_candidates_v2(
         } else {
             0.0
         };
-        let recency_score = 1.0 / (1.0 + days_since(&candidate.entry.last_accessed_at) as f32 * 0.1);
+        let recency_score =
+            1.0 / (1.0 + days_since(&candidate.entry.last_accessed_at) as f32 * 0.1);
         let source_reliability = if candidate.entry.source_session_id.is_some() {
             0.90
         } else {
@@ -842,9 +848,12 @@ pub async fn search_memories_v2_async(
         }
 
         if semantic_scores.is_empty() {
-            if let Some(scores) =
-                compute_tfidf_semantic_scores(store, &request.project_path, &request.query, &candidates)
-            {
+            if let Some(scores) = compute_tfidf_semantic_scores(
+                store,
+                &request.project_path,
+                &request.query,
+                &candidates,
+            ) {
                 semantic_channel = if dense_configured {
                     "tfidf_fallback".to_string()
                 } else {

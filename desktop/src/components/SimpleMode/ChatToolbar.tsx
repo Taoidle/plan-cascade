@@ -23,12 +23,14 @@ interface ChatToolbarProps {
   isFilePickDisabled: boolean;
   // Execution controls
   executionStatus: 'idle' | 'running' | 'paused' | 'completed' | 'failed';
+  isCancelling?: boolean;
   onPause: () => void;
   onResume: () => void;
   onCancel: () => void;
   // Task workflow controls
   taskWorkflowActive?: boolean;
   planWorkflowActive?: boolean;
+  isWorkflowCancelling?: boolean;
   onCancelWorkflow?: () => void;
   // Export image
   onExportImage: () => void;
@@ -47,11 +49,13 @@ export function ChatToolbar({
   onFilePick,
   isFilePickDisabled,
   executionStatus,
+  isCancelling = false,
   onPause,
   onResume,
   onCancel,
   taskWorkflowActive,
   planWorkflowActive,
+  isWorkflowCancelling = false,
   onCancelWorkflow,
   onExportImage,
   isExportDisabled,
@@ -168,14 +172,20 @@ export function ChatToolbar({
           {isExecuting && (
             <button
               onClick={onCancel}
+              disabled={isCancelling}
               className={clsx(
                 'flex items-center justify-center',
                 'w-7 h-7 rounded-md',
                 'text-red-500 dark:text-red-400',
                 'hover:bg-red-50 dark:hover:bg-red-900/20',
+                'disabled:opacity-50 disabled:cursor-not-allowed',
                 'transition-colors',
               )}
-              title={t('chatToolbar.cancel', { defaultValue: 'Cancel' })}
+              title={
+                isCancelling
+                  ? t('chatToolbar.cancelling', { defaultValue: 'Cancelling...' })
+                  : t('chatToolbar.cancel', { defaultValue: 'Cancel' })
+              }
             >
               <Cross2Icon className="w-4 h-4" />
             </button>
@@ -183,11 +193,13 @@ export function ChatToolbar({
           {(taskWorkflowActive || planWorkflowActive) && !isExecuting && onCancelWorkflow && (
             <button
               onClick={onCancelWorkflow}
+              disabled={isWorkflowCancelling}
               className={clsx(
                 'flex items-center gap-1',
                 'px-2 py-1 rounded-md text-xs',
                 'text-red-500 dark:text-red-400',
                 'hover:bg-red-50 dark:hover:bg-red-900/20',
+                'disabled:opacity-50 disabled:cursor-not-allowed',
                 'transition-colors',
               )}
               title={t('workflow.cancelWorkflow')}

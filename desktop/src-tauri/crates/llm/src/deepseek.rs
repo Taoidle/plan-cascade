@@ -407,7 +407,7 @@ impl LlmProvider for DeepSeekProvider {
         if model.contains("v2.5") {
             128_000 // DeepSeek-V2.5: 128k context
         } else {
-            64_000 // DeepSeek-V3, DeepSeek-R1, deepseek-chat, deepseek-reasoner: 64k
+            128_000 // DeepSeek-V3.2+/R1/deepseek-chat/deepseek-reasoner: 128k context
         }
     }
 

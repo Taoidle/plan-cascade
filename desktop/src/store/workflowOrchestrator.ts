@@ -85,6 +85,9 @@ interface WorkflowOrchestratorState {
   /** Error message */
   error: string | null;
 
+  /** True while waiting for backend cancel confirmation */
+  isCancelling: boolean;
+
   /** Event unsubscribe function */
   _unlistenFn: UnlistenFn | null;
 
@@ -146,6 +149,7 @@ const DEFAULT_STATE = {
   architectureReview: null as ArchitectureReviewCardData | null,
   architectureReviewRound: 0,
   error: null as string | null,
+  isCancelling: false,
   _unlistenFn: null as UnlistenFn | null,
   _conversationHistory: [] as CrossModeConversationTurn[],
   _runToken: 0,
@@ -480,7 +484,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     // Add user message as 'info' StreamLine so it appears as a chat bubble in ChatTranscript
     useExecutionStore.getState().appendStreamLine(description, 'info');
 
-    set({ phase: 'analyzing', taskDescription: description, error: null, _runToken: runToken });
+    set({ phase: 'analyzing', taskDescription: description, error: null, isCancelling: false, _runToken: runToken });
     injectInfo(i18n.t('workflow.orchestrator.analyzingTask', { ns: 'simpleMode' }), 'info');
 
     // Extract complete Chat conversation history for Task context sharing
@@ -978,14 +982,40 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   /** Cancel the current workflow */
   cancelWorkflow: async () => {
     const { phase, sessionId, _runToken } = get();
-    const nextRunToken = _runToken + 1;
-    set({ _runToken: nextRunToken });
 
     if (phase === 'executing' && sessionId) {
+      if (get().isCancelling) return;
+      set({ isCancelling: true, error: null });
       await useTaskModeStore.getState().cancelExecution();
-    } else {
-      await useTaskModeStore.getState().cancelOperation();
+      const taskState = useTaskModeStore.getState();
+      if (taskState.error) {
+        set({ isCancelling: false, error: taskState.error });
+        injectError(
+          i18n.t('workflow.orchestrator.cancelFailed', {
+            ns: 'simpleMode',
+            defaultValue: 'Cancel Failed',
+          }),
+          taskState.error,
+          i18n.t('workflow.orchestrator.cancelRetry', {
+            ns: 'simpleMode',
+            defaultValue: 'Please retry cancellation.',
+          }),
+        );
+        return;
+      }
+      injectInfo(
+        i18n.t('workflow.orchestrator.cancelling', {
+          ns: 'simpleMode',
+          defaultValue: 'Cancelling workflow...',
+        }),
+        'warning',
+      );
+      return;
     }
+
+    const nextRunToken = _runToken + 1;
+    set({ _runToken: nextRunToken, isCancelling: false });
+    await useTaskModeStore.getState().cancelOperation();
 
     // Unsubscribe from events
     const { _unlistenFn } = get();
@@ -1384,7 +1414,7 @@ async function designDocAndExecutePhase(set: SetFn, get: GetFn, prd: TaskPrd, ru
 
   // Start execution
   if (!isRunActive(get, runToken)) return;
-  set({ phase: 'executing' });
+  set({ phase: 'executing', isCancelling: false });
   injectInfo(i18n.t('workflow.orchestrator.prdApproved', { ns: 'simpleMode' }), 'success');
 
   try {
@@ -1611,7 +1641,7 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
             agentAssignments: {},
           } as CompletionReportCardData);
 
-          set({ phase: success ? 'completed' : 'failed' });
+          set({ phase: success ? 'completed' : 'failed', isCancelling: false });
 
           // Synthesize execution result into conversation history (Task → Chat writeback)
           synthesizeExecutionTurn(completedCount, totalStories, success);
@@ -1638,11 +1668,19 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
         }
 
         case 'execution_cancelled': {
-          set({ phase: 'cancelled' });
+          set({ phase: 'cancelled', isCancelling: false });
+          injectInfo(
+            i18n.t('workflow.orchestrator.workflowCancelled', {
+              ns: 'simpleMode',
+              defaultValue: 'Workflow cancelled.',
+            }),
+            'warning',
+          );
           break;
         }
 
         case 'error': {
+          set({ isCancelling: false });
           if (payload.error) {
             injectError('Execution Error', payload.error);
           }

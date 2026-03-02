@@ -338,13 +338,14 @@ describe('TaskModeStore', () => {
   // cancelExecution
   // =========================================================================
   describe('cancelExecution', () => {
-    it('should cancel execution and update status', async () => {
+    it('should request cancel and wait for event confirmation', async () => {
       useTaskModeStore.setState({ sessionId: 'session-123', sessionStatus: 'executing' });
       mockInvoke.mockResolvedValueOnce({ success: true, data: true, error: null });
 
       await useTaskModeStore.getState().cancelExecution();
 
-      expect(useTaskModeStore.getState().sessionStatus).toBe('cancelled');
+      expect(useTaskModeStore.getState().sessionStatus).toBe('executing');
+      expect(useTaskModeStore.getState().isCancelling).toBe(true);
       expect(useTaskModeStore.getState().isLoading).toBe(false);
     });
 

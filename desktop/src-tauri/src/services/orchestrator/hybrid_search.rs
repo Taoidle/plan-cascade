@@ -326,10 +326,11 @@ impl HybridSearchEngine {
     /// if FTS returns empty results or encounters an error (graceful degradation).
     fn search_symbols(&self, query: &str, project_path: &str) -> AppResult<Vec<ChannelEntry>> {
         // Try FTS5 first for BM25-ranked results
-        match self
-            .index_store
-            .fts_search_symbols(query, project_path, self.config.channel_max_results)
-        {
+        match self.index_store.fts_search_symbols(
+            query,
+            project_path,
+            self.config.channel_max_results,
+        ) {
             Ok(fts_results) if !fts_results.is_empty() => {
                 let entries: Vec<ChannelEntry> = fts_results
                     .into_iter()
@@ -1709,7 +1710,9 @@ mod tests {
         store.upsert_file_index("/project", &item, "hash1").unwrap();
 
         let engine = HybridSearchEngine::with_defaults(store, None);
-        let results = engine.search_symbols("user_controller", "/project").unwrap();
+        let results = engine
+            .search_symbols("user_controller", "/project")
+            .unwrap();
 
         assert!(!results.is_empty());
         assert_eq!(results[0].file_path, "src/controller.rs");

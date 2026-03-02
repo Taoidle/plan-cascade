@@ -13,8 +13,8 @@ use crate::models::response::CommandResponse;
 use crate::services::knowledge::chunker::{Chunker, Document, ParagraphChunker};
 use crate::services::knowledge::docs_indexer::{DocsIndexer, DocsKbStatus};
 use crate::services::knowledge::pipeline::{
-    CollectionUpdateCheck, DocumentSummary, KnowledgeCollection, RagPipeline, RagQueryResult,
-    QueryRunSummary, ScopedDocumentRef,
+    CollectionUpdateCheck, DocumentSummary, KnowledgeCollection, QueryRunSummary, RagPipeline,
+    RagQueryResult, ScopedDocumentRef,
 };
 use crate::services::knowledge::reranker::{NoopReranker, Reranker, SearchResult};
 use crate::services::orchestrator::embedding_config_builder;
@@ -621,7 +621,10 @@ pub async fn rag_delete_document(
         Err(e) => return Ok(CommandResponse::err(e.to_string())),
     };
 
-    match pipeline.delete_document(&collection_id, &document_uid).await {
+    match pipeline
+        .delete_document(&collection_id, &document_uid)
+        .await
+    {
         Ok(()) => Ok(CommandResponse::ok(true)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }

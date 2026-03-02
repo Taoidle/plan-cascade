@@ -51,10 +51,10 @@ import {
 import {
   DEFAULT_PROMPT_TOKEN_BUDGET,
   estimatePromptTokensFallback,
-  formatTokenCount,
   toAttachmentTokenEstimateInput,
   type PromptTokenEstimateResult,
 } from './tokenBudget';
+import { resolvePromptTokenBudget } from '../../lib/promptTokenBudget';
 
 type WorkflowMode = 'chat' | 'plan' | 'task';
 interface CommandResponse<T> {
@@ -76,6 +76,7 @@ export function SimpleMode() {
   const { showToast } = useToast();
   const {
     status,
+    isCancelling: executionIsCancelling,
     connectionStatus,
     isSubmitting,
     apiError,
@@ -112,6 +113,9 @@ export function SimpleMode() {
     foregroundBgId,
   } = useExecutionStore();
   const activeAgentName = useExecutionStore((s) => s.activeAgentName);
+  const backend = useSettingsStore((s) => s.backend);
+  const provider = useSettingsStore((s) => s.provider);
+  const model = useSettingsStore((s) => s.model);
   const workspacePath = useSettingsStore((s) => s.workspacePath);
   const sidebarCollapsed = useSettingsStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useSettingsStore((s) => s.setSidebarCollapsed);
@@ -127,6 +131,7 @@ export function SimpleMode() {
   const [queuedChatMessages, setQueuedChatMessages] = useState<QueuedChatMessage[]>([]);
   const [tokenEstimate, setTokenEstimate] = useState<PromptTokenEstimateResult | null>(null);
   const [isEstimatingTokenBudget, setIsEstimatingTokenBudget] = useState(false);
+  const [promptTokenBudget, setPromptTokenBudget] = useState(DEFAULT_PROMPT_TOKEN_BUDGET);
 
   // Ref for InputBox to call pickFile externally
   const inputBoxRef = useRef<InputBoxHandle>(null);
@@ -415,6 +420,7 @@ export function SimpleMode() {
   const overrideConfigNatural = useWorkflowOrchestratorStore((s) => s.overrideConfigNatural);
   const addPrdFeedback = useWorkflowOrchestratorStore((s) => s.addPrdFeedback);
   const cancelWorkflow = useWorkflowOrchestratorStore((s) => s.cancelWorkflow);
+  const taskWorkflowCancelling = useWorkflowOrchestratorStore((s) => s.isCancelling);
   const resetWorkflow = useWorkflowOrchestratorStore((s) => s.resetWorkflow);
   const isInterviewSubmitting =
     useWorkflowOrchestratorStore((s) => s.phase === 'interviewing') && pendingQuestion === null;
@@ -427,10 +433,23 @@ export function SimpleMode() {
   const submitPlanClarification = usePlanOrchestratorStore((s) => s.submitClarification);
   const skipPlanClarification = usePlanOrchestratorStore((s) => s.skipClarification);
   const cancelPlanWorkflow = usePlanOrchestratorStore((s) => s.cancelWorkflow);
+  const planWorkflowCancelling = usePlanOrchestratorStore((s) => s.isCancelling);
   const resetPlanWorkflow = usePlanOrchestratorStore((s) => s.resetWorkflow);
 
   const workflowPhase = workflowKernelSession?.modeSnapshots.task?.phase ?? workflowPhaseLegacy;
   const planPhase = workflowKernelSession?.modeSnapshots.plan?.phase ?? planPhaseLegacy;
+  const chatPhase =
+    workflowKernelSession?.modeSnapshots.chat?.phase ??
+    (status === 'running'
+      ? 'running'
+      : status === 'paused'
+        ? 'paused'
+        : status === 'completed'
+          ? 'completed'
+          : status === 'failed'
+            ? 'failed'
+            : 'ready');
+  const rightPanelPhase = workflowMode === 'task' ? workflowPhase : workflowMode === 'plan' ? planPhase : chatPhase;
 
   useEffect(() => {
     if (workflowMode !== 'task') return;
@@ -886,6 +905,7 @@ export function SimpleMode() {
   );
 
   const handleCancelStructuredWorkflow = useCallback(async () => {
+    if (taskWorkflowCancelling || planWorkflowCancelling) return;
     await cancelWorkflowKernelOperation('cancelled_by_user');
     if (workflowMode === 'plan') {
       await cancelPlanWorkflow();
@@ -894,7 +914,14 @@ export function SimpleMode() {
     if (workflowMode === 'task') {
       await cancelWorkflow();
     }
-  }, [cancelWorkflowKernelOperation, workflowMode, cancelPlanWorkflow, cancelWorkflow]);
+  }, [
+    cancelWorkflowKernelOperation,
+    workflowMode,
+    cancelPlanWorkflow,
+    cancelWorkflow,
+    taskWorkflowCancelling,
+    planWorkflowCancelling,
+  ]);
 
   const handleExportImage = useCallback(async () => {
     const el = chatScrollRef.current;
@@ -955,9 +982,13 @@ export function SimpleMode() {
       planPhase === 'planning' ||
       planPhase === 'executing' ||
       (planPhase === 'clarifying' && pendingClarifyQuestion === null));
-  const inputBusy = isSubmitting || isAnalyzingStrategy || isTaskWorkflowBusy || isPlanWorkflowBusy;
+  const isStructuredWorkflowCancelling =
+    (workflowMode === 'task' && taskWorkflowCancelling) || (workflowMode === 'plan' && planWorkflowCancelling);
+  const inputBusy =
+    isSubmitting || executionIsCancelling || isAnalyzingStrategy || isTaskWorkflowBusy || isPlanWorkflowBusy;
   const inputDisabled =
     inputBusy ||
+    isStructuredWorkflowCancelling ||
     hasStructuredInterviewQuestion ||
     (workflowMode !== 'chat' && isRunning) ||
     (workflowMode === 'task' && workflowPhase === 'interviewing' && pendingQuestion === null) ||
@@ -968,7 +999,8 @@ export function SimpleMode() {
       (workflowMode === 'task' && workflowPhase === 'interviewing' && pendingQuestion === null) ||
       (workflowMode === 'plan' && planPhase === 'clarifying' && pendingClarifyQuestion === null)) &&
     !(workflowMode === 'chat' && isRunning);
-  const canQueueWhileRunning = workflowMode === 'chat' && isRunning && !inputBusy && !hasStructuredInterviewQuestion;
+  const canQueueWhileRunning =
+    workflowMode === 'chat' && isRunning && !executionIsCancelling && !inputBusy && !hasStructuredInterviewQuestion;
   const hoverPanelsEnabled = autoPanelHoverEnabled && supportsPointerHover;
   const isLeftPanelOpen = !sidebarCollapsed || leftPanelHoverExpanded;
   const isRightPanelOpen = rightPanelOpen || rightPanelHoverExpanded;
@@ -1083,6 +1115,25 @@ export function SimpleMode() {
   ]);
 
   useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const budget = await resolvePromptTokenBudget({
+        backend,
+        provider,
+        model,
+        fallbackBudget: DEFAULT_PROMPT_TOKEN_BUDGET,
+      });
+      if (!cancelled) {
+        setPromptTokenBudget(budget);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [backend, provider, model]);
+
+  useEffect(() => {
     const hasPrompt = description.trim().length > 0;
     const hasAttachments = attachments.length > 0;
     if (!hasPrompt && !hasAttachments) {
@@ -1098,7 +1149,7 @@ export function SimpleMode() {
         const result = await invoke<CommandResponse<PromptTokenEstimateResult>>('estimate_prompt_tokens', {
           prompt: description,
           attachments: toAttachmentTokenEstimateInput(attachments),
-          budgetTokens: DEFAULT_PROMPT_TOKEN_BUDGET,
+          budgetTokens: promptTokenBudget,
         });
 
         if (cancelled) return;
@@ -1115,7 +1166,7 @@ export function SimpleMode() {
       }
 
       if (!cancelled) {
-        setTokenEstimate(estimatePromptTokensFallback(description, attachments, DEFAULT_PROMPT_TOKEN_BUDGET));
+        setTokenEstimate(estimatePromptTokensFallback(description, attachments, promptTokenBudget));
       }
     }, TOKEN_ESTIMATE_DEBOUNCE_MS);
 
@@ -1123,17 +1174,7 @@ export function SimpleMode() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [description, attachments]);
-
-  const tokenEstimateProgress = useMemo(() => {
-    if (!tokenEstimate || tokenEstimate.budget_tokens <= 0) return 0;
-    return Math.min(100, Math.round((tokenEstimate.estimated_tokens / tokenEstimate.budget_tokens) * 100));
-  }, [tokenEstimate]);
-
-  const attachmentSharePercent = useMemo(() => {
-    if (!tokenEstimate || tokenEstimate.estimated_tokens <= 0) return 0;
-    return Math.round((tokenEstimate.attachment_tokens / tokenEstimate.estimated_tokens) * 100);
-  }, [tokenEstimate]);
+  }, [description, attachments, promptTokenBudget]);
 
   return (
     <div className="h-full flex flex-col">
@@ -1222,11 +1263,13 @@ export function SimpleMode() {
               onFilePick={() => inputBoxRef.current?.pickFile()}
               isFilePickDisabled={inputBusy || isRunning || !!permissionRequest}
               executionStatus={status}
+              isCancelling={executionIsCancelling}
               onPause={pause}
               onResume={resume}
               onCancel={cancel}
               taskWorkflowActive={isTaskWorkflowActive}
               planWorkflowActive={isPlanWorkflowActive}
+              isWorkflowCancelling={isStructuredWorkflowCancelling}
               onCancelWorkflow={handleCancelStructuredWorkflow}
               onExportImage={handleExportImage}
               isExportDisabled={streamingOutput.length === 0}
@@ -1426,74 +1469,6 @@ export function SimpleMode() {
                     }}
                   />
 
-                  {tokenEstimate && (
-                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 px-3 py-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-medium text-gray-700 dark:text-gray-200">
-                          {t('workflow.tokenBudget.title', { defaultValue: 'Prompt Token Budget' })}
-                        </p>
-                        <span
-                          className={clsx(
-                            'text-xs font-mono',
-                            tokenEstimate.exceeds_budget
-                              ? 'text-red-600 dark:text-red-400'
-                              : 'text-gray-600 dark:text-gray-300',
-                          )}
-                        >
-                          {formatTokenCount(tokenEstimate.estimated_tokens)} /{' '}
-                          {formatTokenCount(tokenEstimate.budget_tokens)}
-                        </span>
-                      </div>
-                      <div className="mt-2 h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
-                        <div
-                          className={clsx(
-                            'h-full rounded-full transition-all',
-                            tokenEstimate.exceeds_budget
-                              ? 'bg-red-500'
-                              : tokenEstimateProgress >= 85
-                                ? 'bg-amber-500'
-                                : 'bg-emerald-500',
-                          )}
-                          style={{ width: `${tokenEstimateProgress}%` }}
-                        />
-                      </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-600 dark:text-gray-300">
-                        <span>
-                          {t('workflow.tokenBudget.prompt', { defaultValue: 'Prompt' })}:&nbsp;
-                          <span className="font-mono">{formatTokenCount(tokenEstimate.prompt_tokens)}</span>
-                        </span>
-                        <span>
-                          {t('workflow.tokenBudget.attachments', { defaultValue: 'Attachments' })}:&nbsp;
-                          <span className="font-mono">
-                            {formatTokenCount(tokenEstimate.attachment_tokens)} ({attachmentSharePercent}%)
-                          </span>
-                        </span>
-                        <span
-                          className={clsx(
-                            tokenEstimate.remaining_tokens < 0
-                              ? 'text-red-600 dark:text-red-400'
-                              : 'text-gray-600 dark:text-gray-300',
-                          )}
-                        >
-                          {t('workflow.tokenBudget.remaining', { defaultValue: 'Remaining' })}:&nbsp;
-                          <span className="font-mono">{formatTokenCount(tokenEstimate.remaining_tokens)}</span>
-                        </span>
-                      </div>
-                      {tokenEstimate.exceeds_budget && (
-                        <p className="mt-2 text-xs text-red-600 dark:text-red-400">
-                          {t('workflow.tokenBudget.exceeded', {
-                            defaultValue: 'Estimated tokens exceed budget. Some attachment context may be truncated.',
-                          })}
-                        </p>
-                      )}
-                      {isEstimatingTokenBudget && (
-                        <p className="mt-1 text-2xs text-gray-500 dark:text-gray-400">
-                          {t('workflow.tokenBudget.estimating', { defaultValue: 'Estimating token budget...' })}
-                        </p>
-                      )}
-                    </div>
-                  )}
-
                   {workflowMode === 'chat' && queuedChatMessages.length > 0 && (
                     <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 px-3 py-2">
                       <p className="text-xs font-medium text-gray-600 dark:text-gray-300">
@@ -1549,7 +1524,7 @@ export function SimpleMode() {
                 activeTab={rightPanelTab}
                 onTabChange={setRightPanelTab}
                 workflowMode={workflowMode}
-                workflowPhase={workflowPhase}
+                workflowPhase={rightPanelPhase}
                 logs={logs}
                 analysisCoverage={analysisCoverage}
                 streamingOutput={streamingOutput}
@@ -1570,6 +1545,8 @@ export function SimpleMode() {
         sessionId={permissionSessionId}
         turnUsage={turnUsageTotals}
         sessionUsage={sessionUsageTotals}
+        tokenEstimate={tokenEstimate}
+        isEstimatingTokenBudget={isEstimatingTokenBudget}
       />
     </div>
   );

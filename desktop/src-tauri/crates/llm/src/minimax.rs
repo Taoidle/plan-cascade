@@ -448,15 +448,13 @@ impl LlmProvider for MinimaxProvider {
 
     fn context_window(&self) -> u32 {
         let model = self.config.model.to_lowercase();
-        if model.contains("m2.5") || model.contains("m2.1") {
-            // MiniMax-M2.5, M2.5-highspeed, M2.1, M2.1-highspeed
-            245_760
-        } else if model.contains("m2") {
-            200_000
-        } else if model.contains("text-01") {
+        if model.contains("text-01") {
             4_000_000
+        } else if model.contains("m2.5") || model.contains("m2.1") || model.contains("m2") {
+            // MiniMax-M2.5 / M2.1 / M2 families
+            204_800
         } else {
-            200_000
+            204_800
         }
     }
 
@@ -819,7 +817,7 @@ mod tests {
     #[test]
     fn test_context_window_m2_5() {
         let provider = MinimaxProvider::new(test_config());
-        assert_eq!(provider.context_window(), 245_760);
+        assert_eq!(provider.context_window(), 204_800);
     }
 
     #[test]
@@ -829,7 +827,7 @@ mod tests {
             ..test_config()
         };
         let provider = MinimaxProvider::new(config);
-        assert_eq!(provider.context_window(), 200_000);
+        assert_eq!(provider.context_window(), 204_800);
     }
 
     #[test]

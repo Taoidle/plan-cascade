@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{mpsc, RwLock};
 
@@ -407,7 +408,7 @@ pub async fn list_providers() -> CommandResponse<Vec<ProviderInfo>> {
                     name: "DeepSeek Chat".to_string(),
                     supports_thinking: false,
                     supports_tools: true,
-                    context_window: 64_000,
+                    context_window: 128_000,
                     pricing: None,
                 },
                 ModelInfo {
@@ -415,7 +416,7 @@ pub async fn list_providers() -> CommandResponse<Vec<ProviderInfo>> {
                     name: "DeepSeek Reasoner".to_string(),
                     supports_thinking: true,
                     supports_tools: true,
-                    context_window: 64_000,
+                    context_window: 128_000,
                     pricing: None,
                 },
             ],
@@ -439,7 +440,7 @@ pub async fn list_providers() -> CommandResponse<Vec<ProviderInfo>> {
                     name: "GLM-4.7".to_string(),
                     supports_thinking: true,
                     supports_tools: true,
-                    context_window: 128_000,
+                    context_window: 200_000,
                     pricing: None,
                 },
                 ModelInfo {
@@ -447,7 +448,7 @@ pub async fn list_providers() -> CommandResponse<Vec<ProviderInfo>> {
                     name: "GLM-4.6".to_string(),
                     supports_thinking: true,
                     supports_tools: true,
-                    context_window: 128_000,
+                    context_window: 200_000,
                     pricing: None,
                 },
                 ModelInfo {
@@ -455,7 +456,7 @@ pub async fn list_providers() -> CommandResponse<Vec<ProviderInfo>> {
                     name: "GLM-4.6V".to_string(),
                     supports_thinking: true,
                     supports_tools: true,
-                    context_window: 32_768,
+                    context_window: 128_000,
                     pricing: None,
                 },
             ],
@@ -481,7 +482,7 @@ pub async fn list_providers() -> CommandResponse<Vec<ProviderInfo>> {
                     name: "Qwen3 Plus".to_string(),
                     supports_thinking: true,
                     supports_tools: true,
-                    context_window: 131_072,
+                    context_window: 1_000_000,
                     pricing: None,
                 },
                 ModelInfo {
@@ -489,7 +490,7 @@ pub async fn list_providers() -> CommandResponse<Vec<ProviderInfo>> {
                     name: "Qwen3.5 Plus".to_string(),
                     supports_thinking: true,
                     supports_tools: true,
-                    context_window: 131_072,
+                    context_window: 1_000_000,
                     pricing: None,
                 },
             ],
@@ -507,7 +508,7 @@ pub async fn list_providers() -> CommandResponse<Vec<ProviderInfo>> {
                     name: "MiniMax M2.5".to_string(),
                     supports_thinking: true,
                     supports_tools: true,
-                    context_window: 245_760,
+                    context_window: 204_800,
                     pricing: None,
                 },
                 ModelInfo {
@@ -515,7 +516,7 @@ pub async fn list_providers() -> CommandResponse<Vec<ProviderInfo>> {
                     name: "MiniMax M2.5 Highspeed".to_string(),
                     supports_thinking: true,
                     supports_tools: true,
-                    context_window: 245_760,
+                    context_window: 204_800,
                     pricing: None,
                 },
                 ModelInfo {
@@ -523,7 +524,7 @@ pub async fn list_providers() -> CommandResponse<Vec<ProviderInfo>> {
                     name: "MiniMax M2.1".to_string(),
                     supports_thinking: true,
                     supports_tools: true,
-                    context_window: 245_760,
+                    context_window: 204_800,
                     pricing: None,
                 },
                 ModelInfo {
@@ -531,7 +532,7 @@ pub async fn list_providers() -> CommandResponse<Vec<ProviderInfo>> {
                     name: "MiniMax M2.1 Highspeed".to_string(),
                     supports_thinking: true,
                     supports_tools: true,
-                    context_window: 245_760,
+                    context_window: 204_800,
                     pricing: None,
                 },
             ],
@@ -1148,6 +1149,8 @@ pub async fn execute_standalone(
     baseUrl: Option<String>,
     analysis_session_id: Option<String>,
     analysisSessionId: Option<String>,
+    execution_id: Option<String>,
+    executionId: Option<String>,
     permission_level: Option<crate::services::orchestrator::permissions::PermissionLevel>,
     permissionLevel: Option<crate::services::orchestrator::permissions::PermissionLevel>,
     enable_compaction: Option<bool>,
@@ -1273,6 +1276,11 @@ pub async fn execute_standalone(
         .or(analysisSessionId)
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    let execution_id = execution_id
+        .or(executionId)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let effective_permission_level = permission_level.or(permissionLevel).unwrap_or_default();
 
     // Clone session_id before it's moved into orchestrator_config
@@ -1523,17 +1531,60 @@ pub async fn execute_standalone(
                         serde_json::Value::String(event_session_id.clone()),
                     );
                 }
+                obj.insert(
+                    "execution_id".to_string(),
+                    serde_json::Value::String(execution_id.clone()),
+                );
             }
             let _ = app_clone.emit("standalone-event", &payload);
         }
     });
 
-    // Execute the message
+    // Execute the message. The top-level select makes cancellation preemptive:
+    // once cancel token fires, we drop the in-flight execute future immediately.
+    let cancel_token = orchestrator.cancellation_token();
     let result = if enable_tools {
-        orchestrator.execute(message, tx).await
+        tokio::select! {
+            result = orchestrator.execute(message, tx.clone()) => result,
+            _ = cancel_token.cancelled() => {
+                let _ = tx.send(UnifiedStreamEvent::Error {
+                    message: "Execution cancelled".to_string(),
+                    code: Some("cancelled".to_string()),
+                }).await;
+                let _ = tx.send(UnifiedStreamEvent::Complete {
+                    stop_reason: Some("cancelled".to_string()),
+                }).await;
+                ExecutionResult {
+                    response: None,
+                    usage: crate::services::llm::UsageStats::default(),
+                    iterations: 0,
+                    success: false,
+                    error: Some("Execution cancelled".to_string()),
+                }
+            }
+        }
     } else {
-        orchestrator.execute_single(message, tx).await
+        tokio::select! {
+            result = orchestrator.execute_single(message, tx.clone()) => result,
+            _ = cancel_token.cancelled() => {
+                let _ = tx.send(UnifiedStreamEvent::Error {
+                    message: "Execution cancelled".to_string(),
+                    code: Some("cancelled".to_string()),
+                }).await;
+                let _ = tx.send(UnifiedStreamEvent::Complete {
+                    stop_reason: Some("cancelled".to_string()),
+                }).await;
+                ExecutionResult {
+                    response: None,
+                    usage: crate::services::llm::UsageStats::default(),
+                    iterations: 0,
+                    success: false,
+                    error: Some("Execution cancelled".to_string()),
+                }
+            }
+        }
     };
+    drop(tx);
 
     // Clean up orchestrator from StandaloneState
     if !cleanup_session_id.is_empty() {
@@ -1951,7 +2002,21 @@ pub async fn cancel_standalone_execution(
 
     if let Some(orchestrator) = standalone_state.get_orchestrator(&session_id).await {
         orchestrator.cancel();
-        Ok(CommandResponse::ok(true))
+
+        // ACK only after the execution has actually stopped (or timed out).
+        let timeout = Duration::from_secs(3);
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if standalone_state.get_orchestrator(&session_id).await.is_none() {
+                return Ok(CommandResponse::ok(true));
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        Ok(CommandResponse::err(format!(
+            "Cancellation timed out after {}ms",
+            timeout.as_millis()
+        )))
     } else {
         Ok(CommandResponse::err(format!(
             "Session not found: {}",

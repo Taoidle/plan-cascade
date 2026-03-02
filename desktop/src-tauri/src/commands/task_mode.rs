@@ -15,8 +15,8 @@ use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
 use crate::models::CommandResponse;
-use crate::services::knowledge::pipeline::ScopedDocumentRef;
 use crate::services::design::GenerateResult;
+use crate::services::knowledge::pipeline::ScopedDocumentRef;
 use crate::services::strategy::analyzer::{analyze_task_for_mode, StrategyAnalysis};
 use crate::services::task_mode::agent_resolver::AgentResolver;
 use crate::services::task_mode::batch_executor::{
@@ -3165,7 +3165,13 @@ fn build_story_executor(
             match mode {
                 StoryExecutionMode::Cli => {
                     // Spawn agent CLI process to execute the story
-                    execute_story_via_agent(&ctx.agent_name, &prompt, &ctx.project_path).await
+                    execute_story_via_agent(
+                        &ctx.agent_name,
+                        &prompt,
+                        &ctx.project_path,
+                        ctx.cancel_token.clone(),
+                    )
+                    .await
                 }
                 StoryExecutionMode::Llm => {
                     // Execute via OrchestratorService using direct LLM API
@@ -3178,6 +3184,7 @@ fn build_story_executor(
                         &memory_block,
                         &skills_block,
                         knowledge_tool_params.as_ref(),
+                        ctx.cancel_token.clone(),
                     )
                     .await
                 }
@@ -3195,6 +3202,7 @@ async fn execute_story_via_agent(
     agent_name: &str,
     prompt: &str,
     project_path: &std::path::Path,
+    cancel_token: tokio_util::sync::CancellationToken,
 ) -> StoryExecutionOutcome {
     use tokio::process::Command;
 
@@ -3233,42 +3241,76 @@ async fn execute_story_via_agent(
         project_path.display()
     );
 
-    let result = Command::new(&command)
+    let mut process_builder = Command::new(&command);
+    process_builder
         .args(&args)
         .current_dir(project_path)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .output()
-        .await;
+        .kill_on_drop(true);
 
-    match result {
-        Ok(output) if output.status.success() => {
-            eprintln!("[INFO] Agent '{}' completed successfully", command);
-            StoryExecutionOutcome {
-                success: true,
-                error: None,
-            }
-        }
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let error_msg = format!(
-                "Agent '{}' exited with code {}: {}",
-                command,
-                output.status.code().unwrap_or(-1),
-                stderr.chars().take(500).collect::<String>()
-            );
-            eprintln!("[WARN] {}", error_msg);
-            StoryExecutionOutcome {
-                success: false,
-                error: Some(error_msg),
-            }
-        }
+    let child = match process_builder.spawn() {
+        Ok(child) => child,
         Err(e) => {
             let error_msg = format!("Failed to spawn agent '{}': {}", command, e);
             eprintln!("[WARN] {}", error_msg);
-            StoryExecutionOutcome {
+            return StoryExecutionOutcome {
                 success: false,
                 error: Some(error_msg),
+            };
+        }
+    };
+
+    let mut wait_handle = tokio::spawn(async move { child.wait_with_output().await });
+
+    tokio::select! {
+        _ = cancel_token.cancelled() => {
+            wait_handle.abort();
+            eprintln!("[INFO] Agent '{}' execution cancelled", command);
+            StoryExecutionOutcome {
+                success: false,
+                error: Some("Story execution cancelled".to_string()),
+            }
+        }
+        join_result = &mut wait_handle => {
+            match join_result {
+                Ok(Ok(output)) if output.status.success() => {
+                    eprintln!("[INFO] Agent '{}' completed successfully", command);
+                    StoryExecutionOutcome {
+                        success: true,
+                        error: None,
+                    }
+                }
+                Ok(Ok(output)) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let error_msg = format!(
+                        "Agent '{}' exited with code {}: {}",
+                        command,
+                        output.status.code().unwrap_or(-1),
+                        stderr.chars().take(500).collect::<String>()
+                    );
+                    eprintln!("[WARN] {}", error_msg);
+                    StoryExecutionOutcome {
+                        success: false,
+                        error: Some(error_msg),
+                    }
+                }
+                Ok(Err(e)) => {
+                    let error_msg = format!("Agent '{}' failed while waiting for output: {}", command, e);
+                    eprintln!("[WARN] {}", error_msg);
+                    StoryExecutionOutcome {
+                        success: false,
+                        error: Some(error_msg),
+                    }
+                }
+                Err(e) => {
+                    let error_msg = format!("Agent '{}' task join failed: {}", command, e);
+                    eprintln!("[WARN] {}", error_msg);
+                    StoryExecutionOutcome {
+                        success: false,
+                        error: Some(error_msg),
+                    }
+                }
             }
         }
     }
@@ -3288,6 +3330,7 @@ async fn execute_story_via_llm(
     memory_block: &str,
     skills_block: &str,
     knowledge_tool_params: Option<&KnowledgeToolParams>,
+    cancel_token: tokio_util::sync::CancellationToken,
 ) -> StoryExecutionOutcome {
     use crate::services::orchestrator::{OrchestratorConfig, OrchestratorService};
     use crate::services::streaming::UnifiedStreamEvent;
@@ -3380,8 +3423,28 @@ async fn execute_story_via_llm(
         project_path.display()
     );
 
-    // Run the full agentic loop
-    let result = orchestrator.execute(prompt.to_string(), tx).await;
+    // Run the full agentic loop with cancellation support.
+    let execute_future = orchestrator.execute(prompt.to_string(), tx);
+    tokio::pin!(execute_future);
+
+    let result = tokio::select! {
+        _ = cancel_token.cancelled() => {
+            orchestrator.cancel();
+            return StoryExecutionOutcome {
+                success: false,
+                error: Some("Story execution cancelled".to_string()),
+            };
+        }
+        result = &mut execute_future => result,
+    };
+
+    if cancel_token.is_cancelled() {
+        orchestrator.cancel();
+        return StoryExecutionOutcome {
+            success: false,
+            error: Some("Story execution cancelled".to_string()),
+        };
+    }
 
     if result.success {
         eprintln!("[INFO] LLM story execution completed successfully");
@@ -3921,6 +3984,94 @@ mod tests {
         assert!(sessions.is_empty());
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_execute_story_via_agent_cancels_inflight_process() {
+        use std::os::unix::fs::PermissionsExt;
+        use tokio::time::{Duration, Instant};
+        use tokio_util::sync::CancellationToken;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let agent_path = temp_dir.path().join("fake-agent.sh");
+
+        std::fs::write(
+            &agent_path,
+            "#!/bin/sh\n# Simulate a long-running agent process\nsleep 30\n",
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&agent_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&agent_path, perms).unwrap();
+
+        let token = CancellationToken::new();
+        let cancel_token = token.clone();
+        let started = Instant::now();
+
+        let cancel_handle = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(120)).await;
+            cancel_token.cancel();
+        });
+
+        let agent_cmd = agent_path.to_string_lossy().into_owned();
+        let outcome =
+            execute_story_via_agent(&agent_cmd, "test prompt", temp_dir.path(), token).await;
+
+        let _ = cancel_handle.await;
+
+        assert!(!outcome.success);
+        assert!(outcome
+            .error
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains("cancelled"));
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "cancellation should interrupt in-flight story quickly"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_story_via_llm_returns_cancelled_when_token_cancelled() {
+        use crate::services::llm::types::{ProviderConfig, ProviderType};
+        use tokio::time::Duration;
+        use tokio_util::sync::CancellationToken;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let token = CancellationToken::new();
+        token.cancel();
+
+        let provider = ProviderConfig {
+            provider: ProviderType::Anthropic,
+            api_key: Some("test-key".to_string()),
+            model: "claude-sonnet-4-6-20260219".to_string(),
+            ..ProviderConfig::default()
+        };
+
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(3),
+            execute_story_via_llm(
+                Some(&provider),
+                "Implement a tiny change",
+                temp_dir.path(),
+                None,
+                "",
+                "",
+                "",
+                None,
+                token.clone(),
+            ),
+        )
+        .await
+        .expect("llm story cancellation path should return quickly");
+
+        assert!(!outcome.success);
+        assert!(outcome
+            .error
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains("cancelled"));
+    }
+
     // ========================================================================
     // StoryContext & load_story_context Tests
     // ========================================================================
@@ -3940,6 +4091,7 @@ mod tests {
             attempt: 1,
             retry_context: None,
             story_context,
+            cancel_token: CancellationToken::new(),
         }
     }
 

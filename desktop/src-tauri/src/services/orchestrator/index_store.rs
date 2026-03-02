@@ -2289,8 +2289,12 @@ mod tests {
             )],
         );
 
-        store.upsert_file_index("/project-a", &item_a, "ha").unwrap();
-        store.upsert_file_index("/project-b", &item_b, "hb").unwrap();
+        store
+            .upsert_file_index("/project-a", &item_a, "ha")
+            .unwrap();
+        store
+            .upsert_file_index("/project-b", &item_b, "hb")
+            .unwrap();
 
         let results_a = store
             .query_symbols("/project-a", "%SharedController%")
@@ -3648,8 +3652,12 @@ mod tests {
             )],
         );
 
-        store.upsert_file_index("/project-a", &item_a, "ha").unwrap();
-        store.upsert_file_index("/project-b", &item_b, "hb").unwrap();
+        store
+            .upsert_file_index("/project-a", &item_a, "ha")
+            .unwrap();
+        store
+            .upsert_file_index("/project-b", &item_b, "hb")
+            .unwrap();
 
         let results = store
             .fts_search_symbols("shared_controller", "/project-a", 10)

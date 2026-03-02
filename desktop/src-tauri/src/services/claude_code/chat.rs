@@ -15,6 +15,15 @@ use crate::utils::error::{AppError, AppResult};
 use super::executor::{ClaudeCodeExecutor, SpawnConfig};
 use super::session_manager::ActiveSessionManager;
 
+/// Stream handle for a message execution.
+#[derive(Debug)]
+pub struct SendMessageStream {
+    /// Backend-generated execution ID for this message turn
+    pub execution_id: String,
+    /// Receiver of adapted stream events
+    pub receiver: mpsc::Receiver<UnifiedStreamEvent>,
+}
+
 /// Result of a message send operation
 #[derive(Debug)]
 pub struct SendMessageResult {
@@ -69,7 +78,7 @@ impl ChatHandler {
         &mut self,
         session_id: &str,
         prompt: &str,
-    ) -> AppResult<mpsc::Receiver<UnifiedStreamEvent>> {
+    ) -> AppResult<SendMessageStream> {
         // Get the session
         let session = self
             .session_manager
@@ -84,10 +93,7 @@ impl ChatHandler {
             ));
         }
 
-        // Update session state to running
-        self.session_manager
-            .update_session_state(session_id, SessionState::Running)
-            .await?;
+        let execution_id = uuid::Uuid::new_v4().to_string();
 
         // Build spawn config - prompt goes to stdin, NOT via -p flag
         let mut config = SpawnConfig::new(&session.project_path);
@@ -106,61 +112,95 @@ impl ChatHandler {
         let mut process = executor.spawn(&config).await?;
         let pid = process.pid();
         eprintln!(
-            "[INFO] Spawned Claude Code process {} for message in session {}",
-            pid, session_id
+            "[INFO] Spawned Claude Code process {} for session {} execution {}",
+            pid, session_id, execution_id
         );
 
-        // Write prompt to stdin, then close it to signal EOF
-        // The CLI reads all of stdin and processes it as the user message
-        if let Some(mut stdin) = process.take_stdin() {
-            if let Err(e) = stdin.write_all(prompt.as_bytes()).await {
-                eprintln!("[ERROR] Failed to write prompt to stdin: {}", e);
-            }
-            if let Err(e) = stdin.flush().await {
-                eprintln!("[ERROR] Failed to flush stdin: {}", e);
-            }
-            // Drop stdin to close it - signals EOF to the CLI
-            drop(stdin);
-        }
-
-        // Take stdout for reading events
+        // Take stdio handles before process registration so cancellation can
+        // still terminate the real process while we stream from detached pipes.
+        let mut stdin = process.take_stdin();
         let stdout = process
             .take_stdout()
             .ok_or_else(|| AppError::internal("Failed to get stdout handle"))?;
+        let stderr = process.take_stderr();
+
+        // Register active execution before streaming starts so cancel always
+        // targets a concrete process.
+        let cancel_token = self
+            .session_manager
+            .register_execution(session_id, &execution_id, process)
+            .await?;
 
         // Create event channel
         let (tx, rx) = mpsc::channel::<UnifiedStreamEvent>(100);
 
         // Clone session_id for the async task
         let session_id_clone = session_id.to_string();
+        let execution_id_clone = execution_id.clone();
         let session_manager = self.session_manager.clone();
-
-        // Also capture stderr for debugging
-        let stderr = process.take_stderr();
 
         // Spawn a task to log stderr
         if let Some(stderr) = stderr {
+            let stderr_cancel_token = cancel_token.clone();
             tokio::spawn(async move {
                 let reader = BufReader::new(stderr);
                 let mut lines = reader.lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    eprintln!("[claude stderr] {}", line);
+                loop {
+                    tokio::select! {
+                        _ = stderr_cancel_token.cancelled() => {
+                            break;
+                        }
+                        line = lines.next_line() => {
+                            match line {
+                                Ok(Some(line)) => eprintln!("[claude stderr] {}", line),
+                                Ok(None) | Err(_) => break,
+                            }
+                        }
+                    }
                 }
             });
         }
 
+        // Write prompt to stdin, then close it to signal EOF.
+        // The CLI reads all of stdin and processes it as the user message.
+        if let Some(mut stdin_handle) = stdin.take() {
+            if let Err(e) = stdin_handle.write_all(prompt.as_bytes()).await {
+                eprintln!("[ERROR] Failed to write prompt to stdin: {}", e);
+            }
+            if let Err(e) = stdin_handle.flush().await {
+                eprintln!("[ERROR] Failed to flush stdin: {}", e);
+            }
+            drop(stdin_handle);
+        }
+
         // Spawn a task to read stdout and forward parsed events
+        let reader_cancel_token = cancel_token.clone();
         tokio::spawn(async move {
             eprintln!(
-                "[DEBUG] stdout reader task started for session {}",
-                session_id_clone
+                "[DEBUG] stdout reader started for session {} execution {}",
+                session_id_clone, execution_id_clone
             );
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
             let mut adapter = ClaudeCodeAdapter::new();
             let mut line_count = 0u32;
 
-            while let Ok(Some(line)) = lines.next_line().await {
+            loop {
+                let line = tokio::select! {
+                    _ = reader_cancel_token.cancelled() => {
+                        eprintln!(
+                            "[DEBUG] stdout reader cancelled for session {} execution {}",
+                            session_id_clone, execution_id_clone
+                        );
+                        break;
+                    }
+                    next_line = lines.next_line() => next_line,
+                };
+
+                let line = match line {
+                    Ok(Some(line)) => line,
+                    Ok(None) | Err(_) => break,
+                };
                 line_count += 1;
                 // Skip empty lines
                 if line.trim().is_empty() {
@@ -186,8 +226,6 @@ impl ChatHandler {
                         let mut should_break = false;
 
                         for event in events {
-                            let is_complete = matches!(&event, UnifiedStreamEvent::Complete { .. });
-
                             // Check if this is a large text delta that needs chunking
                             // (e.g., from non-streaming assistant event with full response)
                             let is_large_text = matches!(
@@ -231,16 +269,6 @@ impl ChatHandler {
                                 eprintln!("[WARN] mpsc receiver dropped, stopping");
                                 break;
                             }
-
-                            if is_complete {
-                                eprintln!(
-                                    "[DEBUG] stream complete for session {}",
-                                    session_id_clone
-                                );
-                                let _ = session_manager
-                                    .update_session_state(&session_id_clone, SessionState::Idle)
-                                    .await;
-                            }
                         }
                     }
                     Err(e) => {
@@ -250,23 +278,29 @@ impl ChatHandler {
             }
 
             eprintln!(
-                "[DEBUG] stdout reader ended after {} lines for session {}",
-                line_count, session_id_clone
+                "[DEBUG] stdout reader ended after {} lines for session {} execution {}",
+                line_count, session_id_clone, execution_id_clone
             );
 
-            // Stream ended (process exited) - update session state
-            let _ = session_manager
-                .update_session_state(&session_id_clone, SessionState::Idle)
-                .await;
-            let _ = session_manager
-                .increment_message_count(&session_id_clone)
+            let was_cancelled = reader_cancel_token.is_cancelled();
+            session_manager
+                .complete_execution(&session_id_clone, &execution_id_clone)
                 .await;
 
-            // Keep process alive until stdout is fully read, then let it drop
-            drop(process);
+            if !was_cancelled {
+                let _ = session_manager
+                    .update_session_state(&session_id_clone, SessionState::Idle)
+                    .await;
+                let _ = session_manager
+                    .increment_message_count(&session_id_clone)
+                    .await;
+            }
         });
 
-        Ok(rx)
+        Ok(SendMessageStream {
+            execution_id,
+            receiver: rx,
+        })
     }
 
     /// Process a stream of lines from Claude Code and convert to unified events
