@@ -11,12 +11,44 @@ use std::collections::HashSet;
 
 use rusqlite::params;
 
-use crate::services::memory::store::{bytes_to_embedding, embedding_to_bytes, ProjectMemoryStore};
+use crate::services::memory::store::{
+    bytes_to_embedding, embedding_to_bytes, ProjectMemoryStore, GLOBAL_PROJECT_PATH,
+    SESSION_PROJECT_PATH_PREFIX,
+};
 use crate::services::orchestrator::embedding_service::cosine_similarity;
 use crate::utils::error::AppResult;
 
 /// Similarity threshold tuned for sparse TF-IDF vectors during maintenance compaction.
 const TFIDF_COMPACTION_THRESHOLD: f32 = 0.82;
+
+#[derive(Debug, Clone)]
+struct ScopeFilter {
+    scope: String,
+    project_path: Option<String>,
+    session_id: Option<String>,
+}
+
+fn resolve_scope_filter(project_path: &str) -> ScopeFilter {
+    if project_path == GLOBAL_PROJECT_PATH {
+        ScopeFilter {
+            scope: "global".to_string(),
+            project_path: None,
+            session_id: None,
+        }
+    } else if let Some(session_id) = project_path.strip_prefix(SESSION_PROJECT_PATH_PREFIX) {
+        ScopeFilter {
+            scope: "session".to_string(),
+            project_path: None,
+            session_id: Some(session_id.to_string()),
+        }
+    } else {
+        ScopeFilter {
+            scope: "project".to_string(),
+            project_path: Some(project_path.to_string()),
+            session_id: None,
+        }
+    }
+}
 
 /// Memory maintenance operations
 pub struct MemoryMaintenance;
@@ -28,6 +60,7 @@ impl MemoryMaintenance {
     ///
     /// Returns count of memories whose importance was updated.
     pub fn decay_memories(store: &ProjectMemoryStore, project_path: &str) -> AppResult<usize> {
+        let scoped = resolve_scope_filter(project_path);
         // Read all memories with their last_accessed_at and current importance
         struct DecayCandidate {
             id: String,
@@ -48,18 +81,22 @@ impl MemoryMaintenance {
                                 ELSE last_accessed_at
                             END
                         )
-                 FROM project_memories
-                 WHERE project_path = ?1",
+                 FROM memory_entries_v2
+                 WHERE scope = ?1
+                   AND ((?1 = 'project' AND project_path = ?2) OR (?1 = 'session' AND session_id = ?3) OR (?1 = 'global'))",
             )?;
 
             let rows: Vec<DecayCandidate> = stmt
-                .query_map(params![project_path], |row| {
-                    Ok(DecayCandidate {
-                        id: row.get(0)?,
-                        importance: row.get(1)?,
-                        days_since_access: row.get::<_, f64>(2).unwrap_or(0.0).floor(),
-                    })
-                })?
+                .query_map(
+                    params![scoped.scope, scoped.project_path, scoped.session_id],
+                    |row| {
+                        Ok(DecayCandidate {
+                            id: row.get(0)?,
+                            importance: row.get(1)?,
+                            days_since_access: row.get::<_, f64>(2).unwrap_or(0.0).floor(),
+                        })
+                    },
+                )?
                 .filter_map(|r| r.ok())
                 .collect();
             rows
@@ -83,7 +120,7 @@ impl MemoryMaintenance {
                     ))
                 })?;
                 conn.execute(
-                    "UPDATE project_memories
+                    "UPDATE memory_entries_v2
                      SET importance = ?2,
                          last_decay_at = datetime('now'),
                          updated_at = datetime('now')
@@ -105,13 +142,22 @@ impl MemoryMaintenance {
         project_path: &str,
         min_importance: f32,
     ) -> AppResult<usize> {
+        let scoped = resolve_scope_filter(project_path);
         let conn = store.pool().get().map_err(|e| {
             crate::utils::error::AppError::database(format!("Failed to get connection: {}", e))
         })?;
 
         let deleted = conn.execute(
-            "DELETE FROM project_memories WHERE project_path = ?1 AND importance < ?2",
-            params![project_path, min_importance],
+            "DELETE FROM memory_entries_v2
+             WHERE scope = ?1
+               AND ((?1 = 'project' AND project_path = ?2) OR (?1 = 'session' AND session_id = ?3) OR (?1 = 'global'))
+               AND importance < ?4",
+            params![
+                scoped.scope,
+                scoped.project_path,
+                scoped.session_id,
+                min_importance
+            ],
         )?;
 
         if deleted > 0 {
@@ -132,6 +178,7 @@ impl MemoryMaintenance {
     /// Returns count of memories merged (removed).
     pub fn compact_memories(store: &ProjectMemoryStore, project_path: &str) -> AppResult<usize> {
         store.ensure_vocabulary_for_project(project_path)?;
+        let scoped = resolve_scope_filter(project_path);
 
         // Load all memories with their embeddings
         struct MemWithEmb {
@@ -148,29 +195,34 @@ impl MemoryMaintenance {
             })?;
             let mut stmt = conn.prepare(
                 "SELECT id, content, importance, keywords, embedding
-                 FROM project_memories
-                 WHERE project_path = ?1
+                 FROM memory_entries_v2
+                 WHERE scope = ?1
+                   AND ((?1 = 'project' AND project_path = ?2) OR (?1 = 'session' AND session_id = ?3) OR (?1 = 'global'))
+                   AND status = 'active'
                  ORDER BY importance DESC",
             )?;
 
             let rows: Vec<MemWithEmb> = stmt
-                .query_map(params![project_path], |row| {
-                    let id: String = row.get(0)?;
-                    let content: String = row.get(1)?;
-                    let importance: f32 = row.get(2)?;
-                    let keywords_json: String = row.get(3)?;
-                    let embedding_bytes: Option<Vec<u8>> = row.get(4)?;
+                .query_map(
+                    params![scoped.scope, scoped.project_path, scoped.session_id],
+                    |row| {
+                        let id: String = row.get(0)?;
+                        let content: String = row.get(1)?;
+                        let importance: f32 = row.get(2)?;
+                        let keywords_json: String = row.get(3)?;
+                        let embedding_bytes: Option<Vec<u8>> = row.get(4)?;
 
-                    let embedding = embedding_bytes.map(|b| bytes_to_embedding(&b));
+                        let embedding = embedding_bytes.map(|b| bytes_to_embedding(&b));
 
-                    Ok(MemWithEmb {
-                        id,
-                        content,
-                        importance,
-                        keywords_json,
-                        embedding,
-                    })
-                })?
+                        Ok(MemWithEmb {
+                            id,
+                            content,
+                            importance,
+                            keywords_json,
+                            embedding,
+                        })
+                    },
+                )?
                 .filter_map(|r| r.ok())
                 .collect();
             rows
@@ -247,7 +299,7 @@ impl MemoryMaintenance {
                     Some(embedding_to_bytes(&merged_emb))
                 };
                 conn.execute(
-                    "UPDATE project_memories SET content = ?2, keywords = ?3, embedding = ?4, updated_at = datetime('now') WHERE id = ?1",
+                    "UPDATE memory_entries_v2 SET content = ?2, content_hash = lower(trim(?2)), keywords = ?3, embedding = ?4, updated_at = datetime('now') WHERE id = ?1",
                     params![
                         memories[i].id,
                         merged_content_acc,
@@ -264,7 +316,7 @@ impl MemoryMaintenance {
                 crate::utils::error::AppError::database(format!("Failed to get connection: {}", e))
             })?;
             for id in &to_delete {
-                conn.execute("DELETE FROM project_memories WHERE id = ?1", params![id])?;
+                conn.execute("DELETE FROM memory_entries_v2 WHERE id = ?1", params![id])?;
             }
             store.mark_vocabulary_dirty_for_project(project_path);
         }
@@ -329,7 +381,7 @@ mod tests {
         {
             let conn = store.pool().get().map_err(|e| format!("{}", e)).unwrap();
             conn.execute(
-                "UPDATE project_memories SET last_accessed_at = datetime('now', '-14 days') WHERE id = ?1",
+                "UPDATE memory_entries_v2 SET last_accessed_at = datetime('now', '-14 days') WHERE id = ?1",
                 params![mem.id],
             ).unwrap();
         }
@@ -381,7 +433,7 @@ mod tests {
         {
             let conn = store.pool().get().map_err(|e| format!("{}", e)).unwrap();
             conn.execute(
-                "UPDATE project_memories SET last_accessed_at = datetime('now', '-14 days') WHERE id = ?1",
+                "UPDATE memory_entries_v2 SET last_accessed_at = datetime('now', '-14 days') WHERE id = ?1",
                 params![mem.id],
             )
             .unwrap();
@@ -583,7 +635,7 @@ mod tests {
             let emb = embedding_to_bytes(&[1.0, 0.0, 0.0]);
             for id in [&mem_a.id, &mem_b.id, &mem_c.id] {
                 conn.execute(
-                    "UPDATE project_memories SET embedding = ?2 WHERE id = ?1",
+                    "UPDATE memory_entries_v2 SET embedding = ?2 WHERE id = ?1",
                     params![id, emb.clone()],
                 )
                 .unwrap();

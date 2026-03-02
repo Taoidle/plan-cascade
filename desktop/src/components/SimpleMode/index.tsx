@@ -150,16 +150,10 @@ export function SimpleMode() {
   const recoverWorkflowKernelSession = useWorkflowKernelStore((s) => s.recoverSession);
   const transitionWorkflowKernelMode = useWorkflowKernelStore((s) => s.transitionMode);
   const transitionAndSubmitWorkflowKernelInput = useWorkflowKernelStore((s) => s.transitionAndSubmitInput);
-  const syncWorkflowKernelPhase = useWorkflowKernelStore((s) => s.syncModePhase);
   const refreshWorkflowKernelState = useWorkflowKernelStore((s) => s.refreshSessionState);
   const cancelWorkflowKernelOperation = useWorkflowKernelStore((s) => s.cancelOperation);
   const resetWorkflowKernel = useWorkflowKernelStore((s) => s.reset);
   const kernelBootstrapInFlightRef = useRef(false);
-  const lastSyncedKernelPhasesRef = useRef<{ chat: string; plan: string; task: string }>({
-    chat: '',
-    plan: '',
-    task: '',
-  });
 
   const isRunning = status === 'running' || status === 'paused';
 
@@ -412,7 +406,6 @@ export function SimpleMode() {
     };
   }, [bridgeSessionId, workspacePath]);
 
-  const workflowPhaseLegacy = useWorkflowOrchestratorStore((s) => s.phase);
   const pendingQuestion = useWorkflowOrchestratorStore((s) => s.pendingQuestion);
   const startWorkflow = useWorkflowOrchestratorStore((s) => s.startWorkflow);
   const submitInterviewAnswer = useWorkflowOrchestratorStore((s) => s.submitInterviewAnswer);
@@ -426,7 +419,6 @@ export function SimpleMode() {
     useWorkflowOrchestratorStore((s) => s.phase === 'interviewing') && pendingQuestion === null;
 
   // Plan mode orchestrator
-  const planPhaseLegacy = usePlanOrchestratorStore((s) => s.phase);
   const pendingClarifyQuestion = usePlanOrchestratorStore((s) => s.pendingClarifyQuestion);
   const planIsBusy = usePlanOrchestratorStore((s) => s.isBusy);
   const startPlanWorkflow = usePlanOrchestratorStore((s) => s.startPlanWorkflow);
@@ -436,53 +428,10 @@ export function SimpleMode() {
   const planWorkflowCancelling = usePlanOrchestratorStore((s) => s.isCancelling);
   const resetPlanWorkflow = usePlanOrchestratorStore((s) => s.resetWorkflow);
 
-  const workflowPhase = workflowKernelSession?.modeSnapshots.task?.phase ?? workflowPhaseLegacy;
-  const planPhase = workflowKernelSession?.modeSnapshots.plan?.phase ?? planPhaseLegacy;
-  const chatPhase =
-    workflowKernelSession?.modeSnapshots.chat?.phase ??
-    (status === 'running'
-      ? 'running'
-      : status === 'paused'
-        ? 'paused'
-        : status === 'completed'
-          ? 'completed'
-          : status === 'failed'
-            ? 'failed'
-            : 'ready');
+  const workflowPhase = workflowKernelSession?.modeSnapshots.task?.phase ?? 'idle';
+  const planPhase = workflowKernelSession?.modeSnapshots.plan?.phase ?? 'idle';
+  const chatPhase = workflowKernelSession?.modeSnapshots.chat?.phase ?? 'ready';
   const rightPanelPhase = workflowMode === 'task' ? workflowPhase : workflowMode === 'plan' ? planPhase : chatPhase;
-
-  useEffect(() => {
-    if (workflowMode !== 'task') return;
-    if (!workflowPhaseLegacy) return;
-    if (lastSyncedKernelPhasesRef.current.task === workflowPhaseLegacy) return;
-    lastSyncedKernelPhasesRef.current.task = workflowPhaseLegacy;
-    void syncWorkflowKernelPhase('task', workflowPhaseLegacy, 'task_orchestrator');
-  }, [workflowMode, workflowPhaseLegacy, syncWorkflowKernelPhase]);
-
-  useEffect(() => {
-    if (workflowMode !== 'plan') return;
-    if (!planPhaseLegacy) return;
-    if (lastSyncedKernelPhasesRef.current.plan === planPhaseLegacy) return;
-    lastSyncedKernelPhasesRef.current.plan = planPhaseLegacy;
-    void syncWorkflowKernelPhase('plan', planPhaseLegacy, 'plan_orchestrator');
-  }, [workflowMode, planPhaseLegacy, syncWorkflowKernelPhase]);
-
-  useEffect(() => {
-    if (workflowMode !== 'chat') return;
-    const phase =
-      status === 'running'
-        ? 'running'
-        : status === 'paused'
-          ? 'paused'
-          : status === 'completed'
-            ? 'completed'
-            : status === 'failed'
-              ? 'failed'
-              : 'ready';
-    if (lastSyncedKernelPhasesRef.current.chat === phase) return;
-    lastSyncedKernelPhasesRef.current.chat = phase;
-    void syncWorkflowKernelPhase('chat', phase, 'chat_execution_status');
-  }, [workflowMode, status, syncWorkflowKernelPhase]);
 
   const hasStructuredInterviewQuestion =
     workflowMode === 'task' &&

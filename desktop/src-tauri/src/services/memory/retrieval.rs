@@ -19,14 +19,58 @@ use chrono::{NaiveDateTime, Utc};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
+use crate::services::memory::query_policy_v2::{memory_query_tuning_v2, MemoryQueryPresetV2};
 use crate::services::memory::store::{
     bytes_to_embedding, MemoryCategory, MemoryEntry, MemorySearchRequest, MemorySearchResult,
-    ProjectMemoryStore,
+    ProjectMemoryStore, GLOBAL_PROJECT_PATH, SESSION_PROJECT_PATH_PREFIX,
 };
 use crate::services::orchestrator::embedding_manager::EmbeddingManager;
 use crate::services::orchestrator::embedding_provider::EmbeddingProviderType;
 use crate::services::orchestrator::embedding_service::cosine_similarity;
 use crate::utils::error::AppResult;
+
+#[derive(Debug, Clone)]
+struct ScopeFilter {
+    scope: String,
+    project_path: Option<String>,
+    session_id: Option<String>,
+}
+
+fn resolve_scope_filter(project_path: &str) -> ScopeFilter {
+    if project_path == GLOBAL_PROJECT_PATH {
+        ScopeFilter {
+            scope: "global".to_string(),
+            project_path: None,
+            session_id: None,
+        }
+    } else if let Some(session) = project_path.strip_prefix(SESSION_PROJECT_PATH_PREFIX) {
+        ScopeFilter {
+            scope: "session".to_string(),
+            project_path: None,
+            session_id: Some(session.to_string()),
+        }
+    } else {
+        ScopeFilter {
+            scope: "project".to_string(),
+            project_path: Some(project_path.to_string()),
+            session_id: None,
+        }
+    }
+}
+
+fn legacy_project_path_from_scope(
+    scope: &str,
+    project_path: Option<&str>,
+    session_id: Option<&str>,
+) -> String {
+    match scope {
+        "global" => GLOBAL_PROJECT_PATH.to_string(),
+        "session" => session_id
+            .map(|sid| format!("{}{}", SESSION_PROJECT_PATH_PREFIX, sid))
+            .unwrap_or_else(|| GLOBAL_PROJECT_PATH.to_string()),
+        _ => project_path.unwrap_or_default().to_string(),
+    }
+}
 
 /// Ranking mode for memory retrieval.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -103,12 +147,13 @@ fn default_true() -> bool {
 
 impl Default for MemorySearchRequestV2 {
     fn default() -> Self {
+        let tuning = memory_query_tuning_v2(MemoryQueryPresetV2::CommandSearch);
         Self {
             project_path: String::new(),
             query: String::new(),
             categories: None,
-            top_k: 10,
-            min_importance: 0.1,
+            top_k: tuning.top_k_total,
+            min_importance: tuning.min_importance,
             intent: MemorySearchIntent::Default,
             enable_semantic: true,
             enable_lexical: true,
@@ -399,12 +444,16 @@ fn load_candidates_v2(
     })?;
 
     let category_filter = build_category_filter_sql(&request.categories);
+    let scoped = resolve_scope_filter(&request.project_path);
     let sql = format!(
-        "SELECT id, project_path, category, content, keywords, importance, access_count,
-                source_session_id, source_context, created_at, updated_at, last_accessed_at,
+        "SELECT id, scope, project_path, session_id, category, content, keywords, importance, access_count,
+                source_session_id, source_context, status, risk_tier, conflict_flag, created_at, updated_at, last_accessed_at,
                 embedding
-         FROM project_memories
-         WHERE project_path = ?1 AND importance >= ?2{}
+         FROM memory_entries_v2
+         WHERE scope = ?1
+           AND ((?1 = 'project' AND project_path = ?2) OR (?1 = 'session' AND session_id = ?3) OR (?1 = 'global'))
+           AND status = 'active'
+           AND importance >= ?4{}
          ORDER BY importance DESC
          LIMIT {}",
         category_filter,
@@ -413,30 +462,49 @@ fn load_candidates_v2(
 
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(
-        params![request.project_path, request.min_importance],
+        params![
+            scoped.scope,
+            scoped.project_path,
+            scoped.session_id,
+            request.min_importance
+        ],
         |row| -> rusqlite::Result<MemoryCandidate> {
-            let category_str: String = row.get(2)?;
-            let keywords_json: String = row.get(4)?;
+            let scope: String = row.get(1)?;
+            let project_path: Option<String> = row.get(2)?;
+            let session_id: Option<String> = row.get(3)?;
+            let category_str: String = row.get(4)?;
+            let keywords_json: String = row.get(6)?;
             let keywords: Vec<String> = serde_json::from_str(&keywords_json).unwrap_or_default();
             let embedding = row
-                .get::<_, Option<Vec<u8>>>(12)?
+                .get::<_, Option<Vec<u8>>>(17)?
                 .map(|bytes| bytes_to_embedding(&bytes));
+            let legacy_project_path = legacy_project_path_from_scope(
+                &scope,
+                project_path.as_deref(),
+                session_id.as_deref(),
+            );
 
             Ok(MemoryCandidate {
                 entry: MemoryEntry {
                     id: row.get(0)?,
-                    project_path: row.get(1)?,
+                    project_path: legacy_project_path,
+                    scope: Some(scope),
+                    session_id,
                     category: MemoryCategory::from_str(&category_str)
                         .unwrap_or(MemoryCategory::Fact),
-                    content: row.get(3)?,
+                    content: row.get(5)?,
                     keywords,
-                    importance: row.get(5)?,
-                    access_count: row.get(6)?,
-                    source_session_id: row.get(7)?,
-                    source_context: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
-                    last_accessed_at: row.get(11)?,
+                    importance: row.get(7)?,
+                    access_count: row.get(8)?,
+                    source_session_id: row.get(9)?,
+                    source_context: row.get(10)?,
+                    status: Some(row.get(11)?),
+                    risk_tier: Some(row.get(12)?),
+                    conflict_flag: Some(row.get::<_, i64>(13).unwrap_or(0) != 0),
+                    trace_id: None,
+                    created_at: row.get(14)?,
+                    updated_at: row.get(15)?,
+                    last_accessed_at: row.get(16)?,
                 },
                 embedding,
             })
@@ -661,12 +729,16 @@ pub fn search_memories_with_options(
         String::new()
     };
 
+    let scoped = resolve_scope_filter(&request.project_path);
     let sql = format!(
-        "SELECT id, project_path, category, content, keywords, importance, access_count,
-                source_session_id, source_context, created_at, updated_at, last_accessed_at,
+        "SELECT id, scope, project_path, session_id, category, content, keywords, importance, access_count,
+                source_session_id, source_context, status, risk_tier, conflict_flag, created_at, updated_at, last_accessed_at,
                 embedding
-         FROM project_memories
-         WHERE project_path = ?1 AND importance >= ?2{}
+         FROM memory_entries_v2
+         WHERE scope = ?1
+           AND ((?1 = 'project' AND project_path = ?2) OR (?1 = 'session' AND session_id = ?3) OR (?1 = 'global'))
+           AND status = 'active'
+           AND importance >= ?4{}
          ORDER BY importance DESC",
         category_filter
     );
@@ -675,7 +747,9 @@ pub fn search_memories_with_options(
 
     struct Candidate {
         id: String,
-        project_path: String,
+        scope: String,
+        project_path: Option<String>,
+        session_id: Option<String>,
         category: String,
         content: String,
         keywords_json: String,
@@ -683,6 +757,9 @@ pub fn search_memories_with_options(
         access_count: i64,
         source_session_id: Option<String>,
         source_context: Option<String>,
+        status: String,
+        risk_tier: String,
+        conflict_flag: bool,
         created_at: String,
         updated_at: String,
         last_accessed_at: String,
@@ -691,22 +768,32 @@ pub fn search_memories_with_options(
 
     let candidates: Vec<Candidate> = stmt
         .query_map(
-            params![request.project_path, request.min_importance],
+            params![
+                scoped.scope,
+                scoped.project_path,
+                scoped.session_id,
+                request.min_importance
+            ],
             |row| {
                 Ok(Candidate {
                     id: row.get(0)?,
-                    project_path: row.get(1)?,
-                    category: row.get(2)?,
-                    content: row.get(3)?,
-                    keywords_json: row.get(4)?,
-                    importance: row.get(5)?,
-                    access_count: row.get(6)?,
-                    source_session_id: row.get(7)?,
-                    source_context: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
-                    last_accessed_at: row.get(11)?,
-                    embedding_bytes: row.get(12)?,
+                    scope: row.get(1)?,
+                    project_path: row.get(2)?,
+                    session_id: row.get(3)?,
+                    category: row.get(4)?,
+                    content: row.get(5)?,
+                    keywords_json: row.get(6)?,
+                    importance: row.get(7)?,
+                    access_count: row.get(8)?,
+                    source_session_id: row.get(9)?,
+                    source_context: row.get(10)?,
+                    status: row.get(11)?,
+                    risk_tier: row.get(12)?,
+                    conflict_flag: row.get::<_, i64>(13).unwrap_or(0) != 0,
+                    created_at: row.get(14)?,
+                    updated_at: row.get(15)?,
+                    last_accessed_at: row.get(16)?,
+                    embedding_bytes: row.get(17)?,
                 })
             },
         )?
@@ -750,11 +837,18 @@ pub fn search_memories_with_options(
             };
 
             let category = MemoryCategory::from_str(&c.category).unwrap_or(MemoryCategory::Fact);
+            let legacy_project_path = legacy_project_path_from_scope(
+                &c.scope,
+                c.project_path.as_deref(),
+                c.session_id.as_deref(),
+            );
 
             MemorySearchResult {
                 entry: crate::services::memory::store::MemoryEntry {
                     id: c.id,
-                    project_path: c.project_path,
+                    project_path: legacy_project_path,
+                    scope: Some(c.scope),
+                    session_id: c.session_id,
                     category,
                     content: c.content,
                     keywords: mem_keywords,
@@ -762,6 +856,10 @@ pub fn search_memories_with_options(
                     access_count: c.access_count,
                     source_session_id: c.source_session_id,
                     source_context: c.source_context,
+                    status: Some(c.status),
+                    risk_tier: Some(c.risk_tier),
+                    conflict_flag: Some(c.conflict_flag),
+                    trace_id: None,
                     created_at: c.created_at,
                     updated_at: c.updated_at,
                     last_accessed_at: c.last_accessed_at,

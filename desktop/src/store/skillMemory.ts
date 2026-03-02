@@ -18,6 +18,8 @@ import type {
   MemoryCategory,
   MemoryScope,
   MemoryStats,
+  MemoryReviewCandidate,
+  MemoryReviewDecision,
   SkillMatch,
   SkillSourceLabel,
 } from '../types/skillMemory';
@@ -30,6 +32,35 @@ interface CommandResponse<T> {
   success: boolean;
   data: T | null;
   error: string | null;
+}
+
+interface UnifiedMemoryQueryResultV2 {
+  trace_id: string;
+  degraded: boolean;
+  candidate_count: number;
+  results: Array<{
+    entry: MemoryEntry;
+    relevance_score: number;
+  }>;
+}
+
+interface MemoryReviewSummaryV2 {
+  updated: number;
+}
+
+function memoryScopesForRequest(scope: MemoryScope, sessionId: string | null): MemoryScope[] {
+  if (scope === 'session') {
+    return sessionId?.trim() ? ['session'] : [];
+  }
+  return [scope];
+}
+
+function memoryErrorWithTrace(message: string): string {
+  const traceId =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `memory-${Date.now()}`;
+  return `${message} (trace_id: ${traceId}, retry available)`;
 }
 
 function tSkillMemory(key: string, defaultValue: string): string {
@@ -73,6 +104,8 @@ interface SkillMemoryState {
   memoryPage: number;
   memoryPageSize: number;
   memoryHasMore: boolean;
+  pendingMemoryCandidates: MemoryReviewCandidate[];
+  pendingMemoryCandidatesLoading: boolean;
 
   // --- UI State ---
   panelOpen: boolean;
@@ -116,6 +149,12 @@ interface SkillMemoryState {
   deleteMemory: (id: string) => Promise<void>;
   clearMemories: (projectPath: string) => Promise<void>;
   searchMemories: (projectPath: string, query: string) => Promise<void>;
+  loadPendingMemoryCandidates: (projectPath: string, limit?: number) => Promise<void>;
+  reviewPendingMemoryCandidates: (
+    projectPath: string,
+    memoryIds: string[],
+    decision: MemoryReviewDecision,
+  ) => Promise<void>;
   runMaintenance: (projectPath: string) => Promise<void>;
   setMemorySearchQuery: (query: string) => void;
   setMemoryCategoryFilter: (filter: MemoryCategoryFilter) => void;
@@ -157,6 +196,8 @@ const defaultState = {
   memoryPage: 0,
   memoryPageSize: 20,
   memoryHasMore: true,
+  pendingMemoryCandidates: [] as MemoryReviewCandidate[],
+  pendingMemoryCandidatesLoading: false,
 
   panelOpen: false,
   dialogOpen: false,
@@ -400,12 +441,13 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         return;
       }
       const category = memoryCategoryFilter === 'all' ? null : memoryCategoryFilter;
-      const response = await invoke<CommandResponse<MemoryEntry[]>>('list_project_memories', {
+      const response = await invoke<CommandResponse<MemoryEntry[]>>('list_memory_entries_v2', {
         projectPath,
-        category,
+        categories: category ? [category] : null,
+        scopes: memoryScopesForRequest(memoryScope, memorySessionId),
+        statuses: ['active'],
         offset: 0,
         limit: memoryPageSize,
-        scope: memoryScope,
         sessionId: memorySessionId,
       });
       if (response.success && response.data) {
@@ -420,12 +462,20 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
             response.error || tSkillMemory('skillPanel.toasts.loadMemoriesFailed', 'Failed to load memories'),
           memoriesLoading: false,
         });
+        get().showToast(
+          memoryErrorWithTrace(
+            response.error || tSkillMemory('skillPanel.toasts.loadMemoriesFailed', 'Failed to load memories'),
+          ),
+          'error',
+        );
       }
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       set({
-        memoriesError: error instanceof Error ? error.message : String(error),
+        memoriesError: message,
         memoriesLoading: false,
       });
+      get().showToast(memoryErrorWithTrace(message), 'error');
     }
   },
 
@@ -437,12 +487,13 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
     const nextPage = memoryPage + 1;
     const category = memoryCategoryFilter === 'all' ? null : memoryCategoryFilter;
     try {
-      const response = await invoke<CommandResponse<MemoryEntry[]>>('list_project_memories', {
+      const response = await invoke<CommandResponse<MemoryEntry[]>>('list_memory_entries_v2', {
         projectPath,
-        category,
+        categories: category ? [category] : null,
+        scopes: memoryScopesForRequest(memoryScope, memorySessionId),
+        statuses: ['active'],
         offset: nextPage * memoryPageSize,
         limit: memoryPageSize,
-        scope: memoryScope,
         sessionId: memorySessionId,
       });
       if (response.success && response.data) {
@@ -451,9 +502,12 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
           memoryPage: nextPage,
           memoryHasMore: response.data.length >= memoryPageSize,
         });
+      } else if (response.error) {
+        get().showToast(memoryErrorWithTrace(response.error), 'error');
       }
-    } catch {
-      // Silently fail for pagination
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      get().showToast(memoryErrorWithTrace(message), 'error');
     }
   },
 
@@ -464,16 +518,20 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         set({ memoryStats: null });
         return;
       }
-      const response = await invoke<CommandResponse<MemoryStats>>('get_memory_stats', {
+      const response = await invoke<CommandResponse<MemoryStats>>('memory_stats_v2', {
         projectPath,
-        scope: memoryScope,
+        scopes: memoryScopesForRequest(memoryScope, memorySessionId),
+        statuses: ['active'],
         sessionId: memorySessionId,
       });
       if (response.success && response.data) {
         set({ memoryStats: response.data });
+      } else if (response.error) {
+        get().showToast(memoryErrorWithTrace(response.error), 'error');
       }
-    } catch {
-      // Silently fail - stats are optional
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      get().showToast(memoryErrorWithTrace(message), 'error');
     }
   },
 
@@ -613,34 +671,119 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
     try {
       const { memoryCategoryFilter } = get();
       const categories = memoryCategoryFilter === 'all' ? null : [memoryCategoryFilter];
-      const response = await invoke<CommandResponse<Array<{ entry: MemoryEntry; relevance_score: number }>>>(
-        'search_project_memories',
-        {
-          projectPath,
-          query,
-          categories,
-          topK: 50,
-          scope: memoryScope,
-          sessionId: memorySessionId,
-        },
-      );
+      const response = await invoke<CommandResponse<UnifiedMemoryQueryResultV2>>('query_memory_entries_v2', {
+        projectPath,
+        query,
+        categories,
+        scopes: memoryScopesForRequest(memoryScope, memorySessionId),
+        includeIds: [],
+        excludeIds: [],
+        statuses: ['active'],
+        sessionId: memorySessionId,
+        topKTotal: 50,
+        minImportance: 0.1,
+        enableSemantic: true,
+        enableLexical: true,
+      });
       if (response.success && response.data) {
         set({
-          memories: response.data.map((r) => r.entry),
+          memories: response.data.results.map((r) => r.entry),
           memoriesLoading: false,
           memoryHasMore: false,
         });
+        if (response.data.degraded) {
+          get().showToast(
+            `Memory search degraded (trace_id: ${response.data.trace_id}). Retry after ranker recovers.`,
+            'info',
+          );
+        }
       } else {
         set({
           memoriesError: response.error || tSkillMemory('skillPanel.toasts.searchMemoriesFailed', 'Search failed'),
           memoriesLoading: false,
         });
+        get().showToast(
+          memoryErrorWithTrace(
+            response.error || tSkillMemory('skillPanel.toasts.searchMemoriesFailed', 'Search failed'),
+          ),
+          'error',
+        );
       }
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       set({
-        memoriesError: error instanceof Error ? error.message : String(error),
+        memoriesError: message,
         memoriesLoading: false,
       });
+      get().showToast(memoryErrorWithTrace(message), 'error');
+    }
+  },
+
+  loadPendingMemoryCandidates: async (projectPath: string, limit = 200) => {
+    set({ pendingMemoryCandidatesLoading: true });
+    try {
+      const { memoryScope, memorySessionId } = get();
+      if (memoryScope === 'session' && !memorySessionId?.trim()) {
+        set({ pendingMemoryCandidates: [], pendingMemoryCandidatesLoading: false });
+        return;
+      }
+      const response = await invoke<CommandResponse<MemoryReviewCandidate[]>>('list_pending_memory_candidates_v2', {
+        projectPath,
+        scopes: memoryScopesForRequest(memoryScope, memorySessionId),
+        sessionId: memorySessionId,
+        limit,
+      });
+      if (response.success && response.data) {
+        set({
+          pendingMemoryCandidates: response.data,
+          pendingMemoryCandidatesLoading: false,
+        });
+      } else {
+        set({ pendingMemoryCandidatesLoading: false });
+        if (response.error) {
+          get().showToast(memoryErrorWithTrace(response.error), 'error');
+        }
+      }
+    } catch (error) {
+      set({ pendingMemoryCandidatesLoading: false });
+      const message = error instanceof Error ? error.message : String(error);
+      get().showToast(memoryErrorWithTrace(message), 'error');
+    }
+  },
+
+  reviewPendingMemoryCandidates: async (projectPath: string, memoryIds: string[], decision: MemoryReviewDecision) => {
+    if (memoryIds.length === 0) {
+      return;
+    }
+    try {
+      const response = await invoke<CommandResponse<MemoryReviewSummaryV2>>('review_memory_candidates_v2', {
+        memoryIds,
+        decision,
+      });
+      if (!response.success) {
+        get().showToast(
+          memoryErrorWithTrace(
+            response.error ||
+              tSkillMemory('skillPanel.toasts.memoryReviewFailed', 'Failed to review memory candidates'),
+          ),
+          'error',
+        );
+        return;
+      }
+
+      const updated = response.data?.updated ?? memoryIds.length;
+      get().showToast(
+        tSkillMemory('skillPanel.toasts.memoryReviewSuccess', `Reviewed ${updated} memory candidates`),
+        'success',
+      );
+      await Promise.all([
+        get().loadPendingMemoryCandidates(projectPath),
+        get().loadMemories(projectPath),
+        get().loadMemoryStats(projectPath),
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      get().showToast(memoryErrorWithTrace(message), 'error');
     }
   },
 

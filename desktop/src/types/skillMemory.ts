@@ -124,6 +124,9 @@ export type MemoryCategory = 'preference' | 'convention' | 'pattern' | 'correcti
 
 /** Scope of memory storage */
 export type MemoryScope = 'project' | 'global' | 'session';
+export type MemoryStatus = 'active' | 'pending_review' | 'rejected' | 'archived';
+export type MemoryRiskTier = 'low' | 'medium' | 'high';
+export type MemoryReviewDecision = 'approve' | 'reject' | 'archive';
 
 /** All valid memory categories */
 export const MEMORY_CATEGORIES: MemoryCategory[] = ['preference', 'convention', 'pattern', 'correction', 'fact'];
@@ -132,6 +135,8 @@ export const MEMORY_CATEGORIES: MemoryCategory[] = ['preference', 'convention', 
 export interface MemoryEntry {
   id: string;
   project_path: string;
+  scope?: MemoryScope;
+  session_id?: string | null;
   category: MemoryCategory;
   content: string;
   keywords: string[];
@@ -139,6 +144,14 @@ export interface MemoryEntry {
   access_count: number;
   source_session_id: string | null;
   source_context: string | null;
+  status?: MemoryStatus;
+  risk_tier?: MemoryRiskTier;
+  conflict_flag?: boolean;
+  trace_id?: string | null;
+  sessionId?: string | null;
+  riskTier?: MemoryRiskTier;
+  conflictFlag?: boolean;
+  traceId?: string | null;
   created_at: string;
   updated_at: string;
   last_accessed_at: string;
@@ -148,6 +161,24 @@ export interface MemoryEntry {
 export interface MemorySearchResult {
   entry: MemoryEntry;
   relevance_score: number;
+}
+
+export interface MemoryReviewCandidate {
+  id: string;
+  scope: MemoryScope;
+  project_path: string | null;
+  session_id: string | null;
+  category: MemoryCategory;
+  content: string;
+  keywords: string[];
+  importance: number;
+  source_session_id: string | null;
+  source_context: string | null;
+  status: MemoryStatus;
+  risk_tier: MemoryRiskTier;
+  conflict_flag: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 /** Memory statistics */

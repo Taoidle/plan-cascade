@@ -12,7 +12,8 @@ import { useTranslation } from 'react-i18next';
 import { ChevronDownIcon, ChevronRightIcon, MagnifyingGlassIcon } from '@radix-ui/react-icons';
 import { useContextSourcesStore } from '../../store/contextSources';
 import { useSettingsStore } from '../../store/settings';
-import { MEMORY_CATEGORIES, type MemoryCategory, type MemoryScope } from '../../types/skillMemory';
+import { useSkillMemoryStore } from '../../store/skillMemory';
+import { MEMORY_CATEGORIES, type MemoryCategory, type MemoryEntry, type MemoryScope } from '../../types/skillMemory';
 
 /** Color classes for each memory category */
 const CATEGORY_COLORS: Record<string, string> = {
@@ -35,7 +36,9 @@ const SCOPE_STYLES: Record<MemoryScope, string> = {
   session: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
 };
 
-function inferScope(projectPath: string): MemoryScope {
+function inferScope(entry: MemoryEntry): MemoryScope {
+  if (entry.scope) return entry.scope;
+  const projectPath = entry.project_path;
   if (projectPath === '__global__') return 'global';
   if (projectPath.startsWith('__session__:')) return 'session';
   return 'project';
@@ -44,6 +47,9 @@ function inferScope(projectPath: string): MemoryScope {
 export function MemorySourcePicker() {
   const { t } = useTranslation('simpleMode');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
+  const pendingMemoryCandidates = useSkillMemoryStore((s) => s.pendingMemoryCandidates);
+  const loadPendingMemoryCandidates = useSkillMemoryStore((s) => s.loadPendingMemoryCandidates);
+  const openDialog = useSkillMemoryStore((s) => s.openDialog);
   const {
     memorySelectionMode,
     selectedMemoryScopes,
@@ -91,8 +97,9 @@ export function MemorySourcePicker() {
   useEffect(() => {
     if (workspacePath) {
       loadMemoryStats(workspacePath);
+      loadPendingMemoryCandidates(workspacePath);
     }
-  }, [workspacePath, scopesKey, memorySessionId, loadMemoryStats]);
+  }, [workspacePath, scopesKey, memorySessionId, loadMemoryStats, loadPendingMemoryCandidates]);
 
   // Debounced search
   useEffect(() => {
@@ -160,6 +167,22 @@ export function MemorySourcePicker() {
       <div className="px-3 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 border-b border-gray-100 dark:border-gray-700">
         {t('contextSources.memoryPicker.title', { defaultValue: 'Memory Sources' })}
       </div>
+      {pendingMemoryCandidates.length > 0 && (
+        <div className="px-2 py-1.5 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
+          <span className="text-2xs text-amber-700 dark:text-amber-300">
+            {t('contextSources.memoryPicker.pendingReview', {
+              defaultValue: '{{count}} pending review memories',
+              count: pendingMemoryCandidates.length,
+            })}
+          </span>
+          <button
+            onClick={() => openDialog('memory')}
+            className="ml-auto px-1.5 py-0.5 rounded text-2xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+          >
+            {t('contextSources.memoryPicker.reviewNow', { defaultValue: 'Review' })}
+          </button>
+        </div>
+      )}
 
       {/* Scope toggles */}
       <div className="px-2 py-1.5 border-b border-gray-100 dark:border-gray-700 flex items-center gap-1 flex-wrap">
@@ -278,13 +301,8 @@ export function MemorySourcePicker() {
                     CATEGORY_COLORS[entry.category] || 'bg-gray-400',
                   )}
                 />
-                <span
-                  className={clsx(
-                    'text-2xs px-1 py-0.5 rounded flex-shrink-0',
-                    SCOPE_STYLES[inferScope(entry.project_path)],
-                  )}
-                >
-                  {SCOPE_LABELS[inferScope(entry.project_path)]}
+                <span className={clsx('text-2xs px-1 py-0.5 rounded flex-shrink-0', SCOPE_STYLES[inferScope(entry)])}>
+                  {SCOPE_LABELS[inferScope(entry)]}
                 </span>
                 <span className="flex-1 text-2xs text-gray-600 dark:text-gray-400 truncate">
                   {entry.content.slice(0, 80)}
@@ -374,10 +392,10 @@ export function MemorySourcePicker() {
                         <span
                           className={clsx(
                             'text-2xs px-1 py-0.5 rounded flex-shrink-0',
-                            SCOPE_STYLES[inferScope(entry.project_path)],
+                            SCOPE_STYLES[inferScope(entry)],
                           )}
                         >
-                          {SCOPE_LABELS[inferScope(entry.project_path)]}
+                          {SCOPE_LABELS[inferScope(entry)]}
                         </span>
                         <span className="flex-1 text-2xs text-gray-600 dark:text-gray-400 truncate">
                           {entry.content.slice(0, 60)}

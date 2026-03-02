@@ -10,7 +10,7 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import type { KnowledgeCollection, DocumentSummary, ScopedDocumentRef } from '../lib/knowledgeApi';
 import { ragListCollections, ragListDocuments, ragEnsureDocsCollection } from '../lib/knowledgeApi';
-import type { MemoryEntry, MemoryScope, MemoryStats, MemorySearchResult, SkillSummary } from '../types/skillMemory';
+import type { MemoryEntry, MemoryScope, MemoryStats, SkillSummary } from '../types/skillMemory';
 import { useProjectsStore } from './projects';
 
 // ---------------------------------------------------------------------------
@@ -21,6 +21,16 @@ interface CommandResponse<T> {
   success: boolean;
   data: T | null;
   error: string | null;
+}
+
+interface UnifiedMemoryQueryResultV2 {
+  trace_id: string;
+  degraded: boolean;
+  candidate_count: number;
+  results: Array<{
+    entry: MemoryEntry;
+    relevance_score: number;
+  }>;
 }
 
 const MEMORY_COMMAND_TIMEOUT_MS = 8000;
@@ -71,6 +81,8 @@ export interface ContextSourceConfig {
     excluded_memory_ids: string[];
     selected_scopes: MemoryScope[];
     session_id?: string | null;
+    statuses?: string[];
+    review_mode?: 'active_only' | 'include_pending_review';
   };
   skills?: {
     enabled: boolean;
@@ -516,47 +528,17 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
     try {
       const { selectedMemoryScopes, memorySessionId } = get();
       const scopes = normalizeMemoryScopes(selectedMemoryScopes, memorySessionId);
-      const settledStats = await Promise.allSettled(
-        scopes.map((scope) =>
-          invokeCommandResponseWithTimeout<MemoryStats>('get_memory_stats', {
-            projectPath,
-            scope,
-            sessionId: memorySessionId,
-          }),
-        ),
-      );
-
-      const nonNullStats: MemoryStats[] = [];
-      for (const result of settledStats) {
-        if (result.status !== 'fulfilled') continue;
-        const response = result.value;
-        if (response.success && response.data) {
-          nonNullStats.push(response.data);
-        }
-      }
-
-      if (nonNullStats.length === 0) {
+      const response = await invokeCommandResponseWithTimeout<MemoryStats>('memory_stats_v2', {
+        projectPath,
+        scopes,
+        statuses: ['active'],
+        sessionId: memorySessionId,
+      });
+      if (!response.success || !response.data) {
         set({ availableMemoryStats: null, isLoadingMemoryStats: false });
         return;
       }
-
-      let totalCount = 0;
-      let weightedImportanceSum = 0;
-      const categoryCounts: Record<string, number> = {};
-      for (const stats of nonNullStats) {
-        totalCount += stats.total_count;
-        weightedImportanceSum += stats.avg_importance * stats.total_count;
-        for (const [cat, count] of Object.entries(stats.category_counts)) {
-          categoryCounts[cat] = (categoryCounts[cat] || 0) + count;
-        }
-      }
-
-      const aggregate: MemoryStats = {
-        total_count: totalCount,
-        category_counts: categoryCounts,
-        avg_importance: totalCount > 0 ? weightedImportanceSum / totalCount : 0,
-      };
-      set({ availableMemoryStats: aggregate, isLoadingMemoryStats: false });
+      set({ availableMemoryStats: response.data, isLoadingMemoryStats: false });
     } catch {
       set({ isLoadingMemoryStats: false });
     }
@@ -572,27 +554,16 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
     try {
       const { selectedMemoryScopes, memorySessionId } = get();
       const scopes = normalizeMemoryScopes(selectedMemoryScopes, memorySessionId);
-      const listResults = await Promise.all(
-        scopes.map(async (scope) => {
-          const response = await invoke<CommandResponse<MemoryEntry[]>>('list_project_memories', {
-            projectPath,
-            category,
-            offset: 0,
-            limit: 50,
-            scope,
-            sessionId: memorySessionId,
-          });
-          return response.success && response.data ? response.data : [];
-        }),
-      );
-
-      const mergedMap = new Map<string, MemoryEntry>();
-      for (const list of listResults) {
-        for (const entry of list) {
-          mergedMap.set(entry.id, entry);
-        }
-      }
-      const merged = Array.from(mergedMap.values()).sort((a, b) => b.importance - a.importance);
+      const response = await invokeCommandResponseWithTimeout<MemoryEntry[]>('list_memory_entries_v2', {
+        projectPath,
+        categories: [category],
+        scopes,
+        statuses: ['active'],
+        sessionId: memorySessionId,
+        offset: 0,
+        limit: 200,
+      });
+      const merged = response.success && response.data ? response.data.sort((a, b) => b.importance - a.importance) : [];
 
       set((state) => ({
         categoryMemories: { ...state.categoryMemories, [category]: merged },
@@ -610,33 +581,25 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
     try {
       const { selectedMemoryScopes, memorySessionId } = get();
       const scopes = normalizeMemoryScopes(selectedMemoryScopes, memorySessionId);
-      const searchResults = await Promise.all(
-        scopes.map(async (scope) => {
-          const response = await invoke<CommandResponse<MemorySearchResult[]>>('search_project_memories', {
-            projectPath,
-            query,
-            categories: null,
-            topK: 20,
-            scope,
-            sessionId: memorySessionId,
-          });
-          return response.success && response.data ? response.data : [];
-        }),
-      );
+      const response = await invokeCommandResponseWithTimeout<UnifiedMemoryQueryResultV2>('query_memory_entries_v2', {
+        projectPath,
+        query,
+        categories: null,
+        scopes,
+        includeIds: [],
+        excludeIds: [],
+        statuses: ['active'],
+        sessionId: memorySessionId,
+        topKTotal: 50,
+        minImportance: 0.1,
+        enableSemantic: true,
+        enableLexical: true,
+      });
 
-      const mergedMap = new Map<string, { entry: MemoryEntry; score: number }>();
-      for (const results of searchResults) {
-        for (const result of results) {
-          const prev = mergedMap.get(result.entry.id);
-          if (!prev || result.relevance_score > prev.score) {
-            mergedMap.set(result.entry.id, { entry: result.entry, score: result.relevance_score });
-          }
-        }
-      }
-
-      const merged = Array.from(mergedMap.values())
-        .sort((a, b) => b.score - a.score)
-        .map((item) => item.entry);
+      const merged =
+        response.success && response.data
+          ? response.data.results.sort((a, b) => b.relevance_score - a.relevance_score).map((item) => item.entry)
+          : [];
 
       set({
         memorySearchResults: merged,
@@ -749,6 +712,8 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
       excluded_memory_ids: excludedIds,
       selected_scopes: normalizedScopes,
       session_id: memorySessionId,
+      statuses: ['active'],
+      review_mode: 'active_only',
     };
 
     if (knowledgeEnabled) {

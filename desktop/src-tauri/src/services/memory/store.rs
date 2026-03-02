@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
+use crate::services::memory::query_policy_v2::{memory_query_tuning_v2, MemoryQueryPresetV2};
 use crate::services::orchestrator::embedding_manager::EmbeddingManager;
 use crate::services::orchestrator::embedding_service::{cosine_similarity, EmbeddingService};
 use crate::storage::database::{Database, DbPool};
@@ -31,6 +32,7 @@ pub const SESSION_PROJECT_PATH_PREFIX: &str = "__session__:";
 /// distributions are generally more compressed.
 const TFIDF_UPSERT_MERGE_THRESHOLD: f32 = 0.72;
 const MEMORY_EMBEDDING_PROVIDER_TFIDF: &str = "tfidf";
+const MEMORY_ENTRY_SELECT_SQL: &str = "id, scope, project_path, session_id, category, content, keywords, importance, access_count, source_session_id, source_context, status, risk_tier, conflict_flag, created_at, updated_at, last_accessed_at";
 
 /// Normalize a session id for memory scoping.
 ///
@@ -58,6 +60,57 @@ pub fn normalize_memory_session_id(session_id: &str) -> Option<String> {
 pub fn build_session_project_path(session_id: &str) -> Option<String> {
     normalize_memory_session_id(session_id)
         .map(|normalized| format!("{}{}", SESSION_PROJECT_PATH_PREFIX, normalized))
+}
+
+#[derive(Debug, Clone)]
+struct MemoryScopeMapping {
+    scope: String,
+    project_path: Option<String>,
+    session_id: Option<String>,
+}
+
+fn map_legacy_project_path(project_path: &str) -> MemoryScopeMapping {
+    if project_path == GLOBAL_PROJECT_PATH {
+        MemoryScopeMapping {
+            scope: "global".to_string(),
+            project_path: None,
+            session_id: None,
+        }
+    } else if let Some(session) = project_path.strip_prefix(SESSION_PROJECT_PATH_PREFIX) {
+        MemoryScopeMapping {
+            scope: "session".to_string(),
+            project_path: None,
+            session_id: normalize_memory_session_id(session),
+        }
+    } else {
+        MemoryScopeMapping {
+            scope: "project".to_string(),
+            project_path: Some(project_path.to_string()),
+            session_id: None,
+        }
+    }
+}
+
+fn legacy_project_path_from_scope(
+    scope: &str,
+    project_path: Option<&str>,
+    session_id: Option<&str>,
+) -> String {
+    match scope {
+        "global" => GLOBAL_PROJECT_PATH.to_string(),
+        "session" => session_id
+            .and_then(build_session_project_path)
+            .unwrap_or_else(|| GLOBAL_PROJECT_PATH.to_string()),
+        _ => project_path.unwrap_or_default().to_string(),
+    }
+}
+
+fn default_status_and_risk(source_context: Option<&str>) -> (&'static str, &'static str) {
+    match source_context {
+        Some(ctx) if ctx.starts_with("llm_extract:") => ("pending_review", "medium"),
+        Some(ctx) if ctx.starts_with("rule_extract:") => ("pending_review", "low"),
+        _ => ("active", "high"),
+    }
 }
 
 // ============================================================================
@@ -114,6 +167,10 @@ impl std::fmt::Display for MemoryCategory {
 pub struct MemoryEntry {
     pub id: String,
     pub project_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
     pub category: MemoryCategory,
     pub content: String,
     pub keywords: Vec<String>,
@@ -121,6 +178,14 @@ pub struct MemoryEntry {
     pub access_count: i64,
     pub source_session_id: Option<String>,
     pub source_context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk_tier: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conflict_flag: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub last_accessed_at: String,
@@ -173,12 +238,13 @@ pub struct MemorySearchRequest {
 
 impl Default for MemorySearchRequest {
     fn default() -> Self {
+        let tuning = memory_query_tuning_v2(MemoryQueryPresetV2::CommandSearch);
         Self {
             project_path: String::new(),
             query: String::new(),
             categories: None,
-            top_k: 10,
-            min_importance: 0.1,
+            top_k: tuning.top_k_total,
+            min_importance: tuning.min_importance,
         }
     }
 }
@@ -255,6 +321,8 @@ impl ProjectMemoryStore {
     pub fn add_memory(&self, entry: NewMemoryEntry) -> AppResult<MemoryEntry> {
         let id = uuid::Uuid::new_v4().to_string();
         let keywords_json = serde_json::to_string(&entry.keywords)?;
+        let scoped = map_legacy_project_path(&entry.project_path);
+        let (status, risk_tier) = default_status_and_risk(entry.source_context.as_deref());
 
         self.mark_vocabulary_dirty(&entry.project_path);
         self.ensure_vocabulary_for_project_with_seed(
@@ -275,13 +343,16 @@ impl ProjectMemoryStore {
         {
             let conn = self.get_connection()?;
             conn.execute(
-                "INSERT INTO project_memories (
-                    id, project_path, category, content, keywords, embedding, importance,
-                    source_session_id, source_context, embedding_provider, embedding_dim, quality_score
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                "INSERT INTO memory_entries_v2 (
+                    id, scope, project_path, session_id, category, content, content_hash,
+                    keywords, embedding, importance, source_session_id, source_context,
+                    status, risk_tier, conflict_flag, embedding_provider, embedding_dim, quality_score
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, lower(trim(?6)), ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0, ?14, ?15, ?16)",
                 params![
                     id,
-                    entry.project_path,
+                    scoped.scope,
+                    scoped.project_path,
+                    scoped.session_id,
                     entry.category.as_str(),
                     entry.content,
                     keywords_json,
@@ -289,6 +360,8 @@ impl ProjectMemoryStore {
                     entry.importance,
                     entry.source_session_id,
                     entry.source_context,
+                    status,
+                    risk_tier,
                     MEMORY_EMBEDDING_PROVIDER_TFIDF,
                     embedding_dim,
                     quality_score,
@@ -348,7 +421,7 @@ impl ProjectMemoryStore {
                 let conn = self.get_connection()?;
                 conn.query_row(
                     "SELECT embedding, embedding_provider, embedding_dim, quality_score
-                 FROM project_memories WHERE id = ?1",
+                 FROM memory_entries_v2 WHERE id = ?1",
                     params![id],
                     |row| {
                         Ok((
@@ -365,8 +438,8 @@ impl ProjectMemoryStore {
         {
             let conn = self.get_connection()?;
             conn.execute(
-                "UPDATE project_memories
-                 SET content = ?2, category = ?3, importance = ?4, keywords = ?5, embedding = ?6,
+                "UPDATE memory_entries_v2
+                 SET content = ?2, content_hash = lower(trim(?2)), category = ?3, importance = ?4, keywords = ?5, embedding = ?6,
                      embedding_provider = ?7, embedding_dim = ?8, quality_score = ?9,
                      updated_at = datetime('now')
                  WHERE id = ?1",
@@ -416,15 +489,8 @@ impl ProjectMemoryStore {
         // Load existing memories + embeddings in one query (avoid N+1 queries).
         let existing: Vec<ExistingCandidate> = {
             let conn = self.get_connection()?;
-            let mut stmt = conn.prepare(
-                "SELECT id, content, importance, keywords, embedding
-                 FROM project_memories
-                 WHERE project_path = ?1
-                 ORDER BY importance DESC
-                 LIMIT 1000",
-            )?;
-
-            let rows = stmt.query_map(params![&entry.project_path], |row| {
+            let scoped = map_legacy_project_path(&entry.project_path);
+            let map_row = |row: &rusqlite::Row| -> rusqlite::Result<ExistingCandidate> {
                 let keywords_json: String = row.get(3)?;
                 let embedding_bytes: Option<Vec<u8>> = row.get(4)?;
                 Ok(ExistingCandidate {
@@ -436,9 +502,50 @@ impl ProjectMemoryStore {
                         .map(|bytes| bytes_to_embedding(&bytes))
                         .unwrap_or_default(),
                 })
-            })?;
+            };
 
-            rows.filter_map(|r| r.ok()).collect()
+            if scoped.scope == "global" {
+                let mut stmt = conn.prepare(
+                    "SELECT id, content, importance, keywords, embedding
+                     FROM memory_entries_v2
+                     WHERE scope = 'global' AND status = 'active'
+                     ORDER BY importance DESC
+                     LIMIT 1000",
+                )?;
+                let rows = stmt
+                    .query_map([], map_row)?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                rows
+            } else if scoped.scope == "session" {
+                let sid = scoped.session_id.unwrap_or_default();
+                let mut stmt = conn.prepare(
+                    "SELECT id, content, importance, keywords, embedding
+                     FROM memory_entries_v2
+                     WHERE scope = 'session' AND session_id = ?1 AND status = 'active'
+                     ORDER BY importance DESC
+                     LIMIT 1000",
+                )?;
+                let rows = stmt
+                    .query_map(params![sid], map_row)?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                rows
+            } else {
+                let project = scoped.project_path.unwrap_or_default();
+                let mut stmt = conn.prepare(
+                    "SELECT id, content, importance, keywords, embedding
+                     FROM memory_entries_v2
+                     WHERE scope = 'project' AND project_path = ?1 AND status = 'active'
+                     ORDER BY importance DESC
+                     LIMIT 1000",
+                )?;
+                let rows = stmt
+                    .query_map(params![project], map_row)?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                rows
+            }
         };
 
         // Check for high-similarity duplicates
@@ -492,13 +599,11 @@ impl ProjectMemoryStore {
     /// Get a single memory by ID
     pub fn get_memory(&self, id: &str) -> AppResult<Option<MemoryEntry>> {
         let conn = self.get_connection()?;
-        let result = conn.query_row(
-            "SELECT id, project_path, category, content, keywords, importance, access_count,
-                    source_session_id, source_context, created_at, updated_at, last_accessed_at
-             FROM project_memories WHERE id = ?1",
-            params![id],
-            |row| row_to_memory_entry(row),
+        let sql = format!(
+            "SELECT {} FROM memory_entries_v2 WHERE id = ?1",
+            MEMORY_ENTRY_SELECT_SQL
         );
+        let result = conn.query_row(&sql, params![id], row_to_memory_entry);
 
         match result {
             Ok(entry) => Ok(Some(entry)),
@@ -516,40 +621,58 @@ impl ProjectMemoryStore {
         limit: usize,
     ) -> AppResult<Vec<MemoryEntry>> {
         let conn = self.get_connection()?;
+        let scoped = map_legacy_project_path(project_path);
 
-        let (sql, category_str);
+        let sql_with_category = format!(
+            "SELECT {}
+             FROM memory_entries_v2
+             WHERE scope = ?1
+               AND ((?1 = 'project' AND project_path = ?2) OR (?1 = 'session' AND session_id = ?3) OR (?1 = 'global'))
+               AND category = ?4
+             ORDER BY importance DESC, updated_at DESC
+             LIMIT ?5 OFFSET ?6",
+            MEMORY_ENTRY_SELECT_SQL
+        );
+        let sql_without_category = format!(
+            "SELECT {}
+             FROM memory_entries_v2
+             WHERE scope = ?1
+               AND ((?1 = 'project' AND project_path = ?2) OR (?1 = 'session' AND session_id = ?3) OR (?1 = 'global'))
+             ORDER BY importance DESC, updated_at DESC
+             LIMIT ?4 OFFSET ?5",
+            MEMORY_ENTRY_SELECT_SQL
+        );
+
         if let Some(ref cat) = category {
-            category_str = cat.as_str().to_string();
-            sql = format!(
-                "SELECT id, project_path, category, content, keywords, importance, access_count,
-                        source_session_id, source_context, created_at, updated_at, last_accessed_at
-                 FROM project_memories
-                 WHERE project_path = ?1 AND category = ?2
-                 ORDER BY importance DESC, updated_at DESC
-                 LIMIT ?3 OFFSET ?4"
-            );
-            let mut stmt = conn.prepare(&sql)?;
+            let mut stmt = conn.prepare(&sql_with_category)?;
             let rows = stmt
                 .query_map(
-                    params![project_path, category_str, limit as i64, offset as i64],
-                    |row| row_to_memory_entry(row),
+                    params![
+                        scoped.scope,
+                        scoped.project_path,
+                        scoped.session_id,
+                        cat.as_str(),
+                        limit as i64,
+                        offset as i64
+                    ],
+                    row_to_memory_entry,
                 )?
                 .filter_map(|r| r.ok())
                 .collect();
             Ok(rows)
         } else {
-            sql = "SELECT id, project_path, category, content, keywords, importance, access_count,
-                          source_session_id, source_context, created_at, updated_at, last_accessed_at
-                   FROM project_memories
-                   WHERE project_path = ?1
-                   ORDER BY importance DESC, updated_at DESC
-                   LIMIT ?2 OFFSET ?3"
-                .to_string();
-            let mut stmt = conn.prepare(&sql)?;
+            let mut stmt = conn.prepare(&sql_without_category)?;
             let rows = stmt
-                .query_map(params![project_path, limit as i64, offset as i64], |row| {
-                    row_to_memory_entry(row)
-                })?
+                .query_map(
+                    params![
+                        scoped.scope,
+                        scoped.project_path,
+                        scoped.session_id,
+                        limit as i64,
+                        offset as i64
+                    ],
+                    row_to_memory_entry,
+                )?
                 .filter_map(|r| r.ok())
                 .collect();
             Ok(rows)
@@ -559,9 +682,13 @@ impl ProjectMemoryStore {
     /// Get memory count by project
     pub fn count_memories(&self, project_path: &str) -> AppResult<usize> {
         let conn = self.get_connection()?;
+        let scoped = map_legacy_project_path(project_path);
         let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM project_memories WHERE project_path = ?1",
-            params![project_path],
+            "SELECT COUNT(*)
+             FROM memory_entries_v2
+             WHERE scope = ?1
+               AND ((?1 = 'project' AND project_path = ?2) OR (?1 = 'session' AND session_id = ?3) OR (?1 = 'global'))",
+            params![scoped.scope, scoped.project_path, scoped.session_id],
             |row| row.get(0),
         )?;
         Ok(count as usize)
@@ -570,27 +697,39 @@ impl ProjectMemoryStore {
     /// Get memory statistics for a project
     pub fn get_stats(&self, project_path: &str) -> AppResult<MemoryStats> {
         let conn = self.get_connection()?;
+        let scoped = map_legacy_project_path(project_path);
 
         let total_count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM project_memories WHERE project_path = ?1",
-            params![project_path],
+            "SELECT COUNT(*)
+             FROM memory_entries_v2
+             WHERE scope = ?1
+               AND ((?1 = 'project' AND project_path = ?2) OR (?1 = 'session' AND session_id = ?3) OR (?1 = 'global'))",
+            params![scoped.scope, scoped.project_path, scoped.session_id],
             |row| row.get(0),
         )?;
 
         let avg_importance: f64 = conn.query_row(
-            "SELECT COALESCE(AVG(importance), 0.0) FROM project_memories WHERE project_path = ?1",
-            params![project_path],
+            "SELECT COALESCE(AVG(importance), 0.0)
+             FROM memory_entries_v2
+             WHERE scope = ?1
+               AND ((?1 = 'project' AND project_path = ?2) OR (?1 = 'session' AND session_id = ?3) OR (?1 = 'global'))",
+            params![scoped.scope, scoped.project_path, scoped.session_id],
             |row| row.get(0),
         )?;
 
         // Category counts
         let mut stmt = conn.prepare(
-            "SELECT category, COUNT(*) FROM project_memories WHERE project_path = ?1 GROUP BY category",
+            "SELECT category, COUNT(*)
+             FROM memory_entries_v2
+             WHERE scope = ?1
+               AND ((?1 = 'project' AND project_path = ?2) OR (?1 = 'session' AND session_id = ?3) OR (?1 = 'global'))
+             GROUP BY category",
         )?;
         let category_counts: std::collections::HashMap<String, usize> = stmt
-            .query_map(params![project_path], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as usize))
-            })?
+            .query_map(
+                params![scoped.scope, scoped.project_path, scoped.session_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as usize)),
+            )?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -612,7 +751,7 @@ impl ProjectMemoryStore {
             .map(|m| m.project_path)
             .unwrap_or_default();
         let conn = self.get_connection()?;
-        conn.execute("DELETE FROM project_memories WHERE id = ?1", params![id])?;
+        conn.execute("DELETE FROM memory_entries_v2 WHERE id = ?1", params![id])?;
         if !project_path.is_empty() {
             self.mark_vocabulary_dirty(&project_path);
         }
@@ -622,9 +761,12 @@ impl ProjectMemoryStore {
     /// Delete all memories for a project, returns count of deleted entries
     pub fn clear_project_memories(&self, project_path: &str) -> AppResult<usize> {
         let conn = self.get_connection()?;
+        let scoped = map_legacy_project_path(project_path);
         let count = conn.execute(
-            "DELETE FROM project_memories WHERE project_path = ?1",
-            params![project_path],
+            "DELETE FROM memory_entries_v2
+             WHERE scope = ?1
+               AND ((?1 = 'project' AND project_path = ?2) OR (?1 = 'session' AND session_id = ?3) OR (?1 = 'global'))",
+            params![scoped.scope, scoped.project_path, scoped.session_id],
         )?;
         self.mark_vocabulary_dirty(project_path);
         Ok(count)
@@ -636,6 +778,22 @@ impl ProjectMemoryStore {
             return Ok(0);
         };
         self.clear_project_memories(&project_path)
+    }
+
+    /// Delete expired session-scope memories older than `ttl_days`.
+    ///
+    /// This operates directly on V2 storage.
+    pub fn cleanup_expired_session_memories(&self, ttl_days: i64) -> AppResult<usize> {
+        let effective_ttl = ttl_days.max(1);
+        let threshold = format!("-{} days", effective_ttl);
+        let conn = self.get_connection()?;
+        let deleted = conn.execute(
+            "DELETE FROM memory_entries_v2
+             WHERE scope = 'session'
+               AND updated_at < datetime('now', ?1)",
+            params![threshold],
+        )?;
+        Ok(deleted)
     }
 
     /// Increment access counters for the specified memory IDs.
@@ -651,7 +809,7 @@ impl ProjectMemoryStore {
         let mut touched = 0usize;
         for id in ids {
             touched += tx.execute(
-                "UPDATE project_memories
+                "UPDATE memory_entries_v2
                  SET access_count = access_count + 1,
                      last_accessed_at = datetime('now')
                  WHERE id = ?1",
@@ -724,16 +882,47 @@ impl ProjectMemoryStore {
 
     fn load_memory_contents_for_project(&self, project_path: &str) -> AppResult<Vec<String>> {
         let conn = self.get_connection()?;
+        let scoped = map_legacy_project_path(project_path);
+
+        if scoped.scope == "global" {
+            let mut stmt = conn.prepare(
+                "SELECT content
+                 FROM memory_entries_v2
+                 WHERE scope = 'global' AND status = 'active'
+                 ORDER BY importance DESC, updated_at DESC
+                 LIMIT 2000",
+            )?;
+            let rows = stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            return Ok(rows);
+        }
+
+        if scoped.scope == "session" {
+            let mut stmt = conn.prepare(
+                "SELECT content
+                 FROM memory_entries_v2
+                 WHERE scope = 'session' AND session_id = ?1 AND status = 'active'
+                 ORDER BY importance DESC, updated_at DESC
+                 LIMIT 2000",
+            )?;
+            let rows = stmt
+                .query_map(params![scoped.session_id], |row| row.get::<_, String>(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            return Ok(rows);
+        }
+
         let mut stmt = conn.prepare(
             "SELECT content
-             FROM project_memories
-             WHERE project_path = ?1
+             FROM memory_entries_v2
+             WHERE scope = 'project' AND project_path = ?1 AND status = 'active'
              ORDER BY importance DESC, updated_at DESC
              LIMIT 2000",
         )?;
-
         let rows = stmt
-            .query_map(params![project_path], |row| row.get::<_, String>(0))?
+            .query_map(params![scoped.project_path], |row| row.get::<_, String>(0))?
             .filter_map(|r| r.ok())
             .collect();
         Ok(rows)
@@ -741,20 +930,48 @@ impl ProjectMemoryStore {
 
     fn backfill_embeddings_for_project(&self, project_path: &str) -> AppResult<()> {
         let conn = self.get_connection()?;
-        let mut stmt = conn.prepare(
-            "SELECT id, content
-             FROM project_memories
-             WHERE project_path = ?1",
-        )?;
+        let scoped = map_legacy_project_path(project_path);
+        let rows: Vec<(String, String)> = if scoped.scope == "global" {
+            let mut stmt = conn.prepare(
+                "SELECT id, content
+                 FROM memory_entries_v2
+                 WHERE scope = 'global' AND status = 'active'",
+            )?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+            rows
+        } else if scoped.scope == "session" {
+            let mut stmt = conn.prepare(
+                "SELECT id, content
+                 FROM memory_entries_v2
+                 WHERE scope = 'session' AND session_id = ?1 AND status = 'active'",
+            )?;
+            let rows = stmt
+                .query_map(params![scoped.session_id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+            rows
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT id, content
+                 FROM memory_entries_v2
+                 WHERE scope = 'project' AND project_path = ?1 AND status = 'active'",
+            )?;
+            let rows = stmt
+                .query_map(params![scoped.project_path], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+            rows
+        };
 
-        let rows: Vec<(String, String)> = stmt
-            .query_map(params![project_path], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        drop(stmt);
         for (id, content) in rows {
             let emb = self.embedding_service.embed_text(&content);
             let emb_dim = emb.len() as i64;
@@ -764,7 +981,7 @@ impl ProjectMemoryStore {
                 Some(embedding_to_bytes(&emb))
             };
             conn.execute(
-                "UPDATE project_memories
+                "UPDATE memory_entries_v2
                  SET embedding = ?2, embedding_provider = ?3, embedding_dim = ?4, updated_at = datetime('now')
                  WHERE id = ?1",
                 params![id, emb_bytes, MEMORY_EMBEDDING_PROVIDER_TFIDF, emb_dim],
@@ -808,24 +1025,36 @@ impl ProjectMemoryStore {
 /// Convert a database row to a MemoryEntry
 fn row_to_memory_entry(row: &rusqlite::Row) -> rusqlite::Result<MemoryEntry> {
     let id: String = row.get(0)?;
-    let project_path: String = row.get(1)?;
-    let category_str: String = row.get(2)?;
-    let content: String = row.get(3)?;
-    let keywords_json: String = row.get(4)?;
-    let importance: f32 = row.get(5)?;
-    let access_count: i64 = row.get(6)?;
-    let source_session_id: Option<String> = row.get(7)?;
-    let source_context: Option<String> = row.get(8)?;
-    let created_at: String = row.get(9)?;
-    let updated_at: String = row.get(10)?;
-    let last_accessed_at: String = row.get(11)?;
+    let scope: String = row.get(1)?;
+    let project_path_v2: Option<String> = row.get(2)?;
+    let session_id_v2: Option<String> = row.get(3)?;
+    let category_str: String = row.get(4)?;
+    let content: String = row.get(5)?;
+    let keywords_json: String = row.get(6)?;
+    let importance: f32 = row.get(7)?;
+    let access_count: i64 = row.get(8)?;
+    let source_session_id: Option<String> = row.get(9)?;
+    let source_context: Option<String> = row.get(10)?;
+    let status: String = row.get(11)?;
+    let risk_tier: String = row.get(12)?;
+    let conflict_flag = row.get::<_, i64>(13).unwrap_or(0) != 0;
+    let created_at: String = row.get(14)?;
+    let updated_at: String = row.get(15)?;
+    let last_accessed_at: String = row.get(16)?;
+    let legacy_project_path = legacy_project_path_from_scope(
+        &scope,
+        project_path_v2.as_deref(),
+        session_id_v2.as_deref(),
+    );
 
     let category = MemoryCategory::from_str(&category_str).unwrap_or(MemoryCategory::Fact);
     let keywords: Vec<String> = serde_json::from_str(&keywords_json).unwrap_or_default();
 
     Ok(MemoryEntry {
         id,
-        project_path,
+        project_path: legacy_project_path,
+        scope: Some(scope),
+        session_id: session_id_v2,
         category,
         content,
         keywords,
@@ -833,6 +1062,10 @@ fn row_to_memory_entry(row: &rusqlite::Row) -> rusqlite::Result<MemoryEntry> {
         access_count,
         source_session_id,
         source_context,
+        status: Some(status),
+        risk_tier: Some(risk_tier),
+        conflict_flag: Some(conflict_flag),
+        trace_id: None,
         created_at,
         updated_at,
         last_accessed_at,

@@ -779,9 +779,11 @@ impl WorkflowKernelState {
         }
 
         let record = self.read_persisted_record(session_id).await?;
+        let mut recovered_session = record.session.clone();
+        let repaired_fields = Self::repair_snapshot_integrity(&mut recovered_session);
         {
             let mut sessions = self.sessions.write().await;
-            sessions.insert(session_id.to_string(), record.session.clone());
+            sessions.insert(session_id.to_string(), recovered_session.clone());
         }
         {
             let mut events = self.events.write().await;
@@ -795,9 +797,11 @@ impl WorkflowKernelState {
         self.append_event(
             session_id,
             WorkflowEventKind::SessionRecovered,
-            record.session.active_mode,
+            recovered_session.active_mode,
             json!({
-                "fromPersistence": true
+                "fromPersistence": true,
+                "snapshotIntegrity": if repaired_fields.is_empty() { "ok" } else { "repaired" },
+                "repairedFields": repaired_fields,
             }),
         )
         .await;
@@ -806,6 +810,46 @@ impl WorkflowKernelState {
         self.persist_session_record(session_id).await?;
 
         self.get_session(session_id).await
+    }
+
+    fn repair_snapshot_integrity(session: &mut WorkflowSession) -> Vec<String> {
+        let mut repaired = Vec::new();
+
+        if session.mode_snapshots.chat.is_none() {
+            session.mode_snapshots.chat = Some(ChatState::default());
+            repaired.push("mode_snapshots.chat".to_string());
+        }
+        if session.mode_snapshots.plan.is_none() {
+            session.mode_snapshots.plan = Some(PlanState::default());
+            repaired.push("mode_snapshots.plan".to_string());
+        }
+        if session.mode_snapshots.task.is_none() {
+            session.mode_snapshots.task = Some(TaskState::default());
+            repaired.push("mode_snapshots.task".to_string());
+        }
+
+        session.mode_snapshots.ensure_mode(session.active_mode);
+
+        if let Some(chat) = session.mode_snapshots.chat.as_mut() {
+            if chat.phase.trim().is_empty() {
+                chat.phase = "ready".to_string();
+                repaired.push("mode_snapshots.chat.phase".to_string());
+            }
+        }
+        if let Some(plan) = session.mode_snapshots.plan.as_mut() {
+            if plan.phase.trim().is_empty() {
+                plan.phase = "idle".to_string();
+                repaired.push("mode_snapshots.plan.phase".to_string());
+            }
+        }
+        if let Some(task) = session.mode_snapshots.task.as_mut() {
+            if task.phase.trim().is_empty() {
+                task.phase = "idle".to_string();
+                repaired.push("mode_snapshots.task.phase".to_string());
+            }
+        }
+
+        repaired
     }
 
     async fn append_event(

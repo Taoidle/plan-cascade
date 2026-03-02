@@ -176,6 +176,12 @@ export interface ContextOpsDashboard {
   source_failure_traces: number;
   prepare_context_p50_ms: number;
   prepare_context_p95_ms: number;
+  memory_query_p95_ms: number;
+  empty_hit_rate: number;
+  candidate_count: number;
+  review_backlog: number;
+  approve_rate: number;
+  reject_rate: number;
   total_compaction_saving_tokens: number;
   avg_compaction_saving_tokens: number;
   ab_variants: ContextOpsVariantStat[];

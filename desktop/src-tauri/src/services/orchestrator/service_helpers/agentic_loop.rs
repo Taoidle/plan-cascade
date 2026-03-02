@@ -4106,12 +4106,12 @@ impl OrchestratorService {
         )?;
 
         // Delete session-scoped memories.
-        if let Some(session_project_path) =
-            crate::services::memory::store::build_session_project_path(session_id)
+        if let Some(normalized_session_id) =
+            crate::services::memory::store::normalize_memory_session_id(session_id)
         {
             conn.execute(
-                "DELETE FROM project_memories WHERE project_path = ?1",
-                params![session_project_path],
+                "DELETE FROM memory_entries_v2 WHERE scope = 'session' AND session_id = ?1",
+                params![normalized_session_id],
             )?;
         }
 
@@ -4161,12 +4161,12 @@ impl OrchestratorService {
 
         // Delete stale session-scoped memories.
         for session_id in &stale_session_ids {
-            if let Some(session_project_path) =
-                crate::services::memory::store::build_session_project_path(session_id)
+            if let Some(normalized_session_id) =
+                crate::services::memory::store::normalize_memory_session_id(session_id)
             {
                 conn.execute(
-                    "DELETE FROM project_memories WHERE project_path = ?1",
-                    params![session_project_path],
+                    "DELETE FROM memory_entries_v2 WHERE scope = 'session' AND session_id = ?1",
+                    params![normalized_session_id],
                 )?;
             }
         }

@@ -638,64 +638,15 @@ impl Database {
         // Feature-001: Project Memory System tables
         // ====================================================================
 
-        // Cross-session project memory
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS project_memories (
-                id TEXT PRIMARY KEY,
-                project_path TEXT NOT NULL,
-                category TEXT NOT NULL CHECK(category IN (
-                    'preference',
-                    'convention',
-                    'pattern',
-                    'correction',
-                    'fact'
-                )),
-                content TEXT NOT NULL,
-                keywords TEXT NOT NULL DEFAULT '[]',
-                embedding BLOB,
-                importance REAL NOT NULL DEFAULT 0.5,
-                access_count INTEGER NOT NULL DEFAULT 0,
-                source_session_id TEXT,
-                source_context TEXT,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                last_accessed_at TEXT NOT NULL DEFAULT (datetime('now')),
-                last_decay_at TEXT,
-                UNIQUE(project_path, content)
-            )",
-            [],
-        )?;
-
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_project_memories_project
-             ON project_memories(project_path)",
-            [],
-        )?;
-
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_project_memories_category
-             ON project_memories(project_path, category)",
-            [],
-        )?;
-
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_project_memories_importance
-             ON project_memories(project_path, importance DESC)",
-            [],
-        )?;
-
-        // Migration: add decay tracking column for incremental/idempotent decay.
-        {
-            let has_last_decay_at =
-                Self::table_has_column(&conn, "project_memories", "last_decay_at");
-            if !has_last_decay_at {
+        let has_legacy_project_memories = Self::table_exists(&conn, "project_memories");
+        if has_legacy_project_memories {
+            // Migration: add decay tracking column for incremental/idempotent decay.
+            if !Self::table_has_column(&conn, "project_memories", "last_decay_at") {
                 let _ = conn
                     .execute_batch("ALTER TABLE project_memories ADD COLUMN last_decay_at TEXT;");
             }
-        }
 
-        // Migration: embedding metadata fields for memory provider awareness.
-        {
+            // Migration: embedding metadata fields for memory provider awareness.
             if !Self::table_has_column(&conn, "project_memories", "embedding_provider") {
                 let _ = conn.execute_batch(
                     "ALTER TABLE project_memories ADD COLUMN embedding_provider TEXT NOT NULL DEFAULT 'tfidf';",
@@ -712,6 +663,257 @@ impl Database {
                 );
             }
         }
+
+        if has_legacy_project_memories
+            && !Self::table_exists(&conn, "project_memories_legacy_backup_v2")
+        {
+            let _ = conn.execute_batch(
+                "ALTER TABLE project_memories RENAME TO project_memories_legacy_backup_v2;",
+            );
+        }
+
+        // ====================================================================
+        // Memory V2: explicit scope/status model + unified retrieval substrate
+        // ====================================================================
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS memory_entries_v2 (
+                id TEXT PRIMARY KEY,
+                scope TEXT NOT NULL CHECK(scope IN ('global', 'project', 'session')),
+                project_path TEXT,
+                session_id TEXT,
+                category TEXT NOT NULL CHECK(category IN (
+                    'preference',
+                    'convention',
+                    'pattern',
+                    'correction',
+                    'fact'
+                )),
+                content TEXT NOT NULL,
+                content_hash TEXT NOT NULL DEFAULT '',
+                keywords TEXT NOT NULL DEFAULT '[]',
+                embedding BLOB,
+                importance REAL NOT NULL DEFAULT 0.5,
+                access_count INTEGER NOT NULL DEFAULT 0,
+                source_session_id TEXT,
+                source_context TEXT,
+                status TEXT NOT NULL DEFAULT 'active' CHECK(status IN (
+                    'active',
+                    'pending_review',
+                    'rejected',
+                    'archived'
+                )),
+                risk_tier TEXT NOT NULL DEFAULT 'high' CHECK(risk_tier IN ('low', 'medium', 'high')),
+                conflict_flag INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                last_accessed_at TEXT NOT NULL DEFAULT (datetime('now')),
+                last_decay_at TEXT,
+                embedding_provider TEXT NOT NULL DEFAULT 'tfidf',
+                embedding_dim INTEGER NOT NULL DEFAULT 0,
+                quality_score REAL NOT NULL DEFAULT 1.0
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_entries_v2_unique_content
+             ON memory_entries_v2(scope, IFNULL(project_path, ''), IFNULL(session_id, ''), content_hash)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_entries_v2_scope_project_session
+             ON memory_entries_v2(scope, project_path, session_id)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_entries_v2_status_risk
+             ON memory_entries_v2(status, risk_tier, updated_at DESC)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_entries_v2_category_importance
+             ON memory_entries_v2(category, importance DESC)",
+            [],
+        )?;
+
+        conn.execute_batch(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts_v2 USING fts5(
+                memory_id UNINDEXED,
+                content,
+                keywords,
+                tokenize=\"unicode61 remove_diacritics 2 tokenchars '_'\"
+            )",
+        )?;
+
+        // Backfill memory_entries_v2 from legacy backup table (idempotent).
+        if Self::table_exists(&conn, "project_memories_legacy_backup_v2") {
+            let _ = conn.execute_batch(
+                "INSERT OR IGNORE INTO memory_entries_v2 (
+                    id, scope, project_path, session_id, category, content, content_hash,
+                    keywords, embedding, importance, access_count, source_session_id, source_context,
+                    status, risk_tier, conflict_flag, created_at, updated_at, last_accessed_at,
+                    last_decay_at, embedding_provider, embedding_dim, quality_score
+                )
+                SELECT
+                    id,
+                    CASE
+                        WHEN project_path = '__global__' THEN 'global'
+                        WHEN project_path LIKE '__session__:%' THEN 'session'
+                        ELSE 'project'
+                    END,
+                    CASE
+                        WHEN project_path = '__global__' THEN NULL
+                        WHEN project_path LIKE '__session__:%' THEN NULL
+                        ELSE project_path
+                    END,
+                    CASE
+                        WHEN project_path LIKE '__session__:%' THEN substr(project_path, 13)
+                        ELSE NULL
+                    END,
+                    category,
+                    content,
+                    lower(trim(content)),
+                    keywords,
+                    embedding,
+                    importance,
+                    access_count,
+                    source_session_id,
+                    source_context,
+                    CASE
+                        WHEN source_context LIKE 'llm_extract:%' OR source_context LIKE 'rule_extract:%'
+                            THEN 'pending_review'
+                        ELSE 'active'
+                    END,
+                    CASE
+                        WHEN source_context LIKE 'llm_extract:%' THEN 'medium'
+                        WHEN source_context LIKE 'rule_extract:%' THEN 'low'
+                        ELSE 'high'
+                    END,
+                    0,
+                    created_at,
+                    updated_at,
+                    last_accessed_at,
+                    last_decay_at,
+                    COALESCE(embedding_provider, 'tfidf'),
+                    COALESCE(embedding_dim, 0),
+                    COALESCE(quality_score, 1.0)
+                FROM project_memories_legacy_backup_v2",
+            );
+        }
+        let _ = conn.execute_batch(
+            "UPDATE memory_entries_v2 AS pending
+             SET conflict_flag = CASE
+                 WHEN pending.status = 'pending_review'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM memory_entries_v2 AS active
+                          WHERE active.id <> pending.id
+                            AND active.status = 'active'
+                            AND active.scope = pending.scope
+                            AND IFNULL(active.project_path, '') = IFNULL(pending.project_path, '')
+                            AND IFNULL(active.session_id, '') = IFNULL(pending.session_id, '')
+                            AND active.category = pending.category
+                      )
+                 THEN 1
+                 ELSE 0
+             END",
+        );
+        let _ = conn.execute_batch(
+            "DROP TRIGGER IF EXISTS trg_project_memories_to_v2_insert;
+             DROP TRIGGER IF EXISTS trg_project_memories_to_v2_update;
+             DROP TRIGGER IF EXISTS trg_project_memories_to_v2_delete;",
+        );
+
+        conn.execute_batch(
+            "CREATE TRIGGER IF NOT EXISTS trg_memory_v2_fts_insert
+             AFTER INSERT ON memory_entries_v2
+             BEGIN
+                 DELETE FROM memory_fts_v2 WHERE memory_id = NEW.id;
+                 INSERT INTO memory_fts_v2(memory_id, content, keywords)
+                 VALUES (NEW.id, NEW.content, NEW.keywords);
+             END;
+
+             CREATE TRIGGER IF NOT EXISTS trg_memory_v2_fts_update
+             AFTER UPDATE ON memory_entries_v2
+             BEGIN
+                 DELETE FROM memory_fts_v2 WHERE memory_id = NEW.id;
+                 INSERT INTO memory_fts_v2(memory_id, content, keywords)
+                 VALUES (NEW.id, NEW.content, NEW.keywords);
+             END;
+
+             CREATE TRIGGER IF NOT EXISTS trg_memory_v2_fts_delete
+             AFTER DELETE ON memory_entries_v2
+             BEGIN
+                 DELETE FROM memory_fts_v2 WHERE memory_id = OLD.id;
+             END;
+
+             CREATE TRIGGER IF NOT EXISTS trg_memory_v2_conflict_insert
+             AFTER INSERT ON memory_entries_v2
+             BEGIN
+                 UPDATE memory_entries_v2
+                 SET conflict_flag = CASE
+                     WHEN NEW.status = 'pending_review'
+                          AND EXISTS (
+                              SELECT 1
+                              FROM memory_entries_v2 AS active
+                              WHERE active.id <> NEW.id
+                                AND active.status = 'active'
+                                AND active.scope = NEW.scope
+                                AND IFNULL(active.project_path, '') = IFNULL(NEW.project_path, '')
+                                AND IFNULL(active.session_id, '') = IFNULL(NEW.session_id, '')
+                                AND active.category = NEW.category
+                          )
+                     THEN 1
+                     ELSE 0
+                 END
+                 WHERE id = NEW.id;
+             END;
+
+             CREATE TRIGGER IF NOT EXISTS trg_memory_v2_conflict_update
+             AFTER UPDATE OF status, scope, project_path, session_id, category ON memory_entries_v2
+             BEGIN
+                 UPDATE memory_entries_v2
+                 SET conflict_flag = CASE
+                     WHEN status = 'pending_review'
+                          AND EXISTS (
+                              SELECT 1
+                              FROM memory_entries_v2 AS active
+                              WHERE active.id <> memory_entries_v2.id
+                                AND active.status = 'active'
+                                AND active.scope = memory_entries_v2.scope
+                                AND IFNULL(active.project_path, '') = IFNULL(memory_entries_v2.project_path, '')
+                                AND IFNULL(active.session_id, '') = IFNULL(memory_entries_v2.session_id, '')
+                                AND active.category = memory_entries_v2.category
+                          )
+                     THEN 1
+                     ELSE 0
+                 END
+                 WHERE scope = NEW.scope
+                   AND IFNULL(project_path, '') = IFNULL(NEW.project_path, '')
+                   AND IFNULL(session_id, '') = IFNULL(NEW.session_id, '')
+                   AND category = NEW.category;
+             END;",
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS memory_review_audit_v2 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                memory_id TEXT NOT NULL,
+                decision TEXT NOT NULL CHECK(decision IN ('approve', 'reject', 'archive')),
+                operator TEXT NOT NULL DEFAULT 'system',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_review_audit_v2_created
+             ON memory_review_audit_v2(created_at DESC)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_review_audit_v2_memory
+             ON memory_review_audit_v2(memory_id)",
+            [],
+        )?;
 
         // Embedding metadata registry for memory retrieval diagnostics.
         conn.execute(
@@ -1183,6 +1385,17 @@ impl Database {
             }
         }
         false
+    }
+
+    /// Check whether a table exists in sqlite_master.
+    fn table_exists(conn: &rusqlite::Connection, table: &str) -> bool {
+        conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?1",
+            params![table],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count > 0)
+        .unwrap_or(false)
     }
 
     /// Get a connection from the pool
@@ -2123,78 +2336,76 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn test_project_memories_table_exists() {
+    fn test_memory_entries_v2_table_exists() {
         let db = create_test_db().unwrap();
         let conn = db.get_connection().unwrap();
 
-        // Insert a memory entry
         conn.execute(
-            "INSERT INTO project_memories (id, project_path, category, content, keywords, importance)
-             VALUES ('mem-001', '/test/project', 'preference', 'Use pnpm not npm', '[\"pnpm\",\"npm\"]', 0.9)",
+            "INSERT INTO memory_entries_v2 (id, scope, project_path, category, content, content_hash, keywords, importance)
+             VALUES ('mem-001', 'project', '/test/project', 'preference', 'Use pnpm not npm', lower(trim('Use pnpm not npm')), '[\"pnpm\",\"npm\"]', 0.9)",
             [],
-        ).unwrap();
+        )
+        .unwrap();
 
-        // Query it back
         let content: String = conn
             .query_row(
-                "SELECT content FROM project_memories WHERE id = 'mem-001'",
+                "SELECT content FROM memory_entries_v2 WHERE id = 'mem-001'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
         assert_eq!(content, "Use pnpm not npm");
 
-        // Verify category constraint
         let result = conn.execute(
-            "INSERT INTO project_memories (id, project_path, category, content)
-             VALUES ('mem-002', '/test/project', 'invalid_category', 'test')",
+            "INSERT INTO memory_entries_v2 (id, scope, project_path, category, content, content_hash)
+             VALUES ('mem-002', 'project', '/test/project', 'invalid_category', 'test', lower(trim('test')))",
             [],
         );
         assert!(result.is_err(), "Invalid category should be rejected");
     }
 
     #[test]
-    fn test_project_memories_unique_constraint() {
+    fn test_memory_entries_v2_unique_constraint() {
         let db = create_test_db().unwrap();
         let conn = db.get_connection().unwrap();
 
         conn.execute(
-            "INSERT INTO project_memories (id, project_path, category, content)
-             VALUES ('mem-001', '/test/project', 'fact', 'This is a Tauri app')",
+            "INSERT INTO memory_entries_v2 (id, scope, project_path, category, content, content_hash)
+             VALUES ('mem-001', 'project', '/test/project', 'fact', 'This is a Tauri app', lower(trim('This is a Tauri app')))",
             [],
         )
         .unwrap();
 
-        // Same project_path + content should fail with UNIQUE constraint
         let result = conn.execute(
-            "INSERT INTO project_memories (id, project_path, category, content)
-             VALUES ('mem-002', '/test/project', 'fact', 'This is a Tauri app')",
+            "INSERT INTO memory_entries_v2 (id, scope, project_path, category, content, content_hash)
+             VALUES ('mem-002', 'project', '/test/project', 'fact', 'This is a Tauri app', lower(trim('This is a Tauri app')))",
             [],
         );
         assert!(
             result.is_err(),
-            "Duplicate project_path+content should be rejected"
+            "Duplicate scoped content should be rejected"
         );
     }
 
     #[test]
-    fn test_project_memories_all_categories() {
+    fn test_memory_entries_v2_all_categories() {
         let db = create_test_db().unwrap();
         let conn = db.get_connection().unwrap();
 
         let categories = ["preference", "convention", "pattern", "correction", "fact"];
         for (i, cat) in categories.iter().enumerate() {
+            let content = format!("test content {}", i);
             conn.execute(
-                "INSERT INTO project_memories (id, project_path, category, content)
-                 VALUES (?1, '/test', ?2, ?3)",
-                params![format!("mem-{}", i), *cat, format!("test content {}", i)],
+                "INSERT INTO memory_entries_v2 (id, scope, project_path, category, content, content_hash)
+                 VALUES (?1, 'project', '/test', ?2, ?3, lower(trim(?3)))",
+                params![format!("mem-{}", i), *cat, content],
             )
             .unwrap();
         }
 
         let count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM project_memories WHERE project_path = '/test'",
+                "SELECT COUNT(*) FROM memory_entries_v2 WHERE scope = 'project' AND project_path = '/test'",
                 [],
                 |row| row.get(0),
             )
@@ -2256,14 +2467,14 @@ mod tests {
     }
 
     #[test]
-    fn test_project_memories_indexes_exist() {
+    fn test_memory_entries_v2_indexes_exist() {
         let db = create_test_db().unwrap();
         let conn = db.get_connection().unwrap();
 
         // Check indexes via pragma
         let mut stmt = conn
             .prepare(
-                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='project_memories'",
+                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='memory_entries_v2'",
             )
             .unwrap();
         let indexes: Vec<String> = stmt
@@ -2272,20 +2483,197 @@ mod tests {
             .filter_map(|r| r.ok())
             .collect();
 
-        assert!(indexes.contains(&"idx_project_memories_project".to_string()));
-        assert!(indexes.contains(&"idx_project_memories_category".to_string()));
-        assert!(indexes.contains(&"idx_project_memories_importance".to_string()));
+        assert!(indexes.contains(&"idx_memory_entries_v2_unique_content".to_string()));
+        assert!(indexes.contains(&"idx_memory_entries_v2_scope_project_session".to_string()));
+        assert!(indexes.contains(&"idx_memory_entries_v2_status_risk".to_string()));
+        assert!(indexes.contains(&"idx_memory_entries_v2_category_importance".to_string()));
     }
 
     #[test]
-    fn test_project_memories_last_decay_column_exists() {
+    fn test_memory_entries_v2_last_decay_column_exists() {
         let db = create_test_db().unwrap();
         let conn = db.get_connection().unwrap();
         assert!(Database::table_has_column(
             &conn,
-            "project_memories",
+            "memory_entries_v2",
             "last_decay_at"
         ));
+    }
+
+    fn create_legacy_memory_db_for_migration() -> Database {
+        let manager = SqliteConnectionManager::memory();
+        let pool = Pool::builder().max_size(1).build(manager).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            conn.execute_batch(
+                "CREATE TABLE project_memories (
+                    id TEXT PRIMARY KEY,
+                    project_path TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    keywords TEXT NOT NULL DEFAULT '[]',
+                    embedding BLOB,
+                    importance REAL NOT NULL DEFAULT 0.5,
+                    access_count INTEGER NOT NULL DEFAULT 0,
+                    source_session_id TEXT,
+                    source_context TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    last_accessed_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE(project_path, content)
+                );",
+            )
+            .unwrap();
+
+            conn.execute(
+                "INSERT INTO project_memories (id, project_path, category, content, keywords, importance, source_context)
+                 VALUES ('legacy-project', '/legacy/project', 'fact', 'legacy project memory', '[\"legacy\"]', 0.8, 'manual')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO project_memories (id, project_path, category, content, keywords, importance, source_context)
+                 VALUES ('legacy-global', '__global__', 'preference', 'legacy global memory', '[\"global\"]', 0.9, 'manual')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO project_memories (id, project_path, category, content, keywords, importance, source_context)
+                 VALUES ('legacy-session', '__session__:sess-1', 'pattern', 'legacy session memory', '[\"session\"]', 0.7, 'llm_extract:session')",
+                [],
+            )
+            .unwrap();
+        }
+
+        Database { pool }
+    }
+
+    fn restore_memory_entries_from_legacy_backup(conn: &rusqlite::Connection) {
+        conn.execute_batch(
+            "INSERT OR REPLACE INTO memory_entries_v2 (
+                id, scope, project_path, session_id, category, content, content_hash,
+                keywords, embedding, importance, access_count, source_session_id, source_context,
+                status, risk_tier, conflict_flag, created_at, updated_at, last_accessed_at,
+                last_decay_at, embedding_provider, embedding_dim, quality_score
+            )
+            SELECT
+                id,
+                CASE
+                    WHEN project_path = '__global__' THEN 'global'
+                    WHEN project_path LIKE '__session__:%' THEN 'session'
+                    ELSE 'project'
+                END,
+                CASE
+                    WHEN project_path = '__global__' THEN NULL
+                    WHEN project_path LIKE '__session__:%' THEN NULL
+                    ELSE project_path
+                END,
+                CASE
+                    WHEN project_path LIKE '__session__:%' THEN substr(project_path, 13)
+                    ELSE NULL
+                END,
+                category,
+                content,
+                lower(trim(content)),
+                keywords,
+                embedding,
+                importance,
+                access_count,
+                source_session_id,
+                source_context,
+                CASE
+                    WHEN source_context LIKE 'llm_extract:%' OR source_context LIKE 'rule_extract:%'
+                        THEN 'pending_review'
+                    ELSE 'active'
+                END,
+                CASE
+                    WHEN source_context LIKE 'llm_extract:%' THEN 'medium'
+                    WHEN source_context LIKE 'rule_extract:%' THEN 'low'
+                    ELSE 'high'
+                END,
+                0,
+                created_at,
+                updated_at,
+                last_accessed_at,
+                last_decay_at,
+                COALESCE(embedding_provider, 'tfidf'),
+                COALESCE(embedding_dim, 0),
+                COALESCE(quality_score, 1.0)
+            FROM project_memories_legacy_backup_v2;",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_memory_v2_migration_renames_legacy_table_and_backfills() {
+        let db = create_legacy_memory_db_for_migration();
+        db.init_schema().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        assert!(!Database::table_exists(&conn, "project_memories"));
+        assert!(Database::table_exists(
+            &conn,
+            "project_memories_legacy_backup_v2"
+        ));
+
+        let backup_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM project_memories_legacy_backup_v2",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let v2_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM memory_entries_v2", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(backup_count, 3);
+        assert_eq!(v2_count, 3);
+
+        let (scope, project_path, session_id): (String, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT scope, project_path, session_id
+                 FROM memory_entries_v2
+                 WHERE id = 'legacy-session'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(scope, "session");
+        assert_eq!(project_path, None);
+        assert_eq!(session_id, Some("sess-1".to_string()));
+    }
+
+    #[test]
+    fn test_memory_v2_rollback_rehearsal_from_backup() {
+        let db = create_legacy_memory_db_for_migration();
+        db.init_schema().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        conn.execute("DELETE FROM memory_entries_v2", []).unwrap();
+        let count_after_delete: i64 = conn
+            .query_row("SELECT COUNT(*) FROM memory_entries_v2", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count_after_delete, 0);
+
+        restore_memory_entries_from_legacy_backup(&conn);
+
+        let restored_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM memory_entries_v2", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let backup_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM project_memories_legacy_backup_v2",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(restored_count, backup_count);
     }
 
     #[test]

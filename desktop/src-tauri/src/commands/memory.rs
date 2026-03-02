@@ -8,9 +8,18 @@ use tauri::State;
 use crate::models::response::CommandResponse;
 use crate::services::memory::extraction::MemoryExtractor;
 use crate::services::memory::maintenance::MemoryMaintenance;
+use crate::services::memory::query_policy_v2::{memory_query_tuning_v2, MemoryQueryPresetV2};
+use crate::services::memory::query_v2::{
+    list_memory_entries_v2 as list_memory_entries_unified_v2,
+    list_pending_memory_candidates_v2 as list_pending_memory_candidates_unified_v2,
+    memory_stats_v2 as memory_stats_unified_v2,
+    query_memory_entries_v2 as query_memory_entries_unified_v2,
+    review_memory_candidates_v2 as review_memory_candidates_unified_v2, MemoryReviewCandidateV2,
+    MemoryReviewDecisionV2, MemoryReviewSummaryV2, MemoryScopeV2, MemoryStatusV2,
+    UnifiedMemoryQueryRequestV2, UnifiedMemoryQueryResultV2,
+};
 use crate::services::memory::retrieval::{
-    search_memories, search_memories_v2_async, MemorySearchIntent, MemorySearchRequestV2,
-    MemorySearchResultV2,
+    search_memories, MemorySearchIntent, MemorySearchResultV2,
 };
 use crate::services::memory::store::{
     build_session_project_path, MemoryCategory, MemoryEntry, MemorySearchRequest,
@@ -20,6 +29,7 @@ use crate::services::memory::store::{
 use crate::state::AppState;
 
 const EXTRACTION_SESSION_MARKER_PREFIX: &str = "memory_extracted_session:";
+const DEFAULT_SESSION_SCOPE_TTL_DAYS: i64 = 14;
 
 fn resolve_memory_project_path(
     project_path: &str,
@@ -65,6 +75,31 @@ fn parse_memory_intent(intent: Option<&str>) -> MemorySearchIntent {
     }
 }
 
+fn parse_memory_scopes_v2(scopes: Option<&[String]>) -> Vec<MemoryScopeV2> {
+    scopes
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|scope| MemoryScopeV2::from_str(scope))
+        .collect()
+}
+
+fn parse_memory_statuses_v2(statuses: Option<&[String]>) -> Vec<MemoryStatusV2> {
+    statuses
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|status| MemoryStatusV2::from_str(status))
+        .collect()
+}
+
+fn parse_memory_review_decision_v2(value: &str) -> Result<MemoryReviewDecisionV2, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "approve" | "approved" | "active" => Ok(MemoryReviewDecisionV2::Approve),
+        "reject" | "rejected" => Ok(MemoryReviewDecisionV2::Reject),
+        "archive" | "archived" => Ok(MemoryReviewDecisionV2::Archive),
+        _ => Err(format!("Invalid review decision: {}", value)),
+    }
+}
+
 /// Search project memories by semantic similarity and keyword match
 #[tauri::command]
 pub async fn search_project_memories(
@@ -88,12 +123,13 @@ pub async fn search_project_memories(
             .collect::<Vec<_>>()
     });
 
+    let tuning = memory_query_tuning_v2(MemoryQueryPresetV2::CommandSearch);
     let request = MemorySearchRequest {
         project_path: effective_project_path,
         query,
         categories: parsed_categories,
-        top_k: top_k.unwrap_or(10),
-        min_importance: 0.1,
+        top_k: top_k.unwrap_or(tuning.top_k_total),
+        min_importance: tuning.min_importance,
     };
 
     match state
@@ -119,27 +155,55 @@ pub async fn search_project_memories_v2(
     enable_lexical: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<CommandResponse<Vec<MemorySearchResultV2>>, String> {
-    let effective_project_path =
-        match resolve_memory_project_path(&project_path, scope.as_deref(), session_id.as_deref()) {
-            Ok(path) => path,
-            Err(e) => return Ok(CommandResponse::err(e)),
-        };
+    let trimmed_project_path = project_path.trim().to_string();
+    if trimmed_project_path.is_empty() {
+        return Ok(CommandResponse::err("project_path is required".to_string()));
+    }
+    let parsed_scope = match scope.as_deref() {
+        Some(value) => match MemoryScopeV2::from_str(value) {
+            Some(scope) => vec![scope],
+            None => {
+                return Ok(CommandResponse::err(format!(
+                    "Invalid memory scope: {}",
+                    value
+                )))
+            }
+        },
+        None => vec![],
+    };
+    if matches!(parsed_scope.first(), Some(MemoryScopeV2::Session))
+        && session_id.as_deref().unwrap_or("").trim().is_empty()
+    {
+        return Ok(CommandResponse::err(
+            "session_id is required for session scope".to_string(),
+        ));
+    }
 
-    let parsed_categories = categories.as_ref().map(|cats| {
-        cats.iter()
-            .filter_map(|c| MemoryCategory::from_str(c).ok())
-            .collect::<Vec<_>>()
-    });
+    let parsed_categories: Vec<MemoryCategory> = categories
+        .as_ref()
+        .map(|cats| {
+            cats.iter()
+                .filter_map(|c| MemoryCategory::from_str(c).ok())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
 
-    let request = MemorySearchRequestV2 {
-        project_path: effective_project_path,
+    let tuning = memory_query_tuning_v2(MemoryQueryPresetV2::CommandSearch);
+    let request = UnifiedMemoryQueryRequestV2 {
+        project_path: trimmed_project_path,
         query,
+        scopes: parsed_scope,
         categories: parsed_categories,
-        top_k: top_k.unwrap_or(10),
-        min_importance: 0.1,
+        include_ids: vec![],
+        exclude_ids: vec![],
+        session_id,
+        top_k_total: top_k.unwrap_or(tuning.top_k_total),
+        min_importance: tuning.min_importance,
+        per_scope_budget: tuning.per_scope_budget,
         intent: parse_memory_intent(intent.as_deref()),
         enable_semantic: enable_semantic.unwrap_or(true),
         enable_lexical: enable_lexical.unwrap_or(true),
+        statuses: vec![MemoryStatusV2::Active],
     };
 
     let store = match state.get_memory_store_arc().await {
@@ -147,8 +211,8 @@ pub async fn search_project_memories_v2(
         Err(e) => return Ok(CommandResponse::err(e.to_string())),
     };
 
-    match search_memories_v2_async(store.as_ref(), &request).await {
-        Ok(results) => Ok(CommandResponse::ok(results)),
+    match query_memory_entries_unified_v2(store.as_ref(), &request).await {
+        Ok(results) => Ok(CommandResponse::ok(results.results)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
 }
@@ -320,6 +384,22 @@ pub async fn clear_session_memories(
     }
 }
 
+/// Cleanup expired session-scope memories based on TTL days (default: 14).
+#[tauri::command]
+pub async fn cleanup_expired_session_memories_v2(
+    ttl_days: Option<i64>,
+    state: State<'_, AppState>,
+) -> Result<CommandResponse<usize>, String> {
+    let effective_ttl = ttl_days.unwrap_or(DEFAULT_SESSION_SCOPE_TTL_DAYS).max(1);
+    match state
+        .with_memory_store(|store| store.cleanup_expired_session_memories(effective_ttl))
+        .await
+    {
+        Ok(count) => Ok(CommandResponse::ok(count)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
 /// Get memory statistics for a project
 #[tauri::command]
 pub async fn get_memory_stats(
@@ -328,17 +408,270 @@ pub async fn get_memory_stats(
     session_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<CommandResponse<MemoryStats>, String> {
-    let effective_project_path =
-        match resolve_memory_project_path(&project_path, scope.as_deref(), session_id.as_deref()) {
-            Ok(path) => path,
-            Err(e) => return Ok(CommandResponse::err(e)),
-        };
-
+    let trimmed_project_path = project_path.trim().to_string();
+    if trimmed_project_path.is_empty() {
+        return Ok(CommandResponse::err("project_path is required".to_string()));
+    }
+    let scopes = match scope.as_deref() {
+        Some(value) => match MemoryScopeV2::from_str(value) {
+            Some(scope) => vec![scope],
+            None => {
+                return Ok(CommandResponse::err(format!(
+                    "Invalid memory scope: {}",
+                    value
+                )))
+            }
+        },
+        None => vec![],
+    };
+    if matches!(scopes.first(), Some(MemoryScopeV2::Session))
+        && session_id.as_deref().unwrap_or("").trim().is_empty()
+    {
+        return Ok(CommandResponse::err(
+            "session_id is required for session scope".to_string(),
+        ));
+    }
+    let tuning = memory_query_tuning_v2(MemoryQueryPresetV2::CommandStats);
+    let request = UnifiedMemoryQueryRequestV2 {
+        project_path: trimmed_project_path,
+        query: String::new(),
+        scopes,
+        categories: vec![],
+        include_ids: vec![],
+        exclude_ids: vec![],
+        session_id,
+        top_k_total: tuning.top_k_total,
+        min_importance: tuning.min_importance,
+        per_scope_budget: tuning.per_scope_budget,
+        intent: MemorySearchIntent::Default,
+        enable_semantic: false,
+        enable_lexical: false,
+        statuses: vec![MemoryStatusV2::Active],
+    };
     match state
-        .with_memory_store(|store| store.get_stats(&effective_project_path))
+        .with_memory_store(|store| memory_stats_unified_v2(store, &request))
         .await
     {
         Ok(stats) => Ok(CommandResponse::ok(stats)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Unified V2 memory query across project/global/session scopes.
+#[tauri::command]
+pub async fn query_memory_entries_v2(
+    project_path: String,
+    query: String,
+    categories: Option<Vec<String>>,
+    scopes: Option<Vec<String>>,
+    include_ids: Option<Vec<String>>,
+    exclude_ids: Option<Vec<String>>,
+    statuses: Option<Vec<String>>,
+    session_id: Option<String>,
+    top_k_total: Option<usize>,
+    min_importance: Option<f32>,
+    per_scope_budget: Option<usize>,
+    intent: Option<String>,
+    enable_semantic: Option<bool>,
+    enable_lexical: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<CommandResponse<UnifiedMemoryQueryResultV2>, String> {
+    let trimmed_project_path = project_path.trim().to_string();
+    if trimmed_project_path.is_empty() {
+        return Ok(CommandResponse::err("project_path is required".to_string()));
+    }
+    let parsed_categories: Vec<MemoryCategory> = categories
+        .as_ref()
+        .map(|cats| {
+            cats.iter()
+                .filter_map(|cat| MemoryCategory::from_str(cat).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    let tuning = memory_query_tuning_v2(MemoryQueryPresetV2::CommandQuery);
+    let request = UnifiedMemoryQueryRequestV2 {
+        project_path: trimmed_project_path,
+        query,
+        scopes: parse_memory_scopes_v2(scopes.as_deref()),
+        categories: parsed_categories,
+        include_ids: include_ids.unwrap_or_default(),
+        exclude_ids: exclude_ids.unwrap_or_default(),
+        session_id,
+        top_k_total: top_k_total.unwrap_or(tuning.top_k_total),
+        min_importance: min_importance.unwrap_or(tuning.min_importance),
+        per_scope_budget: per_scope_budget.unwrap_or(tuning.per_scope_budget),
+        intent: parse_memory_intent(intent.as_deref()),
+        enable_semantic: enable_semantic.unwrap_or(true),
+        enable_lexical: enable_lexical.unwrap_or(true),
+        statuses: parse_memory_statuses_v2(statuses.as_deref()),
+    };
+    let store = match state.get_memory_store_arc().await {
+        Ok(store) => store,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+    match query_memory_entries_unified_v2(store.as_ref(), &request).await {
+        Ok(result) => Ok(CommandResponse::ok(result)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Unified V2 memory listing across scopes.
+#[tauri::command]
+pub async fn list_memory_entries_v2(
+    project_path: String,
+    categories: Option<Vec<String>>,
+    scopes: Option<Vec<String>>,
+    statuses: Option<Vec<String>>,
+    session_id: Option<String>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<CommandResponse<Vec<MemoryEntry>>, String> {
+    let trimmed_project_path = project_path.trim().to_string();
+    if trimmed_project_path.is_empty() {
+        return Ok(CommandResponse::err("project_path is required".to_string()));
+    }
+    let tuning = memory_query_tuning_v2(MemoryQueryPresetV2::CommandList);
+    let parsed_categories: Vec<MemoryCategory> = categories
+        .as_ref()
+        .map(|cats| {
+            cats.iter()
+                .filter_map(|cat| MemoryCategory::from_str(cat).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    let page_offset = offset.unwrap_or(0);
+    let page_limit = limit.unwrap_or(50).max(1);
+    let request = UnifiedMemoryQueryRequestV2 {
+        project_path: trimmed_project_path,
+        query: String::new(),
+        scopes: parse_memory_scopes_v2(scopes.as_deref()),
+        categories: parsed_categories,
+        include_ids: vec![],
+        exclude_ids: vec![],
+        session_id,
+        top_k_total: (page_offset + page_limit).max(tuning.top_k_total),
+        min_importance: tuning.min_importance,
+        per_scope_budget: tuning.per_scope_budget,
+        intent: MemorySearchIntent::Default,
+        enable_semantic: false,
+        enable_lexical: false,
+        statuses: parse_memory_statuses_v2(statuses.as_deref()),
+    };
+    let store = match state.get_memory_store_arc().await {
+        Ok(store) => store,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+    match list_memory_entries_unified_v2(store.as_ref(), request).await {
+        Ok(mut rows) => {
+            if page_offset >= rows.len() {
+                return Ok(CommandResponse::ok(vec![]));
+            }
+            let end = (page_offset + page_limit).min(rows.len());
+            rows = rows[page_offset..end].to_vec();
+            Ok(CommandResponse::ok(rows))
+        }
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Unified V2 memory stats across scopes.
+#[tauri::command]
+pub async fn memory_stats_v2(
+    project_path: String,
+    categories: Option<Vec<String>>,
+    scopes: Option<Vec<String>>,
+    statuses: Option<Vec<String>>,
+    session_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<CommandResponse<MemoryStats>, String> {
+    let trimmed_project_path = project_path.trim().to_string();
+    if trimmed_project_path.is_empty() {
+        return Ok(CommandResponse::err("project_path is required".to_string()));
+    }
+    let parsed_categories: Vec<MemoryCategory> = categories
+        .as_ref()
+        .map(|cats| {
+            cats.iter()
+                .filter_map(|cat| MemoryCategory::from_str(cat).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    let tuning = memory_query_tuning_v2(MemoryQueryPresetV2::CommandStats);
+    let request = UnifiedMemoryQueryRequestV2 {
+        project_path: trimmed_project_path,
+        query: String::new(),
+        scopes: parse_memory_scopes_v2(scopes.as_deref()),
+        categories: parsed_categories,
+        include_ids: vec![],
+        exclude_ids: vec![],
+        session_id,
+        top_k_total: tuning.top_k_total,
+        min_importance: tuning.min_importance,
+        per_scope_budget: tuning.per_scope_budget,
+        intent: MemorySearchIntent::Default,
+        enable_semantic: false,
+        enable_lexical: false,
+        statuses: parse_memory_statuses_v2(statuses.as_deref()),
+    };
+    match state
+        .with_memory_store(|store| memory_stats_unified_v2(store, &request))
+        .await
+    {
+        Ok(stats) => Ok(CommandResponse::ok(stats)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// List pending-review memories in V2 governance flow.
+#[tauri::command]
+pub async fn list_pending_memory_candidates_v2(
+    project_path: String,
+    scopes: Option<Vec<String>>,
+    session_id: Option<String>,
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<CommandResponse<Vec<MemoryReviewCandidateV2>>, String> {
+    let trimmed_project_path = project_path.trim().to_string();
+    if trimmed_project_path.is_empty() {
+        return Ok(CommandResponse::err("project_path is required".to_string()));
+    }
+    let normalized_scopes = parse_memory_scopes_v2(scopes.as_deref());
+    match state
+        .with_memory_store(|store| {
+            list_pending_memory_candidates_unified_v2(
+                store,
+                &trimmed_project_path,
+                session_id.as_deref(),
+                &normalized_scopes,
+                limit.unwrap_or(200),
+            )
+        })
+        .await
+    {
+        Ok(rows) => Ok(CommandResponse::ok(rows)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Review pending memory candidates in V2 governance flow.
+#[tauri::command]
+pub async fn review_memory_candidates_v2(
+    memory_ids: Vec<String>,
+    decision: String,
+    state: State<'_, AppState>,
+) -> Result<CommandResponse<MemoryReviewSummaryV2>, String> {
+    let parsed_decision = match parse_memory_review_decision_v2(&decision) {
+        Ok(value) => value,
+        Err(e) => return Ok(CommandResponse::err(e)),
+    };
+    match state
+        .with_memory_store(|store| {
+            review_memory_candidates_unified_v2(store, &memory_ids, parsed_decision)
+        })
+        .await
+    {
+        Ok(summary) => Ok(CommandResponse::ok(summary)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
 }

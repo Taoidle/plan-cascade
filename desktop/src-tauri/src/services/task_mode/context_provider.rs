@@ -18,11 +18,12 @@ use crate::services::knowledge::context_provider::{
     KnowledgeContextConfig, KnowledgeContextProvider,
 };
 use crate::services::knowledge::pipeline::ScopedDocumentRef;
-use crate::services::memory::retrieval::search_memories;
-use crate::services::memory::store::{
-    build_session_project_path, MemoryCategory, GLOBAL_PROJECT_PATH,
+use crate::services::memory::query_policy_v2::tuning_for_task_context_v2;
+use crate::services::memory::query_v2::{
+    query_memory_entries_v2 as query_memory_entries_unified_v2, MemoryScopeV2, MemoryStatusV2,
+    UnifiedMemoryQueryRequestV2,
 };
-use crate::services::memory::MemorySearchRequest;
+use crate::services::memory::store::MemoryCategory;
 use crate::services::skills::config::load_skills_config;
 use crate::services::skills::discovery::discover_all_skills;
 use crate::services::skills::generator::SkillGeneratorStore;
@@ -88,6 +89,15 @@ pub struct MemorySourceConfig {
     /// Session id used when querying session-scoped memories.
     #[serde(default)]
     pub session_id: Option<String>,
+    /// Allowed memory statuses for retrieval.
+    /// Empty means default to `active`, unless review_mode opts into diagnostics.
+    #[serde(default)]
+    pub statuses: Vec<String>,
+    /// Review retrieval mode:
+    /// - `active_only` (default): inject only active memories
+    /// - `include_pending_review`: include pending_review for diagnostics
+    #[serde(default)]
+    pub review_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -232,6 +242,8 @@ pub async fn query_selected_context(
             &m.excluded_memory_ids,
             &m.selected_scopes,
             m.session_id.as_deref(),
+            &m.statuses,
+            m.review_mode.as_deref(),
         )
         .await
     } else {
@@ -289,6 +301,8 @@ pub async fn query_selected_context_without_knowledge(
             &m.excluded_memory_ids,
             &m.selected_scopes,
             m.session_id.as_deref(),
+            &m.statuses,
+            m.review_mode.as_deref(),
         )
         .await
     } else {
@@ -401,7 +415,19 @@ pub async fn query_memories_for_task(
     project_path: &str,
     query: &str,
 ) -> String {
-    query_memories_for_task_filtered(app_state, project_path, query, &[], &[], &[], &[], None).await
+    query_memories_for_task_filtered(
+        app_state,
+        project_path,
+        query,
+        &[],
+        &[],
+        &[],
+        &[],
+        None,
+        &[],
+        None,
+    )
+    .await
 }
 
 /// Query Project Memory with optional category/ID filtering.
@@ -421,110 +447,78 @@ pub async fn query_memories_for_task_filtered(
     excluded_memory_ids: &[String],
     selected_scopes: &[String],
     session_id: Option<&str>,
+    selected_statuses: &[String],
+    review_mode: Option<&str>,
 ) -> String {
-    let mut entries = Vec::new();
-    let mut seen_ids = std::collections::HashSet::new();
-    let excluded_ids: std::collections::HashSet<&str> =
-        excluded_memory_ids.iter().map(|id| id.as_str()).collect();
+    let store = match app_state.get_memory_store_arc().await {
+        Ok(store) => store,
+        Err(_) => return String::new(),
+    };
 
-    let mut scopes = std::collections::HashSet::new();
-    for scope in selected_scopes {
-        scopes.insert(scope.trim().to_ascii_lowercase());
-    }
-    if scopes.is_empty() {
-        scopes.insert("project".to_string());
-        scopes.insert("global".to_string());
-        if session_id.is_some() {
-            scopes.insert("session".to_string());
-        }
-    }
-
-    // 1. If specific IDs requested, fetch them directly
-    if !selected_memory_ids.is_empty() {
-        let ids = selected_memory_ids.to_vec();
-        if let Ok(fetched) = app_state
-            .with_memory_store(|store| {
-                let mut results = Vec::new();
-                for id in &ids {
-                    if let Ok(Some(entry)) = store.get_memory(id) {
-                        results.push(entry);
-                    }
-                }
-                Ok(results)
-            })
-            .await
-        {
-            for entry in fetched {
-                if excluded_ids.contains(entry.id.as_str()) {
-                    continue;
-                }
-                seen_ids.insert(entry.id.clone());
-                entries.push(entry);
-            }
-        }
-    }
-
-    // 2. If categories selected (or no specific IDs either → search all), do semantic search
-    // for both project and global memory scopes.
-    if selected_memory_ids.is_empty() || !selected_categories.is_empty() {
-        let categories = if selected_categories.is_empty() {
-            None
+    let parsed_categories: Vec<MemoryCategory> = selected_categories
+        .iter()
+        .filter_map(|category| MemoryCategory::from_str(category).ok())
+        .collect();
+    let parsed_scopes: Vec<MemoryScopeV2> = selected_scopes
+        .iter()
+        .filter_map(|scope| MemoryScopeV2::from_str(scope))
+        .collect();
+    let mut parsed_statuses: Vec<MemoryStatusV2> = selected_statuses
+        .iter()
+        .filter_map(|status| MemoryStatusV2::from_str(status))
+        .collect();
+    if parsed_statuses.is_empty() {
+        if matches!(
+            review_mode
+                .unwrap_or("active_only")
+                .trim()
+                .to_ascii_lowercase()
+                .as_str(),
+            "include_pending_review" | "diagnostic"
+        ) {
+            parsed_statuses.push(MemoryStatusV2::Active);
+            parsed_statuses.push(MemoryStatusV2::PendingReview);
         } else {
-            let cats: Vec<MemoryCategory> = selected_categories
-                .iter()
-                .filter_map(|s| MemoryCategory::from_str(s).ok())
-                .collect();
-            if cats.is_empty() {
-                None
-            } else {
-                Some(cats)
-            }
-        };
-
-        let mut search_specs: Vec<(String, usize, f32)> = Vec::new();
-        if scopes.contains("project") {
-            search_specs.push((project_path.to_string(), 10usize, 0.3f32));
-        }
-        if scopes.contains("global") {
-            search_specs.push((GLOBAL_PROJECT_PATH.to_string(), 5usize, 0.3f32));
-        }
-        if scopes.contains("session") {
-            if let Some(sid) = session_id {
-                if let Some(session_project_path) = build_session_project_path(sid) {
-                    search_specs.push((session_project_path, 10usize, 0.3f32));
-                }
-            }
-        }
-
-        for (scope_project_path, top_k, min_importance) in search_specs {
-            let request = MemorySearchRequest {
-                project_path: scope_project_path,
-                query: query.to_string(),
-                categories: categories.clone(),
-                top_k,
-                min_importance,
-            };
-
-            if let Ok(results) = app_state
-                .with_memory_store(|store| search_memories(store, &request))
-                .await
-            {
-                for r in results {
-                    if excluded_ids.contains(r.entry.id.as_str()) {
-                        continue;
-                    }
-                    if seen_ids.insert(r.entry.id.clone()) {
-                        entries.push(r.entry);
-                    }
-                }
-            }
+            parsed_statuses.push(MemoryStatusV2::Active);
         }
     }
+    let should_query = selected_memory_ids.is_empty() || !parsed_categories.is_empty();
+    let query_text = if should_query {
+        query.to_string()
+    } else {
+        String::new()
+    };
+    let tuning = tuning_for_task_context_v2(!selected_memory_ids.is_empty());
+    let request = UnifiedMemoryQueryRequestV2 {
+        project_path: project_path.to_string(),
+        query: query_text,
+        scopes: parsed_scopes,
+        categories: parsed_categories,
+        include_ids: selected_memory_ids.to_vec(),
+        exclude_ids: excluded_memory_ids.to_vec(),
+        session_id: session_id.map(|sid| sid.to_string()),
+        top_k_total: tuning.top_k_total,
+        min_importance: tuning.min_importance,
+        per_scope_budget: tuning.per_scope_budget,
+        intent: crate::services::memory::retrieval::MemorySearchIntent::Default,
+        enable_semantic: true,
+        enable_lexical: true,
+        statuses: parsed_statuses,
+    };
 
-    if entries.is_empty() {
+    let queried = match query_memory_entries_unified_v2(store.as_ref(), &request).await {
+        Ok(rows) => rows,
+        Err(_) => return String::new(),
+    };
+    if queried.results.is_empty() {
         return String::new();
     }
 
+    let entries = queried
+        .results
+        .into_iter()
+        .map(|row| row.entry)
+        .collect::<Vec<_>>();
     build_memory_section(Some(&entries))
 }
 

@@ -66,7 +66,6 @@ export interface WorkflowKernelStore {
     intent: UserInputIntent,
     handoff?: HandoffContextBundle,
   ) => Promise<WorkflowSession | null>;
-  syncModePhase: (mode: WorkflowMode, phase: string, source?: string) => Promise<WorkflowSession | null>;
   applyPlanEdit: (operation: PlanEditOperation) => Promise<WorkflowSession | null>;
   executePlan: () => Promise<WorkflowSession | null>;
   retryStep: (stepId: string) => Promise<WorkflowSession | null>;
@@ -218,20 +217,6 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
       });
       return null;
     }
-  },
-
-  syncModePhase: async (mode, phase, source = 'ui_phase_sync') => {
-    const normalizedPhase = phase.trim();
-    if (!normalizedPhase) return null;
-    return get().submitInput({
-      type: 'system_phase_update',
-      content: `phase:${normalizedPhase}`,
-      metadata: {
-        mode,
-        phase: normalizedPhase,
-        source,
-      },
-    });
   },
 
   submitInput: async (intent) => {

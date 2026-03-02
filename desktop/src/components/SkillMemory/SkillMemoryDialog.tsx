@@ -25,7 +25,13 @@ import { CategoryBadge } from './CategoryBadge';
 import { ImportanceBar } from './ImportanceBar';
 import { EmptyState } from './EmptyState';
 import { debounce } from '../Projects/utils';
-import type { SkillSummary, MemoryEntry, MemoryCategory, MemoryScope } from '../../types/skillMemory';
+import type {
+  SkillSummary,
+  MemoryEntry,
+  MemoryCategory,
+  MemoryScope,
+  MemoryReviewCandidate,
+} from '../../types/skillMemory';
 import { MEMORY_CATEGORIES } from '../../types/skillMemory';
 
 // ============================================================================
@@ -96,6 +102,13 @@ function memoryScopeFallback(scope: MemoryScope): string {
     default:
       return scope;
   }
+}
+
+function inferMemoryScope(entry: MemoryEntry): MemoryScope {
+  if (entry.scope) return entry.scope;
+  if (entry.project_path === '__global__') return 'global';
+  if (entry.project_path.startsWith('__session__:')) return 'session';
+  return 'project';
 }
 
 // ============================================================================
@@ -323,9 +336,15 @@ function MemoryTab() {
   const clearMemories = useSkillMemoryStore((s) => s.clearMemories);
   const memoryStats = useSkillMemoryStore((s) => s.memoryStats);
   const loadMemoryStats = useSkillMemoryStore((s) => s.loadMemoryStats);
+  const pendingMemoryCandidates = useSkillMemoryStore((s) => s.pendingMemoryCandidates);
+  const pendingMemoryCandidatesLoading = useSkillMemoryStore((s) => s.pendingMemoryCandidatesLoading);
+  const loadPendingMemoryCandidates = useSkillMemoryStore((s) => s.loadPendingMemoryCandidates);
+  const reviewPendingMemoryCandidates = useSkillMemoryStore((s) => s.reviewPendingMemoryCandidates);
 
   const [selectedMemory, setSelectedMemory] = useState<MemoryEntry | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [memoryViewMode, setMemoryViewMode] = useState<'active' | 'pending'>('active');
+  const [selectedPendingIds, setSelectedPendingIds] = useState<Set<string>>(new Set());
   const activeSessionId = useMemo(() => {
     if (foregroundOriginSessionId?.trim()) return foregroundOriginSessionId.trim();
     if (taskId?.trim()) return `claude:${taskId.trim()}`;
@@ -367,8 +386,41 @@ function MemoryTab() {
       } else {
         loadMemories(workspacePath);
       }
+      loadPendingMemoryCandidates(workspacePath);
     }
   }, [memoryCategoryFilter, memoryScope, activeSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    setSelectedPendingIds(new Set());
+  }, [memoryScope, pendingMemoryCandidates.length, memoryViewMode]);
+
+  const activeMemoryIndex = useMemo(() => {
+    const grouped = new Map<string, MemoryEntry[]>();
+    for (const entry of memories) {
+      const scope = inferMemoryScope(entry);
+      const key = `${scope}:${entry.category}`;
+      const prev = grouped.get(key) || [];
+      prev.push(entry);
+      grouped.set(key, prev);
+    }
+    return grouped;
+  }, [memories]);
+
+  const conflictReference = useCallback(
+    (candidate: MemoryReviewCandidate): MemoryEntry | null => {
+      const key = `${candidate.scope}:${candidate.category}`;
+      const candidates = activeMemoryIndex.get(key);
+      if (!candidates || candidates.length === 0) return null;
+      const normalizedPending = candidate.content.toLowerCase();
+      const best = [...candidates].sort((a, b) => {
+        const aHit = normalizedPending.includes(a.content.toLowerCase()) ? 1 : 0;
+        const bHit = normalizedPending.includes(b.content.toLowerCase()) ? 1 : 0;
+        return bHit - aHit;
+      });
+      return best[0] ?? null;
+    },
+    [activeMemoryIndex],
+  );
 
   const debouncedSearch = useMemo(
     () =>
@@ -437,6 +489,39 @@ function MemoryTab() {
     }
   }, [workspacePath, clearMemories, t, memoryScope]);
 
+  const handleTogglePendingSelection = useCallback((memoryId: string) => {
+    setSelectedPendingIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(memoryId)) {
+        next.delete(memoryId);
+      } else {
+        next.add(memoryId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleToggleSelectAllPending = useCallback(() => {
+    if (selectedPendingIds.size >= pendingMemoryCandidates.length) {
+      setSelectedPendingIds(new Set());
+      return;
+    }
+    setSelectedPendingIds(new Set(pendingMemoryCandidates.map((candidate) => candidate.id)));
+  }, [pendingMemoryCandidates, selectedPendingIds.size]);
+
+  const handleReviewPending = useCallback(
+    async (ids: string[], decision: 'approve' | 'reject') => {
+      if (!workspacePath || ids.length === 0) return;
+      await reviewPendingMemoryCandidates(workspacePath, ids, decision);
+      setSelectedPendingIds((prev) => {
+        const next = new Set(prev);
+        ids.forEach((id) => next.delete(id));
+        return next;
+      });
+    },
+    [workspacePath, reviewPendingMemoryCandidates],
+  );
+
   // If add form is open, show it
   if (showAddForm) {
     return <AddMemoryForm onSave={handleAddMemory} onCancel={() => setShowAddForm(false)} />;
@@ -462,7 +547,7 @@ function MemoryTab() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Toolbar: scope + search + category filter */}
+      {/* Toolbar: scope + mode + filters */}
       <div className="p-3 border-b border-gray-200 dark:border-gray-700 space-y-2">
         {/* Scope filter */}
         <div className="flex items-center gap-1 flex-wrap">
@@ -487,6 +572,32 @@ function MemoryTab() {
           })}
         </div>
 
+        {/* View mode */}
+        <div className="flex items-center gap-1 flex-wrap">
+          <button
+            onClick={() => setMemoryViewMode('active')}
+            className={clsx(
+              'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
+              memoryViewMode === 'active'
+                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
+            )}
+          >
+            {t('skillPanel.activeMemories', { defaultValue: 'Active' })}
+          </button>
+          <button
+            onClick={() => setMemoryViewMode('pending')}
+            className={clsx(
+              'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
+              memoryViewMode === 'pending'
+                ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
+            )}
+          >
+            {t('skillPanel.pendingReview', { defaultValue: 'Pending Review' })} ({pendingMemoryCandidates.length})
+          </button>
+        </div>
+
         {/* Search */}
         <div className="relative">
           <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
@@ -494,7 +605,8 @@ function MemoryTab() {
             type="text"
             value={memorySearchQuery}
             onChange={handleSearch}
-            placeholder={t('skillPanel.searchMemories')}
+            disabled={memoryViewMode === 'pending'}
+            placeholder={t('skillPanel.searchMemories', { defaultValue: 'Search memories...' })}
             className={clsx(
               'w-full pl-8 pr-3 py-1.5 rounded-md text-xs',
               'bg-gray-50 dark:bg-gray-800',
@@ -502,66 +614,119 @@ function MemoryTab() {
               'text-gray-700 dark:text-gray-300',
               'placeholder:text-gray-400 dark:placeholder:text-gray-500',
               'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent',
+              memoryViewMode === 'pending' && 'opacity-60 cursor-not-allowed',
             )}
           />
         </div>
 
         {/* Category filter + action buttons */}
-        <div className="flex items-center gap-1 flex-wrap">
-          <button
-            onClick={() => handleCategoryFilter('all')}
-            className={clsx(
-              'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
-              memoryCategoryFilter === 'all'
-                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
-            )}
-          >
-            {t('skillPanel.filterAll')}
-          </button>
-          {MEMORY_CATEGORIES.map((cat) => (
+        {memoryViewMode === 'active' ? (
+          <div className="flex items-center gap-1 flex-wrap">
             <button
-              key={cat}
-              onClick={() => handleCategoryFilter(cat)}
+              onClick={() => handleCategoryFilter('all')}
               className={clsx(
                 'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
-                memoryCategoryFilter === cat
+                memoryCategoryFilter === 'all'
                   ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
                   : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
               )}
             >
-              {getCategoryLabel(cat)}
+              {t('skillPanel.filterAll')}
             </button>
-          ))}
-          <button
-            onClick={() => setShowAddForm(true)}
-            className={clsx(
-              'ml-auto p-1 rounded-md transition-colors',
-              'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
-              'hover:bg-gray-100 dark:hover:bg-gray-800',
-            )}
-            title={t('skillPanel.addMemory')}
-          >
-            <PlusIcon className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={handleClearAll}
-            disabled={memories.length === 0}
-            className={clsx(
-              'p-1 rounded-md transition-colors',
-              memories.length === 0
-                ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
-                : 'text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20',
-            )}
-            title={t('skillPanel.clearAll')}
-          >
-            <TrashIcon className="w-3.5 h-3.5" />
-          </button>
-        </div>
+            {MEMORY_CATEGORIES.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => handleCategoryFilter(cat)}
+                className={clsx(
+                  'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
+                  memoryCategoryFilter === cat
+                    ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                    : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
+                )}
+              >
+                {getCategoryLabel(cat)}
+              </button>
+            ))}
+            <button
+              onClick={() => setShowAddForm(true)}
+              className={clsx(
+                'ml-auto p-1 rounded-md transition-colors',
+                'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
+                'hover:bg-gray-100 dark:hover:bg-gray-800',
+              )}
+              title={t('skillPanel.addMemory')}
+            >
+              <PlusIcon className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={handleClearAll}
+              disabled={memories.length === 0}
+              className={clsx(
+                'p-1 rounded-md transition-colors',
+                memories.length === 0
+                  ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                  : 'text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20',
+              )}
+              title={t('skillPanel.clearAll')}
+            >
+              <TrashIcon className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1 flex-wrap">
+            <button
+              onClick={handleToggleSelectAllPending}
+              disabled={pendingMemoryCandidates.length === 0}
+              className={clsx(
+                'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
+                selectedPendingIds.size >= pendingMemoryCandidates.length && pendingMemoryCandidates.length > 0
+                  ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                  : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
+              )}
+            >
+              {t('skillPanel.selectAll', { defaultValue: 'Select All' })}
+            </button>
+            <button
+              onClick={() => void handleReviewPending(Array.from(selectedPendingIds), 'approve')}
+              disabled={selectedPendingIds.size === 0}
+              className={clsx(
+                'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
+                selectedPendingIds.size === 0
+                  ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                  : 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
+              )}
+            >
+              {t('skillPanel.approveSelected', { defaultValue: 'Approve Selected' })}
+            </button>
+            <button
+              onClick={() => void handleReviewPending(Array.from(selectedPendingIds), 'reject')}
+              disabled={selectedPendingIds.size === 0}
+              className={clsx(
+                'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
+                selectedPendingIds.size === 0
+                  ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                  : 'bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300',
+              )}
+            >
+              {t('skillPanel.rejectSelected', { defaultValue: 'Reject Selected' })}
+            </button>
+            <button
+              onClick={() => workspacePath && void loadPendingMemoryCandidates(workspacePath)}
+              className={clsx(
+                'ml-auto p-1 rounded-md transition-colors',
+                'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
+                'hover:bg-gray-100 dark:hover:bg-gray-800',
+              )}
+              title={t('skillPanel.refresh', { defaultValue: 'Refresh' })}
+            >
+              <ReloadIcon className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Stats bar */}
-      {memoryStats && (
+      {memoryViewMode === 'active' && memoryStats && (
         <div className="px-3 py-1.5 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2 text-2xs text-gray-500 dark:text-gray-400">
           <span>{t('skillPanel.totalMemories', { count: memoryStats.total_count })}</span>
           <span className="text-gray-300 dark:text-gray-600">|</span>
@@ -574,19 +739,36 @@ function MemoryTab() {
         </div>
       )}
 
+      {memoryViewMode === 'pending' && (
+        <div className="px-3 py-1.5 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2 text-2xs text-gray-500 dark:text-gray-400">
+          <span>
+            {t('skillPanel.pendingReviewCount', { defaultValue: 'Pending' })}: {pendingMemoryCandidates.length}
+          </span>
+          <span className="text-gray-300 dark:text-gray-600">|</span>
+          <span>
+            {t('skillPanel.selectedCount', { defaultValue: 'Selected' })}: {selectedPendingIds.size}
+          </span>
+          <span className="text-gray-300 dark:text-gray-600">|</span>
+          <span>
+            {t('skillPanel.conflictCount', { defaultValue: 'Conflicts' })}:{' '}
+            {pendingMemoryCandidates.filter((candidate) => candidate.conflict_flag).length}
+          </span>
+        </div>
+      )}
+
       {/* Memory list */}
       <div className="flex-1 overflow-y-auto">
-        {memoriesLoading && memories.length === 0 ? (
+        {memoryViewMode === 'active' && memoriesLoading && memories.length === 0 ? (
           <div className="flex items-center justify-center py-8">
             <span className="text-xs text-gray-400">{t('skillPanel.loading')}</span>
           </div>
-        ) : memories.length === 0 ? (
+        ) : memoryViewMode === 'active' && memories.length === 0 ? (
           <EmptyState
             title={t('skillPanel.noMemoriesFound')}
             description={t('skillPanel.noMemoriesFoundHint')}
             action={{ label: t('skillPanel.addMemory'), onClick: () => setShowAddForm(true) }}
           />
-        ) : (
+        ) : memoryViewMode === 'active' ? (
           <div className="divide-y divide-gray-100 dark:divide-gray-800">
             {memories.map((memory) => (
               <button
@@ -624,10 +806,121 @@ function MemoryTab() {
               </button>
             ))}
           </div>
+        ) : pendingMemoryCandidatesLoading && pendingMemoryCandidates.length === 0 ? (
+          <div className="flex items-center justify-center py-8">
+            <span className="text-xs text-gray-400">{t('skillPanel.loading')}</span>
+          </div>
+        ) : pendingMemoryCandidates.length === 0 ? (
+          <EmptyState
+            title={t('skillPanel.noPendingReview', { defaultValue: 'No pending review memories' })}
+            description={t('skillPanel.noPendingReviewHint', {
+              defaultValue: 'New inferred memories will appear here.',
+            })}
+          />
+        ) : (
+          <div className="divide-y divide-gray-100 dark:divide-gray-800">
+            {pendingMemoryCandidates.map((candidate) => {
+              const checked = selectedPendingIds.has(candidate.id);
+              const reference = conflictReference(candidate);
+              return (
+                <div key={candidate.id} className="px-4 py-3">
+                  <div className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => handleTogglePendingSelection(candidate.id)}
+                      className="mt-0.5 w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                        <CategoryBadge category={candidate.category} compact />
+                        <span className="text-2xs px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+                          {candidate.scope}
+                        </span>
+                        <span
+                          className={clsx(
+                            'text-2xs px-1 py-0.5 rounded',
+                            candidate.risk_tier === 'high'
+                              ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                              : candidate.risk_tier === 'medium'
+                                ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                                : 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300',
+                          )}
+                        >
+                          {candidate.risk_tier}
+                        </span>
+                        {candidate.conflict_flag && (
+                          <span className="text-2xs px-1 py-0.5 rounded bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300">
+                            {t('skillPanel.conflictFlag', { defaultValue: 'Conflict' })}
+                          </span>
+                        )}
+                        <span className="ml-auto text-2xs text-gray-400 dark:text-gray-500 shrink-0">
+                          {new Date(candidate.updated_at).toLocaleDateString()}
+                        </span>
+                      </div>
+
+                      <p className="text-xs text-gray-700 dark:text-gray-300">{candidate.content}</p>
+
+                      {candidate.keywords.length > 0 && (
+                        <div className="flex gap-1 mt-1.5 flex-wrap">
+                          {candidate.keywords.slice(0, 4).map((kw) => (
+                            <span
+                              key={kw}
+                              className="text-2xs px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400"
+                            >
+                              {kw}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {candidate.conflict_flag && (
+                        <div className="mt-2 grid grid-cols-1 gap-2">
+                          <div className="rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-900/10 p-2">
+                            <p className="text-2xs font-medium text-amber-700 dark:text-amber-300 mb-0.5">
+                              {t('skillPanel.pendingCandidate', { defaultValue: 'Candidate' })}
+                            </p>
+                            <p className="text-2xs text-amber-700/90 dark:text-amber-200">{candidate.content}</p>
+                          </div>
+                          <div className="rounded-md border border-sky-200 dark:border-sky-800 bg-sky-50/70 dark:bg-sky-900/10 p-2">
+                            <p className="text-2xs font-medium text-sky-700 dark:text-sky-300 mb-0.5">
+                              {t('skillPanel.activeReference', { defaultValue: 'Active Reference' })}
+                            </p>
+                            <p className="text-2xs text-sky-700/90 dark:text-sky-200">
+                              {reference
+                                ? reference.content
+                                : t('skillPanel.noActiveReference', {
+                                    defaultValue: 'No active reference loaded in this scope/category.',
+                                  })}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <button
+                        onClick={() => void handleReviewPending([candidate.id], 'approve')}
+                        className="px-2 py-0.5 rounded text-2xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                      >
+                        {t('skillPanel.approve', { defaultValue: 'Approve' })}
+                      </button>
+                      <button
+                        onClick={() => void handleReviewPending([candidate.id], 'reject')}
+                        className="px-2 py-0.5 rounded text-2xs font-medium bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300"
+                      >
+                        {t('skillPanel.reject', { defaultValue: 'Reject' })}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
 
         {/* Load more */}
-        {memoryHasMore && memories.length > 0 && (
+        {memoryViewMode === 'active' && memoryHasMore && memories.length > 0 && (
           <div className="p-3 text-center">
             <button
               onClick={handleLoadMore}
@@ -660,6 +953,7 @@ export function SkillMemoryDialog() {
   const loadSkills = useSkillMemoryStore((s) => s.loadSkills);
   const loadMemories = useSkillMemoryStore((s) => s.loadMemories);
   const loadMemoryStats = useSkillMemoryStore((s) => s.loadMemoryStats);
+  const loadPendingMemoryCandidates = useSkillMemoryStore((s) => s.loadPendingMemoryCandidates);
   const runMaintenance = useSkillMemoryStore((s) => s.runMaintenance);
 
   // Load data when dialog opens
@@ -668,9 +962,18 @@ export function SkillMemoryDialog() {
       loadSkills(workspacePath);
       loadMemories(workspacePath);
       loadMemoryStats(workspacePath);
+      loadPendingMemoryCandidates(workspacePath);
       runMaintenance(workspacePath);
     }
-  }, [dialogOpen, workspacePath, loadSkills, loadMemories, loadMemoryStats, runMaintenance]);
+  }, [
+    dialogOpen,
+    workspacePath,
+    loadSkills,
+    loadMemories,
+    loadMemoryStats,
+    loadPendingMemoryCandidates,
+    runMaintenance,
+  ]);
 
   return (
     <Dialog.Root open={dialogOpen} onOpenChange={(open) => !open && closeDialog()}>

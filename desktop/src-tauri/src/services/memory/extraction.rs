@@ -340,7 +340,7 @@ Rules:
                     keywords,
                     importance: importance.clamp(0.0, 1.0),
                     source_session_id: session_id.map(|s| s.to_string()),
-                    source_context: None,
+                    source_context: Some("llm_extract:auto_v2".to_string()),
                 })
             })
             .collect();
@@ -546,6 +546,8 @@ mod tests {
         let existing = vec![MemoryEntry {
             id: "test-1".into(),
             project_path: "/test".into(),
+            scope: Some("project".into()),
+            session_id: None,
             category: MemoryCategory::Fact,
             content: "This is a Tauri app".into(),
             keywords: vec![],
@@ -553,6 +555,10 @@ mod tests {
             access_count: 0,
             source_session_id: None,
             source_context: None,
+            status: Some("active".into()),
+            risk_tier: Some("high".into()),
+            conflict_flag: Some(false),
+            trace_id: None,
             created_at: "".into(),
             updated_at: "".into(),
             last_accessed_at: "".into(),

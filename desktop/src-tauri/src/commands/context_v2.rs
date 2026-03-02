@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
+use std::time::Instant;
 use tauri::State;
 
 use crate::commands::knowledge::KnowledgeState;
@@ -22,12 +23,13 @@ use crate::services::context::events::TraceEventType;
 use crate::services::knowledge::context_provider::{
     KnowledgeContextConfig, KnowledgeContextProvider,
 };
-use crate::services::memory::retrieval::{
-    search_memories_v2_async, MemorySearchIntent, MemorySearchRequestV2,
+use crate::services::memory::query_policy_v2::tuning_for_context_envelope_v2;
+use crate::services::memory::query_v2::{
+    query_memory_entries_v2 as query_memory_entries_unified_v2, MemoryScopeV2, MemoryStatusV2,
+    UnifiedMemoryQueryRequestV2,
 };
-use crate::services::memory::store::{
-    build_session_project_path, MemoryCategory, MemoryEntry, GLOBAL_PROJECT_PATH,
-};
+use crate::services::memory::retrieval::MemorySearchIntent;
+use crate::services::memory::store::{MemoryCategory, MemoryEntry};
 use crate::services::skills::model::InjectionPhase;
 use crate::services::task_mode::context_provider::{
     ensure_knowledge_initialized_public, query_selected_context, select_skills_for_task_filtered,
@@ -429,6 +431,12 @@ pub struct ContextOpsDashboard {
     pub source_failure_traces: usize,
     pub prepare_context_p50_ms: f32,
     pub prepare_context_p95_ms: f32,
+    pub memory_query_p95_ms: f32,
+    pub empty_hit_rate: f32,
+    pub candidate_count: f32,
+    pub review_backlog: usize,
+    pub approve_rate: f32,
+    pub reject_rate: f32,
     pub total_compaction_saving_tokens: i64,
     pub avg_compaction_saving_tokens: f32,
     pub ab_variants: Vec<ContextOpsVariantStat>,
@@ -1276,11 +1284,10 @@ async fn prepare_turn_context_v2_internal(
                 let mcfg = config.memory.as_ref().unwrap();
                 let mut memory_entries: Vec<MemoryEntry> = Vec::new();
                 let mut seen_ids = HashSet::new();
-                let excluded_ids: HashSet<&str> = mcfg
-                    .excluded_memory_ids
-                    .iter()
-                    .map(|id| id.as_str())
-                    .collect();
+                let mut memory_query_trace_id: Option<String> = None;
+                let mut memory_query_candidate_count = 0usize;
+                let mut memory_query_degraded = false;
+                let mut memory_query_latency_ms = 0.0_f64;
 
                 if fault_injection.memory_timeout {
                     trace_events.push(make_trace_event(
@@ -1319,96 +1326,103 @@ async fn prepare_turn_context_v2_internal(
                     };
 
                     if let Some(memory_store) = memory_store {
-                        if !mcfg.selected_memory_ids.is_empty() {
-                            for id in &mcfg.selected_memory_ids {
-                                if let Ok(Some(entry)) = memory_store.get_memory(id) {
-                                    if excluded_ids.contains(entry.id.as_str()) {
-                                        continue;
-                                    }
+                        let parsed_categories: Vec<MemoryCategory> = mcfg
+                            .selected_categories
+                            .iter()
+                            .filter_map(|s| MemoryCategory::from_str(s).ok())
+                            .collect();
+                        let parsed_scopes: Vec<MemoryScopeV2> = mcfg
+                            .selected_scopes
+                            .iter()
+                            .filter_map(|scope| MemoryScopeV2::from_str(scope))
+                            .collect();
+                        let only_selected_mode =
+                            !mcfg.selected_memory_ids.is_empty() && parsed_categories.is_empty();
+                        let query_text = if only_selected_mode {
+                            String::new()
+                        } else {
+                            request.query.clone()
+                        };
+                        let statuses: Vec<MemoryStatusV2> = if mcfg.statuses.is_empty() {
+                            vec![MemoryStatusV2::Active]
+                        } else {
+                            mcfg.statuses
+                                .iter()
+                                .filter_map(|status| MemoryStatusV2::from_str(status))
+                                .collect()
+                        };
+                        let enable_semantic = context_policy.memory_v2_ranker
+                            && !fault_injection.ranker_unavailable
+                            && !query_text.trim().is_empty();
+                        let tuning =
+                            tuning_for_context_envelope_v2(!mcfg.selected_memory_ids.is_empty());
+                        let unified_request = UnifiedMemoryQueryRequestV2 {
+                            project_path: project_path.clone(),
+                            query: query_text,
+                            scopes: parsed_scopes,
+                            categories: parsed_categories,
+                            include_ids: mcfg.selected_memory_ids.clone(),
+                            exclude_ids: mcfg.excluded_memory_ids.clone(),
+                            session_id: mcfg.session_id.clone(),
+                            top_k_total: tuning.top_k_total,
+                            min_importance: tuning.min_importance,
+                            per_scope_budget: tuning.per_scope_budget,
+                            intent: parse_memory_intent(request.intent.as_deref()),
+                            enable_semantic,
+                            enable_lexical: true,
+                            statuses,
+                        };
+                        let memory_query_started_at = Instant::now();
+
+                        match query_memory_entries_unified_v2(
+                            memory_store.as_ref(),
+                            &unified_request,
+                        )
+                        .await
+                        {
+                            Ok(result) => {
+                                memory_query_latency_ms =
+                                    memory_query_started_at.elapsed().as_secs_f64() * 1000.0;
+                                memory_query_trace_id = Some(result.trace_id.clone());
+                                memory_query_candidate_count = result.candidate_count;
+                                memory_query_degraded = result.degraded;
+
+                                if result.degraded {
+                                    trace_events.push(make_trace_event(
+                                        &trace_id,
+                                        TraceEventType::SourceFailed,
+                                        Some("memory"),
+                                        Some("memory:degraded"),
+                                        "memory query degraded; semantic channel unavailable",
+                                        Some(json!({
+                                            "memory_trace_id": result.trace_id,
+                                            "candidate_count": result.candidate_count,
+                                            "memory_query_latency_ms": memory_query_latency_ms,
+                                        })),
+                                    ));
+                                }
+
+                                for row in result.results {
+                                    let entry = row.entry;
                                     if seen_ids.insert(entry.id.clone()) {
                                         memory_entries.push(entry);
                                     }
                                 }
                             }
-                        }
-
-                        let categories = if mcfg.selected_categories.is_empty() {
-                            None
-                        } else {
-                            let parsed: Vec<MemoryCategory> = mcfg
-                                .selected_categories
-                                .iter()
-                                .filter_map(|s| MemoryCategory::from_str(s).ok())
-                                .collect();
-                            if parsed.is_empty() {
-                                None
-                            } else {
-                                Some(parsed)
-                            }
-                        };
-
-                        let mut scopes = HashSet::new();
-                        for scope in &mcfg.selected_scopes {
-                            scopes.insert(scope.trim().to_ascii_lowercase());
-                        }
-                        if scopes.is_empty() {
-                            scopes.insert("project".to_string());
-                            scopes.insert("global".to_string());
-                            if mcfg.session_id.is_some() {
-                                scopes.insert("session".to_string());
-                            }
-                        }
-
-                        let mut search_specs: Vec<String> = Vec::new();
-                        if scopes.contains("project") {
-                            search_specs.push(project_path.clone());
-                        }
-                        if scopes.contains("global") {
-                            search_specs.push(GLOBAL_PROJECT_PATH.to_string());
-                        }
-                        if scopes.contains("session") {
-                            if let Some(sid) = mcfg.session_id.as_deref() {
-                                if let Some(scope_path) = build_session_project_path(sid) {
-                                    search_specs.push(scope_path);
-                                }
-                            }
-                        }
-
-                        for scope_path in search_specs {
-                            let req = MemorySearchRequestV2 {
-                                project_path: scope_path,
-                                query: request.query.clone(),
-                                categories: categories.clone(),
-                                top_k: 10,
-                                min_importance: 0.3,
-                                intent: parse_memory_intent(request.intent.as_deref()),
-                                enable_semantic: context_policy.memory_v2_ranker
-                                    && !fault_injection.ranker_unavailable,
-                                enable_lexical: true,
-                            };
-
-                            match search_memories_v2_async(memory_store.as_ref(), &req).await {
-                                Ok(results) => {
-                                    for row in results {
-                                        let entry = row.entry;
-                                        if excluded_ids.contains(entry.id.as_str()) {
-                                            continue;
-                                        }
-                                        if seen_ids.insert(entry.id.clone()) {
-                                            memory_entries.push(entry);
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    trace_events.push(make_trace_event(
-                                        &trace_id,
-                                        TraceEventType::SourceFailed,
-                                        Some("memory"),
-                                        Some("memory:search"),
-                                        "memory search failed",
-                                        Some(json!({ "error": e.to_string() })),
-                                    ));
-                                }
+                            Err(e) => {
+                                memory_query_latency_ms =
+                                    memory_query_started_at.elapsed().as_secs_f64() * 1000.0;
+                                trace_events.push(make_trace_event(
+                                    &trace_id,
+                                    TraceEventType::SourceFailed,
+                                    Some("memory"),
+                                    Some("memory:search"),
+                                    "memory search failed",
+                                    Some(json!({
+                                        "error": e.to_string(),
+                                        "memory_query_latency_ms": memory_query_latency_ms,
+                                    })),
+                                ));
                             }
                         }
                     }
@@ -1435,7 +1449,13 @@ async fn prepare_turn_context_v2_internal(
                                 Some("memory"),
                                 Some("memory:retrieved"),
                                 "memory context included",
-                                Some(json!({ "entries": memory_entries.len() })),
+                                Some(json!({
+                                    "entries": memory_entries.len(),
+                                    "candidate_count": memory_query_candidate_count,
+                                    "degraded": memory_query_degraded,
+                                    "memory_query_latency_ms": memory_query_latency_ms,
+                                    "memory_trace_id": memory_query_trace_id,
+                                })),
                             ));
                         }
                     }
@@ -2157,6 +2177,9 @@ struct TraceAggregation {
     degraded: bool,
     variant: Option<String>,
     compaction_saving_tokens: i64,
+    memory_query_latency_ms: Option<f64>,
+    memory_candidate_count: Option<f64>,
+    memory_entries_count: Option<f64>,
 }
 
 #[tauri::command]
@@ -2181,7 +2204,7 @@ pub async fn get_context_ops_dashboard(
         .with_database(|db| {
             let conn = db.get_connection()?;
             let mut stmt = conn.prepare(
-                "SELECT trace_id, event_type, metadata, created_at
+                "SELECT trace_id, event_type, source_id, metadata, created_at
                  FROM context_trace_events
                  WHERE created_at >= ?1
                  ORDER BY id ASC",
@@ -2192,8 +2215,9 @@ pub async fn get_context_ops_dashboard(
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(2)?,
                         row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
                     ))
                 })?
                 .filter_map(|r| r.ok())
@@ -2207,7 +2231,7 @@ pub async fn get_context_ops_dashboard(
     };
 
     let mut grouped: HashMap<String, TraceAggregation> = HashMap::new();
-    for (trace_id, event_type, metadata_text, created_at) in traces {
+    for (trace_id, event_type, source_id, metadata_text, created_at) in traces {
         let entry = grouped.entry(trace_id).or_default();
         let metadata = serde_json::from_str::<serde_json::Value>(&metadata_text).ok();
         let created_at_dt = parse_event_time(&created_at);
@@ -2228,6 +2252,49 @@ pub async fn get_context_ops_dashboard(
             Some(TraceEventType::SourceFailed) => {
                 entry.source_failed = true;
                 entry.degraded = true;
+                if source_id
+                    .as_deref()
+                    .map(|value| value.starts_with("memory:"))
+                    == Some(true)
+                {
+                    if let Some(ref m) = metadata {
+                        if let Some(latency) =
+                            m.get("memory_query_latency_ms").and_then(|v| v.as_f64())
+                        {
+                            entry.memory_query_latency_ms = Some(latency);
+                        }
+                    }
+                }
+            }
+            Some(TraceEventType::SourceCollected) => {
+                if source_id.as_deref() == Some("memory:retrieved") {
+                    if let Some(ref m) = metadata {
+                        if let Some(latency) =
+                            m.get("memory_query_latency_ms").and_then(|v| v.as_f64())
+                        {
+                            entry.memory_query_latency_ms = Some(latency);
+                        }
+                        if let Some(candidate_count) =
+                            m.get("candidate_count").and_then(|v| v.as_f64())
+                        {
+                            entry.memory_candidate_count = Some(candidate_count);
+                        } else if let Some(candidate_count) =
+                            m.get("candidate_count").and_then(|v| v.as_u64())
+                        {
+                            entry.memory_candidate_count = Some(candidate_count as f64);
+                        }
+                        if let Some(entries_count) = m.get("entries").and_then(|v| v.as_f64()) {
+                            entry.memory_entries_count = Some(entries_count);
+                        } else if let Some(entries_count) =
+                            m.get("entries").and_then(|v| v.as_u64())
+                        {
+                            entry.memory_entries_count = Some(entries_count as f64);
+                        }
+                        if m.get("degraded").and_then(|v| v.as_bool()).unwrap_or(false) {
+                            entry.degraded = true;
+                        }
+                    }
+                }
             }
             Some(TraceEventType::RolloutAssignment) => {
                 if let Some(ref m) = metadata {
@@ -2257,6 +2324,10 @@ pub async fn get_context_ops_dashboard(
     let mut variant_latencies: HashMap<String, Vec<f64>> = HashMap::new();
     let mut variant_counts: HashMap<String, usize> = HashMap::new();
     let mut variant_degraded_counts: HashMap<String, usize> = HashMap::new();
+    let mut memory_query_latencies: Vec<f64> = Vec::new();
+    let mut memory_query_candidate_sum = 0.0_f64;
+    let mut memory_query_samples = 0usize;
+    let mut memory_empty_hits = 0usize;
 
     for (_, trace) in grouped {
         if trace.project_path.as_deref() != Some(project_path.as_str()) {
@@ -2270,6 +2341,16 @@ pub async fn get_context_ops_dashboard(
             source_failure_traces += 1;
         }
         compaction_saving_total += trace.compaction_saving_tokens;
+        if let Some(latency) = trace.memory_query_latency_ms {
+            memory_query_latencies.push(latency);
+        }
+        if let Some(candidate_count) = trace.memory_candidate_count {
+            memory_query_candidate_sum += candidate_count;
+            memory_query_samples += 1;
+            if trace.memory_entries_count.unwrap_or(0.0) <= 0.0 {
+                memory_empty_hits += 1;
+            }
+        }
 
         let variant = trace
             .variant
@@ -2306,11 +2387,74 @@ pub async fn get_context_ops_dashboard(
 
     let p50_ms = percentile_ms(&mut latencies_ms.clone(), 0.50) as f32;
     let p95_ms = percentile_ms(&mut latencies_ms, 0.95) as f32;
+    let memory_query_p95_ms = percentile_ms(&mut memory_query_latencies, 0.95) as f32;
+    let empty_hit_rate = if memory_query_samples == 0 {
+        0.0
+    } else {
+        memory_empty_hits as f32 / memory_query_samples as f32
+    };
+    let candidate_count = if memory_query_samples == 0 {
+        0.0
+    } else {
+        (memory_query_candidate_sum / memory_query_samples as f64) as f32
+    };
 
     let avg_compaction_saving_tokens = if total_traces == 0 {
         0.0
     } else {
         compaction_saving_total as f32 / total_traces as f32
+    };
+
+    let (review_backlog, approve_count, reject_count) = app_state
+        .with_database(|db| {
+            let conn = db.get_connection()?;
+            let review_backlog: i64 = conn.query_row(
+                "SELECT COUNT(*)
+                 FROM memory_entries_v2
+                 WHERE status = 'pending_review'
+                   AND ((scope = 'project' AND project_path = ?1) OR scope = 'global')",
+                rusqlite::params![project_path],
+                |row| row.get(0),
+            )?;
+
+            let mut approve_count = 0usize;
+            let mut reject_count = 0usize;
+            let mut stmt = conn.prepare(
+                "SELECT decision, COUNT(*)
+                 FROM memory_review_audit_v2 AS audit
+                 JOIN memory_entries_v2 AS mem ON mem.id = audit.memory_id
+                 WHERE audit.created_at >= ?1
+                   AND ((mem.scope = 'project' AND mem.project_path = ?2) OR mem.scope = 'global')
+                 GROUP BY decision",
+            )?;
+            let rows = stmt
+                .query_map(rusqlite::params![window_start, project_path], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })?
+                .filter_map(|r| r.ok())
+                .collect::<Vec<_>>();
+            for (decision, count) in rows {
+                match decision.as_str() {
+                    "approve" => approve_count += count.max(0) as usize,
+                    "reject" => reject_count += count.max(0) as usize,
+                    _ => {}
+                }
+            }
+
+            Ok((review_backlog.max(0) as usize, approve_count, reject_count))
+        })
+        .await
+        .unwrap_or((0, 0, 0));
+    let review_decisions = approve_count + reject_count;
+    let approve_rate = if review_decisions == 0 {
+        0.0
+    } else {
+        approve_count as f32 / review_decisions as f32
+    };
+    let reject_rate = if review_decisions == 0 {
+        0.0
+    } else {
+        reject_count as f32 / review_decisions as f32
     };
 
     let mut ab_variants: Vec<ContextOpsVariantStat> = variant_counts
@@ -2352,13 +2496,22 @@ pub async fn get_context_ops_dashboard(
             threshold: 300.0,
         });
     }
-    if degraded_rate > 0.10 {
+    if degraded_rate > 0.05 {
         alerts.push(ContextOpsAlert {
             code: "degraded_rate".to_string(),
             severity: "high".to_string(),
             message: "degraded rate exceeded threshold".to_string(),
             value: degraded_rate,
-            threshold: 0.10,
+            threshold: 0.05,
+        });
+    }
+    if review_backlog > 200 {
+        alerts.push(ContextOpsAlert {
+            code: "pending_review_backlog".to_string(),
+            severity: "high".to_string(),
+            message: "pending review backlog exceeded threshold".to_string(),
+            value: review_backlog as f32,
+            threshold: 200.0,
         });
     }
     if availability < 0.999 {
@@ -2435,6 +2588,12 @@ pub async fn get_context_ops_dashboard(
         source_failure_traces,
         prepare_context_p50_ms: p50_ms,
         prepare_context_p95_ms: p95_ms,
+        memory_query_p95_ms,
+        empty_hit_rate,
+        candidate_count,
+        review_backlog,
+        approve_rate,
+        reject_rate,
         total_compaction_saving_tokens: compaction_saving_total,
         avg_compaction_saving_tokens,
         ab_variants,
@@ -2517,6 +2676,8 @@ pub async fn run_context_chaos_probe(
                     excluded_memory_ids: Vec::new(),
                     selected_scopes: vec!["project".to_string(), "global".to_string()],
                     session_id: session_id.clone(),
+                    statuses: vec![],
+                    review_mode: None,
                 }),
                 skills: Some(SkillsSourceConfig {
                     enabled: false,

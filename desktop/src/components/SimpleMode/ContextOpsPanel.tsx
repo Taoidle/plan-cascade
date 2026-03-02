@@ -359,7 +359,7 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
         <StatCard
           label={t('rightPanel.contextOps.stats.degradedRate', { defaultValue: 'Degraded Rate' })}
           value={dashboard ? fmtPct(dashboard.degraded_rate, 2) : '-'}
-          tone={dashboard && dashboard.degraded_rate <= 0.1 ? 'good' : 'bad'}
+          tone={dashboard && dashboard.degraded_rate <= 0.05 ? 'good' : 'bad'}
         />
         <StatCard
           label={t('rightPanel.contextOps.stats.p95Latency', { defaultValue: 'P95 Latency' })}
@@ -369,6 +369,35 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
         <StatCard
           label={t('rightPanel.contextOps.stats.traces', { defaultValue: 'Traces' })}
           value={dashboard ? String(dashboard.total_traces) : '-'}
+        />
+        <StatCard
+          label={t('rightPanel.contextOps.stats.memoryP95', { defaultValue: 'Memory P95' })}
+          value={dashboard ? `${dashboard.memory_query_p95_ms.toFixed(1)}ms` : '-'}
+          tone={dashboard && dashboard.memory_query_p95_ms <= 300 ? 'good' : 'bad'}
+        />
+        <StatCard
+          label={t('rightPanel.contextOps.stats.emptyHitRate', { defaultValue: 'Empty Hit Rate' })}
+          value={dashboard ? fmtPct(dashboard.empty_hit_rate, 2) : '-'}
+          tone={dashboard && dashboard.empty_hit_rate <= 0.2 ? 'good' : 'warn'}
+        />
+        <StatCard
+          label={t('rightPanel.contextOps.stats.candidateCount', { defaultValue: 'Candidate Count' })}
+          value={dashboard ? dashboard.candidate_count.toFixed(1) : '-'}
+        />
+        <StatCard
+          label={t('rightPanel.contextOps.stats.reviewBacklog', { defaultValue: 'Review Backlog' })}
+          value={dashboard ? String(dashboard.review_backlog) : '-'}
+          tone={dashboard && dashboard.review_backlog <= 200 ? 'good' : 'bad'}
+        />
+        <StatCard
+          label={t('rightPanel.contextOps.stats.approveRate', { defaultValue: 'Approve Rate' })}
+          value={dashboard ? fmtPct(dashboard.approve_rate, 2) : '-'}
+          tone={dashboard && dashboard.approve_rate >= 0.7 ? 'good' : 'warn'}
+        />
+        <StatCard
+          label={t('rightPanel.contextOps.stats.rejectRate', { defaultValue: 'Reject Rate' })}
+          value={dashboard ? fmtPct(dashboard.reject_rate, 2) : '-'}
+          tone={dashboard && dashboard.reject_rate <= 0.3 ? 'good' : 'warn'}
         />
       </div>
 
