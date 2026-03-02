@@ -6,15 +6,19 @@
 
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { CommandResponse } from '../lib/tauri';
 import type {
   HandoffContextBundle,
   PlanEditOperation,
   UserInputIntent,
+  WorkflowKernelUpdatedEvent,
   WorkflowMode,
   WorkflowSession,
   WorkflowSessionState,
 } from '../types/workflowKernel';
+
+const WORKFLOW_KERNEL_UPDATED_CHANNEL = 'workflow-kernel-updated';
 
 const DEFAULT_HANDOFF: HandoffContextBundle = {
   conversationContext: [],
@@ -54,9 +58,11 @@ export interface WorkflowKernelStore {
   session: WorkflowSession | null;
   events: WorkflowSessionState['events'];
   checkpoints: WorkflowSessionState['checkpoints'];
+  revision: number;
   isLoading: boolean;
   error: string | null;
   _requestId: number;
+  _updatesUnlisten: UnlistenFn | null;
 
   openSession: (initialMode?: WorkflowMode, initialContext?: HandoffContextBundle) => Promise<WorkflowSession | null>;
   transitionMode: (targetMode: WorkflowMode, handoff?: HandoffContextBundle) => Promise<WorkflowSession | null>;
@@ -72,6 +78,9 @@ export interface WorkflowKernelStore {
   cancelOperation: (reason?: string) => Promise<WorkflowSession | null>;
   refreshSessionState: () => Promise<WorkflowSessionState | null>;
   recoverSession: (sessionId: string) => Promise<WorkflowSessionState | null>;
+  linkModeSession: (mode: WorkflowMode, modeSessionId: string) => Promise<WorkflowSession | null>;
+  subscribeToUpdates: () => Promise<void>;
+  unsubscribeFromUpdates: () => void;
   reset: () => void;
 }
 
@@ -81,9 +90,11 @@ const DEFAULT_STATE = {
   session: null as WorkflowSession | null,
   events: [] as WorkflowSessionState['events'],
   checkpoints: [] as WorkflowSessionState['checkpoints'],
+  revision: 0,
   isLoading: false,
   error: null as string | null,
   _requestId: 0,
+  _updatesUnlisten: null as UnlistenFn | null,
 };
 
 function applySession(set: (partial: Partial<WorkflowKernelStore>) => void, session: WorkflowSession) {
@@ -102,6 +113,7 @@ function applySessionState(set: (partial: Partial<WorkflowKernelStore>) => void,
     session: sessionState.session,
     events: sessionState.events,
     checkpoints: sessionState.checkpoints,
+    revision: sessionState.events.length + sessionState.checkpoints.length,
     error: null,
   });
 }
@@ -126,6 +138,8 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
 
       applySession(set, result.data);
       set({ isLoading: false });
+      await get().subscribeToUpdates();
+      void get().refreshSessionState();
       return result.data;
     } catch (error) {
       if (get()._requestId !== requestId) return null;
@@ -378,6 +392,7 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
       }
       applySessionState(set, result.data);
       set({ isLoading: false });
+      await get().subscribeToUpdates();
       return result.data;
     } catch (error) {
       if (get()._requestId !== requestId) return null;
@@ -389,7 +404,73 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
     }
   },
 
+  linkModeSession: async (mode, modeSessionId) => {
+    const sessionId = get().sessionId;
+    const normalizedModeSessionId = modeSessionId.trim();
+    if (!sessionId) {
+      set({ error: 'No workflow session available' });
+      return null;
+    }
+    if (!normalizedModeSessionId) {
+      set({ error: 'Mode session id cannot be empty' });
+      return null;
+    }
+    try {
+      const result = await invoke<CommandResponse<WorkflowSession>>('workflow_link_mode_session', {
+        sessionId,
+        mode,
+        modeSessionId: normalizedModeSessionId,
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to link workflow mode session' });
+        return null;
+      }
+      applySession(set, result.data);
+      return result.data;
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  },
+
+  subscribeToUpdates: async () => {
+    if (get()._updatesUnlisten) return;
+    try {
+      const unlisten = await listen<WorkflowKernelUpdatedEvent>(WORKFLOW_KERNEL_UPDATED_CHANNEL, (event) => {
+        const payload = event.payload;
+        const incomingSessionId = payload?.sessionState?.session?.sessionId;
+        if (!incomingSessionId) return;
+        const currentSessionId = get().sessionId;
+        if (currentSessionId && currentSessionId !== incomingSessionId) return;
+
+        set({
+          sessionId: incomingSessionId,
+          activeMode: payload.sessionState.session.activeMode,
+          session: payload.sessionState.session,
+          events: payload.sessionState.events,
+          checkpoints: payload.sessionState.checkpoints,
+          revision: payload.revision,
+          error: null,
+        });
+      });
+      set({ _updatesUnlisten: unlisten });
+    } catch {
+      // Event subscription failure should not block workflow.
+    }
+  },
+
+  unsubscribeFromUpdates: () => {
+    const unlisten = get()._updatesUnlisten;
+    if (unlisten) {
+      unlisten();
+      set({ _updatesUnlisten: null });
+    }
+  },
+
   reset: () => {
+    get().unsubscribeFromUpdates();
     set({ ...DEFAULT_STATE });
   },
 }));

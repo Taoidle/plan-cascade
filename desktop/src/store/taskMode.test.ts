@@ -30,10 +30,12 @@ import { useTaskModeStore } from './taskMode';
 import type { StrategyAnalysis, TaskModeSession, TaskPrd, TaskExecutionStatus, ExecutionReport } from './taskMode';
 import { useContextSourcesStore } from './contextSources';
 import { useProjectsStore } from './projects';
+import { useSettingsStore } from './settings';
 
 // Helpers
 function resetStore() {
   useTaskModeStore.getState().reset();
+  useSettingsStore.setState({ defaultAgent: 'claude-code' });
   useContextSourcesStore.setState({
     knowledgeEnabled: false,
     selectedCollections: [],
@@ -356,6 +358,26 @@ describe('TaskModeStore', () => {
 
       expect(useTaskModeStore.getState().error).toBe('PRD must contain at least one story');
     });
+
+    it('passes globalDefaultAgent to approve_task_prd payload', async () => {
+      useTaskModeStore.setState({ sessionId: 'session-123', isTaskMode: true });
+      useSettingsStore.setState({ defaultAgent: 'codex' });
+      mockInvoke.mockResolvedValueOnce({ success: true, data: true, error: null });
+
+      await useTaskModeStore.getState().approvePrd(mockPrd());
+
+      const call = mockInvoke.mock.calls.find(([command]) => command === 'approve_task_prd');
+      expect(call).toBeDefined();
+      expect(
+        (
+          call?.[1] as
+            | {
+                globalDefaultAgent?: string | null;
+              }
+            | undefined
+        )?.globalDefaultAgent,
+      ).toBe('codex');
+    });
   });
 
   // =========================================================================
@@ -514,6 +536,37 @@ describe('TaskModeStore', () => {
       expect(state.currentBatch).toBe(2);
       expect(state.totalBatches).toBe(3);
       expect(state.storyStatuses['story-001']).toBe('completed');
+    });
+
+    it('should map gateResults into story qualityGateResults', async () => {
+      useTaskModeStore.setState({ sessionId: 'session-123' });
+      await useTaskModeStore.getState().subscribeToEvents();
+
+      emitEvent('task-mode-progress', {
+        sessionId: 'session-123',
+        eventType: 'story_completed',
+        currentBatch: 1,
+        totalBatches: 2,
+        storyId: 'story-qa',
+        storyStatus: 'completed',
+        agentName: 'qa-agent',
+        gateResults: [
+          {
+            gateId: 'tests',
+            gateName: 'Tests',
+            phase: 'validation',
+            status: 'passed',
+            message: 'All tests passed',
+          },
+        ],
+        error: null,
+        progressPct: 50,
+      });
+
+      const state = useTaskModeStore.getState();
+      expect(state.qualityGateResults['story-qa']).toBeDefined();
+      expect(state.qualityGateResults['story-qa'].overallStatus).toBe('passed');
+      expect(state.qualityGateResults['story-qa'].gates).toHaveLength(1);
     });
 
     it('should ignore events for different session', async () => {

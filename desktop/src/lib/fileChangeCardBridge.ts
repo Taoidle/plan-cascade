@@ -61,16 +61,15 @@ function extractDiffPreview(diff: string, maxLines: number = 8): string | null {
   return lines.slice(0, maxLines).join('\n');
 }
 
-function makeCardPayload(cardType: 'file_change', data: FileChangeCardData): string;
-function makeCardPayload(cardType: 'turn_change_summary', data: TurnChangeSummaryCardData): string;
-function makeCardPayload(cardType: string, data: unknown): string {
-  const payload: CardPayload = {
+function makeCardPayload(cardType: 'file_change', data: FileChangeCardData): CardPayload;
+function makeCardPayload(cardType: 'turn_change_summary', data: TurnChangeSummaryCardData): CardPayload;
+function makeCardPayload(cardType: string, data: unknown): CardPayload {
+  return {
     cardType: cardType as CardPayload['cardType'],
     cardId: `${cardType}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     data: data as CardPayload['data'],
     interactive: false,
   };
-  return JSON.stringify(payload);
 }
 
 // ============================================================================
@@ -134,7 +133,7 @@ export function createFileChangeCardBridge(sessionId: string, projectRoot: strin
         };
 
         // Inject the card into the chat
-        useExecutionStore.getState().appendStreamLine(makeCardPayload('file_change', cardData), 'card');
+        useExecutionStore.getState().appendCard(makeCardPayload('file_change', cardData));
 
         // Accumulate for turn summary
         const pending: PendingChange = {
@@ -216,7 +215,7 @@ export function createFileChangeCardBridge(sessionId: string, projectRoot: strin
         totalLinesRemoved: changes.reduce((sum, c) => sum + c.linesRemoved, 0),
       };
 
-      useExecutionStore.getState().appendStreamLine(makeCardPayload('turn_change_summary', summaryData), 'card');
+      useExecutionStore.getState().appendCard(makeCardPayload('turn_change_summary', summaryData));
     },
 
     reset() {

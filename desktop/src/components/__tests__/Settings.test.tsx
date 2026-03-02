@@ -50,6 +50,17 @@ vi.mock('react-i18next', () => ({
         'general.knowledgeBase.kbPickerServerSearchDescription': 'Search unexpanded collections',
         'general.knowledgeBase.kbIngestJobScopedProgress': 'Use job-scoped ingest progress events',
         'general.knowledgeBase.kbIngestJobScopedProgressDescription': 'Isolate upload progress by job',
+        'general.simpleWorkflow.title': 'Simple Workflow Rollout',
+        'general.simpleWorkflow.simpleKernelSot': 'SIMPLE_KERNEL_SOT (Kernel phase source of truth)',
+        'general.simpleWorkflow.simpleKernelSotDescription':
+          'Use workflow-kernel snapshots and events as the primary phase authority.',
+        'general.simpleWorkflow.typedCardPipeline': 'TYPED_CARD_PIPELINE (Structured card payload path)',
+        'general.simpleWorkflow.typedCardPipelineDescription':
+          'Render workflow cards from typed payloads first, with JSON fallback for legacy history.',
+        'general.contextInspector.title': 'Context Observability',
+        'general.contextInspector.enable': 'Enable Context Inspector tab',
+        'general.contextInspector.description':
+          'Show the Context tab in the right panel for trace, compaction, and source diagnostics.',
         'general.executionLimits.title': 'Execution Limits',
         'general.executionLimits.maxParallelStories': 'Max Parallel Stories',
         'general.executionLimits.maxIterations': 'Max Iterations',
@@ -82,6 +93,22 @@ const { mockUpdateSettings, mockGetKnowledgeFeatureFlags, mockSetKnowledgeFeatur
 
 const mockInvoke = vi.fn(async (command: string, args?: { provider?: string; apiKey?: string; api_key?: string }) => {
   switch (command) {
+    case 'get_context_policy':
+      return {
+        success: true,
+        data: {
+          context_v2_pipeline: true,
+          memory_v2_ranker: true,
+          context_inspector_ui: false,
+          pinned_sources: [],
+          excluded_sources: [],
+          soft_threshold_ratio: 0.85,
+          hard_threshold_ratio: 0.95,
+        },
+        error: null,
+      };
+    case 'set_context_policy':
+      return { success: true, data: { key: 'context_policy_v2', updated_at: '2026-03-02T00:00:00Z' }, error: null };
     case 'list_configured_api_key_providers':
       return { success: true, data: Object.keys(mockProviderKeys), error: null };
     case 'list_providers':
@@ -133,6 +160,8 @@ const mockSetKnowledgeAutoEnsureDocsCollection = vi.fn();
 const mockSetKbQueryRunsV2 = vi.fn();
 const mockSetKbPickerServerSearch = vi.fn();
 const mockSetKbIngestJobScopedProgress = vi.fn();
+const mockSetSimpleKernelSot = vi.fn();
+const mockSetTypedCardPipeline = vi.fn();
 
 const mockSettingsState = {
   backend: 'claude-code' as string,
@@ -152,6 +181,8 @@ const mockSettingsState = {
   kbQueryRunsV2: true,
   kbPickerServerSearch: true,
   kbIngestJobScopedProgress: true,
+  simpleKernelSot: true,
+  typedCardPipeline: true,
   agents: [
     { name: 'claude-code', enabled: true, command: 'claude', isDefault: true },
     { name: 'aider', enabled: false, command: 'aider', isDefault: false },
@@ -178,6 +209,8 @@ const mockSettingsState = {
   setKbQueryRunsV2: mockSetKbQueryRunsV2,
   setKbPickerServerSearch: mockSetKbPickerServerSearch,
   setKbIngestJobScopedProgress: mockSetKbIngestJobScopedProgress,
+  setSimpleKernelSot: mockSetSimpleKernelSot,
+  setTypedCardPipeline: mockSetTypedCardPipeline,
 };
 
 vi.mock('../../store/settings', () => ({
@@ -465,6 +498,24 @@ describe('GeneralSection', () => {
     render(<GeneralSection />);
 
     expect(screen.getByTestId('language-selector')).toBeInTheDocument();
+  });
+
+  it('persists context inspector toggle via context policy API', async () => {
+    render(<GeneralSection />);
+
+    const title = await screen.findByText('Enable Context Inspector tab');
+    const toggle = title.closest('label')?.querySelector('input[type="checkbox"]');
+    expect(toggle).toBeTruthy();
+    fireEvent.click(toggle!);
+
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith(
+        'set_context_policy',
+        expect.objectContaining({
+          policy: expect.objectContaining({ context_inspector_ui: true }),
+        }),
+      ),
+    );
   });
 });
 

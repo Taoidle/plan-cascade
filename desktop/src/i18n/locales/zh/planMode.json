@@ -32,7 +32,9 @@
   "output": {
     "passed": "通过",
     "partial": "部分通过",
-    "criteria": "标准"
+    "criteria": "标准",
+    "met": "满足",
+    "notMet": "未满足"
   },
 
   "completion": {
@@ -45,6 +47,7 @@
   },
 
   "clarify": {
+    "title": "需要澄清",
     "question": "澄清问题",
     "hint": "提示",
     "skipped": "已跳过",
@@ -66,6 +69,9 @@
     "clarificationFailed": "澄清失败，继续进行规划。",
     "planFailed": "计划生成失败",
     "planApproved": "计划已批准！开始执行...",
+    "cancelFailed": "取消失败",
+    "cancelling": "正在取消计划执行...",
+    "stepOutputLoadFailed": "步骤输出不可用",
     "cancelled": "计划模式已取消。"
   },
 

@@ -18,6 +18,7 @@ import type {
   PlanModeProgressPayload,
   PlanExecutionStatusResponse,
   AdapterInfo,
+  StepOutputData,
   PlanClarifyAnswerCardData,
   PlanClarifyQuestionCardData,
 } from '../types/planModeCard';
@@ -92,6 +93,7 @@ export interface PlanModeState {
   cancelExecution: () => Promise<void>;
   cancelOperation: () => Promise<void>;
   fetchReport: () => Promise<void>;
+  fetchStepOutput: (stepId: string) => Promise<StepOutputData | null>;
   exitPlanMode: () => Promise<void>;
   fetchAdapters: () => Promise<void>;
   subscribeToEvents: () => Promise<void>;
@@ -399,6 +401,27 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
     }
   },
 
+  fetchStepOutput: async (stepId) => {
+    const { sessionId } = get();
+    const normalizedStepId = stepId.trim();
+    if (!sessionId || !normalizedStepId) return null;
+
+    try {
+      const result = await invoke<CommandResponse<StepOutputData>>('get_step_output', {
+        sessionId,
+        stepId: normalizedStepId,
+      });
+      if (result.success && result.data) {
+        return result.data;
+      }
+      set({ error: result.error || `Failed to fetch output for step '${normalizedStepId}'` });
+      return null;
+    } catch (e) {
+      set({ error: String(e) });
+      return null;
+    }
+  },
+
   exitPlanMode: async () => {
     const { sessionId, _unlistenFn } = get();
     const nextRequestId = get()._requestId + 1;
@@ -458,6 +481,8 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
       } else if (payload.eventType === 'execution_cancelled') {
         updates.sessionPhase = 'cancelled';
         updates.isCancelling = false;
+      } else if (payload.eventType === 'step_failed' && payload.error) {
+        updates.error = payload.error;
       }
 
       set(updates);

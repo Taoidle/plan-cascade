@@ -1423,6 +1423,7 @@ pub async fn approve_task_prd(
     base_url: Option<String>,
     execution_mode: Option<StoryExecutionMode>,
     workflow_config: Option<TaskWorkflowConfig>,
+    global_default_agent: Option<String>,
     phase_configs: Option<HashMap<String, PhaseConfigInput>>,
     context_sources: Option<crate::services::task_mode::context_provider::ContextSourceConfig>,
 ) -> Result<CommandResponse<bool>, String> {
@@ -1663,9 +1664,9 @@ pub async fn approve_task_prd(
                 let executor =
                     BatchExecutor::new(stories_for_exec, exec_config, cancellation_token);
                 let resolver = match &phase_configs {
-                    Some(configs) if !configs.is_empty() => {
-                        AgentResolver::new(build_agents_config_from_frontend(configs))
-                    }
+                    Some(configs) if !configs.is_empty() => AgentResolver::new(
+                        build_agents_config_from_frontend(configs, global_default_agent.as_deref()),
+                    ),
                     _ => AgentResolver::with_defaults(),
                 };
 
@@ -3569,6 +3570,7 @@ fn build_story_prompt(
 /// also registered so the resolver considers them "available".
 fn build_agents_config_from_frontend(
     configs: &HashMap<String, PhaseConfigInput>,
+    global_default_agent: Option<&str>,
 ) -> crate::services::task_mode::agent_resolver::AgentsConfig {
     use crate::services::task_mode::agent_resolver::{
         AgentDefinition, AgentOverrides, AgentsConfig, PhaseConfig,
@@ -3576,9 +3578,16 @@ fn build_agents_config_from_frontend(
 
     let mut agents: HashMap<String, AgentDefinition> = HashMap::new();
     let mut phase_defaults: HashMap<String, PhaseConfig> = HashMap::new();
+    let normalized_global_default = global_default_agent
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string);
 
     // Helper: register an agent name (CLI or LLM) so it's marked available
     let mut register_agent = |name: &str| {
+        if name.trim().is_empty() {
+            return;
+        }
         if !agents.contains_key(name) {
             agents.insert(
                 name.to_string(),
@@ -3592,27 +3601,44 @@ fn build_agents_config_from_frontend(
         }
     };
 
+    if let Some(ref global_agent) = normalized_global_default {
+        register_agent(global_agent);
+    }
+
     for (phase_id, input) in configs {
-        register_agent(&input.default_agent);
-        for fb in &input.fallback_chain {
-            register_agent(fb);
+        let normalized_default = input.default_agent.trim();
+        if !normalized_default.is_empty() {
+            register_agent(normalized_default);
         }
+
+        let mut fallback_chain: Vec<String> = Vec::new();
+        for fallback in &input.fallback_chain {
+            let normalized = fallback.trim();
+            if normalized.is_empty() {
+                continue;
+            }
+            register_agent(normalized);
+            fallback_chain.push(normalized.to_string());
+        }
+
+        let phase_default = if normalized_default.is_empty() {
+            normalized_global_default.clone()
+        } else {
+            Some(normalized_default.to_string())
+        };
 
         phase_defaults.insert(
             phase_id.clone(),
             PhaseConfig {
-                default_agent: Some(input.default_agent.clone()),
-                fallback_chain: input.fallback_chain.clone(),
+                default_agent: phase_default,
+                fallback_chain,
                 story_type_overrides: HashMap::new(),
             },
         );
     }
 
-    // Default agent is the implementation phase's default, or first available
-    let default_agent = configs
-        .get("implementation")
-        .map(|c| c.default_agent.clone())
-        .unwrap_or_else(|| "claude-code".to_string());
+    let default_agent = normalized_global_default.unwrap_or_else(|| "claude-code".to_string());
+    register_agent(&default_agent);
 
     AgentsConfig {
         default_agent,
@@ -3777,6 +3803,65 @@ mod tests {
         assert!(json.contains("\"qualityScores\""));
         assert!(json.contains("\"timeline\""));
         assert!(json.contains("\"agentPerformance\""));
+    }
+
+    #[test]
+    fn test_build_agents_config_from_frontend_uses_global_default_for_empty_phase_defaults() {
+        let mut configs = HashMap::new();
+        configs.insert(
+            "planning".to_string(),
+            PhaseConfigInput {
+                default_agent: "".to_string(),
+                fallback_chain: vec!["codex".to_string()],
+            },
+        );
+        configs.insert(
+            "implementation".to_string(),
+            PhaseConfigInput {
+                default_agent: "  ".to_string(),
+                fallback_chain: vec!["aider".to_string()],
+            },
+        );
+
+        let parsed = build_agents_config_from_frontend(&configs, Some("claude-code"));
+        let planning = parsed
+            .phase_defaults
+            .get("planning")
+            .expect("planning config");
+        let implementation = parsed
+            .phase_defaults
+            .get("implementation")
+            .expect("implementation config");
+
+        assert_eq!(parsed.default_agent, "claude-code");
+        assert_eq!(planning.default_agent.as_deref(), Some("claude-code"));
+        assert_eq!(implementation.default_agent.as_deref(), Some("claude-code"));
+        assert_eq!(planning.fallback_chain, vec!["codex"]);
+        assert_eq!(implementation.fallback_chain, vec!["aider"]);
+        assert!(parsed.agents.contains_key("claude-code"));
+        assert!(!parsed.agents.contains_key(""));
+    }
+
+    #[test]
+    fn test_build_agents_config_from_frontend_falls_back_when_global_default_missing() {
+        let mut configs = HashMap::new();
+        configs.insert(
+            "planning".to_string(),
+            PhaseConfigInput {
+                default_agent: "".to_string(),
+                fallback_chain: vec![],
+            },
+        );
+
+        let parsed = build_agents_config_from_frontend(&configs, None);
+        let planning = parsed
+            .phase_defaults
+            .get("planning")
+            .expect("planning config");
+
+        assert_eq!(parsed.default_agent, "claude-code");
+        assert_eq!(planning.default_agent, None);
+        assert!(parsed.agents.contains_key("claude-code"));
     }
 
     #[test]

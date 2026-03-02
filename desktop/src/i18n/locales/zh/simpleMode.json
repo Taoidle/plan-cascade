@@ -274,6 +274,9 @@
     "thinking": "思考中...",
     "startConversation": "在右侧输入框中开始对话。"
   },
+  "chat": {
+    "scrollToBottom": "滚动到底部"
+  },
 
   "permission": {
     "toolRequiresApproval": "工具需要审批：",
@@ -339,6 +342,7 @@
   "workflow": {
     "cancelWorkflow": "取消工作流",
     "modeSwitchConfirm": "当前执行仍在进行。立即切换模式可能改变当前工作流上下文，是否继续？",
+    "modeSwitchFailed": "切换工作流模式失败，请重试。",
     "clearQueuedMessages": "离开对话模式时已清空排队消息。",
     "queueLimitReached": "排队已满（最多 3 条消息）。",
     "queueAttachmentsNotSupported": "运行中排队暂不支持新附件消息。",
@@ -675,10 +679,14 @@
       "prdApproved": "PRD 已批准！开始执行...",
       "prdFeedbackNoted": "PRD 反馈已记录：「{{feedback}}」。使用 PRD 卡片上的编辑按钮进行修改。",
       "workflowCancelled": "工作流已取消。",
+      "cancelFailed": "取消失败",
+      "cancelRetry": "请重试取消操作。",
+      "cancelling": "正在取消工作流...",
       "configUpdated": "配置已更新：{{details}}",
       "enhancingAnalysis": "正在使用AI增强分析...",
       "exploringProject": "正在探索项目结构和代码库...",
       "explorationFailed": "项目探索失败（非阻塞），继续执行...",
+      "interviewQuestionUnavailable": "访谈问题暂不可用，继续进行需求分析。",
       "analyzingRequirements": "产品经理正在分析需求...",
       "requirementAnalysisFailed": "需求分析未能完成，继续执行...",
       "reviewingArchitecture": "软件架构师正在审查架构...",
@@ -843,6 +851,7 @@
     "outputTab": "输出",
     "gitTab": "Git",
     "contextTab": "上下文",
+    "resize": "调整面板宽度",
     "contextOps": {
       "tabs": {
         "inspector": "检查器",

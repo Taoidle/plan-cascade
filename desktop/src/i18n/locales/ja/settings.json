@@ -51,13 +51,27 @@
     "knowledgeBase": {
       "title": "ナレッジベース",
       "autoEnsureDocs": "ワークスペース用 docs コレクションを自動作成",
-      "autoEnsureDocsDescription": "有効にすると、ワークスペースを開いたときに docs コレクションを自動作成して関連付けます。安全性のため既定はオフです。",
+      "autoEnsureDocsDescription": "有効にすると、ワークスペースを開いたときに docs コレクションを自動作成して関連付けます。",
       "kbQueryRunsV2": "クエリ履歴のスコープ厳密フィルタ（v2）を使用",
       "kbQueryRunsV2Description": "有効時、クエリ履歴のフィルタは構造化された collection scope 結合を使用し、従来の曖昧一致を使いません。",
       "kbPickerServerSearch": "ピッカーでサーバー側ドキュメント検索を使用",
       "kbPickerServerSearchDescription": "有効時、ローカルで未展開のコレクション内ドキュメントもソースピッカー検索でヒットします。",
       "kbIngestJobScopedProgress": "job 単位の取り込み進捗イベントを使用",
       "kbIngestJobScopedProgressDescription": "有効時、アップロード進捗を job/project/collection ごとに分離し、コレクション間の進捗干渉を防ぎます。"
+    },
+
+    "simpleWorkflow": {
+      "title": "Simple ワークフローのロールアウト",
+      "simpleKernelSot": "SIMPLE_KERNEL_SOT（Kernel phase の単一真実源）",
+      "simpleKernelSotDescription": "workflow-kernel のスナップショットとイベントを主要な phase の基準として使用します。",
+      "typedCardPipeline": "TYPED_CARD_PIPELINE（型付きカード経路）",
+      "typedCardPipelineDescription": "ワークフローカードは型付き payload を優先し、履歴 JSON の互換フォールバックを維持します。"
+    },
+
+    "contextInspector": {
+      "title": "コンテキスト観測",
+      "enable": "Context Inspector タブを有効化",
+      "description": "右側パネルに Context タブを表示し、trace、圧縮結果、ソース診断を確認できます。"
     },
 
     "language": {
@@ -238,7 +252,7 @@
       "subAgentEvents": "サブエージェント進捗イベントを表示",
       "subAgentEventsHelp": "委任された探索・分析フェーズの構造化された開始/終了イベントを表示します。",
       "reasoningTraces": "モデルの推論/思考トレースを表示",
-      "reasoningTracesHelp": "デフォルトはオフ。詳細なモデル動作をデバッグする場合のみ有効にしてください。",
+      "reasoningTracesHelp": "モデルの推論/思考ストリームをリアルタイム表示します。デバッグと透明性の確認に有効です。",
       "enableThinking": "モデルの思考/推論を有効にする",
       "enableThinkingHelp": "対応モデル（Qwen3、QwQ、DeepSeek-R1など）で拡張思考を有効にします。モデルは応答前に段階的に問題を推論します。"
     },
@@ -479,6 +493,16 @@
       "button": "すべての設定をリセット",
       "success": "設定をデフォルトにリセットしました",
       "error": "設定のリセットに失敗しました。もう一度お試しください。"
+    },
+    "clearAllData": {
+      "title": "すべてのデータを削除",
+      "description": "ローカルのアプリデータ（フロントエンドキャッシュ + バックエンド ~/.plan-cascade データ）をすべて削除します。DBレコード、インデックス、プラグイン、シークレットが対象です。この操作は元に戻せません。",
+      "button": "すべてのデータを削除",
+      "clearing": "削除中...",
+      "confirmPrimary": "ローカルの Plan Cascade データをすべて削除します。続行しますか？",
+      "confirmSecondary": "最終確認：この操作は取り消せません。今すぐすべてのデータを削除しますか？",
+      "success": "すべてのデータを削除しました。再読み込みしています...",
+      "error": "すべてのデータの削除に失敗しました。もう一度お試しください。"
     }
   },
 

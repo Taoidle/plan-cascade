@@ -1,206 +1,714 @@
-/**
- * SimpleMode Component Tests
- *
- * Tests the one-click execution flow, strategy recommendation display,
- * streaming progress rendering, and idle state.
- *
- * Story 009: React Component Test Coverage
- */
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import { SimpleMode } from '../SimpleMode/index';
-import { createMockStrategyAnalysis } from './test-utils';
+const storeHarness = vi.hoisted(() => {
+  let executionState: Record<string, unknown> = {};
+  let settingsState: Record<string, unknown> = {};
+  let workflowKernelState: Record<string, unknown> = {};
+  let workflowOrchestratorState: Record<string, unknown> = {};
+  let planOrchestratorState: Record<string, unknown> = {};
+  let toolPermissionState: Record<string, unknown> = {};
+  let contextSourcesState: Record<string, unknown> = {};
 
-// --------------------------------------------------------------------------
-// Mocks
-// --------------------------------------------------------------------------
+  const useExecutionStore = ((selector?: (state: Record<string, unknown>) => unknown) =>
+    selector ? selector(executionState) : executionState) as {
+    (selector?: (state: Record<string, unknown>) => unknown): unknown;
+    getState: () => Record<string, unknown>;
+    setState: (partial: Record<string, unknown>) => void;
+    subscribe: ReturnType<typeof vi.fn>;
+  };
+  useExecutionStore.getState = () => executionState;
+  useExecutionStore.setState = (partial) => {
+    executionState = { ...executionState, ...partial };
+  };
+  useExecutionStore.subscribe = vi.fn(() => () => {});
 
-// Mock react-i18next
+  const useSettingsStore = ((selector?: (state: Record<string, unknown>) => unknown) =>
+    selector ? selector(settingsState) : settingsState) as {
+    (selector?: (state: Record<string, unknown>) => unknown): unknown;
+    getState: () => Record<string, unknown>;
+    setState: (partial: Record<string, unknown>) => void;
+  };
+  useSettingsStore.getState = () => settingsState;
+  useSettingsStore.setState = (partial) => {
+    settingsState = { ...settingsState, ...partial };
+  };
+
+  const useWorkflowKernelStore = ((selector?: (state: Record<string, unknown>) => unknown) =>
+    selector ? selector(workflowKernelState) : workflowKernelState) as {
+    (selector?: (state: Record<string, unknown>) => unknown): unknown;
+    getState: () => Record<string, unknown>;
+    setState: (partial: Record<string, unknown>) => void;
+  };
+  useWorkflowKernelStore.getState = () => workflowKernelState;
+  useWorkflowKernelStore.setState = (partial) => {
+    workflowKernelState = { ...workflowKernelState, ...partial };
+  };
+
+  const useWorkflowOrchestratorStore = ((selector?: (state: Record<string, unknown>) => unknown) =>
+    selector ? selector(workflowOrchestratorState) : workflowOrchestratorState) as {
+    (selector?: (state: Record<string, unknown>) => unknown): unknown;
+    getState: () => Record<string, unknown>;
+  };
+  useWorkflowOrchestratorStore.getState = () => workflowOrchestratorState;
+
+  const usePlanOrchestratorStore = ((selector?: (state: Record<string, unknown>) => unknown) =>
+    selector ? selector(planOrchestratorState) : planOrchestratorState) as {
+    (selector?: (state: Record<string, unknown>) => unknown): unknown;
+    getState: () => Record<string, unknown>;
+  };
+  usePlanOrchestratorStore.getState = () => planOrchestratorState;
+
+  const useToolPermissionStore = ((selector?: (state: Record<string, unknown>) => unknown) =>
+    selector ? selector(toolPermissionState) : toolPermissionState) as {
+    (selector?: (state: Record<string, unknown>) => unknown): unknown;
+  };
+
+  const useContextSourcesStore = ((selector?: (state: Record<string, unknown>) => unknown) =>
+    selector ? selector(contextSourcesState) : contextSourcesState) as {
+    (selector?: (state: Record<string, unknown>) => unknown): unknown;
+    getState: () => Record<string, unknown>;
+  };
+  useContextSourcesStore.getState = () => contextSourcesState;
+
+  const mockSetGitSelectedTab = vi.fn();
+  const useGitStore = {
+    getState: () => ({
+      setSelectedTab: mockSetGitSelectedTab,
+    }),
+  };
+
+  const mockSelectTurn = vi.fn();
+  const useFileChangesStore = {
+    getState: () => ({
+      selectTurn: mockSelectTurn,
+    }),
+  };
+
+  const useAgentsStore = {
+    getState: () => ({
+      clearActiveAgent: vi.fn(),
+    }),
+  };
+
+  return {
+    useExecutionStore,
+    useSettingsStore,
+    useWorkflowKernelStore,
+    useWorkflowOrchestratorStore,
+    usePlanOrchestratorStore,
+    useToolPermissionStore,
+    useContextSourcesStore,
+    useGitStore,
+    useFileChangesStore,
+    useAgentsStore,
+    getExecutionState: () => executionState,
+    setExecutionState: (state: Record<string, unknown>) => {
+      executionState = state;
+    },
+    getSettingsState: () => settingsState,
+    setSettingsState: (state: Record<string, unknown>) => {
+      settingsState = state;
+    },
+    getWorkflowKernelState: () => workflowKernelState,
+    setWorkflowKernelState: (state: Record<string, unknown>) => {
+      workflowKernelState = state;
+    },
+    getWorkflowOrchestratorState: () => workflowOrchestratorState,
+    setWorkflowOrchestratorState: (state: Record<string, unknown>) => {
+      workflowOrchestratorState = state;
+    },
+    getPlanOrchestratorState: () => planOrchestratorState,
+    setPlanOrchestratorState: (state: Record<string, unknown>) => {
+      planOrchestratorState = state;
+    },
+    setToolPermissionState: (state: Record<string, unknown>) => {
+      toolPermissionState = state;
+    },
+    setContextSourcesState: (state: Record<string, unknown>) => {
+      contextSourcesState = state;
+    },
+  };
+});
+
+const mockInvoke = vi.fn();
+const mockShowToast = vi.fn();
+
 vi.mock('react-i18next', () => ({
-  initReactI18next: {
-    type: '3rdParty',
-    init: () => {},
-  },
   useTranslation: () => ({
     t: (key: string, opts?: { defaultValue?: string }) => opts?.defaultValue || key,
   }),
 }));
 
-// Track store state for controlled testing
-const mockAnalyzeStrategy = vi.fn();
-const mockStart = vi.fn();
-const mockSendFollowUp = vi.fn();
-const mockReset = vi.fn();
-const mockClearStrategyAnalysis = vi.fn();
-const mockInitialize = vi.fn();
-const mockCleanup = vi.fn();
-
-let mockStoreState = {
-  status: 'idle' as string,
-  connectionStatus: 'connected' as string,
-  isSubmitting: false,
-  apiError: null as string | null,
-  start: mockStart,
-  sendFollowUp: mockSendFollowUp,
-  reset: mockReset,
-  result: null as { success: boolean; message: string } | null,
-  initialize: mockInitialize,
-  cleanup: mockCleanup,
-  analyzeStrategy: mockAnalyzeStrategy,
-  strategyAnalysis: null as ReturnType<typeof createMockStrategyAnalysis> | null,
-  isAnalyzingStrategy: false,
-  clearStrategyAnalysis: mockClearStrategyAnalysis,
-  isChatSession: false,
-  streamingOutput: [] as Array<Record<string, unknown>>,
-  standaloneTurns: [] as Array<Record<string, unknown>>,
-  history: [] as Array<Record<string, unknown>>,
-  clearHistory: vi.fn(),
-  deleteHistory: vi.fn(),
-  renameHistory: vi.fn(),
-  restoreFromHistory: vi.fn(),
-  sessionUsageTotals: null,
-  latestUsage: null,
-  analysisCoverage: null,
-  logs: [] as string[],
-  attachments: [] as Array<Record<string, unknown>>,
-  addAttachment: vi.fn(),
-  removeAttachment: vi.fn(),
-  backgroundSessions: {} as Record<string, unknown>,
-  switchToSession: vi.fn(),
-  removeBackgroundSession: vi.fn(),
-};
-
-vi.mock('../../store/execution', () => ({
-  useExecutionStore: () => mockStoreState,
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (...args: unknown[]) => mockInvoke(...args),
 }));
 
-// Mock child components to isolate SimpleMode logic
-vi.mock('../SimpleMode/InputBox', () => ({
-  InputBox: ({
-    value,
-    onChange,
-    onSubmit,
-    disabled,
-    placeholder,
-    isLoading,
+vi.mock('../shared/Toast', () => ({
+  useToast: () => ({ showToast: mockShowToast }),
+}));
+
+vi.mock('../SimpleMode/ChatTranscript', () => ({
+  ChatTranscript: ({ lines }: { lines: Array<unknown> }) => (
+    <div data-testid="chat-transcript">lines:{lines.length}</div>
+  ),
+}));
+
+vi.mock('../SimpleMode/WorkspaceTreeSidebar', () => ({
+  WorkspaceTreeSidebar: () => <div data-testid="workspace-tree-sidebar" />,
+}));
+
+vi.mock('../SimpleMode/EdgeCollapseButton', () => ({
+  EdgeCollapseButton: ({ onToggle }: { onToggle: () => void }) => (
+    <button data-testid="edge-toggle" onClick={onToggle}>
+      edge-toggle
+    </button>
+  ),
+}));
+
+vi.mock('../SimpleMode/BottomStatusBar', () => ({
+  BottomStatusBar: () => <div data-testid="bottom-status-bar" />,
+}));
+
+vi.mock('../SimpleMode/InputBox', async () => {
+  const React = await import('react');
+  const InputBox = React.forwardRef(function MockInputBox(
+    props: {
+      value: string;
+      onChange: (value: string) => void;
+      onSubmit: () => void;
+      disabled?: boolean;
+      placeholder?: string;
+    },
+    ref: React.Ref<{ pickFile: () => void }>,
+  ) {
+    React.useImperativeHandle(ref, () => ({
+      pickFile: vi.fn(),
+    }));
+    return (
+      <div data-testid="input-box">
+        <input
+          data-testid="composer-input"
+          value={props.value}
+          onChange={(event) => props.onChange(event.target.value)}
+          placeholder={props.placeholder}
+          disabled={props.disabled}
+        />
+        <button data-testid="composer-submit" onClick={props.onSubmit} disabled={props.disabled}>
+          submit
+        </button>
+      </div>
+    );
+  });
+  return { InputBox };
+});
+
+vi.mock('../SimpleMode/InterviewInputPanel', () => ({
+  InterviewInputPanel: () => <div data-testid="interview-input-panel" />,
+}));
+
+vi.mock('../SimpleMode/ToolPermissionOverlay', () => ({
+  ToolPermissionOverlay: () => <div data-testid="tool-permission-overlay" />,
+}));
+
+vi.mock('../SimpleMode/TabbedRightPanel', () => ({
+  TabbedRightPanel: ({
+    workflowMode,
+    workflowPhase,
+    activeTab,
   }: {
-    value: string;
-    onChange: (v: string) => void;
-    onSubmit: () => void;
-    disabled: boolean;
-    placeholder: string;
-    isLoading: boolean;
+    workflowMode: string;
+    workflowPhase: string;
+    activeTab: string;
   }) => (
-    <div data-testid="input-box">
-      <input
-        data-testid="task-input"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        disabled={disabled}
-      />
-      <button data-testid="submit-btn" onClick={onSubmit} disabled={disabled}>
-        {isLoading ? 'Loading...' : 'Execute'}
+    <div
+      data-testid="tabbed-right-panel"
+      data-workflow-mode={workflowMode}
+      data-workflow-phase={workflowPhase}
+      data-active-tab={activeTab}
+    />
+  ),
+}));
+
+vi.mock('../SimpleMode/ChatToolbar', () => ({
+  ChatToolbar: ({
+    workflowMode,
+    onWorkflowModeChange,
+    onToggleOutput,
+  }: {
+    workflowMode: string;
+    onWorkflowModeChange: (mode: 'chat' | 'plan' | 'task') => void;
+    onToggleOutput: () => void;
+  }) => (
+    <div data-testid="chat-toolbar">
+      <div data-testid="toolbar-workflow-mode">{workflowMode}</div>
+      <button data-testid="mode-chat" onClick={() => onWorkflowModeChange('chat')}>
+        mode-chat
+      </button>
+      <button data-testid="mode-plan" onClick={() => onWorkflowModeChange('plan')}>
+        mode-plan
+      </button>
+      <button data-testid="mode-task" onClick={() => onWorkflowModeChange('task')}>
+        mode-task
+      </button>
+      <button data-testid="toggle-output" onClick={onToggleOutput}>
+        toggle-output
       </button>
     </div>
   ),
 }));
 
-vi.mock('../SimpleMode/ProgressView', () => ({
-  ProgressView: () => <div data-testid="progress-view">Progress View</div>,
+vi.mock('../../lib/fileChangeCardBridge', () => ({
+  createFileChangeCardBridge: () => ({
+    startListening: async () => () => {},
+    onTurnEnd: vi.fn(),
+    reset: vi.fn(),
+  }),
 }));
 
-vi.mock('../SimpleMode/ResultView', () => ({
-  ResultView: ({ result }: { result: unknown }) => <div data-testid="result-view">{JSON.stringify(result)}</div>,
+vi.mock('../../lib/simpleModeNavigation', () => ({
+  listenOpenAIChanges: () => () => {},
 }));
 
-vi.mock('../SimpleMode/HistoryPanel', () => ({
-  HistoryPanel: ({ onClose }: { onClose: () => void }) => (
-    <div data-testid="history-panel">
-      <button onClick={onClose}>Close History</button>
-    </div>
-  ),
+vi.mock('../../lib/exportUtils', () => ({
+  captureElementToBlob: vi.fn(),
+  blobToBase64: vi.fn(),
+  saveBinaryWithDialog: vi.fn(),
+  localTimestampForFilename: vi.fn(),
 }));
 
-vi.mock('../SimpleMode/ConnectionStatus', () => ({
-  ConnectionStatus: ({ status }: { status: string }) => <div data-testid="connection-status">{status}</div>,
+vi.mock('../../lib/contextBridge', () => ({
+  buildConversationHistory: () => [],
 }));
 
-// Mock shared streaming/progress components imported by SimpleMode
-vi.mock('../shared', () => ({
-  StreamingOutput: () => <div data-testid="streaming-output">Streaming</div>,
-  GlobalProgressBar: () => <div data-testid="global-progress">Progress</div>,
-  ErrorState: () => <div data-testid="error-state">Errors</div>,
-  ProjectSelector: () => <div data-testid="project-selector">Project Selector</div>,
+vi.mock('../SimpleMode/queuePersistence', () => ({
+  clearPersistedSimpleChatQueue: vi.fn(),
+  loadPersistedSimpleChatQueue: vi.fn(() => []),
+  persistSimpleChatQueue: vi.fn(),
 }));
 
-// --------------------------------------------------------------------------
-// Tests
-// --------------------------------------------------------------------------
+vi.mock('../SimpleMode/tokenBudget', () => ({
+  DEFAULT_PROMPT_TOKEN_BUDGET: 8000,
+  estimatePromptTokensFallback: vi.fn(() => ({
+    estimatedTokens: 10,
+    exceedsBudget: false,
+  })),
+  toAttachmentTokenEstimateInput: vi.fn(() => []),
+}));
+
+vi.mock('../../lib/promptTokenBudget', () => ({
+  resolvePromptTokenBudget: vi.fn(async () => 8000),
+}));
+
+vi.mock('../../store/execution', () => ({
+  useExecutionStore: storeHarness.useExecutionStore,
+}));
+
+vi.mock('../../store/settings', () => ({
+  useSettingsStore: storeHarness.useSettingsStore,
+}));
+
+vi.mock('../../store/workflowKernel', () => ({
+  useWorkflowKernelStore: storeHarness.useWorkflowKernelStore,
+}));
+
+vi.mock('../../store/workflowOrchestrator', () => ({
+  useWorkflowOrchestratorStore: storeHarness.useWorkflowOrchestratorStore,
+}));
+
+vi.mock('../../store/planOrchestrator', () => ({
+  usePlanOrchestratorStore: storeHarness.usePlanOrchestratorStore,
+}));
+
+vi.mock('../../store/toolPermission', () => ({
+  useToolPermissionStore: storeHarness.useToolPermissionStore,
+}));
+
+vi.mock('../../store/contextSources', () => ({
+  useContextSourcesStore: storeHarness.useContextSourcesStore,
+}));
+
+vi.mock('../../store/git', () => ({
+  useGitStore: storeHarness.useGitStore,
+}));
+
+vi.mock('../../store/fileChanges', () => ({
+  useFileChangesStore: storeHarness.useFileChangesStore,
+}));
+
+vi.mock('../../store/agents', () => ({
+  useAgentsStore: storeHarness.useAgentsStore,
+}));
+
+import { SimpleMode } from '../SimpleMode';
+
+function createKernelSession(activeMode: 'chat' | 'plan' | 'task' = 'chat') {
+  return {
+    sessionId: 'kernel-session-1',
+    status: 'active',
+    activeMode,
+    modeSnapshots: {
+      chat: {
+        phase: 'ready',
+        draftInput: '',
+        turnCount: 0,
+        lastUserMessage: null,
+        lastAssistantMessage: null,
+      },
+      plan: {
+        phase: 'idle',
+      },
+      task: {
+        phase: 'idle',
+      },
+    },
+    handoffContext: {
+      conversationContext: [],
+      artifactRefs: [],
+      contextSources: [],
+      metadata: {},
+    },
+    linkedModeSessions: {} as Record<string, string>,
+    lastError: null,
+    createdAt: '2026-03-02T00:00:00Z',
+    updatedAt: '2026-03-02T00:00:00Z',
+    lastCheckpointId: null,
+  };
+}
+
+function resetStates() {
+  const execution = {
+    status: 'idle',
+    isCancelling: false,
+    connectionStatus: 'connected',
+    isSubmitting: false,
+    apiError: null,
+    start: vi.fn(async () => undefined),
+    sendFollowUp: vi.fn(async () => undefined),
+    pause: vi.fn(),
+    resume: vi.fn(),
+    cancel: vi.fn(),
+    reset: vi.fn(),
+    initialize: vi.fn(),
+    cleanup: vi.fn(),
+    isAnalyzingStrategy: false,
+    clearStrategyAnalysis: vi.fn(),
+    isChatSession: false,
+    streamingOutput: [],
+    analysisCoverage: null,
+    logs: [],
+    history: [],
+    clearHistory: vi.fn(),
+    deleteHistory: vi.fn(),
+    renameHistory: vi.fn(),
+    restoreFromHistory: vi.fn(),
+    sessionUsageTotals: null,
+    turnUsageTotals: null,
+    taskId: null,
+    standaloneSessionId: null,
+    attachments: [],
+    addAttachment: vi.fn(),
+    removeAttachment: vi.fn(),
+    backgroundSessions: {},
+    switchToSession: vi.fn(),
+    removeBackgroundSession: vi.fn(),
+    foregroundParentSessionId: null,
+    foregroundBgId: null,
+    activeAgentName: null,
+    _pendingTaskContext: null,
+  };
+  storeHarness.setExecutionState(execution);
+
+  storeHarness.setSettingsState({
+    backend: 'claude-code',
+    provider: 'anthropic',
+    model: '',
+    workspacePath: '/tmp/project',
+    sidebarCollapsed: false,
+    setSidebarCollapsed: vi.fn(),
+    autoPanelHoverEnabled: false,
+    simpleKernelSot: true,
+  });
+
+  storeHarness.setWorkflowKernelState({
+    sessionId: 'kernel-session-1',
+    session: createKernelSession('chat'),
+    openSession: vi.fn(async function () {
+      return storeHarness.getWorkflowKernelState().session;
+    }),
+    recoverSession: vi.fn(async () => null),
+    transitionMode: vi.fn(async (targetMode: 'chat' | 'plan' | 'task') => {
+      const session = createKernelSession(targetMode);
+      storeHarness.setWorkflowKernelState({
+        ...storeHarness.getWorkflowKernelState(),
+        session,
+      });
+      return session;
+    }),
+    transitionAndSubmitInput: vi.fn(async function () {
+      return storeHarness.getWorkflowKernelState().session;
+    }),
+    linkModeSession: vi.fn(async (mode: 'plan' | 'task', modeSessionId: string) => {
+      const currentSession = storeHarness.getWorkflowKernelState().session as ReturnType<typeof createKernelSession>;
+      currentSession.linkedModeSessions[mode] = modeSessionId;
+      return currentSession;
+    }),
+    cancelOperation: vi.fn(async function () {
+      return storeHarness.getWorkflowKernelState().session;
+    }),
+    refreshSessionState: vi.fn(async function () {
+      return {
+        session: storeHarness.getWorkflowKernelState().session,
+        events: [],
+        checkpoints: [],
+      };
+    }),
+    reset: vi.fn(),
+  });
+
+  storeHarness.setWorkflowOrchestratorState({
+    pendingQuestion: null,
+    phase: 'idle',
+    sessionId: null,
+    startWorkflow: vi.fn(async () => {
+      storeHarness.setWorkflowOrchestratorState({
+        ...storeHarness.getWorkflowOrchestratorState(),
+        sessionId: 'task-session-1',
+      });
+    }),
+    submitInterviewAnswer: vi.fn(async () => undefined),
+    skipInterviewQuestion: vi.fn(async () => undefined),
+    overrideConfigNatural: vi.fn(),
+    addPrdFeedback: vi.fn(),
+    cancelWorkflow: vi.fn(async () => undefined),
+    isCancelling: false,
+    resetWorkflow: vi.fn(),
+  });
+
+  storeHarness.setPlanOrchestratorState({
+    pendingClarifyQuestion: null,
+    phase: 'idle',
+    isBusy: false,
+    sessionId: null,
+    startPlanWorkflow: vi.fn(async () => {
+      storeHarness.setPlanOrchestratorState({
+        ...storeHarness.getPlanOrchestratorState(),
+        sessionId: 'plan-session-1',
+      });
+    }),
+    submitClarification: vi.fn(async () => undefined),
+    skipClarification: vi.fn(async () => undefined),
+    cancelWorkflow: vi.fn(async () => undefined),
+    isCancelling: false,
+    resetWorkflow: vi.fn(),
+  });
+
+  storeHarness.setToolPermissionState({
+    pendingRequest: null,
+    requestQueue: [],
+    isResponding: false,
+    respond: vi.fn(async () => undefined),
+    sessionLevel: 'ask',
+    setSessionLevel: vi.fn(async () => undefined),
+  });
+
+  storeHarness.setContextSourcesState({
+    resetAutoAssociation: vi.fn(),
+  });
+}
+
+function renderSimpleMode(children?: ReactNode) {
+  return render(children ?? <SimpleMode />);
+}
 
 describe('SimpleMode', () => {
   beforeEach(() => {
+    resetStates();
     vi.clearAllMocks();
-    mockStoreState = {
-      status: 'idle',
-      connectionStatus: 'connected',
-      isSubmitting: false,
-      apiError: null,
-      start: mockStart,
-      sendFollowUp: mockSendFollowUp,
-      reset: mockReset,
-      result: null,
-      initialize: mockInitialize,
-      cleanup: mockCleanup,
-      analyzeStrategy: mockAnalyzeStrategy,
-      strategyAnalysis: null,
-      isAnalyzingStrategy: false,
-      clearStrategyAnalysis: mockClearStrategyAnalysis,
-      isChatSession: false,
-      streamingOutput: [],
-      standaloneTurns: [],
-      history: [],
-      clearHistory: vi.fn(),
-      deleteHistory: vi.fn(),
-      renameHistory: vi.fn(),
-      restoreFromHistory: vi.fn(),
-      sessionUsageTotals: null,
-      latestUsage: null,
-      analysisCoverage: null,
-      logs: [],
-      attachments: [],
-      addAttachment: vi.fn(),
-      removeAttachment: vi.fn(),
-      backgroundSessions: {},
-      switchToSession: vi.fn(),
-      removeBackgroundSession: vi.fn(),
-    };
   });
 
-  it('calls initialize on mount and cleanup on unmount', () => {
-    const { unmount } = render(<SimpleMode />);
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
-    expect(mockInitialize).toHaveBeenCalledTimes(1);
+  it('mounts with initialize and unmounts with cleanup', () => {
+    const { unmount } = renderSimpleMode();
+    expect(storeHarness.getExecutionState().initialize).toHaveBeenCalledTimes(1);
 
     unmount();
-    expect(mockCleanup).toHaveBeenCalledTimes(1);
+    expect(storeHarness.getExecutionState().cleanup).toHaveBeenCalledTimes(1);
   });
 
-  it('displays API error message when present', () => {
-    mockStoreState.apiError = 'Connection refused';
-
-    render(<SimpleMode />);
-
+  it('shows api error', () => {
+    storeHarness.setExecutionState({
+      ...storeHarness.getExecutionState(),
+      apiError: 'Connection refused',
+    });
+    renderSimpleMode();
     expect(screen.getByText('Connection refused')).toBeInTheDocument();
   });
 
-  it('disables input during submission', () => {
-    mockStoreState.isSubmitting = true;
+  it('starts task workflow and links task session when SIMPLE_KERNEL_SOT is enabled', async () => {
+    renderSimpleMode();
 
-    render(<SimpleMode />);
+    fireEvent.click(screen.getByTestId('mode-task'));
+    await waitFor(() => {
+      expect(screen.getByTestId('toolbar-workflow-mode')).toHaveTextContent('task');
+    });
 
-    expect(screen.getByTestId('task-input')).toBeDisabled();
-    expect(screen.getByTestId('submit-btn')).toBeDisabled();
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'Implement auth flow' } });
+    fireEvent.click(screen.getByTestId('composer-submit'));
+
+    await waitFor(() => {
+      expect(storeHarness.getWorkflowOrchestratorState().startWorkflow).toHaveBeenCalledWith('Implement auth flow');
+      expect(storeHarness.getWorkflowKernelState().linkModeSession).toHaveBeenCalledWith('task', 'task-session-1');
+    });
+  });
+
+  it('starts plan workflow and links plan session when SIMPLE_KERNEL_SOT is enabled', async () => {
+    renderSimpleMode();
+
+    fireEvent.click(screen.getByTestId('mode-plan'));
+    await waitFor(() => {
+      expect(screen.getByTestId('toolbar-workflow-mode')).toHaveTextContent('plan');
+    });
+
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'Plan migration rollout' } });
+    fireEvent.click(screen.getByTestId('composer-submit'));
+
+    await waitFor(() => {
+      expect(storeHarness.getPlanOrchestratorState().startPlanWorkflow).toHaveBeenCalledWith('Plan migration rollout');
+      expect(storeHarness.getWorkflowKernelState().linkModeSession).toHaveBeenCalledWith('plan', 'plan-session-1');
+    });
+  });
+
+  it('uses legacy phase and refresh polling fallback when SIMPLE_KERNEL_SOT is disabled', async () => {
+    storeHarness.setSettingsState({
+      ...storeHarness.getSettingsState(),
+      simpleKernelSot: false,
+    });
+    storeHarness.setWorkflowOrchestratorState({
+      ...storeHarness.getWorkflowOrchestratorState(),
+      phase: 'executing',
+    });
+
+    const kernelState = storeHarness.getWorkflowKernelState();
+    const kernelSession = kernelState.session as ReturnType<typeof createKernelSession>;
+    storeHarness.setWorkflowKernelState({
+      ...kernelState,
+      session: {
+        ...kernelSession,
+        modeSnapshots: {
+          ...kernelSession.modeSnapshots,
+          task: { phase: 'idle' },
+        },
+      },
+    });
+
+    renderSimpleMode();
+    fireEvent.click(screen.getByTestId('mode-task'));
+    await waitFor(() => {
+      expect(screen.getByTestId('toolbar-workflow-mode')).toHaveTextContent('task');
+    });
+
+    fireEvent.click(screen.getByTestId('toggle-output'));
+    await waitFor(() => {
+      expect(screen.getByTestId('tabbed-right-panel')).toHaveAttribute('data-workflow-phase', 'executing');
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 1700));
+    expect(storeHarness.getWorkflowKernelState().refreshSessionState).toHaveBeenCalled();
+  });
+
+  it('does not link mode session when SIMPLE_KERNEL_SOT is disabled', async () => {
+    storeHarness.setSettingsState({
+      ...storeHarness.getSettingsState(),
+      simpleKernelSot: false,
+    });
+
+    renderSimpleMode();
+    fireEvent.click(screen.getByTestId('mode-task'));
+    await waitFor(() => {
+      expect(screen.getByTestId('toolbar-workflow-mode')).toHaveTextContent('task');
+    });
+
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'Run task in legacy rollout' } });
+    fireEvent.click(screen.getByTestId('composer-submit'));
+
+    await waitFor(() => {
+      expect(storeHarness.getWorkflowOrchestratorState().startWorkflow).toHaveBeenCalledWith(
+        'Run task in legacy rollout',
+      );
+    });
+    expect(storeHarness.getWorkflowKernelState().linkModeSession).not.toHaveBeenCalled();
+  });
+
+  it('shows task interview input panel when kernel phase is stale but interview question exists', async () => {
+    const kernelSession = createKernelSession('task');
+    kernelSession.modeSnapshots.task = { phase: 'analyzing' };
+    storeHarness.setWorkflowKernelState({
+      ...storeHarness.getWorkflowKernelState(),
+      session: kernelSession,
+    });
+    storeHarness.setWorkflowOrchestratorState({
+      ...storeHarness.getWorkflowOrchestratorState(),
+      phase: 'interviewing',
+      pendingQuestion: {
+        questionId: 'q1',
+        question: 'Need auth?',
+        hint: null,
+        required: true,
+        inputType: 'boolean',
+        options: [],
+        allowCustom: false,
+        questionNumber: 1,
+        totalQuestions: 3,
+      },
+    });
+
+    renderSimpleMode();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('toolbar-workflow-mode')).toHaveTextContent('task');
+    });
+    expect(screen.getByTestId('interview-input-panel')).toBeInTheDocument();
+  });
+
+  it('routes plan clarification submit when pending question exists even if kernel phase is stale', async () => {
+    const kernelSession = createKernelSession('plan');
+    kernelSession.modeSnapshots.plan = { phase: 'planning' };
+    storeHarness.setWorkflowKernelState({
+      ...storeHarness.getWorkflowKernelState(),
+      session: kernelSession,
+    });
+    storeHarness.setPlanOrchestratorState({
+      ...storeHarness.getPlanOrchestratorState(),
+      phase: 'clarifying',
+      pendingClarifyQuestion: {
+        questionId: 'q1',
+        question: 'Target audience?',
+        hint: null,
+        inputType: 'text',
+      },
+    });
+
+    renderSimpleMode();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('toolbar-workflow-mode')).toHaveTextContent('plan');
+    });
+
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'Developers' } });
+    fireEvent.click(screen.getByTestId('composer-submit'));
+
+    await waitFor(() => {
+      expect(storeHarness.getPlanOrchestratorState().submitClarification).toHaveBeenCalledWith({
+        questionId: 'q1',
+        answer: 'Developers',
+        skipped: false,
+      });
+    });
+    expect(storeHarness.getExecutionState().sendFollowUp).not.toHaveBeenCalled();
   });
 });

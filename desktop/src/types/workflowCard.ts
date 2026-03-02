@@ -59,10 +59,10 @@ export type CardType =
   | 'plan_persona_indicator';
 
 // ============================================================================
-// Card Payload (stored in StreamLine.content as JSON)
+// Card Payload (typed path + JSON compatibility replay path)
 // ============================================================================
 
-/** Top-level card payload serialized into StreamLine.content */
+/** Top-level card payload serialized into StreamLine.content and optionally attached as StreamLine.cardPayload. */
 export interface CardPayload {
   cardType: CardType;
   cardId: string;

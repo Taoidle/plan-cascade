@@ -402,7 +402,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const settingsStore = (await import('./settings')).useSettingsStore.getState();
-      const { provider, model, phaseConfigs, glmEndpoint, qwenEndpoint, minimaxEndpoint } = settingsStore;
+      const { provider, model, defaultAgent, phaseConfigs, glmEndpoint, qwenEndpoint, minimaxEndpoint } = settingsStore;
       const { resolveProviderBaseUrl } = await import('../lib/providers');
       const baseUrl = provider
         ? resolveProviderBaseUrl(provider, { glmEndpoint, qwenEndpoint, minimaxEndpoint })
@@ -415,6 +415,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
         provider: provider || null,
         model: model || null,
         baseUrl: baseUrl || null,
+        globalDefaultAgent: defaultAgent || null,
         phaseConfigs,
         contextSources,
       });
@@ -532,7 +533,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
     try {
       const unlisten = await listen<TaskModeProgressPayload>('task-mode-progress', (event) => {
         const payload = event.payload;
-        const { sessionId, storyStatuses: prevStatuses } = get();
+        const { sessionId, storyStatuses: prevStatuses, qualityGateResults: prevQualityGateResults } = get();
         // Only process events for our session
         if (payload.sessionId !== sessionId) return;
 
@@ -546,6 +547,31 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
           updates.storyStatuses = { ...prevStatuses, [payload.storyId]: payload.storyStatus };
         }
 
+        if (payload.storyId && payload.gateResults && payload.gateResults.length > 0) {
+          const hasFailed = payload.gateResults.some((gate) => gate.status === 'failed');
+          const hasRunning = payload.gateResults.some((gate) => gate.status === 'running');
+          const hasPending = payload.gateResults.some((gate) => gate.status === 'pending');
+          const allSkipped = payload.gateResults.every((gate) => gate.status === 'skipped');
+          const overallStatus: GateStatus = hasFailed
+            ? 'failed'
+            : hasRunning
+              ? 'running'
+              : hasPending
+                ? 'pending'
+                : allSkipped
+                  ? 'skipped'
+                  : 'passed';
+
+          updates.qualityGateResults = {
+            ...prevQualityGateResults,
+            [payload.storyId]: {
+              storyId: payload.storyId,
+              overallStatus,
+              gates: payload.gateResults,
+            },
+          };
+        }
+
         // Determine session status from event type
         if (payload.eventType === 'execution_completed') {
           const allStatuses = updates.storyStatuses ?? prevStatuses;
@@ -555,6 +581,8 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
         } else if (payload.eventType === 'execution_cancelled') {
           updates.sessionStatus = 'cancelled';
           updates.isCancelling = false;
+        } else if ((payload.eventType === 'story_failed' || payload.eventType === 'error') && payload.error) {
+          updates.error = payload.error;
         }
 
         set(updates);

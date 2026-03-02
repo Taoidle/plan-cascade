@@ -274,6 +274,9 @@
     "thinking": "Thinking...",
     "startConversation": "Start a conversation on the right input box."
   },
+  "chat": {
+    "scrollToBottom": "Scroll to bottom"
+  },
 
   "permission": {
     "toolRequiresApproval": "Tool requires approval:",
@@ -339,6 +342,7 @@
   "workflow": {
     "cancelWorkflow": "Cancel workflow",
     "modeSwitchConfirm": "An execution is still running. Switching modes now may change your active workflow context. Continue?",
+    "modeSwitchFailed": "Failed to switch workflow mode. Please retry.",
     "clearQueuedMessages": "Cleared queued chat messages when leaving Chat mode.",
     "queueLimitReached": "Queue is full (max 3 messages).",
     "queueAttachmentsNotSupported": "Queued chat messages with new attachments are not supported yet.",
@@ -675,10 +679,14 @@
       "prdApproved": "PRD approved! Starting execution...",
       "prdFeedbackNoted": "PRD feedback noted: \"{{feedback}}\". Use the Edit button on the PRD card to make changes.",
       "workflowCancelled": "Workflow cancelled.",
+      "cancelFailed": "Cancel failed",
+      "cancelRetry": "Please retry cancellation.",
+      "cancelling": "Cancelling workflow...",
       "configUpdated": "Config updated: {{details}}",
       "enhancingAnalysis": "Enhancing analysis with AI...",
       "exploringProject": "Exploring project structure and codebase...",
       "explorationFailed": "Project exploration failed (non-blocking), continuing...",
+      "interviewQuestionUnavailable": "Interview question unavailable, continuing with requirement analysis.",
       "analyzingRequirements": "Analyzing requirements with Product Manager...",
       "requirementAnalysisFailed": "Requirement analysis could not be completed. Continuing...",
       "reviewingArchitecture": "Reviewing architecture with Software Architect...",
@@ -843,6 +851,7 @@
     "outputTab": "Output",
     "gitTab": "Git",
     "contextTab": "Context",
+    "resize": "Resize panel",
     "contextOps": {
       "tabs": {
         "inspector": "Inspector",

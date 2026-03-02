@@ -16,8 +16,18 @@ interface WorkflowKernelProgressPanelProps {
   workflowPhase: string;
 }
 
-const CHAT_PHASES = ['ready', 'running', 'paused', 'completed'];
-const PLAN_PHASES = ['idle', 'analyzing', 'clarifying', 'planning', 'reviewing_plan', 'executing', 'completed'];
+const CHAT_PHASES = ['ready', 'running', 'paused', 'completed', 'failed', 'cancelled'];
+const PLAN_PHASES = [
+  'idle',
+  'analyzing',
+  'clarifying',
+  'planning',
+  'reviewing_plan',
+  'executing',
+  'completed',
+  'failed',
+  'cancelled',
+];
 const TASK_PHASES = [
   'idle',
   'analyzing',
@@ -31,6 +41,8 @@ const TASK_PHASES = [
   'generating_design_doc',
   'executing',
   'completed',
+  'failed',
+  'cancelled',
 ];
 
 function getPhases(mode: WorkflowMode): string[] {

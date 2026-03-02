@@ -3,6 +3,7 @@
 //! Commands for reading and updating application settings.
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -16,6 +17,22 @@ use crate::state::AppState;
 const KB_QUERY_RUNS_V2_FLAG: &str = "kb_query_runs_v2";
 const KB_PICKER_SERVER_SEARCH_FLAG: &str = "kb_picker_server_search";
 const KB_INGEST_JOB_SCOPED_PROGRESS_FLAG: &str = "kb_ingest_job_scoped_progress";
+const CLEAR_ALL_DATA_DIRECTORIES: [&str; 8] = [
+    "artifacts",
+    "analysis-runs",
+    "file-changes",
+    "knowledge-hnsw",
+    "hnsw_indexes",
+    "marketplace-cache",
+    "plugins",
+    "agents",
+];
+const CLEAR_ALL_DATA_FILES: [&str; 4] = [
+    "plugin-settings.json",
+    "knowledge-tfidf-vocab.json",
+    ".secret_key",
+    "secrets.json",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -154,6 +171,57 @@ pub async fn reset_all_settings(
     if let Err(e) = clear_plugin_settings_file() {
         return Ok(CommandResponse::err(format!(
             "Failed to reset plugin settings: {}",
+            e
+        )));
+    }
+
+    Ok(CommandResponse::ok(true))
+}
+
+/// Clear all persisted application data:
+/// - frontend local data is cleared by caller
+/// - backend DB rows, config, keyring secrets, and ~/.plan-cascade persistent artifacts
+#[tauri::command]
+pub async fn clear_all_data(state: State<'_, AppState>) -> Result<CommandResponse<bool>, String> {
+    if let Err(e) = state.with_database(clear_all_database_business_data).await {
+        return Ok(CommandResponse::err(format!(
+            "Failed to clear database data: {}",
+            e
+        )));
+    }
+
+    if let Err(e) = state
+        .with_config_mut(|config_service| {
+            config_service.reset()?;
+            Ok(())
+        })
+        .await
+    {
+        return Ok(CommandResponse::err(format!(
+            "Failed to reset config: {}",
+            e
+        )));
+    }
+
+    if let Err(e) = state.import_all_secrets(&HashMap::new()).await {
+        return Ok(CommandResponse::err(format!(
+            "Failed to clear secrets: {}",
+            e
+        )));
+    }
+
+    let plan_dir = match crate::utils::paths::plan_cascade_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            return Ok(CommandResponse::err(format!(
+                "Failed to resolve data dir: {}",
+                e
+            )))
+        }
+    };
+    if let Err(e) = clear_plan_cascade_persisted_data(&plan_dir) {
+        return Ok(CommandResponse::err(format!(
+            "Failed to clear persisted files: {}",
             e
         )));
     }
@@ -642,6 +710,63 @@ fn clear_plugin_settings_file() -> crate::utils::error::AppResult<()> {
     Ok(())
 }
 
+fn clear_all_database_business_data(
+    db: &crate::storage::Database,
+) -> crate::utils::error::AppResult<()> {
+    let conn = db.get_connection()?;
+    let tables = list_user_tables(&conn)?;
+
+    for table in tables {
+        let escaped_table = table.replace('"', "\"\"");
+        let sql = format!("DELETE FROM \"{}\"", escaped_table);
+        if let Err(e) = conn.execute(&sql, []) {
+            if is_read_only_shadow_table_error(&e) {
+                tracing::warn!("Skipping readonly shadow table '{}': {}", table, e);
+                continue;
+            }
+            return Err(e.into());
+        }
+    }
+
+    Ok(())
+}
+
+fn list_user_tables(conn: &rusqlite::Connection) -> crate::utils::error::AppResult<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+    )?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    let mut tables = Vec::new();
+    for row in rows {
+        tables.push(row?);
+    }
+    Ok(tables)
+}
+
+fn is_read_only_shadow_table_error(err: &rusqlite::Error) -> bool {
+    err.to_string()
+        .to_ascii_lowercase()
+        .contains("shadow table")
+}
+
+fn clear_plan_cascade_persisted_data(base_dir: &Path) -> crate::utils::error::AppResult<()> {
+    for relative_dir in CLEAR_ALL_DATA_DIRECTORIES {
+        let path = base_dir.join(relative_dir);
+        if path.exists() {
+            std::fs::remove_dir_all(&path)?;
+        }
+    }
+
+    for relative_file in CLEAR_ALL_DATA_FILES {
+        let path = base_dir.join(relative_file);
+        if path.exists() {
+            std::fs::remove_file(&path)?;
+        }
+    }
+
+    Ok(())
+}
+
 fn parse_bool_setting(value: Option<String>, default_value: bool) -> bool {
     match value
         .as_deref()
@@ -729,5 +854,66 @@ mod tests {
         let defaulted =
             read_feature_flag(&db, KB_PICKER_SERVER_SEARCH_FLAG, true).expect("read default");
         assert!(defaulted);
+    }
+
+    #[test]
+    fn clear_all_database_business_data_removes_rows_from_user_tables() {
+        let db = create_test_db();
+        let conn = db.get_connection().expect("conn");
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS test_data (id INTEGER PRIMARY KEY, value TEXT NOT NULL)",
+            [],
+        )
+        .expect("create test_data");
+        conn.execute("INSERT INTO settings (key, value) VALUES ('a', '1')", [])
+            .expect("insert settings");
+        conn.execute("INSERT INTO test_data (value) VALUES ('hello')", [])
+            .expect("insert test_data");
+        drop(conn);
+
+        clear_all_database_business_data(&db).expect("clear data");
+
+        let conn = db.get_connection().expect("conn");
+        let settings_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM settings", [], |row| row.get(0))
+            .expect("count settings");
+        let data_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM test_data", [], |row| row.get(0))
+            .expect("count test_data");
+        assert_eq!(settings_count, 0);
+        assert_eq!(data_count, 0);
+    }
+
+    #[test]
+    fn clear_plan_cascade_persisted_data_removes_targets_only() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        for relative_dir in CLEAR_ALL_DATA_DIRECTORIES {
+            let dir_path = temp_dir.path().join(relative_dir);
+            std::fs::create_dir_all(&dir_path).expect("create dir");
+            std::fs::write(dir_path.join("marker.txt"), "x").expect("write marker");
+        }
+        for relative_file in CLEAR_ALL_DATA_FILES {
+            std::fs::write(temp_dir.path().join(relative_file), "x").expect("write file");
+        }
+        let untouched = temp_dir.path().join("keep.txt");
+        std::fs::write(&untouched, "keep").expect("write untouched");
+
+        clear_plan_cascade_persisted_data(temp_dir.path()).expect("clear persisted");
+
+        for relative_dir in CLEAR_ALL_DATA_DIRECTORIES {
+            assert!(
+                !temp_dir.path().join(relative_dir).exists(),
+                "expected dir to be removed: {}",
+                relative_dir
+            );
+        }
+        for relative_file in CLEAR_ALL_DATA_FILES {
+            assert!(
+                !temp_dir.path().join(relative_file).exists(),
+                "expected file to be removed: {}",
+                relative_file
+            );
+        }
+        assert!(untouched.exists(), "untouched file should remain");
     }
 }

@@ -101,6 +101,44 @@ describe('Execution Store - Background Session State', () => {
     resetStore();
   });
 
+  describe('appendCard typed pipeline', () => {
+    it('stores typed cardPayload when TYPED_CARD_PIPELINE is enabled', () => {
+      useSettingsStore.setState({ typedCardPipeline: true });
+      const payload = {
+        cardType: 'workflow_info',
+        cardId: 'card-1',
+        data: { message: 'hello' },
+        interactive: false,
+      } as const;
+
+      useExecutionStore.getState().appendCard(payload as never);
+      const lines = useExecutionStore.getState().streamingOutput;
+      const lastLine = lines[lines.length - 1];
+
+      expect(lastLine?.type).toBe('card');
+      expect(lastLine?.content).toBe(JSON.stringify(payload));
+      expect(lastLine?.cardPayload).toEqual(payload);
+    });
+
+    it('falls back to JSON-only card when TYPED_CARD_PIPELINE is disabled', () => {
+      useSettingsStore.setState({ typedCardPipeline: false });
+      const payload = {
+        cardType: 'workflow_info',
+        cardId: 'card-legacy',
+        data: { message: 'legacy path' },
+        interactive: false,
+      } as const;
+
+      useExecutionStore.getState().appendCard(payload as never);
+      const lines = useExecutionStore.getState().streamingOutput;
+      const lastLine = lines[lines.length - 1];
+
+      expect(lastLine?.type).toBe('card');
+      expect(lastLine?.content).toBe(JSON.stringify(payload));
+      expect(lastLine?.cardPayload).toBeUndefined();
+    });
+  });
+
   // ===========================================================================
   // 1. Initial state includes backgroundSessions and activeSessionId
   // ===========================================================================

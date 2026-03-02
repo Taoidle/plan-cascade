@@ -20,7 +20,7 @@ use crate::utils::paths::ensure_plan_cascade_dir;
 
 const MAX_HANDOFF_TURNS: usize = 128;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowMode {
     Chat,
@@ -208,6 +208,7 @@ impl ModeSnapshots {
 pub enum WorkflowEventKind {
     SessionOpened,
     ModeTransitioned,
+    ModeSessionLinked,
     InputSubmitted,
     ContextAppended,
     PlanEdited,
@@ -284,6 +285,8 @@ pub struct WorkflowSession {
     pub active_mode: WorkflowMode,
     pub mode_snapshots: ModeSnapshots,
     pub handoff_context: HandoffContextBundle,
+    #[serde(default)]
+    pub linked_mode_sessions: HashMap<WorkflowMode, String>,
     pub last_error: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -309,6 +312,16 @@ pub struct WorkflowSessionState {
     pub session: WorkflowSession,
     pub events: Vec<WorkflowEventV2>,
     pub checkpoints: Vec<WorkflowCheckpoint>,
+}
+
+pub const WORKFLOW_KERNEL_UPDATED_CHANNEL: &str = "workflow-kernel-updated";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowKernelUpdatedEvent {
+    pub session_state: WorkflowSessionState,
+    pub revision: u64,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -361,6 +374,7 @@ impl WorkflowKernelState {
             active_mode,
             mode_snapshots,
             handoff_context: initial_context.unwrap_or_default(),
+            linked_mode_sessions: HashMap::new(),
             last_error: None,
             created_at: now.clone(),
             updated_at: now,
@@ -607,6 +621,48 @@ impl WorkflowKernelState {
         Ok(updated_session)
     }
 
+    pub async fn link_mode_session(
+        &self,
+        session_id: &str,
+        mode: WorkflowMode,
+        mode_session_id: &str,
+    ) -> Result<WorkflowSession, String> {
+        let normalized_mode_session_id = mode_session_id.trim();
+        if normalized_mode_session_id.is_empty() {
+            return Err("Mode session id cannot be empty".to_string());
+        }
+
+        let updated_session = {
+            let mut sessions = self.sessions.write().await;
+            let session = sessions
+                .get_mut(session_id)
+                .ok_or_else(|| format!("Workflow session not found: {session_id}"))?;
+
+            session
+                .linked_mode_sessions
+                .insert(mode, normalized_mode_session_id.to_string());
+            session.mode_snapshots.ensure_mode(mode);
+            session.updated_at = now_rfc3339();
+            session.clone()
+        };
+
+        self.append_event(
+            session_id,
+            WorkflowEventKind::ModeSessionLinked,
+            mode,
+            json!({
+                "mode": mode,
+                "modeSessionId": normalized_mode_session_id
+            }),
+        )
+        .await;
+        self.create_checkpoint(session_id, "mode_session_linked")
+            .await?;
+        self.persist_session_record(session_id).await?;
+
+        Ok(updated_session)
+    }
+
     pub async fn apply_plan_edit(
         &self,
         session_id: &str,
@@ -826,6 +882,9 @@ impl WorkflowKernelState {
         if session.mode_snapshots.task.is_none() {
             session.mode_snapshots.task = Some(TaskState::default());
             repaired.push("mode_snapshots.task".to_string());
+        }
+        if session.linked_mode_sessions.is_empty() {
+            session.linked_mode_sessions = HashMap::new();
         }
 
         session.mode_snapshots.ensure_mode(session.active_mode);
@@ -1362,6 +1421,31 @@ mod tests {
             .rposition(|event| event.kind == WorkflowEventKind::InputSubmitted)
             .expect("input submitted event");
         assert!(transition_index < input_index);
+    }
+
+    #[tokio::test]
+    async fn link_mode_session_persists_linked_session_id() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let kernel = WorkflowKernelState::new_with_storage_dir(temp_dir.path().to_path_buf());
+
+        let session = kernel
+            .open_session(Some(WorkflowMode::Chat), None)
+            .await
+            .expect("open session");
+        let session_id = session.session_id.clone();
+
+        let updated = kernel
+            .link_mode_session(&session_id, WorkflowMode::Task, "task-session-123")
+            .await
+            .expect("link mode session");
+
+        assert_eq!(
+            updated
+                .linked_mode_sessions
+                .get(&WorkflowMode::Task)
+                .map(String::as_str),
+            Some("task-session-123")
+        );
     }
 
     #[tokio::test]

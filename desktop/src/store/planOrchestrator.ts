@@ -7,7 +7,7 @@
  *
  * Delegates to:
  * - usePlanModeStore: backend session lifecycle
- * - useExecutionStore: appendStreamLine for card injection into chat transcript
+ * - useExecutionStore: appendCard for structured card injection into chat transcript
  */
 
 import { create } from 'zustand';
@@ -25,6 +25,7 @@ import type {
   PlanClarifyAnswerCardData,
   PlanClarifyQuestionCardData,
   PlanStepUpdateCardData,
+  PlanStepOutputCardData,
   PlanCompletionCardData,
   PlanPersonaIndicatorData,
   PlanModeProgressPayload,
@@ -87,7 +88,7 @@ function injectCard(cardType: string, data: Record<string, unknown>, interactive
     data: data as unknown as CardPayload['data'],
     interactive,
   };
-  useExecutionStore.getState().appendStreamLine(JSON.stringify(payload), 'card');
+  useExecutionStore.getState().appendCard(payload);
 }
 
 function injectInfo(message: string) {
@@ -96,6 +97,11 @@ function injectInfo(message: string) {
 
 function injectError(title: string, description: string) {
   injectCard('workflow_error', { title, description, suggestedFix: '' });
+}
+
+function normalizeStepOutputFormat(format: string | undefined): PlanStepOutputCardData['format'] {
+  if (format === 'markdown' || format === 'json' || format === 'html' || format === 'code') return format;
+  return 'text';
 }
 
 // ============================================================================
@@ -200,9 +206,15 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
         i18n.t('planMode:orchestrator.needsClarification', 'Some details need clarification before planning.'),
       );
 
-      // Inject first question card if available
+      // Inject first question card if available, otherwise degrade gracefully instead of getting stuck.
       if (currentQuestion) {
         injectCard('plan_clarify_question', currentQuestion as unknown as Record<string, unknown>);
+      } else {
+        injectInfo(
+          i18n.t('planMode:orchestrator.clarificationFailed', 'Clarification failed, proceeding to planning.'),
+        );
+        if (get()._runToken !== runToken) return;
+        await get().proceedToPlanning();
       }
     } else {
       // Skip to planning
@@ -358,6 +370,42 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
         progressPct: payload.progressPct,
         error: payload.error,
       } satisfies PlanStepUpdateCardData);
+
+      if (payload.eventType === 'step_completed' && payload.stepId) {
+        const completedStepId = payload.stepId;
+        const completedStepTitle = stepTitle ?? completedStepId;
+        const planStore = usePlanModeStore.getState();
+        void planStore
+          .fetchStepOutput(completedStepId)
+          .then((stepOutput) => {
+            if (get()._runToken !== runToken) return;
+            if (!stepOutput) {
+              const latestError = usePlanModeStore.getState().error;
+              if (latestError) {
+                injectError(
+                  i18n.t('planMode:orchestrator.stepOutputLoadFailed', 'Step Output Unavailable'),
+                  latestError,
+                );
+              }
+              return;
+            }
+
+            injectCard('plan_step_output', {
+              stepId: completedStepId,
+              stepTitle: completedStepTitle,
+              content: stepOutput.content,
+              format: normalizeStepOutputFormat(stepOutput.format),
+              criteriaMet: stepOutput.criteriaMet ?? [],
+            } satisfies PlanStepOutputCardData);
+          })
+          .catch((error) => {
+            if (get()._runToken !== runToken) return;
+            injectError(
+              i18n.t('planMode:orchestrator.stepOutputLoadFailed', 'Step Output Unavailable'),
+              error instanceof Error ? error.message : String(error),
+            );
+          });
+      }
 
       // On completion, inject completion card
       if (payload.eventType === 'execution_completed') {

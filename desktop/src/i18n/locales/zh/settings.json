@@ -51,13 +51,27 @@
     "knowledgeBase": {
       "title": "知识库",
       "autoEnsureDocs": "为工作区自动创建 docs 集合",
-      "autoEnsureDocsDescription": "开启后，进入工作区会自动创建并关联 docs 集合。默认关闭以保证更安全的行为。",
+      "autoEnsureDocsDescription": "开启后，进入工作区会自动创建并关联 docs 集合。",
       "kbQueryRunsV2": "使用精确的查询历史作用域过滤（v2）",
       "kbQueryRunsV2Description": "开启后，查询历史过滤将使用结构化 collection scope 关联，不再依赖旧的模糊匹配。",
       "kbPickerServerSearch": "在选择器中启用服务端文档搜索",
       "kbPickerServerSearchDescription": "开启后，来源选择器可命中未在本地展开的集合中的文档。",
       "kbIngestJobScopedProgress": "使用 job 级别的入库进度事件",
       "kbIngestJobScopedProgressDescription": "开启后，上传进度会按 job/project/collection 隔离，避免跨集合串扰。"
+    },
+
+    "simpleWorkflow": {
+      "title": "Simple 工作流灰度",
+      "simpleKernelSot": "SIMPLE_KERNEL_SOT（Kernel phase 单一真相源）",
+      "simpleKernelSotDescription": "将 workflow-kernel 的快照与事件作为主要 phase 权威来源。",
+      "typedCardPipeline": "TYPED_CARD_PIPELINE（类型化 Card 渲染链路）",
+      "typedCardPipelineDescription": "优先使用类型化 payload 渲染工作流卡片，并保留历史 JSON 兼容回放。"
+    },
+
+    "contextInspector": {
+      "title": "上下文观测",
+      "enable": "启用 Context Inspector 标签页",
+      "description": "在右侧面板显示 Context 标签页，用于查看 trace、压缩结果和来源诊断信息。"
     },
 
     "language": {
@@ -238,7 +252,7 @@
       "subAgentEvents": "显示子代理进度事件",
       "subAgentEventsHelp": "显示委托探索和分析阶段的结构化开始/结束事件。",
       "reasoningTraces": "显示模型推理/思考轨迹",
-      "reasoningTracesHelp": "默认关闭。仅在调试详细模型行为时启用。",
+      "reasoningTracesHelp": "实时展示模型推理/思考流，便于调试与透明化分析。",
       "enableThinking": "启用模型思考/推理",
       "enableThinkingHelp": "为支持的模型（Qwen3、QwQ、DeepSeek-R1等）启用扩展思考。模型将在响应前逐步推理问题。"
     },
@@ -479,6 +493,16 @@
       "button": "重置所有设置",
       "success": "设置已重置为默认值",
       "error": "重置设置失败。请重试。"
+    },
+    "clearAllData": {
+      "title": "清除所有数据",
+      "description": "删除全部本地应用数据（前端缓存 + 后端 ~/.plan-cascade 数据），包括数据库记录、索引、插件和密钥。此操作不可撤销。",
+      "button": "清除所有数据",
+      "clearing": "清除中...",
+      "confirmPrimary": "这将删除本地全部 Plan Cascade 数据。确定继续吗？",
+      "confirmSecondary": "最终确认：该操作不可恢复。现在清除所有数据吗？",
+      "success": "所有数据已清除，正在重载...",
+      "error": "清除所有数据失败，请重试。"
     }
   },
 

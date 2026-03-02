@@ -51,13 +51,27 @@
     "knowledgeBase": {
       "title": "Knowledge Base",
       "autoEnsureDocs": "Auto-create docs collection for workspace",
-      "autoEnsureDocsDescription": "When enabled, entering a workspace automatically creates and associates a docs collection. Default is off for safer behavior.",
+      "autoEnsureDocsDescription": "When enabled, entering a workspace automatically creates and associates a docs collection.",
       "kbQueryRunsV2": "Use precise query-run scope filtering (v2)",
       "kbQueryRunsV2Description": "When enabled, query run history filtering uses structured collection scope joins instead of legacy fuzzy matching.",
       "kbPickerServerSearch": "Use server-side document search in picker",
       "kbPickerServerSearchDescription": "When enabled, source picker search can find documents in collections that are not expanded locally.",
       "kbIngestJobScopedProgress": "Use job-scoped ingest progress events",
       "kbIngestJobScopedProgressDescription": "When enabled, upload progress is isolated by job/project/collection to avoid cross-collection progress interference."
+    },
+
+    "simpleWorkflow": {
+      "title": "Simple Workflow Rollout",
+      "simpleKernelSot": "SIMPLE_KERNEL_SOT (Kernel phase source of truth)",
+      "simpleKernelSotDescription": "Use workflow-kernel snapshots and events as the primary phase authority.",
+      "typedCardPipeline": "TYPED_CARD_PIPELINE (Structured card payload path)",
+      "typedCardPipelineDescription": "Render workflow cards from typed payloads first, with JSON fallback for legacy history."
+    },
+
+    "contextInspector": {
+      "title": "Context Observability",
+      "enable": "Enable Context Inspector tab",
+      "description": "Show the Context tab in the right panel for trace, compaction, and source diagnostics."
     },
 
     "language": {
@@ -238,7 +252,7 @@
       "subAgentEvents": "Show sub-agent progress events",
       "subAgentEventsHelp": "Display structured start/end events for delegated exploration and analysis phases.",
       "reasoningTraces": "Show model reasoning/thinking traces",
-      "reasoningTracesHelp": "Off by default. Enable only for debugging verbose model behavior.",
+      "reasoningTracesHelp": "Display the model's reasoning/thinking stream in real time. Useful for debugging and transparency.",
       "enableThinking": "Enable model thinking/reasoning",
       "enableThinkingHelp": "Enable extended thinking for supported models (Qwen3, QwQ, DeepSeek-R1, etc.). The model will reason through problems step-by-step before responding."
     },
@@ -479,6 +493,16 @@
       "button": "Reset All Settings",
       "success": "Settings reset to defaults",
       "error": "Failed to reset settings. Please try again."
+    },
+    "clearAllData": {
+      "title": "Clear All Data",
+      "description": "Delete all local app data (frontend cache + backend ~/.plan-cascade data), including DB records, indexes, plugins, and secrets. This cannot be undone.",
+      "button": "Clear All Data",
+      "clearing": "Clearing...",
+      "confirmPrimary": "This will delete all local Plan Cascade data. Continue?",
+      "confirmSecondary": "Final confirmation: this action is irreversible. Clear all data now?",
+      "success": "All data cleared. Reloading...",
+      "error": "Failed to clear all data. Please try again."
     }
   },
 

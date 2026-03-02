@@ -2,7 +2,7 @@
  * InterviewQuestionCard
  *
  * Displays an interview question in the chat. Read-only after answered.
- * Structured input (boolean/select) is handled by StructuredInputOverlay.
+ * Structured input (boolean/select) is handled by the shared interview input panel.
  */
 
 import { clsx } from 'clsx';

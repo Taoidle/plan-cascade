@@ -15,6 +15,8 @@ export type StandaloneContextTurns = 2 | 4 | 6 | 8 | 10 | 20 | 50 | 100 | 200 | 
 export type GlmEndpoint = 'standard' | 'coding' | 'international' | 'international-coding';
 export type MinimaxEndpoint = 'international' | 'china';
 export type QwenEndpoint = 'china' | 'singapore' | 'us';
+const SETTINGS_PERSIST_VERSION = 2;
+const EXECUTION_PHASE_IDS = ['planning', 'implementation', 'retry', 'refactor', 'review'] as const;
 
 function normalizeProviderKey(provider: string): string {
   return provider.trim().toLowerCase();
@@ -84,6 +86,8 @@ interface SettingsState {
   kbQueryRunsV2: boolean;
   kbPickerServerSearch: boolean;
   kbIngestJobScopedProgress: boolean;
+  simpleKernelSot: boolean;
+  typedCardPipeline: boolean;
 
   // Sidebar settings
   pinnedDirectories: string[];
@@ -153,6 +157,8 @@ interface SettingsState {
   setKbQueryRunsV2: (enabled: boolean) => void;
   setKbPickerServerSearch: (enabled: boolean) => void;
   setKbIngestJobScopedProgress: (enabled: boolean) => void;
+  setSimpleKernelSot: (enabled: boolean) => void;
+  setTypedCardPipeline: (enabled: boolean) => void;
 
   // Sidebar actions
   addPinnedDirectory: (path: string) => void;
@@ -196,10 +202,10 @@ const defaultSettings = {
   maxConcurrentSubagents: 0,
 
   // UI
-  defaultMode: 'simple' as const,
+  defaultMode: 'expert' as const,
   theme: 'system' as Theme,
   language: 'en' as Language,
-  standaloneContextTurns: 8 as StandaloneContextTurns,
+  standaloneContextTurns: -1 as StandaloneContextTurns,
 
   // Chat UI
   showLineNumbers: true,
@@ -211,10 +217,12 @@ const defaultSettings = {
   onboardingCompleted: false,
   tourCompleted: false,
   workspacePath: '',
-  knowledgeAutoEnsureDocsCollection: false,
+  knowledgeAutoEnsureDocsCollection: true,
   kbQueryRunsV2: true,
   kbPickerServerSearch: true,
   kbIngestJobScopedProgress: true,
+  simpleKernelSot: true,
+  typedCardPipeline: true,
 
   // Sidebar
   pinnedDirectories: [] as string[],
@@ -223,8 +231,8 @@ const defaultSettings = {
 
   // Context compaction
   enableContextCompaction: true,
-  showReasoningOutput: false,
-  enableThinking: false,
+  showReasoningOutput: true,
+  enableThinking: true,
   showSubAgentEvents: true,
 
   // GLM endpoint
@@ -249,13 +257,37 @@ const defaultSettings = {
     plan_architecture: { defaultAgent: '', fallbackChain: [] },
     plan_prd: { defaultAgent: '', fallbackChain: [] },
     // Execution phases (CLI agents + LLM)
-    planning: { defaultAgent: 'claude-code', fallbackChain: ['codex'] },
-    implementation: { defaultAgent: 'claude-code', fallbackChain: ['codex', 'aider'] },
-    retry: { defaultAgent: 'claude-code', fallbackChain: ['aider'] },
-    refactor: { defaultAgent: 'aider', fallbackChain: ['claude-code'] },
-    review: { defaultAgent: 'claude-code', fallbackChain: ['codex'] },
+    planning: { defaultAgent: '', fallbackChain: ['codex'] },
+    implementation: { defaultAgent: '', fallbackChain: ['codex', 'aider'] },
+    retry: { defaultAgent: '', fallbackChain: ['aider'] },
+    refactor: { defaultAgent: '', fallbackChain: ['claude-code'] },
+    review: { defaultAgent: '', fallbackChain: ['codex'] },
   } as Record<string, PhaseAgentConfig>,
 };
+
+function applyV2ForcedDefaults(state: Partial<SettingsState>): Partial<SettingsState> {
+  const nextState: Partial<SettingsState> = { ...state };
+  nextState.defaultMode = 'expert';
+  nextState.knowledgeAutoEnsureDocsCollection = true;
+  nextState.standaloneContextTurns = -1;
+  nextState.enableThinking = true;
+  nextState.showReasoningOutput = true;
+  nextState.showSubAgentEvents = true;
+  nextState.enableContextCompaction = true;
+
+  const currentPhaseConfigs = (nextState.phaseConfigs ?? {}) as Record<string, PhaseAgentConfig>;
+  const phaseConfigs: Record<string, PhaseAgentConfig> = { ...currentPhaseConfigs };
+
+  for (const phaseId of EXECUTION_PHASE_IDS) {
+    const current = currentPhaseConfigs[phaseId] ?? defaultSettings.phaseConfigs[phaseId];
+    phaseConfigs[phaseId] = {
+      defaultAgent: '',
+      fallbackChain: [...(current?.fallbackChain ?? defaultSettings.phaseConfigs[phaseId].fallbackChain)],
+    };
+  }
+  nextState.phaseConfigs = phaseConfigs;
+  return nextState;
+}
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
@@ -382,6 +414,8 @@ export const useSettingsStore = create<SettingsState>()(
       setKbQueryRunsV2: (enabled: boolean) => set({ kbQueryRunsV2: enabled }),
       setKbPickerServerSearch: (enabled: boolean) => set({ kbPickerServerSearch: enabled }),
       setKbIngestJobScopedProgress: (enabled: boolean) => set({ kbIngestJobScopedProgress: enabled }),
+      setSimpleKernelSot: (enabled: boolean) => set({ simpleKernelSot: enabled }),
+      setTypedCardPipeline: (enabled: boolean) => set({ typedCardPipeline: enabled }),
 
       addPinnedDirectory: (path) =>
         set((state) => {
@@ -408,6 +442,14 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'plan-cascade-settings',
+      version: SETTINGS_PERSIST_VERSION,
+      migrate: (persistedState, version) => {
+        const state = (persistedState ?? {}) as Partial<SettingsState>;
+        if (version < SETTINGS_PERSIST_VERSION) {
+          return applyV2ForcedDefaults(state);
+        }
+        return state;
+      },
       partialize: (state) => {
         return Object.fromEntries(Object.entries(state).filter(([key]) => key !== 'apiKey')) as Partial<SettingsState>;
       },

@@ -27,6 +27,7 @@ import type { ContextSourceConfig } from './contextSources';
 import { assembleTurnContext, type ContextEnvelope } from '../lib/contextApi';
 import { useContextOpsStore } from './contextOps';
 import { DEFAULT_PROMPT_TOKEN_BUDGET, resolvePromptTokenBudget } from '../lib/promptTokenBudget';
+import type { CardPayload } from '../types/workflowCard';
 
 export type ExecutionStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
 
@@ -159,6 +160,8 @@ export interface StreamLine {
   content: string;
   type: StreamLineType;
   timestamp: number;
+  /** Structured workflow card payload (v2 path). */
+  cardPayload?: CardPayload;
   /** Sub-agent ID if this line originated from a sub-agent */
   subAgentId?: string;
   /** Sub-agent nesting depth (0 = root) */
@@ -676,6 +679,9 @@ interface ExecutionState {
   /** Append a streaming output line */
   appendStreamLine: (content: string, type: StreamLineType, subAgentId?: string, subAgentDepth?: number) => void;
 
+  /** Append a structured workflow card line */
+  appendCard: (payload: CardPayload, subAgentId?: string, subAgentDepth?: number) => void;
+
   /** Clear streaming output buffer */
   clearStreamingOutput: () => void;
 
@@ -720,7 +726,7 @@ const HISTORY_KEY = 'plan-cascade-execution-history';
 const HISTORY_MIGRATION_KEY = 'plan-cascade-execution-history-migrated-v2';
 const SESSION_STATE_KEY = 'plan-cascade-execution-sessions-v1';
 const MAX_HISTORY_ITEMS = 200;
-const DEFAULT_STANDALONE_CONTEXT_TURNS = 8;
+const DEFAULT_STANDALONE_CONTEXT_TURNS = -1;
 const STANDALONE_CONTEXT_UNLIMITED = -1;
 const HANDOFF_TURN_THRESHOLD = 120;
 const HANDOFF_RECENT_TURNS_TO_KEEP = 60;
@@ -2987,6 +2993,27 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => ({
       };
       return {
         streamingOutput: [...lines, line],
+        streamLineCounter: counter,
+        foregroundDirty: true,
+      };
+    });
+  },
+
+  appendCard: (payload, subAgentId, subAgentDepth) => {
+    set((state) => {
+      const counter = state.streamLineCounter + 1;
+      const typedCardPipelineEnabled = useSettingsStore.getState().typedCardPipeline;
+      const line: StreamLine = {
+        id: counter,
+        content: JSON.stringify(payload),
+        type: 'card',
+        timestamp: Date.now(),
+        ...(typedCardPipelineEnabled ? { cardPayload: payload } : {}),
+        subAgentId,
+        subAgentDepth,
+      };
+      return {
+        streamingOutput: [...state.streamingOutput, line],
         streamLineCounter: counter,
         foregroundDirty: true,
       };

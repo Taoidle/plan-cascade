@@ -348,6 +348,7 @@ export function PhaseAgentSection() {
                           'focus:outline-none focus:ring-2 focus:ring-primary-500',
                         )}
                       >
+                        <option value="">{globalDefaultLabel}</option>
                         <AgentSelectOptions
                           enabledAgents={enabledAgents}
                           cliAgentsLabel={cliAgentsLabel}

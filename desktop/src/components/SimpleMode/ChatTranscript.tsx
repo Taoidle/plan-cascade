@@ -336,16 +336,29 @@ function ChatAssistantSection({
           // Single line block
           const line = block.line;
           if (line.type === 'card') {
+            let payload: CardPayload | null = line.cardPayload ?? null;
             try {
-              const payload = JSON.parse(line.content) as CardPayload;
+              if (!payload) {
+                payload = JSON.parse(line.content) as CardPayload;
+              }
+            } catch (error) {
+              console.warn('Failed to parse workflow card payload', error, { lineId: line.id });
+            }
+            if (!payload) {
               return (
-                <div key={line.id} className="my-1">
-                  <WorkflowCardRenderer payload={payload} />
+                <div
+                  key={line.id}
+                  className="my-1 text-xs px-3 py-2 rounded border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300"
+                >
+                  Invalid workflow card payload
                 </div>
               );
-            } catch {
-              return null;
             }
+            return (
+              <div key={line.id} className="my-1">
+                <WorkflowCardRenderer payload={payload} />
+              </div>
+            );
           }
           if (line.type === 'text') {
             return (

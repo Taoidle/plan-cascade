@@ -60,6 +60,7 @@ export interface ModeSnapshots {
 export type WorkflowEventKind =
   | 'session_opened'
   | 'mode_transitioned'
+  | 'mode_session_linked'
   | 'input_submitted'
   | 'context_appended'
   | 'plan_edited'
@@ -117,6 +118,7 @@ export interface WorkflowSession {
   activeMode: WorkflowMode;
   modeSnapshots: ModeSnapshots;
   handoffContext: HandoffContextBundle;
+  linkedModeSessions: Partial<Record<WorkflowMode, string>>;
   lastError: string | null;
   createdAt: string;
   updatedAt: string;
@@ -137,4 +139,10 @@ export interface WorkflowSessionState {
   session: WorkflowSession;
   events: WorkflowEventV2[];
   checkpoints: WorkflowCheckpoint[];
+}
+
+export interface WorkflowKernelUpdatedEvent {
+  sessionState: WorkflowSessionState;
+  revision: number;
+  source: string;
 }

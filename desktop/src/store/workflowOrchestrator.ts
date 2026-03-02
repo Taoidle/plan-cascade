@@ -8,7 +8,7 @@
  * Delegates to existing stores:
  * - useTaskModeStore: backend session lifecycle (enterTaskMode, generatePrd, approvePrd)
  * - useSpecInterviewStore: interview flow (startInterview, submitAnswer, compileSpec)
- * - useExecutionStore: appendStreamLine for card injection into chat transcript
+ * - useExecutionStore: appendCard for structured card injection into chat transcript
  */
 
 import { create } from 'zustand';
@@ -177,7 +177,7 @@ function injectCard<T extends CardPayload['cardType']>(cardType: T, data: CardPa
     data,
     interactive,
   };
-  useExecutionStore.getState().appendStreamLine(JSON.stringify(payload), 'card');
+  useExecutionStore.getState().appendCard(payload);
 }
 
 /** Inject an info-level workflow message */
@@ -665,15 +665,33 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         if (!isRunActive(get, runToken)) return;
         set({ interviewId: session.id });
 
+        let interviewSession = session;
+        if (!interviewSession.current_question && interviewSession.status !== 'finalized') {
+          const recovered = await useSpecInterviewStore.getState().fetchState(interviewSession.id);
+          if (!isRunActive(get, runToken)) return;
+          if (recovered) interviewSession = recovered;
+        }
+
         // Present first question
-        if (session.current_question) {
+        if (interviewSession.current_question) {
           const questionData = mapInterviewQuestion(
-            session.current_question,
-            session.question_cursor + 1,
-            session.max_questions,
+            interviewSession.current_question,
+            interviewSession.question_cursor + 1,
+            interviewSession.max_questions,
           );
           set({ pendingQuestion: questionData });
           injectCard('interview_question', questionData, true);
+        } else {
+          injectInfo(
+            i18n.t('workflow.orchestrator.interviewQuestionUnavailable', {
+              ns: 'simpleMode',
+              defaultValue: 'Interview question unavailable, continuing with requirement analysis.',
+            }),
+            'warning',
+          );
+          await requirementAnalysisPhase(set, get, runToken);
+          if (!isRunActive(get, runToken)) return;
+          await generatePrdPhase(set, get, runToken);
         }
       } else {
         // Skip interview, run requirement analysis then generate PRD
@@ -809,16 +827,35 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       return;
     }
 
+    let nextSession = updatedSession;
+    if (!nextSession.current_question && nextSession.status !== 'finalized') {
+      const recovered = await useSpecInterviewStore.getState().fetchState(nextSession.id);
+      if (!isRunActive(get, runToken)) return;
+      if (recovered) nextSession = recovered;
+    }
+
     // Present next question
-    if (updatedSession.current_question) {
+    if (nextSession.current_question) {
       const questionData = mapInterviewQuestion(
-        updatedSession.current_question,
-        updatedSession.question_cursor + 1,
-        updatedSession.max_questions,
+        nextSession.current_question,
+        nextSession.question_cursor + 1,
+        nextSession.max_questions,
       );
       set({ pendingQuestion: questionData });
       injectCard('interview_question', questionData, true);
+      return;
     }
+
+    injectInfo(
+      i18n.t('workflow.orchestrator.interviewQuestionUnavailable', {
+        ns: 'simpleMode',
+        defaultValue: 'Interview question unavailable, continuing with requirement analysis.',
+      }),
+      'warning',
+    );
+    await requirementAnalysisPhase(set, get, runToken);
+    if (!isRunActive(get, runToken)) return;
+    await generatePrdPhase(set, get, runToken);
   },
 
   /** Skip current interview question */
@@ -866,15 +903,34 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       return;
     }
 
-    if (updatedSession.current_question) {
+    let nextSession = updatedSession;
+    if (!nextSession.current_question && nextSession.status !== 'finalized') {
+      const recovered = await useSpecInterviewStore.getState().fetchState(nextSession.id);
+      if (!isRunActive(get, runToken)) return;
+      if (recovered) nextSession = recovered;
+    }
+
+    if (nextSession.current_question) {
       const questionData = mapInterviewQuestion(
-        updatedSession.current_question,
-        updatedSession.question_cursor + 1,
-        updatedSession.max_questions,
+        nextSession.current_question,
+        nextSession.question_cursor + 1,
+        nextSession.max_questions,
       );
       set({ pendingQuestion: questionData });
       injectCard('interview_question', questionData, true);
+      return;
     }
+
+    injectInfo(
+      i18n.t('workflow.orchestrator.interviewQuestionUnavailable', {
+        ns: 'simpleMode',
+        defaultValue: 'Interview question unavailable, continuing with requirement analysis.',
+      }),
+      'warning',
+    );
+    await requirementAnalysisPhase(set, get, runToken);
+    if (!isRunActive(get, runToken)) return;
+    await generatePrdPhase(set, get, runToken);
   },
 
   /** Update a story field in the editable PRD */

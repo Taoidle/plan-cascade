@@ -15,6 +15,7 @@ export function PlanStepOutputCard({ data }: { data: PlanStepOutputCardData }) {
   const { t } = useTranslation('planMode');
   const [isExpanded, setIsExpanded] = useState(false);
   const allMet = data.criteriaMet.length === 0 || data.criteriaMet.every((c) => c.met);
+  const contentPreview = data.content.length > 280 ? `${data.content.slice(0, 280)}...` : data.content;
 
   return (
     <div
@@ -33,6 +34,9 @@ export function PlanStepOutputCard({ data }: { data: PlanStepOutputCardData }) {
           <ChevronRightIcon className="w-3 h-3 shrink-0 text-gray-400" />
         )}
         <span className="text-xs font-medium text-gray-800 dark:text-gray-200 flex-1">{data.stepTitle}</span>
+        <span className="text-2xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 uppercase">
+          {data.format}
+        </span>
         <span
           className={clsx(
             'text-2xs px-1.5 py-0.5 rounded font-medium',
@@ -50,7 +54,7 @@ export function PlanStepOutputCard({ data }: { data: PlanStepOutputCardData }) {
         <div className="mt-2 space-y-2">
           {/* Output content */}
           <div className="text-xs text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-900 rounded p-2 max-h-48 overflow-y-auto whitespace-pre-wrap font-mono">
-            {data.content.length > 1000 ? `${data.content.slice(0, 1000)}...` : data.content}
+            {data.content.length > 2000 ? `${data.content.slice(0, 2000)}...` : data.content}
           </div>
 
           {/* Criteria results */}
@@ -61,13 +65,19 @@ export function PlanStepOutputCard({ data }: { data: PlanStepOutputCardData }) {
                 <div key={i} className="flex items-start gap-1.5 text-2xs">
                   <span className={cr.met ? 'text-green-500' : 'text-red-500'}>{cr.met ? '\u2713' : '\u2717'}</span>
                   <span className="text-gray-600 dark:text-gray-400">
-                    {cr.criterion}: {cr.explanation}
+                    {cr.criterion} ({cr.met ? t('output.met', 'met') : t('output.notMet', 'not met')}): {cr.explanation}
                   </span>
                 </div>
               ))}
             </div>
           )}
         </div>
+      )}
+
+      {!isExpanded && data.content.length > 0 && (
+        <p className="mt-2 text-2xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-words">
+          {contentPreview}
+        </p>
       )}
     </div>
   );

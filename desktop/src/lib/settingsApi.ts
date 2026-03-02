@@ -146,6 +146,17 @@ export async function resetAllSettings(): Promise<boolean> {
 }
 
 /**
+ * Clear all application data (frontend state should be cleared by caller)
+ */
+export async function clearAllData(): Promise<boolean> {
+  const result = await invoke<CommandResponse<boolean>>('clear_all_data');
+  if (!result.success || result.data !== true) {
+    throw new Error(result.error || 'Failed to clear all data');
+  }
+  return true;
+}
+
+/**
  * Export all settings (frontend + backend + optionally encrypted API keys)
  */
 export async function exportAllSettings(
@@ -189,6 +200,7 @@ export default {
   getKnowledgeFeatureFlags,
   setKnowledgeFeatureFlags,
   resetAllSettings,
+  clearAllData,
   exportAllSettings,
   importAllSettings,
   isTauriAvailable,

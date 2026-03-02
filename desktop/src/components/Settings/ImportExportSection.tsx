@@ -19,7 +19,13 @@ import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '../../store/settings';
 import { useEmbeddingStore } from '../../store/embedding';
 import { CUSTOM_MODELS_STORAGE_KEY, LOCAL_PROVIDER_API_KEY_CACHE_STORAGE_KEY } from '../../lib/providers';
-import { exportAllSettings, importAllSettings, resetAllSettings, type ImportResult } from '../../lib/settingsApi';
+import {
+  clearAllData,
+  exportAllSettings,
+  importAllSettings,
+  resetAllSettings,
+  type ImportResult,
+} from '../../lib/settingsApi';
 
 type MessageType = 'success' | 'error' | 'warning';
 
@@ -32,6 +38,7 @@ export function ImportExportSection() {
   const { t } = useTranslation('settings');
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isClearingAllData, setIsClearingAllData] = useState(false);
   const [message, setMessage] = useState<StatusMessage | null>(null);
   const [importPreview, setImportPreview] = useState<{ raw: string; parsed: Record<string, unknown> } | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
@@ -244,6 +251,31 @@ export function ImportExportSection() {
     }
   };
 
+  const handleClearAllData = async () => {
+    const confirmedPrimary = window.confirm(t('importExport.clearAllData.confirmPrimary'));
+    if (!confirmedPrimary) return;
+    const confirmedSecondary = window.confirm(t('importExport.clearAllData.confirmSecondary'));
+    if (!confirmedSecondary) return;
+
+    setIsClearingAllData(true);
+    setMessage(null);
+
+    try {
+      await clearAllData();
+      localStorage.clear();
+      window.dispatchEvent(new CustomEvent('plan-cascade:settings-reset'));
+      setMessage({ type: 'success', text: t('importExport.clearAllData.success') });
+      window.setTimeout(() => {
+        window.location.reload();
+      }, 250);
+    } catch (error) {
+      console.error('Clear all data failed:', error);
+      setMessage({ type: 'error', text: t('importExport.clearAllData.error') });
+    } finally {
+      setIsClearingAllData(false);
+    }
+  };
+
   // ========================================================================
   // Render
   // ========================================================================
@@ -392,6 +424,40 @@ export function ImportExportSection() {
                 )}
               >
                 {t('importExport.reset.button')}
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Clear All Data Section */}
+      <section className="space-y-4">
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('importExport.clearAllData.title')}</h3>
+        <div
+          className={clsx(
+            'p-4 rounded-lg',
+            'bg-red-50 dark:bg-red-900/10',
+            'border border-red-200 dark:border-red-800',
+          )}
+        >
+          <div className="flex items-start gap-3">
+            <ExclamationTriangleIcon className="w-5 h-5 text-red-600 dark:text-red-500 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm text-red-800 dark:text-red-200 mb-3">
+                {t('importExport.clearAllData.description')}
+              </p>
+              <button
+                onClick={handleClearAllData}
+                disabled={isClearingAllData}
+                className={clsx(
+                  'px-3 py-1.5 rounded-lg text-sm',
+                  'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+                  'hover:bg-red-200 dark:hover:bg-red-900/50',
+                  'focus:outline-none focus:ring-2 focus:ring-red-500',
+                  'disabled:opacity-50 disabled:cursor-not-allowed',
+                )}
+              >
+                {isClearingAllData ? t('importExport.clearAllData.clearing') : t('importExport.clearAllData.button')}
               </button>
             </div>
           </div>

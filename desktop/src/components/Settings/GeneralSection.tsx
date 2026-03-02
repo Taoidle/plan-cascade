@@ -5,11 +5,13 @@
  */
 
 import { clsx } from 'clsx';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ResetIcon, RocketIcon } from '@radix-ui/react-icons';
 import { useSettingsStore } from '../../store/settings';
 import { useOnboardingStore } from '../../store/onboarding';
 import { LanguageSelector } from './LanguageSelector';
+import { getContextPolicy, setContextPolicy, type ContextPolicy } from '../../lib/contextApi';
 
 interface GeneralSectionProps {
   /** Callback to close the parent Settings dialog */
@@ -35,8 +37,58 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
     setKbPickerServerSearch,
     kbIngestJobScopedProgress,
     setKbIngestJobScopedProgress,
+    simpleKernelSot,
+    setSimpleKernelSot,
+    typedCardPipeline,
+    setTypedCardPipeline,
   } = useSettingsStore();
   const { triggerWizard, startTour } = useOnboardingStore();
+  const [contextPolicy, setContextPolicyState] = useState<ContextPolicy | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const response = await getContextPolicy();
+      if (cancelled) return;
+      if (response.success && response.data) {
+        setContextPolicyState(response.data);
+      } else {
+        setContextPolicyState(
+          (prev) =>
+            prev ?? {
+              context_v2_pipeline: true,
+              memory_v2_ranker: true,
+              context_inspector_ui: false,
+              pinned_sources: [],
+              excluded_sources: [],
+              soft_threshold_ratio: 0.85,
+              hard_threshold_ratio: 0.95,
+            },
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleContextInspectorToggle = async (enabled: boolean) => {
+    const basePolicy: ContextPolicy = contextPolicy ?? {
+      context_v2_pipeline: true,
+      memory_v2_ranker: true,
+      context_inspector_ui: false,
+      pinned_sources: [],
+      excluded_sources: [],
+      soft_threshold_ratio: 0.85,
+      hard_threshold_ratio: 0.95,
+    };
+    const nextPolicy: ContextPolicy = { ...basePolicy, context_inspector_ui: enabled };
+    setContextPolicyState(nextPolicy);
+    const response = await setContextPolicy(nextPolicy);
+    if (!response.success) {
+      setContextPolicyState(basePolicy);
+    }
+  };
 
   return (
     <div className="space-y-8">
@@ -244,6 +296,96 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
             </div>
             <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               {t('general.knowledgeBase.kbIngestJobScopedProgressDescription')}
+            </div>
+          </div>
+        </label>
+      </section>
+
+      {/* Simple Workflow Rollout Flags */}
+      <section className="space-y-4">
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
+          {t('general.simpleWorkflow.title', { defaultValue: 'Simple Workflow Rollout' })}
+        </h3>
+        <label
+          className={clsx(
+            'flex items-start gap-4 p-4 rounded-lg border cursor-pointer',
+            'transition-colors',
+            'border-gray-200 dark:border-gray-700',
+            'hover:bg-gray-50 dark:hover:bg-gray-800',
+          )}
+        >
+          <input
+            type="checkbox"
+            checked={simpleKernelSot}
+            onChange={(e) => setSimpleKernelSot(e.target.checked)}
+            className="mt-1 text-primary-600"
+          />
+          <div>
+            <div className="font-medium text-gray-900 dark:text-white text-sm">
+              {t('general.simpleWorkflow.simpleKernelSot', {
+                defaultValue: 'SIMPLE_KERNEL_SOT (Kernel phase source of truth)',
+              })}
+            </div>
+            <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              {t('general.simpleWorkflow.simpleKernelSotDescription', {
+                defaultValue: 'Use workflow-kernel snapshots and events as the primary phase authority.',
+              })}
+            </div>
+          </div>
+        </label>
+
+        <label
+          className={clsx(
+            'flex items-start gap-4 p-4 rounded-lg border cursor-pointer',
+            'transition-colors',
+            'border-gray-200 dark:border-gray-700',
+            'hover:bg-gray-50 dark:hover:bg-gray-800',
+          )}
+        >
+          <input
+            type="checkbox"
+            checked={typedCardPipeline}
+            onChange={(e) => setTypedCardPipeline(e.target.checked)}
+            className="mt-1 text-primary-600"
+          />
+          <div>
+            <div className="font-medium text-gray-900 dark:text-white text-sm">
+              {t('general.simpleWorkflow.typedCardPipeline', {
+                defaultValue: 'TYPED_CARD_PIPELINE (Structured card payload path)',
+              })}
+            </div>
+            <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              {t('general.simpleWorkflow.typedCardPipelineDescription', {
+                defaultValue: 'Render workflow cards from typed payloads first, with JSON fallback for legacy history.',
+              })}
+            </div>
+          </div>
+        </label>
+      </section>
+
+      {/* Context Inspector */}
+      <section className="space-y-4">
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('general.contextInspector.title')}</h3>
+        <label
+          className={clsx(
+            'flex items-start gap-4 p-4 rounded-lg border cursor-pointer',
+            'transition-colors',
+            'border-gray-200 dark:border-gray-700',
+            'hover:bg-gray-50 dark:hover:bg-gray-800',
+          )}
+        >
+          <input
+            type="checkbox"
+            checked={contextPolicy?.context_inspector_ui ?? false}
+            onChange={(e) => void handleContextInspectorToggle(e.target.checked)}
+            className="mt-1 text-primary-600"
+          />
+          <div>
+            <div className="font-medium text-gray-900 dark:text-white text-sm">
+              {t('general.contextInspector.enable')}
+            </div>
+            <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              {t('general.contextInspector.description')}
             </div>
           </div>
         </label>

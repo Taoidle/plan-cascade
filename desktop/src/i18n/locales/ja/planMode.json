@@ -32,7 +32,9 @@
   "output": {
     "passed": "合格",
     "partial": "一部合格",
-    "criteria": "基準"
+    "criteria": "基準",
+    "met": "達成",
+    "notMet": "未達成"
   },
 
   "completion": {
@@ -45,6 +47,7 @@
   },
 
   "clarify": {
+    "title": "確認が必要です",
     "question": "確認質問",
     "hint": "ヒント",
     "skipped": "スキップ",
@@ -66,6 +69,9 @@
     "clarificationFailed": "確認に失敗しました。計画作成に進みます。",
     "planFailed": "プラン生成失敗",
     "planApproved": "プランが承認されました！実行を開始します...",
+    "cancelFailed": "キャンセル失敗",
+    "cancelling": "プラン実行をキャンセル中...",
+    "stepOutputLoadFailed": "ステップ出力を取得できません",
     "cancelled": "プランモードがキャンセルされました。"
   },
 

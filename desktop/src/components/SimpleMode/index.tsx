@@ -9,7 +9,7 @@
  * - Edge collapse buttons for left/right panels
  */
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback, type MouseEvent as ReactMouseEvent } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
@@ -66,9 +66,17 @@ interface CommandResponse<T> {
 const MAX_QUEUED_CHAT_MESSAGES = 3;
 const TOKEN_ESTIMATE_DEBOUNCE_MS = 180;
 const WORKFLOW_KERNEL_SESSION_STORAGE_PREFIX = 'simple_mode_workflow_kernel_session_v2:';
+const RIGHT_PANEL_WIDTH_STORAGE_PREFIX = 'simple_mode_right_panel_width_v1:';
+const DEFAULT_RIGHT_PANEL_WIDTH = 620;
+const MIN_RIGHT_PANEL_WIDTH = 420;
+const MAX_RIGHT_PANEL_WIDTH = 960;
 
 function workflowKernelSessionStorageKey(workspacePath: string | null): string {
   return `${WORKFLOW_KERNEL_SESSION_STORAGE_PREFIX}${workspacePath || '__default_workspace__'}`;
+}
+
+function rightPanelWidthStorageKey(workspacePath: string | null): string {
+  return `${RIGHT_PANEL_WIDTH_STORAGE_PREFIX}${workspacePath || '__default_workspace__'}`;
 }
 
 export function SimpleMode() {
@@ -120,11 +128,13 @@ export function SimpleMode() {
   const sidebarCollapsed = useSettingsStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useSettingsStore((s) => s.setSidebarCollapsed);
   const autoPanelHoverEnabled = useSettingsStore((s) => s.autoPanelHoverEnabled);
+  const simpleKernelSot = useSettingsStore((s) => s.simpleKernelSot);
 
   const [description, setDescription] = useState('');
   const [leftPanelHoverExpanded, setLeftPanelHoverExpanded] = useState(false);
   const [rightPanelHoverExpanded, setRightPanelHoverExpanded] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const [rightPanelWidth, setRightPanelWidth] = useState(DEFAULT_RIGHT_PANEL_WIDTH);
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>('output');
   const [workflowMode, setWorkflowMode] = useState<WorkflowMode>('chat');
   const [supportsPointerHover, setSupportsPointerHover] = useState(false);
@@ -140,6 +150,7 @@ export function SimpleMode() {
   const [isCapturing, setIsCapturing] = useState(false);
   const leftHoverTimerRef = useRef<number | null>(null);
   const rightHoverTimerRef = useRef<number | null>(null);
+  const rightPanelResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const queueIdRef = useRef(0);
   const queueDispatchInFlightRef = useRef(false);
   const hasHydratedQueueRef = useRef(false);
@@ -150,7 +161,7 @@ export function SimpleMode() {
   const recoverWorkflowKernelSession = useWorkflowKernelStore((s) => s.recoverSession);
   const transitionWorkflowKernelMode = useWorkflowKernelStore((s) => s.transitionMode);
   const transitionAndSubmitWorkflowKernelInput = useWorkflowKernelStore((s) => s.transitionAndSubmitInput);
-  const refreshWorkflowKernelState = useWorkflowKernelStore((s) => s.refreshSessionState);
+  const linkWorkflowKernelModeSession = useWorkflowKernelStore((s) => s.linkModeSession);
   const cancelWorkflowKernelOperation = useWorkflowKernelStore((s) => s.cancelOperation);
   const resetWorkflowKernel = useWorkflowKernelStore((s) => s.reset);
   const kernelBootstrapInFlightRef = useRef(false);
@@ -301,19 +312,38 @@ export function SimpleMode() {
   }, [workflowKernelSessionId, persistWorkflowKernelSessionId]);
 
   useEffect(() => {
-    if (!workflowKernelSessionId) return;
-    void refreshWorkflowKernelState();
-    const timer = window.setInterval(() => {
-      void refreshWorkflowKernelState();
-    }, 1500);
-    return () => window.clearInterval(timer);
-  }, [workflowKernelSessionId, refreshWorkflowKernelState]);
+    if (typeof localStorage === 'undefined') return;
+    const stored = localStorage.getItem(rightPanelWidthStorageKey(workspacePath));
+    if (!stored) return;
+    const parsed = Number.parseInt(stored, 10);
+    if (!Number.isFinite(parsed)) return;
+    setRightPanelWidth(Math.max(MIN_RIGHT_PANEL_WIDTH, Math.min(MAX_RIGHT_PANEL_WIDTH, parsed)));
+  }, [workspacePath]);
 
   useEffect(() => {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(rightPanelWidthStorageKey(workspacePath), String(Math.round(rightPanelWidth)));
+  }, [workspacePath, rightPanelWidth]);
+
+  useEffect(() => {
+    if (!simpleKernelSot) return;
     const activeMode = workflowKernelSession?.activeMode;
     if (!activeMode || activeMode === workflowMode) return;
     setWorkflowMode(activeMode);
-  }, [workflowKernelSession?.activeMode, workflowMode]);
+  }, [simpleKernelSot, workflowKernelSession?.activeMode, workflowMode]);
+
+  useEffect(() => {
+    if (simpleKernelSot) return;
+    if (!workflowKernelSessionId) return;
+    if (typeof window === 'undefined') return;
+
+    const timer = window.setInterval(() => {
+      void useWorkflowKernelStore.getState().refreshSessionState();
+    }, 1500);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [simpleKernelSot, workflowKernelSessionId]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
@@ -407,6 +437,7 @@ export function SimpleMode() {
   }, [bridgeSessionId, workspacePath]);
 
   const pendingQuestion = useWorkflowOrchestratorStore((s) => s.pendingQuestion);
+  const workflowPhaseLegacy = useWorkflowOrchestratorStore((s) => s.phase);
   const startWorkflow = useWorkflowOrchestratorStore((s) => s.startWorkflow);
   const submitInterviewAnswer = useWorkflowOrchestratorStore((s) => s.submitInterviewAnswer);
   const skipInterviewQuestion = useWorkflowOrchestratorStore((s) => s.skipInterviewQuestion);
@@ -420,6 +451,7 @@ export function SimpleMode() {
 
   // Plan mode orchestrator
   const pendingClarifyQuestion = usePlanOrchestratorStore((s) => s.pendingClarifyQuestion);
+  const planPhaseLegacy = usePlanOrchestratorStore((s) => s.phase);
   const planIsBusy = usePlanOrchestratorStore((s) => s.isBusy);
   const startPlanWorkflow = usePlanOrchestratorStore((s) => s.startPlanWorkflow);
   const submitPlanClarification = usePlanOrchestratorStore((s) => s.submitClarification);
@@ -428,21 +460,28 @@ export function SimpleMode() {
   const planWorkflowCancelling = usePlanOrchestratorStore((s) => s.isCancelling);
   const resetPlanWorkflow = usePlanOrchestratorStore((s) => s.resetWorkflow);
 
-  const workflowPhase = workflowKernelSession?.modeSnapshots.task?.phase ?? 'idle';
-  const planPhase = workflowKernelSession?.modeSnapshots.plan?.phase ?? 'idle';
-  const chatPhase = workflowKernelSession?.modeSnapshots.chat?.phase ?? 'ready';
+  const workflowKernelTaskPhase = workflowKernelSession?.modeSnapshots.task?.phase ?? 'idle';
+  const workflowKernelPlanPhase = workflowKernelSession?.modeSnapshots.plan?.phase ?? 'idle';
+  const workflowKernelChatPhase = workflowKernelSession?.modeSnapshots.chat?.phase ?? 'ready';
+  const workflowPhase = simpleKernelSot ? workflowKernelTaskPhase : workflowPhaseLegacy;
+  const planPhase = simpleKernelSot ? workflowKernelPlanPhase : planPhaseLegacy;
+  const chatPhase = simpleKernelSot ? workflowKernelChatPhase : isRunning ? 'running' : 'ready';
   const rightPanelPhase = workflowMode === 'task' ? workflowPhase : workflowMode === 'plan' ? planPhase : chatPhase;
+  const taskInterviewingPhase =
+    workflowMode === 'task' && (workflowPhase === 'interviewing' || workflowPhaseLegacy === 'interviewing');
+  const planClarifyingPhase =
+    workflowMode === 'plan' && (planPhase === 'clarifying' || planPhaseLegacy === 'clarifying');
 
   const hasStructuredInterviewQuestion =
-    workflowMode === 'task' &&
-    workflowPhase === 'interviewing' &&
+    taskInterviewingPhase &&
     !!pendingQuestion &&
     (pendingQuestion.inputType === 'boolean' ||
       pendingQuestion.inputType === 'single_select' ||
       pendingQuestion.inputType === 'multi_select');
-  const hasTextInterviewQuestion =
-    workflowMode === 'task' && workflowPhase === 'interviewing' && !!pendingQuestion && !hasStructuredInterviewQuestion;
-  const hasPlanClarifyQuestion = workflowMode === 'plan' && planPhase === 'clarifying' && !!pendingClarifyQuestion;
+  const hasTextInterviewQuestion = taskInterviewingPhase && !!pendingQuestion && !hasStructuredInterviewQuestion;
+  const hasPlanClarifyQuestion = planClarifyingPhase && !!pendingClarifyQuestion;
+  const effectiveTaskPhaseForInput = taskInterviewingPhase ? 'interviewing' : workflowPhase;
+  const effectivePlanPhaseForInput = planClarifyingPhase ? 'clarifying' : planPhase;
 
   // Tool permission state
   const permissionRequest = useToolPermissionStore((s) => s.pendingRequest);
@@ -499,12 +538,20 @@ export function SimpleMode() {
       if (workflowMode === 'task') {
         // Route Task mode through the workflow orchestrator
         await startWorkflow(prompt);
+        const taskModeSessionId = useWorkflowOrchestratorStore.getState().sessionId;
+        if (simpleKernelSot && taskModeSessionId) {
+          await linkWorkflowKernelModeSession('task', taskModeSessionId);
+        }
         return;
       }
 
       if (workflowMode === 'plan') {
         // Route Plan mode through the plan orchestrator
         await startPlanWorkflow(prompt);
+        const planModeSessionId = usePlanOrchestratorStore.getState().sessionId;
+        if (simpleKernelSot && planModeSessionId) {
+          await linkWorkflowKernelModeSession('plan', planModeSessionId);
+        }
         return;
       }
 
@@ -517,6 +564,8 @@ export function SimpleMode() {
       start,
       startWorkflow,
       startPlanWorkflow,
+      simpleKernelSot,
+      linkWorkflowKernelModeSession,
       transitionAndSubmitWorkflowKernelInput,
       workflowMode,
     ],
@@ -546,7 +595,7 @@ export function SimpleMode() {
             metadata: { mode: workflowMode, phase: workflowPhase },
           });
           addPrdFeedback(prompt);
-        } else if (workflowPhase === 'interviewing' && pendingQuestion && !hasStructuredInterviewQuestion) {
+        } else if (taskInterviewingPhase && pendingQuestion && !hasStructuredInterviewQuestion) {
           await transitionAndSubmitWorkflowKernelInput(workflowMode, {
             type: 'task_interview_answer',
             content: prompt,
@@ -562,7 +611,7 @@ export function SimpleMode() {
       }
 
       // Route plan clarification through plan orchestrator
-      if (workflowMode === 'plan' && planPhase === 'clarifying' && pendingClarifyQuestion) {
+      if (planClarifyingPhase && pendingClarifyQuestion) {
         await transitionAndSubmitWorkflowKernelInput(workflowMode, {
           type: 'plan_clarification',
           content: prompt,
@@ -595,8 +644,10 @@ export function SimpleMode() {
       sendFollowUp,
       workflowMode,
       workflowPhase,
+      taskInterviewingPhase,
       pendingQuestion,
       planPhase,
+      planClarifyingPhase,
       pendingClarifyQuestion,
       hasStructuredInterviewQuestion,
       overrideConfigNatural,
@@ -917,20 +968,20 @@ export function SimpleMode() {
     planPhase !== 'cancelled';
   const isTaskWorkflowBusy =
     workflowMode === 'task' &&
-    (workflowPhase === 'analyzing' ||
-      workflowPhase === 'exploring' ||
-      workflowPhase === 'requirement_analysis' ||
-      workflowPhase === 'generating_prd' ||
-      workflowPhase === 'generating_design_doc' ||
-      workflowPhase === 'executing' ||
-      (workflowPhase === 'interviewing' && pendingQuestion === null));
+    (effectiveTaskPhaseForInput === 'analyzing' ||
+      effectiveTaskPhaseForInput === 'exploring' ||
+      effectiveTaskPhaseForInput === 'requirement_analysis' ||
+      effectiveTaskPhaseForInput === 'generating_prd' ||
+      effectiveTaskPhaseForInput === 'generating_design_doc' ||
+      effectiveTaskPhaseForInput === 'executing' ||
+      (effectiveTaskPhaseForInput === 'interviewing' && pendingQuestion === null));
   const isPlanWorkflowBusy =
     workflowMode === 'plan' &&
     (planIsBusy ||
-      planPhase === 'analyzing' ||
-      planPhase === 'planning' ||
-      planPhase === 'executing' ||
-      (planPhase === 'clarifying' && pendingClarifyQuestion === null));
+      effectivePlanPhaseForInput === 'analyzing' ||
+      effectivePlanPhaseForInput === 'planning' ||
+      effectivePlanPhaseForInput === 'executing' ||
+      (effectivePlanPhaseForInput === 'clarifying' && pendingClarifyQuestion === null));
   const isStructuredWorkflowCancelling =
     (workflowMode === 'task' && taskWorkflowCancelling) || (workflowMode === 'plan' && planWorkflowCancelling);
   const canQueueWhileRunning =
@@ -950,13 +1001,13 @@ export function SimpleMode() {
     isStructuredWorkflowCancelling ||
     hasStructuredInterviewQuestion ||
     (workflowMode !== 'chat' && isRunning) ||
-    (workflowMode === 'task' && workflowPhase === 'interviewing' && pendingQuestion === null) ||
-    (workflowMode === 'plan' && planPhase === 'clarifying' && pendingClarifyQuestion === null);
+    (effectiveTaskPhaseForInput === 'interviewing' && pendingQuestion === null) ||
+    (effectivePlanPhaseForInput === 'clarifying' && pendingClarifyQuestion === null);
   const inputLoading =
     (inputBusy ||
       (workflowMode !== 'chat' && isRunning) ||
-      (workflowMode === 'task' && workflowPhase === 'interviewing' && pendingQuestion === null) ||
-      (workflowMode === 'plan' && planPhase === 'clarifying' && pendingClarifyQuestion === null)) &&
+      (effectiveTaskPhaseForInput === 'interviewing' && pendingQuestion === null) ||
+      (effectivePlanPhaseForInput === 'clarifying' && pendingClarifyQuestion === null)) &&
     !(workflowMode === 'chat' && isRunning);
   const hoverPanelsEnabled = autoPanelHoverEnabled && supportsPointerHover;
   const isLeftPanelOpen = !sidebarCollapsed || leftPanelHoverExpanded;
@@ -1045,6 +1096,42 @@ export function SimpleMode() {
       setRightPanelTab('output');
     }
   }, [isRightPanelOpen, rightPanelOpen, rightPanelTab]);
+
+  const clampRightPanelWidth = useCallback((value: number) => {
+    const viewportLimit =
+      typeof window === 'undefined'
+        ? MAX_RIGHT_PANEL_WIDTH
+        : Math.max(MIN_RIGHT_PANEL_WIDTH, Math.floor(window.innerWidth * 0.75));
+    return Math.max(MIN_RIGHT_PANEL_WIDTH, Math.min(Math.min(MAX_RIGHT_PANEL_WIDTH, viewportLimit), value));
+  }, []);
+
+  const handleRightPanelResizeStart = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (!isRightPanelOpen) return;
+      rightPanelResizeRef.current = {
+        startX: event.clientX,
+        startWidth: rightPanelWidth,
+      };
+
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        const current = rightPanelResizeRef.current;
+        if (!current) return;
+        const delta = current.startX - moveEvent.clientX;
+        setRightPanelWidth(clampRightPanelWidth(current.startWidth + delta));
+      };
+
+      const handleMouseUp = () => {
+        rightPanelResizeRef.current = null;
+        window.removeEventListener('mousemove', handleMouseMove);
+        window.removeEventListener('mouseup', handleMouseUp);
+      };
+
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+      event.preventDefault();
+    },
+    [clampRightPanelWidth, isRightPanelOpen, rightPanelWidth],
+  );
 
   useEffect(() => {
     if (workflowMode !== 'chat' || queuedChatMessages.length === 0) return;
@@ -1330,7 +1417,7 @@ export function SimpleMode() {
                   )}
 
                   {/* Question generation/loading hints */}
-                  {workflowMode === 'task' && workflowPhase === 'interviewing' && !pendingQuestion && (
+                  {taskInterviewingPhase && !pendingQuestion && (
                     <div className="px-3 py-2 flex items-center gap-2 text-sm text-violet-600 dark:text-violet-400">
                       <svg
                         className="animate-spin h-4 w-4"
@@ -1348,7 +1435,7 @@ export function SimpleMode() {
                       <span>{t('workflow.interview.generating', { defaultValue: 'Generating next question...' })}</span>
                     </div>
                   )}
-                  {workflowMode === 'plan' && planPhase === 'clarifying' && !pendingClarifyQuestion && (
+                  {planClarifyingPhase && !pendingClarifyQuestion && (
                     <div className="px-3 py-2 flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
                       <svg
                         className="animate-spin h-4 w-4"
@@ -1394,7 +1481,7 @@ export function SimpleMode() {
                               ? t('workflow.input.interviewPlaceholder', {
                                   defaultValue: 'Type your answer to the interview question...',
                                 })
-                              : workflowMode === 'plan' && planPhase === 'clarifying' && pendingClarifyQuestion
+                              : planClarifyingPhase && pendingClarifyQuestion
                                 ? t('planMode:clarify.inputPlaceholder', { defaultValue: 'Type your clarification...' })
                                 : workflowMode === 'task'
                                   ? t('workflow.input.taskPlaceholder', {
@@ -1470,13 +1557,21 @@ export function SimpleMode() {
           {/* Right panel: Output + Git tabs */}
           <div
             className={clsx(
-              'shrink-0 transition-all duration-200 ease-out overflow-hidden',
-              isRightPanelOpen ? 'w-[620px] opacity-100 ml-3' : 'w-0 opacity-0',
+              'relative shrink-0 transition-[width,opacity,margin] duration-200 ease-out overflow-hidden',
+              isRightPanelOpen ? 'opacity-100 ml-3' : 'opacity-0 ml-0',
             )}
+            style={{ width: isRightPanelOpen ? rightPanelWidth : 0 }}
             onMouseEnter={openRightHoverPanel}
             onMouseLeave={scheduleCloseRightHoverPanel}
           >
-            <div className="w-[620px] h-full">
+            {isRightPanelOpen && (
+              <div
+                className="absolute left-0 top-0 z-20 h-full w-1.5 cursor-col-resize bg-transparent hover:bg-primary-200/70 dark:hover:bg-primary-700/50 transition-colors"
+                onMouseDown={handleRightPanelResizeStart}
+                title={t('rightPanel.resize', { defaultValue: 'Resize panel' })}
+              />
+            )}
+            <div className="h-full" style={{ width: rightPanelWidth }}>
               <TabbedRightPanel
                 activeTab={rightPanelTab}
                 onTabChange={setRightPanelTab}

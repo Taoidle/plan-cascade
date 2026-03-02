@@ -32,7 +32,9 @@
   "output": {
     "passed": "passed",
     "partial": "partial",
-    "criteria": "Criteria"
+    "criteria": "Criteria",
+    "met": "met",
+    "notMet": "not met"
   },
 
   "completion": {
@@ -45,6 +47,7 @@
   },
 
   "clarify": {
+    "title": "Clarification Needed",
     "question": "Clarification Question",
     "hint": "Hint",
     "skipped": "Skipped",
@@ -66,6 +69,9 @@
     "clarificationFailed": "Clarification failed, proceeding to planning.",
     "planFailed": "Plan Generation Failed",
     "planApproved": "Plan approved! Starting execution...",
+    "cancelFailed": "Cancel Failed",
+    "cancelling": "Cancelling plan execution...",
+    "stepOutputLoadFailed": "Step Output Unavailable",
     "cancelled": "Plan mode cancelled."
   },
 

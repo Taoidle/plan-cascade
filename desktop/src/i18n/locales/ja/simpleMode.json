@@ -274,6 +274,9 @@
     "thinking": "考え中...",
     "startConversation": "右の入力ボックスで会話を始めてください。"
   },
+  "chat": {
+    "scrollToBottom": "最下部へスクロール"
+  },
 
   "permission": {
     "toolRequiresApproval": "ツールの承認が必要です：",
@@ -338,6 +341,18 @@
 
   "workflow": {
     "cancelWorkflow": "ワークフローをキャンセル",
+    "modeSwitchConfirm": "実行がまだ進行中です。今モードを切り替えると、アクティブなワークフローコンテキストが変わる可能性があります。続行しますか？",
+    "modeSwitchFailed": "ワークフローモードの切り替えに失敗しました。再試行してください。",
+    "clearQueuedMessages": "チャットモードを離れたため、キューメッセージをクリアしました。",
+    "queueLimitReached": "キューが上限です（最大3件）。",
+    "queueAttachmentsNotSupported": "新しい添付ファイル付きのキューメッセージはまだサポートされていません。",
+    "queue": {
+      "title": "キューメッセージ ({{count}}/{{max}})",
+      "recovered": "{{count}} 件のキューメッセージを復元しました。",
+      "placeholder": "実行中です。メッセージはキューに入ります...",
+      "remove": "キューメッセージを削除",
+      "removeShort": "削除"
+    },
 
     "strategy": {
       "title": "戦略分析",
@@ -656,10 +671,14 @@
       "prdApproved": "PRDが承認されました！実行を開始...",
       "prdFeedbackNoted": "PRDフィードバックを記録しました：「{{feedback}}」。PRDカードの編集ボタンで変更してください。",
       "workflowCancelled": "ワークフローがキャンセルされました。",
+      "cancelFailed": "キャンセルに失敗しました",
+      "cancelRetry": "キャンセルを再試行してください。",
+      "cancelling": "ワークフローをキャンセル中...",
       "configUpdated": "設定が更新されました：{{details}}",
       "enhancingAnalysis": "AIで分析を強化中...",
       "exploringProject": "プロジェクト構造とコードベースを探索中...",
       "explorationFailed": "プロジェクト探索に失敗しました（非ブロッキング）、続行します...",
+      "interviewQuestionUnavailable": "インタビュー質問を取得できないため、要件分析に進みます。",
       "analyzingRequirements": "プロダクトマネージャーが要件を分析中...",
       "requirementAnalysisFailed": "要件分析を完了できませんでした。続行します...",
       "reviewingArchitecture": "ソフトウェアアーキテクトがアーキテクチャをレビュー中...",
@@ -824,6 +843,7 @@
     "outputTab": "出力",
     "gitTab": "Git",
     "contextTab": "コンテキスト",
+    "resize": "パネル幅を調整",
     "contextOps": {
       "tabs": {
         "inspector": "インスペクター",

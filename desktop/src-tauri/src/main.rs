@@ -66,6 +66,7 @@ fn main() {
             plan_cascade_desktop::commands::settings::update_settings,
             plan_cascade_desktop::commands::settings::set_knowledge_feature_flags,
             plan_cascade_desktop::commands::settings::reset_all_settings,
+            plan_cascade_desktop::commands::settings::clear_all_data,
             plan_cascade_desktop::commands::settings::export_all_settings,
             plan_cascade_desktop::commands::settings::import_all_settings,
             // Project commands
@@ -250,6 +251,7 @@ fn main() {
             plan_cascade_desktop::commands::workflow::workflow_append_context_items,
             plan_cascade_desktop::commands::workflow::workflow_get_session_state,
             plan_cascade_desktop::commands::workflow::workflow_recover_session,
+            plan_cascade_desktop::commands::workflow::workflow_link_mode_session,
             // Spec Interview commands
             plan_cascade_desktop::commands::spec_interview::start_spec_interview,
             plan_cascade_desktop::commands::spec_interview::submit_interview_answer,
