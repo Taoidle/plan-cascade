@@ -80,7 +80,7 @@ export function CodebaseDetail({ projectPath, liveStatus, onBack }: CodebaseDeta
       <div className="flex-1 overflow-y-auto">
         {detailLoading ? (
           <div className="p-8 text-center">
-            <div className="animate-pulse text-sm text-gray-500">Loading...</div>
+            <div className="animate-pulse text-sm text-gray-500">{t('loading')}</div>
           </div>
         ) : activeTab === 'overview' ? (
           <OverviewTab
@@ -94,7 +94,7 @@ export function CodebaseDetail({ projectPath, liveStatus, onBack }: CodebaseDeta
               try {
                 const result = await classifyComponents(projectPath);
                 if (!result.success) {
-                  setError(result.error ?? 'Component classification failed');
+                  setError(result.error ?? t('classifyFailed'));
                   return;
                 }
                 await loadProjectDetail(projectPath);

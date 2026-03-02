@@ -754,7 +754,10 @@ mod tests {
             model: "qwen3.5-plus".to_string(),
             ..test_config()
         };
-        assert_eq!(QwenProvider::new(config_35_plus).context_window(), 1_000_000);
+        assert_eq!(
+            QwenProvider::new(config_35_plus).context_window(),
+            1_000_000
+        );
     }
 
     #[test]

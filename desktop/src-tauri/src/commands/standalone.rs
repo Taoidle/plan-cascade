@@ -1413,6 +1413,9 @@ pub async fn execute_standalone(
         if let Some(emb_mgr) = manager.get_embedding_manager(&project_path).await {
             orchestrator = orchestrator.with_embedding_manager(emb_mgr);
         }
+        if let Some(hnsw) = manager.get_hnsw_index(&project_path).await {
+            orchestrator = orchestrator.with_hnsw_index(hnsw);
+        }
     }
 
     // Set LLM provider on IndexManager for component classification (Phase 1a).
@@ -2007,7 +2010,11 @@ pub async fn cancel_standalone_execution(
         let timeout = Duration::from_secs(3);
         let deadline = Instant::now() + timeout;
         while Instant::now() < deadline {
-            if standalone_state.get_orchestrator(&session_id).await.is_none() {
+            if standalone_state
+                .get_orchestrator(&session_id)
+                .await
+                .is_none()
+            {
                 return Ok(CommandResponse::ok(true));
             }
             tokio::time::sleep(Duration::from_millis(50)).await;

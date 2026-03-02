@@ -703,6 +703,12 @@ impl OrchestratorService {
         self
     }
 
+    /// Wire a prebuilt HNSW index to the tool executor for fast ANN semantic search.
+    pub fn with_hnsw_index(mut self, idx: Arc<HnswIndex>) -> Self {
+        self.tool_executor.set_hnsw_index(idx);
+        self
+    }
+
     /// Set lifecycle hooks for cross-cutting concerns (memory, skills, etc.).
     pub fn with_hooks(mut self, hooks: crate::services::orchestrator::hooks::AgenticHooks) -> Self {
         self.hooks = hooks;
@@ -1606,7 +1612,7 @@ impl OrchestratorService {
     }
 
     /// Execute a single story (internal method)
-    async fn execute_story(
+    pub(crate) async fn execute_story(
         &self,
         prompt: &str,
         tools: &[ToolDefinition],

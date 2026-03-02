@@ -109,7 +109,7 @@ export function CodebaseFileList({ projectPath }: CodebaseFileListProps) {
       <div className="flex-1 overflow-auto">
         {filesLoading ? (
           <div className="p-8 text-center">
-            <div className="animate-pulse text-sm text-gray-500">Loading...</div>
+            <div className="animate-pulse text-sm text-gray-500">{t('loading')}</div>
           </div>
         ) : files.length === 0 ? (
           <div className="p-8 text-center text-sm text-gray-500 dark:text-gray-400">{t('noResults')}</div>
@@ -119,8 +119,8 @@ export function CodebaseFileList({ projectPath }: CodebaseFileListProps) {
               <tr className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
                 <th className="px-4 py-2">{t('files')}</th>
                 <th className="px-3 py-2">{t('languages')}</th>
-                <th className="px-3 py-2 text-right">Size</th>
-                <th className="px-3 py-2 text-right">Lines</th>
+                <th className="px-3 py-2 text-right">{t('size')}</th>
+                <th className="px-3 py-2 text-right">{t('lines')}</th>
                 <th className="px-3 py-2">{t('components')}</th>
               </tr>
             </thead>
@@ -132,7 +132,7 @@ export function CodebaseFileList({ projectPath }: CodebaseFileListProps) {
                   onClick={async () => {
                     const result = await openCodebaseFileInEditor(projectPath, file.file_path, 1, 1);
                     if (!result.success) {
-                      setError(result.error ?? 'Failed to open file');
+                      setError(result.error ?? t('openFailed'));
                     }
                   }}
                 >

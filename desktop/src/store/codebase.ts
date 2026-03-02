@@ -7,16 +7,19 @@
 
 import { create } from 'zustand';
 import type {
-  IndexedProjectEntry,
+  IndexedProjectStatusEntry,
   CodebaseProjectDetail,
   FileIndexRow,
   SearchHit,
   CodeSearchMode,
   ContextItem,
+  IndexStatusEvent,
+  CodebaseContextAppendResult,
 } from '../lib/codebaseApi';
 import {
   addCodebaseContext,
   listCodebaseProjects,
+  listCodebaseProjectsV2,
   getCodebaseDetail,
   listCodebaseFiles,
   deleteCodebaseProject,
@@ -24,28 +27,57 @@ import {
   triggerReindex,
   getIndexStatus,
 } from '../lib/codebaseApi';
+import { useWorkflowKernelStore } from './workflowKernel';
+import type { WorkflowMode } from '../types/workflowKernel';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 const PAGE_SIZE = 50;
+const DEFAULT_SCOPE_STATUS = 'idle';
+
+interface ProjectRequestVersion {
+  detail: number;
+  files: number;
+  search: number;
+}
+
+interface ProjectScopedCodebaseState {
+  detail: CodebaseProjectDetail | null;
+  files: FileIndexRow[];
+  filesTotalCount: number;
+  searchResults: SearchHit[];
+  status: IndexStatusEvent;
+  requestVersion: ProjectRequestVersion;
+}
+
+export interface ContextPushSummary {
+  appendedCount: number;
+  contextRefIds: string[];
+  sessionId: string;
+  targetMode: 'chat' | 'plan' | 'task';
+}
 
 export interface CodebaseState {
   // Data
-  projects: IndexedProjectEntry[];
+  projects: IndexedProjectStatusEntry[];
+  byProjectPath: Record<string, ProjectScopedCodebaseState>;
   selectedProjectPath: string | null;
   projectDetail: CodebaseProjectDetail | null;
   files: FileIndexRow[];
   filesTotalCount: number;
   searchResults: SearchHit[];
   contextItems: ContextItem[];
+  lastContextPush: ContextPushSummary | null;
+  requestVersion: number;
 
   // UI state
   loading: boolean;
   detailLoading: boolean;
   filesLoading: boolean;
   searchLoading: boolean;
+  contextPushLoading: boolean;
   error: string | null;
 
   // Filters
@@ -67,10 +99,56 @@ export interface CodebaseState {
   addContextItem: (item: ContextItem) => void;
   removeContextItem: (index: number) => void;
   clearContextItems: () => void;
-  pushContextToMode: (targetMode: 'simple' | 'expert' | 'task' | 'plan' | 'chat') => Promise<void>;
+  pushContextToMode: (targetMode: 'chat' | 'plan' | 'task') => Promise<void>;
   setError: (message: string | null) => void;
   clearSearch: () => void;
   clearError: () => void;
+}
+
+function makeFallbackStatus(projectPath: string, fileCount: number): IndexStatusEvent {
+  const derivedStatus: IndexStatusEvent['status'] = fileCount > 0 ? 'indexed' : DEFAULT_SCOPE_STATUS;
+  return {
+    project_path: projectPath,
+    status: derivedStatus,
+    indexed_files: fileCount,
+    total_files: fileCount,
+    error_message: null,
+    total_symbols: 0,
+    embedding_chunks: 0,
+    embedding_provider_name: null,
+    lsp_enrichment: 'none',
+    phase: 'done',
+    job_id: null,
+    updated_at: null,
+  };
+}
+
+function createProjectScope(projectPath: string, status?: IndexStatusEvent): ProjectScopedCodebaseState {
+  return {
+    detail: null,
+    files: [],
+    filesTotalCount: 0,
+    searchResults: [],
+    status: status ?? makeFallbackStatus(projectPath, 0),
+    requestVersion: {
+      detail: 0,
+      files: 0,
+      search: 0,
+    },
+  };
+}
+
+function pickScope(state: CodebaseState, path: string): ProjectScopedCodebaseState {
+  return state.byProjectPath[path] ?? createProjectScope(path);
+}
+
+function toContextPushSummary(result: CodebaseContextAppendResult): ContextPushSummary {
+  return {
+    appendedCount: result.appended_count,
+    contextRefIds: result.context_ref_ids,
+    sessionId: result.session_id,
+    targetMode: result.target_mode as 'chat' | 'plan' | 'task',
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -79,17 +157,21 @@ export interface CodebaseState {
 
 export const useCodebaseStore = create<CodebaseState>()((set, get) => ({
   projects: [],
+  byProjectPath: {},
   selectedProjectPath: null,
   projectDetail: null,
   files: [],
   filesTotalCount: 0,
   searchResults: [],
   contextItems: [],
+  lastContextPush: null,
+  requestVersion: 0,
 
   loading: false,
   detailLoading: false,
   filesLoading: false,
   searchLoading: false,
+  contextPushLoading: false,
   error: null,
 
   filesPage: 0,
@@ -98,21 +180,69 @@ export const useCodebaseStore = create<CodebaseState>()((set, get) => ({
 
   loadProjects: async () => {
     set({ loading: true, error: null });
-    const res = await listCodebaseProjects();
-    if (res.success && res.data) {
-      set({ projects: res.data, loading: false });
-    } else {
-      set({ loading: false, error: res.error ?? 'Failed to load projects' });
+    const v2 = await listCodebaseProjectsV2();
+    if (v2.success && v2.data) {
+      const projectsV2 = v2.data;
+      set((state) => {
+        const nextByProjectPath = { ...state.byProjectPath };
+        for (const project of projectsV2) {
+          const current =
+            nextByProjectPath[project.project_path] ?? createProjectScope(project.project_path, project.status);
+          nextByProjectPath[project.project_path] = {
+            ...current,
+            status: project.status,
+            detail: current.detail ? { ...current.detail, status: project.status } : current.detail,
+          };
+        }
+        return {
+          projects: projectsV2,
+          byProjectPath: nextByProjectPath,
+          loading: false,
+        };
+      });
+      return;
     }
+
+    const legacy = await listCodebaseProjects();
+    if (legacy.success && legacy.data) {
+      const mappedProjects: IndexedProjectStatusEntry[] = legacy.data.map((project) => ({
+        ...project,
+        status: makeFallbackStatus(project.project_path, project.file_count),
+      }));
+      set((state) => {
+        const nextByProjectPath = { ...state.byProjectPath };
+        for (const project of mappedProjects) {
+          const current =
+            nextByProjectPath[project.project_path] ?? createProjectScope(project.project_path, project.status);
+          nextByProjectPath[project.project_path] = {
+            ...current,
+            status: project.status,
+            detail: current.detail ? { ...current.detail, status: project.status } : current.detail,
+          };
+        }
+        return {
+          projects: mappedProjects,
+          byProjectPath: nextByProjectPath,
+          loading: false,
+        };
+      });
+      return;
+    }
+
+    set({
+      loading: false,
+      error: v2.error ?? legacy.error ?? 'Failed to load projects',
+    });
   },
 
   selectProject: (path) => {
+    const scope = path ? pickScope(get(), path) : null;
     set({
       selectedProjectPath: path,
-      projectDetail: null,
-      files: [],
-      filesTotalCount: 0,
-      searchResults: [],
+      projectDetail: scope?.detail ?? null,
+      files: scope?.files ?? [],
+      filesTotalCount: scope?.filesTotalCount ?? 0,
+      searchResults: scope?.searchResults ?? [],
       filesPage: 0,
       filesLanguageFilter: null,
       filesSearchPattern: '',
@@ -124,10 +254,50 @@ export const useCodebaseStore = create<CodebaseState>()((set, get) => ({
   },
 
   loadProjectDetail: async (path) => {
-    set({ detailLoading: true });
+    const requestVersion = get().requestVersion + 1;
+    set((state) => {
+      const scope = pickScope(state, path);
+      return {
+        requestVersion,
+        detailLoading: true,
+        byProjectPath: {
+          ...state.byProjectPath,
+          [path]: {
+            ...scope,
+            requestVersion: {
+              ...scope.requestVersion,
+              detail: requestVersion,
+            },
+          },
+        },
+      };
+    });
+
     const res = await getCodebaseDetail(path);
+    if ((get().byProjectPath[path]?.requestVersion.detail ?? -1) !== requestVersion) {
+      return;
+    }
+
     if (res.success && res.data) {
-      set({ projectDetail: res.data, detailLoading: false });
+      const detailData = res.data;
+      set((state) => {
+        const scope = pickScope(state, path);
+        const nextScope: ProjectScopedCodebaseState = {
+          ...scope,
+          detail: detailData,
+          status: detailData.status,
+        };
+
+        const shouldProjectDetail = state.selectedProjectPath === path;
+        return {
+          byProjectPath: {
+            ...state.byProjectPath,
+            [path]: nextScope,
+          },
+          projectDetail: shouldProjectDetail ? detailData : state.projectDetail,
+          detailLoading: false,
+        };
+      });
     } else {
       set({ detailLoading: false, error: res.error ?? 'Failed to load detail' });
     }
@@ -135,18 +305,54 @@ export const useCodebaseStore = create<CodebaseState>()((set, get) => ({
 
   loadFiles: async (path) => {
     const { filesPage, filesLanguageFilter, filesSearchPattern } = get();
-    set({ filesLoading: true });
+    const requestVersion = get().requestVersion + 1;
+    set((state) => {
+      const scope = pickScope(state, path);
+      return {
+        requestVersion,
+        filesLoading: true,
+        byProjectPath: {
+          ...state.byProjectPath,
+          [path]: {
+            ...scope,
+            requestVersion: {
+              ...scope.requestVersion,
+              files: requestVersion,
+            },
+          },
+        },
+      };
+    });
+
     const res = await listCodebaseFiles(path, {
       languageFilter: filesLanguageFilter,
       searchPattern: filesSearchPattern || null,
       offset: filesPage * PAGE_SIZE,
       limit: PAGE_SIZE,
     });
+    if ((get().byProjectPath[path]?.requestVersion.files ?? -1) !== requestVersion) {
+      return;
+    }
+
     if (res.success && res.data) {
-      set({
-        files: res.data.files,
-        filesTotalCount: res.data.total,
-        filesLoading: false,
+      const filesData = res.data;
+      set((state) => {
+        const scope = pickScope(state, path);
+        const nextScope: ProjectScopedCodebaseState = {
+          ...scope,
+          files: filesData.files,
+          filesTotalCount: filesData.total,
+        };
+        const isSelected = state.selectedProjectPath === path;
+        return {
+          byProjectPath: {
+            ...state.byProjectPath,
+            [path]: nextScope,
+          },
+          files: isSelected ? filesData.files : state.files,
+          filesTotalCount: isSelected ? filesData.total : state.filesTotalCount,
+          filesLoading: false,
+        };
       });
     } else {
       set({ filesLoading: false, error: res.error ?? 'Failed to load files' });
@@ -159,6 +365,9 @@ export const useCodebaseStore = create<CodebaseState>()((set, get) => ({
       const { selectedProjectPath } = get();
       set((state) => ({
         projects: state.projects.filter((p) => p.project_path !== path),
+        byProjectPath: Object.fromEntries(
+          Object.entries(state.byProjectPath).filter(([projectPath]) => projectPath !== path),
+        ),
         ...(selectedProjectPath === path
           ? {
               selectedProjectPath: null,
@@ -188,6 +397,19 @@ export const useCodebaseStore = create<CodebaseState>()((set, get) => ({
       if (status.success && status.data) {
         const s = status.data.status;
         if (s !== 'idle') {
+          set((state) => {
+            const scope = pickScope(state, path);
+            return {
+              byProjectPath: {
+                ...state.byProjectPath,
+                [path]: {
+                  ...scope,
+                  status: status.data as IndexStatusEvent,
+                },
+              },
+            };
+          });
+          await get().loadProjects();
           await get().loadProjectDetail(path);
           return;
         }
@@ -200,7 +422,27 @@ export const useCodebaseStore = create<CodebaseState>()((set, get) => ({
   },
 
   searchProject: async (path, query, topK, modes) => {
-    set({ searchLoading: true, searchResults: [] });
+    const requestVersion = get().requestVersion + 1;
+    set((state) => {
+      const scope = pickScope(state, path);
+      return {
+        requestVersion,
+        searchLoading: true,
+        searchResults: state.selectedProjectPath === path ? [] : state.searchResults,
+        byProjectPath: {
+          ...state.byProjectPath,
+          [path]: {
+            ...scope,
+            searchResults: [],
+            requestVersion: {
+              ...scope.requestVersion,
+              search: requestVersion,
+            },
+          },
+        },
+      };
+    });
+
     const v2 = await searchCodebase({
       project_path: path,
       query,
@@ -208,8 +450,28 @@ export const useCodebaseStore = create<CodebaseState>()((set, get) => ({
       limit: topK ?? 20,
       include_snippet: true,
     });
+    if ((get().byProjectPath[path]?.requestVersion.search ?? -1) !== requestVersion) {
+      return;
+    }
+
     if (v2.success && v2.data) {
-      set({ searchResults: v2.data.hits, searchLoading: false });
+      const searchData = v2.data;
+      set((state) => {
+        const scope = pickScope(state, path);
+        const nextScope: ProjectScopedCodebaseState = {
+          ...scope,
+          searchResults: searchData.hits,
+        };
+        const isSelected = state.selectedProjectPath === path;
+        return {
+          byProjectPath: {
+            ...state.byProjectPath,
+            [path]: nextScope,
+          },
+          searchResults: isSelected ? searchData.hits : state.searchResults,
+          searchLoading: false,
+        };
+      });
       return;
     }
     set({
@@ -267,12 +529,40 @@ export const useCodebaseStore = create<CodebaseState>()((set, get) => ({
     if (contextItems.length === 0) {
       return;
     }
-    const res = await addCodebaseContext(targetMode, contextItems);
+    set({ contextPushLoading: true, error: null });
+
+    const workflowState = useWorkflowKernelStore.getState();
+    let sessionId = workflowState.sessionId;
+
+    if (!sessionId || workflowState.activeMode !== targetMode) {
+      const transitioned = await workflowState.transitionMode(targetMode as WorkflowMode);
+      if (!transitioned?.sessionId) {
+        const latestWorkflowState = useWorkflowKernelStore.getState();
+        set({
+          contextPushLoading: false,
+          error: latestWorkflowState.error ?? 'Failed to open workflow session',
+        });
+        return;
+      }
+      sessionId = transitioned.sessionId;
+    }
+
+    const payloadItems = contextItems.map((item) => ({
+      ...item,
+      source: item.source ?? 'codebase',
+      session_id: sessionId,
+      target_mode: targetMode,
+    }));
+    const res = await addCodebaseContext(targetMode, payloadItems, sessionId);
     if (!res.success) {
-      set({ error: res.error ?? 'Failed to add context' });
+      set({ contextPushLoading: false, error: res.error ?? 'Failed to add context' });
       return;
     }
-    set({ contextItems: [] });
+    set({
+      contextItems: [],
+      contextPushLoading: false,
+      lastContextPush: res.data ? toContextPushSummary(res.data) : null,
+    });
   },
 
   setError: (message) => {
@@ -280,7 +570,23 @@ export const useCodebaseStore = create<CodebaseState>()((set, get) => ({
   },
 
   clearSearch: () => {
-    set({ searchResults: [] });
+    set((state) => {
+      const selected = state.selectedProjectPath;
+      if (!selected) {
+        return { searchResults: [] };
+      }
+      const scope = pickScope(state, selected);
+      return {
+        searchResults: [],
+        byProjectPath: {
+          ...state.byProjectPath,
+          [selected]: {
+            ...scope,
+            searchResults: [],
+          },
+        },
+      };
+    });
   },
 
   clearError: () => {

@@ -4,17 +4,17 @@
 //! workspace codebase indexes from the frontend Codebase panel.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::{Emitter, State};
 
 use crate::models::response::CommandResponse;
-use crate::services::orchestrator::hybrid_search::{HybridSearchEngine, SearchChannel};
+use crate::services::orchestrator::codebase_search_service::CodebaseSearchService;
 use crate::services::orchestrator::index_manager::IndexStatusEvent;
 use crate::services::orchestrator::index_store::{
     EmbeddingMetadata, FileIndexRow, IndexedProjectEntry, LanguageBreakdown, ProjectIndexSummary,
 };
+use crate::services::workflow_kernel::{HandoffContextBundle, WorkflowKernelState, WorkflowMode};
 
 use super::standalone::StandaloneState;
 
@@ -28,6 +28,15 @@ pub struct CodebaseProjectDetail {
     pub status: IndexStatusEvent,
 }
 
+/// Indexed project list entry with live status snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexedProjectStatusEntry {
+    pub project_path: String,
+    pub file_count: usize,
+    pub last_indexed_at: Option<String>,
+    pub status: IndexStatusEvent,
+}
+
 /// Paginated file listing result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CodebaseFileListResult {
@@ -35,54 +44,10 @@ pub struct CodebaseFileListResult {
     pub total: usize,
 }
 
-/// Request for codebase search v2.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct CodebaseSearchV2Request {
-    pub project_path: String,
-    pub query: String,
-    #[serde(default)]
-    pub modes: Vec<String>,
-    pub limit: Option<usize>,
-    pub offset: Option<usize>,
-    pub include_snippet: Option<bool>,
-    pub filters: Option<CodebaseSearchFilters>,
-}
-
-/// Optional filters for codebase search v2.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct CodebaseSearchFilters {
-    pub component: Option<String>,
-    pub language: Option<String>,
-    pub file_path_prefix: Option<String>,
-}
-
-/// Single channel score contribution for a search hit.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SearchChannelScore {
-    pub channel: String,
-    pub rank: usize,
-    pub score: f64,
-}
-
-/// Search hit for codebase search v2.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SearchHit {
-    pub file_path: String,
-    pub symbol_name: Option<String>,
-    pub snippet: Option<String>,
-    pub similarity: Option<f32>,
-    pub score: f64,
-    pub score_breakdown: Vec<SearchChannelScore>,
-}
-
-/// Response payload for codebase search v2.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CodeSearchResponse {
-    pub hits: Vec<SearchHit>,
-    pub total: usize,
-    pub semantic_degraded: bool,
-    pub semantic_error: Option<String>,
-}
+pub use crate::services::orchestrator::codebase_search_service::{
+    CodeSearchDiagnostics, CodeSearchResponse, CodebaseSearchFilters,
+    CodebaseSearchRequest as CodebaseSearchV2Request, SearchChannelScore, SearchHit,
+};
 
 /// File excerpt response for preview panel integration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,6 +77,14 @@ pub struct ContextItem {
 struct CodebaseContextAddedEvent {
     pub target_mode: String,
     pub items: Vec<ContextItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodebaseContextAppendResult {
+    pub appended_count: usize,
+    pub context_ref_ids: Vec<String>,
+    pub session_id: String,
+    pub target_mode: String,
 }
 
 fn resolve_project_file_path(project_path: &str, file_path: &str) -> Result<PathBuf, String> {
@@ -190,63 +163,55 @@ fn open_file_in_editor(
     Err("Unsupported platform for opening files".to_string())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum RequestedSearchMode {
-    Hybrid,
-    Symbol,
-    Path,
-    Semantic,
+fn parse_workflow_mode(value: &str) -> Result<WorkflowMode, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "chat" => Ok(WorkflowMode::Chat),
+        "plan" => Ok(WorkflowMode::Plan),
+        "task" => Ok(WorkflowMode::Task),
+        _ => Err("mode_mismatch: target_mode must be one of: chat, plan, task".to_string()),
+    }
 }
 
-impl RequestedSearchMode {
-    fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "hybrid" => Some(Self::Hybrid),
-            "symbol" => Some(Self::Symbol),
-            "path" => Some(Self::Path),
-            "semantic" => Some(Self::Semantic),
-            _ => None,
+fn validate_context_items(items: &[ContextItem]) -> Result<(), String> {
+    let first_project = items
+        .first()
+        .map(|item| item.project_path.as_str())
+        .unwrap_or_default();
+
+    for (idx, item) in items.iter().enumerate() {
+        if item.project_path.trim().is_empty() {
+            return Err(format!(
+                "context_validation_failed: items[{idx}].project_path is empty"
+            ));
+        }
+        if item.file_path.trim().is_empty() {
+            return Err(format!(
+                "context_validation_failed: items[{idx}].file_path is empty"
+            ));
+        }
+        if let Some(line_start) = item.line_start {
+            if line_start == 0 {
+                return Err(format!(
+                    "context_validation_failed: items[{idx}].line_start must be >= 1"
+                ));
+            }
+            if let Some(line_end) = item.line_end {
+                if line_end < line_start {
+                    return Err(format!(
+                        "context_validation_failed: items[{idx}] line_end must be >= line_start"
+                    ));
+                }
+            }
+        }
+        if item.project_path != first_project {
+            return Err(
+                "context_validation_failed: mixed project_path values are not supported"
+                    .to_string(),
+            );
         }
     }
-}
 
-fn parse_requested_modes(raw_modes: &[String]) -> Result<HashSet<RequestedSearchMode>, String> {
-    if raw_modes.is_empty() {
-        let mut defaults = HashSet::new();
-        defaults.insert(RequestedSearchMode::Hybrid);
-        return Ok(defaults);
-    }
-
-    let mut parsed = HashSet::new();
-    for raw in raw_modes {
-        let mode_str = raw.trim();
-        let mode = RequestedSearchMode::parse(mode_str).ok_or_else(|| {
-            format!(
-                "Invalid mode '{}'. Use one of: hybrid, symbol, path, semantic.",
-                if mode_str.is_empty() {
-                    "<empty>"
-                } else {
-                    mode_str
-                }
-            )
-        })?;
-        parsed.insert(mode);
-    }
-    Ok(parsed)
-}
-
-fn channel_matches_modes(
-    channel: SearchChannel,
-    requested_modes: &HashSet<RequestedSearchMode>,
-) -> bool {
-    if requested_modes.contains(&RequestedSearchMode::Hybrid) {
-        return true;
-    }
-    match channel {
-        SearchChannel::Symbol => requested_modes.contains(&RequestedSearchMode::Symbol),
-        SearchChannel::FilePath => requested_modes.contains(&RequestedSearchMode::Path),
-        SearchChannel::Semantic => requested_modes.contains(&RequestedSearchMode::Semantic),
-    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +236,41 @@ pub async fn codebase_list_projects(
             e
         ))),
     }
+}
+
+/// List all indexed projects with status snapshots.
+#[tauri::command]
+pub async fn codebase_list_projects_v2(
+    standalone_state: State<'_, StandaloneState>,
+) -> Result<CommandResponse<Vec<IndexedProjectStatusEntry>>, String> {
+    let mgr_lock = standalone_state.index_manager.read().await;
+    let mgr = match &*mgr_lock {
+        Some(mgr) => mgr,
+        None => return Ok(CommandResponse::ok(vec![])),
+    };
+
+    let projects = match mgr.index_store().list_indexed_projects() {
+        Ok(projects) => projects,
+        Err(e) => {
+            return Ok(CommandResponse::err(format!(
+                "Failed to list indexed projects: {}",
+                e
+            )))
+        }
+    };
+
+    let mut entries = Vec::with_capacity(projects.len());
+    for project in projects {
+        let status = mgr.get_status(&project.project_path).await;
+        entries.push(IndexedProjectStatusEntry {
+            project_path: project.project_path,
+            file_count: project.file_count,
+            last_indexed_at: project.last_indexed_at,
+            status,
+        });
+    }
+
+    Ok(CommandResponse::ok(entries))
 }
 
 /// Get detailed information about a specific project's codebase index.
@@ -396,139 +396,22 @@ pub async fn codebase_search_v2(
     request: CodebaseSearchV2Request,
     standalone_state: State<'_, StandaloneState>,
 ) -> Result<CommandResponse<CodeSearchResponse>, String> {
-    if request.project_path.trim().is_empty() {
-        return Ok(CommandResponse::err("project_path is empty"));
-    }
-    if request.query.trim().is_empty() {
-        return Ok(CommandResponse::err("query is empty"));
-    }
-
     let mgr_lock = standalone_state.index_manager.read().await;
     let mgr = match &*mgr_lock {
         Some(mgr) => mgr,
         None => return Ok(CommandResponse::err("IndexManager not initialized")),
     };
 
-    let index_store = mgr.index_store();
-    let mut engine = HybridSearchEngine::with_defaults(
+    let project_path = request.project_path.clone();
+    let search_service = CodebaseSearchService::new(
         mgr.index_store_arc(),
-        mgr.get_embedding_manager(&request.project_path).await,
+        mgr.get_embedding_manager(&project_path).await,
+        mgr.get_hnsw_index(&project_path).await,
     );
-    if let Some(hnsw) = mgr.get_hnsw_index(&request.project_path).await {
-        engine.set_hnsw_index(hnsw);
+    match search_service.search(request).await {
+        Ok(response) => Ok(CommandResponse::ok(response)),
+        Err(error) => Ok(CommandResponse::err(error)),
     }
-
-    let outcome = match engine.search(&request.query, &request.project_path).await {
-        Ok(v) => v,
-        Err(e) => return Ok(CommandResponse::err(format!("Search failed: {}", e))),
-    };
-
-    let parsed_modes = match parse_requested_modes(&request.modes) {
-        Ok(modes) => modes,
-        Err(e) => return Ok(CommandResponse::err(e)),
-    };
-    let include_snippet = request.include_snippet.unwrap_or(true);
-    let filters = request.filters.unwrap_or_default();
-    let component_filter = filters
-        .component
-        .as_ref()
-        .map(|v| v.trim())
-        .filter(|v| !v.is_empty());
-    let path_prefix_filter = filters
-        .file_path_prefix
-        .as_ref()
-        .map(|v| v.trim())
-        .filter(|v| !v.is_empty());
-
-    let allowed_language_paths: Option<HashSet<String>> = if let Some(lang) = filters
-        .language
-        .as_ref()
-        .map(|v| v.trim())
-        .filter(|v| !v.is_empty())
-    {
-        match index_store.list_project_files(&request.project_path, Some(lang), None, 0, 100_000) {
-            Ok((files, _)) => Some(files.into_iter().map(|f| f.file_path).collect()),
-            Err(_) => Some(HashSet::new()),
-        }
-    } else {
-        None
-    };
-    let allowed_component_paths: Option<HashSet<String>> = if let Some(component) = component_filter
-    {
-        match index_store.query_files_by_component(&request.project_path, component) {
-            Ok(files) => Some(files.into_iter().map(|f| f.file_path).collect()),
-            Err(_) => Some(HashSet::new()),
-        }
-    } else {
-        None
-    };
-
-    let mut hits: Vec<SearchHit> = outcome
-        .results
-        .into_iter()
-        .filter(|result| {
-            // Keep hits when any contributing channel is requested.
-            if !result
-                .provenance
-                .iter()
-                .any(|p| channel_matches_modes(p.channel, &parsed_modes))
-            {
-                return false;
-            }
-
-            if let Some(ref allowed) = allowed_component_paths {
-                if !allowed.contains(&result.file_path) {
-                    return false;
-                }
-            }
-
-            if let Some(prefix) = path_prefix_filter {
-                if !result.file_path.starts_with(prefix) {
-                    return false;
-                }
-            }
-
-            if let Some(ref allowed) = allowed_language_paths {
-                if !allowed.contains(&result.file_path) {
-                    return false;
-                }
-            }
-
-            true
-        })
-        .map(|result| SearchHit {
-            file_path: result.file_path,
-            symbol_name: result.symbol_name,
-            snippet: if include_snippet {
-                result.chunk_text
-            } else {
-                None
-            },
-            similarity: result.semantic_similarity,
-            score: result.score,
-            score_breakdown: result
-                .provenance
-                .into_iter()
-                .map(|p| SearchChannelScore {
-                    channel: p.channel.to_string(),
-                    rank: p.rank,
-                    score: p.rrf_contribution,
-                })
-                .collect(),
-        })
-        .collect();
-
-    let total = hits.len();
-    let offset = request.offset.unwrap_or(0).min(total);
-    let limit = request.limit.unwrap_or(20).clamp(1, 100);
-    hits = hits.into_iter().skip(offset).take(limit).collect();
-
-    Ok(CommandResponse::ok(CodeSearchResponse {
-        hits,
-        total,
-        semantic_degraded: outcome.semantic_degraded,
-        semantic_error: outcome.semantic_error,
-    }))
 }
 
 /// Fetch a safe, line-bounded file excerpt under the project root.
@@ -598,14 +481,129 @@ pub async fn codebase_open_in_editor(
 pub async fn codebase_add_context(
     target_mode: String,
     items: Vec<ContextItem>,
+    session_id: Option<String>,
+    workflow_state: State<'_, WorkflowKernelState>,
     app_handle: tauri::AppHandle,
-) -> Result<CommandResponse<usize>, String> {
+) -> Result<CommandResponse<CodebaseContextAppendResult>, String> {
+    if items.is_empty() {
+        return Ok(CommandResponse::err(
+            "context_validation_failed: items cannot be empty",
+        ));
+    }
+    if let Err(err) = validate_context_items(&items) {
+        return Ok(CommandResponse::err(err));
+    }
+
+    let target_mode_parsed = match parse_workflow_mode(&target_mode) {
+        Ok(mode) => mode,
+        Err(err) => return Ok(CommandResponse::err(err)),
+    };
+
+    let resolved_session_id = match session_id.as_deref().map(str::trim) {
+        Some(existing) if !existing.is_empty() => existing.to_string(),
+        _ => match workflow_state
+            .open_session(
+                Some(target_mode_parsed),
+                Some(HandoffContextBundle::default()),
+            )
+            .await
+        {
+            Ok(session) => session.session_id,
+            Err(e) => {
+                return Ok(CommandResponse::err(format!(
+                    "session_not_found: unable to create workflow session: {}",
+                    e
+                )));
+            }
+        },
+    };
+
+    let context_ref_ids: Vec<String> = items
+        .iter()
+        .map(|item| {
+            format!(
+                "ctx:{}:{}:{}:{}",
+                uuid::Uuid::new_v4(),
+                item.project_path,
+                item.file_path,
+                item.symbol_name.clone().unwrap_or_default()
+            )
+        })
+        .collect();
+
+    let mut metadata = serde_json::Map::new();
+    metadata.insert(
+        "source".to_string(),
+        serde_json::Value::String("codebase".to_string()),
+    );
+    metadata.insert(
+        "target_mode".to_string(),
+        serde_json::Value::String(target_mode.clone()),
+    );
+    metadata.insert(
+        "items".to_string(),
+        serde_json::to_value(&items).unwrap_or(serde_json::Value::Array(vec![])),
+    );
+    metadata.insert(
+        "context_ref_ids".to_string(),
+        serde_json::to_value(&context_ref_ids).unwrap_or(serde_json::Value::Array(vec![])),
+    );
+
+    let artifact_refs: Vec<String> = items
+        .iter()
+        .map(|item| {
+            format!(
+                "{}:{}{}",
+                item.project_path,
+                item.file_path,
+                item.symbol_name
+                    .as_ref()
+                    .map(|symbol| format!("#{}", symbol))
+                    .unwrap_or_default()
+            )
+        })
+        .collect();
+
+    let mut context_sources = vec!["codebase".to_string()];
+    for project in items.iter().map(|item| item.project_path.clone()) {
+        let source = format!("codebase:{}", project);
+        if !context_sources.contains(&source) {
+            context_sources.push(source);
+        }
+    }
+
+    let handoff = HandoffContextBundle {
+        conversation_context: Vec::new(),
+        artifact_refs,
+        context_sources,
+        metadata,
+    };
+
+    if let Err(e) = workflow_state
+        .append_context_items(&resolved_session_id, target_mode_parsed, handoff)
+        .await
+    {
+        let msg = if e.contains("not found") {
+            format!("session_not_found: {}", e)
+        } else {
+            e
+        };
+        return Ok(CommandResponse::err(msg));
+    }
+
+    // Compatibility event (deprecated). Actual integration is now session-backed.
     let payload = CodebaseContextAddedEvent {
         target_mode,
         items: items.clone(),
     };
     let _ = app_handle.emit("codebase-context-added", &payload);
-    Ok(CommandResponse::ok(items.len()))
+
+    Ok(CommandResponse::ok(CodebaseContextAppendResult {
+        appended_count: items.len(),
+        context_ref_ids,
+        session_id: resolved_session_id,
+        target_mode: payload.target_mode,
+    }))
 }
 
 /// Trigger LLM-based component classification for a project.
@@ -657,37 +655,51 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_requested_modes_defaults_to_hybrid() {
-        let parsed = parse_requested_modes(&[]).expect("modes should parse");
-        assert!(parsed.contains(&RequestedSearchMode::Hybrid));
-        assert_eq!(parsed.len(), 1);
+    fn validate_context_items_rejects_mixed_project_paths() {
+        let items = vec![
+            ContextItem {
+                r#type: "search_result".to_string(),
+                project_path: "/a".to_string(),
+                file_path: "src/a.rs".to_string(),
+                symbol_name: None,
+                snippet: None,
+                line_start: Some(1),
+                line_end: Some(2),
+                score: None,
+                metadata: None,
+            },
+            ContextItem {
+                r#type: "search_result".to_string(),
+                project_path: "/b".to_string(),
+                file_path: "src/b.rs".to_string(),
+                symbol_name: None,
+                snippet: None,
+                line_start: Some(1),
+                line_end: Some(2),
+                score: None,
+                metadata: None,
+            },
+        ];
+
+        let err = validate_context_items(&items).expect_err("mixed projects must fail");
+        assert!(err.contains("mixed project_path values"));
     }
 
     #[test]
-    fn parse_requested_modes_accepts_v2_modes_only() {
-        let parsed = parse_requested_modes(&[
-            "symbol".to_string(),
-            "path".to_string(),
-            "semantic".to_string(),
-        ])
-        .expect("valid v2 modes should parse");
-        assert!(parsed.contains(&RequestedSearchMode::Symbol));
-        assert!(parsed.contains(&RequestedSearchMode::Path));
-        assert!(parsed.contains(&RequestedSearchMode::Semantic));
-        assert!(!parsed.contains(&RequestedSearchMode::Hybrid));
-    }
+    fn validate_context_items_rejects_invalid_line_ranges() {
+        let items = vec![ContextItem {
+            r#type: "search_result".to_string(),
+            project_path: "/a".to_string(),
+            file_path: "src/a.rs".to_string(),
+            symbol_name: None,
+            snippet: None,
+            line_start: Some(10),
+            line_end: Some(3),
+            score: None,
+            metadata: None,
+        }];
 
-    #[test]
-    fn parse_requested_modes_rejects_legacy_aliases() {
-        let err = parse_requested_modes(&["all".to_string()]).expect_err("legacy mode must fail");
-        assert!(err.contains("Invalid mode 'all'"));
-    }
-
-    #[test]
-    fn channel_matching_hybrid_matches_all_channels() {
-        let modes = parse_requested_modes(&["hybrid".to_string()]).expect("hybrid should parse");
-        assert!(channel_matches_modes(SearchChannel::Symbol, &modes));
-        assert!(channel_matches_modes(SearchChannel::FilePath, &modes));
-        assert!(channel_matches_modes(SearchChannel::Semantic, &modes));
+        let err = validate_context_items(&items).expect_err("invalid line range must fail");
+        assert!(err.contains("line_end must be >= line_start"));
     }
 }

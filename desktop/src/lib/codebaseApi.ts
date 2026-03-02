@@ -18,6 +18,10 @@ export interface IndexedProjectEntry {
   last_indexed_at: string | null;
 }
 
+export interface IndexedProjectStatusEntry extends IndexedProjectEntry {
+  status: IndexStatusEvent;
+}
+
 export interface LanguageBreakdown {
   language: string;
   count: number;
@@ -117,6 +121,23 @@ export interface SearchHit {
   similarity?: number | null;
   score: number;
   score_breakdown: SearchChannelScore[];
+  line_start?: number | null;
+  line_end?: number | null;
+  component?: string | null;
+  language?: string | null;
+  channels?: CodeSearchMode[];
+  query_id?: string;
+}
+
+export interface CodeSearchDiagnostics {
+  query_id: string;
+  active_channels: CodeSearchMode[];
+  semantic_degraded: boolean;
+  semantic_error?: string | null;
+  provider_display?: string | null;
+  embedding_dimension: number;
+  hnsw_used: boolean;
+  hnsw_vector_count: number;
 }
 
 export interface CodeSearchRequest {
@@ -134,6 +155,8 @@ export interface CodeSearchResponse {
   total: number;
   semantic_degraded: boolean;
   semantic_error?: string | null;
+  query_id?: string;
+  diagnostics?: CodeSearchDiagnostics | null;
 }
 
 export interface FileExcerptResult {
@@ -154,6 +177,17 @@ export interface ContextItem {
   line_end?: number | null;
   score?: number | null;
   metadata?: Record<string, unknown> | null;
+  source?: string | null;
+  session_id?: string | null;
+  target_mode?: 'chat' | 'plan' | 'task' | null;
+  context_ref_id?: string | null;
+}
+
+export interface CodebaseContextAppendResult {
+  appended_count: number;
+  context_ref_ids: string[];
+  session_id: string;
+  target_mode: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -163,6 +197,14 @@ export interface ContextItem {
 export async function listCodebaseProjects(): Promise<CommandResponse<IndexedProjectEntry[]>> {
   try {
     return await invoke<CommandResponse<IndexedProjectEntry[]>>('codebase_list_projects');
+  } catch (e) {
+    return { success: false, data: null, error: String(e) };
+  }
+}
+
+export async function listCodebaseProjectsV2(): Promise<CommandResponse<IndexedProjectStatusEntry[]>> {
+  try {
+    return await invoke<CommandResponse<IndexedProjectStatusEntry[]>>('codebase_list_projects_v2');
   } catch (e) {
     return { success: false, data: null, error: String(e) };
   }
@@ -298,13 +340,15 @@ export async function openCodebaseFileInEditor(
 }
 
 export async function addCodebaseContext(
-  targetMode: 'simple' | 'expert' | 'task' | 'plan' | 'chat',
+  targetMode: 'chat' | 'plan' | 'task',
   items: ContextItem[],
-): Promise<CommandResponse<number>> {
+  sessionId?: string | null,
+): Promise<CommandResponse<CodebaseContextAppendResult>> {
   try {
-    return await invoke<CommandResponse<number>>('codebase_add_context', {
+    return await invoke<CommandResponse<CodebaseContextAppendResult>>('codebase_add_context', {
       targetMode,
       items,
+      sessionId: sessionId ?? null,
     });
   } catch (e) {
     return { success: false, data: null, error: String(e) };

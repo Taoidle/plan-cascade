@@ -146,3 +146,19 @@ pub async fn workflow_recover_session(
         Err(error) => CommandResponse::err(error),
     })
 }
+
+#[tauri::command]
+pub async fn workflow_append_context_items(
+    session_id: String,
+    target_mode: WorkflowMode,
+    handoff: HandoffContextBundle,
+    state: tauri::State<'_, WorkflowKernelState>,
+) -> Result<CommandResponse<WorkflowSession>, String> {
+    let result = state
+        .append_context_items(&session_id, target_mode, handoff)
+        .await;
+    Ok(match result {
+        Ok(session) => CommandResponse::ok(session),
+        Err(error) => CommandResponse::err(error),
+    })
+}

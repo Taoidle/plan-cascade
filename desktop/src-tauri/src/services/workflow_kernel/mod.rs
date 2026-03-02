@@ -209,6 +209,7 @@ pub enum WorkflowEventKind {
     SessionOpened,
     ModeTransitioned,
     InputSubmitted,
+    ContextAppended,
     PlanEdited,
     PlanExecutionStarted,
     PlanStepRetried,
@@ -563,6 +564,43 @@ impl WorkflowKernelState {
         )
         .await;
         self.create_checkpoint(session_id, "mode_transitioned_with_input")
+            .await?;
+        self.persist_session_record(session_id).await?;
+
+        Ok(updated_session)
+    }
+
+    pub async fn append_context_items(
+        &self,
+        session_id: &str,
+        target_mode: WorkflowMode,
+        handoff: HandoffContextBundle,
+    ) -> Result<WorkflowSession, String> {
+        let updated_session = {
+            let mut sessions = self.sessions.write().await;
+            let session = sessions
+                .get_mut(session_id)
+                .ok_or_else(|| format!("Workflow session not found: {session_id}"))?;
+
+            session.mode_snapshots.ensure_mode(target_mode);
+            merge_handoff_bundle(&mut session.handoff_context, handoff);
+            session.updated_at = now_rfc3339();
+            session.clone()
+        };
+
+        self.append_event(
+            session_id,
+            WorkflowEventKind::ContextAppended,
+            target_mode,
+            json!({
+                "targetMode": target_mode,
+                "conversationTurns": updated_session.handoff_context.conversation_context.len(),
+                "artifactRefs": updated_session.handoff_context.artifact_refs.len(),
+                "contextSources": updated_session.handoff_context.context_sources.len()
+            }),
+        )
+        .await;
+        self.create_checkpoint(session_id, "context_appended")
             .await?;
         self.persist_session_record(session_id).await?;
 

@@ -995,6 +995,20 @@ pub async fn explore_project(
                     coordinator = coordinator.with_database(pool);
                 }
 
+                // Wire embedding resources for semantic CodebaseSearch parity with standalone mode
+                if let Some(ref manager) = *standalone_state.index_manager.read().await {
+                    let project_path_str = project_path.to_string_lossy().to_string();
+                    if let Some(emb_svc) = manager.get_embedding_service(&project_path_str).await {
+                        coordinator = coordinator.with_embedding_service(emb_svc);
+                    }
+                    if let Some(emb_mgr) = manager.get_embedding_manager(&project_path_str).await {
+                        coordinator = coordinator.with_embedding_manager(emb_mgr);
+                    }
+                    if let Some(hnsw) = manager.get_hnsw_index(&project_path_str).await {
+                        coordinator = coordinator.with_hnsw_index(hnsw);
+                    }
+                }
+
                 // Wire SearchKnowledge tool for on-demand knowledge base access
                 if let Some(ref cs) = context_sources {
                     if cs.knowledge.as_ref().map_or(false, |k| k.enabled) {
@@ -1298,7 +1312,7 @@ pub(crate) async fn resolve_llm_provider(
 /// Same as `resolve_llm_provider` but returns the raw config instead of
 /// an instantiated provider. Used by `execute_story_via_llm()` to create
 /// OrchestratorService instances.
-async fn resolve_provider_config(
+pub(crate) async fn resolve_provider_config(
     provider_name: &str,
     model: &str,
     explicit_api_key: Option<String>,
@@ -1372,7 +1386,7 @@ async fn resolve_provider_config(
     })
 }
 
-fn resolve_search_provider_for_tools() -> (String, Option<String>) {
+pub(crate) fn resolve_search_provider_for_tools() -> (String, Option<String>) {
     use crate::commands::standalone::get_search_api_key_with_aliases;
 
     let provider = ConfigService::new()

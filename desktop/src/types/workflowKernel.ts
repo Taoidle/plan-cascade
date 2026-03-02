@@ -61,6 +61,7 @@ export type WorkflowEventKind =
   | 'session_opened'
   | 'mode_transitioned'
   | 'input_submitted'
+  | 'context_appended'
   | 'plan_edited'
   | 'plan_execution_started'
   | 'plan_step_retried'

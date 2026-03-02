@@ -194,6 +194,7 @@ fn main() {
             plan_cascade_desktop::commands::standalone::semantic_search,
             // Codebase Index Management commands
             plan_cascade_desktop::commands::codebase::codebase_list_projects,
+            plan_cascade_desktop::commands::codebase::codebase_list_projects_v2,
             plan_cascade_desktop::commands::codebase::codebase_get_project_detail,
             plan_cascade_desktop::commands::codebase::codebase_list_files,
             plan_cascade_desktop::commands::codebase::codebase_delete_project,
@@ -244,6 +245,7 @@ fn main() {
             plan_cascade_desktop::commands::workflow::workflow_execute_plan,
             plan_cascade_desktop::commands::workflow::workflow_retry_step,
             plan_cascade_desktop::commands::workflow::workflow_cancel_operation,
+            plan_cascade_desktop::commands::workflow::workflow_append_context_items,
             plan_cascade_desktop::commands::workflow::workflow_get_session_state,
             plan_cascade_desktop::commands::workflow::workflow_recover_session,
             // Spec Interview commands

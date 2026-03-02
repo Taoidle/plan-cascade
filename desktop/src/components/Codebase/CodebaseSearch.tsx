@@ -25,10 +25,13 @@ export function CodebaseSearch({ projectPath }: CodebaseSearchProps) {
     addContextItem,
     contextItems,
     pushContextToMode,
+    contextPushLoading,
+    lastContextPush,
     setError,
   } = useCodebaseStore();
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<'hybrid' | 'semantic' | 'symbol' | 'path'>('hybrid');
+  const [targetMode, setTargetMode] = useState<'chat' | 'plan' | 'task'>('chat');
 
   const handleSearch = useCallback(() => {
     if (query.trim()) {
@@ -75,10 +78,10 @@ export function CodebaseSearch({ projectPath }: CodebaseSearchProps) {
               'text-gray-900 dark:text-white',
             )}
           >
-            <option value="hybrid">Hybrid</option>
-            <option value="semantic">Semantic</option>
-            <option value="symbol">Symbol</option>
-            <option value="path">Path</option>
+            <option value="hybrid">{t('searchMode.hybrid')}</option>
+            <option value="semantic">{t('searchMode.semantic')}</option>
+            <option value="symbol">{t('searchMode.symbol')}</option>
+            <option value="path">{t('searchMode.path')}</option>
           </select>
           <input
             type="text"
@@ -106,20 +109,37 @@ export function CodebaseSearch({ projectPath }: CodebaseSearchProps) {
               'transition-colors',
             )}
           >
-            {searchLoading ? '...' : t('search')}
+            {searchLoading ? t('searching') : t('search')}
           </button>
+          <select
+            value={targetMode}
+            onChange={(e) => setTargetMode(e.target.value as 'chat' | 'plan' | 'task')}
+            className={clsx(
+              'px-2.5 py-2 rounded-lg text-sm',
+              'border border-gray-300 dark:border-gray-600',
+              'bg-white dark:bg-gray-800',
+              'text-gray-900 dark:text-white',
+            )}
+            title={t('targetModeLabel')}
+          >
+            <option value="chat">{t('targetMode.chat')}</option>
+            <option value="plan">{t('targetMode.plan')}</option>
+            <option value="task">{t('targetMode.task')}</option>
+          </select>
           <button
-            onClick={() => pushContextToMode('chat')}
-            disabled={contextItems.length === 0}
+            onClick={() => pushContextToMode(targetMode)}
+            disabled={contextItems.length === 0 || contextPushLoading}
             className={clsx(
               'px-3 py-2 rounded-lg text-sm',
               'bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700',
               'text-gray-700 dark:text-gray-300',
               'disabled:opacity-50 disabled:cursor-not-allowed',
             )}
-            title="Push context basket to Chat"
+            title={t('pushContextTitle', { mode: t(`targetMode.${targetMode}`) })}
           >
-            Context ({contextItems.length})
+            {contextPushLoading
+              ? t('pushingContext')
+              : t('pushContext', { mode: t(`targetMode.${targetMode}`), count: contextItems.length })}
           </button>
           {searchResults.length > 0 && (
             <button
@@ -136,9 +156,19 @@ export function CodebaseSearch({ projectPath }: CodebaseSearchProps) {
           )}
         </div>
         {searchResults.length > 0 && (
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-            {t('searchResults', { count: searchResults.length })}
-          </p>
+          <>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+              {t('searchResults', { count: searchResults.length })}
+            </p>
+            {lastContextPush && (
+              <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">
+                {t('contextPushSuccess', {
+                  count: lastContextPush.appendedCount,
+                  mode: t(`targetMode.${lastContextPush.targetMode}`),
+                })}
+              </p>
+            )}
+          </>
         )}
       </div>
 
@@ -146,7 +176,7 @@ export function CodebaseSearch({ projectPath }: CodebaseSearchProps) {
       <div className="flex-1 overflow-y-auto">
         {searchLoading ? (
           <div className="p-8 text-center">
-            <div className="animate-pulse text-sm text-gray-500">Searching...</div>
+            <div className="animate-pulse text-sm text-gray-500">{t('searching')}</div>
           </div>
         ) : searchResults.length === 0 && query.trim() ? (
           <div className="p-8 text-center text-sm text-gray-500 dark:text-gray-400">{t('noResults')}</div>
@@ -188,19 +218,36 @@ export function CodebaseSearch({ projectPath }: CodebaseSearchProps) {
                     {result.snippet.length > 500 ? result.snippet.slice(0, 500) + '...' : result.snippet}
                   </pre>
                 ) : (
-                  <div className="text-xs text-gray-500 dark:text-gray-400">No snippet available</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{t('noSnippet')}</div>
+                )}
+                {result.score_breakdown.length > 0 && (
+                  <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                    {result.score_breakdown.map((channel) => (
+                      <span
+                        key={`${result.file_path}-${idx}-${channel.channel}`}
+                        className="px-1.5 py-0.5 rounded text-[10px] bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                      >
+                        {channel.channel}
+                      </span>
+                    ))}
+                  </div>
                 )}
                 <div className="mt-2 flex items-center gap-2">
                   <button
                     onClick={async () => {
-                      const opened = await openCodebaseFileInEditor(projectPath, result.file_path, 1, 1);
+                      const opened = await openCodebaseFileInEditor(
+                        projectPath,
+                        result.file_path,
+                        result.line_start ?? 1,
+                        1,
+                      );
                       if (!opened.success) {
-                        setError(opened.error ?? 'Failed to open file');
+                        setError(opened.error ?? t('openFailed'));
                       }
                     }}
                     className="px-2 py-1 rounded text-xs bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
                   >
-                    Open
+                    {t('open')}
                   </button>
                   <button
                     onClick={() =>
@@ -210,15 +257,20 @@ export function CodebaseSearch({ projectPath }: CodebaseSearchProps) {
                         file_path: result.file_path,
                         symbol_name: result.symbol_name ?? null,
                         snippet: result.snippet ?? null,
+                        line_start: result.line_start ?? null,
+                        line_end: result.line_end ?? null,
                         score: result.score,
+                        source: 'codebase',
                         metadata: {
                           score_breakdown: result.score_breakdown,
+                          query_id: result.query_id ?? null,
+                          channels: result.channels ?? null,
                         },
                       })
                     }
                     className="px-2 py-1 rounded text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:hover:bg-blue-900/60"
                   >
-                    Add Context
+                    {t('addContext')}
                   </button>
                   <button
                     onClick={async () => {
@@ -226,12 +278,12 @@ export function CodebaseSearch({ projectPath }: CodebaseSearchProps) {
                       try {
                         await navigator.clipboard.writeText(ref);
                       } catch {
-                        setError('Failed to copy reference');
+                        setError(t('copyRefFailed'));
                       }
                     }}
                     className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
                   >
-                    Copy Ref
+                    {t('copyRef')}
                   </button>
                 </div>
               </div>

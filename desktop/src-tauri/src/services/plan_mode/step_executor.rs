@@ -3,15 +3,26 @@
 //! Phase 5: Execute steps in dependency-resolved batches.
 //! Runs steps in parallel within each batch using tokio tasks.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use tokio::sync::{RwLock, Semaphore};
+use tokio::sync::{mpsc, RwLock, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 use crate::services::llm::provider::LlmProvider;
-use crate::services::llm::types::{LlmRequestOptions, Message, MessageRole};
+use crate::services::llm::types::{
+    LlmRequestOptions, Message, MessageRole, ProviderConfig, ToolDefinition,
+};
+use crate::services::orchestrator::embedding_manager::EmbeddingManager;
+use crate::services::orchestrator::embedding_service::EmbeddingService;
+use crate::services::orchestrator::hnsw_index::HnswIndex;
+use crate::services::orchestrator::index_store::IndexStore;
+use crate::services::orchestrator::permission_gate::PermissionGate;
+use crate::services::orchestrator::{OrchestratorConfig, OrchestratorService};
+use crate::services::streaming::UnifiedStreamEvent;
+use crate::services::tools::definitions::get_tool_definitions_from_registry;
 use crate::utils::error::{AppError, AppResult};
 
 use super::adapter::DomainAdapter;
@@ -41,12 +52,88 @@ impl Default for StepExecutionConfig {
     }
 }
 
+/// Shared runtime dependencies used to execute each step through orchestrator.
+#[derive(Clone)]
+pub struct StepExecutionRuntime {
+    pub provider_config: ProviderConfig,
+    pub project_root: PathBuf,
+    pub index_store: Option<Arc<IndexStore>>,
+    pub embedding_service: Option<Arc<EmbeddingService>>,
+    pub embedding_manager: Option<Arc<EmbeddingManager>>,
+    pub hnsw_index: Option<Arc<HnswIndex>>,
+    pub permission_gate: Option<Arc<PermissionGate>>,
+    pub search_provider: Option<(String, Option<String>)>,
+}
+
+fn normalize_tool_name(name: &str) -> Option<&'static str> {
+    let normalized = name.trim().to_ascii_lowercase().replace('_', "");
+    match normalized.as_str() {
+        "read" | "readfile" => Some("Read"),
+        "write" | "writefile" => Some("Write"),
+        "edit" => Some("Edit"),
+        "ls" => Some("LS"),
+        "glob" => Some("Glob"),
+        "grep" => Some("Grep"),
+        "bash" => Some("Bash"),
+        "websearch" => Some("WebSearch"),
+        "webfetch" => Some("WebFetch"),
+        "codebasesearch" => Some("CodebaseSearch"),
+        "searchknowledge" => Some("SearchKnowledge"),
+        "cwd" => Some("Cwd"),
+        "browser" => Some("Browser"),
+        "notebookedit" => Some("NotebookEdit"),
+        "task" => Some("Task"),
+        "analyze" => Some("Analyze"),
+        _ => None,
+    }
+}
+
+fn fallback_plan_tools() -> Vec<&'static str> {
+    vec!["CodebaseSearch", "Read", "Grep", "LS", "Write", "WebSearch"]
+}
+
+fn resolve_step_tools(
+    adapter: &dyn DomainAdapter,
+    step: &super::types::PlanStep,
+) -> Vec<ToolDefinition> {
+    let requested = adapter.available_tools(step);
+    let mut allowed: HashSet<String> = requested
+        .iter()
+        .filter_map(|name| normalize_tool_name(name))
+        .map(|name| name.to_string())
+        .collect();
+
+    if allowed.is_empty() {
+        allowed.extend(
+            fallback_plan_tools()
+                .into_iter()
+                .map(|name| name.to_string()),
+        );
+    }
+
+    let mut resolved: Vec<ToolDefinition> = get_tool_definitions_from_registry()
+        .into_iter()
+        .filter(|tool| allowed.contains(&tool.name))
+        .collect();
+
+    if resolved.is_empty() {
+        let fallback: HashSet<&'static str> = fallback_plan_tools().into_iter().collect();
+        resolved = get_tool_definitions_from_registry()
+            .into_iter()
+            .filter(|tool| fallback.contains(tool.name.as_str()))
+            .collect();
+    }
+
+    resolved
+}
+
 /// Execute all steps in a plan according to batch ordering.
 pub async fn execute_plan(
     session_id: &str,
     plan: &mut Plan,
     adapter: Arc<dyn DomainAdapter>,
     provider: Arc<dyn LlmProvider>,
+    runtime: Option<StepExecutionRuntime>,
     config: StepExecutionConfig,
     shared_context: Option<String>,
     language_instruction: String,
@@ -127,6 +214,7 @@ pub async fn execute_plan(
             let sem = semaphore.clone();
             let adapter = adapter.clone();
             let provider = provider.clone();
+            let runtime = runtime.clone();
             let outputs = step_outputs.clone();
             let states = step_states.clone();
             let handle = app_handle.clone();
@@ -207,6 +295,7 @@ pub async fn execute_plan(
                     &plan_clone,
                     adapter.as_ref(),
                     provider.as_ref(),
+                    runtime.as_ref(),
                     shared_ctx.as_deref(),
                     &lang_inst,
                     cancel.clone(),
@@ -351,6 +440,7 @@ async fn execute_single_step(
     plan: &Plan,
     adapter: &dyn DomainAdapter,
     provider: &dyn LlmProvider,
+    runtime: Option<&StepExecutionRuntime>,
     shared_context: Option<&str>,
     language_instruction: &str,
     cancellation_token: CancellationToken,
@@ -381,6 +471,95 @@ async fn execute_single_step(
         "{user_prompt}\n\n---\nExecute this step and produce the required output. \
          Address all completion criteria."
     );
+
+    if let Some(runtime) = runtime {
+        let tools = resolve_step_tools(adapter, step);
+        if tools.is_empty() {
+            return Err(AppError::Internal(
+                "Step execution has no available tools after whitelist filtering".to_string(),
+            ));
+        }
+
+        let config = OrchestratorConfig {
+            provider: runtime.provider_config.clone(),
+            system_prompt: Some(system),
+            max_iterations: 24,
+            max_total_tokens: 120_000,
+            project_root: runtime.project_root.clone(),
+            analysis_artifacts_root: dirs::home_dir()
+                .unwrap_or_else(|| std::env::temp_dir())
+                .join(".plan-cascade")
+                .join("analysis-runs"),
+            streaming: false,
+            enable_compaction: true,
+            analysis_profile: Default::default(),
+            analysis_limits: Default::default(),
+            analysis_session_id: None,
+            project_id: None,
+            compaction_config: Default::default(),
+            task_type: Some("plan".to_string()),
+            sub_agent_depth: None,
+        };
+
+        let mut orchestrator = OrchestratorService::new(config);
+        if let Some((provider_name, api_key)) = runtime.search_provider.as_ref() {
+            orchestrator = orchestrator.with_search_provider(provider_name, api_key.clone());
+        }
+        if let Some(store) = runtime.index_store.as_ref() {
+            orchestrator = orchestrator.with_index_store(Arc::clone(store));
+        }
+        if let Some(svc) = runtime.embedding_service.as_ref() {
+            orchestrator = orchestrator.with_embedding_service(Arc::clone(svc));
+        }
+        if let Some(mgr) = runtime.embedding_manager.as_ref() {
+            orchestrator = orchestrator.with_embedding_manager(Arc::clone(mgr));
+        }
+        if let Some(hnsw) = runtime.hnsw_index.as_ref() {
+            orchestrator = orchestrator.with_hnsw_index(Arc::clone(hnsw));
+        }
+        if let Some(gate) = runtime.permission_gate.as_ref() {
+            orchestrator = orchestrator.with_permission_gate(Arc::clone(gate));
+        }
+
+        let cancel_bridge = orchestrator.cancellation_token();
+        let cancel_observer = cancellation_token.clone();
+        let cancel_watch = tokio::spawn(async move {
+            cancel_observer.cancelled().await;
+            cancel_bridge.cancel();
+        });
+
+        let (tx, mut rx) = mpsc::channel::<UnifiedStreamEvent>(128);
+        let drain_events = tokio::spawn(async move { while rx.recv().await.is_some() {} });
+
+        let result = orchestrator.execute_story(&full_prompt, &tools, tx).await;
+
+        cancel_watch.abort();
+        drain_events.abort();
+
+        if cancellation_token.is_cancelled() {
+            return Err(AppError::internal("Execution cancelled"));
+        }
+        if !result.success {
+            return Err(AppError::Internal(format!(
+                "Step execution failed: {}",
+                result
+                    .error
+                    .unwrap_or_else(|| "unknown orchestrator error".to_string())
+            )));
+        }
+
+        let content = result
+            .response
+            .unwrap_or_else(|| "No output produced".to_string());
+
+        return Ok(StepOutput {
+            step_id: step.id.clone(),
+            content,
+            format: OutputFormat::Markdown,
+            criteria_met: vec![],
+            artifacts: vec![],
+        });
+    }
 
     let messages = vec![Message::text(MessageRole::User, full_prompt)];
 
@@ -464,6 +643,9 @@ fn emit_event(handle: &tauri::AppHandle, event: PlanModeProgressEvent) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::plan_mode::adapters::general::GeneralAdapter;
+    use crate::services::plan_mode::types::StepPriority;
+    use std::collections::HashMap as StdHashMap;
 
     #[test]
     fn test_truncate_dep_outputs() {
@@ -516,5 +698,27 @@ mod tests {
         assert_eq!(progress.steps_failed, 1);
         assert_eq!(progress.total_steps, 3);
         assert!((progress.progress_pct - 33.33).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_resolve_step_tools_maps_plan_tool_whitelist() {
+        let adapter = GeneralAdapter;
+        let step = super::super::types::PlanStep {
+            id: "s1".to_string(),
+            title: "Inspect codebase".to_string(),
+            description: "Read relevant code".to_string(),
+            priority: StepPriority::Medium,
+            dependencies: vec![],
+            completion_criteria: vec![],
+            expected_output: String::new(),
+            metadata: StdHashMap::new(),
+        };
+
+        let tools = resolve_step_tools(&adapter, &step);
+        let names: HashSet<String> = tools.into_iter().map(|tool| tool.name).collect();
+        assert!(names.contains("CodebaseSearch"));
+        assert!(names.contains("Read"));
+        assert!(names.contains("Grep"));
+        assert!(names.contains("LS"));
     }
 }

@@ -124,6 +124,9 @@ Respond in JSON format:
     fn available_tools(&self, _step: &PlanStep) -> Vec<String> {
         // Research tasks need web search heavily
         vec![
+            "codebase_search".to_string(),
+            "grep".to_string(),
+            "ls".to_string(),
             "web_search".to_string(),
             "read_file".to_string(),
             "write_file".to_string(),

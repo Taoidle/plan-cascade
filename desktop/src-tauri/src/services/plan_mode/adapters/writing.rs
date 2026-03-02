@@ -110,7 +110,13 @@ Respond in JSON format:
 
     fn available_tools(&self, step: &PlanStep) -> Vec<String> {
         let title_lower = step.title.to_lowercase();
-        let mut tools = vec!["write_file".to_string(), "read_file".to_string()];
+        let mut tools = vec![
+            "codebase_search".to_string(),
+            "grep".to_string(),
+            "ls".to_string(),
+            "write_file".to_string(),
+            "read_file".to_string(),
+        ];
 
         if title_lower.contains("research") || title_lower.contains("gather") {
             tools.push("web_search".to_string());

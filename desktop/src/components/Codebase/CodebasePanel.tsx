@@ -140,11 +140,10 @@ export function CodebasePanel() {
     setDeleteTarget(null);
   }, [deleteTarget, deleteProject]);
 
-  const getStatusForProject = (projectPath: string, fileCount: number): CodebaseIndexStatus => {
+  const getStatusForProject = (projectPath: string, snapshotStatus?: CodebaseIndexStatus): CodebaseIndexStatus => {
     const live = liveStatuses[projectPath]?.status;
     if (live) return live;
-    if (fileCount > 0) return 'indexed';
-    return 'idle';
+    return snapshotStatus ?? 'idle';
   };
 
   const formatPath = (path: string): string => {
@@ -192,7 +191,7 @@ export function CodebasePanel() {
             <div className="flex-1 overflow-y-auto">
               {loading ? (
                 <div className="px-4 py-8 text-center">
-                  <div className="animate-pulse text-sm text-gray-500">Loading...</div>
+                  <div className="animate-pulse text-sm text-gray-500">{t('loading')}</div>
                 </div>
               ) : projects.length === 0 ? (
                 <div className="px-4 py-8 text-center">
@@ -202,7 +201,7 @@ export function CodebasePanel() {
               ) : (
                 <div className="divide-y divide-gray-200 dark:divide-gray-700">
                   {projects.map((project) => {
-                    const status = getStatusForProject(project.project_path, project.file_count);
+                    const status = getStatusForProject(project.project_path, project.status?.status);
                     const isSelected = selectedProjectPath === project.project_path;
 
                     return (

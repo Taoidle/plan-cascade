@@ -7,18 +7,21 @@
 //! - execution status/cancel/report
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
-use crate::commands::task_mode::resolve_llm_provider;
+use crate::commands::task_mode::{
+    resolve_llm_provider, resolve_provider_config, resolve_search_provider_for_tools,
+};
 use crate::models::CommandResponse;
 use crate::services::plan_mode::adapter_registry::{AdapterInfo, AdapterRegistry};
 use crate::services::plan_mode::types::{
-    ClarificationAnswer, Plan, PlanAnalysis, PlanExecutionProgress, PlanExecutionReport,
-    PlanModePhase, PlanModeSession, StepExecutionState, StepOutput,
+    ClarificationAnswer, Plan, PlanAnalysis, PlanExecutionReport, PlanModePhase, PlanModeSession,
+    StepExecutionState, StepOutput,
 };
 use crate::services::skills::model::InjectionPhase;
 use crate::services::task_mode::context_provider::{
@@ -498,6 +501,8 @@ pub async fn approve_plan(
     locale: Option<String>,
     state: tauri::State<'_, PlanModeState>,
     app_state: tauri::State<'_, AppState>,
+    standalone_state: tauri::State<'_, crate::commands::standalone::StandaloneState>,
+    permission_state: tauri::State<'_, crate::commands::permissions::PermissionState>,
     app_handle: tauri::AppHandle,
 ) -> Result<CommandResponse<bool>, String> {
     // Validate
@@ -518,6 +523,10 @@ pub async fn approve_plan(
         (Some(p), Some(m)) => (p.as_str(), m.as_str()),
         _ => return Ok(CommandResponse::err("Provider and model are required")),
     };
+
+    let provider_config = resolve_provider_config(prov, mdl, None, base_url.clone(), &app_state)
+        .await
+        .map_err(|e| format!("Failed to resolve provider config: {e}"))?;
 
     let llm_provider = resolve_llm_provider(prov, mdl, None, base_url, &app_state)
         .await
@@ -567,6 +576,37 @@ pub async fn approve_plan(
         Some(execution_context)
     };
 
+    let resolved_project_root = match project_path.as_deref().map(str::trim) {
+        Some(path) if !path.is_empty() => PathBuf::from(path),
+        _ => standalone_state.working_directory.read().await.clone(),
+    };
+    let resolved_project_path = resolved_project_root.to_string_lossy().to_string();
+
+    let (index_store, embedding_service, embedding_manager, hnsw_index) = {
+        let manager_guard = standalone_state.index_manager.read().await;
+        if let Some(manager) = &*manager_guard {
+            (
+                Some(manager.index_store_arc()),
+                manager.get_embedding_service(&resolved_project_path).await,
+                manager.get_embedding_manager(&resolved_project_path).await,
+                manager.get_hnsw_index(&resolved_project_path).await,
+            )
+        } else {
+            (None, None, None, None)
+        }
+    };
+
+    let step_runtime = crate::services::plan_mode::step_executor::StepExecutionRuntime {
+        provider_config,
+        project_root: resolved_project_root,
+        index_store,
+        embedding_service,
+        embedding_manager,
+        hnsw_index,
+        permission_gate: Some(permission_state.gate.clone()),
+        search_provider: Some(resolve_search_provider_for_tools()),
+    };
+
     tokio::spawn(async move {
         let config = crate::services::plan_mode::step_executor::StepExecutionConfig::default();
 
@@ -577,6 +617,7 @@ pub async fn approve_plan(
             &mut plan_mut,
             adapter,
             llm_provider,
+            Some(step_runtime),
             config,
             execution_context,
             lang_instruction,
