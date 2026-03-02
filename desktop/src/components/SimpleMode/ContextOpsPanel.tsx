@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import { useContextOpsStore } from '../../store/contextOps';
 
 type ContextOpsTab = 'inspector' | 'trace' | 'artifacts' | 'ops';
@@ -42,6 +43,7 @@ function StatCard({
 }
 
 export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: string | null; sessionId: string | null }) {
+  const { t } = useTranslation('simpleMode');
   const [activeTab, setActiveTab] = useState<ContextOpsTab>('inspector');
   const [traceInput, setTraceInput] = useState('');
   const [artifactName, setArtifactName] = useState('');
@@ -136,36 +138,44 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
     <div className="space-y-3">
       {!latestEnvelope ? (
         <div className="text-xs text-gray-500 dark:text-gray-400">
-          No context envelope captured yet. Send a message to generate one.
+          {t('rightPanel.contextOps.empty.envelope', {
+            defaultValue: 'No context envelope captured yet. Send a message to generate one.',
+          })}
         </div>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-2">
             <StatCard
-              label="Trace"
+              label={t('rightPanel.contextOps.stats.trace', { defaultValue: 'Trace' })}
               value={latestEnvelope.trace_id.slice(0, 8)}
               tone={latestEnvelope.budget.over_budget ? 'bad' : 'good'}
             />
             <StatCard
-              label="Budget"
+              label={t('rightPanel.contextOps.stats.budget', { defaultValue: 'Budget' })}
               value={`${latestEnvelope.budget.used_input_tokens}/${latestEnvelope.budget.input_token_budget}`}
               tone={latestEnvelope.budget.over_budget ? 'warn' : 'good'}
             />
             <StatCard
-              label="Compaction"
+              label={t('rightPanel.contextOps.stats.compaction', { defaultValue: 'Compaction' })}
               value={
                 latestEnvelope.compaction.triggered
                   ? `${latestEnvelope.compaction.strategy} (${latestEnvelope.compaction.net_saving})`
-                  : 'none'
+                  : t('rightPanel.contextOps.common.none', { defaultValue: 'none' })
               }
               tone={latestEnvelope.compaction.triggered ? 'warn' : 'neutral'}
             />
-            <StatCard label="Mode" value={latestEnvelope.request_meta.mode} />
+            <StatCard
+              label={t('rightPanel.contextOps.stats.mode', { defaultValue: 'Mode' })}
+              value={latestEnvelope.request_meta.mode}
+            />
           </div>
 
           <div className="rounded-md border border-gray-200 dark:border-gray-700 overflow-hidden">
             <div className="px-3 py-2 text-xs font-medium bg-gray-50 dark:bg-gray-800/70 border-b border-gray-200 dark:border-gray-700">
-              Sources ({sourceRows.length})
+              {t('rightPanel.contextOps.sources.title', {
+                defaultValue: 'Sources ({{count}})',
+                count: sourceRows.length,
+              })}
             </div>
             <div className="max-h-60 overflow-y-auto divide-y divide-gray-200 dark:divide-gray-700">
               {sourceRows.map((source) => {
@@ -178,7 +188,8 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
                       <div className="min-w-0">
                         <div className="font-medium text-gray-900 dark:text-gray-100 truncate">{source.label}</div>
                         <div className="text-gray-500 dark:text-gray-400">
-                          {source.kind} · {source.token_cost} tok · {source.reason}
+                          {source.kind} · {source.token_cost}{' '}
+                          {t('rightPanel.contextOps.sources.tokenShort', { defaultValue: 'tok' })} · {source.reason}
                         </div>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
@@ -191,7 +202,9 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
                               : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-300',
                           )}
                         >
-                          {pinned ? 'Pinned' : 'Pin'}
+                          {pinned
+                            ? t('rightPanel.contextOps.actions.pinned', { defaultValue: 'Pinned' })
+                            : t('rightPanel.contextOps.actions.pin', { defaultValue: 'Pin' })}
                         </button>
                         <button
                           onClick={() => void toggleExcluded(source.id)}
@@ -202,7 +215,9 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
                               : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-300',
                           )}
                         >
-                          {excluded ? 'Excluded' : 'Exclude'}
+                          {excluded
+                            ? t('rightPanel.contextOps.actions.excluded', { defaultValue: 'Excluded' })
+                            : t('rightPanel.contextOps.actions.exclude', { defaultValue: 'Exclude' })}
                         </button>
                       </div>
                     </div>
@@ -222,7 +237,7 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
         <input
           value={traceInput}
           onChange={(e) => setTraceInput(e.target.value)}
-          placeholder="trace_id"
+          placeholder={t('rightPanel.contextOps.trace.placeholder', { defaultValue: 'trace_id' })}
           className="flex-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs"
         />
         <button
@@ -234,12 +249,14 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
           }}
           className="px-2 py-1 text-xs rounded bg-primary-600 text-white hover:bg-primary-700"
         >
-          Load
+          {t('rightPanel.contextOps.actions.load', { defaultValue: 'Load' })}
         </button>
       </div>
 
       {!activeTrace ? (
-        <div className="text-xs text-gray-500 dark:text-gray-400">No trace loaded.</div>
+        <div className="text-xs text-gray-500 dark:text-gray-400">
+          {t('rightPanel.contextOps.empty.trace', { defaultValue: 'No trace loaded.' })}
+        </div>
       ) : (
         <div className="rounded-md border border-gray-200 dark:border-gray-700 max-h-[420px] overflow-y-auto">
           {activeTrace.events.map((event, idx) => (
@@ -271,7 +288,7 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
         <input
           value={artifactName}
           onChange={(e) => setArtifactName(e.target.value)}
-          placeholder="artifact name"
+          placeholder={t('rightPanel.contextOps.artifacts.namePlaceholder', { defaultValue: 'artifact name' })}
           className="flex-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs"
         />
         <button
@@ -284,7 +301,7 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
           className="px-2 py-1 text-xs rounded bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60"
           disabled={!latestEnvelope || !artifactName.trim() || !effectiveProjectPath}
         >
-          Save
+          {t('rightPanel.contextOps.actions.save', { defaultValue: 'Save' })}
         </button>
         <button
           onClick={() => {
@@ -294,13 +311,15 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
           className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300"
           disabled={!effectiveProjectPath}
         >
-          Refresh
+          {t('rightPanel.contextOps.actions.refresh', { defaultValue: 'Refresh' })}
         </button>
       </div>
 
       <div className="rounded-md border border-gray-200 dark:border-gray-700 max-h-[420px] overflow-y-auto divide-y divide-gray-200 dark:divide-gray-700">
         {artifacts.length === 0 ? (
-          <div className="px-3 py-3 text-xs text-gray-500 dark:text-gray-400">No artifacts.</div>
+          <div className="px-3 py-3 text-xs text-gray-500 dark:text-gray-400">
+            {t('rightPanel.contextOps.empty.artifacts', { defaultValue: 'No artifacts.' })}
+          </div>
         ) : (
           artifacts.map((artifact) => (
             <div key={artifact.id} className="px-3 py-2 text-xs">
@@ -313,13 +332,13 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
                   onClick={() => void applyArtifact(artifact.id, sessionId)}
                   className="px-2 py-0.5 rounded border border-primary-300 text-primary-700 dark:border-primary-700 dark:text-primary-300"
                 >
-                  Apply
+                  {t('rightPanel.contextOps.actions.apply', { defaultValue: 'Apply' })}
                 </button>
                 <button
                   onClick={() => void deleteArtifact(artifact.id, effectiveProjectPath, sessionId)}
                   className="px-2 py-0.5 rounded border border-red-300 text-red-700 dark:border-red-700 dark:text-red-300"
                 >
-                  Delete
+                  {t('rightPanel.contextOps.actions.delete', { defaultValue: 'Delete' })}
                 </button>
               </div>
             </div>
@@ -333,26 +352,31 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-2">
         <StatCard
-          label="Availability"
+          label={t('rightPanel.contextOps.stats.availability', { defaultValue: 'Availability' })}
           value={dashboard ? fmtPct(dashboard.availability, 2) : '-'}
           tone={dashboard && dashboard.availability >= 0.999 ? 'good' : 'warn'}
         />
         <StatCard
-          label="Degraded Rate"
+          label={t('rightPanel.contextOps.stats.degradedRate', { defaultValue: 'Degraded Rate' })}
           value={dashboard ? fmtPct(dashboard.degraded_rate, 2) : '-'}
           tone={dashboard && dashboard.degraded_rate <= 0.1 ? 'good' : 'bad'}
         />
         <StatCard
-          label="P95 Latency"
+          label={t('rightPanel.contextOps.stats.p95Latency', { defaultValue: 'P95 Latency' })}
           value={dashboard ? `${dashboard.prepare_context_p95_ms.toFixed(1)}ms` : '-'}
           tone={dashboard && dashboard.prepare_context_p95_ms <= 300 ? 'good' : 'bad'}
         />
-        <StatCard label="Traces" value={dashboard ? String(dashboard.total_traces) : '-'} />
+        <StatCard
+          label={t('rightPanel.contextOps.stats.traces', { defaultValue: 'Traces' })}
+          value={dashboard ? String(dashboard.total_traces) : '-'}
+        />
       </div>
 
       {dashboard?.alerts && dashboard.alerts.length > 0 && (
         <div className="rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2">
-          <div className="text-xs font-medium text-amber-800 dark:text-amber-200">Alerts</div>
+          <div className="text-xs font-medium text-amber-800 dark:text-amber-200">
+            {t('rightPanel.contextOps.ops.alerts', { defaultValue: 'Alerts' })}
+          </div>
           <ul className="mt-1 space-y-1 text-xs text-amber-700 dark:text-amber-300">
             {dashboard.alerts.map((alert) => (
               <li key={alert.code}>
@@ -364,7 +388,9 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
       )}
 
       <div className="rounded-md border border-gray-200 dark:border-gray-700 px-3 py-2 space-y-2">
-        <div className="text-xs font-medium text-gray-800 dark:text-gray-200">Feature Flags</div>
+        <div className="text-xs font-medium text-gray-800 dark:text-gray-200">
+          {t('rightPanel.contextOps.ops.featureFlags', { defaultValue: 'Feature Flags' })}
+        </div>
         <label className="flex items-center justify-between text-xs">
           <span>context_v2_pipeline</span>
           <input
@@ -392,9 +418,11 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
       </div>
 
       <div className="rounded-md border border-gray-200 dark:border-gray-700 px-3 py-2 space-y-2">
-        <div className="text-xs font-medium text-gray-800 dark:text-gray-200">Rollout / A-B</div>
+        <div className="text-xs font-medium text-gray-800 dark:text-gray-200">
+          {t('rightPanel.contextOps.ops.rolloutTitle', { defaultValue: 'Rollout / A-B' })}
+        </div>
         <label className="flex items-center justify-between text-xs">
-          <span>Enabled</span>
+          <span>{t('rightPanel.contextOps.ops.enabled', { defaultValue: 'Enabled' })}</span>
           <input
             type="checkbox"
             checked={rollout.enabled}
@@ -402,7 +430,12 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
           />
         </label>
         <label className="block text-xs">
-          <span className="text-gray-600 dark:text-gray-300">Rollout %: {rollout.rollout_percentage}</span>
+          <span className="text-gray-600 dark:text-gray-300">
+            {t('rightPanel.contextOps.ops.rolloutPercent', {
+              defaultValue: 'Rollout %: {{value}}',
+              value: rollout.rollout_percentage,
+            })}
+          </span>
           <input
             type="range"
             min={0}
@@ -413,24 +446,28 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
           />
         </label>
         <label className="block text-xs">
-          <span className="text-gray-600 dark:text-gray-300">A/B mode</span>
+          <span className="text-gray-600 dark:text-gray-300">
+            {t('rightPanel.contextOps.ops.abMode', { defaultValue: 'A/B mode' })}
+          </span>
           <select
             value={rollout.ab_mode}
             onChange={(e) => void saveRollout({ ab_mode: e.target.value })}
             className="mt-1 w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs"
           >
-            <option value="off">off</option>
-            <option value="shadow">shadow</option>
-            <option value="split">split</option>
+            <option value="off">{t('rightPanel.contextOps.ops.abModes.off', { defaultValue: 'off' })}</option>
+            <option value="shadow">{t('rightPanel.contextOps.ops.abModes.shadow', { defaultValue: 'shadow' })}</option>
+            <option value="split">{t('rightPanel.contextOps.ops.abModes.split', { defaultValue: 'split' })}</option>
           </select>
         </label>
       </div>
 
       <div className="rounded-md border border-gray-200 dark:border-gray-700 px-3 py-2 space-y-2">
-        <div className="text-xs font-medium text-gray-800 dark:text-gray-200">Chaos Probe</div>
+        <div className="text-xs font-medium text-gray-800 dark:text-gray-200">
+          {t('rightPanel.contextOps.ops.chaosProbe', { defaultValue: 'Chaos Probe' })}
+        </div>
         <div className="flex items-center gap-2">
           <label className="text-xs text-gray-600 dark:text-gray-300">
-            Iterations
+            {t('rightPanel.contextOps.ops.iterations', { defaultValue: 'Iterations' })}
             <input
               type="number"
               min={1}
@@ -441,7 +478,7 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
             />
           </label>
           <label className="text-xs text-gray-600 dark:text-gray-300">
-            Failure p
+            {t('rightPanel.contextOps.ops.failureProbability', { defaultValue: 'Failure p' })}
             <input
               type="number"
               min={0}
@@ -460,19 +497,27 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
             disabled={!effectiveProjectPath || isBusy}
             className="px-2 py-1 text-xs rounded bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60"
           >
-            {isBusy ? 'Running...' : 'Run'}
+            {isBusy
+              ? t('rightPanel.contextOps.actions.running', { defaultValue: 'Running...' })
+              : t('rightPanel.contextOps.actions.run', { defaultValue: 'Run' })}
           </button>
         </div>
         {lastChaosReport && (
           <div className="text-xs text-gray-700 dark:text-gray-300">
-            last: {lastChaosReport.run_id.slice(0, 8)} · injected={lastChaosReport.injected_faults} · fallback=
-            {fmtPct(lastChaosReport.fallback_success_rate)}
+            {t('rightPanel.contextOps.ops.lastRun', {
+              defaultValue: 'last: {{runId}} · injected={{injected}} · fallback={{fallback}}',
+              runId: lastChaosReport.run_id.slice(0, 8),
+              injected: lastChaosReport.injected_faults,
+              fallback: fmtPct(lastChaosReport.fallback_success_rate),
+            })}
           </div>
         )}
       </div>
 
       <div className="rounded-md border border-gray-200 dark:border-gray-700 px-3 py-2">
-        <div className="text-xs font-medium text-gray-800 dark:text-gray-200">Runbook</div>
+        <div className="text-xs font-medium text-gray-800 dark:text-gray-200">
+          {t('rightPanel.contextOps.ops.runbook', { defaultValue: 'Runbook' })}
+        </div>
         <div className="mt-1 text-xs text-gray-600 dark:text-gray-300 break-all">
           {dashboard?.runbook_path ?? 'docs/Context-V2-Incident-Runbook.md'}
         </div>
@@ -480,12 +525,19 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
 
       {chaosRuns.length > 0 && (
         <div className="rounded-md border border-gray-200 dark:border-gray-700 px-3 py-2">
-          <div className="text-xs font-medium text-gray-800 dark:text-gray-200">Recent Chaos Runs</div>
+          <div className="text-xs font-medium text-gray-800 dark:text-gray-200">
+            {t('rightPanel.contextOps.ops.recentChaosRuns', { defaultValue: 'Recent Chaos Runs' })}
+          </div>
           <div className="mt-2 space-y-1 max-h-36 overflow-y-auto">
             {chaosRuns.map((run) => (
               <div key={run.run_id} className="text-xs text-gray-700 dark:text-gray-300">
-                {fmtTime(run.created_at)} · {run.run_id.slice(0, 8)} · iter={run.iterations} · fallback=
-                {fmtPct(run.fallback_success_rate)}
+                {t('rightPanel.contextOps.ops.chaosRunItem', {
+                  defaultValue: '{{time}} · {{runId}} · iter={{iterations}} · fallback={{fallback}}',
+                  time: fmtTime(run.created_at),
+                  runId: run.run_id.slice(0, 8),
+                  iterations: run.iterations,
+                  fallback: fmtPct(run.fallback_success_rate),
+                })}
               </div>
             ))}
           </div>
@@ -504,16 +556,16 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
       <div className="shrink-0 border-b border-gray-200 dark:border-gray-700 p-2 space-y-2">
         <div className="flex items-center gap-1">
           <button className={tabButtonClass('inspector')} onClick={() => setActiveTab('inspector')}>
-            Inspector
+            {t('rightPanel.contextOps.tabs.inspector', { defaultValue: 'Inspector' })}
           </button>
           <button className={tabButtonClass('trace')} onClick={() => setActiveTab('trace')}>
-            Trace
+            {t('rightPanel.contextOps.tabs.trace', { defaultValue: 'Trace' })}
           </button>
           <button className={tabButtonClass('artifacts')} onClick={() => setActiveTab('artifacts')}>
-            Artifacts
+            {t('rightPanel.contextOps.tabs.artifacts', { defaultValue: 'Artifacts' })}
           </button>
           <button className={tabButtonClass('ops')} onClick={() => setActiveTab('ops')}>
-            Ops
+            {t('rightPanel.contextOps.tabs.ops', { defaultValue: 'Ops' })}
           </button>
           <button
             className="ml-auto px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300"
@@ -525,11 +577,15 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
             }}
             disabled={!effectiveProjectPath}
           >
-            Refresh
+            {t('rightPanel.contextOps.actions.refresh', { defaultValue: 'Refresh' })}
           </button>
         </div>
         <div className="text-2xs text-gray-500 dark:text-gray-400 truncate">
-          project: {effectiveProjectPath || '-'} | session: {sessionId || '-'}
+          {t('rightPanel.contextOps.meta.projectSession', {
+            defaultValue: 'project: {{project}} | session: {{session}}',
+            project: effectiveProjectPath || '-',
+            session: sessionId || '-',
+          })}
         </div>
       </div>
 
@@ -539,7 +595,7 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
         <div className="shrink-0 border-t border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 px-3 py-2 flex items-center gap-2">
           <div className="text-xs text-red-700 dark:text-red-300 flex-1">{error}</div>
           <button className="text-xs text-red-700 dark:text-red-300 underline" onClick={clearError}>
-            dismiss
+            {t('rightPanel.contextOps.actions.dismiss', { defaultValue: 'dismiss' })}
           </button>
         </div>
       )}

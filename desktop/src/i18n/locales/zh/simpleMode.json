@@ -843,6 +843,79 @@
     "outputTab": "输出",
     "gitTab": "Git",
     "contextTab": "上下文",
+    "contextOps": {
+      "tabs": {
+        "inspector": "检查器",
+        "trace": "追踪",
+        "artifacts": "工件",
+        "ops": "运维"
+      },
+      "common": {
+        "none": "无"
+      },
+      "actions": {
+        "refresh": "刷新",
+        "load": "加载",
+        "save": "保存",
+        "apply": "应用",
+        "delete": "删除",
+        "run": "运行",
+        "running": "运行中...",
+        "dismiss": "关闭",
+        "pin": "固定",
+        "pinned": "已固定",
+        "exclude": "排除",
+        "excluded": "已排除"
+      },
+      "empty": {
+        "envelope": "还没有捕获到上下文封装。请先发送一条消息生成上下文。",
+        "trace": "未加载追踪。",
+        "artifacts": "没有工件。"
+      },
+      "stats": {
+        "trace": "追踪",
+        "budget": "预算",
+        "compaction": "压缩",
+        "mode": "模式",
+        "availability": "可用性",
+        "degradedRate": "降级率",
+        "p95Latency": "P95 延迟",
+        "traces": "追踪数"
+      },
+      "sources": {
+        "title": "来源（{{count}}）",
+        "tokenShort": "tok"
+      },
+      "trace": {
+        "placeholder": "trace_id"
+      },
+      "artifacts": {
+        "namePlaceholder": "工件名称"
+      },
+      "ops": {
+        "alerts": "告警",
+        "featureFlags": "功能开关",
+        "rolloutTitle": "灰度 / A-B",
+        "enabled": "启用",
+        "rolloutPercent": "灰度比例：{{value}}%",
+        "abMode": "A/B 模式",
+        "abModes": {
+          "off": "关闭",
+          "shadow": "影子",
+          "split": "分流"
+        },
+        "chaosProbe": "混沌探针",
+        "iterations": "迭代次数",
+        "failureProbability": "故障概率",
+        "lastRun": "最近一次：{{runId}} · 注入={{injected}} · 回退={{fallback}}",
+        "runbook": "运行手册",
+        "recentChaosRuns": "最近混沌运行",
+        "chaosRunItem": "{{time}} · {{runId}} · iter={{iterations}} · fallback={{fallback}}"
+      },
+      "meta": {
+        "projectSession": "项目：{{project}} | 会话：{{session}}"
+      }
+    },
     "errors": {
       "summary": "{{count}} 条问题",
       "dismiss": "忽略",

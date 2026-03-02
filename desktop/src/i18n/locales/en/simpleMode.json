@@ -843,6 +843,79 @@
     "outputTab": "Output",
     "gitTab": "Git",
     "contextTab": "Context",
+    "contextOps": {
+      "tabs": {
+        "inspector": "Inspector",
+        "trace": "Trace",
+        "artifacts": "Artifacts",
+        "ops": "Ops"
+      },
+      "common": {
+        "none": "none"
+      },
+      "actions": {
+        "refresh": "Refresh",
+        "load": "Load",
+        "save": "Save",
+        "apply": "Apply",
+        "delete": "Delete",
+        "run": "Run",
+        "running": "Running...",
+        "dismiss": "dismiss",
+        "pin": "Pin",
+        "pinned": "Pinned",
+        "exclude": "Exclude",
+        "excluded": "Excluded"
+      },
+      "empty": {
+        "envelope": "No context envelope captured yet. Send a message to generate one.",
+        "trace": "No trace loaded.",
+        "artifacts": "No artifacts."
+      },
+      "stats": {
+        "trace": "Trace",
+        "budget": "Budget",
+        "compaction": "Compaction",
+        "mode": "Mode",
+        "availability": "Availability",
+        "degradedRate": "Degraded Rate",
+        "p95Latency": "P95 Latency",
+        "traces": "Traces"
+      },
+      "sources": {
+        "title": "Sources ({{count}})",
+        "tokenShort": "tok"
+      },
+      "trace": {
+        "placeholder": "trace_id"
+      },
+      "artifacts": {
+        "namePlaceholder": "artifact name"
+      },
+      "ops": {
+        "alerts": "Alerts",
+        "featureFlags": "Feature Flags",
+        "rolloutTitle": "Rollout / A-B",
+        "enabled": "Enabled",
+        "rolloutPercent": "Rollout %: {{value}}",
+        "abMode": "A/B mode",
+        "abModes": {
+          "off": "off",
+          "shadow": "shadow",
+          "split": "split"
+        },
+        "chaosProbe": "Chaos Probe",
+        "iterations": "Iterations",
+        "failureProbability": "Failure p",
+        "lastRun": "last: {{runId}} · injected={{injected}} · fallback={{fallback}}",
+        "runbook": "Runbook",
+        "recentChaosRuns": "Recent Chaos Runs",
+        "chaosRunItem": "{{time}} · {{runId}} · iter={{iterations}} · fallback={{fallback}}"
+      },
+      "meta": {
+        "projectSession": "project: {{project}} | session: {{session}}"
+      }
+    },
     "errors": {
       "summary": "{{count}} issue(s)",
       "dismiss": "Dismiss",

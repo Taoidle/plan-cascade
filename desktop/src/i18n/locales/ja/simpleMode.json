@@ -823,6 +823,80 @@
   "rightPanel": {
     "outputTab": "出力",
     "gitTab": "Git",
+    "contextTab": "コンテキスト",
+    "contextOps": {
+      "tabs": {
+        "inspector": "インスペクター",
+        "trace": "トレース",
+        "artifacts": "アーティファクト",
+        "ops": "運用"
+      },
+      "common": {
+        "none": "なし"
+      },
+      "actions": {
+        "refresh": "更新",
+        "load": "読み込み",
+        "save": "保存",
+        "apply": "適用",
+        "delete": "削除",
+        "run": "実行",
+        "running": "実行中...",
+        "dismiss": "閉じる",
+        "pin": "固定",
+        "pinned": "固定済み",
+        "exclude": "除外",
+        "excluded": "除外済み"
+      },
+      "empty": {
+        "envelope": "まだコンテキストエンベロープがありません。メッセージ送信後に生成されます。",
+        "trace": "トレースが読み込まれていません。",
+        "artifacts": "アーティファクトはありません。"
+      },
+      "stats": {
+        "trace": "トレース",
+        "budget": "予算",
+        "compaction": "圧縮",
+        "mode": "モード",
+        "availability": "可用性",
+        "degradedRate": "劣化率",
+        "p95Latency": "P95 レイテンシ",
+        "traces": "トレース数"
+      },
+      "sources": {
+        "title": "ソース ({{count}})",
+        "tokenShort": "tok"
+      },
+      "trace": {
+        "placeholder": "trace_id"
+      },
+      "artifacts": {
+        "namePlaceholder": "アーティファクト名"
+      },
+      "ops": {
+        "alerts": "アラート",
+        "featureFlags": "機能フラグ",
+        "rolloutTitle": "ロールアウト / A-B",
+        "enabled": "有効",
+        "rolloutPercent": "ロールアウト %: {{value}}",
+        "abMode": "A/B モード",
+        "abModes": {
+          "off": "off",
+          "shadow": "shadow",
+          "split": "split"
+        },
+        "chaosProbe": "カオスプローブ",
+        "iterations": "反復回数",
+        "failureProbability": "障害確率",
+        "lastRun": "最新: {{runId}} · 注入={{injected}} · フォールバック={{fallback}}",
+        "runbook": "ランブック",
+        "recentChaosRuns": "最近のカオス実行",
+        "chaosRunItem": "{{time}} · {{runId}} · iter={{iterations}} · fallback={{fallback}}"
+      },
+      "meta": {
+        "projectSession": "project: {{project}} | session: {{session}}"
+      }
+    },
     "errors": {
       "summary": "{{count}} 件の問題",
       "dismiss": "閉じる",
