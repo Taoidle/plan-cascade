@@ -133,8 +133,10 @@ export interface RagQueryRequest {
 /** Recorded retrieval execution metadata for observability. */
 export interface QueryRunSummary {
   id: number;
+  project_id: string;
   query: string;
   collection_scope: string;
+  retrieval_profile: string;
   top_k: number;
   vector_candidates: number;
   bm25_candidates: number;
@@ -143,6 +145,27 @@ export interface QueryRunSummary {
   total_ms: number;
   result_count: number;
   created_at: string;
+}
+
+/** Document match result for picker search. */
+export interface DocumentSearchMatch {
+  collection_id: string;
+  document_uid: string;
+  display_name: string;
+}
+
+/** Aggregated monitoring metrics for knowledge subsystem behavior. */
+export interface KnowledgeObservabilityMetrics {
+  query_run_scope_checks_total: number;
+  query_run_scope_hits_total: number;
+  query_run_scope_hit_rate: number;
+  ingest_crosstalk_alert_total: number;
+  picker_search_total: number;
+  picker_search_empty_total: number;
+  picker_search_empty_rate: number;
+  plan_knowledge_attempt_total: number;
+  plan_knowledge_hit_total: number;
+  plan_knowledge_hit_rate: number;
 }
 
 function normalizeDocumentSummary(document: DocumentSummary): DocumentSummary {
@@ -242,6 +265,78 @@ export async function ragListQueryRuns(
       collection_ids: collectionIds ?? null,
       limit: limit ?? null,
     });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Search documents by display name across project collections.
+ */
+export async function ragSearchDocuments(
+  projectId: string,
+  query: string,
+  collectionIds?: string[],
+  limit?: number,
+): Promise<CommandResponse<DocumentSearchMatch[]>> {
+  try {
+    return await invoke<CommandResponse<DocumentSearchMatch[]>>('rag_search_documents', {
+      projectId,
+      project_id: projectId,
+      query,
+      collectionIds: collectionIds ?? null,
+      collection_ids: collectionIds ?? null,
+      limit: limit ?? null,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Read knowledge observability metrics snapshot.
+ */
+export async function ragGetObservabilityMetrics(): Promise<CommandResponse<KnowledgeObservabilityMetrics>> {
+  try {
+    return await invoke<CommandResponse<KnowledgeObservabilityMetrics>>('rag_get_observability_metrics');
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Record picker search event for empty-result rate monitoring.
+ */
+export async function ragRecordPickerSearch(empty: boolean): Promise<CommandResponse<boolean>> {
+  try {
+    return await invoke<CommandResponse<boolean>>('rag_record_picker_search', { empty });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Record a potential ingest progress crosstalk alert.
+ */
+export async function ragRecordIngestCrosstalkAlert(): Promise<CommandResponse<boolean>> {
+  try {
+    return await invoke<CommandResponse<boolean>>('rag_record_ingest_crosstalk_alert');
   } catch (error) {
     return {
       success: false,

@@ -362,9 +362,14 @@ export function RetrievalLab({ projectId, collectionId }: RetrievalLabProps) {
                 <div key={run.id} className="px-4 py-3 space-y-2">
                   <div className="flex items-center justify-between gap-3">
                     <div className="text-sm font-medium text-gray-900 dark:text-white truncate">{run.query}</div>
-                    <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                      {formatDateTime(run.created_at)}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 uppercase">
+                        {run.retrieval_profile}
+                      </span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                        {formatDateTime(run.created_at)}
+                      </span>
+                    </div>
                   </div>
                   <div className="grid grid-cols-3 gap-2 text-xs text-gray-600 dark:text-gray-400">
                     <div>

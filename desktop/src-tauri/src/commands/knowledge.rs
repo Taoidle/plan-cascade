@@ -12,9 +12,12 @@ use tracing::{info, warn};
 use crate::models::response::CommandResponse;
 use crate::services::knowledge::chunker::{Chunker, Document, ParagraphChunker};
 use crate::services::knowledge::docs_indexer::{DocsIndexer, DocsKbStatus};
+use crate::services::knowledge::observability::{
+    self, KnowledgeObservabilityMetrics,
+};
 use crate::services::knowledge::pipeline::{
-    CollectionUpdateCheck, DocumentSummary, KnowledgeCollection, QueryRunSummary, RagPipeline,
-    RagQueryResult, ScopedDocumentRef,
+    CollectionUpdateCheck, DocumentSearchMatch, DocumentSummary, KnowledgeCollection,
+    QueryRunSummary, RagPipeline, RagQueryResult, ScopedDocumentRef,
 };
 use crate::services::knowledge::reranker::{NoopReranker, Reranker, SearchResult};
 use crate::services::orchestrator::embedding_config_builder;
@@ -510,6 +513,77 @@ pub async fn rag_list_query_runs(
 
     match pipeline.list_query_runs(&project_id, collection_ids.as_deref(), limit.unwrap_or(20)) {
         Ok(runs) => Ok(CommandResponse::ok(runs)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Read knowledge observability metrics snapshot.
+#[tauri::command]
+pub async fn rag_get_observability_metrics(
+    app_state: State<'_, crate::state::AppState>,
+) -> Result<CommandResponse<KnowledgeObservabilityMetrics>, String> {
+    match app_state
+        .with_database(observability::read_metrics_snapshot)
+        .await
+    {
+        Ok(metrics) => Ok(CommandResponse::ok(metrics)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Record a picker search event for empty-result rate monitoring.
+#[tauri::command]
+pub async fn rag_record_picker_search(
+    app_state: State<'_, crate::state::AppState>,
+    empty: bool,
+) -> Result<CommandResponse<bool>, String> {
+    match app_state
+        .with_database(|db| observability::record_picker_search(db, empty))
+        .await
+    {
+        Ok(()) => Ok(CommandResponse::ok(true)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Record a potential ingest progress crosstalk alert.
+#[tauri::command]
+pub async fn rag_record_ingest_crosstalk_alert(
+    app_state: State<'_, crate::state::AppState>,
+) -> Result<CommandResponse<bool>, String> {
+    match app_state
+        .with_database(observability::record_ingest_crosstalk_alert)
+        .await
+    {
+        Ok(()) => Ok(CommandResponse::ok(true)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Search knowledge documents by name for source-picking.
+#[tauri::command]
+pub async fn rag_search_documents(
+    knowledge_state: State<'_, KnowledgeState>,
+    app_state: State<'_, crate::state::AppState>,
+    project_id: String,
+    query: String,
+    collection_ids: Option<Vec<String>>,
+    limit: Option<usize>,
+) -> Result<CommandResponse<Vec<DocumentSearchMatch>>, String> {
+    ensure_initialized(&knowledge_state, &app_state).await?;
+
+    let pipeline = match knowledge_state.get_pipeline().await {
+        Ok(p) => p,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+
+    match pipeline.search_documents(
+        &project_id,
+        &query,
+        collection_ids.as_deref(),
+        limit.unwrap_or(60),
+    ) {
+        Ok(matches) => Ok(CommandResponse::ok(matches)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
 }

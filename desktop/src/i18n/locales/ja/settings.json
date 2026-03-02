@@ -48,6 +48,18 @@
       "description": "有効時、マウスを左右端のホットゾーンに移動するとサイドバー/出力パネルを一時展開し、離れると短い遅延後に自動で折りたたみます。"
     },
 
+    "knowledgeBase": {
+      "title": "ナレッジベース",
+      "autoEnsureDocs": "ワークスペース用 docs コレクションを自動作成",
+      "autoEnsureDocsDescription": "有効にすると、ワークスペースを開いたときに docs コレクションを自動作成して関連付けます。安全性のため既定はオフです。",
+      "kbQueryRunsV2": "クエリ履歴のスコープ厳密フィルタ（v2）を使用",
+      "kbQueryRunsV2Description": "有効時、クエリ履歴のフィルタは構造化された collection scope 結合を使用し、従来の曖昧一致を使いません。",
+      "kbPickerServerSearch": "ピッカーでサーバー側ドキュメント検索を使用",
+      "kbPickerServerSearchDescription": "有効時、ローカルで未展開のコレクション内ドキュメントもソースピッカー検索でヒットします。",
+      "kbIngestJobScopedProgress": "job 単位の取り込み進捗イベントを使用",
+      "kbIngestJobScopedProgressDescription": "有効時、アップロード進捗を job/project/collection ごとに分離し、コレクション間の進捗干渉を防ぎます。"
+    },
+
     "language": {
       "title": "言語",
       "description": "お好みの言語を選択してください。"

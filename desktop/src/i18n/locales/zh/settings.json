@@ -48,6 +48,18 @@
       "description": "开启后，鼠标移入左右边缘热区会临时展开侧边栏/输出面板，移开后会在短暂延时后自动收起。"
     },
 
+    "knowledgeBase": {
+      "title": "知识库",
+      "autoEnsureDocs": "为工作区自动创建 docs 集合",
+      "autoEnsureDocsDescription": "开启后，进入工作区会自动创建并关联 docs 集合。默认关闭以保证更安全的行为。",
+      "kbQueryRunsV2": "使用精确的查询历史作用域过滤（v2）",
+      "kbQueryRunsV2Description": "开启后，查询历史过滤将使用结构化 collection scope 关联，不再依赖旧的模糊匹配。",
+      "kbPickerServerSearch": "在选择器中启用服务端文档搜索",
+      "kbPickerServerSearchDescription": "开启后，来源选择器可命中未在本地展开的集合中的文档。",
+      "kbIngestJobScopedProgress": "使用 job 级别的入库进度事件",
+      "kbIngestJobScopedProgressDescription": "开启后，上传进度会按 job/project/collection 隔离，避免跨集合串扰。"
+    },
+
     "language": {
       "title": "语言",
       "description": "选择你偏好的语言。"

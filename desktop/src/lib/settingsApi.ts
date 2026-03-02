@@ -41,6 +41,12 @@ export interface SettingsUpdate {
   debug_mode?: boolean;
 }
 
+export interface KnowledgeFeatureFlags {
+  kbQueryRunsV2: boolean;
+  kbPickerServerSearch: boolean;
+  kbIngestJobScopedProgress: boolean;
+}
+
 /** Unified settings export (v6.0) */
 export interface UnifiedSettingsExport {
   version: string;
@@ -105,6 +111,30 @@ export async function updateSettings(update: SettingsUpdate): Promise<AppConfig>
 }
 
 /**
+ * Get knowledge feature flags persisted in backend settings DB.
+ */
+export async function getKnowledgeFeatureFlags(): Promise<KnowledgeFeatureFlags> {
+  const result = await invoke<CommandResponse<KnowledgeFeatureFlags>>('get_knowledge_feature_flags');
+  if (!result.success || !result.data) {
+    throw new Error(result.error || 'Failed to get knowledge feature flags');
+  }
+  return result.data;
+}
+
+/**
+ * Persist knowledge feature flags into backend settings DB.
+ */
+export async function setKnowledgeFeatureFlags(flags: KnowledgeFeatureFlags): Promise<KnowledgeFeatureFlags> {
+  const result = await invoke<CommandResponse<KnowledgeFeatureFlags>>('set_knowledge_feature_flags', {
+    flags,
+  });
+  if (!result.success || !result.data) {
+    throw new Error(result.error || 'Failed to set knowledge feature flags');
+  }
+  return result.data;
+}
+
+/**
  * Reset all settings (frontend + backend persisted state)
  */
 export async function resetAllSettings(): Promise<boolean> {
@@ -156,6 +186,8 @@ export function isTauriAvailable(): boolean {
 export default {
   getSettings,
   updateSettings,
+  getKnowledgeFeatureFlags,
+  setKnowledgeFeatureFlags,
   resetAllSettings,
   exportAllSettings,
   importAllSettings,

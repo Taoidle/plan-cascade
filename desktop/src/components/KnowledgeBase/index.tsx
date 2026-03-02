@@ -7,6 +7,5 @@
 export { KnowledgeBasePanel } from './KnowledgeBasePanel';
 export { CollectionDetail } from './CollectionDetail';
 export { DocumentUploader } from './DocumentUploader';
-export { KnowledgeQuery } from './KnowledgeQuery';
 export { RetrievalLab } from './RetrievalLab';
 export { SyncHealthPanel } from './SyncHealthPanel';

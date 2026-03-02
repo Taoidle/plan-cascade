@@ -42,13 +42,20 @@ function resetStore() {
     queryRunsByCollection: {},
     docsStatus: null,
     isLoading: false,
+    isLoadingCollections: false,
+    isLoadingDocuments: false,
+    isUpdatingCollection: false,
     isIngesting: false,
     isQuerying: false,
     isDeleting: false,
+    isDeletingCollection: false,
+    isDeletingDocument: false,
     isLoadingQueryRuns: false,
     isLoadingDocsStatus: false,
     isSyncingDocs: false,
     uploadProgress: 0,
+    uploadProgressByJob: {},
+    activeUploadJobByCollection: {},
     pendingUpdates: null,
     isCheckingUpdates: false,
     isApplyingUpdates: false,
@@ -165,11 +172,13 @@ describe('Knowledge Store', () => {
 
       const promise = useKnowledgeStore.getState().fetchCollections('proj-1');
       expect(useKnowledgeStore.getState().isLoading).toBe(true);
+      expect(useKnowledgeStore.getState().isLoadingCollections).toBe(true);
 
       resolveInvoke!({ success: true, data: [], error: null });
       await promise;
 
       expect(useKnowledgeStore.getState().isLoading).toBe(false);
+      expect(useKnowledgeStore.getState().isLoadingCollections).toBe(false);
     });
   });
 
@@ -418,7 +427,8 @@ describe('Knowledge Store', () => {
       const state = useKnowledgeStore.getState();
       expect(state.documents).toHaveLength(2);
       expect(state.documents[0].document_id).toBe('doc-1');
-      expect(state.isLoading).toBe(false);
+      expect(state.isLoadingDocuments).toBe(false);
+      expect(state.isLoadingCollections).toBe(false);
     });
 
     it('sets error on failure', async () => {
@@ -540,6 +550,22 @@ describe('Knowledge Store', () => {
       useKnowledgeStore.setState({ error: 'Some error' });
       useKnowledgeStore.getState().clearError();
       expect(useKnowledgeStore.getState().error).toBeNull();
+    });
+
+    it('tracks progress by upload job and clears active collection job', () => {
+      const store = useKnowledgeStore.getState();
+      store.setActiveUploadJob('col-1', 'job-1');
+      store.setUploadJobProgress('job-1', 55);
+
+      let state = useKnowledgeStore.getState();
+      expect(state.activeUploadJobByCollection['col-1']).toBe('job-1');
+      expect(state.uploadProgressByJob['job-1']).toBe(55);
+      expect(state.uploadProgress).toBe(55);
+
+      store.clearActiveUploadJob('col-1');
+      state = useKnowledgeStore.getState();
+      expect(state.activeUploadJobByCollection['col-1']).toBeUndefined();
+      expect(state.uploadProgressByJob['job-1']).toBe(55);
     });
   });
 });

@@ -23,10 +23,10 @@ use crate::services::plan_mode::types::{
     ClarificationAnswer, Plan, PlanAnalysis, PlanExecutionReport, PlanModePhase, PlanModeSession,
     StepExecutionState, StepOutput,
 };
+use crate::services::knowledge::observability;
 use crate::services::skills::model::InjectionPhase;
 use crate::services::task_mode::context_provider::{
-    query_selected_context_without_knowledge, ContextSourceConfig, MemorySourceConfig,
-    SkillsSourceConfig,
+    query_selected_context, ContextSourceConfig, MemorySourceConfig, SkillsSourceConfig,
 };
 use crate::state::AppState;
 
@@ -104,6 +104,7 @@ pub async fn enter_plan_mode(
     locale: Option<String>,
     state: tauri::State<'_, PlanModeState>,
     app_state: tauri::State<'_, AppState>,
+    knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
 ) -> Result<CommandResponse<PlanModeSession>, String> {
     if description.trim().is_empty() {
         return Ok(CommandResponse::err("Task description cannot be empty"));
@@ -141,6 +142,7 @@ pub async fn enter_plan_mode(
                 let lang_instruction = locale_instruction(locale_tag);
                 let plan_context = build_plan_conversation_context(
                     &app_state,
+                    &knowledge_state,
                     project_path.as_deref(),
                     conversation_context.as_deref(),
                     context_sources.as_ref(),
@@ -250,6 +252,7 @@ pub async fn submit_plan_clarification(
     locale: Option<String>,
     state: tauri::State<'_, PlanModeState>,
     app_state: tauri::State<'_, AppState>,
+    knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
 ) -> Result<CommandResponse<PlanModeSession>, String> {
     // Snapshot data needed for question generation.
     let (description, analysis, mut clarifications, adapter_name, current_question_text) = {
@@ -307,6 +310,7 @@ pub async fn submit_plan_clarification(
                 let lang_instruction = locale_instruction(locale_tag);
                 let plan_context = build_plan_conversation_context(
                     &app_state,
+                    &knowledge_state,
                     project_path.as_deref(),
                     conversation_context.as_deref(),
                     context_sources.as_ref(),
@@ -402,6 +406,7 @@ pub async fn generate_plan(
     locale: Option<String>,
     state: tauri::State<'_, PlanModeState>,
     app_state: tauri::State<'_, AppState>,
+    knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
 ) -> Result<CommandResponse<Plan>, String> {
     // Extract session data
     let (description, domain, adapter_name, clarifications) = {
@@ -444,6 +449,7 @@ pub async fn generate_plan(
             let lang_instruction = locale_instruction(locale_tag);
             let plan_context = build_plan_conversation_context(
                 &app_state,
+                &knowledge_state,
                 project_path.as_deref(),
                 conversation_context.as_deref(),
                 context_sources.as_ref(),
@@ -501,6 +507,7 @@ pub async fn approve_plan(
     locale: Option<String>,
     state: tauri::State<'_, PlanModeState>,
     app_state: tauri::State<'_, AppState>,
+    knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
     standalone_state: tauri::State<'_, crate::commands::standalone::StandaloneState>,
     permission_state: tauri::State<'_, crate::commands::permissions::PermissionState>,
     app_handle: tauri::AppHandle,
@@ -563,6 +570,7 @@ pub async fn approve_plan(
     let lang_instruction = locale_instruction(locale_tag).to_string();
     let execution_context = build_plan_conversation_context(
         &app_state,
+        &knowledge_state,
         project_path.as_deref(),
         conversation_context.as_deref(),
         context_sources.as_ref(),
@@ -918,6 +926,7 @@ fn default_plan_context_sources() -> ContextSourceConfig {
 
 async fn build_plan_conversation_context(
     app_state: &AppState,
+    knowledge_state: &crate::commands::knowledge::KnowledgeState,
     project_path: Option<&str>,
     conversation_context: Option<&str>,
     context_sources: Option<&ContextSourceConfig>,
@@ -940,11 +949,30 @@ async fn build_plan_conversation_context(
     let config = context_sources
         .cloned()
         .unwrap_or_else(default_plan_context_sources);
+    let knowledge_requested = config.knowledge.as_ref().map(|k| k.enabled).unwrap_or(false);
 
-    let enriched =
-        query_selected_context_without_knowledge(&config, app_state, project_path, query, phase)
+    let enriched = query_selected_context(
+        &config,
+        knowledge_state,
+        app_state,
+        project_path,
+        query,
+        phase,
+    )
+    .await;
+    if knowledge_requested {
+        let knowledge_hit = !enriched.knowledge_block.is_empty();
+        let _ = app_state
+            .with_database(|db| observability::record_plan_knowledge(db, knowledge_hit))
             .await;
+    }
 
+    if !enriched.knowledge_block.is_empty() {
+        sections.push(format!(
+            "[context-source] knowledge:retrieved\n{}",
+            enriched.knowledge_block
+        ));
+    }
     if !enriched.memory_block.is_empty() {
         sections.push(enriched.memory_block);
     }

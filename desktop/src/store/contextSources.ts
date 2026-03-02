@@ -12,6 +12,7 @@ import type { KnowledgeCollection, DocumentSummary, ScopedDocumentRef } from '..
 import { ragListCollections, ragListDocuments, ragEnsureDocsCollection } from '../lib/knowledgeApi';
 import type { MemoryEntry, MemoryScope, MemoryStats, SkillSummary } from '../types/skillMemory';
 import { useProjectsStore } from './projects';
+import { useSettingsStore } from './settings';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -268,8 +269,9 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
         });
       }
 
-      // Trigger docs collection creation if none exists for this workspace
-      if (!hasDocsCollection) {
+      // Trigger docs collection creation only when explicitly enabled in settings.
+      const autoEnsureDocs = useSettingsStore.getState().knowledgeAutoEnsureDocsCollection ?? false;
+      if (!hasDocsCollection && autoEnsureDocs) {
         try {
           const docsResult = await ragEnsureDocsCollection(workspacePath, projectId);
           if (docsResult.success && docsResult.data) {

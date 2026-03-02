@@ -8,9 +8,15 @@ import * as Dialog from '@radix-ui/react-dialog';
 import * as Tabs from '@radix-ui/react-tabs';
 import { Cross2Icon } from '@radix-ui/react-icons';
 import { clsx } from 'clsx';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '../../store/settings';
+import {
+  getKnowledgeFeatureFlags,
+  isTauriAvailable,
+  setKnowledgeFeatureFlags,
+  updateSettings,
+} from '../../lib/settingsApi';
 import { DEFAULT_MODEL_BY_PROVIDER, normalizeProvider } from '../../lib/providers';
 
 // Section components (to be implemented)
@@ -54,6 +60,28 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const { t } = useTranslation('settings');
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        if (!isTauriAvailable()) return;
+        const flags = await getKnowledgeFeatureFlags();
+        if (cancelled) return;
+        useSettingsStore.setState({
+          kbQueryRunsV2: flags.kbQueryRunsV2,
+          kbPickerServerSearch: flags.kbPickerServerSearch,
+          kbIngestJobScopedProgress: flags.kbIngestJobScopedProgress,
+        });
+      } catch (error) {
+        console.warn('Failed to load knowledge feature flags from backend:', error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   const tabs: { id: SettingsTab; label: string }[] = [
     { id: 'general', label: t('tabs.general') },
@@ -214,6 +242,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <button
               onClick={handleSave}
               disabled={isSaving}
+              data-testid="settings-save-button"
               className={clsx(
                 'px-4 py-2 rounded-lg',
                 'bg-primary-600 text-white',
@@ -238,8 +267,6 @@ async function saveSettingsToBackend() {
   // Sync key fields to Tauri backend config.json
   // (Zustand persist middleware already saves all settings to localStorage automatically)
   try {
-    const { updateSettings, isTauriAvailable } = await import('../../lib/settingsApi');
-
     if (isTauriAvailable()) {
       const canonicalProvider = normalizeProvider(settings.provider || '');
       const resolvedDefaultModel =
@@ -253,6 +280,11 @@ async function saveSettingsToBackend() {
         default_provider: settings.provider,
         default_model: resolvedDefaultModel,
         model_by_provider: settings.modelByProvider,
+      });
+      await setKnowledgeFeatureFlags({
+        kbQueryRunsV2: settings.kbQueryRunsV2,
+        kbPickerServerSearch: settings.kbPickerServerSearch,
+        kbIngestJobScopedProgress: settings.kbIngestJobScopedProgress,
       });
     }
   } catch (error) {

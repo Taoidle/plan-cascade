@@ -1,7 +1,19 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useContextSourcesStore } from './contextSources';
 import { useProjectsStore } from './projects';
+import { useSettingsStore } from './settings';
 import type { Project } from '../types/project';
+
+const { mockRagListCollections, mockRagEnsureDocsCollection } = vi.hoisted(() => ({
+  mockRagListCollections: vi.fn(),
+  mockRagEnsureDocsCollection: vi.fn(),
+}));
+
+vi.mock('../lib/knowledgeApi', () => ({
+  ragListCollections: mockRagListCollections,
+  ragListDocuments: vi.fn(),
+  ragEnsureDocsCollection: mockRagEnsureDocsCollection,
+}));
 
 function resetContextSourcesState() {
   useContextSourcesStore.setState({
@@ -40,6 +52,9 @@ describe('useContextSourcesStore', () => {
   beforeEach(() => {
     resetContextSourcesState();
     useProjectsStore.setState({ selectedProject: null });
+    useSettingsStore.setState({ knowledgeAutoEnsureDocsCollection: false });
+    mockRagListCollections.mockResolvedValue({ success: true, data: [], error: null });
+    mockRagEnsureDocsCollection.mockResolvedValue({ success: true, data: null, error: null });
   });
 
   it('buildConfig in auto mode maps to excluded_memory_ids only', () => {
@@ -125,5 +140,56 @@ describe('useContextSourcesStore', () => {
 
     const config = useContextSourcesStore.getState().buildConfig();
     expect(config.project_id).toBe('project-123');
+  });
+
+  it('autoAssociateForWorkspace does not auto-ensure docs when opt-in is disabled', async () => {
+    useSettingsStore.setState({ knowledgeAutoEnsureDocsCollection: false });
+    mockRagListCollections.mockResolvedValue({
+      success: true,
+      data: [
+        {
+          id: 'col-1',
+          name: 'Workspace Notes',
+          project_id: 'proj-1',
+          description: '',
+          chunk_count: 0,
+          created_at: '',
+          updated_at: '',
+          workspace_path: '/workspace/demo',
+        },
+      ],
+      error: null,
+    });
+
+    await useContextSourcesStore.getState().autoAssociateForWorkspace('/workspace/demo', 'proj-1');
+
+    expect(mockRagEnsureDocsCollection).not.toHaveBeenCalled();
+  });
+
+  it('autoAssociateForWorkspace ensures docs when opt-in is enabled', async () => {
+    useSettingsStore.setState({ knowledgeAutoEnsureDocsCollection: true });
+    mockRagListCollections.mockResolvedValue({
+      success: true,
+      data: [],
+      error: null,
+    });
+    mockRagEnsureDocsCollection.mockResolvedValue({
+      success: true,
+      data: {
+        id: 'docs-col',
+        name: '[Docs] /workspace/demo',
+        project_id: 'proj-1',
+        description: '',
+        chunk_count: 0,
+        created_at: '',
+        updated_at: '',
+        workspace_path: '/workspace/demo',
+      },
+      error: null,
+    });
+
+    await useContextSourcesStore.getState().autoAssociateForWorkspace('/workspace/demo', 'proj-1');
+
+    expect(mockRagEnsureDocsCollection).toHaveBeenCalledWith('/workspace/demo', 'proj-1');
   });
 });

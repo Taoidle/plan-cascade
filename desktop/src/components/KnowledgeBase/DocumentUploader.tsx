@@ -10,7 +10,8 @@ import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { listen } from '@tauri-apps/api/event';
 import { useKnowledgeStore } from '../../store/knowledge';
-import type { DocumentInput } from '../../lib/knowledgeApi';
+import { useSettingsStore } from '../../store/settings';
+import { ragRecordIngestCrosstalkAlert, type DocumentInput } from '../../lib/knowledgeApi';
 
 // ---------------------------------------------------------------------------
 // Accepted file types
@@ -32,25 +33,89 @@ interface DocumentUploaderProps {
 
 export function DocumentUploader({ projectId, collectionId }: DocumentUploaderProps) {
   const { t } = useTranslation('knowledge');
-  const { ingestDocuments, isIngesting, uploadProgress } = useKnowledgeStore();
+  const ingestDocuments = useKnowledgeStore((state) => state.ingestDocuments);
+  const clearActiveUploadJob = useKnowledgeStore((state) => state.clearActiveUploadJob);
+  const uploadProgressByJob = useKnowledgeStore((state) => state.uploadProgressByJob);
+  const activeUploadJobByCollection = useKnowledgeStore((state) => state.activeUploadJobByCollection);
+  const jobScopedProgressEnabled = useSettingsStore((state) => state.kbIngestJobScopedProgress);
 
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isSubmittingUpload, setIsSubmittingUpload] = useState(false);
+  const [legacyProgress, setLegacyProgress] = useState(0);
+  const [isLegacyIngesting, setIsLegacyIngesting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const activeJobId = activeUploadJobByCollection[collectionId];
+  const uploadProgress = activeJobId
+    ? (uploadProgressByJob[activeJobId] ?? 0)
+    : isLegacyIngesting
+      ? legacyProgress
+      : isSubmittingUpload
+        ? 10
+        : 0;
+  const isCollectionIngesting = Boolean(activeJobId) || isLegacyIngesting || isSubmittingUpload;
+
+  const buildUploadSourcePath = useCallback((filename: string) => {
+    const randomPart =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+    const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+    return `upload://manual/${randomPart}/${safeName}`;
+  }, []);
 
   // Listen for real-time ingest progress events from the backend
   useEffect(() => {
     let unlisten: (() => void) | undefined;
-    listen<{ stage: string; progress: number; detail: string }>('knowledge:ingest-progress', (event) => {
-      useKnowledgeStore.setState({ uploadProgress: event.payload.progress });
-    }).then((fn) => {
-      unlisten = fn;
-    });
+    listen<{
+      job_id?: string;
+      project_id?: string;
+      collection_id?: string;
+      stage: string;
+      progress: number;
+      detail: string;
+    }>('knowledge:ingest-progress', (event) => {
+      const payload = event.payload;
+      if (!payload) {
+        return;
+      }
+      if (payload.project_id && payload.project_id !== projectId) {
+        void ragRecordIngestCrosstalkAlert();
+        return;
+      }
+      if (payload.collection_id && payload.collection_id !== collectionId) {
+        void ragRecordIngestCrosstalkAlert();
+        return;
+      }
+      const store = useKnowledgeStore.getState();
+      if (!jobScopedProgressEnabled || !payload.job_id) {
+        setLegacyProgress(payload.progress);
+        setIsLegacyIngesting(payload.progress < 100);
+        return;
+      }
+      const currentJob = store.activeUploadJobByCollection[collectionId];
+      if (!currentJob) {
+        store.setActiveUploadJob(collectionId, payload.job_id);
+        store.setUploadJobProgress(payload.job_id, payload.progress);
+        return;
+      }
+      if (currentJob !== payload.job_id) {
+        void ragRecordIngestCrosstalkAlert();
+        return;
+      }
+      store.setUploadJobProgress(payload.job_id, payload.progress);
+    })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {
+        // best-effort listener only
+      });
     return () => {
       unlisten?.();
     };
-  }, []);
+  }, [projectId, collectionId, jobScopedProgressEnabled]);
 
   const isAcceptedFile = (file: File): boolean => {
     const ext = '.' + file.name.split('.').pop()?.toLowerCase();
@@ -102,6 +167,9 @@ export function DocumentUploader({ projectId, collectionId }: DocumentUploaderPr
   const handleUpload = useCallback(async () => {
     if (selectedFiles.length === 0) return;
     setUploadError(null);
+    setIsSubmittingUpload(true);
+    setLegacyProgress(0);
+    setIsLegacyIngesting(false);
 
     try {
       // Binary file types that need base64 encoding
@@ -126,7 +194,7 @@ export function DocumentUploader({ projectId, collectionId }: DocumentUploaderPr
               id: `${file.name}-${Date.now()}`,
               content: '',
               content_base64: base64,
-              source_path: file.name,
+              source_path: buildUploadSourcePath(file.name),
               source_type: ext,
             };
           } else {
@@ -135,7 +203,7 @@ export function DocumentUploader({ projectId, collectionId }: DocumentUploaderPr
             return {
               id: `${file.name}-${Date.now()}`,
               content: text,
-              source_path: file.name,
+              source_path: buildUploadSourcePath(file.name),
               source_type: ext,
             };
           }
@@ -145,11 +213,16 @@ export function DocumentUploader({ projectId, collectionId }: DocumentUploaderPr
       const ok = await ingestDocuments(projectId, collectionId, documents);
       if (ok) {
         setSelectedFiles([]);
+        clearActiveUploadJob(collectionId);
       }
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : String(err));
+      clearActiveUploadJob(collectionId);
+    } finally {
+      setIsSubmittingUpload(false);
+      setIsLegacyIngesting(false);
     }
-  }, [selectedFiles, projectId, collectionId, ingestDocuments]);
+  }, [selectedFiles, projectId, collectionId, ingestDocuments, buildUploadSourcePath, clearActiveUploadJob]);
 
   const formatSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
@@ -248,7 +321,7 @@ export function DocumentUploader({ projectId, collectionId }: DocumentUploaderPr
       )}
 
       {/* Upload progress */}
-      {isIngesting && (
+      {isCollectionIngesting && (
         <div className="space-y-2">
           <div className="flex justify-between text-sm">
             <span className="text-gray-600 dark:text-gray-400">{t('upload.ingesting')}</span>
@@ -264,7 +337,7 @@ export function DocumentUploader({ projectId, collectionId }: DocumentUploaderPr
       )}
 
       {/* Upload button */}
-      {selectedFiles.length > 0 && !isIngesting && (
+      {selectedFiles.length > 0 && !isCollectionIngesting && (
         <button
           onClick={handleUpload}
           className={clsx(

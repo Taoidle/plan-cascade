@@ -20,8 +20,22 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
   const { t } = useTranslation('settings');
   const { t: tCommon } = useTranslation();
   const { t: tWizard } = useTranslation('wizard');
-  const { defaultMode, setDefaultMode, theme, setTheme, autoPanelHoverEnabled, setAutoPanelHoverEnabled } =
-    useSettingsStore();
+  const {
+    defaultMode,
+    setDefaultMode,
+    theme,
+    setTheme,
+    autoPanelHoverEnabled,
+    setAutoPanelHoverEnabled,
+    knowledgeAutoEnsureDocsCollection,
+    setKnowledgeAutoEnsureDocsCollection,
+    kbQueryRunsV2,
+    setKbQueryRunsV2,
+    kbPickerServerSearch,
+    setKbPickerServerSearch,
+    kbIngestJobScopedProgress,
+    setKbIngestJobScopedProgress,
+  } = useSettingsStore();
   const { triggerWizard, startTour } = useOnboardingStore();
 
   return (
@@ -131,6 +145,106 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
           <div>
             <div className="font-medium text-gray-900 dark:text-white text-sm">{t('general.panelHover.enable')}</div>
             <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('general.panelHover.description')}</div>
+          </div>
+        </label>
+      </section>
+
+      {/* Knowledge Base Section */}
+      <section className="space-y-4">
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('general.knowledgeBase.title')}</h3>
+        <label
+          className={clsx(
+            'flex items-start gap-4 p-4 rounded-lg border cursor-pointer',
+            'transition-colors',
+            'border-gray-200 dark:border-gray-700',
+            'hover:bg-gray-50 dark:hover:bg-gray-800',
+          )}
+        >
+          <input
+            type="checkbox"
+            checked={knowledgeAutoEnsureDocsCollection}
+            onChange={(e) => setKnowledgeAutoEnsureDocsCollection(e.target.checked)}
+            className="mt-1 text-primary-600"
+          />
+          <div>
+            <div className="font-medium text-gray-900 dark:text-white text-sm">
+              {t('general.knowledgeBase.autoEnsureDocs')}
+            </div>
+            <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              {t('general.knowledgeBase.autoEnsureDocsDescription')}
+            </div>
+          </div>
+        </label>
+
+        <label
+          className={clsx(
+            'flex items-start gap-4 p-4 rounded-lg border cursor-pointer',
+            'transition-colors',
+            'border-gray-200 dark:border-gray-700',
+            'hover:bg-gray-50 dark:hover:bg-gray-800',
+          )}
+        >
+          <input
+            type="checkbox"
+            checked={kbQueryRunsV2}
+            onChange={(e) => setKbQueryRunsV2(e.target.checked)}
+            className="mt-1 text-primary-600"
+          />
+          <div>
+            <div className="font-medium text-gray-900 dark:text-white text-sm">
+              {t('general.knowledgeBase.kbQueryRunsV2')}
+            </div>
+            <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              {t('general.knowledgeBase.kbQueryRunsV2Description')}
+            </div>
+          </div>
+        </label>
+
+        <label
+          className={clsx(
+            'flex items-start gap-4 p-4 rounded-lg border cursor-pointer',
+            'transition-colors',
+            'border-gray-200 dark:border-gray-700',
+            'hover:bg-gray-50 dark:hover:bg-gray-800',
+          )}
+        >
+          <input
+            type="checkbox"
+            checked={kbPickerServerSearch}
+            onChange={(e) => setKbPickerServerSearch(e.target.checked)}
+            className="mt-1 text-primary-600"
+          />
+          <div>
+            <div className="font-medium text-gray-900 dark:text-white text-sm">
+              {t('general.knowledgeBase.kbPickerServerSearch')}
+            </div>
+            <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              {t('general.knowledgeBase.kbPickerServerSearchDescription')}
+            </div>
+          </div>
+        </label>
+
+        <label
+          className={clsx(
+            'flex items-start gap-4 p-4 rounded-lg border cursor-pointer',
+            'transition-colors',
+            'border-gray-200 dark:border-gray-700',
+            'hover:bg-gray-50 dark:hover:bg-gray-800',
+          )}
+        >
+          <input
+            type="checkbox"
+            checked={kbIngestJobScopedProgress}
+            onChange={(e) => setKbIngestJobScopedProgress(e.target.checked)}
+            className="mt-1 text-primary-600"
+          />
+          <div>
+            <div className="font-medium text-gray-900 dark:text-white text-sm">
+              {t('general.knowledgeBase.kbIngestJobScopedProgress')}
+            </div>
+            <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              {t('general.knowledgeBase.kbIngestJobScopedProgressDescription')}
+            </div>
           </div>
         </label>
       </section>

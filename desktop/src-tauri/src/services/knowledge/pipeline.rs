@@ -7,7 +7,6 @@
 //! Each collection has its own set of chunks indexed in HNSW with
 //! collection-namespaced IDs.
 
-use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -17,6 +16,7 @@ use std::time::Instant;
 use tauri::Emitter;
 
 use crate::services::knowledge::chunker::{Chunk, Chunker, Document};
+use crate::services::knowledge::observability;
 use crate::services::knowledge::reranker::{Reranker, SearchResult};
 use crate::services::orchestrator::embedding_manager::EmbeddingManager;
 use crate::services::orchestrator::embedding_service::{
@@ -125,8 +125,10 @@ pub struct CollectionUpdateCheck {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryRunSummary {
     pub id: i64,
+    pub project_id: String,
     pub query: String,
     pub collection_scope: String,
+    pub retrieval_profile: String,
     pub top_k: i64,
     pub vector_candidates: i64,
     pub bm25_candidates: i64,
@@ -135,6 +137,74 @@ pub struct QueryRunSummary {
     pub total_ms: i64,
     pub result_count: i64,
     pub created_at: String,
+}
+
+/// Lightweight document search result for source-picker UX.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentSearchMatch {
+    pub collection_id: String,
+    pub document_uid: String,
+    pub display_name: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum RetrievalProfile {
+    Balanced,
+    Precision,
+    Recall,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RetrievalParams {
+    vector_top_n: usize,
+    bm25_top_n: usize,
+    fused_top_n: usize,
+    mmr_top_n: usize,
+    mmr_lambda: f32,
+}
+
+impl RetrievalProfile {
+    fn from_raw(raw: Option<&str>) -> Self {
+        match raw.unwrap_or("balanced").trim().to_ascii_lowercase().as_str() {
+            "precision" => Self::Precision,
+            "recall" => Self::Recall,
+            _ => Self::Balanced,
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Balanced => "balanced",
+            Self::Precision => "precision",
+            Self::Recall => "recall",
+        }
+    }
+
+    fn params(&self) -> RetrievalParams {
+        match self {
+            Self::Balanced => RetrievalParams {
+                vector_top_n: 80,
+                bm25_top_n: 80,
+                fused_top_n: 30,
+                mmr_top_n: 20,
+                mmr_lambda: 0.72,
+            },
+            Self::Precision => RetrievalParams {
+                vector_top_n: 60,
+                bm25_top_n: 50,
+                fused_top_n: 20,
+                mmr_top_n: 12,
+                mmr_lambda: 0.86,
+            },
+            Self::Recall => RetrievalParams {
+                vector_top_n: 140,
+                bm25_top_n: 140,
+                fused_top_n: 60,
+                mmr_top_n: 30,
+                mmr_lambda: 0.58,
+            },
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -185,7 +255,72 @@ impl RagPipeline {
         Self::ensure_collections_table(&conn)?;
         Self::ensure_collection_workspace_path(&conn)?;
         self.migrate_to_knowledge_v2(&mut conn)?;
+        if let Err(e) = Self::migrate_query_runs_to_v3(&conn) {
+            tracing::warn!(
+                error = %e,
+                "knowledge_query_runs v3 migration failed; using legacy query run path"
+            );
+        }
         Ok(())
+    }
+
+    fn parse_bool_flag(raw: &str) -> Option<bool> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" | "enabled" => Some(true),
+            "0" | "false" | "no" | "off" | "disabled" => Some(false),
+            _ => None,
+        }
+    }
+
+    fn is_feature_enabled(&self, key: &str, default_value: bool) -> bool {
+        let env_key = format!("PLAN_CASCADE_{}", key.to_ascii_uppercase());
+        if let Ok(value) = std::env::var(&env_key) {
+            if let Some(enabled) = Self::parse_bool_flag(&value) {
+                return enabled;
+            }
+        }
+
+        for setting_key in [format!("feature.{}", key), key.to_string()] {
+            if let Ok(Some(value)) = self.database.get_setting(&setting_key) {
+                if let Some(enabled) = Self::parse_bool_flag(&value) {
+                    return enabled;
+                }
+            }
+        }
+
+        default_value
+    }
+
+    fn build_ingest_progress_payload(
+        job_scoped_progress: bool,
+        job_id: &str,
+        project_id: &str,
+        collection_id: &str,
+        collection_name: &str,
+        stage: &str,
+        progress: u32,
+        detail: &str,
+    ) -> serde_json::Value {
+        if job_scoped_progress {
+            serde_json::json!({
+                "job_id": job_id,
+                "project_id": project_id,
+                "collection_id": collection_id,
+                "collection_name": collection_name,
+                "stage": stage,
+                "progress": progress,
+                "detail": detail,
+            })
+        } else {
+            serde_json::json!({
+                "project_id": project_id,
+                "collection_id": collection_id,
+                "collection_name": collection_name,
+                "stage": stage,
+                "progress": progress,
+                "detail": detail,
+            })
+        }
     }
 
     fn ensure_collections_table(conn: &rusqlite::Connection) -> AppResult<()> {
@@ -342,8 +477,10 @@ impl RagPipeline {
 
             CREATE TABLE IF NOT EXISTS knowledge_query_runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT NOT NULL DEFAULT '',
                 query TEXT NOT NULL,
                 collection_scope TEXT NOT NULL DEFAULT '',
+                retrieval_profile TEXT NOT NULL DEFAULT 'balanced',
                 top_k INTEGER NOT NULL DEFAULT 5,
                 vector_candidates INTEGER NOT NULL DEFAULT 0,
                 bm25_candidates INTEGER NOT NULL DEFAULT 0,
@@ -352,6 +489,14 @@ impl RagPipeline {
                 total_ms INTEGER NOT NULL DEFAULT 0,
                 result_count INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS knowledge_query_run_scopes (
+                run_id INTEGER NOT NULL,
+                collection_id TEXT NOT NULL,
+                PRIMARY KEY (run_id, collection_id),
+                FOREIGN KEY (run_id) REFERENCES knowledge_query_runs(id) ON DELETE CASCADE,
+                FOREIGN KEY (collection_id) REFERENCES knowledge_collections(id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS knowledge_schema_version (
@@ -369,10 +514,77 @@ impl RagPipeline {
                 ON knowledge_chunks(collection_id, document_uid);
             CREATE INDEX IF NOT EXISTS idx_knowledge_query_runs_created_at
                 ON knowledge_query_runs(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_knowledge_query_runs_project_created_at
+                ON knowledge_query_runs(project_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_knowledge_query_run_scopes_collection
+                ON knowledge_query_run_scopes(collection_id, run_id DESC);
 
-            INSERT OR IGNORE INTO knowledge_schema_version(version) VALUES (2);",
+            INSERT OR IGNORE INTO knowledge_schema_version(version) VALUES (3);",
         )
         .map_err(|e| AppError::database(format!("Failed creating knowledge v2 tables: {}", e)))?;
+
+        Ok(())
+    }
+
+    fn migrate_query_runs_to_v3(conn: &rusqlite::Connection) -> AppResult<()> {
+        if Self::table_exists(conn, "knowledge_query_runs")?
+            && !Self::table_exists(conn, "knowledge_query_runs_v2_backup")?
+        {
+            conn.execute(
+                "CREATE TABLE knowledge_query_runs_v2_backup AS SELECT * FROM knowledge_query_runs",
+                [],
+            )
+            .map_err(|e| {
+                AppError::database(format!(
+                    "Failed creating knowledge_query_runs backup before v3 migration: {}",
+                    e
+                ))
+            })?;
+        }
+
+        if !Self::table_has_column(conn, "knowledge_query_runs", "project_id")? {
+            conn.execute(
+                "ALTER TABLE knowledge_query_runs ADD COLUMN project_id TEXT NOT NULL DEFAULT ''",
+                [],
+            )
+            .map_err(|e| {
+                AppError::database(format!("Failed to add knowledge_query_runs.project_id: {}", e))
+            })?;
+        }
+
+        if !Self::table_has_column(conn, "knowledge_query_runs", "retrieval_profile")? {
+            conn.execute(
+                "ALTER TABLE knowledge_query_runs ADD COLUMN retrieval_profile TEXT NOT NULL DEFAULT 'balanced'",
+                [],
+            )
+            .map_err(|e| {
+                AppError::database(format!(
+                    "Failed to add knowledge_query_runs.retrieval_profile: {}",
+                    e
+                ))
+            })?;
+        }
+
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS knowledge_query_run_scopes (
+                run_id INTEGER NOT NULL,
+                collection_id TEXT NOT NULL,
+                PRIMARY KEY (run_id, collection_id),
+                FOREIGN KEY (run_id) REFERENCES knowledge_query_runs(id) ON DELETE CASCADE,
+                FOREIGN KEY (collection_id) REFERENCES knowledge_collections(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_knowledge_query_runs_project_created_at
+                ON knowledge_query_runs(project_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_knowledge_query_run_scopes_collection
+                ON knowledge_query_run_scopes(collection_id, run_id DESC);",
+        )
+        .map_err(|e| AppError::database(format!("Failed migrating query runs schema v3: {}", e)))?;
+
+        conn.execute(
+            "INSERT OR IGNORE INTO knowledge_schema_version(version) VALUES (3)",
+            [],
+        )
+        .map_err(|e| AppError::database(format!("Failed updating schema version to 3: {}", e)))?;
 
         Ok(())
     }
@@ -386,8 +598,17 @@ impl RagPipeline {
             Some(sp) if !sp.is_empty() => {
                 if sp.starts_with("upload://") {
                     ("upload".to_string(), sp.to_string())
-                } else {
+                } else if Path::new(sp).is_absolute() {
                     ("workspace".to_string(), sp.to_string())
+                } else {
+                    (
+                        "upload".to_string(),
+                        format!(
+                            "upload://manual/{}/{}",
+                            uuid::Uuid::new_v4(),
+                            Self::sanitize_filename(sp)
+                        ),
+                    )
                 }
             }
             _ => (
@@ -718,18 +939,22 @@ impl RagPipeline {
     ) -> AppResult<KnowledgeCollection> {
         let collection = self.get_collection(collection_id)?;
         let collection_name = collection_name_hint.unwrap_or(collection.name.as_str());
+        let job_id = uuid::Uuid::new_v4().to_string();
+        let job_scoped_progress = self.is_feature_enabled("kb_ingest_job_scoped_progress", true);
 
         let emit_progress = |stage: &str, progress: u32, detail: &str| {
             if let Some(handle) = app_handle {
-                let _ = handle.emit(
-                    "knowledge:ingest-progress",
-                    serde_json::json!({
-                        "collection_name": collection_name,
-                        "stage": stage,
-                        "progress": progress,
-                        "detail": detail,
-                    }),
+                let payload = Self::build_ingest_progress_payload(
+                    job_scoped_progress,
+                    &job_id,
+                    &collection.project_id,
+                    collection_id,
+                    collection_name,
+                    stage,
+                    progress,
+                    detail,
                 );
+                let _ = handle.emit("knowledge:ingest-progress", payload);
             }
         };
 
@@ -1155,11 +1380,11 @@ impl RagPipeline {
     fn apply_mmr(
         candidates: Vec<(SearchResult, Vec<f32>, f32)>,
         max_items: usize,
+        lambda: f32,
     ) -> Vec<(SearchResult, f32)> {
         if candidates.is_empty() {
             return Vec::new();
         }
-        let lambda = 0.72f32;
         let mut remaining = candidates;
         let mut selected: Vec<(SearchResult, Vec<f32>, f32)> = Vec::new();
 
@@ -1197,8 +1422,11 @@ impl RagPipeline {
 
     fn log_query_run(
         &self,
+        project_id: &str,
         query: &str,
         collection_scope: &str,
+        scoped_collection_ids: &[String],
+        retrieval_profile: &str,
         top_k: usize,
         vector_candidates: usize,
         bm25_candidates: usize,
@@ -1206,18 +1434,37 @@ impl RagPipeline {
         rerank_ms: u128,
         total_ms: u128,
         result_count: usize,
-    ) {
-        let conn = match self.database.get_connection() {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-        let _ = conn.execute(
-            "INSERT INTO knowledge_query_runs
-             (query, collection_scope, top_k, vector_candidates, bm25_candidates, merged_candidates, rerank_ms, total_ms, result_count)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            rusqlite::params![
+    ) -> Option<i64> {
+        if !self.is_feature_enabled("kb_query_runs_v2", true) {
+            return self.log_query_run_legacy(
+                project_id,
                 query,
                 collection_scope,
+                retrieval_profile,
+                top_k,
+                vector_candidates,
+                bm25_candidates,
+                merged_candidates,
+                rerank_ms,
+                total_ms,
+                result_count,
+            );
+        }
+
+        let mut conn = match self.database.get_connection() {
+            Ok(c) => c,
+            Err(_) => return None,
+        };
+        let tx = conn.transaction().ok()?;
+        tx.execute(
+            "INSERT INTO knowledge_query_runs
+             (project_id, query, collection_scope, retrieval_profile, top_k, vector_candidates, bm25_candidates, merged_candidates, rerank_ms, total_ms, result_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![
+                project_id,
+                query,
+                collection_scope,
+                retrieval_profile,
                 top_k as i64,
                 vector_candidates as i64,
                 bm25_candidates as i64,
@@ -1226,7 +1473,137 @@ impl RagPipeline {
                 total_ms as i64,
                 result_count as i64,
             ],
-        );
+        )
+        .ok()?;
+        let run_id = tx.last_insert_rowid();
+        for collection_id in scoped_collection_ids {
+            let _ = tx.execute(
+                "INSERT OR IGNORE INTO knowledge_query_run_scopes (run_id, collection_id) VALUES (?1, ?2)",
+                rusqlite::params![run_id, collection_id],
+            );
+        }
+        if tx.commit().is_ok() {
+            Some(run_id)
+        } else {
+            self.log_query_run_legacy(
+                project_id,
+                query,
+                collection_scope,
+                retrieval_profile,
+                top_k,
+                vector_candidates,
+                bm25_candidates,
+                merged_candidates,
+                rerank_ms,
+                total_ms,
+                result_count,
+            )
+        }
+    }
+
+    fn log_query_run_legacy(
+        &self,
+        project_id: &str,
+        query: &str,
+        collection_scope: &str,
+        retrieval_profile: &str,
+        top_k: usize,
+        vector_candidates: usize,
+        bm25_candidates: usize,
+        merged_candidates: usize,
+        rerank_ms: u128,
+        total_ms: u128,
+        result_count: usize,
+    ) -> Option<i64> {
+        let conn = self.database.get_connection().ok()?;
+        let has_project_id = Self::table_has_column(&conn, "knowledge_query_runs", "project_id").ok()?;
+        let has_profile = Self::table_has_column(&conn, "knowledge_query_runs", "retrieval_profile").ok()?;
+        let sql = match (has_project_id, has_profile) {
+            (true, true) => {
+                "INSERT INTO knowledge_query_runs
+                 (project_id, query, collection_scope, retrieval_profile, top_k, vector_candidates, bm25_candidates, merged_candidates, rerank_ms, total_ms, result_count)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"
+            }
+            (true, false) => {
+                "INSERT INTO knowledge_query_runs
+                 (project_id, query, collection_scope, top_k, vector_candidates, bm25_candidates, merged_candidates, rerank_ms, total_ms, result_count)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"
+            }
+            (false, true) => {
+                "INSERT INTO knowledge_query_runs
+                 (query, collection_scope, retrieval_profile, top_k, vector_candidates, bm25_candidates, merged_candidates, rerank_ms, total_ms, result_count)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"
+            }
+            (false, false) => {
+                "INSERT INTO knowledge_query_runs
+                 (query, collection_scope, top_k, vector_candidates, bm25_candidates, merged_candidates, rerank_ms, total_ms, result_count)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+            }
+        };
+        let result = match (has_project_id, has_profile) {
+            (true, true) => conn.execute(
+                sql,
+                rusqlite::params![
+                    project_id,
+                    query,
+                    collection_scope,
+                    retrieval_profile,
+                    top_k as i64,
+                    vector_candidates as i64,
+                    bm25_candidates as i64,
+                    merged_candidates as i64,
+                    rerank_ms as i64,
+                    total_ms as i64,
+                    result_count as i64,
+                ],
+            ),
+            (true, false) => conn.execute(
+                sql,
+                rusqlite::params![
+                    project_id,
+                    query,
+                    collection_scope,
+                    top_k as i64,
+                    vector_candidates as i64,
+                    bm25_candidates as i64,
+                    merged_candidates as i64,
+                    rerank_ms as i64,
+                    total_ms as i64,
+                    result_count as i64,
+                ],
+            ),
+            (false, true) => conn.execute(
+                sql,
+                rusqlite::params![
+                    query,
+                    collection_scope,
+                    retrieval_profile,
+                    top_k as i64,
+                    vector_candidates as i64,
+                    bm25_candidates as i64,
+                    merged_candidates as i64,
+                    rerank_ms as i64,
+                    total_ms as i64,
+                    result_count as i64,
+                ],
+            ),
+            (false, false) => conn.execute(
+                sql,
+                rusqlite::params![
+                    query,
+                    collection_scope,
+                    top_k as i64,
+                    vector_candidates as i64,
+                    bm25_candidates as i64,
+                    merged_candidates as i64,
+                    rerank_ms as i64,
+                    total_ms as i64,
+                    result_count as i64,
+                ],
+            ),
+        };
+        result.ok()?;
+        Some(conn.last_insert_rowid())
     }
 
     /// Query with scoped filters and hybrid retrieval (Vector + BM25 + RRF + MMR).
@@ -1237,9 +1614,22 @@ impl RagPipeline {
         top_k: usize,
         collection_ids: Option<&[String]>,
         document_filters: Option<&[ScopedDocumentRef]>,
-        _retrieval_profile: Option<&str>,
+        retrieval_profile: Option<&str>,
     ) -> AppResult<RagQueryResult> {
         let started = Instant::now();
+        let profile = RetrievalProfile::from_raw(retrieval_profile);
+        if let Some(raw_profile) = retrieval_profile {
+            let normalized = raw_profile.trim().to_ascii_lowercase();
+            if normalized != profile.as_str() {
+                tracing::warn!(
+                    profile = %raw_profile,
+                    normalized = %normalized,
+                    applied = %profile.as_str(),
+                    "Invalid retrieval profile; falling back to balanced profile"
+                );
+            }
+        }
+        let params = profile.params();
         let scope = self.resolve_collection_scope(project_id, collection_ids)?;
         if scope.is_empty() {
             return Ok(RagQueryResult {
@@ -1263,11 +1653,6 @@ impl RagPipeline {
             .await
             .map_err(|e| AppError::internal(format!("Query embedding failed: {}", e)))?;
 
-        let vector_top_n = 80usize;
-        let bm25_top_n = 80usize;
-        let fused_top_n = 30usize;
-        let mmr_top_n = 20usize;
-
         let mut candidate_map: HashMap<
             i64,
             (SearchResult, Vec<f32>, Option<usize>, Option<usize>),
@@ -1283,7 +1668,7 @@ impl RagPipeline {
 
             let vector_hits = self
                 .hnsw_index
-                .search(&query_embedding, vector_top_n * 3)
+                .search(&query_embedding, params.vector_top_n * 3)
                 .await;
             for (rank, (chunk_id, distance)) in vector_hits.iter().enumerate() {
                 let Some((mut result, embedding)) =
@@ -1310,7 +1695,7 @@ impl RagPipeline {
                         entry.2 = Some(rank + 1);
                     })
                     .or_insert((result, embedding, Some(rank + 1), None));
-                if vector_ranked.len() >= vector_top_n {
+                if vector_ranked.len() >= params.vector_top_n {
                     break;
                 }
             }
@@ -1325,7 +1710,7 @@ impl RagPipeline {
                 )
                 .map_err(|e| AppError::database(format!("Failed to prepare BM25 query: {}", e)))?;
             let bm25_rows = bm25_stmt
-                .query_map(rusqlite::params![query_text, bm25_top_n as i64], |row| {
+                .query_map(rusqlite::params![query_text, params.bm25_top_n as i64], |row| {
                     Ok((
                         row.get::<_, i64>(0)?,
                         row.get::<_, String>(1)?,
@@ -1380,8 +1765,8 @@ impl RagPipeline {
             .collect();
 
         fused.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
-        if fused.len() > fused_top_n {
-            fused.truncate(fused_top_n);
+        if fused.len() > params.fused_top_n {
+            fused.truncate(params.fused_top_n);
         }
 
         if fused.is_empty() {
@@ -1404,7 +1789,7 @@ impl RagPipeline {
             });
         }
 
-        let mmr_selected = Self::apply_mmr(fused, mmr_top_n);
+        let mmr_selected = Self::apply_mmr(fused, params.mmr_top_n, params.mmr_lambda);
         let mut search_results: Vec<SearchResult> =
             mmr_selected.into_iter().map(|(r, _)| r).collect();
         let total_searched = search_results.len();
@@ -1421,10 +1806,14 @@ impl RagPipeline {
             .map(|(_, name)| name.clone())
             .collect::<Vec<_>>()
             .join(", ");
+        let scope_collection_ids: Vec<String> = scope.iter().map(|(id, _)| id.clone()).collect();
 
-        self.log_query_run(
+        let _ = self.log_query_run(
+            project_id,
             query_text,
             &scope_label,
+            &scope_collection_ids,
+            profile.as_str(),
             top_k,
             vector_ranked.len(),
             bm25_ranked.len(),
@@ -1554,117 +1943,230 @@ impl RagPipeline {
         collection_ids: Option<&[String]>,
         limit: usize,
     ) -> AppResult<Vec<QueryRunSummary>> {
+        let has_scope_filter = collection_ids.map(|ids| !ids.is_empty()).unwrap_or(false);
+        let use_v2 = self.is_feature_enabled("kb_query_runs_v2", true);
+        if use_v2 {
+            match self.list_query_runs_v2(project_id, collection_ids, limit) {
+                Ok(runs) => {
+                    if has_scope_filter {
+                        let _ = observability::record_query_run_scope_check(
+                            self.database.as_ref(),
+                            1,
+                            1,
+                        );
+                    }
+                    return Ok(runs);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "Falling back to legacy query-runs listing path"
+                    );
+                }
+            }
+        }
+        if has_scope_filter {
+            let _ = observability::record_query_run_scope_check(self.database.as_ref(), 1, 0);
+        }
+        self.list_query_runs_legacy(project_id, collection_ids, limit)
+    }
+
+    fn list_query_runs_v2(
+        &self,
+        project_id: &str,
+        collection_ids: Option<&[String]>,
+        limit: usize,
+    ) -> AppResult<Vec<QueryRunSummary>> {
         let conn = self
             .database
             .get_connection()
             .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
 
         let safe_limit = limit.clamp(1, 500) as i64;
-        let has_collection_filter = collection_ids.is_some();
+        let include_legacy_default = project_id == "default";
+        let base_select = "SELECT DISTINCT r.id, r.project_id, r.query, r.collection_scope, r.retrieval_profile, r.top_k, r.vector_candidates, r.bm25_candidates, r.merged_candidates, r.rerank_ms, r.total_ms, r.result_count, r.created_at FROM knowledge_query_runs r";
 
-        // query_runs currently stores collection names in `collection_scope`, so we resolve
-        // optional collection IDs to names and use LIKE filtering.
-        let scope_names: Vec<String> = if let Some(ids) = collection_ids {
-            if ids.is_empty() {
-                Vec::new()
-            } else {
-                let mut out = Vec::new();
-                for collection_id in ids {
-                    let maybe_name: Option<String> = conn
-                        .query_row(
-                            "SELECT name FROM knowledge_collections WHERE id = ?1 AND project_id = ?2",
-                            rusqlite::params![collection_id, project_id],
-                            |row| row.get(0),
-                        )
-                        .optional()
-                        .map_err(|e| {
-                            AppError::database(format!(
-                                "Failed resolving collection id '{}' to name: {}",
-                                collection_id, e
-                            ))
-                        })?;
-                    if let Some(name) = maybe_name {
-                        out.push(name);
-                    }
-                }
-                out
-            }
-        } else {
-            Vec::new()
+        let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<QueryRunSummary> {
+            Ok(QueryRunSummary {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                query: row.get(2)?,
+                collection_scope: row.get(3)?,
+                retrieval_profile: row.get(4)?,
+                top_k: row.get(5)?,
+                vector_candidates: row.get(6)?,
+                bm25_candidates: row.get(7)?,
+                merged_candidates: row.get(8)?,
+                rerank_ms: row.get(9)?,
+                total_ms: row.get(10)?,
+                result_count: row.get(11)?,
+                created_at: row.get(12)?,
+            })
         };
 
-        let base_sql = "SELECT id, query, collection_scope, top_k, vector_candidates, bm25_candidates, merged_candidates, rerank_ms, total_ms, result_count, created_at FROM knowledge_query_runs";
-
-        let mut query_runs = Vec::new();
-        if scope_names.is_empty() {
-            if has_collection_filter {
+        if let Some(ids) = collection_ids {
+            if ids.is_empty() {
                 return Ok(Vec::new());
             }
-            let sql = format!("{base_sql} ORDER BY id DESC LIMIT ?1");
+
+            let placeholders = vec!["?"; ids.len()].join(",");
+            let project_clause = if include_legacy_default {
+                "(r.project_id = ?1 OR r.project_id = '')"
+            } else {
+                "r.project_id = ?1"
+            };
+            let sql = format!(
+                "{base_select} \
+                 JOIN knowledge_query_run_scopes s ON s.run_id = r.id \
+                 WHERE {project_clause} AND s.collection_id IN ({placeholders}) \
+                 ORDER BY r.id DESC LIMIT ?{}",
+                ids.len() + 2
+            );
             let mut stmt = conn.prepare(&sql).map_err(|e| {
-                AppError::database(format!("Failed to prepare query runs statement: {}", e))
+                AppError::database(format!("Failed to prepare scoped query runs statement: {}", e))
             })?;
-            let rows = stmt
-                .query_map(rusqlite::params![safe_limit], |row| {
-                    Ok(QueryRunSummary {
-                        id: row.get(0)?,
-                        query: row.get(1)?,
-                        collection_scope: row.get(2)?,
-                        top_k: row.get(3)?,
-                        vector_candidates: row.get(4)?,
-                        bm25_candidates: row.get(5)?,
-                        merged_candidates: row.get(6)?,
-                        rerank_ms: row.get(7)?,
-                        total_ms: row.get(8)?,
-                        result_count: row.get(9)?,
-                        created_at: row.get(10)?,
-                    })
-                })
-                .map_err(|e| AppError::database(format!("Failed querying query runs: {}", e)))?;
-            for row in rows.flatten() {
-                query_runs.push(row);
+
+            let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+            params.push(Box::new(project_id.to_string()));
+            for cid in ids {
+                params.push(Box::new(cid.to_string()));
             }
-            return Ok(query_runs);
+            params.push(Box::new(safe_limit));
+            let params_ref: Vec<&dyn rusqlite::ToSql> =
+                params.iter().map(|v| v.as_ref() as &dyn rusqlite::ToSql).collect();
+
+            let rows = stmt
+                .query_map(params_ref.as_slice(), map_row)
+                .map_err(|e| AppError::database(format!("Failed querying scoped query runs: {}", e)))?;
+            return Ok(rows.filter_map(|r| r.ok()).collect());
         }
 
-        let like_clauses = vec!["collection_scope LIKE ?"; scope_names.len()].join(" OR ");
-        let sql = format!("{base_sql} WHERE ({like_clauses}) ORDER BY id DESC LIMIT ?");
-        let mut stmt = conn.prepare(&sql).map_err(|e| {
-            AppError::database(format!(
-                "Failed to prepare scoped query runs statement: {}",
-                e
-            ))
-        })?;
-
-        let mut params: Vec<String> = scope_names
-            .iter()
-            .map(|name| format!("%{}%", name))
-            .collect();
-        params.push(safe_limit.to_string());
-        let params_ref: Vec<&dyn rusqlite::ToSql> =
-            params.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
-
+        let project_clause = if include_legacy_default {
+            "(project_id = ?1 OR project_id = '')"
+        } else {
+            "project_id = ?1"
+        };
+        let sql =
+            format!("{base_select} WHERE {project_clause} ORDER BY r.id DESC LIMIT ?2");
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| AppError::database(format!("Failed to prepare query runs statement: {}", e)))?;
         let rows = stmt
-            .query_map(params_ref.as_slice(), |row| {
-                Ok(QueryRunSummary {
-                    id: row.get(0)?,
-                    query: row.get(1)?,
-                    collection_scope: row.get(2)?,
-                    top_k: row.get(3)?,
-                    vector_candidates: row.get(4)?,
-                    bm25_candidates: row.get(5)?,
-                    merged_candidates: row.get(6)?,
-                    rerank_ms: row.get(7)?,
-                    total_ms: row.get(8)?,
-                    result_count: row.get(9)?,
-                    created_at: row.get(10)?,
-                })
+            .query_map(rusqlite::params![project_id, safe_limit], map_row)
+            .map_err(|e| AppError::database(format!("Failed querying query runs: {}", e)))?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    fn list_query_runs_legacy(
+        &self,
+        project_id: &str,
+        collection_ids: Option<&[String]>,
+        limit: usize,
+    ) -> AppResult<Vec<QueryRunSummary>> {
+        let conn = self
+            .database
+            .get_connection()
+            .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
+
+        let safe_limit = limit.clamp(1, 500) as i64;
+        let include_legacy_default = project_id == "default";
+        let has_project_id = Self::table_has_column(&conn, "knowledge_query_runs", "project_id")?;
+        let has_profile = Self::table_has_column(&conn, "knowledge_query_runs", "retrieval_profile")?;
+        let project_expr = if has_project_id {
+            "r.project_id"
+        } else {
+            "'' AS project_id"
+        };
+        let profile_expr = if has_profile {
+            "r.retrieval_profile"
+        } else {
+            "'balanced' AS retrieval_profile"
+        };
+        let base_select = format!(
+            "SELECT r.id, {project_expr}, r.query, r.collection_scope, {profile_expr}, r.top_k, r.vector_candidates, r.bm25_candidates, r.merged_candidates, r.rerank_ms, r.total_ms, r.result_count, r.created_at FROM knowledge_query_runs r"
+        );
+        let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<QueryRunSummary> {
+            Ok(QueryRunSummary {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                query: row.get(2)?,
+                collection_scope: row.get(3)?,
+                retrieval_profile: row.get(4)?,
+                top_k: row.get(5)?,
+                vector_candidates: row.get(6)?,
+                bm25_candidates: row.get(7)?,
+                merged_candidates: row.get(8)?,
+                rerank_ms: row.get(9)?,
+                total_ms: row.get(10)?,
+                result_count: row.get(11)?,
+                created_at: row.get(12)?,
             })
-            .map_err(|e| AppError::database(format!("Failed querying scoped query runs: {}", e)))?;
-        for row in rows.flatten() {
-            query_runs.push(row);
+        };
+
+        let mut where_clauses: Vec<String> = Vec::new();
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        let mut next_idx = 1usize;
+
+        if has_project_id {
+            if include_legacy_default {
+                where_clauses.push(format!(
+                    "(r.project_id = ?{} OR r.project_id = '')",
+                    next_idx
+                ));
+            } else {
+                where_clauses.push(format!("r.project_id = ?{}", next_idx));
+            }
+            params.push(Box::new(project_id.to_string()));
+            next_idx += 1;
         }
-        Ok(query_runs)
+
+        if let Some(ids) = collection_ids {
+            if ids.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            let mut scope_names: Vec<String> = Vec::new();
+            for id in ids {
+                if let Ok(name) = conn.query_row(
+                    "SELECT name FROM knowledge_collections WHERE id = ?1",
+                    rusqlite::params![id],
+                    |row| row.get::<_, String>(0),
+                ) {
+                    scope_names.push(name);
+                }
+            }
+            if scope_names.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            let mut scope_predicates = Vec::new();
+            for scope_name in scope_names {
+                scope_predicates.push(format!("r.collection_scope LIKE ?{}", next_idx));
+                params.push(Box::new(format!("%{}%", scope_name)));
+                next_idx += 1;
+            }
+            where_clauses.push(format!("({})", scope_predicates.join(" OR ")));
+        }
+
+        let mut sql = base_select;
+        if !where_clauses.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&where_clauses.join(" AND "));
+        }
+        sql.push_str(&format!(" ORDER BY r.id DESC LIMIT ?{}", next_idx));
+        params.push(Box::new(safe_limit));
+
+        let params_ref: Vec<&dyn rusqlite::ToSql> = params
+            .iter()
+            .map(|v| v.as_ref() as &dyn rusqlite::ToSql)
+            .collect();
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| AppError::database(format!("Failed to prepare legacy query runs: {}", e)))?;
+        let rows = stmt
+            .query_map(params_ref.as_slice(), map_row)
+            .map_err(|e| AppError::database(format!("Failed querying legacy query runs: {}", e)))?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
     /// List all collections for a project.
@@ -1751,6 +2253,79 @@ impl RagPipeline {
             })
             .map_err(|e| AppError::database(format!("Failed to query documents: {}", e)))?;
 
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// Search documents by display name across project collections.
+    pub fn search_documents(
+        &self,
+        project_id: &str,
+        query: &str,
+        collection_ids: Option<&[String]>,
+        limit: usize,
+    ) -> AppResult<Vec<DocumentSearchMatch>> {
+        let term = query.trim();
+        if term.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let conn = self
+            .database
+            .get_connection()
+            .map_err(|e| AppError::database(format!("Failed to get connection: {}", e)))?;
+        let safe_limit = limit.clamp(1, 200) as i64;
+        let like = format!("%{}%", term.to_lowercase());
+
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        params.push(Box::new(project_id.to_string()));
+        params.push(Box::new(like));
+
+        let sql = if let Some(ids) = collection_ids {
+            if ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let placeholders = vec!["?"; ids.len()].join(",");
+            for cid in ids {
+                params.push(Box::new(cid.to_string()));
+            }
+            params.push(Box::new(safe_limit));
+            format!(
+                "SELECT d.collection_id, d.document_uid, d.display_name
+                 FROM knowledge_documents d
+                 JOIN knowledge_collections c ON c.id = d.collection_id
+                 WHERE c.project_id = ?1
+                   AND LOWER(d.display_name) LIKE ?2
+                   AND d.collection_id IN ({placeholders})
+                 ORDER BY d.display_name
+                 LIMIT ?{}",
+                ids.len() + 3
+            )
+        } else {
+            params.push(Box::new(safe_limit));
+            "SELECT d.collection_id, d.document_uid, d.display_name
+             FROM knowledge_documents d
+             JOIN knowledge_collections c ON c.id = d.collection_id
+             WHERE c.project_id = ?1
+               AND LOWER(d.display_name) LIKE ?2
+             ORDER BY d.display_name
+             LIMIT ?3"
+                .to_string()
+        };
+
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| AppError::database(format!("Failed to prepare document search query: {}", e)))?;
+        let params_ref: Vec<&dyn rusqlite::ToSql> =
+            params.iter().map(|v| v.as_ref() as &dyn rusqlite::ToSql).collect();
+        let rows = stmt
+            .query_map(params_ref.as_slice(), |row| {
+                Ok(DocumentSearchMatch {
+                    collection_id: row.get(0)?,
+                    document_uid: row.get(1)?,
+                    display_name: row.get(2)?,
+                })
+            })
+            .map_err(|e| AppError::database(format!("Failed executing document search query: {}", e)))?;
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
@@ -2313,6 +2888,7 @@ impl RagPipeline {
 mod tests {
     use super::*;
     use crate::services::knowledge::chunker::ParagraphChunker;
+    use crate::services::knowledge::observability;
     use crate::services::knowledge::reranker::NoopReranker;
     use crate::services::orchestrator::embedding_manager::EmbeddingManagerConfig;
     use crate::services::orchestrator::embedding_provider::{
@@ -2570,6 +3146,291 @@ mod tests {
             "chunk_count should include chunks from both ingests, got {}",
             collection.chunk_count,
         );
+    }
+
+    #[tokio::test]
+    async fn query_runs_are_filtered_by_exact_collection_scope() {
+        let (pipeline, _dir) = create_test_pipeline().await;
+
+        let col_a = pipeline
+            .ingest(
+                "scope-a",
+                "proj-1",
+                "Scope A",
+                vec![Document::new("a-doc", "Alpha retrieval context.")],
+            )
+            .await
+            .unwrap();
+        let col_b = pipeline
+            .ingest(
+                "scope-b",
+                "proj-1",
+                "Scope B",
+                vec![Document::new("b-doc", "Bravo retrieval context.")],
+            )
+            .await
+            .unwrap();
+
+        let scope_a = vec![col_a.id.clone()];
+        let scope_b = vec![col_b.id.clone()];
+        pipeline
+            .query_scoped("proj-1", "alpha", 5, Some(&scope_a), None, Some("balanced"))
+            .await
+            .unwrap();
+        pipeline
+            .query_scoped("proj-1", "bravo", 5, Some(&scope_b), None, Some("balanced"))
+            .await
+            .unwrap();
+
+        let runs_a = pipeline
+            .list_query_runs("proj-1", Some(&scope_a), 20)
+            .unwrap();
+        let runs_b = pipeline
+            .list_query_runs("proj-1", Some(&scope_b), 20)
+            .unwrap();
+
+        assert_eq!(runs_a.len(), 1);
+        assert_eq!(runs_b.len(), 1);
+        assert_eq!(runs_a[0].query, "alpha");
+        assert_eq!(runs_b[0].query, "bravo");
+        assert_ne!(runs_a[0].id, runs_b[0].id);
+    }
+
+    #[tokio::test]
+    async fn query_runs_are_isolated_by_project_id() {
+        let (pipeline, _dir) = create_test_pipeline().await;
+
+        let col_proj1 = pipeline
+            .ingest(
+                "shared-name",
+                "proj-1",
+                "Project one",
+                vec![Document::new("p1-doc", "Project one content.")],
+            )
+            .await
+            .unwrap();
+        let col_proj2 = pipeline
+            .ingest(
+                "shared-name",
+                "proj-2",
+                "Project two",
+                vec![Document::new("p2-doc", "Project two content.")],
+            )
+            .await
+            .unwrap();
+
+        let scope_proj1 = vec![col_proj1.id.clone()];
+        let scope_proj2 = vec![col_proj2.id.clone()];
+        pipeline
+            .query_scoped("proj-1", "project", 5, Some(&scope_proj1), None, Some("balanced"))
+            .await
+            .unwrap();
+        pipeline
+            .query_scoped("proj-2", "project", 5, Some(&scope_proj2), None, Some("balanced"))
+            .await
+            .unwrap();
+
+        let runs_proj1 = pipeline.list_query_runs("proj-1", None, 20).unwrap();
+        let runs_proj2 = pipeline.list_query_runs("proj-2", None, 20).unwrap();
+
+        assert_eq!(runs_proj1.len(), 1);
+        assert_eq!(runs_proj2.len(), 1);
+        assert_eq!(runs_proj1[0].project_id, "proj-1");
+        assert_eq!(runs_proj2[0].project_id, "proj-2");
+        assert_ne!(runs_proj1[0].id, runs_proj2[0].id);
+    }
+
+    #[tokio::test]
+    async fn query_run_scope_metrics_track_v2_and_legacy_paths() {
+        let (pipeline, _dir) = create_test_pipeline().await;
+
+        let collection = pipeline
+            .ingest(
+                "scope-metrics",
+                "proj-1",
+                "Scope metrics",
+                vec![Document::new("doc", "Scope metric content")],
+            )
+            .await
+            .unwrap();
+        let scope = vec![collection.id.clone()];
+        pipeline
+            .query_scoped("proj-1", "scope", 5, Some(&scope), None, Some("balanced"))
+            .await
+            .unwrap();
+
+        let _ = pipeline.list_query_runs("proj-1", Some(&scope), 10).unwrap();
+        let snapshot_v2 = observability::read_metrics_snapshot(pipeline.database.as_ref()).unwrap();
+        assert_eq!(snapshot_v2.query_run_scope_checks_total, 1);
+        assert_eq!(snapshot_v2.query_run_scope_hits_total, 1);
+
+        pipeline
+            .database
+            .set_setting("feature.kb_query_runs_v2", "false")
+            .unwrap();
+        let _ = pipeline.list_query_runs("proj-1", Some(&scope), 10).unwrap();
+        let snapshot_legacy =
+            observability::read_metrics_snapshot(pipeline.database.as_ref()).unwrap();
+        assert_eq!(snapshot_legacy.query_run_scope_checks_total, 2);
+        assert_eq!(snapshot_legacy.query_run_scope_hits_total, 1);
+    }
+
+    #[tokio::test]
+    async fn invalid_retrieval_profile_falls_back_to_balanced() {
+        let (pipeline, _dir) = create_test_pipeline().await;
+
+        let collection = pipeline
+            .ingest(
+                "retrieval-profile-test",
+                "proj-1",
+                "profile",
+                vec![Document::new("d1", "Profile fallback content.")],
+            )
+            .await
+            .unwrap();
+
+        let scope = vec![collection.id.clone()];
+        pipeline
+            .query_scoped("proj-1", "profile", 5, Some(&scope), None, Some("unknown-mode"))
+            .await
+            .unwrap();
+
+        let runs = pipeline
+            .list_query_runs("proj-1", Some(&scope), 10)
+            .unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].retrieval_profile, "balanced");
+    }
+
+    #[test]
+    fn retrieval_profiles_map_to_distinct_parameters() {
+        let balanced = RetrievalProfile::Balanced.params();
+        let precision = RetrievalProfile::Precision.params();
+        let recall = RetrievalProfile::Recall.params();
+
+        assert!(precision.vector_top_n < balanced.vector_top_n);
+        assert!(balanced.vector_top_n < recall.vector_top_n);
+        assert!(precision.bm25_top_n < recall.bm25_top_n);
+        assert!(precision.mmr_lambda > recall.mmr_lambda);
+    }
+
+    #[test]
+    fn source_kind_and_locator_classifies_manual_uploads_safely() {
+        let (kind_upload, locator_upload) =
+            RagPipeline::source_kind_and_locator(Some("upload://manual/id/file.txt"), "col", "file.txt");
+        assert_eq!(kind_upload, "upload");
+        assert_eq!(locator_upload, "upload://manual/id/file.txt");
+
+        let (kind_workspace, locator_workspace) =
+            RagPipeline::source_kind_and_locator(Some("/tmp/file.txt"), "col", "file.txt");
+        assert_eq!(kind_workspace, "workspace");
+        assert_eq!(locator_workspace, "/tmp/file.txt");
+
+        let (kind_relative, locator_relative) =
+            RagPipeline::source_kind_and_locator(Some("notes/readme.md"), "col", "readme.md");
+        assert_eq!(kind_relative, "upload");
+        assert!(locator_relative.starts_with("upload://manual/"));
+    }
+
+    #[test]
+    fn ingest_progress_payload_includes_job_metadata_when_scoped_enabled() {
+        let payload = RagPipeline::build_ingest_progress_payload(
+            true,
+            "job-123",
+            "proj-1",
+            "col-1",
+            "docs",
+            "embedding",
+            66,
+            "embedding chunks",
+        );
+
+        assert_eq!(payload["job_id"], "job-123");
+        assert_eq!(payload["project_id"], "proj-1");
+        assert_eq!(payload["collection_id"], "col-1");
+        assert_eq!(payload["collection_name"], "docs");
+        assert_eq!(payload["stage"], "embedding");
+        assert_eq!(payload["progress"], 66);
+        assert_eq!(payload["detail"], "embedding chunks");
+    }
+
+    #[test]
+    fn ingest_progress_payload_legacy_mode_omits_job_id() {
+        let payload = RagPipeline::build_ingest_progress_payload(
+            false,
+            "job-legacy",
+            "proj-1",
+            "col-1",
+            "docs",
+            "storing",
+            100,
+            "done",
+        );
+
+        assert!(payload.get("job_id").is_none());
+        assert_eq!(payload["project_id"], "proj-1");
+        assert_eq!(payload["collection_id"], "col-1");
+        assert_eq!(payload["collection_name"], "docs");
+        assert_eq!(payload["stage"], "storing");
+        assert_eq!(payload["progress"], 100);
+        assert_eq!(payload["detail"], "done");
+    }
+
+    #[tokio::test]
+    async fn search_documents_matches_project_scope_and_collection_filter() {
+        let (pipeline, _dir) = create_test_pipeline().await;
+
+        let col_a = pipeline
+            .ingest(
+                "search-a",
+                "proj-1",
+                "Search A",
+                vec![Document::new("local-notes.md", "Local notes")],
+            )
+            .await
+            .unwrap();
+        let col_b = pipeline
+            .ingest(
+                "search-b",
+                "proj-1",
+                "Search B",
+                vec![Document::new("remote-api-spec.md", "Remote API spec body")],
+            )
+            .await
+            .unwrap();
+        pipeline
+            .ingest(
+                "search-b",
+                "proj-2",
+                "Other project",
+                vec![Document::new("remote-api-spec.md", "Other project")],
+            )
+            .await
+            .unwrap();
+
+        let matches = pipeline
+            .search_documents("proj-1", "remote", None, 50)
+            .unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].collection_id, col_b.id);
+        assert_eq!(matches[0].display_name, "remote-api-spec.md");
+
+        let scoped_to_a = pipeline
+            .search_documents("proj-1", "remote", Some(&vec![col_a.id.clone()]), 50)
+            .unwrap();
+        assert!(scoped_to_a.is_empty());
+
+        let scoped_to_b = pipeline
+            .search_documents("proj-1", "remote", Some(&vec![col_b.id.clone()]), 50)
+            .unwrap();
+        assert_eq!(scoped_to_b.len(), 1);
+        assert_eq!(scoped_to_b[0].collection_id, col_b.id);
+
+        let project_two = pipeline
+            .search_documents("proj-2", "remote", None, 50)
+            .unwrap();
+        assert_eq!(project_two.len(), 1);
+        assert_ne!(project_two[0].collection_id, col_b.id);
     }
 
     #[test]

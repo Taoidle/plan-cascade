@@ -48,6 +48,18 @@
       "description": "When enabled, moving the mouse to the left/right edge temporarily expands the sidebar/output panel, and moving away collapses it after a short delay."
     },
 
+    "knowledgeBase": {
+      "title": "Knowledge Base",
+      "autoEnsureDocs": "Auto-create docs collection for workspace",
+      "autoEnsureDocsDescription": "When enabled, entering a workspace automatically creates and associates a docs collection. Default is off for safer behavior.",
+      "kbQueryRunsV2": "Use precise query-run scope filtering (v2)",
+      "kbQueryRunsV2Description": "When enabled, query run history filtering uses structured collection scope joins instead of legacy fuzzy matching.",
+      "kbPickerServerSearch": "Use server-side document search in picker",
+      "kbPickerServerSearchDescription": "When enabled, source picker search can find documents in collections that are not expanded locally.",
+      "kbIngestJobScopedProgress": "Use job-scoped ingest progress events",
+      "kbIngestJobScopedProgressDescription": "When enabled, upload progress is isolated by job/project/collection to avoid cross-collection progress interference."
+    },
+
     "language": {
       "title": "Language",
       "description": "Select your preferred language."

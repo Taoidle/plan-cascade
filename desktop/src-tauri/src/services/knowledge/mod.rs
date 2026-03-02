@@ -10,5 +10,6 @@ pub mod chunker;
 pub mod code_chunker;
 pub mod context_provider;
 pub mod docs_indexer;
+pub mod observability;
 pub mod pipeline;
 pub mod reranker;

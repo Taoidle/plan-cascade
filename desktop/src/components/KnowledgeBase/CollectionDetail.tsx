@@ -22,7 +22,7 @@ export function CollectionDetail({ collection }: CollectionDetailProps) {
     documents,
     fetchDocuments,
     deleteDocument,
-    isDeleting,
+    isDeletingDocument,
     pendingUpdates,
     isCheckingUpdates,
     isApplyingUpdates,
@@ -189,7 +189,7 @@ export function CollectionDetail({ collection }: CollectionDetailProps) {
                 </div>
                 <button
                   onClick={() => handleDeleteDocument(doc.document_uid)}
-                  disabled={isDeleting}
+                  disabled={isDeletingDocument}
                   className={clsx(
                     'text-xs px-2.5 py-1 rounded',
                     'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20',
@@ -197,7 +197,7 @@ export function CollectionDetail({ collection }: CollectionDetailProps) {
                     'transition-colors',
                   )}
                 >
-                  {isDeleting ? t('deleting') : t('delete')}
+                  {isDeletingDocument ? t('deleting') : t('delete')}
                 </button>
               </div>
             ))}

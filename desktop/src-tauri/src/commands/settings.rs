@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::models::export::{SettingsImportResult, UnifiedSettingsExport};
@@ -11,6 +12,35 @@ use crate::models::response::CommandResponse;
 use crate::models::settings::{AppConfig, SettingsUpdate};
 use crate::services::settings_export;
 use crate::state::AppState;
+
+const KB_QUERY_RUNS_V2_FLAG: &str = "kb_query_runs_v2";
+const KB_PICKER_SERVER_SEARCH_FLAG: &str = "kb_picker_server_search";
+const KB_INGEST_JOB_SCOPED_PROGRESS_FLAG: &str = "kb_ingest_job_scoped_progress";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowledgeFeatureFlags {
+    #[serde(default = "default_true")]
+    pub kb_query_runs_v2: bool,
+    #[serde(default = "default_true")]
+    pub kb_picker_server_search: bool,
+    #[serde(default = "default_true")]
+    pub kb_ingest_job_scoped_progress: bool,
+}
+
+impl Default for KnowledgeFeatureFlags {
+    fn default() -> Self {
+        Self {
+            kb_query_runs_v2: true,
+            kb_picker_server_search: true,
+            kb_ingest_job_scoped_progress: true,
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
 
 /// Get current application settings
 #[tauri::command]
@@ -31,6 +61,60 @@ pub async fn update_settings(
 ) -> Result<CommandResponse<AppConfig>, String> {
     match state.update_config(update).await {
         Ok(config) => Ok(CommandResponse::ok(config)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Get knowledge-related runtime feature flags persisted in DB settings.
+#[tauri::command]
+pub async fn get_knowledge_feature_flags(
+    state: State<'_, AppState>,
+) -> Result<CommandResponse<KnowledgeFeatureFlags>, String> {
+    match state
+        .with_database(|db| {
+            Ok(KnowledgeFeatureFlags {
+                kb_query_runs_v2: read_feature_flag(db, KB_QUERY_RUNS_V2_FLAG, true)?,
+                kb_picker_server_search: read_feature_flag(db, KB_PICKER_SERVER_SEARCH_FLAG, true)?,
+                kb_ingest_job_scoped_progress: read_feature_flag(
+                    db,
+                    KB_INGEST_JOB_SCOPED_PROGRESS_FLAG,
+                    true,
+                )?,
+            })
+        })
+        .await
+    {
+        Ok(flags) => Ok(CommandResponse::ok(flags)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Persist knowledge-related runtime feature flags into DB settings.
+#[tauri::command]
+pub async fn set_knowledge_feature_flags(
+    state: State<'_, AppState>,
+    flags: KnowledgeFeatureFlags,
+) -> Result<CommandResponse<KnowledgeFeatureFlags>, String> {
+    let normalized = flags.clone();
+    let to_persist = normalized.clone();
+    match state
+        .with_database(move |db| {
+            persist_feature_flag(db, KB_QUERY_RUNS_V2_FLAG, to_persist.kb_query_runs_v2)?;
+            persist_feature_flag(
+                db,
+                KB_PICKER_SERVER_SEARCH_FLAG,
+                to_persist.kb_picker_server_search,
+            )?;
+            persist_feature_flag(
+                db,
+                KB_INGEST_JOB_SCOPED_PROGRESS_FLAG,
+                to_persist.kb_ingest_job_scoped_progress,
+            )?;
+            Ok(())
+        })
+        .await
+    {
+        Ok(()) => Ok(CommandResponse::ok(normalized)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
 }
@@ -508,6 +592,12 @@ fn reset_backend_settings(db: &crate::storage::Database) -> crate::utils::error:
         "proxy_global",
         "remote_gateway_config",
         "remote_telegram_config",
+        KB_QUERY_RUNS_V2_FLAG,
+        KB_PICKER_SERVER_SEARCH_FLAG,
+        KB_INGEST_JOB_SCOPED_PROGRESS_FLAG,
+        "feature.kb_query_runs_v2",
+        "feature.kb_picker_server_search",
+        "feature.kb_ingest_job_scoped_progress",
     ] {
         db.delete_setting(key)?;
     }
@@ -550,4 +640,94 @@ fn clear_plugin_settings_file() -> crate::utils::error::AppResult<()> {
         std::fs::remove_file(plugin_settings_path)?;
     }
     Ok(())
+}
+
+fn parse_bool_setting(value: Option<String>, default_value: bool) -> bool {
+    match value
+        .as_deref()
+        .map(str::trim)
+        .map(|v| v.to_ascii_lowercase())
+    {
+        Some(v) if v == "1" || v == "true" || v == "yes" || v == "on" => true,
+        Some(v) if v == "0" || v == "false" || v == "no" || v == "off" => false,
+        _ => default_value,
+    }
+}
+
+fn read_feature_flag(
+    db: &crate::storage::Database,
+    key: &str,
+    default_value: bool,
+) -> crate::utils::error::AppResult<bool> {
+    for setting_key in [format!("feature.{}", key), key.to_string()] {
+        if let Some(raw) = db.get_setting(&setting_key)? {
+            return Ok(parse_bool_setting(Some(raw), default_value));
+        }
+    }
+    Ok(default_value)
+}
+
+fn persist_feature_flag(
+    db: &crate::storage::Database,
+    key: &str,
+    enabled: bool,
+) -> crate::utils::error::AppResult<()> {
+    let value = if enabled { "true" } else { "false" };
+    db.set_setting(&format!("feature.{}", key), value)?;
+    db.set_setting(key, value)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::database::Database;
+
+    fn create_test_db() -> Database {
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let pool = r2d2::Pool::builder()
+            .max_size(1)
+            .build(manager)
+            .expect("pool");
+        {
+            let conn = pool.get().expect("conn");
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+                [],
+            )
+            .expect("create settings");
+        }
+        Database::from_pool_for_test(pool)
+    }
+
+    #[test]
+    fn persist_feature_flag_writes_both_legacy_and_feature_keys() {
+        let db = create_test_db();
+        persist_feature_flag(&db, KB_QUERY_RUNS_V2_FLAG, false).expect("persist flag");
+
+        assert_eq!(
+            db.get_setting("feature.kb_query_runs_v2").unwrap(),
+            Some("false".to_string())
+        );
+        assert_eq!(
+            db.get_setting("kb_query_runs_v2").unwrap(),
+            Some("false".to_string())
+        );
+    }
+
+    #[test]
+    fn read_feature_flag_prefers_prefixed_value_and_falls_back_to_default() {
+        let db = create_test_db();
+        db.set_setting("kb_query_runs_v2", "false")
+            .expect("set legacy flag");
+        db.set_setting("feature.kb_query_runs_v2", "true")
+            .expect("set feature flag");
+
+        let resolved = read_feature_flag(&db, KB_QUERY_RUNS_V2_FLAG, false).expect("read flag");
+        assert!(resolved);
+
+        let defaulted =
+            read_feature_flag(&db, KB_PICKER_SERVER_SEARCH_FLAG, true).expect("read default");
+        assert!(defaulted);
+    }
 }

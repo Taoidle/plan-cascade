@@ -16,407 +16,21 @@ import { CollectionDetail } from './CollectionDetail';
 import { DocumentUploader } from './DocumentUploader';
 import { RetrievalLab } from './RetrievalLab';
 import { SyncHealthPanel } from './SyncHealthPanel';
-
-// ---------------------------------------------------------------------------
-// WorkspacePathPicker
-// ---------------------------------------------------------------------------
-
-interface WorkspacePathPickerProps {
-  value: string;
-  onChange: (path: string) => void;
-  placeholder: string;
-  label: string;
-  browseLabel: string;
-  clearLabel: string;
-}
-
-function WorkspacePathPicker({
-  value,
-  onChange,
-  placeholder,
-  label,
-  browseLabel,
-  clearLabel,
-}: WorkspacePathPickerProps) {
-  const handleBrowse = useCallback(async () => {
-    try {
-      const { open } = await import('@tauri-apps/plugin-dialog');
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: label,
-        defaultPath: value || undefined,
-      });
-      if (selected && typeof selected === 'string') {
-        onChange(selected);
-      }
-    } catch (err) {
-      console.error('Failed to open directory picker:', err);
-    }
-  }, [value, onChange, label]);
-
-  return (
-    <div>
-      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{label}</label>
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={value}
-          readOnly
-          placeholder={placeholder}
-          onClick={handleBrowse}
-          className={clsx(
-            'flex-1 min-w-0 px-3 py-2 rounded-lg cursor-pointer',
-            'border border-gray-300 dark:border-gray-600',
-            'bg-gray-50 dark:bg-gray-700',
-            'text-gray-900 dark:text-white',
-            'text-sm truncate',
-            'hover:border-primary-400 dark:hover:border-primary-500',
-            'transition-colors',
-          )}
-        />
-        <button
-          type="button"
-          onClick={handleBrowse}
-          className={clsx(
-            'px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap',
-            'border border-gray-300 dark:border-gray-600',
-            'bg-white dark:bg-gray-700',
-            'text-gray-700 dark:text-gray-300',
-            'hover:bg-gray-50 dark:hover:bg-gray-600',
-            'transition-colors',
-          )}
-        >
-          {browseLabel}
-        </button>
-        {value && (
-          <button
-            type="button"
-            onClick={() => onChange('')}
-            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-2"
-            title={clearLabel}
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// CreateCollectionDialog
-// ---------------------------------------------------------------------------
-
-interface CreateCollectionDialogProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onSubmit: (name: string, description: string, workspacePath?: string) => void;
-  isLoading: boolean;
-}
-
-function CreateCollectionDialog({ isOpen, onClose, onSubmit, isLoading }: CreateCollectionDialogProps) {
-  const { t } = useTranslation('knowledge');
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [workspacePath, setWorkspacePath] = useState('');
-
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div
-        className={clsx(
-          'w-full max-w-md rounded-xl p-6',
-          'bg-white dark:bg-gray-800',
-          'border border-gray-200 dark:border-gray-700',
-          'shadow-xl',
-        )}
-      >
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t('createCollection')}</h3>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              {t('collectionName')}
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t('collectionNamePlaceholder')}
-              className={clsx(
-                'w-full px-3 py-2 rounded-lg',
-                'border border-gray-300 dark:border-gray-600',
-                'bg-white dark:bg-gray-700',
-                'text-gray-900 dark:text-white',
-                'focus:ring-2 focus:ring-primary-500 focus:border-transparent',
-                'text-sm',
-              )}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              {t('description')}
-            </label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder={t('descriptionPlaceholder')}
-              rows={3}
-              className={clsx(
-                'w-full px-3 py-2 rounded-lg',
-                'border border-gray-300 dark:border-gray-600',
-                'bg-white dark:bg-gray-700',
-                'text-gray-900 dark:text-white',
-                'focus:ring-2 focus:ring-primary-500 focus:border-transparent',
-                'text-sm resize-none',
-              )}
-            />
-          </div>
-          <WorkspacePathPicker
-            value={workspacePath}
-            onChange={setWorkspacePath}
-            placeholder={t('workspacePathPlaceholder')}
-            label={t('workspacePath')}
-            browseLabel={t('browse')}
-            clearLabel={t('clearPath')}
-          />
-        </div>
-        <div className="flex justify-end gap-3 mt-6">
-          <button
-            onClick={onClose}
-            className={clsx(
-              'px-4 py-2 rounded-lg text-sm font-medium',
-              'text-gray-700 dark:text-gray-300',
-              'hover:bg-gray-100 dark:hover:bg-gray-700',
-              'transition-colors',
-            )}
-          >
-            {t('cancel', { ns: 'common' })}
-          </button>
-          <button
-            onClick={() => {
-              if (name.trim()) {
-                onSubmit(name.trim(), description.trim(), workspacePath.trim() || undefined);
-              }
-            }}
-            disabled={!name.trim() || isLoading}
-            className={clsx(
-              'px-4 py-2 rounded-lg text-sm font-medium',
-              'bg-primary-600 hover:bg-primary-700',
-              'text-white',
-              'disabled:opacity-50 disabled:cursor-not-allowed',
-              'transition-colors',
-            )}
-          >
-            {isLoading ? t('creating') : t('create')}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// EditCollectionDialog
-// ---------------------------------------------------------------------------
-
-interface EditCollectionDialogProps {
-  isOpen: boolean;
-  collection: KnowledgeCollection | null;
-  onClose: () => void;
-  onSubmit: (collectionId: string, name: string, description: string, workspacePath?: string | null) => void;
-  isLoading: boolean;
-}
-
-function EditCollectionDialog({ isOpen, collection, onClose, onSubmit, isLoading }: EditCollectionDialogProps) {
-  const { t } = useTranslation('knowledge');
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [workspacePath, setWorkspacePath] = useState('');
-
-  useEffect(() => {
-    if (collection) {
-      setName(collection.name);
-      setDescription(collection.description);
-      setWorkspacePath(collection.workspace_path ?? '');
-    }
-  }, [collection]);
-
-  if (!isOpen || !collection) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div
-        className={clsx(
-          'w-full max-w-md rounded-xl p-6',
-          'bg-white dark:bg-gray-800',
-          'border border-gray-200 dark:border-gray-700',
-          'shadow-xl',
-        )}
-      >
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t('editCollection')}</h3>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              {t('collectionName')}
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t('collectionNamePlaceholder')}
-              className={clsx(
-                'w-full px-3 py-2 rounded-lg',
-                'border border-gray-300 dark:border-gray-600',
-                'bg-white dark:bg-gray-700',
-                'text-gray-900 dark:text-white',
-                'focus:ring-2 focus:ring-primary-500 focus:border-transparent',
-                'text-sm',
-              )}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              {t('description')}
-            </label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder={t('descriptionPlaceholder')}
-              rows={3}
-              className={clsx(
-                'w-full px-3 py-2 rounded-lg',
-                'border border-gray-300 dark:border-gray-600',
-                'bg-white dark:bg-gray-700',
-                'text-gray-900 dark:text-white',
-                'focus:ring-2 focus:ring-primary-500 focus:border-transparent',
-                'text-sm resize-none',
-              )}
-            />
-          </div>
-          <WorkspacePathPicker
-            value={workspacePath}
-            onChange={setWorkspacePath}
-            placeholder={t('workspacePathPlaceholder')}
-            label={t('workspacePath')}
-            browseLabel={t('browse')}
-            clearLabel={t('clearPath')}
-          />
-        </div>
-        <div className="flex justify-end gap-3 mt-6">
-          <button
-            onClick={onClose}
-            className={clsx(
-              'px-4 py-2 rounded-lg text-sm font-medium',
-              'text-gray-700 dark:text-gray-300',
-              'hover:bg-gray-100 dark:hover:bg-gray-700',
-              'transition-colors',
-            )}
-          >
-            {t('cancel', { ns: 'common' })}
-          </button>
-          <button
-            onClick={() => {
-              if (name.trim()) {
-                const wp = workspacePath.trim();
-                onSubmit(collection.id, name.trim(), description.trim(), wp || null);
-              }
-            }}
-            disabled={!name.trim() || isLoading}
-            className={clsx(
-              'px-4 py-2 rounded-lg text-sm font-medium',
-              'bg-primary-600 hover:bg-primary-700',
-              'text-white',
-              'disabled:opacity-50 disabled:cursor-not-allowed',
-              'transition-colors',
-            )}
-          >
-            {isLoading ? t('updating') : t('updateCollection')}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// DeleteConfirmDialog
-// ---------------------------------------------------------------------------
-
-interface DeleteConfirmDialogProps {
-  isOpen: boolean;
-  collectionName: string;
-  onClose: () => void;
-  onConfirm: () => void;
-  isLoading: boolean;
-}
-
-function DeleteConfirmDialog({ isOpen, collectionName, onClose, onConfirm, isLoading }: DeleteConfirmDialogProps) {
-  const { t } = useTranslation('knowledge');
-
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div
-        className={clsx(
-          'w-full max-w-sm rounded-xl p-6',
-          'bg-white dark:bg-gray-800',
-          'border border-gray-200 dark:border-gray-700',
-          'shadow-xl',
-        )}
-      >
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">{t('deleteCollection')}</h3>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">{t('deleteConfirm', { name: collectionName })}</p>
-        <div className="flex justify-end gap-3">
-          <button
-            onClick={onClose}
-            className={clsx(
-              'px-4 py-2 rounded-lg text-sm font-medium',
-              'text-gray-700 dark:text-gray-300',
-              'hover:bg-gray-100 dark:hover:bg-gray-700',
-              'transition-colors',
-            )}
-          >
-            {t('cancel', { ns: 'common' })}
-          </button>
-          <button
-            onClick={onConfirm}
-            disabled={isLoading}
-            className={clsx(
-              'px-4 py-2 rounded-lg text-sm font-medium',
-              'bg-red-600 hover:bg-red-700',
-              'text-white',
-              'disabled:opacity-50 disabled:cursor-not-allowed',
-              'transition-colors',
-            )}
-          >
-            {isLoading ? t('deleting') : t('delete')}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// KnowledgeBasePanel
-// ---------------------------------------------------------------------------
-
-/** Active tab in the right panel. */
-type RightTab = 'collections' | 'documents' | 'retrieval' | 'health';
+import { CollectionListPane } from './panel/CollectionListPane';
+import { CreateCollectionDialog } from './panel/CreateCollectionDialog';
+import { EditCollectionDialog } from './panel/EditCollectionDialog';
+import { DeleteConfirmDialog } from './panel/DeleteConfirmDialog';
+import { RightPanelTabs, type RightTab } from './panel/RightPanelTabs';
 
 export function KnowledgeBasePanel() {
   const { t } = useTranslation('knowledge');
   const {
     collections,
     activeCollection,
-    isLoading,
+    isLoadingCollections,
+    isUpdatingCollection,
     isIngesting,
-    isDeleting,
+    isDeletingCollection,
     error,
     fetchCollections,
     selectCollection,
@@ -434,7 +48,6 @@ export function KnowledgeBasePanel() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<RightTab>('collections');
 
-  // Fetch collections on mount and project change
   useEffect(() => {
     fetchCollections(projectId);
   }, [projectId, fetchCollections]);
@@ -443,7 +56,6 @@ export function KnowledgeBasePanel() {
     async (name: string, description: string, workspacePath?: string) => {
       const ok = await createCollection(projectId, name, description, []);
       if (ok) {
-        // If workspace path provided, update the newly created collection
         if (workspacePath) {
           const created = useKnowledgeStore.getState().collections.find((c) => c.name === name);
           if (created) {
@@ -478,7 +90,6 @@ export function KnowledgeBasePanel() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Error banner */}
       {error && (
         <div
           className={clsx(
@@ -495,7 +106,6 @@ export function KnowledgeBasePanel() {
       )}
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Panel - Collection List */}
         <div
           className={clsx(
             'h-full border-r border-gray-200 dark:border-gray-700',
@@ -503,125 +113,20 @@ export function KnowledgeBasePanel() {
             activeCollection ? 'hidden md:block md:w-1/3 lg:w-1/4' : 'w-full md:w-1/3 lg:w-1/4',
           )}
         >
-          <div className="h-full flex flex-col">
-            {/* Header */}
-            <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-gray-900 dark:text-white">{t('title')}</h2>
-                <button
-                  onClick={() => setShowCreateDialog(true)}
-                  className={clsx(
-                    'px-3 py-1.5 rounded-lg text-xs font-medium',
-                    'bg-primary-600 hover:bg-primary-700',
-                    'text-white',
-                    'transition-colors',
-                  )}
-                >
-                  {t('newCollection')}
-                </button>
-              </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                {t('subtitle', { count: collections.length })}
-              </p>
-            </div>
-
-            {/* Collection list */}
-            <div className="flex-1 overflow-y-auto">
-              {isLoading ? (
-                <div className="px-4 py-8 text-center">
-                  <div className="animate-pulse text-sm text-gray-500">{t('loading')}</div>
-                </div>
-              ) : collections.length === 0 ? (
-                <div className="px-4 py-8 text-center">
-                  <p className="text-sm text-gray-500 dark:text-gray-400">{t('noCollections')}</p>
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{t('noCollectionsHint')}</p>
-                </div>
-              ) : (
-                <div className="divide-y divide-gray-200 dark:divide-gray-700">
-                  {collections.map((collection) => (
-                    <div
-                      key={collection.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => {
-                        selectCollection(collection);
-                        setActiveTab('collections');
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          selectCollection(collection);
-                          setActiveTab('collections');
-                        }
-                      }}
-                      className={clsx(
-                        'w-full text-left px-4 py-3 cursor-pointer',
-                        'hover:bg-gray-100 dark:hover:bg-gray-800',
-                        'transition-colors',
-                        activeCollection?.id === collection.id &&
-                          'bg-primary-50 dark:bg-primary-900/20 border-l-2 border-primary-500',
-                      )}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                          {collection.name}
-                        </span>
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditTarget(collection);
-                            }}
-                            className="text-gray-400 hover:text-primary-500 dark:hover:text-primary-400 p-1"
-                            title={t('editCollection')}
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                              />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteTarget(collection.name);
-                            }}
-                            className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 p-1"
-                            title={t('delete')}
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                              />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3 mt-1">
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
-                          {t('chunks', { count: collection.chunk_count })}
-                        </span>
-                        {collection.description && (
-                          <span className="text-xs text-gray-400 dark:text-gray-500 truncate">
-                            {collection.description}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+          <CollectionListPane
+            collections={collections}
+            activeCollection={activeCollection}
+            isLoadingCollections={isLoadingCollections}
+            onCreate={() => setShowCreateDialog(true)}
+            onSelect={(collection) => {
+              selectCollection(collection);
+              setActiveTab('collections');
+            }}
+            onEdit={setEditTarget}
+            onDelete={setDeleteTarget}
+          />
         </div>
 
-        {/* Right Panel - Collections / Documents / Retrieval / Health */}
         <div
           className={clsx(
             'h-full flex-1',
@@ -631,35 +136,8 @@ export function KnowledgeBasePanel() {
         >
           {activeCollection ? (
             <div className="h-full flex flex-col">
-              {/* Tab bar */}
-              <div className="flex items-center border-b border-gray-200 dark:border-gray-700 px-4">
-                {/* Back button (mobile) */}
-                <button
-                  onClick={() => selectCollection(null)}
-                  className="md:hidden mr-3 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                  </svg>
-                </button>
+              <RightPanelTabs activeTab={activeTab} onChange={setActiveTab} onBack={() => selectCollection(null)} />
 
-                {(['collections', 'documents', 'retrieval', 'health'] as RightTab[]).map((tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className={clsx(
-                      'px-4 py-3 text-sm font-medium border-b-2 transition-colors',
-                      activeTab === tab
-                        ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-                        : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300',
-                    )}
-                  >
-                    {t(`tabs.${tab}`)}
-                  </button>
-                ))}
-              </div>
-
-              {/* Tab content */}
               <div className="flex-1 overflow-y-auto">
                 {activeTab === 'collections' && <CollectionDetail collection={activeCollection} />}
                 {activeTab === 'documents' && (
@@ -690,7 +168,6 @@ export function KnowledgeBasePanel() {
         </div>
       </div>
 
-      {/* Dialogs */}
       <CreateCollectionDialog
         isOpen={showCreateDialog}
         onClose={() => setShowCreateDialog(false)}
@@ -702,14 +179,14 @@ export function KnowledgeBasePanel() {
         collection={editTarget}
         onClose={() => setEditTarget(null)}
         onSubmit={handleEdit}
-        isLoading={isLoading}
+        isLoading={isUpdatingCollection}
       />
       <DeleteConfirmDialog
         isOpen={deleteTarget !== null}
         collectionName={deleteTarget ?? ''}
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDelete}
-        isLoading={isDeleting}
+        isLoading={isDeletingCollection}
       />
     </div>
   );

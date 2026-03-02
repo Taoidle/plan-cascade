@@ -5,15 +5,22 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { DocumentUploader } from '../DocumentUploader';
 import { useKnowledgeStore } from '../../../store/knowledge';
+import { useSettingsStore } from '../../../store/settings';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
 vi.mock('react-i18next', () => ({
+  initReactI18next: {
+    type: '3rdParty',
+    init: () => {},
+  },
   useTranslation: () => ({
     t: (key: string, opts?: Record<string, unknown>) => {
       const translations: Record<string, string> = {
@@ -59,13 +66,20 @@ function resetStore() {
     queryRunsByCollection: {},
     docsStatus: null,
     isLoading: false,
+    isLoadingCollections: false,
+    isLoadingDocuments: false,
+    isUpdatingCollection: false,
     isIngesting: false,
     isQuerying: false,
     isDeleting: false,
+    isDeletingCollection: false,
+    isDeletingDocument: false,
     isLoadingQueryRuns: false,
     isLoadingDocsStatus: false,
     isSyncingDocs: false,
     uploadProgress: 0,
+    uploadProgressByJob: {},
+    activeUploadJobByCollection: {},
     pendingUpdates: null,
     isCheckingUpdates: false,
     isApplyingUpdates: false,
@@ -86,9 +100,15 @@ function renderUploader() {
 // ---------------------------------------------------------------------------
 
 describe('DocumentUploader', () => {
+  const mockListen = vi.mocked(listen);
+  const mockInvoke = vi.mocked(invoke);
+
   beforeEach(() => {
     vi.clearAllMocks();
+    mockInvoke.mockResolvedValue({ success: true, data: true, error: null });
+    mockListen.mockImplementation(() => Promise.resolve(() => {}));
     resetStore();
+    useSettingsStore.setState({ kbIngestJobScopedProgress: true });
   });
 
   // ========================================================================
@@ -178,15 +198,18 @@ describe('DocumentUploader', () => {
   // ========================================================================
 
   describe('progress display', () => {
-    it('shows progress bar when ingesting', () => {
-      useKnowledgeStore.setState({ isIngesting: true, uploadProgress: 45 });
+    it('shows progress bar for current collection active upload job', () => {
+      useKnowledgeStore.setState({
+        activeUploadJobByCollection: { 'col-1': 'job-1' },
+        uploadProgressByJob: { 'job-1': 45 },
+      });
       renderUploader();
 
       expect(screen.getByText('Ingesting...')).toBeDefined();
       expect(screen.getByText('45%')).toBeDefined();
     });
 
-    it('hides upload button when ingesting', async () => {
+    it('hides upload button when current collection has active job', async () => {
       renderUploader();
       const input = document.querySelector('input[type="file"]') as HTMLInputElement;
 
@@ -194,13 +217,80 @@ describe('DocumentUploader', () => {
       Object.defineProperty(input, 'files', { value: [file], configurable: true });
       fireEvent.change(input);
 
-      // Simulate ingesting state
-      useKnowledgeStore.setState({ isIngesting: true, uploadProgress: 50 });
-
-      // Re-render to reflect state change
-      renderUploader();
+      act(() => {
+        useKnowledgeStore.setState({
+          activeUploadJobByCollection: { 'col-1': 'job-1' },
+          uploadProgressByJob: { 'job-1': 50 },
+        });
+      });
 
       expect(screen.queryByText(/Upload \d+ files/)).toBeNull();
+    });
+
+    it('ignores progress events from other collections and applies matching events', async () => {
+      let listener: ((event: { payload: Record<string, unknown> }) => void) | null = null;
+      mockListen.mockImplementation((_eventName, cb) => {
+        listener = cb as (event: { payload: Record<string, unknown> }) => void;
+        return Promise.resolve(() => {});
+      });
+
+      renderUploader();
+      await waitFor(() => expect(listener).not.toBeNull());
+
+      act(() => {
+        listener!({
+          payload: {
+            job_id: 'job-other',
+            project_id: 'proj-1',
+            collection_id: 'col-other',
+            stage: 'embedding',
+            progress: 33,
+            detail: 'other',
+          },
+        });
+      });
+      expect(screen.queryByText('33%')).toBeNull();
+      expect(mockInvoke).toHaveBeenCalledWith('rag_record_ingest_crosstalk_alert');
+
+      act(() => {
+        listener!({
+          payload: {
+            job_id: 'job-1',
+            project_id: 'proj-1',
+            collection_id: 'col-1',
+            stage: 'embedding',
+            progress: 66,
+            detail: 'match',
+          },
+        });
+      });
+      expect(screen.getByText('66%')).toBeDefined();
+    });
+
+    it('supports legacy progress payloads without job_id when job scope flag is disabled', async () => {
+      let listener: ((event: { payload: Record<string, unknown> }) => void) | null = null;
+      useSettingsStore.setState({ kbIngestJobScopedProgress: false });
+      mockListen.mockImplementation((_eventName, cb) => {
+        listener = cb as (event: { payload: Record<string, unknown> }) => void;
+        return Promise.resolve(() => {});
+      });
+
+      renderUploader();
+      await waitFor(() => expect(listener).not.toBeNull());
+
+      act(() => {
+        listener!({
+          payload: {
+            project_id: 'proj-1',
+            collection_id: 'col-1',
+            stage: 'embedding',
+            progress: 44,
+            detail: 'legacy',
+          },
+        });
+      });
+
+      expect(screen.getByText('44%')).toBeDefined();
     });
   });
 

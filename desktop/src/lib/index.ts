@@ -56,12 +56,20 @@ export type {
 export {
   getSettings,
   updateSettings,
+  getKnowledgeFeatureFlags,
+  setKnowledgeFeatureFlags,
   resetAllSettings,
   exportAllSettings,
   importAllSettings,
   isTauriAvailable,
 } from './settingsApi';
-export type { AppConfig, SettingsUpdate, UnifiedSettingsExport, ImportResult } from './settingsApi';
+export type {
+  AppConfig,
+  SettingsUpdate,
+  KnowledgeFeatureFlags,
+  UnifiedSettingsExport,
+  ImportResult,
+} from './settingsApi';
 
 // Embedding API (v5.0)
 export {

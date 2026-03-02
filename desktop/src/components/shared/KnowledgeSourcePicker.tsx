@@ -7,11 +7,14 @@
  * Includes search input for client-side filtering.
  */
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { ChevronDownIcon, ChevronRightIcon, MagnifyingGlassIcon } from '@radix-ui/react-icons';
 import { useContextSourcesStore } from '../../store/contextSources';
+import { useProjectsStore } from '../../store/projects';
+import { useSettingsStore } from '../../store/settings';
+import { ragRecordPickerSearch, ragSearchDocuments, type DocumentSearchMatch } from '../../lib/knowledgeApi';
 
 export function KnowledgeSourcePicker() {
   const { t } = useTranslation('simpleMode');
@@ -29,6 +32,10 @@ export function KnowledgeSourcePicker() {
 
   const [expandedCollections, setExpandedCollections] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
+  const [remoteMatches, setRemoteMatches] = useState<DocumentSearchMatch[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const projectId = useProjectsStore((s) => s.selectedProject?.id ?? 'default');
+  const serverSearchEnabled = useSettingsStore((s) => s.kbPickerServerSearch);
 
   const toggleExpand = useCallback(
     (collectionId: string) => {
@@ -69,16 +76,62 @@ export function KnowledgeSourcePicker() {
 
   // Client-side search filtering
   const lowerQuery = searchQuery.toLowerCase().trim();
+  useEffect(() => {
+    if (!lowerQuery) {
+      setRemoteMatches([]);
+      setIsSearching(false);
+      return;
+    }
+    if (!serverSearchEnabled) {
+      setRemoteMatches([]);
+      setIsSearching(false);
+      return;
+    }
+    let cancelled = false;
+    const timeout = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const result = await ragSearchDocuments(projectId, lowerQuery, undefined, 80);
+        if (cancelled) return;
+        const matches = result.success && result.data ? result.data : [];
+        setRemoteMatches(matches);
+        void ragRecordPickerSearch(matches.length === 0);
+      } finally {
+        if (!cancelled) {
+          setIsSearching(false);
+        }
+      }
+    }, 240);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [projectId, lowerQuery, serverSearchEnabled]);
+
+  const remoteByCollection = useMemo(() => {
+    const grouped = new Map<string, DocumentSearchMatch[]>();
+    for (const item of remoteMatches) {
+      const bucket = grouped.get(item.collection_id);
+      if (bucket) {
+        bucket.push(item);
+      } else {
+        grouped.set(item.collection_id, [item]);
+      }
+    }
+    return grouped;
+  }, [remoteMatches]);
+
   const filteredCollections = useMemo(() => {
     if (!lowerQuery) return availableCollections;
     return availableCollections.filter((col) => {
       // Match collection name
       if (col.name.toLowerCase().includes(lowerQuery)) return true;
+      if (remoteByCollection.has(col.id)) return true;
       // Match any document in the collection
       const docs = collectionDocuments[col.id] || [];
       return docs.some((d) => (d.display_name || d.document_id || '').toLowerCase().includes(lowerQuery));
     });
-  }, [availableCollections, collectionDocuments, lowerQuery]);
+  }, [availableCollections, collectionDocuments, lowerQuery, remoteByCollection]);
 
   if (isLoadingCollections) {
     return (
@@ -126,6 +179,11 @@ export function KnowledgeSourcePicker() {
       </div>
 
       <div className="max-h-64 overflow-y-auto">
+        {lowerQuery && isSearching && (
+          <div className="px-3 py-2 text-2xs text-gray-400">
+            {t('contextSources.knowledgePicker.loading', { defaultValue: 'Loading...' })}
+          </div>
+        )}
         {filteredCollections.length === 0 && lowerQuery && (
           <div className="px-3 py-2 text-2xs text-gray-400">
             {t('contextSources.knowledgePicker.noResults', { defaultValue: 'No matching collections' })}
@@ -135,15 +193,23 @@ export function KnowledgeSourcePicker() {
           const isExpanded = expandedCollections.has(collection.id) || !!lowerQuery;
           const checkState = getCollectionCheckState(collection.id);
           const allDocs = collectionDocuments[collection.id] || [];
+          const remoteDocs = (remoteByCollection.get(collection.id) || []).map((match) => ({
+            document_uid: match.document_uid,
+            display_name: match.display_name,
+            document_id: match.display_name,
+            chunk_count: 0,
+          }));
           const loading = isLoadingDocuments[collection.id];
 
           // Filter documents when searching
           const docs = lowerQuery
-            ? allDocs.filter(
-                (d) =>
-                  (d.display_name || d.document_id || '').toLowerCase().includes(lowerQuery) ||
-                  collection.name.toLowerCase().includes(lowerQuery),
-              )
+            ? remoteDocs.length > 0
+              ? remoteDocs
+              : allDocs.filter(
+                  (d) =>
+                    (d.display_name || d.document_id || '').toLowerCase().includes(lowerQuery) ||
+                    collection.name.toLowerCase().includes(lowerQuery),
+                )
             : allDocs;
 
           return (
@@ -212,7 +278,12 @@ export function KnowledgeSourcePicker() {
                         checked={selectedDocuments.some(
                           (ref) => ref.collection_id === collection.id && ref.document_uid === doc.document_uid,
                         )}
-                        onChange={() => toggleDocument(collection.id, doc.document_uid)}
+                        onChange={() => {
+                          if (!collectionDocuments[collection.id]) {
+                            void loadDocuments(collection.id);
+                          }
+                          toggleDocument(collection.id, doc.document_uid);
+                        }}
                         className="w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-600 text-amber-600 focus:ring-amber-500"
                       />
                       <span className="flex-1 text-2xs text-gray-600 dark:text-gray-400 truncate">

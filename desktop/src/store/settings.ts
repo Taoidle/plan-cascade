@@ -80,6 +80,10 @@ interface SettingsState {
   onboardingCompleted: boolean;
   tourCompleted: boolean;
   workspacePath: string;
+  knowledgeAutoEnsureDocsCollection: boolean;
+  kbQueryRunsV2: boolean;
+  kbPickerServerSearch: boolean;
+  kbIngestJobScopedProgress: boolean;
 
   // Sidebar settings
   pinnedDirectories: string[];
@@ -145,6 +149,10 @@ interface SettingsState {
   setOnboardingCompleted: (completed: boolean) => void;
   setTourCompleted: (completed: boolean) => void;
   setWorkspacePath: (path: string) => void;
+  setKnowledgeAutoEnsureDocsCollection: (enabled: boolean) => void;
+  setKbQueryRunsV2: (enabled: boolean) => void;
+  setKbPickerServerSearch: (enabled: boolean) => void;
+  setKbIngestJobScopedProgress: (enabled: boolean) => void;
 
   // Sidebar actions
   addPinnedDirectory: (path: string) => void;
@@ -203,6 +211,10 @@ const defaultSettings = {
   onboardingCompleted: false,
   tourCompleted: false,
   workspacePath: '',
+  knowledgeAutoEnsureDocsCollection: false,
+  kbQueryRunsV2: true,
+  kbPickerServerSearch: true,
+  kbIngestJobScopedProgress: true,
 
   // Sidebar
   pinnedDirectories: [] as string[],
@@ -366,6 +378,10 @@ export const useSettingsStore = create<SettingsState>()(
           });
         });
       },
+      setKnowledgeAutoEnsureDocsCollection: (enabled: boolean) => set({ knowledgeAutoEnsureDocsCollection: enabled }),
+      setKbQueryRunsV2: (enabled: boolean) => set({ kbQueryRunsV2: enabled }),
+      setKbPickerServerSearch: (enabled: boolean) => set({ kbPickerServerSearch: enabled }),
+      setKbIngestJobScopedProgress: (enabled: boolean) => set({ kbIngestJobScopedProgress: enabled }),
 
       addPinnedDirectory: (path) =>
         set((state) => {

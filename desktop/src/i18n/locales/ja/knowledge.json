@@ -39,6 +39,10 @@
   },
 
   "tabs": {
+    "collections": "コレクション",
+    "documents": "ドキュメント",
+    "retrieval": "検索ラボ",
+    "health": "同期とヘルス",
     "details": "詳細",
     "upload": "アップロード",
     "query": "検索"
@@ -86,6 +90,60 @@
     "syncComplete": "ドキュメントの同期が完了しました",
     "changesDetected": "ドキュメントの変更が検出されました",
     "syncDocs": "ドキュメントを同期"
+  },
+
+  "retrievalLab": {
+    "title": "検索ラボ",
+    "subtitle": "スコープ付き検索を実行し、候補品質とレイテンシを確認します。",
+    "profile": "プロファイル",
+    "profiles": {
+      "balanced": "バランス",
+      "precision": "精度重視",
+      "recall": "再現率重視"
+    },
+    "enableDocFilter": "ドキュメントフィルタを有効化",
+    "selectAllDocs": "すべて選択",
+    "clearDocSelection": "選択をクリア",
+    "selectedDocs": "{{count}} 件選択済み",
+    "refreshRuns": "実行履歴を更新",
+    "loadingRuns": "履歴を読み込み中...",
+    "runHistory": "検索実行履歴",
+    "lastRuns": "直近 {{count}} 件",
+    "emptyResults": "クエリを実行して結果を確認してください。",
+    "emptyRuns": "まだ実行履歴がありません。",
+    "totalMs": "合計",
+    "rerankMs": "再ランク",
+    "resultCount": "結果数"
+  },
+
+  "syncHealth": {
+    "title": "同期とヘルス",
+    "subtitle": "ドキュメント索引とワークスペース同期の状態を確認します。",
+    "docsStatus": "Docs コレクション状態",
+    "workspaceMissing": "ワークスペースパスが設定されていません。",
+    "totalDocs": "総ドキュメント",
+    "pendingChanges": "未反映変更",
+    "collectionName": "Docs コレクション",
+    "collectionMissing": "未作成",
+    "refresh": "状態を更新",
+    "refreshing": "更新中...",
+    "ensureCollection": "Docs コレクションを作成/確認",
+    "ensuring": "確認中...",
+    "syncNow": "今すぐ同期",
+    "syncing": "同期中...",
+    "pendingFiles": "未反映ファイル変更",
+    "collectionDiff": "コレクション差分",
+    "checkDiff": "差分確認",
+    "applyDiff": "差分反映",
+    "modified": "変更",
+    "deleted": "削除",
+    "newFiles": "新規ファイル",
+    "unchanged": "変更なし",
+    "noDiffData": "「差分確認」を実行してください。",
+    "statusIndexed": "索引済み",
+    "statusChangesPending": "変更あり",
+    "statusIndexing": "索引中",
+    "statusNone": "未初期化"
   },
 
   "query": {

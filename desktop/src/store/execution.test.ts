@@ -32,6 +32,8 @@ vi.mock('@tauri-apps/api/event', () => ({
 // Import after mocks are set up
 import { useExecutionStore } from './execution';
 import type { SessionSnapshot } from './execution';
+import { useContextSourcesStore } from './contextSources';
+import { useProjectsStore } from './projects';
 import { useSettingsStore } from './settings';
 import { ToolCallStreamFilter } from '../utils/toolCallFilter';
 
@@ -2323,5 +2325,59 @@ describe('Execution Store - Auto-Background on start()', () => {
 
     const state = useExecutionStore.getState();
     expect(Object.keys(state.backgroundSessions).length).toBe(0);
+  });
+
+  it('passes knowledge contextSources into execute_standalone for expert-mode start', async () => {
+    useSettingsStore.setState({
+      backend: 'openai',
+      provider: 'openai',
+      model: 'gpt-4o',
+      workspacePath: '/tmp/proj-kb',
+    });
+    useProjectsStore.setState({
+      selectedProject: {
+        id: 'proj-kb',
+        name: 'KB Project',
+        path: '/tmp/proj-kb',
+        last_activity: new Date().toISOString(),
+        session_count: 0,
+        message_count: 0,
+      },
+    });
+    useContextSourcesStore.setState({
+      knowledgeEnabled: true,
+      selectedCollections: ['col-1'],
+      selectedDocuments: [{ collection_id: 'col-1', document_uid: 'doc-1' }],
+    });
+
+    mockInvoke.mockImplementation(async (command: string, _args?: unknown) => {
+      if (command === 'execute_standalone') {
+        return { success: true, data: { task_id: 'task-kb-1' }, error: null };
+      }
+      return { success: true, data: null, error: null };
+    });
+
+    await useExecutionStore.getState().start('Need KB context', 'expert');
+
+    const executeCall = mockInvoke.mock.calls.find(([command]) => command === 'execute_standalone');
+    expect(executeCall).toBeDefined();
+    const args = executeCall?.[1] as
+      | {
+          contextSources?: {
+            project_id?: string;
+            knowledge?: {
+              enabled?: boolean;
+              selected_collections?: string[];
+              selected_documents?: Array<{ collection_id: string; document_uid: string }>;
+            };
+          };
+        }
+      | undefined;
+    expect(args?.contextSources?.project_id).toBe('proj-kb');
+    expect(args?.contextSources?.knowledge?.enabled).toBe(true);
+    expect(args?.contextSources?.knowledge?.selected_collections).toEqual(['col-1']);
+    expect(args?.contextSources?.knowledge?.selected_documents).toEqual([
+      { collection_id: 'col-1', document_uid: 'doc-1' },
+    ]);
   });
 });

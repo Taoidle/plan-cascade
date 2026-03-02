@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { GeneralSection } from '../Settings/GeneralSection';
 import { LLMBackendSection } from '../Settings/LLMBackendSection';
 import { SettingsDialog } from '../Settings/SettingsDialog';
@@ -41,6 +41,15 @@ vi.mock('react-i18next', () => ({
         'general.theme.light': 'Light',
         'general.theme.dark': 'Dark',
         'general.theme.description': 'Choose your preferred color theme',
+        'general.knowledgeBase.title': 'Knowledge Base',
+        'general.knowledgeBase.autoEnsureDocs': 'Auto-create docs collection for workspace',
+        'general.knowledgeBase.autoEnsureDocsDescription': 'Auto create docs collection when entering workspace',
+        'general.knowledgeBase.kbQueryRunsV2': 'Use precise query-run scope filtering (v2)',
+        'general.knowledgeBase.kbQueryRunsV2Description': 'Use structured filtering',
+        'general.knowledgeBase.kbPickerServerSearch': 'Use server-side document search in picker',
+        'general.knowledgeBase.kbPickerServerSearchDescription': 'Search unexpanded collections',
+        'general.knowledgeBase.kbIngestJobScopedProgress': 'Use job-scoped ingest progress events',
+        'general.knowledgeBase.kbIngestJobScopedProgressDescription': 'Isolate upload progress by job',
         'general.executionLimits.title': 'Execution Limits',
         'general.executionLimits.maxParallelStories': 'Max Parallel Stories',
         'general.executionLimits.maxIterations': 'Max Iterations',
@@ -59,6 +68,17 @@ vi.mock('react-i18next', () => ({
 }));
 
 const mockProviderKeys: Record<string, string> = {};
+const { mockUpdateSettings, mockGetKnowledgeFeatureFlags, mockSetKnowledgeFeatureFlags, mockIsTauriAvailable } =
+  vi.hoisted(() => ({
+    mockUpdateSettings: vi.fn().mockResolvedValue(undefined),
+    mockGetKnowledgeFeatureFlags: vi.fn().mockResolvedValue({
+      kbQueryRunsV2: true,
+      kbPickerServerSearch: true,
+      kbIngestJobScopedProgress: true,
+    }),
+    mockSetKnowledgeFeatureFlags: vi.fn().mockResolvedValue(undefined),
+    mockIsTauriAvailable: vi.fn(() => false),
+  }));
 
 const mockInvoke = vi.fn(async (command: string, args?: { provider?: string; apiKey?: string; api_key?: string }) => {
   switch (command) {
@@ -109,6 +129,10 @@ const mockSetEnableContextCompaction = vi.fn();
 const mockSetShowReasoningOutput = vi.fn();
 const mockSetShowSubAgentEvents = vi.fn();
 const mockSetSearchProvider = vi.fn();
+const mockSetKnowledgeAutoEnsureDocsCollection = vi.fn();
+const mockSetKbQueryRunsV2 = vi.fn();
+const mockSetKbPickerServerSearch = vi.fn();
+const mockSetKbIngestJobScopedProgress = vi.fn();
 
 const mockSettingsState = {
   backend: 'claude-code' as string,
@@ -124,6 +148,10 @@ const mockSettingsState = {
   showReasoningOutput: false,
   showSubAgentEvents: true,
   searchProvider: 'duckduckgo' as string,
+  knowledgeAutoEnsureDocsCollection: false,
+  kbQueryRunsV2: true,
+  kbPickerServerSearch: true,
+  kbIngestJobScopedProgress: true,
   agents: [
     { name: 'claude-code', enabled: true, command: 'claude', isDefault: true },
     { name: 'aider', enabled: false, command: 'aider', isDefault: false },
@@ -146,6 +174,10 @@ const mockSettingsState = {
   setShowReasoningOutput: mockSetShowReasoningOutput,
   setShowSubAgentEvents: mockSetShowSubAgentEvents,
   setSearchProvider: mockSetSearchProvider,
+  setKnowledgeAutoEnsureDocsCollection: mockSetKnowledgeAutoEnsureDocsCollection,
+  setKbQueryRunsV2: mockSetKbQueryRunsV2,
+  setKbPickerServerSearch: mockSetKbPickerServerSearch,
+  setKbIngestJobScopedProgress: mockSetKbIngestJobScopedProgress,
 };
 
 vi.mock('../../store/settings', () => ({
@@ -157,8 +189,10 @@ vi.mock('../../store/settings', () => ({
 
 // Mock settings API
 vi.mock('../../lib/settingsApi', () => ({
-  updateSettings: vi.fn().mockResolvedValue(undefined),
-  isTauriAvailable: () => false,
+  updateSettings: mockUpdateSettings,
+  getKnowledgeFeatureFlags: mockGetKnowledgeFeatureFlags,
+  setKnowledgeFeatureFlags: mockSetKnowledgeFeatureFlags,
+  isTauriAvailable: mockIsTauriAvailable,
 }));
 
 // Mock Radix Dialog
@@ -315,6 +349,50 @@ describe('GeneralSection', () => {
     expect(screen.getByText('Max Concurrent Subagents')).toBeInTheDocument();
   });
 
+  it('calls setKnowledgeAutoEnsureDocsCollection when auto docs option is toggled', () => {
+    render(<GeneralSection />);
+
+    const title = screen.getByText('Auto-create docs collection for workspace');
+    const toggle = title.closest('label')?.querySelector('input[type="checkbox"]');
+    expect(toggle).toBeTruthy();
+    fireEvent.click(toggle!);
+
+    expect(mockSetKnowledgeAutoEnsureDocsCollection).toHaveBeenCalledWith(true);
+  });
+
+  it('calls setKbQueryRunsV2 when query-runs v2 option is toggled', () => {
+    render(<GeneralSection />);
+
+    const title = screen.getByText('Use precise query-run scope filtering (v2)');
+    const toggle = title.closest('label')?.querySelector('input[type="checkbox"]');
+    expect(toggle).toBeTruthy();
+    fireEvent.click(toggle!);
+
+    expect(mockSetKbQueryRunsV2).toHaveBeenCalledWith(false);
+  });
+
+  it('calls setKbPickerServerSearch when picker server search option is toggled', () => {
+    render(<GeneralSection />);
+
+    const title = screen.getByText('Use server-side document search in picker');
+    const toggle = title.closest('label')?.querySelector('input[type="checkbox"]');
+    expect(toggle).toBeTruthy();
+    fireEvent.click(toggle!);
+
+    expect(mockSetKbPickerServerSearch).toHaveBeenCalledWith(false);
+  });
+
+  it('calls setKbIngestJobScopedProgress when ingest progress scope option is toggled', () => {
+    render(<GeneralSection />);
+
+    const title = screen.getByText('Use job-scoped ingest progress events');
+    const toggle = title.closest('label')?.querySelector('input[type="checkbox"]');
+    expect(toggle).toBeTruthy();
+    fireEvent.click(toggle!);
+
+    expect(mockSetKbIngestJobScopedProgress).toHaveBeenCalledWith(false);
+  });
+
   it('renders max parallel stories input with default value', () => {
     render(<GeneralSection />);
 
@@ -449,6 +527,7 @@ describe('SettingsDialog', () => {
     vi.clearAllMocks();
     localStorage.clear();
     mockSettingsState.backend = 'claude-code';
+    mockIsTauriAvailable.mockReturnValue(false);
   });
 
   it('renders dialog with title when open', () => {
@@ -489,5 +568,20 @@ describe('SettingsDialog', () => {
     // Other sections should be in the DOM (all tab contents are rendered, just may not be visible)
     expect(screen.getByTestId('agent-config-section')).toBeInTheDocument();
     expect(screen.getByTestId('quality-gates-section')).toBeInTheDocument();
+  });
+
+  it('persists knowledge feature flags to backend on save when Tauri is available', async () => {
+    mockIsTauriAvailable.mockReturnValue(true);
+    render(<SettingsDialog open={true} onOpenChange={vi.fn()} />);
+
+    fireEvent.click(screen.getByTestId('settings-save-button'));
+
+    await waitFor(() =>
+      expect(mockSetKnowledgeFeatureFlags).toHaveBeenCalledWith({
+        kbQueryRunsV2: true,
+        kbPickerServerSearch: true,
+        kbIngestJobScopedProgress: true,
+      }),
+    );
   });
 });
