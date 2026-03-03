@@ -4,7 +4,9 @@
 //! notifications with delivery recording and retry support.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::RwLock;
 
 use crate::services::proxy::ProxyConfig;
 use crate::storage::{Database, KeyringService};
@@ -12,6 +14,7 @@ use crate::storage::{Database, KeyringService};
 use super::channels::custom::CustomChannel;
 use super::channels::discord::DiscordChannel;
 use super::channels::feishu::FeishuChannel;
+use super::channels::serverchan::ServerChanChannel;
 use super::channels::slack::SlackChannel;
 use super::channels::telegram::TelegramNotifyChannel;
 use super::channels::WebhookChannel;
@@ -35,6 +38,8 @@ pub struct WebhookService {
     channels: HashMap<WebhookChannelType, Box<dyn WebhookChannel>>,
     db: Arc<Database>,
     keyring: Arc<KeyringService>,
+    persistence_failures: AtomicU64,
+    last_persistence_error: RwLock<Option<String>>,
 }
 
 impl WebhookService {
@@ -66,6 +71,12 @@ impl WebhookService {
             )),
         );
         channels.insert(
+            WebhookChannelType::ServerChan,
+            Box::new(ServerChanChannel::new(
+                proxy_resolver("webhook_serverchan").as_ref(),
+            )),
+        );
+        channels.insert(
             WebhookChannelType::Discord,
             Box::new(DiscordChannel::new(
                 proxy_resolver("webhook_discord").as_ref(),
@@ -82,6 +93,8 @@ impl WebhookService {
             channels,
             db,
             keyring,
+            persistence_failures: AtomicU64::new(0),
+            last_persistence_error: RwLock::new(None),
         }
     }
 
@@ -126,7 +139,15 @@ impl WebhookService {
             self.send_once(channel.as_ref(), &config, &effective_payload, &mut delivery)
                 .await;
 
-            self.save_delivery(&delivery);
+            if let Err(error) = self.save_delivery(&delivery) {
+                tracing::error!(
+                    channel_id = %delivery.channel_id,
+                    delivery_id = %delivery.id,
+                    attempt = delivery.attempts,
+                    error = %error,
+                    "failed to persist webhook delivery"
+                );
+            }
             deliveries.push(delivery);
         }
 
@@ -134,12 +155,15 @@ impl WebhookService {
     }
 
     /// Retry failed deliveries according to retry policy and due timestamp.
-    pub async fn retry_failed(&self, max_attempts: u32) -> Vec<WebhookDelivery> {
+    pub async fn retry_failed(
+        &self,
+        max_attempts: u32,
+    ) -> Result<Vec<WebhookDelivery>, WebhookError> {
         let now = chrono::Utc::now().to_rfc3339();
         let failed = self
             .db
             .get_deliveries_due_for_retry(max_attempts, &now)
-            .unwrap_or_default();
+            .map_err(|e| WebhookError::DatabaseError(e.to_string()))?;
         let mut results = Vec::new();
 
         for delivery in failed {
@@ -151,7 +175,7 @@ impl WebhookService {
             }
         }
 
-        results
+        Ok(results)
     }
 
     /// Retry one delivery by ID using the original payload.
@@ -163,7 +187,9 @@ impl WebhookService {
             .db
             .get_webhook_delivery(delivery_id)
             .map_err(|e| WebhookError::DatabaseError(e.to_string()))?
-            .ok_or_else(|| WebhookError::DatabaseError(format!("Delivery not found: {}", delivery_id)))?;
+            .ok_or_else(|| {
+                WebhookError::DatabaseError(format!("Delivery not found: {}", delivery_id))
+            })?;
 
         if delivery.status == DeliveryStatus::Success {
             return Err(WebhookError::InvalidConfig(
@@ -198,6 +224,17 @@ impl WebhookService {
         self.db
             .delete_webhook_deliveries_before(&cutoff.to_rfc3339())
             .unwrap_or(0)
+    }
+
+    pub fn persistence_failure_count(&self) -> u64 {
+        self.persistence_failures.load(Ordering::Relaxed)
+    }
+
+    pub fn last_persistence_error(&self) -> Option<String> {
+        self.last_persistence_error
+            .read()
+            .ok()
+            .and_then(|guard| guard.clone())
     }
 
     /// Get enabled channel configs that match the event type and session scope.
@@ -238,13 +275,21 @@ impl WebhookService {
     }
 
     /// Persist one delivery record.
-    fn save_delivery(&self, delivery: &WebhookDelivery) {
-        let _ = self.db.insert_webhook_delivery(delivery);
+    fn save_delivery(&self, delivery: &WebhookDelivery) -> Result<(), WebhookError> {
+        self.db.insert_webhook_delivery(delivery).map_err(|e| {
+            self.record_persistence_failure(&e.to_string());
+            WebhookError::DatabaseError(e.to_string())
+        })
     }
 
     /// Update an existing delivery record.
-    fn update_delivery_status(&self, delivery: &WebhookDelivery) {
-        let _ = self.db.update_webhook_delivery_status(delivery);
+    fn update_delivery_status(&self, delivery: &WebhookDelivery) -> Result<(), WebhookError> {
+        self.db
+            .update_webhook_delivery_status(delivery)
+            .map_err(|e| {
+                self.record_persistence_failure(&e.to_string());
+                WebhookError::DatabaseError(e.to_string())
+            })
     }
 
     fn hydrate_secret(&self, config: &mut WebhookChannelConfig) {
@@ -272,10 +317,17 @@ impl WebhookService {
         delivery.attempts = delivery.attempts.saturating_add(1);
         delivery.last_attempt_at = chrono::Utc::now().to_rfc3339();
         delivery.next_retry_at = None;
+        delivery.retryable = None;
+        delivery.error_class = None;
 
-        self.send_once(channel.as_ref(), &config, &delivery.payload.clone(), &mut delivery)
-            .await;
-        self.update_delivery_status(&delivery);
+        self.send_once(
+            channel.as_ref(),
+            &config,
+            &delivery.payload.clone(),
+            &mut delivery,
+        )
+        .await;
+        self.update_delivery_status(&delivery)?;
 
         Ok(delivery)
     }
@@ -290,21 +342,36 @@ impl WebhookService {
         match channel.send(payload, config).await {
             Ok(send_result) => {
                 delivery.status_code = send_result.status_code;
-                delivery.response_body = send_result.response_body.clone();
+                delivery.response_body = send_result
+                    .response_body
+                    .as_deref()
+                    .map(crate::services::webhook::sanitize::sanitize_response_body_for_storage);
                 delivery.last_attempt_at = chrono::Utc::now().to_rfc3339();
 
                 if send_result.success {
                     delivery.status = DeliveryStatus::Success;
                     delivery.next_retry_at = None;
                     delivery.last_error = None;
+                    delivery.retryable = Some(false);
+                    delivery.error_class = None;
                 } else {
+                    let (retryable, error_class) =
+                        classify_http_failure(send_result.status_code.unwrap_or_default());
                     self.mark_failed(
                         delivery,
-                        send_result.error.unwrap_or_else(|| "delivery failed".to_string()),
+                        send_result
+                            .error
+                            .unwrap_or_else(|| "delivery failed".to_string()),
+                        retryable,
+                        error_class,
                     );
                 }
 
-                let status_str = if send_result.success { "success" } else { "failed" };
+                let status_str = if send_result.success {
+                    "success"
+                } else {
+                    "failed"
+                };
                 tracing::info!(
                     channel_id = %delivery.channel_id,
                     event_type = %delivery.event_type,
@@ -320,7 +387,8 @@ impl WebhookService {
                 delivery.status_code = None;
                 delivery.response_body = None;
                 delivery.last_attempt_at = chrono::Utc::now().to_rfc3339();
-                self.mark_failed(delivery, e.to_string());
+                let (retryable, error_class) = classify_webhook_error(&e);
+                self.mark_failed(delivery, e.to_string(), retryable, error_class);
                 tracing::warn!(
                     channel_id = %delivery.channel_id,
                     event_type = %delivery.event_type,
@@ -334,17 +402,31 @@ impl WebhookService {
         }
     }
 
-    fn mark_failed(&self, delivery: &mut WebhookDelivery, error: String) {
+    fn mark_failed(
+        &self,
+        delivery: &mut WebhookDelivery,
+        error: String,
+        retryable: bool,
+        error_class: &'static str,
+    ) {
         delivery.status = DeliveryStatus::Failed;
-        delivery.last_error = Some(sanitize_error(&error));
-        if delivery.attempts >= WEBHOOK_MAX_ATTEMPTS {
+        delivery.last_error = Some(crate::services::webhook::sanitize::sanitize_for_user(
+            &error,
+        ));
+        delivery.retryable = Some(retryable);
+        delivery.error_class = Some(error_class.to_string());
+        if !retryable || delivery.attempts >= WEBHOOK_MAX_ATTEMPTS {
             delivery.next_retry_at = None;
         } else {
             delivery.next_retry_at = next_retry_at_for_attempt(delivery.attempts);
         }
     }
 
-    fn try_render_summary(&self, template: Option<&str>, payload: &WebhookPayload) -> Option<String> {
+    fn try_render_summary(
+        &self,
+        template: Option<&str>,
+        payload: &WebhookPayload,
+    ) -> Option<String> {
         let Some(template) = template else {
             return None;
         };
@@ -365,6 +447,13 @@ impl WebhookService {
             }
         }
     }
+
+    fn record_persistence_failure(&self, error: &str) {
+        self.persistence_failures.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut guard) = self.last_persistence_error.write() {
+            *guard = Some(crate::services::webhook::sanitize::sanitize_for_user(error));
+        }
+    }
 }
 
 fn next_retry_at_for_attempt(attempts: u32) -> Option<String> {
@@ -381,15 +470,27 @@ fn render_summary_template(template: &str, payload: &WebhookPayload) -> Result<S
     let replacements = [
         ("event_type", format!("{}", payload.event_type)),
         ("session_id", payload.session_id.clone().unwrap_or_default()),
-        ("session_name", payload.session_name.clone().unwrap_or_default()),
-        ("project_path", payload.project_path.clone().unwrap_or_default()),
+        (
+            "session_name",
+            payload.session_name.clone().unwrap_or_default(),
+        ),
+        (
+            "project_path",
+            payload.project_path.clone().unwrap_or_default(),
+        ),
         ("summary", payload.summary.clone()),
         ("timestamp", payload.timestamp.clone()),
         (
             "duration_ms",
-            payload.duration_ms.map(|v| v.to_string()).unwrap_or_default(),
+            payload
+                .duration_ms
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
         ),
-        ("remote_source", payload.remote_source.clone().unwrap_or_default()),
+        (
+            "remote_source",
+            payload.remote_source.clone().unwrap_or_default(),
+        ),
         (
             "details",
             payload
@@ -414,12 +515,38 @@ fn render_summary_template(template: &str, payload: &WebhookPayload) -> Result<S
     Ok(rendered)
 }
 
-fn sanitize_error(message: &str) -> String {
-    let lower = message.to_lowercase();
-    if lower.contains("token") || lower.contains("secret") || lower.contains("password") {
-        "delivery failed (sensitive details omitted)".to_string()
-    } else {
-        message.to_string()
+fn classify_http_failure(status_code: u16) -> (bool, &'static str) {
+    match status_code {
+        408 | 425 | 429 => (true, "http_retryable"),
+        500..=599 => (true, "http_retryable"),
+        400..=499 => (false, "http_non_retryable"),
+        0 => (true, "network"),
+        _ => (false, "http_non_retryable"),
+    }
+}
+
+fn classify_webhook_error(error: &WebhookError) -> (bool, &'static str) {
+    match error {
+        WebhookError::HttpError(message) => {
+            let normalized = message.to_ascii_lowercase();
+            let retryable = normalized.contains("timeout")
+                || normalized.contains("timed out")
+                || normalized.contains("connection")
+                || normalized.contains("refused")
+                || normalized.contains("dns")
+                || normalized.contains("temporary")
+                || normalized.contains("unreachable");
+            if retryable {
+                (true, "network")
+            } else {
+                (false, "http_non_retryable")
+            }
+        }
+        WebhookError::InvalidConfig(_) => (false, "invalid_config"),
+        WebhookError::SerializationError(_) => (false, "serialization"),
+        WebhookError::DatabaseError(_) => (false, "database"),
+        WebhookError::KeyringError(_) => (false, "keyring"),
+        WebhookError::ChannelNotFound(_) => (false, "channel_not_found"),
     }
 }
 
@@ -466,11 +593,25 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitize_error() {
-        assert_eq!(
-            sanitize_error("invalid token supplied"),
-            "delivery failed (sensitive details omitted)"
-        );
-        assert_eq!(sanitize_error("http 500"), "http 500");
+    fn test_classify_http_failure() {
+        assert_eq!(classify_http_failure(429), (true, "http_retryable"));
+        assert_eq!(classify_http_failure(500), (true, "http_retryable"));
+        assert_eq!(classify_http_failure(400), (false, "http_non_retryable"));
+    }
+
+    #[test]
+    fn test_classify_webhook_error() {
+        let (retryable, class) =
+            classify_webhook_error(&WebhookError::HttpError("connection reset".to_string()));
+        assert!(retryable);
+        assert_eq!(class, "network");
+        let (retryable, class) =
+            classify_webhook_error(&WebhookError::HttpError("invalid url".to_string()));
+        assert!(!retryable);
+        assert_eq!(class, "http_non_retryable");
+        let (retryable, class) =
+            classify_webhook_error(&WebhookError::InvalidConfig("missing token".to_string()));
+        assert!(!retryable);
+        assert_eq!(class, "invalid_config");
     }
 }

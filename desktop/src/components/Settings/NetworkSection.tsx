@@ -38,6 +38,7 @@ const WEBHOOK_PROVIDERS = [
   { id: 'webhook_slack', defaultStrategy: 'use_global' as ProxyStrategy },
   { id: 'webhook_feishu', defaultStrategy: 'no_proxy' as ProxyStrategy },
   { id: 'webhook_telegram', defaultStrategy: 'use_global' as ProxyStrategy },
+  { id: 'webhook_serverchan', defaultStrategy: 'no_proxy' as ProxyStrategy },
   { id: 'webhook_discord', defaultStrategy: 'use_global' as ProxyStrategy },
   { id: 'webhook_custom', defaultStrategy: 'use_global' as ProxyStrategy },
 ];

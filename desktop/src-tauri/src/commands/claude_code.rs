@@ -95,7 +95,9 @@ pub async fn send_message(
     let mut chat_handler = state.chat_handler.write().await;
     let session_for_webhook = state.session_manager.get_session(&request.session_id).await;
     let webhook_service = webhook_state.get_or_init(app_state.inner()).await.ok();
-    let _ = webhook_state.start_worker_if_needed(app_state.inner()).await;
+    let _ = webhook_state
+        .start_worker_if_needed(app_state.inner())
+        .await;
     let webhook_project_path = session_for_webhook
         .as_ref()
         .map(|session| session.project_path.clone());
@@ -125,6 +127,7 @@ pub async fn send_message(
                         dispatch_webhook_on_event(
                             &event,
                             &session_id,
+                            Some(&execution_id),
                             None,
                             webhook_project_path.as_deref(),
                             service,

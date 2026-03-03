@@ -245,6 +245,19 @@ impl KeyringService {
         Ok(providers)
     }
 
+    /// List all secret keys stored in encrypted storage that match a prefix.
+    pub fn list_keys_with_prefix(&self, prefix: &str) -> AppResult<Vec<String>> {
+        let store = self.store()?;
+        let secrets = store.load();
+        let mut keys = secrets
+            .keys()
+            .filter(|key| key.starts_with(prefix))
+            .cloned()
+            .collect::<Vec<_>>();
+        keys.sort();
+        Ok(keys)
+    }
+
     /// Check if an API key exists for a provider
     pub fn has_api_key(&self, provider: &str) -> AppResult<bool> {
         let store = self.store()?;

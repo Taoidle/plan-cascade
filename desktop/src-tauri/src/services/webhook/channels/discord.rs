@@ -16,7 +16,7 @@ pub struct DiscordChannel {
 impl DiscordChannel {
     pub fn new(proxy: Option<&ProxyConfig>) -> Self {
         Self {
-            client: crate::services::proxy::build_http_client(proxy),
+            client: crate::services::webhook::http_client::build_webhook_http_client(proxy),
         }
     }
 }

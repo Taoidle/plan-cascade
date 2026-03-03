@@ -21,6 +21,7 @@ const CHANNEL_TYPES: { value: WebhookChannelType; label: string }[] = [
   { value: 'Slack', label: 'Slack' },
   { value: 'Feishu', label: 'Feishu / Lark' },
   { value: 'Telegram', label: 'Telegram' },
+  { value: 'ServerChan', label: 'ServerChan' },
   { value: 'Discord', label: 'Discord' },
   { value: 'Custom', label: 'Custom HTTP' },
 ];
@@ -43,6 +44,7 @@ const PAGE_SIZE = 20;
 type FormErrors = {
   name?: string;
   url?: string;
+  secret?: string;
   events?: string;
   scopeSessions?: string;
   template?: string;
@@ -62,7 +64,14 @@ function isTelegramChatId(target: string): boolean {
 
 function isPrivateHost(hostname: string): boolean {
   const host = hostname.toLowerCase();
-  if (host === 'localhost' || host === '::1') {
+  if (
+    host === 'localhost' ||
+    host === '::1' ||
+    host === '::' ||
+    host === '0.0.0.0' ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal')
+  ) {
     return true;
   }
   if (/^127\./.test(host)) {
@@ -81,9 +90,35 @@ function isPrivateHost(hostname: string): boolean {
     if (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) {
       return true;
     }
+    if (octets[0] === 169 && octets[1] === 254) {
+      return true;
+    }
+    if (octets[0] === 0) {
+      return true;
+    }
+    if (octets[0] === 255 && octets[1] === 255 && octets[2] === 255 && octets[3] === 255) {
+      return true;
+    }
   }
 
   return false;
+}
+
+function isRetryableDelivery(delivery: { status: string; retryable?: boolean; status_code?: number }): boolean {
+  if (delivery.status !== 'Failed' && delivery.status !== 'Retrying') {
+    return false;
+  }
+  if (typeof delivery.retryable === 'boolean') {
+    return delivery.retryable;
+  }
+  const statusCode = delivery.status_code;
+  if (typeof statusCode !== 'number') {
+    return true;
+  }
+  if (statusCode === 408 || statusCode === 425 || statusCode === 429) {
+    return true;
+  }
+  return statusCode >= 500;
 }
 
 function validateChannelTarget(channelType: WebhookChannelType, target: string): string | undefined {
@@ -107,7 +142,12 @@ function validateChannelTarget(channelType: WebhookChannelType, target: string):
     return 'webhook.validation.urlInvalid';
   }
 
-  if (channelType === 'Slack' || channelType === 'Feishu' || channelType === 'Discord') {
+  if (
+    channelType === 'Slack' ||
+    channelType === 'Feishu' ||
+    channelType === 'Discord' ||
+    channelType === 'ServerChan'
+  ) {
     if (parsed.protocol !== 'https:') {
       return 'webhook.validation.httpsRequired';
     }
@@ -274,6 +314,13 @@ export function WebhookSection() {
     if (urlErrorKey) {
       nextErrors.url = t(urlErrorKey);
     }
+    if (!editingChannel && !formSecret.trim()) {
+      if (channelTypeForValidation === 'Telegram') {
+        nextErrors.secret = t('webhook.validation.telegramTokenRequired', 'Telegram channel requires a bot token');
+      } else if (channelTypeForValidation === 'ServerChan') {
+        nextErrors.secret = t('webhook.validation.serverchanSendkeyRequired', 'ServerChan channel requires SENDKEY');
+      }
+    }
 
     if (formEvents.length === 0) {
       nextErrors.events = t('webhook.validation.eventsRequired', 'Select at least one event');
@@ -318,8 +365,12 @@ export function WebhookSection() {
         url: formUrl.trim(),
         scope: buildScope(),
         events: [...formEvents],
-        template: formTemplate.trim() || undefined,
       };
+      const nextTemplate = formTemplate.trim();
+      const previousTemplate = editingChannel.template?.trim() ?? '';
+      if (nextTemplate !== previousTemplate) {
+        request.template = nextTemplate ? nextTemplate : null;
+      }
 
       if (formSecret.trim()) {
         request.secret = formSecret.trim();
@@ -406,6 +457,8 @@ export function WebhookSection() {
         return 'F';
       case 'Telegram':
         return 'T';
+      case 'ServerChan':
+        return 'SC';
       case 'Discord':
         return 'D';
       case 'Custom':
@@ -460,7 +513,9 @@ export function WebhookSection() {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t('webhook.title', 'Notifications')}</h3>
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+          {t('webhook.title', 'Notifications')}
+        </h3>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
           {t('webhook.description', 'Configure webhook channels to receive notifications when tasks complete or fail.')}
         </p>
@@ -477,7 +532,9 @@ export function WebhookSection() {
 
       <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
         <div className="flex items-center justify-between gap-3">
-          <h4 className="font-medium text-gray-900 dark:text-gray-100">{t('webhook.health.title', 'Delivery Worker Health')}</h4>
+          <h4 className="font-medium text-gray-900 dark:text-gray-100">
+            {t('webhook.health.title', 'Delivery Worker Health')}
+          </h4>
           <button
             onClick={() => {
               void fetchHealth();
@@ -505,6 +562,22 @@ export function WebhookSection() {
             <p className="text-gray-500 dark:text-gray-400">{t('webhook.health.lastRetryAt', 'Last Retry')}</p>
             <p className="mt-1 font-medium text-gray-900 dark:text-gray-100">{formatDate(health?.last_retry_at)}</p>
           </div>
+          <div className="rounded border border-gray-200 dark:border-gray-700 p-3">
+            <p className="text-gray-500 dark:text-gray-400">
+              {t('webhook.health.persistenceFailures', 'Persistence Failures')}
+            </p>
+            <p className="mt-1 font-medium text-gray-900 dark:text-gray-100">{health?.persistence_failures ?? '-'}</p>
+          </div>
+          <div className="rounded border border-gray-200 dark:border-gray-700 p-3">
+            <p className="text-gray-500 dark:text-gray-400">{t('webhook.health.retryCycles', 'Retry Cycles')}</p>
+            <p className="mt-1 font-medium text-gray-900 dark:text-gray-100">{health?.retry_cycle_count ?? '-'}</p>
+          </div>
+          <div className="rounded border border-gray-200 dark:border-gray-700 p-3">
+            <p className="text-gray-500 dark:text-gray-400">{t('webhook.health.lastRetryError', 'Last Retry Error')}</p>
+            <p className="mt-1 font-medium text-gray-900 dark:text-gray-100 truncate">
+              {health?.last_retry_error ?? '-'}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -520,9 +593,13 @@ export function WebhookSection() {
         </div>
 
         {loadingChannels && channels.length === 0 ? (
-          <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">{t('webhook.loading', 'Loading...')}</div>
+          <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">
+            {t('webhook.loading', 'Loading...')}
+          </div>
         ) : channels.length === 0 ? (
-          <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">{t('webhook.noChannels', 'No webhook channels configured.')}</div>
+          <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">
+            {t('webhook.noChannels', 'No webhook channels configured.')}
+          </div>
         ) : (
           <div className="divide-y divide-gray-200 dark:divide-gray-700">
             {channels.map((channel) => {
@@ -681,7 +758,9 @@ export function WebhookSection() {
               placeholder={
                 channelTypeForValidation === 'Telegram'
                   ? t('webhook.form.telegramPlaceholder', 'e.g., -1001234567890 or @channel_name')
-                  : 'https://hooks.example.com/...'
+                  : channelTypeForValidation === 'ServerChan'
+                    ? t('webhook.form.serverchanPlaceholder', 'e.g., https://sctapi.ftqq.com')
+                    : 'https://hooks.example.com/...'
               }
               className={clsx(
                 'w-full px-3 py-2 border rounded bg-white dark:bg-gray-800 text-sm',
@@ -691,10 +770,14 @@ export function WebhookSection() {
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {channelTypeForValidation === 'Telegram'
                 ? t('webhook.form.telegramHelp', 'Telegram channel expects chat_id or @name')
-                : t('webhook.form.urlHelp', 'Use HTTPS endpoints for production channels')}
+                : channelTypeForValidation === 'ServerChan'
+                  ? t('webhook.form.serverchanHelp', 'ServerChan channel expects API base URL; put SENDKEY in Secret')
+                  : t('webhook.form.urlHelp', 'Use HTTPS endpoints for production channels')}
             </p>
             {(formErrors.url || (liveUrlError ? t(liveUrlError) : '')) && (
-              <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.url || t(liveUrlError as string)}</p>
+              <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                {formErrors.url || t(liveUrlError as string)}
+              </p>
             )}
           </div>
 
@@ -705,14 +788,23 @@ export function WebhookSection() {
             <input
               type="password"
               value={formSecret}
-              onChange={(event) => setFormSecret(event.target.value)}
+              onChange={(event) => {
+                setFormSecret(event.target.value);
+                if (formErrors.secret) {
+                  setFormErrors((prev) => ({ ...prev, secret: undefined }));
+                }
+              }}
               placeholder={
                 editingChannel
                   ? t('webhook.form.secretPlaceholder', 'Leave empty to keep current')
                   : t('webhook.form.secretOptional', 'Optional')
               }
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-sm"
+              className={clsx(
+                'w-full px-3 py-2 border rounded bg-white dark:bg-gray-800 text-sm',
+                formErrors.secret ? 'border-red-400 dark:border-red-600' : 'border-gray-300 dark:border-gray-600',
+              )}
             />
+            {formErrors.secret && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.secret}</p>}
           </div>
 
           <div>
@@ -811,7 +903,10 @@ export function WebhookSection() {
               )}
             />
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {t('webhook.form.templateHelp', 'Template only overrides summary text; unsupported placeholders fallback safely.')}
+              {t(
+                'webhook.form.templateHelp',
+                'Template only overrides summary text; unsupported placeholders fallback safely.',
+              )}
             </p>
             {formErrors.template && (
               <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.template}</p>
@@ -847,7 +942,9 @@ export function WebhookSection() {
 
       <div className="border border-gray-200 dark:border-gray-700 rounded-lg">
         <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 space-y-3">
-          <h4 className="font-medium text-gray-900 dark:text-gray-100">{t('webhook.deliveryHistory', 'Delivery History')}</h4>
+          <h4 className="font-medium text-gray-900 dark:text-gray-100">
+            {t('webhook.deliveryHistory', 'Delivery History')}
+          </h4>
           <div className="flex items-center gap-3">
             <label className="text-sm text-gray-600 dark:text-gray-300">{t('webhook.filter.channel', 'Channel')}</label>
             <select
@@ -877,7 +974,9 @@ export function WebhookSection() {
         </div>
 
         {loadingDeliveries && deliveries.length === 0 ? (
-          <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">{t('webhook.loading', 'Loading...')}</div>
+          <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">
+            {t('webhook.loading', 'Loading...')}
+          </div>
         ) : deliveries.length === 0 ? (
           <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">
             {t('webhook.noDeliveries', 'No delivery history yet.')}
@@ -913,16 +1012,23 @@ export function WebhookSection() {
                         </span>
                       </td>
                       <td className="px-4 py-2 align-top text-gray-700 dark:text-gray-300">{delivery.attempts}</td>
-                      <td className="px-4 py-2 align-top text-gray-700 dark:text-gray-300">{delivery.status_code ?? '-'}</td>
+                      <td className="px-4 py-2 align-top text-gray-700 dark:text-gray-300">
+                        {delivery.status_code ?? '-'}
+                      </td>
                       <td className="px-4 py-2 align-top text-xs text-red-700 dark:text-red-300 max-w-sm truncate">
                         {delivery.last_error ?? '-'}
                       </td>
-                      <td className="px-4 py-2 align-top text-gray-700 dark:text-gray-300">{formatDate(delivery.next_retry_at)}</td>
-                      <td className="px-4 py-2 align-top text-gray-700 dark:text-gray-300" title={formatDate(delivery.created_at)}>
+                      <td className="px-4 py-2 align-top text-gray-700 dark:text-gray-300">
+                        {formatDate(delivery.next_retry_at)}
+                      </td>
+                      <td
+                        className="px-4 py-2 align-top text-gray-700 dark:text-gray-300"
+                        title={formatDate(delivery.created_at)}
+                      >
                         {timeAgo(delivery.created_at)}
                       </td>
                       <td className="px-4 py-2 align-top">
-                        {(delivery.status === 'Failed' || delivery.status === 'Retrying') && (
+                        {isRetryableDelivery(delivery) && (
                           <button
                             onClick={() => {
                               void handleRetry(delivery.id);

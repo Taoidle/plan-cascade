@@ -165,6 +165,31 @@ describe('WebhookSection', () => {
     expect(mockStoreState.deleteChannel).toHaveBeenCalledWith('channel-1');
   });
 
+  it('sends template=null when clearing template in edit mode', async () => {
+    mockStoreState.channels = [
+      createChannel({
+        template: 'Session {{session_id}} done',
+      }),
+    ];
+
+    render(<WebhookSection />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByDisplayValue('Session {{session_id}} done'), {
+      target: { value: '' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Update' }));
+
+    await waitFor(() => {
+      expect(mockStoreState.updateChannel).toHaveBeenCalledWith(
+        'channel-1',
+        expect.objectContaining({
+          template: null,
+        }),
+      );
+    });
+  });
+
   it('retries failed delivery and supports filter/pagination', async () => {
     render(<WebhookSection />);
 
@@ -186,5 +211,19 @@ describe('WebhookSection', () => {
     await waitFor(() => {
       expect(mockStoreState.fetchDeliveries).toHaveBeenCalledWith('channel-1', 20, 20);
     });
+  });
+
+  it('hides retry action for non-retryable deliveries', async () => {
+    mockStoreState.deliveries = [
+      createDelivery({
+        status: 'Failed',
+        status_code: 400,
+        retryable: false,
+      }),
+    ];
+
+    render(<WebhookSection />);
+
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 });

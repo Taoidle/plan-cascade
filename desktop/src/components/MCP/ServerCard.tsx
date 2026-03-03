@@ -137,11 +137,16 @@ export function ServerCard({
         {connectedInfo && (
           <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400 space-y-0.5">
             <p>
-              protocol={connectedInfo.protocol_version || 'unknown'} tools={connectedInfo.tool_names.length}
+              {t('mcp.connectionMeta', {
+                protocol: connectedInfo.protocol_version || t('mcp.status.unknown'),
+                count: connectedInfo.tool_names.length,
+              })}
             </p>
-            {connectedInfo.connected_at && <p>connected_at={connectedInfo.connected_at}</p>}
+            {connectedInfo.connected_at && <p>{t('mcp.connectedAtMeta', { value: connectedInfo.connected_at })}</p>}
             {connectedInfo.last_error && (
-              <p className="text-red-600 dark:text-red-400">last_error={connectedInfo.last_error}</p>
+              <p className="text-red-600 dark:text-red-400">
+                {t('mcp.lastErrorMeta', { value: connectedInfo.last_error })}
+              </p>
             )}
           </div>
         )}
@@ -164,10 +169,10 @@ export function ServerCard({
           <span>
             {connected
               ? isDisconnecting
-                ? t('mcp.disconnecting', 'Disconnecting...')
+                ? t('mcp.disconnecting')
                 : t('mcp.disconnect')
               : isConnecting
-                ? t('mcp.connecting', 'Connecting...')
+                ? t('mcp.connecting')
                 : t('mcp.connect')}
           </span>
         </button>
@@ -185,7 +190,7 @@ export function ServerCard({
           )}
         >
           <PlayIcon className="w-3 h-3" />
-          <span>{isTesting ? t('mcp.testing', 'Testing...') : t('mcp.test')}</span>
+          <span>{isTesting ? t('mcp.testing') : t('mcp.test')}</span>
         </button>
 
         {connectedInfo && onViewTools && (
@@ -202,7 +207,7 @@ export function ServerCard({
             )}
           >
             <ListBulletIcon className="w-3 h-3" />
-            <span>{t('mcp.viewTools', 'View Tools')}</span>
+            <span>{t('mcp.viewTools')}</span>
           </button>
         )}
 

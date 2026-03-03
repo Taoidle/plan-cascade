@@ -12,7 +12,7 @@ import type { CommandResponse } from './tauri';
 // Types (mirror Rust types with snake_case field names)
 // ---------------------------------------------------------------------------
 
-export type WebhookChannelType = 'Slack' | 'Feishu' | 'Telegram' | 'Discord' | 'Custom';
+export type WebhookChannelType = 'Slack' | 'Feishu' | 'Telegram' | 'ServerChan' | 'Discord' | 'Custom';
 
 export type WebhookScope = 'Global' | { Sessions: string[] };
 
@@ -68,6 +68,8 @@ export interface WebhookDelivery {
   last_attempt_at: string;
   next_retry_at?: string;
   last_error?: string;
+  retryable?: boolean;
+  error_class?: string;
   created_at: string;
 }
 
@@ -75,6 +77,9 @@ export interface WebhookHealth {
   worker_running: boolean;
   failed_queue_length: number;
   last_retry_at?: string;
+  persistence_failures?: number;
+  retry_cycle_count?: number;
+  last_retry_error?: string;
 }
 
 export interface WebhookTestResult {
@@ -99,7 +104,7 @@ export interface UpdateWebhookRequest {
   secret?: string;
   scope?: WebhookScope;
   events?: WebhookEventType[];
-  template?: string;
+  template?: string | null;
   enabled?: boolean;
 }
 

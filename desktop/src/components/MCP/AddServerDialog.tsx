@@ -193,7 +193,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded, onServerUpd
           <form onSubmit={handleSubmit}>
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
               <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-white">
-                {isEditMode ? t('mcp.editServerTitle', 'Edit MCP Server') : t('mcp.addServerTitle')}
+                {isEditMode ? t('mcp.editServerTitle') : t('mcp.addServerTitle')}
               </Dialog.Title>
               <Dialog.Close asChild>
                 <button type="button" className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800">
@@ -262,7 +262,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded, onServerUpd
                   onChange={(e) => setAutoConnect(e.target.checked)}
                   className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                 />
-                <span>{t('mcp.autoConnect', 'Auto-connect on startup')}</span>
+                <span>{t('mcp.autoConnect')}</span>
               </label>
 
               {serverType === 'stdio' && (
@@ -470,10 +470,10 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded, onServerUpd
               >
                 {loading
                   ? isEditMode
-                    ? t('common.saving')
+                    ? t('buttons.saving')
                     : t('common.adding')
                   : isEditMode
-                    ? t('common.save')
+                    ? t('buttons.save')
                     : t('mcp.addServer')}
               </button>
             </div>

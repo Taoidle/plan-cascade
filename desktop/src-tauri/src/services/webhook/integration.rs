@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::services::streaming::UnifiedStreamEvent;
 
@@ -13,11 +14,32 @@ use super::service::WebhookService;
 use super::types::*;
 
 const PROGRESS_MILESTONES: [u8; 3] = [25, 50, 75];
+const TERMINAL_REGISTRY_TTL_SECS: u64 = 600;
+const FAILED_STOP_REASON_HINTS: [&str; 4] =
+    ["fail", "error", "max_iterations", "analysis_gate_failed"];
 
 static SENT_PROGRESS_MILESTONES: OnceLock<Mutex<HashMap<String, HashSet<u8>>>> = OnceLock::new();
+static SENT_TERMINAL_EVENTS: OnceLock<Mutex<HashMap<String, TerminalEventRecord>>> =
+    OnceLock::new();
 
 fn progress_registry() -> &'static Mutex<HashMap<String, HashSet<u8>>> {
     SENT_PROGRESS_MILESTONES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn terminal_registry() -> &'static Mutex<HashMap<String, TerminalEventRecord>> {
+    SENT_TERMINAL_EVENTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TerminalEventKind {
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone)]
+struct TerminalEventRecord {
+    kind: TerminalEventKind,
+    created_at: Instant,
 }
 
 /// Called by event forwarders when an execution event is detected.
@@ -27,6 +49,7 @@ fn progress_registry() -> &'static Mutex<HashMap<String, HashSet<u8>>> {
 pub fn dispatch_on_event(
     event: &UnifiedStreamEvent,
     session_id: &str,
+    execution_id: Option<&str>,
     session_name: Option<&str>,
     project_path: Option<&str>,
     webhook_service: Arc<WebhookService>,
@@ -35,6 +58,7 @@ pub fn dispatch_on_event(
     dispatch_on_event_inner(
         event,
         session_id,
+        execution_id,
         session_name,
         project_path,
         webhook_service,
@@ -47,6 +71,7 @@ pub fn dispatch_on_event(
 pub fn dispatch_on_remote_event(
     event: &UnifiedStreamEvent,
     session_id: &str,
+    execution_id: Option<&str>,
     session_name: Option<&str>,
     project_path: Option<&str>,
     webhook_service: Arc<WebhookService>,
@@ -56,6 +81,7 @@ pub fn dispatch_on_remote_event(
     dispatch_on_event_inner(
         event,
         session_id,
+        execution_id,
         session_name,
         project_path,
         webhook_service,
@@ -67,15 +93,19 @@ pub fn dispatch_on_remote_event(
 fn dispatch_on_event_inner(
     event: &UnifiedStreamEvent,
     session_id: &str,
+    execution_id: Option<&str>,
     session_name: Option<&str>,
     project_path: Option<&str>,
     webhook_service: Arc<WebhookService>,
     duration_ms: Option<u64>,
     remote_source: Option<&str>,
 ) {
+    purge_terminal_registry();
+    let execution_key = execution_registry_key(session_id, execution_id);
     let payloads = build_payloads(
         event,
         session_id,
+        &execution_key,
         session_name,
         project_path,
         duration_ms,
@@ -104,6 +134,7 @@ fn dispatch_on_event_inner(
 fn build_payloads(
     event: &UnifiedStreamEvent,
     session_id: &str,
+    execution_key: &str,
     session_name: Option<&str>,
     project_path: Option<&str>,
     duration_ms: Option<u64>,
@@ -112,22 +143,43 @@ fn build_payloads(
     let source = remote_source.map(|s| s.to_string());
     match event {
         UnifiedStreamEvent::Complete { stop_reason } => {
-            let cancelled = stop_reason
-                .as_deref()
-                .map(|value| value.eq_ignore_ascii_case("cancelled") || value.eq_ignore_ascii_case("canceled"))
-                .unwrap_or(false);
-            let event_type = if cancelled {
-                WebhookEventType::TaskCancelled
-            } else {
-                WebhookEventType::TaskComplete
-            };
-            let summary = match (&source, cancelled) {
-                (Some(src), true) => format!("Task cancelled ({})", src),
-                (Some(src), false) => format!("Task completed successfully ({})", src),
-                (None, true) => "Task cancelled".to_string(),
-                (None, false) => "Task completed successfully".to_string(),
+            let completion_kind = classify_completion(stop_reason.as_deref());
+            if should_skip_terminal_on_complete(execution_key, completion_kind) {
+                clear_terminal_event(execution_key);
+                return Vec::new();
+            }
+
+            let (event_type, summary) = match completion_kind {
+                CompletionKind::Cancelled => (
+                    WebhookEventType::TaskCancelled,
+                    match &source {
+                        Some(src) => format!("Task cancelled ({})", src),
+                        None => "Task cancelled".to_string(),
+                    },
+                ),
+                CompletionKind::Failed => (
+                    WebhookEventType::TaskFailed,
+                    match (&source, stop_reason.as_deref()) {
+                        (Some(src), Some(reason)) if !reason.trim().is_empty() => {
+                            format!("Task failed ({}): {}", src, reason)
+                        }
+                        (Some(src), _) => format!("Task failed ({})", src),
+                        (None, Some(reason)) if !reason.trim().is_empty() => {
+                            format!("Task failed: {}", reason)
+                        }
+                        (None, _) => "Task failed".to_string(),
+                    },
+                ),
+                CompletionKind::Success => (
+                    WebhookEventType::TaskComplete,
+                    match &source {
+                        Some(src) => format!("Task completed successfully ({})", src),
+                        None => "Task completed successfully".to_string(),
+                    },
+                ),
             };
 
+            clear_terminal_event(execution_key);
             vec![base_payload(
                 event_type,
                 session_id,
@@ -139,13 +191,31 @@ fn build_payloads(
                 None,
             )]
         }
-        UnifiedStreamEvent::Error { message, code: _ } => {
-            let summary = match &source {
-                Some(src) => format!("Task failed ({}): {}", src, message),
-                None => format!("Task failed: {}", message),
+        UnifiedStreamEvent::Error { message, code } => {
+            let terminal_kind = classify_error(code.as_deref(), message);
+            if has_sent_terminal_event(execution_key, terminal_kind) {
+                return Vec::new();
+            }
+            remember_terminal_event(execution_key, terminal_kind);
+
+            let (event_type, summary) = match terminal_kind {
+                TerminalEventKind::Cancelled => (
+                    WebhookEventType::TaskCancelled,
+                    match &source {
+                        Some(src) => format!("Task cancelled ({})", src),
+                        None => "Task cancelled".to_string(),
+                    },
+                ),
+                TerminalEventKind::Failed => (
+                    WebhookEventType::TaskFailed,
+                    match &source {
+                        Some(src) => format!("Task failed ({}): {}", src, message),
+                        None => format!("Task failed: {}", message),
+                    },
+                ),
             };
             vec![base_payload(
-                WebhookEventType::TaskFailed,
+                event_type,
                 session_id,
                 session_name,
                 project_path,
@@ -190,6 +260,7 @@ fn build_payloads(
             ..
         } => {
             clear_progress_milestones(session_id);
+            clear_terminal_event(execution_key);
             if !success {
                 return Vec::new();
             }
@@ -247,6 +318,112 @@ fn build_payloads(
         }
         _ => Vec::new(),
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompletionKind {
+    Success,
+    Failed,
+    Cancelled,
+}
+
+fn classify_completion(stop_reason: Option<&str>) -> CompletionKind {
+    let Some(reason) = stop_reason else {
+        return CompletionKind::Success;
+    };
+    let normalized = reason.trim().to_ascii_lowercase();
+    if normalized == "cancelled" || normalized == "canceled" {
+        return CompletionKind::Cancelled;
+    }
+    if FAILED_STOP_REASON_HINTS
+        .iter()
+        .any(|hint| normalized.contains(hint))
+    {
+        return CompletionKind::Failed;
+    }
+    CompletionKind::Success
+}
+
+fn classify_error(code: Option<&str>, message: &str) -> TerminalEventKind {
+    let code_norm = code.unwrap_or_default().trim().to_ascii_lowercase();
+    if code_norm == "cancelled" || code_norm == "canceled" {
+        return TerminalEventKind::Cancelled;
+    }
+    let message_norm = message.trim().to_ascii_lowercase();
+    if message_norm.contains("cancelled") || message_norm.contains("canceled") {
+        return TerminalEventKind::Cancelled;
+    }
+    TerminalEventKind::Failed
+}
+
+fn execution_registry_key(session_id: &str, execution_id: Option<&str>) -> String {
+    let eid = execution_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_default();
+    if eid.is_empty() {
+        session_id.to_string()
+    } else {
+        format!("{}:{}", session_id, eid)
+    }
+}
+
+fn has_sent_terminal_event(execution_key: &str, expected: TerminalEventKind) -> bool {
+    let Ok(registry) = terminal_registry().lock() else {
+        return false;
+    };
+    registry
+        .get(execution_key)
+        .map(|entry| entry.kind == expected)
+        .unwrap_or(false)
+}
+
+fn should_skip_terminal_on_complete(execution_key: &str, completion_kind: CompletionKind) -> bool {
+    let Ok(registry) = terminal_registry().lock() else {
+        return false;
+    };
+    let Some(entry) = registry.get(execution_key) else {
+        return false;
+    };
+
+    match (entry.kind, completion_kind) {
+        // Error first then Complete(success) must not emit TaskComplete.
+        (TerminalEventKind::Failed, CompletionKind::Success) => true,
+        // De-duplicate terminal type already emitted from Error stream.
+        (TerminalEventKind::Failed, CompletionKind::Failed) => true,
+        (TerminalEventKind::Cancelled, CompletionKind::Cancelled) => true,
+        // If cancellation was already emitted from Error code/message,
+        // suppress later Complete(success) as noise.
+        (TerminalEventKind::Cancelled, CompletionKind::Success) => true,
+        _ => false,
+    }
+}
+
+fn remember_terminal_event(execution_key: &str, kind: TerminalEventKind) {
+    let Ok(mut registry) = terminal_registry().lock() else {
+        return;
+    };
+    registry.insert(
+        execution_key.to_string(),
+        TerminalEventRecord {
+            kind,
+            created_at: Instant::now(),
+        },
+    );
+}
+
+fn clear_terminal_event(execution_key: &str) {
+    if let Ok(mut registry) = terminal_registry().lock() {
+        registry.remove(execution_key);
+    }
+}
+
+fn purge_terminal_registry() {
+    let Ok(mut registry) = terminal_registry().lock() else {
+        return;
+    };
+    let ttl = Duration::from_secs(TERMINAL_REGISTRY_TTL_SECS);
+    registry.retain(|_, entry| entry.created_at.elapsed() < ttl);
 }
 
 fn base_payload(
@@ -327,57 +504,66 @@ mod tests {
         clear_progress_milestones(session_id);
     }
 
+    fn reset_terminal(session_id: &str) {
+        clear_terminal_event(session_id);
+    }
+
     #[test]
     fn test_complete_cancelled_maps_to_task_cancelled() {
+        reset_terminal("s1");
         let event = UnifiedStreamEvent::Complete {
             stop_reason: Some("cancelled".to_string()),
         };
-        let payloads = build_payloads(&event, "s1", None, None, None, None);
+        let payloads = build_payloads(&event, "s1", "s1", None, None, None, None);
         assert_eq!(payloads.len(), 1);
         assert_eq!(payloads[0].event_type, WebhookEventType::TaskCancelled);
     }
 
     #[test]
     fn test_complete_maps_to_task_complete() {
+        reset_terminal("s1");
         let event = UnifiedStreamEvent::Complete { stop_reason: None };
-        let payloads = build_payloads(&event, "s1", None, None, None, None);
+        let payloads = build_payloads(&event, "s1", "s1", None, None, None, None);
         assert_eq!(payloads.len(), 1);
         assert_eq!(payloads[0].event_type, WebhookEventType::TaskComplete);
     }
 
     #[test]
     fn test_error_maps_to_task_failed() {
+        reset_terminal("s1");
         let event = UnifiedStreamEvent::Error {
             message: "boom".to_string(),
             code: None,
         };
-        let payloads = build_payloads(&event, "s1", None, None, None, None);
+        let payloads = build_payloads(&event, "s1", "s1", None, None, None, None);
         assert_eq!(payloads.len(), 1);
         assert_eq!(payloads[0].event_type, WebhookEventType::TaskFailed);
     }
 
     #[test]
     fn test_story_complete_success_maps_to_story_complete() {
+        reset_terminal("s1");
         let event = UnifiedStreamEvent::StoryComplete {
             session_id: "s1".to_string(),
             story_id: "story-1".to_string(),
             success: true,
             error: None,
         };
-        let payloads = build_payloads(&event, "s1", None, None, None, None);
+        let payloads = build_payloads(&event, "s1", "s1", None, None, None, None);
         assert_eq!(payloads.len(), 1);
         assert_eq!(payloads[0].event_type, WebhookEventType::StoryComplete);
     }
 
     #[test]
     fn test_prd_complete_maps_from_session_complete_success() {
+        reset_terminal("s1");
         let event = UnifiedStreamEvent::SessionComplete {
             session_id: "s1".to_string(),
             success: true,
             completed_stories: 3,
             total_stories: 3,
         };
-        let payloads = build_payloads(&event, "s1", None, None, None, None);
+        let payloads = build_payloads(&event, "s1", "s1", None, None, None, None);
         assert_eq!(payloads.len(), 1);
         assert_eq!(payloads[0].event_type, WebhookEventType::PrdComplete);
     }
@@ -390,19 +576,43 @@ mod tests {
             session_id: "session-progress".to_string(),
             progress: serde_json::json!({ "percentage": 30.0 }),
         };
-        let payloads = build_payloads(&event_30, "session-progress", None, None, None, None);
+        let payloads = build_payloads(
+            &event_30,
+            "session-progress",
+            "session-progress",
+            None,
+            None,
+            None,
+            None,
+        );
         assert_eq!(payloads.len(), 1);
         assert_eq!(payloads[0].event_type, WebhookEventType::ProgressMilestone);
         assert!(payloads[0].summary.contains("25%"));
 
-        let payloads_again = build_payloads(&event_30, "session-progress", None, None, None, None);
+        let payloads_again = build_payloads(
+            &event_30,
+            "session-progress",
+            "session-progress",
+            None,
+            None,
+            None,
+            None,
+        );
         assert!(payloads_again.is_empty());
 
         let event_55 = UnifiedStreamEvent::SessionProgress {
             session_id: "session-progress".to_string(),
             progress: serde_json::json!({ "percentage": 55.0 }),
         };
-        let payloads_55 = build_payloads(&event_55, "session-progress", None, None, None, None);
+        let payloads_55 = build_payloads(
+            &event_55,
+            "session-progress",
+            "session-progress",
+            None,
+            None,
+            None,
+            None,
+        );
         assert_eq!(payloads_55.len(), 1);
         assert!(payloads_55[0].summary.contains("50%"));
 
@@ -410,7 +620,15 @@ mod tests {
             session_id: "session-progress".to_string(),
             progress: serde_json::json!({ "percentage": 80.0 }),
         };
-        let payloads_80 = build_payloads(&event_80, "session-progress", None, None, None, None);
+        let payloads_80 = build_payloads(
+            &event_80,
+            "session-progress",
+            "session-progress",
+            None,
+            None,
+            None,
+            None,
+        );
         assert_eq!(payloads_80.len(), 1);
         assert!(payloads_80[0].summary.contains("75%"));
 
@@ -427,5 +645,60 @@ mod tests {
     fn test_format_remote_source_without_username() {
         let source = format_remote_source("Telegram", None);
         assert_eq!(source, "via Telegram");
+    }
+
+    #[test]
+    fn test_error_then_complete_success_emits_only_failed() {
+        reset_terminal("s-fail");
+        let err = UnifiedStreamEvent::Error {
+            message: "boom".to_string(),
+            code: Some("internal_error".to_string()),
+        };
+        let err_payloads = build_payloads(&err, "s-fail", "s-fail", None, None, None, None);
+        assert_eq!(err_payloads.len(), 1);
+        assert_eq!(err_payloads[0].event_type, WebhookEventType::TaskFailed);
+
+        let complete = UnifiedStreamEvent::Complete { stop_reason: None };
+        let complete_payloads =
+            build_payloads(&complete, "s-fail", "s-fail", None, None, None, None);
+        assert!(complete_payloads.is_empty());
+    }
+
+    #[test]
+    fn test_cancelled_error_then_complete_cancelled_dedupes() {
+        reset_terminal("s-cancel");
+        let err = UnifiedStreamEvent::Error {
+            message: "Execution cancelled".to_string(),
+            code: Some("cancelled".to_string()),
+        };
+        let err_payloads = build_payloads(&err, "s-cancel", "s-cancel", None, None, None, None);
+        assert_eq!(err_payloads.len(), 1);
+        assert_eq!(err_payloads[0].event_type, WebhookEventType::TaskCancelled);
+
+        let complete = UnifiedStreamEvent::Complete {
+            stop_reason: Some("cancelled".to_string()),
+        };
+        let complete_payloads =
+            build_payloads(&complete, "s-cancel", "s-cancel", None, None, None, None);
+        assert!(complete_payloads.is_empty());
+    }
+
+    #[test]
+    fn test_complete_failed_stop_reason_maps_to_task_failed() {
+        reset_terminal("s-stop-fail");
+        let complete = UnifiedStreamEvent::Complete {
+            stop_reason: Some("analysis_gate_failed".to_string()),
+        };
+        let payloads = build_payloads(
+            &complete,
+            "s-stop-fail",
+            "s-stop-fail",
+            None,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(payloads.len(), 1);
+        assert_eq!(payloads[0].event_type, WebhookEventType::TaskFailed);
     }
 }

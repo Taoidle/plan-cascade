@@ -164,7 +164,7 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
                   ) : (
                     <>
                       <DownloadIcon className="w-4 h-4" />
-                      <span>{previewOnly ? t('mcp.previewImport', 'Preview Import') : t('mcp.importNow')}</span>
+                      <span>{previewOnly ? t('mcp.previewImport') : t('mcp.importNow')}</span>
                     </>
                   )}
                 </button>
@@ -191,7 +191,7 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
                     onChange={(e) => setPreviewOnly(e.target.checked)}
                     className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                   />
-                  <span>{t('mcp.previewOnly', 'Preview only (do not persist)')}</span>
+                  <span>{t('mcp.previewOnly')}</span>
                 </label>
               </>
             )}
@@ -203,19 +203,19 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
                   <div className="p-3 rounded-md bg-green-100 dark:bg-green-900/30 text-center">
                     <p className="text-2xl font-bold text-green-700 dark:text-green-300">{result.added}</p>
                     <p className="text-xs text-green-600 dark:text-green-400">
-                      {resultIsDryRun ? t('mcp.wouldAdd', 'Would Add') : t('mcp.added')}
+                      {resultIsDryRun ? t('mcp.wouldAdd') : t('mcp.added')}
                     </p>
                   </div>
                   <div className="p-3 rounded-md bg-yellow-100 dark:bg-yellow-900/30 text-center">
                     <p className="text-2xl font-bold text-yellow-700 dark:text-yellow-300">{result.skipped}</p>
                     <p className="text-xs text-yellow-600 dark:text-yellow-400">
-                      {resultIsDryRun ? t('mcp.wouldSkip', 'Would Skip') : t('mcp.skipped')}
+                      {resultIsDryRun ? t('mcp.wouldSkip') : t('mcp.skipped')}
                     </p>
                   </div>
                   <div className="p-3 rounded-md bg-red-100 dark:bg-red-900/30 text-center">
                     <p className="text-2xl font-bold text-red-700 dark:text-red-300">{result.failed}</p>
                     <p className="text-xs text-red-600 dark:text-red-400">
-                      {resultIsDryRun ? t('mcp.wouldFail', 'Would Fail') : t('mcp.failed')}
+                      {resultIsDryRun ? t('mcp.wouldFail') : t('mcp.failed')}
                     </p>
                   </div>
                 </div>
@@ -224,7 +224,7 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
                 {addedEntries.length > 0 && (
                   <div>
                     <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      {resultIsDryRun ? t('mcp.wouldAdd', 'Would Add') : t('mcp.importedServers')}
+                      {resultIsDryRun ? t('mcp.wouldAdd') : t('mcp.importedServers')}
                     </p>
                     <div className="space-y-1">
                       {addedEntries.map((name, i) => (
@@ -239,9 +239,7 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
 
                 {resultIsDryRun && (result.will_skip?.length || 0) > 0 && (
                   <div>
-                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      {t('mcp.wouldSkip', 'Would Skip')}
-                    </p>
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('mcp.wouldSkip')}</p>
                     <div className="space-y-1 max-h-24 overflow-y-auto">
                       {result.will_skip?.map((entry, i) => (
                         <div key={i} className="text-xs text-yellow-700 dark:text-yellow-300">

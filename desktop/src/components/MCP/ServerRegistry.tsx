@@ -120,6 +120,14 @@ export function ServerRegistry() {
     [],
   );
 
+  const getEventActionLabel = useCallback(
+    (action: string) => {
+      const actionKey = action === 'test_enabled' ? 'testEnabled' : action;
+      return t(`mcp.eventActions.${actionKey}`, { defaultValue: action });
+    },
+    [t],
+  );
+
   const fetchServers = useCallback(
     async (silent = false) => {
       if (!silent) {
@@ -224,7 +232,10 @@ export function ServerRegistry() {
               appendEvent('test', 'success', {
                 server,
                 serverId,
-                detail: `latency=${response.data.latency_ms ?? 'n/a'}ms tools=${response.data.tool_count ?? 'n/a'}`,
+                detail: t('mcp.eventDetails.testMetrics', {
+                  latency: response.data.latency_ms ?? 'n/a',
+                  tools: response.data.tool_count ?? 'n/a',
+                }),
               });
             } else {
               showToast(`${t('mcp.status.error', { message: '' })}${testLabel}`.trim(), 'error');
@@ -274,7 +285,7 @@ export function ServerRegistry() {
           appendEvent('toggle', 'info', {
             server: response.data,
             serverId,
-            detail: `enabled=${enabled}`,
+            detail: t('mcp.eventDetails.enabled', { enabled }),
           });
         } else {
           const message = response.error || t('mcp.errors.toggleServer');
@@ -350,11 +361,7 @@ export function ServerRegistry() {
   };
 
   const handleDelete = async (serverId: string) => {
-    const confirmed = confirm(
-      t('mcp.confirmDeleteWithDisconnect', {
-        defaultValue: 'Are you sure you want to delete this server? If connected, it will be disconnected first.',
-      }),
-    );
+    const confirmed = confirm(t('mcp.confirmDeleteWithDisconnect'));
     if (!confirmed) return;
 
     await withAction(serverId, setDeletingIds, async () => {
@@ -428,7 +435,7 @@ export function ServerRegistry() {
       const filename = `mcp-config-${localTimestampForFilename()}.json`;
       const saved = await saveTextWithDialog(filename, JSON.stringify(response.data, null, 2));
       if (saved) {
-        showToast(t('commands.mcp.exportConfigDesc'), 'success');
+        showToast(t('mcp.exportSuccess'), 'success');
         appendEvent('export', 'success');
       }
     } catch (err) {
@@ -443,8 +450,10 @@ export function ServerRegistry() {
     for (const id of enabledIds) {
       await handleTest(id);
     }
-    appendEvent('test_enabled', 'info', { detail: `count=${enabledIds.length}` });
-  }, [appendEvent, handleTest, servers]);
+    appendEvent('test_enabled', 'info', {
+      detail: t('mcp.eventDetails.count', { count: enabledIds.length }),
+    });
+  }, [appendEvent, handleTest, servers, t]);
 
   useEffect(() => {
     const listener = (evt: Event) => {
@@ -510,7 +519,7 @@ export function ServerRegistry() {
               )}
             >
               <UploadIcon className="w-4 h-4" />
-              <span>{t('commands.mcp.exportConfig')}</span>
+              <span>{t('mcp.export')}</span>
             </button>
 
             <button
@@ -648,10 +657,7 @@ export function ServerRegistry() {
                     )}
                     {duplicateServerNames.has(server.name) && (
                       <div className="text-xs rounded-md border border-yellow-200 bg-yellow-50 dark:border-yellow-900/40 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-300 px-2 py-1.5">
-                        {t(
-                          'mcp.duplicateNameWarning',
-                          'Duplicate server name detected. Runtime tools remain isolated by server id.',
-                        )}
+                        {t('mcp.duplicateNameWarning')}
                       </div>
                     )}
                   </div>
@@ -666,16 +672,16 @@ export function ServerRegistry() {
               >
                 <span className="inline-flex items-center gap-2 text-gray-700 dark:text-gray-300">
                   <InfoCircledIcon className="w-4 h-4" />
-                  {t('mcp.diagnosticsTitle', 'Connection Diagnostics')}
+                  {t('mcp.diagnosticsTitle')}
                 </span>
-                <span className="text-xs text-gray-500 dark:text-gray-400">{showDiagnostics ? 'Hide' : 'Show'}</span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {showDiagnostics ? t('mcp.hide') : t('mcp.show')}
+                </span>
               </button>
               {showDiagnostics && (
                 <div className="p-3 space-y-2 bg-white dark:bg-gray-900">
                   {Object.values(connectedServers).length === 0 ? (
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {t('mcp.noConnectedServers', 'No connected MCP servers')}
-                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{t('mcp.noConnectedServers')}</p>
                   ) : (
                     Object.values(connectedServers).map((info) => (
                       <div
@@ -684,7 +690,10 @@ export function ServerRegistry() {
                       >
                         <p className="font-medium text-gray-900 dark:text-white">{info.server_name}</p>
                         <p className="text-gray-500 dark:text-gray-400">
-                          protocol={info.protocol_version || 'unknown'} tools={info.tool_names.length}
+                          {t('mcp.connectionMeta', {
+                            protocol: info.protocol_version || t('mcp.status.unknown'),
+                            count: info.tool_names.length,
+                          })}
                         </p>
                         {info.tool_names.length > 0 && (
                           <p className="text-gray-600 dark:text-gray-300 mt-1 break-all">
@@ -696,13 +705,9 @@ export function ServerRegistry() {
                   )}
 
                   <div className="pt-2 mt-2 border-t border-gray-200 dark:border-gray-700">
-                    <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      {t('mcp.recentEvents', 'Recent MCP Events')}
-                    </p>
+                    <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{t('mcp.recentEvents')}</p>
                     {eventLog.length === 0 ? (
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {t('mcp.noRecentEvents', 'No recent MCP events')}
-                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{t('mcp.noRecentEvents')}</p>
                     ) : (
                       <div className="space-y-1.5 max-h-52 overflow-y-auto">
                         {eventLog.map((evt) => (
@@ -715,7 +720,7 @@ export function ServerRegistry() {
                                 evt.status === 'info' && 'text-gray-700 dark:text-gray-300',
                               )}
                             >
-                              {evt.action}
+                              {getEventActionLabel(evt.action)}
                               {evt.serverName ? ` - ${evt.serverName}` : ''}
                             </p>
                             {evt.detail && <p className="text-gray-600 dark:text-gray-400 break-all">{evt.detail}</p>}
@@ -738,14 +743,12 @@ export function ServerRegistry() {
             type="button"
             className="absolute inset-0 bg-black/40"
             onClick={() => setSelectedToolServerId(null)}
-            aria-label={t('common.close')}
+            aria-label={t('buttons.close')}
           />
           <div className="absolute right-0 top-0 h-full w-full max-w-md bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 shadow-xl p-4 flex flex-col">
             <div className="flex items-center justify-between mb-3">
               <div>
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-                  {t('mcp.toolsDrawerTitle', 'MCP Tools')}
-                </h3>
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{t('mcp.toolsDrawerTitle')}</h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400">{selectedToolServer.server_name}</p>
               </div>
               <button
@@ -758,13 +761,15 @@ export function ServerRegistry() {
             </div>
 
             <div className="text-xs text-gray-600 dark:text-gray-400 mb-3">
-              <p>protocol={selectedToolServer.protocol_version || 'unknown'}</p>
-              {selectedToolServer.connected_at && <p>connected_at={selectedToolServer.connected_at}</p>}
+              <p>{t('mcp.protocolMeta', { value: selectedToolServer.protocol_version || t('mcp.status.unknown') })}</p>
+              {selectedToolServer.connected_at && (
+                <p>{t('mcp.connectedAtMeta', { value: selectedToolServer.connected_at })}</p>
+              )}
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-2">
               {selectedToolServer.qualified_tool_names.length === 0 ? (
-                <p className="text-xs text-gray-500 dark:text-gray-400">{t('mcp.noTools', 'No tools found')}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{t('mcp.noTools')}</p>
               ) : (
                 selectedToolServer.qualified_tool_names.map((tool) => (
                   <div key={tool} className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1.5">

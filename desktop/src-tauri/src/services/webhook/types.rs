@@ -13,6 +13,7 @@ pub enum WebhookChannelType {
     Slack,
     Feishu,
     Telegram,
+    ServerChan,
     Discord,
     Custom,
 }
@@ -23,6 +24,7 @@ impl fmt::Display for WebhookChannelType {
             Self::Slack => write!(f, "slack"),
             Self::Feishu => write!(f, "feishu"),
             Self::Telegram => write!(f, "telegram"),
+            Self::ServerChan => write!(f, "serverchan"),
             Self::Discord => write!(f, "discord"),
             Self::Custom => write!(f, "custom"),
         }
@@ -36,6 +38,7 @@ impl WebhookChannelType {
             "slack" => Some(Self::Slack),
             "feishu" => Some(Self::Feishu),
             "telegram" => Some(Self::Telegram),
+            "serverchan" => Some(Self::ServerChan),
             "discord" => Some(Self::Discord),
             "custom" => Some(Self::Custom),
             _ => None,
@@ -159,6 +162,12 @@ pub struct WebhookDelivery {
     pub next_retry_at: Option<String>,
     /// Last error message (sanitized for UI display/logging).
     pub last_error: Option<String>,
+    /// Whether this failure is retryable under the current policy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retryable: Option<bool>,
+    /// Failure class label (for observability and UI filtering).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_class: Option<String>,
     pub created_at: String,
 }
 
@@ -178,6 +187,8 @@ impl WebhookDelivery {
             last_attempt_at: now.clone(),
             next_retry_at: None,
             last_error: None,
+            retryable: None,
+            error_class: None,
             created_at: now,
         }
     }
@@ -240,6 +251,12 @@ pub struct WebhookHealth {
     pub worker_running: bool,
     pub failed_queue_length: u32,
     pub last_retry_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub persistence_failures: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_cycle_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_retry_error: Option<String>,
 }
 
 /// Webhook-specific errors
@@ -286,6 +303,7 @@ mod tests {
             WebhookChannelType::Slack,
             WebhookChannelType::Feishu,
             WebhookChannelType::Telegram,
+            WebhookChannelType::ServerChan,
             WebhookChannelType::Discord,
             WebhookChannelType::Custom,
         ];
@@ -301,6 +319,7 @@ mod tests {
         assert_eq!(WebhookChannelType::Slack.to_string(), "slack");
         assert_eq!(WebhookChannelType::Feishu.to_string(), "feishu");
         assert_eq!(WebhookChannelType::Telegram.to_string(), "telegram");
+        assert_eq!(WebhookChannelType::ServerChan.to_string(), "serverchan");
         assert_eq!(WebhookChannelType::Discord.to_string(), "discord");
         assert_eq!(WebhookChannelType::Custom.to_string(), "custom");
     }
@@ -310,6 +329,10 @@ mod tests {
         assert_eq!(
             WebhookChannelType::from_str_value("slack"),
             Some(WebhookChannelType::Slack)
+        );
+        assert_eq!(
+            WebhookChannelType::from_str_value("serverchan"),
+            Some(WebhookChannelType::ServerChan)
         );
         assert_eq!(WebhookChannelType::from_str_value("unknown"), None);
     }

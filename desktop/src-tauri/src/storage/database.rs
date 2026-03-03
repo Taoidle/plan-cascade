@@ -1243,6 +1243,8 @@ impl Database {
                 last_attempt_at TEXT,
                 next_retry_at TEXT,
                 last_error TEXT,
+                retryable INTEGER,
+                error_class TEXT,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (channel_id) REFERENCES webhook_channels(id) ON DELETE CASCADE
             )",
@@ -1259,6 +1261,18 @@ impl Database {
         if !Self::table_has_column(&conn, "webhook_deliveries", "last_error") {
             let _ = conn.execute(
                 "ALTER TABLE webhook_deliveries ADD COLUMN last_error TEXT",
+                [],
+            );
+        }
+        if !Self::table_has_column(&conn, "webhook_deliveries", "retryable") {
+            let _ = conn.execute(
+                "ALTER TABLE webhook_deliveries ADD COLUMN retryable INTEGER",
+                [],
+            );
+        }
+        if !Self::table_has_column(&conn, "webhook_deliveries", "error_class") {
+            let _ = conn.execute(
+                "ALTER TABLE webhook_deliveries ADD COLUMN error_class TEXT",
                 [],
             );
         }
@@ -2134,8 +2148,8 @@ impl Database {
         let payload_json = serde_json::to_string(&delivery.payload).unwrap_or_default();
 
         conn.execute(
-            "INSERT INTO webhook_deliveries (id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, next_retry_at, last_error, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            "INSERT INTO webhook_deliveries (id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, next_retry_at, last_error, retryable, error_class, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 delivery.id,
                 delivery.channel_id,
@@ -2148,6 +2162,8 @@ impl Database {
                 delivery.last_attempt_at,
                 delivery.next_retry_at,
                 delivery.last_error,
+                delivery.retryable.map(i32::from),
+                delivery.error_class,
                 delivery.created_at,
             ],
         )?;
@@ -2167,7 +2183,7 @@ impl Database {
         match channel_id {
             Some(cid) => {
                 let mut stmt = conn.prepare(
-                    "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, next_retry_at, last_error, created_at
+                    "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, next_retry_at, last_error, retryable, error_class, created_at
                      FROM webhook_deliveries WHERE channel_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
                 )?;
                 let deliveries = stmt
@@ -2180,7 +2196,7 @@ impl Database {
             }
             None => {
                 let mut stmt = conn.prepare(
-                    "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, next_retry_at, last_error, created_at
+                    "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, next_retry_at, last_error, retryable, error_class, created_at
                      FROM webhook_deliveries ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
                 )?;
                 let deliveries = stmt
@@ -2202,7 +2218,7 @@ impl Database {
         let conn = self.get_connection()?;
 
         let mut stmt = conn.prepare(
-            "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, next_retry_at, last_error, created_at
+            "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, next_retry_at, last_error, retryable, error_class, created_at
              FROM webhook_deliveries
              WHERE status IN ('failed', 'retrying') AND attempts < ?1
              ORDER BY last_attempt_at ASC",
@@ -2226,7 +2242,7 @@ impl Database {
     ) -> AppResult<Vec<crate::services::webhook::types::WebhookDelivery>> {
         let conn = self.get_connection()?;
         let mut stmt = conn.prepare(
-            "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, next_retry_at, last_error, created_at
+            "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, next_retry_at, last_error, retryable, error_class, created_at
              FROM webhook_deliveries
              WHERE status IN ('failed', 'retrying')
                AND attempts < ?1
@@ -2274,7 +2290,7 @@ impl Database {
 
         conn.execute(
             "UPDATE webhook_deliveries
-             SET status = ?2, status_code = ?3, response_body = ?4, attempts = ?5, last_attempt_at = ?6, next_retry_at = ?7, last_error = ?8
+             SET status = ?2, status_code = ?3, response_body = ?4, attempts = ?5, last_attempt_at = ?6, next_retry_at = ?7, last_error = ?8, retryable = ?9, error_class = ?10
              WHERE id = ?1",
             params![
                 delivery.id,
@@ -2285,6 +2301,8 @@ impl Database {
                 delivery.last_attempt_at,
                 delivery.next_retry_at,
                 delivery.last_error,
+                delivery.retryable.map(i32::from),
+                delivery.error_class,
             ],
         )?;
 
@@ -2299,7 +2317,7 @@ impl Database {
         let conn = self.get_connection()?;
 
         let result = conn.query_row(
-            "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, next_retry_at, last_error, created_at
+            "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, next_retry_at, last_error, retryable, error_class, created_at
              FROM webhook_deliveries WHERE id = ?1",
             params![id],
             |row| Self::row_to_webhook_delivery(row),
@@ -2375,7 +2393,9 @@ impl Database {
         let last_attempt_at: String = row.get::<_, String>(8).unwrap_or_default();
         let next_retry_at: Option<String> = row.get(9)?;
         let last_error: Option<String> = row.get(10)?;
-        let created_at: String = row.get(11)?;
+        let retryable_raw: Option<i32> = row.get(11)?;
+        let error_class: Option<String> = row.get(12)?;
+        let created_at: String = row.get(13)?;
 
         let event_type: crate::services::webhook::types::WebhookEventType =
             serde_json::from_str(&format!("\"{}\"", event_type_str))
@@ -2398,6 +2418,8 @@ impl Database {
             last_attempt_at,
             next_retry_at,
             last_error,
+            retryable: retryable_raw.map(|value| value != 0),
+            error_class,
             created_at,
         })
     }
@@ -3723,11 +3745,18 @@ mod tests {
         delivery.attempts = 2;
         delivery.next_retry_at = Some("2026-03-03T00:05:00Z".to_string());
         delivery.last_error = Some("HTTP 500".to_string());
+        delivery.retryable = Some(true);
+        delivery.error_class = Some("http_retryable".to_string());
         db.insert_webhook_delivery(&delivery).unwrap();
 
         let loaded = db.get_webhook_delivery(&delivery.id).unwrap().unwrap();
-        assert_eq!(loaded.next_retry_at, Some("2026-03-03T00:05:00Z".to_string()));
+        assert_eq!(
+            loaded.next_retry_at,
+            Some("2026-03-03T00:05:00Z".to_string())
+        );
         assert_eq!(loaded.last_error, Some("HTTP 500".to_string()));
+        assert_eq!(loaded.retryable, Some(true));
+        assert_eq!(loaded.error_class, Some("http_retryable".to_string()));
     }
 
     #[test]

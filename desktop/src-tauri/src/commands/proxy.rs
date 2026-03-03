@@ -42,6 +42,7 @@ const PROVIDER_IDS: &[&str] = &[
     "webhook_slack",
     "webhook_feishu",
     "webhook_telegram",
+    "webhook_serverchan",
     "webhook_discord",
     "webhook_custom",
     "remote_telegram",

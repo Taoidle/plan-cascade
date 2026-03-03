@@ -15,8 +15,9 @@ use super::types::{
     RemoteGatewayConfig, TelegramAdapterConfig,
 };
 use crate::services::proxy::ProxyConfig;
-use crate::services::webhook::integration::format_remote_source;
-use crate::services::webhook::types::{WebhookEventType, WebhookPayload};
+use crate::services::streaming::UnifiedStreamEvent;
+use crate::services::webhook::integration::{dispatch_on_remote_event, format_remote_source};
+use crate::services::webhook::types::WebhookEventType;
 use crate::services::webhook::WebhookService;
 use crate::storage::Database;
 use rusqlite::params;
@@ -341,45 +342,35 @@ impl RemoteGatewayService {
                     .await
                     .unwrap_or_default();
 
-                let summary = match webhook_event_type {
-                    WebhookEventType::TaskComplete => {
-                        format!("Task completed successfully ({})", remote_source)
-                    }
-                    WebhookEventType::TaskFailed => {
-                        format!("Task failed ({})", remote_source)
-                    }
-                    WebhookEventType::TaskCancelled => {
-                        format!("Task cancelled ({})", remote_source)
-                    }
-                    _ => response.clone(),
-                };
-
-                let payload = WebhookPayload {
-                    event_type: webhook_event_type,
-                    session_id: if session_id.is_empty() {
-                        None
-                    } else {
-                        Some(session_id)
-                    },
-                    session_name: None,
-                    project_path: None,
-                    summary,
-                    details: None,
-                    timestamp: chrono::Utc::now().to_rfc3339(),
-                    duration_ms: None,
-                    token_usage: None,
-                    remote_source: Some(remote_source.clone()),
-                };
-
                 let svc = webhook_svc.clone();
-                tokio::spawn(async move {
-                    let deliveries = svc.dispatch(payload).await;
-                    if !deliveries.is_empty() {
-                        tracing::debug!(
-                            "Webhook dispatched {} deliveries for remote command",
-                            deliveries.len()
-                        );
+                let event = match webhook_event_type {
+                    WebhookEventType::TaskComplete => {
+                        UnifiedStreamEvent::Complete { stop_reason: None }
                     }
+                    WebhookEventType::TaskCancelled => UnifiedStreamEvent::Complete {
+                        stop_reason: Some("cancelled".to_string()),
+                    },
+                    WebhookEventType::TaskFailed => UnifiedStreamEvent::Error {
+                        message: response.clone(),
+                        code: Some("remote_error".to_string()),
+                    },
+                    _ => UnifiedStreamEvent::Complete { stop_reason: None },
+                };
+                tokio::spawn(async move {
+                    dispatch_on_remote_event(
+                        &event,
+                        if session_id.is_empty() {
+                            "remote-session"
+                        } else {
+                            &session_id
+                        },
+                        None,
+                        None,
+                        None,
+                        svc,
+                        None,
+                        &remote_source,
+                    );
                 });
             }
         }

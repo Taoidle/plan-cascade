@@ -1547,8 +1547,11 @@ pub async fn execute_standalone(
     }
 
     let webhook_service = webhook_state.get_or_init(app_state.inner()).await.ok();
-    let _ = webhook_state.start_worker_if_needed(app_state.inner()).await;
+    let _ = webhook_state
+        .start_worker_if_needed(app_state.inner())
+        .await;
     let webhook_session_id = event_session_id.clone();
+    let webhook_execution_id = execution_id.clone();
     let webhook_project_path = if project_path.trim().is_empty() {
         None
     } else {
@@ -1563,6 +1566,7 @@ pub async fn execute_standalone(
                 dispatch_webhook_on_event(
                     &event,
                     &webhook_session_id,
+                    Some(&webhook_execution_id),
                     None,
                     webhook_project_path.as_deref(),
                     service,
@@ -2018,7 +2022,9 @@ pub async fn execute_standalone_with_session(
     let (tx, mut rx) = mpsc::channel::<UnifiedStreamEvent>(100);
 
     let webhook_service = webhook_state.get_or_init(app_state.inner()).await.ok();
-    let _ = webhook_state.start_worker_if_needed(app_state.inner()).await;
+    let _ = webhook_state
+        .start_worker_if_needed(app_state.inner())
+        .await;
     let webhook_project_path = if session.project_path.trim().is_empty() {
         None
     } else {
@@ -2034,6 +2040,7 @@ pub async fn execute_standalone_with_session(
                 dispatch_webhook_on_event(
                     &event,
                     &session_id_clone,
+                    None,
                     None,
                     webhook_project_path.as_deref(),
                     service,
@@ -2488,7 +2495,9 @@ pub async fn resume_standalone_execution(
     let (tx, mut rx) = mpsc::channel::<UnifiedStreamEvent>(100);
 
     let webhook_service = webhook_state.get_or_init(app_state.inner()).await.ok();
-    let _ = webhook_state.start_worker_if_needed(app_state.inner()).await;
+    let _ = webhook_state
+        .start_worker_if_needed(app_state.inner())
+        .await;
     let webhook_project_path = if session.project_path.trim().is_empty() {
         None
     } else {
@@ -2504,6 +2513,7 @@ pub async fn resume_standalone_execution(
                 dispatch_webhook_on_event(
                     &event,
                     &session_id,
+                    None,
                     None,
                     webhook_project_path.as_deref(),
                     service,

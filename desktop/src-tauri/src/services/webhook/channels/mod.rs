@@ -6,6 +6,7 @@
 pub mod custom;
 pub mod discord;
 pub mod feishu;
+pub mod serverchan;
 pub mod slack;
 pub mod telegram;
 
