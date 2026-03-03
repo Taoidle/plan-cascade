@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::RwLock;
 
+use crate::commands::webhook::WebhookState;
 use crate::models::claude_code::{
     ActiveSessionInfo, CancelExecutionResponse, ClaudeCodeSession, SendMessageRequest,
     SendMessageResponse, StartChatRequest, StartChatResponse,
@@ -14,6 +15,7 @@ use crate::models::response::CommandResponse;
 use crate::services::claude_code::{
     channels, ActiveSessionManager, ChatHandler, StreamEventPayload,
 };
+use crate::services::webhook::integration::dispatch_on_event as dispatch_webhook_on_event;
 use crate::state::AppState;
 
 /// State for Claude Code services
@@ -86,9 +88,17 @@ pub async fn start_chat(
 pub async fn send_message(
     request: SendMessageRequest,
     state: State<'_, ClaudeCodeState>,
+    app_state: State<'_, AppState>,
+    webhook_state: State<'_, WebhookState>,
     app: AppHandle,
 ) -> Result<CommandResponse<SendMessageResponse>, String> {
     let mut chat_handler = state.chat_handler.write().await;
+    let session_for_webhook = state.session_manager.get_session(&request.session_id).await;
+    let webhook_service = webhook_state.get_or_init(app_state.inner()).await.ok();
+    let _ = webhook_state.start_worker_if_needed(app_state.inner()).await;
+    let webhook_project_path = session_for_webhook
+        .as_ref()
+        .map(|session| session.project_path.clone());
 
     match chat_handler
         .send_message(&request.session_id, &request.prompt)
@@ -111,6 +121,16 @@ pub async fn send_message(
                 let mut event_count = 0u32;
                 while let Some(event) = rx.recv().await {
                     event_count += 1;
+                    if let Some(service) = webhook_service.clone() {
+                        dispatch_webhook_on_event(
+                            &event,
+                            &session_id,
+                            None,
+                            webhook_project_path.as_deref(),
+                            service,
+                            None,
+                        );
+                    }
                     eprintln!(
                         "[DEBUG] forwarding event #{} to frontend for session {}",
                         event_count, session_id

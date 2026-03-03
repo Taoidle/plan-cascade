@@ -143,6 +143,8 @@
     "ensuring": "创建中...",
     "syncNow": "立即同步文档",
     "syncing": "同步中...",
+    "rebuildDocs": "重建文档索引",
+    "rebuilding": "重建中...",
     "pendingFiles": "待处理文件变更",
     "collectionDiff": "集合差异",
     "checkDiff": "检查差异",
@@ -154,7 +156,12 @@
     "noDiffData": "点击“检查差异”以查看工作区漂移。",
     "statusIndexed": "已索引",
     "statusChangesPending": "有待同步变更",
+    "statusQueued": "排队中",
     "statusIndexing": "索引中",
-    "statusNone": "未初始化"
+    "statusRetryWaiting": "等待重试",
+    "statusError": "错误",
+    "statusNone": "未初始化",
+    "lastError": "最近错误",
+    "nextRetryAt": "下次重试时间"
   }
 }

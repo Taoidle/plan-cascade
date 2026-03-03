@@ -877,6 +877,10 @@
     "description": "配置 Webhook 通道，在任务完成或失败时接收通知。",
     "dismiss": "关闭",
     "loading": "加载中...",
+    "refresh": "刷新",
+    "enabled": "启用",
+    "testing": "测试中...",
+    "unknownError": "未知错误",
     "channels": "Webhook 通道",
     "add": "添加",
     "noChannels": "尚未配置 Webhook 通道。",
@@ -895,11 +899,67 @@
     "eventsLabel": "个事件",
     "deliveryHistory": "投递历史",
     "noDeliveries": "暂无投递记录。",
+    "deliveryStatus": {
+      "success": "成功",
+      "failed": "失败",
+      "retrying": "重试中",
+      "pending": "等待中"
+    },
+    "health": {
+      "title": "投递 Worker 健康状态",
+      "refresh": "刷新状态",
+      "workerStatus": "Worker 状态",
+      "workerRunning": "运行中",
+      "workerStopped": "未运行",
+      "failedQueue": "失败队列",
+      "lastRetryAt": "上次重试时间"
+    },
+    "filter": {
+      "channel": "通道",
+      "allChannels": "全部通道"
+    },
+    "table": {
+      "event": "事件",
+      "status": "状态",
+      "attempts": "尝试次数",
+      "statusCode": "状态码",
+      "lastError": "最近错误",
+      "nextRetryAt": "下次重试",
+      "createdAt": "创建时间",
+      "actions": "操作"
+    },
+    "pagination": {
+      "page": "第 {{page}} 页",
+      "previous": "上一页",
+      "next": "下一页"
+    },
+    "time": {
+      "justNow": "刚刚",
+      "minutesAgo": "{{count}} 分钟前",
+      "hoursAgo": "{{count}} 小时前",
+      "daysAgo": "{{count}} 天前"
+    },
+    "validation": {
+      "nameRequired": "请输入通道名称",
+      "nameTooLong": "通道名称不能超过 {{max}} 个字符",
+      "urlRequired": "请输入通道目标",
+      "urlInvalid": "URL 格式不正确",
+      "httpsRequired": "该通道仅支持 HTTPS",
+      "telegramTargetInvalid": "Telegram 目标必须是数字 chat_id 或 @name",
+      "customHttpPrivateOnly": "自定义 HTTP 仅允许 localhost 或内网地址",
+      "customProtocolInvalid": "自定义通道仅支持 http/https",
+      "eventsRequired": "至少选择一个事件",
+      "scopeRequired": "请输入至少一个会话 ID",
+      "scopeTooManySessions": "最多支持 {{max}} 个会话 ID",
+      "scopeSessionTooLong": "每个会话 ID 不能超过 {{max}} 个字符",
+      "templateTooLong": "模板长度不能超过 {{max}} 个字符"
+    },
 
     "scope": {
       "global": "全局",
       "sessions": "个会话",
-      "specificSessions": "指定会话"
+      "specificSessions": "指定会话",
+      "sessionsCount": "{{count}} 个会话"
     },
 
     "events": {
@@ -913,16 +973,22 @@
 
     "form": {
       "name": "名称",
+      "namePlaceholder": "例如：开发团队 Slack",
       "channelType": "通道类型",
       "url": "Webhook URL",
+      "urlHelp": "生产通道建议使用 HTTPS 地址",
+      "telegramHelp": "Telegram 通道填写 chat_id 或 @name",
+      "telegramPlaceholder": "例如：-1001234567890 或 @channel_name",
       "secret": "密钥 / 令牌",
       "secretPlaceholder": "留空以保留当前值",
       "secretOptional": "可选",
       "scope": "作用域",
       "events": "事件",
       "template": "自定义模板",
+      "templateHelp": "模板仅覆盖 summary 字段，渲染失败会自动降级到默认摘要。",
       "optional": "可选",
-      "sessionIds": "以逗号分隔的会话 ID"
+      "sessionIds": "以逗号分隔的会话 ID",
+      "scopeLimitHint": "最多 {{max}} 个会话 ID"
     }
   },
 

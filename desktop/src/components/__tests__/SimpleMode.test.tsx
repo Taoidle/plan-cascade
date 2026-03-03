@@ -343,7 +343,7 @@ vi.mock('../../store/agents', () => ({
 
 import { SimpleMode } from '../SimpleMode';
 
-function createKernelSession(activeMode: 'chat' | 'plan' | 'task' = 'chat') {
+function createKernelSession(activeMode: 'chat' | 'plan' | 'task' = 'chat'): any {
   return {
     sessionId: 'kernel-session-1',
     status: 'active',
@@ -482,6 +482,7 @@ function resetStates() {
     overrideConfigNatural: vi.fn(),
     addPrdFeedback: vi.fn(),
     cancelWorkflow: vi.fn(async () => undefined),
+    syncRuntimeFromKernel: vi.fn(),
     isCancelling: false,
     resetWorkflow: vi.fn(),
   });
@@ -500,6 +501,7 @@ function resetStates() {
     submitClarification: vi.fn(async () => undefined),
     skipClarification: vi.fn(async () => undefined),
     cancelWorkflow: vi.fn(async () => undefined),
+    syncRuntimeFromKernel: vi.fn(),
     isCancelling: false,
     resetWorkflow: vi.fn(),
   });
@@ -644,17 +646,14 @@ describe('SimpleMode', () => {
     expect(storeHarness.getWorkflowKernelState().linkModeSession).not.toHaveBeenCalled();
   });
 
-  it('shows task interview input panel when kernel phase is stale but interview question exists', async () => {
+  it('shows task interview input panel when kernel has pending interview even if orchestrator question is empty', async () => {
     const kernelSession = createKernelSession('task');
-    kernelSession.modeSnapshots.task = { phase: 'analyzing' };
-    storeHarness.setWorkflowKernelState({
-      ...storeHarness.getWorkflowKernelState(),
-      session: kernelSession,
-    });
-    storeHarness.setWorkflowOrchestratorState({
-      ...storeHarness.getWorkflowOrchestratorState(),
+    kernelSession.linkedModeSessions.task = 'task-session-1';
+    kernelSession.modeSnapshots.task = {
+      ...kernelSession.modeSnapshots.task,
       phase: 'interviewing',
-      pendingQuestion: {
+      pendingInterview: {
+        interviewId: 'interview-1',
         questionId: 'q1',
         question: 'Need auth?',
         hint: null,
@@ -665,6 +664,15 @@ describe('SimpleMode', () => {
         questionNumber: 1,
         totalQuestions: 3,
       },
+    };
+    storeHarness.setWorkflowKernelState({
+      ...storeHarness.getWorkflowKernelState(),
+      session: kernelSession,
+    });
+    storeHarness.setWorkflowOrchestratorState({
+      ...storeHarness.getWorkflowOrchestratorState(),
+      phase: 'analyzing',
+      pendingQuestion: null,
     });
 
     renderSimpleMode();
@@ -673,24 +681,38 @@ describe('SimpleMode', () => {
       expect(screen.getByTestId('toolbar-workflow-mode')).toHaveTextContent('task');
     });
     expect(screen.getByTestId('interview-input-panel')).toBeInTheDocument();
+    expect(storeHarness.getWorkflowOrchestratorState().syncRuntimeFromKernel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'task-session-1',
+        interviewId: 'interview-1',
+        phase: 'interviewing',
+      }),
+    );
   });
 
-  it('routes plan clarification submit when pending question exists even if kernel phase is stale', async () => {
+  it('routes plan clarification submit from kernel pending clarification when orchestrator state is stale', async () => {
     const kernelSession = createKernelSession('plan');
-    kernelSession.modeSnapshots.plan = { phase: 'planning' };
+    kernelSession.linkedModeSessions.plan = 'plan-session-1';
+    kernelSession.modeSnapshots.plan = {
+      ...kernelSession.modeSnapshots.plan,
+      phase: 'clarifying',
+      pendingClarification: {
+        questionId: 'q1',
+        question: 'Target audience?',
+        hint: null,
+        inputType: 'text',
+        options: [],
+        required: false,
+      },
+    };
     storeHarness.setWorkflowKernelState({
       ...storeHarness.getWorkflowKernelState(),
       session: kernelSession,
     });
     storeHarness.setPlanOrchestratorState({
       ...storeHarness.getPlanOrchestratorState(),
-      phase: 'clarifying',
-      pendingClarifyQuestion: {
-        questionId: 'q1',
-        question: 'Target audience?',
-        hint: null,
-        inputType: 'text',
-      },
+      phase: 'planning',
+      pendingClarifyQuestion: null,
     });
 
     renderSimpleMode();
@@ -698,6 +720,12 @@ describe('SimpleMode', () => {
     await waitFor(() => {
       expect(screen.getByTestId('toolbar-workflow-mode')).toHaveTextContent('plan');
     });
+    expect(storeHarness.getPlanOrchestratorState().syncRuntimeFromKernel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'plan-session-1',
+        phase: 'clarifying',
+      }),
+    );
 
     fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'Developers' } });
     fireEvent.click(screen.getByTestId('composer-submit'));

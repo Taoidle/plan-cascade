@@ -155,6 +155,10 @@ pub struct WebhookDelivery {
     pub response_body: Option<String>,
     pub attempts: u32,
     pub last_attempt_at: String,
+    /// Next retry timestamp for failed deliveries (RFC3339).
+    pub next_retry_at: Option<String>,
+    /// Last error message (sanitized for UI display/logging).
+    pub last_error: Option<String>,
     pub created_at: String,
 }
 
@@ -172,6 +176,8 @@ impl WebhookDelivery {
             response_body: None,
             attempts: 0,
             last_attempt_at: now.clone(),
+            next_retry_at: None,
+            last_error: None,
             created_at: now,
         }
     }
@@ -216,6 +222,24 @@ pub struct WebhookTestResult {
     pub success: bool,
     pub latency_ms: Option<u32>,
     pub error: Option<String>,
+}
+
+/// Structured channel send result for reliable delivery auditing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookSendResult {
+    pub success: bool,
+    pub status_code: Option<u16>,
+    pub latency_ms: u32,
+    pub response_body: Option<String>,
+    pub error: Option<String>,
+}
+
+/// Runtime health information for webhook retry worker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookHealth {
+    pub worker_running: bool,
+    pub failed_queue_length: u32,
+    pub last_retry_at: Option<String>,
 }
 
 /// Webhook-specific errors

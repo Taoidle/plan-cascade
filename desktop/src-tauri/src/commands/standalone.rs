@@ -11,6 +11,7 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{mpsc, RwLock};
 
 use crate::commands::proxy::resolve_provider_proxy;
+use crate::commands::webhook::WebhookState;
 use crate::models::orchestrator::{
     ExecuteWithSessionRequest, ExecutionProgress, ExecutionSession, ExecutionSessionSummary,
     ExecutionStatus, ResumeExecutionRequest, StandaloneStatus,
@@ -23,6 +24,7 @@ use crate::services::orchestrator::{
 };
 use crate::services::plugins::models::{PluginInvocation, ResolvedPluginInvocation};
 use crate::services::streaming::UnifiedStreamEvent;
+use crate::services::webhook::integration::dispatch_on_event as dispatch_webhook_on_event;
 use crate::state::AppState;
 use crate::storage::KeyringService;
 use crate::utils::paths::ensure_plan_cascade_dir;
@@ -1172,6 +1174,7 @@ pub async fn execute_standalone(
     file_changes_state: State<'_, super::file_changes::FileChangesState>,
     analytics_state: State<'_, super::analytics::AnalyticsState>,
     permission_state: State<'_, super::permissions::PermissionState>,
+    webhook_state: State<'_, WebhookState>,
     plugin_state: State<'_, super::plugins::PluginState>,
 ) -> Result<CommandResponse<ExecutionResult>, String> {
     let external_context_injected = external_context_injected
@@ -1543,10 +1546,30 @@ pub async fn execute_standalone(
             .await;
     }
 
+    let webhook_service = webhook_state.get_or_init(app_state.inner()).await.ok();
+    let _ = webhook_state.start_worker_if_needed(app_state.inner()).await;
+    let webhook_session_id = event_session_id.clone();
+    let webhook_project_path = if project_path.trim().is_empty() {
+        None
+    } else {
+        Some(project_path.clone())
+    };
+
     // Spawn task to forward events to frontend
     let app_clone = app.clone();
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
+            if let Some(service) = webhook_service.clone() {
+                dispatch_webhook_on_event(
+                    &event,
+                    &webhook_session_id,
+                    None,
+                    webhook_project_path.as_deref(),
+                    service,
+                    None,
+                );
+            }
+
             // Flatten session_id into the serialized UnifiedStreamEvent so the
             // frontend's handleUnifiedExecutionEvent can route events to the
             // correct foreground or background session.
@@ -1782,6 +1805,7 @@ pub async fn execute_standalone_with_session(
     file_changes_state: State<'_, super::file_changes::FileChangesState>,
     analytics_state: State<'_, super::analytics::AnalyticsState>,
     permission_state: State<'_, super::permissions::PermissionState>,
+    webhook_state: State<'_, WebhookState>,
     plugin_state: State<'_, super::plugins::PluginState>,
 ) -> Result<CommandResponse<SessionExecutionResult>, String> {
     let keyring = KeyringService::new();
@@ -1993,11 +2017,29 @@ pub async fn execute_standalone_with_session(
     // Create channel for streaming events
     let (tx, mut rx) = mpsc::channel::<UnifiedStreamEvent>(100);
 
+    let webhook_service = webhook_state.get_or_init(app_state.inner()).await.ok();
+    let _ = webhook_state.start_worker_if_needed(app_state.inner()).await;
+    let webhook_project_path = if session.project_path.trim().is_empty() {
+        None
+    } else {
+        Some(session.project_path.clone())
+    };
+
     // Spawn task to forward events to frontend
     let app_clone = app.clone();
     let session_id_clone = session_id.clone();
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
+            if let Some(service) = webhook_service.clone() {
+                dispatch_webhook_on_event(
+                    &event,
+                    &session_id_clone,
+                    None,
+                    webhook_project_path.as_deref(),
+                    service,
+                    None,
+                );
+            }
             let _ = app_clone.emit(&format!("session-event-{}", session_id_clone), &event);
             // Also emit to general channel for dashboard
             let _ = app_clone.emit("standalone-session-event", &event);
@@ -2234,6 +2276,7 @@ pub async fn resume_standalone_execution(
     standalone_state: State<'_, StandaloneState>,
     file_changes_state: State<'_, super::file_changes::FileChangesState>,
     permission_state: State<'_, super::permissions::PermissionState>,
+    webhook_state: State<'_, WebhookState>,
     plugin_state: State<'_, super::plugins::PluginState>,
 ) -> Result<CommandResponse<SessionExecutionResult>, String> {
     // Get database pool
@@ -2444,11 +2487,29 @@ pub async fn resume_standalone_execution(
     // Create channel for streaming events
     let (tx, mut rx) = mpsc::channel::<UnifiedStreamEvent>(100);
 
+    let webhook_service = webhook_state.get_or_init(app_state.inner()).await.ok();
+    let _ = webhook_state.start_worker_if_needed(app_state.inner()).await;
+    let webhook_project_path = if session.project_path.trim().is_empty() {
+        None
+    } else {
+        Some(session.project_path.clone())
+    };
+
     // Spawn task to forward events to frontend
     let app_clone = app.clone();
     let session_id = request.session_id.clone();
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
+            if let Some(service) = webhook_service.clone() {
+                dispatch_webhook_on_event(
+                    &event,
+                    &session_id,
+                    None,
+                    webhook_project_path.as_deref(),
+                    service,
+                    None,
+                );
+            }
             let _ = app_clone.emit(&format!("session-event-{}", session_id), &event);
             let _ = app_clone.emit("standalone-session-event", &event);
         }

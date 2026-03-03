@@ -27,6 +27,7 @@ use super::embedding_provider::{
     EmbeddingError, EmbeddingProvider, EmbeddingProviderConfig, EmbeddingProviderType,
     EmbeddingResult,
 };
+use super::rate_limit_classifier::classify_rate_limit;
 use crate::services::proxy::build_http_client;
 
 // ---------------------------------------------------------------------------
@@ -195,6 +196,7 @@ impl OpenAIEmbeddingProvider {
             .map_err(|e| self.map_reqwest_error(e))?;
 
         let status = response.status().as_u16();
+        let headers = response.headers().clone();
 
         if status == 200 {
             let resp_text = response
@@ -211,7 +213,7 @@ impl OpenAIEmbeddingProvider {
             })
         } else {
             let body_text = response.text().await.unwrap_or_default();
-            Err(self.map_http_error(status, &body_text))
+            Err(self.map_http_error(status, &headers, &body_text))
         }
     }
 
@@ -236,7 +238,12 @@ impl OpenAIEmbeddingProvider {
     }
 
     /// Map an HTTP error response to `EmbeddingError`.
-    fn map_http_error(&self, status: u16, body_text: &str) -> EmbeddingError {
+    fn map_http_error(
+        &self,
+        status: u16,
+        headers: &reqwest::header::HeaderMap,
+        body_text: &str,
+    ) -> EmbeddingError {
         // Try to parse structured error response
         let error_detail = serde_json::from_str::<OpenAIErrorResponse>(body_text)
             .ok()
@@ -246,6 +253,21 @@ impl OpenAIEmbeddingProvider {
             .as_ref()
             .and_then(|d| d.message.as_deref())
             .unwrap_or(body_text);
+        let error_code = error_detail.as_ref().and_then(|d| d.code.as_deref());
+
+        if let Some(signal) = classify_rate_limit(
+            Some(status),
+            Some(headers),
+            error_code,
+            Some(error_message),
+        ) {
+            return EmbeddingError::RateLimited {
+                message: format!("OpenAI rate limit exceeded: {}", error_message),
+                retry_after: signal.retry_after_secs,
+                status: Some(status),
+                provider_code: signal.provider_code,
+            };
+        }
 
         match status {
             401 => EmbeddingError::AuthenticationFailed {
@@ -254,10 +276,6 @@ impl OpenAIEmbeddingProvider {
                      (keyring alias: 'openai_embedding').",
                     error_message
                 ),
-            },
-            429 => EmbeddingError::RateLimited {
-                message: format!("OpenAI rate limit exceeded: {}", error_message),
-                retry_after: None,
             },
             400 => {
                 if error_message.contains("token") || error_message.contains("length") {
@@ -565,8 +583,10 @@ mod tests {
     #[test]
     fn map_http_error_401_auth_failed() {
         let provider = OpenAIEmbeddingProvider::new(&default_config());
+        let headers = reqwest::header::HeaderMap::new();
         let err = provider.map_http_error(
             401,
+            &headers,
             r#"{"error":{"message":"Invalid API key","type":"invalid_request_error","code":"invalid_api_key"}}"#,
         );
         assert!(matches!(err, EmbeddingError::AuthenticationFailed { .. }));
@@ -578,8 +598,10 @@ mod tests {
     #[test]
     fn map_http_error_429_rate_limited() {
         let provider = OpenAIEmbeddingProvider::new(&default_config());
+        let headers = reqwest::header::HeaderMap::new();
         let err = provider.map_http_error(
             429,
+            &headers,
             r#"{"error":{"message":"Rate limit exceeded","type":"rate_limit_error"}}"#,
         );
         assert!(matches!(err, EmbeddingError::RateLimited { .. }));
@@ -589,8 +611,10 @@ mod tests {
     #[test]
     fn map_http_error_400_input_too_long() {
         let provider = OpenAIEmbeddingProvider::new(&default_config());
+        let headers = reqwest::header::HeaderMap::new();
         let err = provider.map_http_error(
             400,
+            &headers,
             r#"{"error":{"message":"max token length exceeded","type":"invalid_request_error"}}"#,
         );
         assert!(matches!(err, EmbeddingError::InputTooLong { .. }));
@@ -599,8 +623,10 @@ mod tests {
     #[test]
     fn map_http_error_404_model_not_found() {
         let provider = OpenAIEmbeddingProvider::new(&default_config());
+        let headers = reqwest::header::HeaderMap::new();
         let err = provider.map_http_error(
             404,
+            &headers,
             r#"{"error":{"message":"Model not found","type":"invalid_request_error"}}"#,
         );
         assert!(matches!(err, EmbeddingError::ModelNotFound { .. }));
@@ -609,7 +635,8 @@ mod tests {
     #[test]
     fn map_http_error_500_server_error() {
         let provider = OpenAIEmbeddingProvider::new(&default_config());
-        let err = provider.map_http_error(500, r#"{"error":{"message":"Internal error"}}"#);
+        let headers = reqwest::header::HeaderMap::new();
+        let err = provider.map_http_error(500, &headers, r#"{"error":{"message":"Internal error"}}"#);
         assert!(matches!(
             err,
             EmbeddingError::ServerError {
@@ -623,7 +650,8 @@ mod tests {
     #[test]
     fn map_http_error_unparseable_body() {
         let provider = OpenAIEmbeddingProvider::new(&default_config());
-        let err = provider.map_http_error(503, "service unavailable");
+        let headers = reqwest::header::HeaderMap::new();
+        let err = provider.map_http_error(503, &headers, "service unavailable");
         assert!(matches!(
             err,
             EmbeddingError::ServerError {

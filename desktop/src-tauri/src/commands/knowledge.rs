@@ -12,9 +12,7 @@ use tracing::{info, warn};
 use crate::models::response::CommandResponse;
 use crate::services::knowledge::chunker::{Chunker, Document, ParagraphChunker};
 use crate::services::knowledge::docs_indexer::{DocsIndexer, DocsKbStatus};
-use crate::services::knowledge::observability::{
-    self, KnowledgeObservabilityMetrics,
-};
+use crate::services::knowledge::observability::{self, KnowledgeObservabilityMetrics};
 use crate::services::knowledge::pipeline::{
     CollectionUpdateCheck, DocumentSearchMatch, DocumentSummary, KnowledgeCollection,
     QueryRunSummary, RagPipeline, RagQueryResult, ScopedDocumentRef,
@@ -886,9 +884,59 @@ pub async fn rag_sync_docs_collection(
     }
 }
 
+/// Force rebuild docs collection for a workspace.
+#[tauri::command]
+pub async fn rag_rebuild_docs_collection(
+    app_handle: tauri::AppHandle,
+    knowledge_state: State<'_, KnowledgeState>,
+    app_state: State<'_, crate::state::AppState>,
+    docs_indexer_state: State<'_, DocsIndexerState>,
+    workspace_path: String,
+    project_id: String,
+    mode: Option<String>,
+) -> Result<CommandResponse<Option<KnowledgeCollection>>, String> {
+    ensure_initialized(&knowledge_state, &app_state).await?;
+
+    let pipeline = match knowledge_state.get_pipeline().await {
+        Ok(p) => p,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+
+    docs_indexer_state
+        .indexer
+        .set_app_handle(app_handle.clone())
+        .await;
+
+    let safe_swap = !matches!(
+        mode.as_deref().map(|s| s.trim().to_ascii_lowercase()),
+        Some(ref raw) if raw == "replace"
+    );
+
+    match docs_indexer_state
+        .indexer
+        .rebuild_docs_collection(
+            &pipeline,
+            &workspace_path,
+            &project_id,
+            Some(&app_handle),
+            safe_swap,
+        )
+        .await
+    {
+        Ok(collection) => {
+            if collection.is_some() && is_tfidf_pipeline(&pipeline) {
+                save_tfidf_vocab(pipeline.embedding_manager());
+            }
+            Ok(CommandResponse::ok(collection))
+        }
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
 /// Get the status of a docs knowledge base for a workspace.
 #[tauri::command]
 pub async fn rag_get_docs_status(
+    app_handle: tauri::AppHandle,
     knowledge_state: State<'_, KnowledgeState>,
     app_state: State<'_, crate::state::AppState>,
     docs_indexer_state: State<'_, DocsIndexerState>,
@@ -901,6 +949,15 @@ pub async fn rag_get_docs_status(
         Ok(p) => p,
         Err(e) => return Ok(CommandResponse::err(e.to_string())),
     };
+
+    docs_indexer_state
+        .indexer
+        .set_app_handle(app_handle.clone())
+        .await;
+    docs_indexer_state
+        .indexer
+        .maybe_retry_due(&pipeline, &workspace_path, &project_id, Some(&app_handle))
+        .await;
 
     let collection_name = DocsIndexer::collection_name_for_workspace(&workspace_path);
 
@@ -915,20 +972,40 @@ pub async fn rag_get_docs_status(
         .indexer
         .peek_pending_changes(&workspace_path)
         .await;
+    let runtime = docs_indexer_state
+        .indexer
+        .get_runtime_status(&workspace_path, &project_id)
+        .await;
 
     let status = match collection {
         None => DocsKbStatus {
             collection_id: None,
             collection_name: None,
             total_docs: 0,
-            pending_changes: Vec::new(),
-            status: "none".to_string(),
+            pending_changes: pending.clone(),
+            status: if !pending.is_empty() {
+                "changes_pending".to_string()
+            } else {
+                runtime.status.clone()
+            },
+            last_error: runtime.last_error.clone(),
+            last_error_code: runtime.last_error_code.clone(),
+            last_attempt_at: runtime.last_attempt_at.map(|t| t.to_rfc3339()),
+            next_retry_at: runtime.next_retry_at.map(|t| t.to_rfc3339()),
+            retry_count: runtime.retry_count,
+            scanned_files: runtime.scanned_files,
         },
         Some(col) => {
             let docs = pipeline.list_documents(&col.id).unwrap_or_default();
 
             let status_str = if !pending.is_empty() {
                 "changes_pending"
+            } else if runtime.status == "retry_waiting"
+                || runtime.status == "error"
+                || runtime.status == "queued"
+                || runtime.status == "indexing"
+            {
+                runtime.status.as_str()
             } else {
                 "indexed"
             };
@@ -939,6 +1016,12 @@ pub async fn rag_get_docs_status(
                 total_docs: docs.len(),
                 pending_changes: pending,
                 status: status_str.to_string(),
+                last_error: runtime.last_error.clone(),
+                last_error_code: runtime.last_error_code.clone(),
+                last_attempt_at: runtime.last_attempt_at.map(|t| t.to_rfc3339()),
+                next_retry_at: runtime.next_retry_at.map(|t| t.to_rfc3339()),
+                retry_count: runtime.retry_count,
+                scanned_files: runtime.scanned_files,
             }
         }
     };

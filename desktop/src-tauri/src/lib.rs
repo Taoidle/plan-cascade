@@ -143,6 +143,7 @@ pub use commands::{
     get_usage_stats,
     get_version,
     get_webhook_deliveries,
+    get_webhook_health,
     get_working_directory,
     get_worktree,
     get_worktree_status,

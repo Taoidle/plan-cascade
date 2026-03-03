@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
 use tauri::Emitter;
 use tokio::sync::RwLock;
@@ -36,6 +37,8 @@ const DOCS_COLLECTION_PREFIX: &str = "[Docs] ";
 
 /// Tauri event emitted when doc file changes are detected.
 const DOCS_CHANGES_EVENT: &str = "knowledge:docs-changes-detected";
+/// Tauri event emitted when docs runtime status changes.
+const DOCS_STATUS_EVENT: &str = "knowledge:docs-status";
 
 /// Status of a docs knowledge base for a workspace.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -44,8 +47,46 @@ pub struct DocsKbStatus {
     pub collection_name: Option<String>,
     pub total_docs: usize,
     pub pending_changes: Vec<String>,
-    /// "none" | "indexing" | "indexed" | "changes_pending"
+    /// "none" | "queued" | "indexing" | "indexed" | "changes_pending" |
+    /// "retry_waiting" | "error"
     pub status: String,
+    /// Last indexing error (if any).
+    pub last_error: Option<String>,
+    /// Error code bucket for retryability/debugging.
+    pub last_error_code: Option<String>,
+    /// RFC3339 timestamp for last attempt.
+    pub last_attempt_at: Option<String>,
+    /// RFC3339 timestamp for next retry window.
+    pub next_retry_at: Option<String>,
+    /// Consecutive retry count.
+    pub retry_count: u32,
+    /// Number of scanned candidate docs from last attempt.
+    pub scanned_files: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct DocsRuntimeState {
+    pub status: String,
+    pub last_error: Option<String>,
+    pub last_error_code: Option<String>,
+    pub last_attempt_at: Option<DateTime<Utc>>,
+    pub next_retry_at: Option<DateTime<Utc>>,
+    pub retry_count: u32,
+    pub scanned_files: usize,
+}
+
+impl Default for DocsRuntimeState {
+    fn default() -> Self {
+        Self {
+            status: "none".to_string(),
+            last_error: None,
+            last_error_code: None,
+            last_attempt_at: None,
+            next_retry_at: None,
+            retry_count: 0,
+            scanned_files: 0,
+        }
+    }
 }
 
 /// Manages per-workspace documentation file watchers and change queues.
@@ -56,6 +97,8 @@ pub struct DocsIndexer {
     pending_changes: Arc<RwLock<HashMap<String, HashSet<String>>>>,
     /// App handle for emitting events.
     app_handle: RwLock<Option<tauri::AppHandle>>,
+    /// Runtime status keyed by normalized "workspace::project".
+    runtime_status: Arc<RwLock<HashMap<String, DocsRuntimeState>>>,
 }
 
 impl DocsIndexer {
@@ -64,6 +107,7 @@ impl DocsIndexer {
             watchers: RwLock::new(HashMap::new()),
             pending_changes: Arc::new(RwLock::new(HashMap::new())),
             app_handle: RwLock::new(None),
+            runtime_status: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -163,6 +207,182 @@ impl DocsIndexer {
         documents
     }
 
+    fn scope_key(workspace_path: &str, project_id: &str) -> String {
+        format!("{}::{}", Self::normalize_path(workspace_path), project_id)
+    }
+
+    async fn emit_status_event(&self, workspace_path: &str, project_id: &str, state: &DocsRuntimeState) {
+        let app_handle = self.app_handle.read().await.clone();
+        if let Some(handle) = app_handle {
+            let _ = handle.emit(
+                DOCS_STATUS_EVENT,
+                serde_json::json!({
+                    "workspace_path": Self::normalize_path(workspace_path),
+                    "project_id": project_id,
+                    "status": state.status,
+                    "last_error": state.last_error,
+                    "last_error_code": state.last_error_code,
+                    "last_attempt_at": state.last_attempt_at.map(|t| t.to_rfc3339()),
+                    "next_retry_at": state.next_retry_at.map(|t| t.to_rfc3339()),
+                    "retry_count": state.retry_count,
+                    "scanned_files": state.scanned_files,
+                }),
+            );
+        }
+    }
+
+    async fn update_runtime_state<F>(&self, workspace_path: &str, project_id: &str, updater: F)
+    where
+        F: FnOnce(&mut DocsRuntimeState),
+    {
+        let key = Self::scope_key(workspace_path, project_id);
+        let snapshot = {
+            let mut guard = self.runtime_status.write().await;
+            let state = guard.entry(key).or_default();
+            updater(state);
+            state.clone()
+        };
+        self.emit_status_event(workspace_path, project_id, &snapshot)
+            .await;
+    }
+
+    async fn mark_attempt(&self, workspace_path: &str, project_id: &str, scanned_files: usize) {
+        self.update_runtime_state(workspace_path, project_id, |state| {
+            state.status = "indexing".to_string();
+            state.last_attempt_at = Some(Utc::now());
+            state.scanned_files = scanned_files;
+            state.last_error = None;
+            state.last_error_code = None;
+            state.next_retry_at = None;
+        })
+        .await;
+    }
+
+    async fn mark_no_docs(&self, workspace_path: &str, project_id: &str, scanned_files: usize) {
+        self.update_runtime_state(workspace_path, project_id, |state| {
+            state.status = "none".to_string();
+            state.last_attempt_at = Some(Utc::now());
+            state.scanned_files = scanned_files;
+            state.last_error = None;
+            state.last_error_code = None;
+            state.next_retry_at = None;
+            state.retry_count = 0;
+        })
+        .await;
+    }
+
+    async fn mark_success(&self, workspace_path: &str, project_id: &str, scanned_files: usize) {
+        self.update_runtime_state(workspace_path, project_id, |state| {
+            state.status = "indexed".to_string();
+            state.last_attempt_at = Some(Utc::now());
+            state.scanned_files = scanned_files;
+            state.last_error = None;
+            state.last_error_code = None;
+            state.next_retry_at = None;
+            state.retry_count = 0;
+        })
+        .await;
+    }
+
+    fn classify_error(error_message: &str) -> (&'static str, bool) {
+        let lower = error_message.to_ascii_lowercase();
+        if lower.contains("rate limit")
+            || lower.contains("throttle")
+            || lower.contains("quota")
+            || lower.contains("qps")
+            || lower.contains("too many requests")
+            || lower.contains("频率")
+            || lower.contains("限流")
+        {
+            return ("rate_limited", true);
+        }
+        if lower.contains("network")
+            || lower.contains("timeout")
+            || lower.contains("timed out")
+            || lower.contains("provider unavailable")
+            || lower.contains("server error")
+            || lower.contains("503")
+            || lower.contains("502")
+        {
+            return ("transient", true);
+        }
+        ("failed", false)
+    }
+
+    fn retry_delay_secs(next_attempt: u32) -> u64 {
+        match next_attempt {
+            0 => 15,
+            1 => 45,
+            2 => 120,
+            _ => 300,
+        }
+    }
+
+    async fn mark_failure(
+        &self,
+        workspace_path: &str,
+        project_id: &str,
+        scanned_files: usize,
+        error_message: &str,
+    ) {
+        let (code, retryable) = Self::classify_error(error_message);
+        self.update_runtime_state(workspace_path, project_id, |state| {
+            state.last_attempt_at = Some(Utc::now());
+            state.scanned_files = scanned_files;
+            state.last_error = Some(error_message.to_string());
+            state.last_error_code = Some(code.to_string());
+
+            if retryable && state.retry_count < 5 {
+                let delay = Self::retry_delay_secs(state.retry_count);
+                state.retry_count += 1;
+                state.next_retry_at =
+                    Some(Utc::now() + chrono::Duration::seconds(delay as i64));
+                state.status = "retry_waiting".to_string();
+            } else {
+                state.next_retry_at = None;
+                state.status = "error".to_string();
+            }
+        })
+        .await;
+    }
+
+    pub async fn get_runtime_status(&self, workspace_path: &str, project_id: &str) -> DocsRuntimeState {
+        let key = Self::scope_key(workspace_path, project_id);
+        let guard = self.runtime_status.read().await;
+        guard.get(&key).cloned().unwrap_or_default()
+    }
+
+    pub async fn maybe_retry_due(
+        &self,
+        pipeline: &RagPipeline,
+        workspace_path: &str,
+        project_id: &str,
+        app_handle: Option<&tauri::AppHandle>,
+    ) {
+        let state = self.get_runtime_status(workspace_path, project_id).await;
+        if state.status != "retry_waiting" {
+            return;
+        }
+        let Some(next_retry_at) = state.next_retry_at else {
+            return;
+        };
+        if Utc::now() < next_retry_at {
+            return;
+        }
+
+        if let Err(err) = self
+            .ensure_docs_collection(pipeline, workspace_path, project_id, app_handle)
+            .await
+        {
+            tracing::warn!(
+                workspace = %workspace_path,
+                project_id = %project_id,
+                error = %err,
+                "Docs indexer retry attempt failed"
+            );
+        }
+    }
+
     /// Ensure a docs collection exists for a workspace, creating one if needed.
     ///
     /// Returns the collection if docs were found, or None if no doc files exist.
@@ -178,14 +398,20 @@ impl DocsIndexer {
     ) -> AppResult<Option<KnowledgeCollection>> {
         let ws_path = Path::new(workspace_path);
         let doc_files = Self::scan_doc_files(ws_path);
+        let scanned_files = doc_files.len();
+
+        self.mark_attempt(workspace_path, project_id, scanned_files)
+            .await;
 
         tracing::info!(
             workspace = %workspace_path,
-            doc_files = doc_files.len(),
+            doc_files = scanned_files,
             "Docs indexer: scanned workspace"
         );
 
         if doc_files.is_empty() {
+            self.mark_no_docs(workspace_path, project_id, scanned_files)
+                .await;
             return Ok(None);
         }
 
@@ -217,7 +443,7 @@ impl DocsIndexer {
                 );
                 let documents = Self::build_documents(&doc_files);
                 if !documents.is_empty() {
-                    let updated = pipeline
+                    let updated_result = pipeline
                         .ingest_with_progress(
                             &collection_name,
                             project_id,
@@ -225,13 +451,31 @@ impl DocsIndexer {
                             documents,
                             app_handle,
                         )
-                        .await?;
-                    self.start_doc_watcher(workspace_path).await;
-                    return Ok(Some(updated));
+                        .await;
+                    match updated_result {
+                        Ok(updated) => {
+                            self.start_doc_watcher(workspace_path).await;
+                            self.mark_success(workspace_path, project_id, scanned_files)
+                                .await;
+                            return Ok(Some(updated));
+                        }
+                        Err(err) => {
+                            self.mark_failure(
+                                workspace_path,
+                                project_id,
+                                scanned_files,
+                                &err.to_string(),
+                            )
+                            .await;
+                            return Err(err);
+                        }
+                    }
                 }
             }
 
             self.start_doc_watcher(workspace_path).await;
+            self.mark_success(workspace_path, project_id, scanned_files)
+                .await;
             return Ok(Some(col));
         }
 
@@ -244,12 +488,14 @@ impl DocsIndexer {
         );
 
         if documents.is_empty() {
+            self.mark_no_docs(workspace_path, project_id, scanned_files)
+                .await;
             return Ok(None);
         }
 
         // Ingest
         let description = format!("Auto-indexed documentation from {}", workspace_path);
-        let collection = pipeline
+        let collection_result = pipeline
             .ingest_with_progress(
                 &collection_name,
                 project_id,
@@ -257,7 +503,20 @@ impl DocsIndexer {
                 documents,
                 app_handle,
             )
-            .await?;
+            .await;
+        let collection = match collection_result {
+            Ok(collection) => collection,
+            Err(err) => {
+                self.mark_failure(
+                    workspace_path,
+                    project_id,
+                    scanned_files,
+                    &err.to_string(),
+                )
+                .await;
+                return Err(err);
+            }
+        };
 
         tracing::info!(
             collection = %collection.name,
@@ -271,8 +530,113 @@ impl DocsIndexer {
 
         // Start file watcher
         self.start_doc_watcher(workspace_path).await;
+        self.mark_success(workspace_path, project_id, scanned_files)
+            .await;
 
         Ok(Some(collection))
+    }
+
+    /// Force rebuild docs collection for a workspace.
+    ///
+    /// When `safe_swap` is true, rebuild happens in a temporary collection
+    /// and swaps into the canonical docs collection name only after successful
+    /// ingestion to avoid destructive failures.
+    pub async fn rebuild_docs_collection(
+        &self,
+        pipeline: &RagPipeline,
+        workspace_path: &str,
+        project_id: &str,
+        app_handle: Option<&tauri::AppHandle>,
+        safe_swap: bool,
+    ) -> AppResult<Option<KnowledgeCollection>> {
+        let ws_path = Path::new(workspace_path);
+        let doc_files = Self::scan_doc_files(ws_path);
+        let scanned_files = doc_files.len();
+
+        self.mark_attempt(workspace_path, project_id, scanned_files)
+            .await;
+
+        if doc_files.is_empty() {
+            self.mark_no_docs(workspace_path, project_id, scanned_files)
+                .await;
+            return Ok(None);
+        }
+
+        let documents = Self::build_documents(&doc_files);
+        if documents.is_empty() {
+            self.mark_no_docs(workspace_path, project_id, scanned_files)
+                .await;
+            return Ok(None);
+        }
+
+        let canonical_name = Self::collection_name_for_workspace(workspace_path);
+        let description = format!("Auto-indexed documentation from {}", workspace_path);
+        let rebuild_result = if safe_swap {
+            let suffix = uuid::Uuid::new_v4().to_string();
+            let temp_name = format!("{} [rebuild-{}]", canonical_name, &suffix[..8]);
+
+            let temp = pipeline
+                .ingest_with_progress(&temp_name, project_id, &description, documents, app_handle)
+                .await?;
+            let temp = pipeline.update_collection(
+                &temp.id,
+                None,
+                None,
+                Some(Some(workspace_path)),
+            )?;
+
+            let existing = pipeline
+                .list_collections(project_id)?
+                .into_iter()
+                .find(|c| c.name == canonical_name && c.id != temp.id);
+
+            if let Some(old) = existing {
+                pipeline.delete_collection(&old.name, project_id).await?;
+            }
+
+            pipeline.update_collection(
+                &temp.id,
+                Some(&canonical_name),
+                None,
+                Some(Some(workspace_path)),
+            )
+        } else {
+            if let Some(existing) = pipeline
+                .list_collections(project_id)?
+                .into_iter()
+                .find(|c| c.name == canonical_name)
+            {
+                pipeline.delete_collection(&existing.name, project_id).await?;
+            }
+            pipeline
+                .ingest_with_progress(
+                    &canonical_name,
+                    project_id,
+                    &description,
+                    documents,
+                    app_handle,
+                )
+                .await
+        };
+
+        match rebuild_result {
+            Ok(collection) => {
+                self.start_doc_watcher(workspace_path).await;
+                self.mark_success(workspace_path, project_id, scanned_files)
+                    .await;
+                Ok(Some(collection))
+            }
+            Err(err) => {
+                self.mark_failure(
+                    workspace_path,
+                    project_id,
+                    scanned_files,
+                    &err.to_string(),
+                )
+                .await;
+                Err(err)
+            }
+        }
     }
 
     /// Start watching a workspace for documentation file changes.
@@ -390,6 +754,11 @@ impl DocsIndexer {
         let normalized = Self::normalize_path(workspace_path);
         self.watchers.write().await.remove(&normalized);
         self.pending_changes.write().await.remove(&normalized);
+        let prefix = format!("{}::", normalized);
+        self.runtime_status
+            .write()
+            .await
+            .retain(|key, _| !key.starts_with(&prefix));
     }
 
     fn normalize_path(p: &str) -> String {

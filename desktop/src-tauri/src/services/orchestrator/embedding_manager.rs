@@ -18,8 +18,11 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 use tracing;
 
 /// Maximum number of retry attempts for transient embedding errors.
@@ -31,6 +34,15 @@ const EMBED_RETRY_BASE_DELAY_MS: u64 = 500;
 
 /// Maximum delay cap to prevent excessively long waits.
 const EMBED_RETRY_MAX_DELAY_MS: u64 = 10_000;
+
+/// Default global in-flight limit for cloud embedding requests.
+const CLOUD_EMBED_MAX_INFLIGHT_DEFAULT: usize = 1;
+
+/// Default minimum interval between cloud embedding requests for the same provider.
+const CLOUD_EMBED_MIN_INTERVAL_MS_DEFAULT: u64 = 250;
+
+/// Fallback cooldown when provider signals rate limiting without explicit Retry-After.
+const CLOUD_EMBED_RATE_LIMIT_FALLBACK_SECS: u64 = 2;
 
 use mini_moka::sync::{Cache, ConcurrentCacheExt};
 
@@ -44,6 +56,79 @@ use super::embedding_provider_openai::OpenAIEmbeddingProvider;
 use super::embedding_provider_qwen::QwenEmbeddingProvider;
 use super::embedding_provider_tfidf::TfIdfEmbeddingProvider;
 use super::embedding_service::EmbeddingService;
+
+#[derive(Default)]
+struct CloudGateSchedule {
+    next_allowed_at: HashMap<EmbeddingProviderType, Instant>,
+}
+
+struct CloudEmbeddingGate {
+    semaphore: Arc<Semaphore>,
+    schedule: Mutex<CloudGateSchedule>,
+    min_interval: Duration,
+}
+
+impl CloudEmbeddingGate {
+    fn new() -> Self {
+        let inflight = std::env::var("PLAN_CASCADE_EMBED_CLOUD_MAX_INFLIGHT")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(CLOUD_EMBED_MAX_INFLIGHT_DEFAULT);
+        let min_interval_ms = std::env::var("PLAN_CASCADE_EMBED_CLOUD_MIN_INTERVAL_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(CLOUD_EMBED_MIN_INTERVAL_MS_DEFAULT);
+
+        Self {
+            semaphore: Arc::new(Semaphore::new(inflight)),
+            schedule: Mutex::new(CloudGateSchedule::default()),
+            min_interval: Duration::from_millis(min_interval_ms),
+        }
+    }
+
+    async fn acquire_permit_and_wait(
+        &self,
+        provider: EmbeddingProviderType,
+    ) -> Option<OwnedSemaphorePermit> {
+        let permit = match Arc::clone(&self.semaphore).acquire_owned().await {
+            Ok(permit) => permit,
+            Err(_) => return None,
+        };
+
+        let wait_for = {
+            let mut schedule = self.schedule.lock().await;
+            let now = Instant::now();
+            let due = schedule.next_allowed_at.get(&provider).copied().unwrap_or(now);
+            let wait_for = due.saturating_duration_since(now);
+            schedule
+                .next_allowed_at
+                .insert(provider, now + wait_for + self.min_interval);
+            wait_for
+        };
+
+        if !wait_for.is_zero() {
+            tokio::time::sleep(wait_for).await;
+        }
+
+        Some(permit)
+    }
+
+    async fn note_rate_limited(&self, provider: EmbeddingProviderType, wait_for: Duration) {
+        let mut schedule = self.schedule.lock().await;
+        let current = schedule
+            .next_allowed_at
+            .get(&provider)
+            .copied()
+            .unwrap_or_else(Instant::now);
+        let target = Instant::now() + wait_for;
+        if target > current {
+            schedule.next_allowed_at.insert(provider, target);
+        }
+    }
+}
+
+static CLOUD_EMBED_GATE: OnceLock<Arc<CloudEmbeddingGate>> = OnceLock::new();
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -354,6 +439,33 @@ impl EmbeddingManager {
     // Internal helpers
     // -----------------------------------------------------------------------
 
+    fn cloud_gate() -> Arc<CloudEmbeddingGate> {
+        Arc::clone(CLOUD_EMBED_GATE.get_or_init(|| Arc::new(CloudEmbeddingGate::new())))
+    }
+
+    async fn acquire_cloud_budget(provider: &dyn EmbeddingProvider) -> Option<OwnedSemaphorePermit> {
+        if provider.is_local() {
+            return None;
+        }
+        let gate = Self::cloud_gate();
+        gate.acquire_permit_and_wait(provider.provider_type()).await
+    }
+
+    async fn note_cloud_rate_limit(provider: &dyn EmbeddingProvider, err: &EmbeddingError) {
+        if provider.is_local() {
+            return;
+        }
+        if !matches!(err, EmbeddingError::RateLimited { .. }) {
+            return;
+        }
+        let wait_secs = err
+            .retry_after_secs()
+            .unwrap_or(CLOUD_EMBED_RATE_LIMIT_FALLBACK_SECS);
+        let gate = Self::cloud_gate();
+        gate.note_rate_limited(provider.provider_type(), Duration::from_secs(wait_secs))
+            .await;
+    }
+
     /// Embed a batch of texts with retry + exponential backoff for transient errors.
     ///
     /// Retries up to `EMBED_MAX_RETRY_ATTEMPTS` times on retryable errors.
@@ -366,12 +478,15 @@ impl EmbeddingManager {
         let mut last_err: Option<EmbeddingError> = None;
 
         for attempt in 0..EMBED_MAX_RETRY_ATTEMPTS {
+            let _permit = Self::acquire_cloud_budget(provider).await;
             match provider.embed_documents(batch).await {
                 Ok(result) => return Ok(result),
                 Err(err) => {
                     if !err.is_retryable() {
                         return Err(err);
                     }
+
+                    Self::note_cloud_rate_limit(provider, &err).await;
 
                     // Determine wait duration
                     let wait_ms = if let Some(secs) = err.retry_after_secs() {
@@ -408,12 +523,15 @@ impl EmbeddingManager {
         let mut last_err: Option<EmbeddingError> = None;
 
         for attempt in 0..EMBED_MAX_RETRY_ATTEMPTS {
+            let _permit = Self::acquire_cloud_budget(provider).await;
             match provider.embed_query(query).await {
                 Ok(result) => return Ok(result),
                 Err(err) => {
                     if !err.is_retryable() {
                         return Err(err);
                     }
+
+                    Self::note_cloud_rate_limit(provider, &err).await;
 
                     let wait_ms = if let Some(secs) = err.retry_after_secs() {
                         secs * 1000

@@ -156,6 +156,9 @@ pub struct InterviewConfig {
     /// Optional exploration result for BA context
     #[serde(default)]
     pub exploration_context: Option<String>,
+    /// Optional linked task-mode session id for workflow-kernel synchronization.
+    #[serde(default)]
+    pub task_session_id: Option<String>,
     /// User locale for question language (e.g., "en", "zh", "ja")
     #[serde(default = "default_locale")]
     pub locale: String,

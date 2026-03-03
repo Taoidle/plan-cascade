@@ -24,6 +24,7 @@ use super::embedding_provider::{
     EmbeddingError, EmbeddingProvider, EmbeddingProviderConfig, EmbeddingProviderType,
     EmbeddingResult,
 };
+use super::rate_limit_classifier::classify_rate_limit;
 use crate::services::proxy::build_http_client;
 
 // ---------------------------------------------------------------------------
@@ -200,6 +201,7 @@ impl GlmEmbeddingProvider {
             .map_err(|e| self.map_reqwest_error(e))?;
 
         let status = response.status().as_u16();
+        let headers = response.headers().clone();
 
         if status == 200 {
             let resp_text = response
@@ -216,7 +218,7 @@ impl GlmEmbeddingProvider {
             })
         } else {
             let body_text = response.text().await.unwrap_or_default();
-            Err(self.map_http_error(status, &body_text))
+            Err(self.map_http_error(status, &headers, &body_text))
         }
     }
 
@@ -241,7 +243,12 @@ impl GlmEmbeddingProvider {
     }
 
     /// Map an HTTP error response to `EmbeddingError`.
-    fn map_http_error(&self, status: u16, body_text: &str) -> EmbeddingError {
+    fn map_http_error(
+        &self,
+        status: u16,
+        headers: &reqwest::header::HeaderMap,
+        body_text: &str,
+    ) -> EmbeddingError {
         // Try to parse structured error response
         let error_detail = serde_json::from_str::<GlmErrorResponse>(body_text)
             .ok()
@@ -253,6 +260,20 @@ impl GlmEmbeddingProvider {
             .unwrap_or(body_text);
         let error_code = error_detail.as_ref().and_then(|d| d.code.as_deref());
 
+        if let Some(signal) = classify_rate_limit(
+            Some(status),
+            Some(headers),
+            error_code,
+            Some(error_message),
+        ) {
+            return EmbeddingError::RateLimited {
+                message: format!("ZhipuAI rate limit exceeded: {}", error_message),
+                retry_after: signal.retry_after_secs,
+                status: Some(status),
+                provider_code: signal.provider_code,
+            };
+        }
+
         match status {
             401 => EmbeddingError::AuthenticationFailed {
                 message: format!(
@@ -261,14 +282,6 @@ impl GlmEmbeddingProvider {
                     error_message
                 ),
             },
-            429 => {
-                // Parse retry-after header if available
-                let retry_after = error_code.and_then(|c| c.parse::<u32>().ok());
-                EmbeddingError::RateLimited {
-                    message: format!("ZhipuAI rate limit exceeded: {}", error_message),
-                    retry_after,
-                }
-            }
             400 => {
                 // Check for specific error codes
                 if let Some(code) = error_code {
@@ -608,8 +621,10 @@ mod tests {
     #[test]
     fn map_http_error_401_auth_failed() {
         let provider = GlmEmbeddingProvider::new(&default_config());
+        let headers = reqwest::header::HeaderMap::new();
         let err = provider.map_http_error(
             401,
+            &headers,
             r#"{"error":{"code":"1001","message":"Invalid API key"}}"#,
         );
         assert!(matches!(err, EmbeddingError::AuthenticationFailed { .. }));
@@ -621,8 +636,10 @@ mod tests {
     #[test]
     fn map_http_error_429_rate_limited() {
         let provider = GlmEmbeddingProvider::new(&default_config());
+        let headers = reqwest::header::HeaderMap::new();
         let err = provider.map_http_error(
             429,
+            &headers,
             r#"{"error":{"code":"1302","message":"Too many requests"}}"#,
         );
         assert!(matches!(err, EmbeddingError::RateLimited { .. }));
@@ -632,8 +649,10 @@ mod tests {
     #[test]
     fn map_http_error_400_invalid_param() {
         let provider = GlmEmbeddingProvider::new(&default_config());
+        let headers = reqwest::header::HeaderMap::new();
         let err = provider.map_http_error(
             400,
+            &headers,
             r#"{"error":{"code":"1210","message":"Invalid parameter"}}"#,
         );
         assert!(matches!(err, EmbeddingError::InvalidConfig { .. }));
@@ -642,8 +661,10 @@ mod tests {
     #[test]
     fn map_http_error_400_input_too_long() {
         let provider = GlmEmbeddingProvider::new(&default_config());
+        let headers = reqwest::header::HeaderMap::new();
         let err = provider.map_http_error(
             400,
+            &headers,
             r#"{"error":{"code":"1214","message":"token limit exceeded"}}"#,
         );
         assert!(matches!(err, EmbeddingError::InputTooLong { .. }));
@@ -652,8 +673,10 @@ mod tests {
     #[test]
     fn map_http_error_404_model_not_found() {
         let provider = GlmEmbeddingProvider::new(&default_config());
+        let headers = reqwest::header::HeaderMap::new();
         let err = provider.map_http_error(
             404,
+            &headers,
             r#"{"error":{"code":"1404","message":"Model not found"}}"#,
         );
         assert!(matches!(err, EmbeddingError::ModelNotFound { .. }));
@@ -662,7 +685,8 @@ mod tests {
     #[test]
     fn map_http_error_500_server_error() {
         let provider = GlmEmbeddingProvider::new(&default_config());
-        let err = provider.map_http_error(500, r#"{"error":{"message":"Internal error"}}"#);
+        let headers = reqwest::header::HeaderMap::new();
+        let err = provider.map_http_error(500, &headers, r#"{"error":{"message":"Internal error"}}"#);
         assert!(matches!(
             err,
             EmbeddingError::ServerError {
@@ -676,7 +700,8 @@ mod tests {
     #[test]
     fn map_http_error_unparseable_body() {
         let provider = GlmEmbeddingProvider::new(&default_config());
-        let err = provider.map_http_error(503, "service unavailable");
+        let headers = reqwest::header::HeaderMap::new();
+        let err = provider.map_http_error(503, &headers, "service unavailable");
         assert!(matches!(
             err,
             EmbeddingError::ServerError {

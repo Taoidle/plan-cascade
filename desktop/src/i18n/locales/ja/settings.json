@@ -877,6 +877,10 @@
     "description": "タスクの完了や失敗時に通知を受け取るWebhookチャンネルを設定します。",
     "dismiss": "閉じる",
     "loading": "読み込み中...",
+    "refresh": "更新",
+    "enabled": "有効",
+    "testing": "テスト中...",
+    "unknownError": "不明なエラー",
     "channels": "Webhookチャンネル",
     "add": "追加",
     "noChannels": "Webhookチャンネルが設定されていません。",
@@ -895,11 +899,67 @@
     "eventsLabel": "イベント",
     "deliveryHistory": "配信履歴",
     "noDeliveries": "配信履歴はまだありません。",
+    "deliveryStatus": {
+      "success": "成功",
+      "failed": "失敗",
+      "retrying": "再試行中",
+      "pending": "保留中"
+    },
+    "health": {
+      "title": "配信ワーカーの状態",
+      "refresh": "状態を更新",
+      "workerStatus": "ワーカー",
+      "workerRunning": "稼働中",
+      "workerStopped": "停止中",
+      "failedQueue": "失敗キュー",
+      "lastRetryAt": "最終再試行"
+    },
+    "filter": {
+      "channel": "チャンネル",
+      "allChannels": "すべてのチャンネル"
+    },
+    "table": {
+      "event": "イベント",
+      "status": "状態",
+      "attempts": "試行回数",
+      "statusCode": "ステータスコード",
+      "lastError": "最新エラー",
+      "nextRetryAt": "次回再試行",
+      "createdAt": "作成日時",
+      "actions": "操作"
+    },
+    "pagination": {
+      "page": "{{page}} ページ",
+      "previous": "前へ",
+      "next": "次へ"
+    },
+    "time": {
+      "justNow": "たった今",
+      "minutesAgo": "{{count}}分前",
+      "hoursAgo": "{{count}}時間前",
+      "daysAgo": "{{count}}日前"
+    },
+    "validation": {
+      "nameRequired": "チャンネル名を入力してください",
+      "nameTooLong": "チャンネル名は {{max}} 文字以内で入力してください",
+      "urlRequired": "チャンネルの送信先を入力してください",
+      "urlInvalid": "URL 形式が正しくありません",
+      "httpsRequired": "このチャンネルでは HTTPS が必要です",
+      "telegramTargetInvalid": "Telegram の送信先は数値 chat_id または @name 形式で入力してください",
+      "customHttpPrivateOnly": "カスタム HTTP は localhost またはプライベートホストのみ許可されます",
+      "customProtocolInvalid": "カスタムチャンネルは http/https のみ対応しています",
+      "eventsRequired": "少なくとも1つのイベントを選択してください",
+      "scopeRequired": "少なくとも1つのセッションIDを入力してください",
+      "scopeTooManySessions": "セッションIDは最大 {{max}} 件まで指定できます",
+      "scopeSessionTooLong": "各セッションIDは {{max}} 文字以内で入力してください",
+      "templateTooLong": "テンプレートは {{max}} 文字以内で入力してください"
+    },
 
     "scope": {
       "global": "グローバル",
       "sessions": "セッション",
-      "specificSessions": "特定のセッション"
+      "specificSessions": "特定のセッション",
+      "sessionsCount": "{{count}} セッション"
     },
 
     "events": {
@@ -913,16 +973,22 @@
 
     "form": {
       "name": "名前",
+      "namePlaceholder": "例: Team Slack",
       "channelType": "チャンネルタイプ",
       "url": "Webhook URL",
+      "urlHelp": "本番では HTTPS エンドポイントの利用を推奨します",
+      "telegramHelp": "Telegram チャンネルは chat_id または @name を指定します",
+      "telegramPlaceholder": "例: -1001234567890 または @channel_name",
       "secret": "シークレット / トークン",
       "secretPlaceholder": "現在の値を保持する場合は空欄",
       "secretOptional": "オプション",
       "scope": "スコープ",
       "events": "イベント",
       "template": "カスタムテンプレート",
+      "templateHelp": "テンプレートは summary のみ上書きします。失敗時は安全に既定文へフォールバックします。",
       "optional": "オプション",
-      "sessionIds": "カンマ区切りのセッションID"
+      "sessionIds": "カンマ区切りのセッションID",
+      "scopeLimitHint": "最大 {{max}} 件のセッションID"
     }
   },
 

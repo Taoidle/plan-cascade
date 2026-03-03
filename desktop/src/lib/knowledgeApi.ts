@@ -108,8 +108,14 @@ export interface DocsKbStatus {
   collection_name: string | null;
   total_docs: number;
   pending_changes: string[];
-  /** "none" | "indexing" | "indexed" | "changes_pending" */
+  /** "none" | "queued" | "indexing" | "indexed" | "changes_pending" | "retry_waiting" | "error" */
   status: string;
+  last_error?: string | null;
+  last_error_code?: string | null;
+  last_attempt_at?: string | null;
+  next_retry_at?: string | null;
+  retry_count?: number;
+  scanned_files?: number;
 }
 
 export interface RagIngestRequest {
@@ -564,6 +570,29 @@ export async function ragSyncDocsCollection(
     return await invoke<CommandResponse<KnowledgeCollection | null>>('rag_sync_docs_collection', {
       workspacePath,
       projectId,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Rebuild docs collection for a workspace.
+ */
+export async function ragRebuildDocsCollection(
+  workspacePath: string,
+  projectId: string,
+  mode?: 'safe_swap' | 'replace',
+): Promise<CommandResponse<KnowledgeCollection | null>> {
+  try {
+    return await invoke<CommandResponse<KnowledgeCollection | null>>('rag_rebuild_docs_collection', {
+      workspacePath,
+      projectId,
+      mode: mode ?? null,
     });
   } catch (error) {
     return {

@@ -74,6 +74,11 @@ interface PlanOrchestratorState {
   proceedToPlanning: () => Promise<void>;
   approvePlan: (plan: PlanCardData) => Promise<void>;
   cancelWorkflow: () => Promise<void>;
+  syncRuntimeFromKernel: (runtime: {
+    sessionId?: string | null;
+    phase?: string | null;
+    pendingClarifyQuestion?: PlanClarifyQuestionCardData | null;
+  }) => void;
   resetWorkflow: () => void;
 }
 
@@ -102,6 +107,23 @@ function injectError(title: string, description: string) {
 function normalizeStepOutputFormat(format: string | undefined): PlanStepOutputCardData['format'] {
   if (format === 'markdown' || format === 'json' || format === 'html' || format === 'code') return format;
   return 'text';
+}
+
+function normalizePlanPhase(phase: string | null | undefined): PlanModePhase | null {
+  switch (phase) {
+    case 'idle':
+    case 'analyzing':
+    case 'clarifying':
+    case 'planning':
+    case 'reviewing_plan':
+    case 'executing':
+    case 'completed':
+    case 'failed':
+    case 'cancelled':
+      return phase;
+    default:
+      return null;
+  }
 }
 
 // ============================================================================
@@ -492,6 +514,54 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       await planStore.exitPlanMode();
       set({ ...DEFAULT_STATE, _runToken: nextRunToken });
       injectInfo(i18n.t('planMode:orchestrator.cancelled', 'Plan mode cancelled.'));
+    }
+  },
+
+  syncRuntimeFromKernel: ({ sessionId, phase, pendingClarifyQuestion }) => {
+    const normalizedSessionId = sessionId?.trim() || null;
+    const normalizedPhase = normalizePlanPhase(phase);
+
+    set((state) => {
+      const patch: Partial<PlanOrchestratorState> = {};
+
+      if (normalizedSessionId && normalizedSessionId !== state.sessionId) {
+        patch.sessionId = normalizedSessionId;
+      }
+      if (normalizedPhase && normalizedPhase !== state.phase) {
+        patch.phase = normalizedPhase;
+      }
+      if (pendingClarifyQuestion !== undefined) {
+        const sameQuestion =
+          (state.pendingClarifyQuestion?.questionId ?? null) === (pendingClarifyQuestion?.questionId ?? null) &&
+          (state.pendingClarifyQuestion?.question ?? null) === (pendingClarifyQuestion?.question ?? null);
+        if (!sameQuestion) {
+          patch.pendingClarifyQuestion = pendingClarifyQuestion ?? null;
+        }
+      }
+
+      return Object.keys(patch).length > 0 ? patch : state;
+    });
+
+    const planModePatch: {
+      isPlanMode?: boolean;
+      sessionId?: string | null;
+      sessionPhase?: PlanModePhase;
+      currentQuestion?: PlanClarifyQuestionCardData | null;
+    } = {};
+
+    if (normalizedSessionId) {
+      planModePatch.isPlanMode = true;
+      planModePatch.sessionId = normalizedSessionId;
+    }
+    if (normalizedPhase) {
+      planModePatch.sessionPhase = normalizedPhase;
+    }
+    if (pendingClarifyQuestion !== undefined) {
+      planModePatch.currentQuestion = pendingClarifyQuestion ?? null;
+    }
+
+    if (Object.keys(planModePatch).length > 0) {
+      usePlanModeStore.setState(planModePatch);
     }
   },
 

@@ -131,6 +131,8 @@
     "ensuring": "確認中...",
     "syncNow": "今すぐ同期",
     "syncing": "同期中...",
+    "rebuildDocs": "Docs 索引を再構築",
+    "rebuilding": "再構築中...",
     "pendingFiles": "未反映ファイル変更",
     "collectionDiff": "コレクション差分",
     "checkDiff": "差分確認",
@@ -142,8 +144,13 @@
     "noDiffData": "「差分確認」を実行してください。",
     "statusIndexed": "索引済み",
     "statusChangesPending": "変更あり",
+    "statusQueued": "キュー待機中",
     "statusIndexing": "索引中",
-    "statusNone": "未初期化"
+    "statusRetryWaiting": "再試行待機中",
+    "statusError": "エラー",
+    "statusNone": "未初期化",
+    "lastError": "直近エラー",
+    "nextRetryAt": "次回再試行"
   },
 
   "query": {

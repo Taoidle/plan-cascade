@@ -59,6 +59,7 @@ export interface InterviewConfig {
   first_principles: boolean;
   project_path: string | null;
   exploration_context: string | null;
+  task_session_id?: string | null;
   locale: string;
 }
 
@@ -117,11 +118,14 @@ interface SpecInterviewState {
 
   /** LLM provider settings for BA-driven mode */
   providerSettings: InterviewProviderSettings | null;
+  /** Linked task-mode session id for workflow-kernel synchronization */
+  linkedTaskSessionId: string | null;
 
   /** Actions */
   setProviderSettings: (settings: InterviewProviderSettings | null) => void;
+  setLinkedTaskSessionId: (taskSessionId: string | null) => void;
   startInterview: (config: InterviewConfig) => Promise<InterviewSession | null>;
-  submitAnswer: (answer: string) => Promise<InterviewSession | null>;
+  submitAnswer: (answer: string, interviewIdOverride?: string | null) => Promise<InterviewSession | null>;
   fetchState: (interviewId: string) => Promise<InterviewSession | null>;
   compileSpec: (options?: Partial<CompileOptions>) => Promise<CompiledSpec | null>;
   reset: () => void;
@@ -139,9 +143,15 @@ export const useSpecInterviewStore = create<SpecInterviewState>((set, get) => ({
   },
   error: null,
   providerSettings: null,
+  linkedTaskSessionId: null,
 
   setProviderSettings: (settings: InterviewProviderSettings | null) => {
     set({ providerSettings: settings });
+  },
+
+  setLinkedTaskSessionId: (taskSessionId: string | null) => {
+    const normalized = taskSessionId?.trim() || null;
+    set({ linkedTaskSessionId: normalized });
   },
 
   startInterview: async (config: InterviewConfig) => {
@@ -164,6 +174,7 @@ export const useSpecInterviewStore = create<SpecInterviewState>((set, get) => ({
       if (response.success && response.data) {
         set((state) => ({
           session: response.data,
+          linkedTaskSessionId: config.task_session_id ?? null,
           loading: { ...state.loading, starting: false },
         }));
         return response.data;
@@ -183,9 +194,11 @@ export const useSpecInterviewStore = create<SpecInterviewState>((set, get) => ({
     }
   },
 
-  submitAnswer: async (answer: string) => {
-    const { session, providerSettings } = get();
-    if (!session) {
+  submitAnswer: async (answer: string, interviewIdOverride?: string | null) => {
+    const { session, providerSettings, linkedTaskSessionId } = get();
+    const normalizedInterviewIdOverride = interviewIdOverride?.trim() || null;
+    const interviewId = normalizedInterviewIdOverride || session?.id || null;
+    if (!interviewId) {
       set({ error: 'No active interview session' });
       return null;
     }
@@ -197,8 +210,9 @@ export const useSpecInterviewStore = create<SpecInterviewState>((set, get) => ({
 
     try {
       const response = await invoke<CommandResponse<InterviewSession>>('submit_interview_answer', {
-        interviewId: session.id,
+        interviewId,
         answer,
+        taskSessionId: linkedTaskSessionId,
         provider: providerSettings?.provider ?? null,
         model: providerSettings?.model ?? null,
         apiKey: providerSettings?.apiKey ?? null,
@@ -228,13 +242,17 @@ export const useSpecInterviewStore = create<SpecInterviewState>((set, get) => ({
   },
 
   fetchState: async (interviewId: string) => {
+    const { linkedTaskSessionId } = get();
     set((state) => ({
       loading: { ...state.loading, fetching: true },
       error: null,
     }));
 
     try {
-      const response = await invoke<CommandResponse<InterviewSession>>('get_interview_state', { interviewId });
+      const response = await invoke<CommandResponse<InterviewSession>>('get_interview_state', {
+        interviewId,
+        taskSessionId: linkedTaskSessionId,
+      });
 
       if (response.success && response.data) {
         set((state) => ({
@@ -318,6 +336,7 @@ export const useSpecInterviewStore = create<SpecInterviewState>((set, get) => ({
       },
       error: null,
       providerSettings: null,
+      linkedTaskSessionId: null,
     });
   },
 

@@ -877,6 +877,10 @@
     "description": "Configure webhook channels to receive notifications when tasks complete or fail.",
     "dismiss": "Dismiss",
     "loading": "Loading...",
+    "refresh": "Refresh",
+    "enabled": "Enabled",
+    "testing": "Testing...",
+    "unknownError": "Unknown error",
     "channels": "Webhook Channels",
     "add": "Add",
     "noChannels": "No webhook channels configured.",
@@ -895,11 +899,67 @@
     "eventsLabel": "events",
     "deliveryHistory": "Delivery History",
     "noDeliveries": "No delivery history yet.",
+    "deliveryStatus": {
+      "success": "Success",
+      "failed": "Failed",
+      "retrying": "Retrying",
+      "pending": "Pending"
+    },
+    "health": {
+      "title": "Delivery Worker Health",
+      "refresh": "Refresh",
+      "workerStatus": "Worker",
+      "workerRunning": "Running",
+      "workerStopped": "Stopped",
+      "failedQueue": "Failed Queue",
+      "lastRetryAt": "Last Retry"
+    },
+    "filter": {
+      "channel": "Channel",
+      "allChannels": "All channels"
+    },
+    "table": {
+      "event": "Event",
+      "status": "Status",
+      "attempts": "Attempts",
+      "statusCode": "Status Code",
+      "lastError": "Last Error",
+      "nextRetryAt": "Next Retry",
+      "createdAt": "Created",
+      "actions": "Actions"
+    },
+    "pagination": {
+      "page": "Page {{page}}",
+      "previous": "Previous",
+      "next": "Next"
+    },
+    "time": {
+      "justNow": "just now",
+      "minutesAgo": "{{count}}m ago",
+      "hoursAgo": "{{count}}h ago",
+      "daysAgo": "{{count}}d ago"
+    },
+    "validation": {
+      "nameRequired": "Channel name is required",
+      "nameTooLong": "Channel name must be {{max}} characters or less",
+      "urlRequired": "Channel target is required",
+      "urlInvalid": "Invalid URL format",
+      "httpsRequired": "This channel requires HTTPS",
+      "telegramTargetInvalid": "Telegram target must be a numeric chat_id or @name",
+      "customHttpPrivateOnly": "Custom HTTP is only allowed for localhost or private hosts",
+      "customProtocolInvalid": "Custom channel only supports http/https",
+      "eventsRequired": "Select at least one event",
+      "scopeRequired": "Enter at least one session id",
+      "scopeTooManySessions": "At most {{max}} session ids are allowed",
+      "scopeSessionTooLong": "Each session id must be {{max}} characters or less",
+      "templateTooLong": "Template must be {{max}} characters or less"
+    },
 
     "scope": {
       "global": "Global",
       "sessions": "sessions",
-      "specificSessions": "Specific Sessions"
+      "specificSessions": "Specific Sessions",
+      "sessionsCount": "{{count}} sessions"
     },
 
     "events": {
@@ -913,16 +973,22 @@
 
     "form": {
       "name": "Name",
+      "namePlaceholder": "e.g., Team Slack",
       "channelType": "Channel Type",
       "url": "Webhook URL",
+      "urlHelp": "Use HTTPS endpoints for production channels",
+      "telegramHelp": "Telegram channel expects chat_id or @name",
+      "telegramPlaceholder": "e.g., -1001234567890 or @channel_name",
       "secret": "Secret / Token",
       "secretPlaceholder": "Leave empty to keep current",
       "secretOptional": "Optional",
       "scope": "Scope",
       "events": "Events",
       "template": "Custom Template",
+      "templateHelp": "Template only overrides summary text; rendering failures will fall back safely.",
       "optional": "optional",
-      "sessionIds": "Comma-separated session IDs"
+      "sessionIds": "Comma-separated session IDs",
+      "scopeLimitHint": "Up to {{max}} session IDs"
     }
   },
 

@@ -42,7 +42,7 @@ fn main() {
         .manage(LspState::new())
         .manage(PluginState::new())
         .manage(GuardrailState::new())
-        .manage(WebhookState::new_empty())
+        .manage(WebhookState::new())
         .manage(RemoteState::new())
         .manage(TaskModeState::new())
         .manage(PlanModeState::new())
@@ -395,6 +395,7 @@ fn main() {
             plan_cascade_desktop::commands::webhook::test_webhook_channel,
             plan_cascade_desktop::commands::webhook::get_webhook_deliveries,
             plan_cascade_desktop::commands::webhook::retry_webhook_delivery,
+            plan_cascade_desktop::commands::webhook::get_webhook_health,
             // Remote Control commands
             plan_cascade_desktop::commands::remote::get_remote_gateway_status,
             plan_cascade_desktop::commands::remote::start_remote_gateway,
@@ -436,6 +437,7 @@ fn main() {
             plan_cascade_desktop::commands::knowledge::rag_apply_collection_updates,
             plan_cascade_desktop::commands::knowledge::rag_ensure_docs_collection,
             plan_cascade_desktop::commands::knowledge::rag_sync_docs_collection,
+            plan_cascade_desktop::commands::knowledge::rag_rebuild_docs_collection,
             plan_cascade_desktop::commands::knowledge::rag_get_docs_status,
             // Git Source Control commands
             plan_cascade_desktop::commands::git::git_full_status,

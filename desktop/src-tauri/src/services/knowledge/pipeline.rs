@@ -165,7 +165,12 @@ struct RetrievalParams {
 
 impl RetrievalProfile {
     fn from_raw(raw: Option<&str>) -> Self {
-        match raw.unwrap_or("balanced").trim().to_ascii_lowercase().as_str() {
+        match raw
+            .unwrap_or("balanced")
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
             "precision" => Self::Precision,
             "recall" => Self::Recall,
             _ => Self::Balanced,
@@ -548,7 +553,10 @@ impl RagPipeline {
                 [],
             )
             .map_err(|e| {
-                AppError::database(format!("Failed to add knowledge_query_runs.project_id: {}", e))
+                AppError::database(format!(
+                    "Failed to add knowledge_query_runs.project_id: {}",
+                    e
+                ))
             })?;
         }
 
@@ -1516,8 +1524,10 @@ impl RagPipeline {
         result_count: usize,
     ) -> Option<i64> {
         let conn = self.database.get_connection().ok()?;
-        let has_project_id = Self::table_has_column(&conn, "knowledge_query_runs", "project_id").ok()?;
-        let has_profile = Self::table_has_column(&conn, "knowledge_query_runs", "retrieval_profile").ok()?;
+        let has_project_id =
+            Self::table_has_column(&conn, "knowledge_query_runs", "project_id").ok()?;
+        let has_profile =
+            Self::table_has_column(&conn, "knowledge_query_runs", "retrieval_profile").ok()?;
         let sql = match (has_project_id, has_profile) {
             (true, true) => {
                 "INSERT INTO knowledge_query_runs
@@ -1710,14 +1720,17 @@ impl RagPipeline {
                 )
                 .map_err(|e| AppError::database(format!("Failed to prepare BM25 query: {}", e)))?;
             let bm25_rows = bm25_stmt
-                .query_map(rusqlite::params![query_text, params.bm25_top_n as i64], |row| {
-                    Ok((
-                        row.get::<_, i64>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, f64>(3).unwrap_or(0.0),
-                    ))
-                })
+                .query_map(
+                    rusqlite::params![query_text, params.bm25_top_n as i64],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, f64>(3).unwrap_or(0.0),
+                        ))
+                    },
+                )
                 .map_err(|e| AppError::database(format!("Failed to execute BM25 query: {}", e)))?;
 
             for (rank, row) in bm25_rows.filter_map(|r| r.ok()).enumerate() {
@@ -2023,7 +2036,10 @@ impl RagPipeline {
                 ids.len() + 2
             );
             let mut stmt = conn.prepare(&sql).map_err(|e| {
-                AppError::database(format!("Failed to prepare scoped query runs statement: {}", e))
+                AppError::database(format!(
+                    "Failed to prepare scoped query runs statement: {}",
+                    e
+                ))
             })?;
 
             let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -2032,12 +2048,16 @@ impl RagPipeline {
                 params.push(Box::new(cid.to_string()));
             }
             params.push(Box::new(safe_limit));
-            let params_ref: Vec<&dyn rusqlite::ToSql> =
-                params.iter().map(|v| v.as_ref() as &dyn rusqlite::ToSql).collect();
+            let params_ref: Vec<&dyn rusqlite::ToSql> = params
+                .iter()
+                .map(|v| v.as_ref() as &dyn rusqlite::ToSql)
+                .collect();
 
             let rows = stmt
                 .query_map(params_ref.as_slice(), map_row)
-                .map_err(|e| AppError::database(format!("Failed querying scoped query runs: {}", e)))?;
+                .map_err(|e| {
+                    AppError::database(format!("Failed querying scoped query runs: {}", e))
+                })?;
             return Ok(rows.filter_map(|r| r.ok()).collect());
         }
 
@@ -2046,11 +2066,10 @@ impl RagPipeline {
         } else {
             "project_id = ?1"
         };
-        let sql =
-            format!("{base_select} WHERE {project_clause} ORDER BY r.id DESC LIMIT ?2");
-        let mut stmt = conn
-            .prepare(&sql)
-            .map_err(|e| AppError::database(format!("Failed to prepare query runs statement: {}", e)))?;
+        let sql = format!("{base_select} WHERE {project_clause} ORDER BY r.id DESC LIMIT ?2");
+        let mut stmt = conn.prepare(&sql).map_err(|e| {
+            AppError::database(format!("Failed to prepare query runs statement: {}", e))
+        })?;
         let rows = stmt
             .query_map(rusqlite::params![project_id, safe_limit], map_row)
             .map_err(|e| AppError::database(format!("Failed querying query runs: {}", e)))?;
@@ -2071,7 +2090,8 @@ impl RagPipeline {
         let safe_limit = limit.clamp(1, 500) as i64;
         let include_legacy_default = project_id == "default";
         let has_project_id = Self::table_has_column(&conn, "knowledge_query_runs", "project_id")?;
-        let has_profile = Self::table_has_column(&conn, "knowledge_query_runs", "retrieval_profile")?;
+        let has_profile =
+            Self::table_has_column(&conn, "knowledge_query_runs", "retrieval_profile")?;
         let project_expr = if has_project_id {
             "r.project_id"
         } else {
@@ -2160,9 +2180,9 @@ impl RagPipeline {
             .iter()
             .map(|v| v.as_ref() as &dyn rusqlite::ToSql)
             .collect();
-        let mut stmt = conn
-            .prepare(&sql)
-            .map_err(|e| AppError::database(format!("Failed to prepare legacy query runs: {}", e)))?;
+        let mut stmt = conn.prepare(&sql).map_err(|e| {
+            AppError::database(format!("Failed to prepare legacy query runs: {}", e))
+        })?;
         let rows = stmt
             .query_map(params_ref.as_slice(), map_row)
             .map_err(|e| AppError::database(format!("Failed querying legacy query runs: {}", e)))?;
@@ -2312,11 +2332,13 @@ impl RagPipeline {
                 .to_string()
         };
 
-        let mut stmt = conn
-            .prepare(&sql)
-            .map_err(|e| AppError::database(format!("Failed to prepare document search query: {}", e)))?;
-        let params_ref: Vec<&dyn rusqlite::ToSql> =
-            params.iter().map(|v| v.as_ref() as &dyn rusqlite::ToSql).collect();
+        let mut stmt = conn.prepare(&sql).map_err(|e| {
+            AppError::database(format!("Failed to prepare document search query: {}", e))
+        })?;
+        let params_ref: Vec<&dyn rusqlite::ToSql> = params
+            .iter()
+            .map(|v| v.as_ref() as &dyn rusqlite::ToSql)
+            .collect();
         let rows = stmt
             .query_map(params_ref.as_slice(), |row| {
                 Ok(DocumentSearchMatch {
@@ -2325,7 +2347,9 @@ impl RagPipeline {
                     display_name: row.get(2)?,
                 })
             })
-            .map_err(|e| AppError::database(format!("Failed executing document search query: {}", e)))?;
+            .map_err(|e| {
+                AppError::database(format!("Failed executing document search query: {}", e))
+            })?;
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
@@ -3222,11 +3246,25 @@ mod tests {
         let scope_proj1 = vec![col_proj1.id.clone()];
         let scope_proj2 = vec![col_proj2.id.clone()];
         pipeline
-            .query_scoped("proj-1", "project", 5, Some(&scope_proj1), None, Some("balanced"))
+            .query_scoped(
+                "proj-1",
+                "project",
+                5,
+                Some(&scope_proj1),
+                None,
+                Some("balanced"),
+            )
             .await
             .unwrap();
         pipeline
-            .query_scoped("proj-2", "project", 5, Some(&scope_proj2), None, Some("balanced"))
+            .query_scoped(
+                "proj-2",
+                "project",
+                5,
+                Some(&scope_proj2),
+                None,
+                Some("balanced"),
+            )
             .await
             .unwrap();
 
@@ -3259,7 +3297,9 @@ mod tests {
             .await
             .unwrap();
 
-        let _ = pipeline.list_query_runs("proj-1", Some(&scope), 10).unwrap();
+        let _ = pipeline
+            .list_query_runs("proj-1", Some(&scope), 10)
+            .unwrap();
         let snapshot_v2 = observability::read_metrics_snapshot(pipeline.database.as_ref()).unwrap();
         assert_eq!(snapshot_v2.query_run_scope_checks_total, 1);
         assert_eq!(snapshot_v2.query_run_scope_hits_total, 1);
@@ -3268,7 +3308,9 @@ mod tests {
             .database
             .set_setting("feature.kb_query_runs_v2", "false")
             .unwrap();
-        let _ = pipeline.list_query_runs("proj-1", Some(&scope), 10).unwrap();
+        let _ = pipeline
+            .list_query_runs("proj-1", Some(&scope), 10)
+            .unwrap();
         let snapshot_legacy =
             observability::read_metrics_snapshot(pipeline.database.as_ref()).unwrap();
         assert_eq!(snapshot_legacy.query_run_scope_checks_total, 2);
@@ -3291,7 +3333,14 @@ mod tests {
 
         let scope = vec![collection.id.clone()];
         pipeline
-            .query_scoped("proj-1", "profile", 5, Some(&scope), None, Some("unknown-mode"))
+            .query_scoped(
+                "proj-1",
+                "profile",
+                5,
+                Some(&scope),
+                None,
+                Some("unknown-mode"),
+            )
             .await
             .unwrap();
 
@@ -3316,8 +3365,11 @@ mod tests {
 
     #[test]
     fn source_kind_and_locator_classifies_manual_uploads_safely() {
-        let (kind_upload, locator_upload) =
-            RagPipeline::source_kind_and_locator(Some("upload://manual/id/file.txt"), "col", "file.txt");
+        let (kind_upload, locator_upload) = RagPipeline::source_kind_and_locator(
+            Some("upload://manual/id/file.txt"),
+            "col",
+            "file.txt",
+        );
         assert_eq!(kind_upload, "upload");
         assert_eq!(locator_upload, "upload://manual/id/file.txt");
 

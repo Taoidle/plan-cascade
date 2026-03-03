@@ -29,6 +29,7 @@ use super::embedding_provider::{
     EmbeddingError, EmbeddingProvider, EmbeddingProviderConfig, EmbeddingProviderType,
     EmbeddingResult,
 };
+use super::rate_limit_classifier::classify_rate_limit;
 use crate::services::proxy::build_http_client;
 
 // ---------------------------------------------------------------------------
@@ -243,6 +244,7 @@ impl QwenEmbeddingProvider {
 
         let status = http_response.status();
         let status_code = status.as_u16();
+        let headers = http_response.headers().clone();
 
         // Read the response body
         let response_text =
@@ -255,7 +257,7 @@ impl QwenEmbeddingProvider {
 
         // Check for HTTP-level errors first
         if !status.is_success() {
-            return Err(self.map_http_error(status_code, &response_text));
+            return Err(self.map_http_error(status_code, &headers, &response_text));
         }
 
         // Parse the successful response
@@ -270,7 +272,7 @@ impl QwenEmbeddingProvider {
 
         // Check for API-level errors (some may come with 200 status)
         if let Some(ref code) = response.code {
-            return Err(self.map_api_error(code, response.message.as_deref()));
+            return Err(self.map_api_error(code, response.message.as_deref(), None));
         }
 
         // Extract embeddings from the output
@@ -323,12 +325,47 @@ impl QwenEmbeddingProvider {
     }
 
     /// Map an HTTP status error to our `EmbeddingError` type.
-    fn map_http_error(&self, status_code: u16, body: &str) -> EmbeddingError {
+    fn map_http_error(
+        &self,
+        status_code: u16,
+        headers: &reqwest::header::HeaderMap,
+        body: &str,
+    ) -> EmbeddingError {
         // Try to parse the body as a DashScope error response
         if let Ok(response) = serde_json::from_str::<DashScopeResponse>(body) {
             if let Some(ref code) = response.code {
-                return self.map_api_error(code, response.message.as_deref());
+                if let Some(signal) = classify_rate_limit(
+                    Some(status_code),
+                    Some(headers),
+                    Some(code),
+                    response.message.as_deref(),
+                ) {
+                    return EmbeddingError::RateLimited {
+                        message: format!(
+                            "DashScope rate limit exceeded ({}): {}",
+                            code,
+                            response.message.as_deref().unwrap_or("unknown error")
+                        ),
+                        retry_after: signal.retry_after_secs,
+                        status: Some(status_code),
+                        provider_code: signal.provider_code,
+                    };
+                }
+                return self.map_api_error(code, response.message.as_deref(), Some(status_code));
             }
+        }
+
+        if let Some(signal) = classify_rate_limit(Some(status_code), Some(headers), None, Some(body))
+        {
+            return EmbeddingError::RateLimited {
+                message: format!(
+                    "DashScope API rate limit exceeded. {}",
+                    &body[..body.len().min(300)]
+                ),
+                retry_after: signal.retry_after_secs,
+                status: Some(status_code),
+                provider_code: signal.provider_code,
+            };
         }
 
         // Fallback to HTTP status code mapping
@@ -350,6 +387,8 @@ impl QwenEmbeddingProvider {
                               Reduce request frequency or upgrade your plan."
                         .to_string(),
                     retry_after: None,
+                    status: Some(status_code),
+                    provider_code: None,
                 }
             }
             400 => EmbeddingError::InvalidConfig {
@@ -383,7 +422,12 @@ impl QwenEmbeddingProvider {
     ///
     /// DashScope error codes documented at:
     /// https://help.aliyun.com/document_detail/2712195.html
-    fn map_api_error(&self, code: &str, message: Option<&str>) -> EmbeddingError {
+    fn map_api_error(
+        &self,
+        code: &str,
+        message: Option<&str>,
+        status_code: Option<u16>,
+    ) -> EmbeddingError {
         let msg = message.unwrap_or("unknown error");
 
         match code {
@@ -405,6 +449,8 @@ impl QwenEmbeddingProvider {
                         code, msg
                     ),
                     retry_after: Some(5), // Suggest 5 second wait
+                    status: status_code,
+                    provider_code: Some(code.to_string()),
                 }
             }
             "QuotaExhausted" | "Throttling.QuotaExhausted" => EmbeddingError::RateLimited {
@@ -415,6 +461,8 @@ impl QwenEmbeddingProvider {
                     code, msg
                 ),
                 retry_after: None,
+                status: status_code,
+                provider_code: Some(code.to_string()),
             },
             "ModelNotFound" | "InvalidParameter.Model" => EmbeddingError::ModelNotFound {
                 model: format!(
@@ -438,9 +486,21 @@ impl QwenEmbeddingProvider {
                     status: None,
                 }
             }
-            _ => EmbeddingError::Other {
-                message: format!("DashScope error ({}): {}", code, msg),
-            },
+            _ => {
+                if let Some(signal) = classify_rate_limit(status_code, None, Some(code), Some(msg))
+                {
+                    EmbeddingError::RateLimited {
+                        message: format!("DashScope rate limit exceeded ({}): {}", code, msg),
+                        retry_after: signal.retry_after_secs,
+                        status: status_code,
+                        provider_code: signal.provider_code,
+                    }
+                } else {
+                    EmbeddingError::Other {
+                        message: format!("DashScope error ({}): {}", code, msg),
+                    }
+                }
+            }
         }
     }
 }
@@ -684,7 +744,7 @@ mod tests {
     #[test]
     fn map_api_error_auth_failure() {
         let provider = QwenEmbeddingProvider::new(&default_config());
-        let err = provider.map_api_error("InvalidApiKey", Some("key is invalid"));
+        let err = provider.map_api_error("InvalidApiKey", Some("key is invalid"), Some(401));
         assert!(matches!(err, EmbeddingError::AuthenticationFailed { .. }));
         assert!(err.to_string().contains("qwen_embedding"));
     }
@@ -692,14 +752,14 @@ mod tests {
     #[test]
     fn map_api_error_unauthorized() {
         let provider = QwenEmbeddingProvider::new(&default_config());
-        let err = provider.map_api_error("Unauthorized", Some("not authorized"));
+        let err = provider.map_api_error("Unauthorized", Some("not authorized"), Some(401));
         assert!(matches!(err, EmbeddingError::AuthenticationFailed { .. }));
     }
 
     #[test]
     fn map_api_error_rate_limited() {
         let provider = QwenEmbeddingProvider::new(&default_config());
-        let err = provider.map_api_error("Throttling", Some("too many requests"));
+        let err = provider.map_api_error("Throttling", Some("too many requests"), Some(429));
         assert!(matches!(err, EmbeddingError::RateLimited { .. }));
         assert!(err.is_retryable());
         assert_eq!(err.retry_after_secs(), Some(5));
@@ -708,7 +768,7 @@ mod tests {
     #[test]
     fn map_api_error_quota_exhausted() {
         let provider = QwenEmbeddingProvider::new(&default_config());
-        let err = provider.map_api_error("QuotaExhausted", Some("no more tokens"));
+        let err = provider.map_api_error("QuotaExhausted", Some("no more tokens"), Some(429));
         assert!(matches!(err, EmbeddingError::RateLimited { .. }));
         assert!(err.to_string().contains("quota"));
     }
@@ -716,14 +776,14 @@ mod tests {
     #[test]
     fn map_api_error_model_not_found() {
         let provider = QwenEmbeddingProvider::new(&default_config());
-        let err = provider.map_api_error("ModelNotFound", Some("model does not exist"));
+        let err = provider.map_api_error("ModelNotFound", Some("model does not exist"), Some(404));
         assert!(matches!(err, EmbeddingError::ModelNotFound { .. }));
     }
 
     #[test]
     fn map_api_error_internal_error() {
         let provider = QwenEmbeddingProvider::new(&default_config());
-        let err = provider.map_api_error("InternalError.Timeout", Some("request timeout"));
+        let err = provider.map_api_error("InternalError.Timeout", Some("request timeout"), Some(500));
         assert!(matches!(err, EmbeddingError::ServerError { .. }));
         assert!(err.is_retryable());
     }
@@ -731,14 +791,14 @@ mod tests {
     #[test]
     fn map_api_error_unknown_code() {
         let provider = QwenEmbeddingProvider::new(&default_config());
-        let err = provider.map_api_error("SomeNewError", Some("unexpected"));
+        let err = provider.map_api_error("SomeNewError", Some("unexpected"), Some(400));
         assert!(matches!(err, EmbeddingError::Other { .. }));
     }
 
     #[test]
     fn map_api_error_data_inspection() {
         let provider = QwenEmbeddingProvider::new(&default_config());
-        let err = provider.map_api_error("DataInspectionFailed", Some("content blocked"));
+        let err = provider.map_api_error("DataInspectionFailed", Some("content blocked"), Some(400));
         assert!(matches!(err, EmbeddingError::Other { .. }));
         assert!(err.to_string().contains("restricted content"));
     }
@@ -746,14 +806,16 @@ mod tests {
     #[test]
     fn map_http_error_401() {
         let provider = QwenEmbeddingProvider::new(&default_config());
-        let err = provider.map_http_error(401, "Unauthorized");
+        let headers = reqwest::header::HeaderMap::new();
+        let err = provider.map_http_error(401, &headers, "Unauthorized");
         assert!(matches!(err, EmbeddingError::AuthenticationFailed { .. }));
     }
 
     #[test]
     fn map_http_error_429() {
         let provider = QwenEmbeddingProvider::new(&default_config());
-        let err = provider.map_http_error(429, "Too Many Requests");
+        let headers = reqwest::header::HeaderMap::new();
+        let err = provider.map_http_error(429, &headers, "Too Many Requests");
         assert!(matches!(err, EmbeddingError::RateLimited { .. }));
         assert!(err.is_retryable());
     }
@@ -761,7 +823,8 @@ mod tests {
     #[test]
     fn map_http_error_500() {
         let provider = QwenEmbeddingProvider::new(&default_config());
-        let err = provider.map_http_error(500, "Internal Server Error");
+        let headers = reqwest::header::HeaderMap::new();
+        let err = provider.map_http_error(500, &headers, "Internal Server Error");
         assert!(matches!(
             err,
             EmbeddingError::ServerError {
@@ -776,7 +839,8 @@ mod tests {
     fn map_http_error_with_api_error_body() {
         let provider = QwenEmbeddingProvider::new(&default_config());
         let body = r#"{"code":"InvalidApiKey","message":"bad key"}"#;
-        let err = provider.map_http_error(401, body);
+        let headers = reqwest::header::HeaderMap::new();
+        let err = provider.map_http_error(401, &headers, body);
         assert!(matches!(err, EmbeddingError::AuthenticationFailed { .. }));
         // Should extract the API error code, not just use HTTP status
         assert!(err.to_string().contains("InvalidApiKey"));

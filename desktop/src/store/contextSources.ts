@@ -126,8 +126,8 @@ export interface ContextSourcesState {
   skillPickerSearchQuery: string;
 
   // === Knowledge Auto-Association ===
-  /** Tracks the last workspace path for which auto-association was performed. */
-  _autoAssociatedPath: string | null;
+  /** Tracks workspace+project scopes for which auto-association was performed. */
+  _autoAssociatedScopes: Record<string, true>;
   /** Auto-associate knowledge collections whose workspace_path matches the given workspace. */
   autoAssociateForWorkspace: (workspacePath: string, projectId: string) => Promise<void>;
   /** Reset auto-association guard so the next workspace change triggers re-association. */
@@ -182,6 +182,14 @@ function toScopedRef(collectionId: string, documentUid: string): ScopedDocumentR
   return { collection_id: collectionId, document_uid: documentUid };
 }
 
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+function autoAssociateScopeKey(workspacePath: string, projectId: string): string {
+  return `${normalizePath(workspacePath)}::${projectId}`;
+}
+
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
@@ -195,7 +203,7 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
   collectionDocuments: {},
   isLoadingCollections: false,
   isLoadingDocuments: {},
-  _autoAssociatedPath: null,
+  _autoAssociatedScopes: {},
 
   // === Memory State ===
   memoryEnabled: true,
@@ -226,21 +234,25 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
   // =========================================================================
 
   autoAssociateForWorkspace: async (workspacePath, projectId) => {
-    // Skip if already auto-associated for this workspace
-    if (get()._autoAssociatedPath === workspacePath) return;
+    const scopeKey = autoAssociateScopeKey(workspacePath, projectId);
+    if (get()._autoAssociatedScopes[scopeKey]) return;
+
+    const markScopeAssociated = () =>
+      set((state) => ({
+        _autoAssociatedScopes: {
+          ...state._autoAssociatedScopes,
+          [scopeKey]: true,
+        },
+      }));
 
     try {
       const result = await ragListCollections(projectId);
       if (!result.success || !result.data) {
-        set({ _autoAssociatedPath: workspacePath });
+        markScopeAssociated();
         return;
       }
 
       const collections = result.data;
-
-      // Normalize path for comparison: backslash→forward slash, strip trailing slash
-      const normalizePath = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
-
       const normalizedWorkspace = normalizePath(workspacePath);
 
       // Find collections whose workspace_path matches
@@ -256,17 +268,23 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
 
       if (matching.length > 0) {
         const matchingIds = matching.map((c) => c.id);
-        set({
+        set((state) => ({
           knowledgeEnabled: true,
           selectedCollections: matchingIds,
           availableCollections: collections,
-          _autoAssociatedPath: workspacePath,
-        });
+          _autoAssociatedScopes: {
+            ...state._autoAssociatedScopes,
+            [scopeKey]: true,
+          },
+        }));
       } else {
-        set({
+        set((state) => ({
           availableCollections: collections,
-          _autoAssociatedPath: workspacePath,
-        });
+          _autoAssociatedScopes: {
+            ...state._autoAssociatedScopes,
+            [scopeKey]: true,
+          },
+        }));
       }
 
       // Trigger docs collection creation only when explicitly enabled in settings.
@@ -289,17 +307,26 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
               });
             }
           }
-        } catch {
-          // Non-critical: docs indexing failure shouldn't block workspace usage
+        } catch (error) {
+          console.warn('[contextSources] Failed auto-ensuring docs collection', {
+            workspacePath,
+            projectId,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
-    } catch {
-      set({ _autoAssociatedPath: workspacePath });
+    } catch (error) {
+      console.warn('[contextSources] Auto-association failed', {
+        workspacePath,
+        projectId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      markScopeAssociated();
     }
   },
 
   resetAutoAssociation: () => {
-    set({ _autoAssociatedPath: null });
+    set({ _autoAssociatedScopes: {} });
   },
 
   // =========================================================================

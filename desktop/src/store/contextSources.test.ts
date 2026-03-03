@@ -44,7 +44,7 @@ function resetContextSourcesState() {
     availableSkills: [],
     isLoadingSkills: false,
     skillPickerSearchQuery: '',
-    _autoAssociatedPath: null,
+    _autoAssociatedScopes: {},
   });
 }
 
@@ -191,5 +191,33 @@ describe('useContextSourcesStore', () => {
     await useContextSourcesStore.getState().autoAssociateForWorkspace('/workspace/demo', 'proj-1');
 
     expect(mockRagEnsureDocsCollection).toHaveBeenCalledWith('/workspace/demo', 'proj-1');
+  });
+
+  it('autoAssociateForWorkspace de-duplicates by workspace + project scope', async () => {
+    mockRagListCollections.mockResolvedValue({
+      success: true,
+      data: [],
+      error: null,
+    });
+
+    const store = useContextSourcesStore.getState();
+    await store.autoAssociateForWorkspace('/workspace/demo', 'proj-1');
+    await store.autoAssociateForWorkspace('/workspace/demo', 'proj-1');
+
+    expect(mockRagListCollections).toHaveBeenCalledTimes(1);
+  });
+
+  it('autoAssociateForWorkspace does not deduplicate across projects', async () => {
+    mockRagListCollections.mockResolvedValue({
+      success: true,
+      data: [],
+      error: null,
+    });
+
+    const store = useContextSourcesStore.getState();
+    await store.autoAssociateForWorkspace('/workspace/demo', 'proj-1');
+    await store.autoAssociateForWorkspace('/workspace/demo', 'proj-2');
+
+    expect(mockRagListCollections).toHaveBeenCalledTimes(2);
   });
 });

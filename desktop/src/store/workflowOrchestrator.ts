@@ -115,6 +115,12 @@ interface WorkflowOrchestratorState {
     selectedModifications: ArchitectureReviewCardData['prdModifications'],
   ) => Promise<void>;
   cancelWorkflow: () => Promise<void>;
+  syncRuntimeFromKernel: (runtime: {
+    sessionId?: string | null;
+    interviewId?: string | null;
+    pendingQuestion?: InterviewQuestionCardData | null;
+    phase?: string | null;
+  }) => void;
   resetWorkflow: () => void;
   clearConversationHistory: () => void;
 }
@@ -350,6 +356,28 @@ function recomputeBatches(stories: TaskPrd['stories'], maxParallel: number): Tas
     }
   }
   return batches;
+}
+
+function normalizeWorkflowPhase(phase: string | null | undefined): WorkflowPhase | null {
+  switch (phase) {
+    case 'idle':
+    case 'analyzing':
+    case 'configuring':
+    case 'interviewing':
+    case 'exploring':
+    case 'requirement_analysis':
+    case 'generating_prd':
+    case 'reviewing_prd':
+    case 'architecture_review':
+    case 'generating_design_doc':
+    case 'executing':
+    case 'completed':
+    case 'failed':
+    case 'cancelled':
+      return phase;
+    default:
+      return null;
+  }
 }
 
 function applyArchitectureModifications(
@@ -625,6 +653,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
           first_principles: false,
           project_path: workspacePath,
           exploration_context: explorationResult ? JSON.stringify(explorationResult) : null,
+          task_session_id: state.sessionId,
           locale: i18n.language,
         };
 
@@ -778,12 +807,12 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   /** Submit answer to current interview question */
   submitInterviewAnswer: async (answer: string) => {
     const runToken = get()._runToken;
-    const { pendingQuestion } = get();
-    if (!pendingQuestion) return;
+    const { pendingQuestion, interviewId } = get();
+    if (!interviewId) return;
 
     // Inject answer card
     const answerData: InterviewAnswerCardData = {
-      questionId: pendingQuestion.questionId,
+      questionId: pendingQuestion?.questionId ?? 'kernel-pending-question',
       answer,
       skipped: false,
     };
@@ -791,7 +820,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     set({ pendingQuestion: null });
 
     // Submit to backend
-    const updatedSession = await useSpecInterviewStore.getState().submitAnswer(answer);
+    const updatedSession = await useSpecInterviewStore.getState().submitAnswer(answer, interviewId);
     if (!isRunActive(get, runToken)) return;
 
     if (!updatedSession) {
@@ -861,11 +890,11 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   /** Skip current interview question */
   skipInterviewQuestion: async () => {
     const runToken = get()._runToken;
-    const { pendingQuestion } = get();
-    if (!pendingQuestion) return;
+    const { pendingQuestion, interviewId } = get();
+    if (!interviewId) return;
 
     const answerData: InterviewAnswerCardData = {
-      questionId: pendingQuestion.questionId,
+      questionId: pendingQuestion?.questionId ?? 'kernel-pending-question',
       answer: '',
       skipped: true,
     };
@@ -873,7 +902,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     set({ pendingQuestion: null });
 
     // Submit skip (empty answer)
-    const updatedSession = await useSpecInterviewStore.getState().submitAnswer('');
+    const updatedSession = await useSpecInterviewStore.getState().submitAnswer('', interviewId);
     if (!isRunActive(get, runToken)) return;
 
     if (!updatedSession) {
@@ -1081,6 +1110,51 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
     set({ phase: 'cancelled' });
     injectInfo(i18n.t('workflow.orchestrator.workflowCancelled', { ns: 'simpleMode' }), 'warning');
+  },
+
+  syncRuntimeFromKernel: ({ sessionId, interviewId, pendingQuestion, phase }) => {
+    const normalizedSessionId = sessionId?.trim() || null;
+    const normalizedInterviewId = interviewId?.trim() || null;
+    const normalizedPhase = normalizeWorkflowPhase(phase);
+
+    set((state) => {
+      const patch: Partial<WorkflowOrchestratorState> = {};
+
+      if (normalizedSessionId && normalizedSessionId !== state.sessionId) {
+        patch.sessionId = normalizedSessionId;
+      }
+      if (normalizedInterviewId && normalizedInterviewId !== state.interviewId) {
+        patch.interviewId = normalizedInterviewId;
+      }
+      if (pendingQuestion !== undefined) {
+        const sameQuestion =
+          (state.pendingQuestion?.questionId ?? null) === (pendingQuestion?.questionId ?? null) &&
+          (state.pendingQuestion?.question ?? null) === (pendingQuestion?.question ?? null);
+        if (!sameQuestion) {
+          patch.pendingQuestion = pendingQuestion ?? null;
+        }
+      }
+      if (normalizedPhase && normalizedPhase !== state.phase) {
+        patch.phase = normalizedPhase;
+      }
+
+      return Object.keys(patch).length > 0 ? patch : state;
+    });
+
+    if (normalizedSessionId) {
+      useTaskModeStore.setState({
+        isTaskMode: true,
+        sessionId: normalizedSessionId,
+      });
+      useSpecInterviewStore.getState().setLinkedTaskSessionId(normalizedSessionId);
+    }
+
+    if (normalizedInterviewId) {
+      const specInterviewStore = useSpecInterviewStore.getState();
+      if (specInterviewStore.session?.id !== normalizedInterviewId) {
+        void specInterviewStore.fetchState(normalizedInterviewId);
+      }
+    }
   },
 
   /** Reset the orchestrator to idle state */
@@ -1408,7 +1482,7 @@ async function designDocAndExecutePhase(set: SetFn, get: GetFn, prd: TaskPrd, ru
         generation_info: unknown;
       };
       error?: string;
-    }>('prepare_design_doc_for_task', { prd, projectPath });
+    }>('prepare_design_doc_for_task', { sessionId: get().sessionId, prd, projectPath });
     if (!isRunActive(get, runToken)) return;
     if (designResult.success && designResult.data) {
       const doc = designResult.data.design_doc;

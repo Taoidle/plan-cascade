@@ -110,6 +110,7 @@ export interface KnowledgeState {
   fetchDocsStatus: (workspacePath: string, projectId: string) => Promise<void>;
   ensureDocsCollection: (workspacePath: string, projectId: string) => Promise<boolean>;
   syncDocsCollection: (workspacePath: string, projectId: string) => Promise<boolean>;
+  rebuildDocsCollection: (workspacePath: string, projectId: string, mode?: 'safe_swap' | 'replace') => Promise<boolean>;
   clearError: () => void;
   checkForUpdates: (collectionId: string) => Promise<void>;
   applyUpdates: (collectionId: string) => Promise<void>;

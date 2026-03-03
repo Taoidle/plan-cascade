@@ -59,7 +59,7 @@ function resetContextSourcesState() {
     availableSkills: [],
     isLoadingSkills: false,
     skillPickerSearchQuery: '',
-    _autoAssociatedPath: null,
+    _autoAssociatedScopes: {},
   });
 }
 

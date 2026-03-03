@@ -18,17 +18,22 @@ use crate::commands::task_mode::{
     resolve_llm_provider, resolve_provider_config, resolve_search_provider_for_tools,
 };
 use crate::models::CommandResponse;
+use crate::services::knowledge::observability;
 use crate::services::plan_mode::adapter_registry::{AdapterInfo, AdapterRegistry};
 use crate::services::plan_mode::types::{
     ClarificationAnswer, Plan, PlanAnalysis, PlanExecutionReport, PlanModePhase, PlanModeSession,
     StepExecutionState, StepOutput,
 };
-use crate::services::knowledge::observability;
 use crate::services::skills::model::InjectionPhase;
 use crate::services::task_mode::context_provider::{
     query_selected_context, ContextSourceConfig, MemorySourceConfig, SkillsSourceConfig,
 };
+use crate::services::workflow_kernel::{
+    PlanClarificationSnapshot, WorkflowKernelState, WorkflowKernelUpdatedEvent,
+    WORKFLOW_KERNEL_UPDATED_CHANNEL,
+};
 use crate::state::AppState;
+use tauri::{Emitter, Manager};
 
 // ============================================================================
 // State
@@ -50,6 +55,11 @@ impl PlanModeState {
             operation_cancellation_tokens: Arc::new(RwLock::new(HashMap::new())),
             adapter_registry: Arc::new(RwLock::new(AdapterRegistry::with_builtins())),
         }
+    }
+
+    pub async fn get_session_snapshot(&self, session_id: &str) -> Option<PlanModeSession> {
+        let sessions = self.sessions.read().await;
+        sessions.get(session_id).cloned()
     }
 }
 
@@ -87,6 +97,89 @@ async fn clear_plan_operation_token(state: &PlanModeState, session_id: &str, ope
     }
 }
 
+fn plan_phase_to_kernel_phase(phase: PlanModePhase) -> &'static str {
+    match phase {
+        PlanModePhase::Idle => "idle",
+        PlanModePhase::Analyzing => "analyzing",
+        PlanModePhase::Clarifying => "clarifying",
+        PlanModePhase::Planning => "planning",
+        PlanModePhase::ReviewingPlan => "reviewing_plan",
+        PlanModePhase::Executing => "executing",
+        PlanModePhase::Completed => "completed",
+        PlanModePhase::Failed => "failed",
+        PlanModePhase::Cancelled => "cancelled",
+    }
+}
+
+fn map_clarification_input_type(
+    input_type: &crate::services::plan_mode::types::ClarificationInputType,
+) -> (String, Vec<String>) {
+    match input_type {
+        crate::services::plan_mode::types::ClarificationInputType::Text => {
+            ("text".to_string(), Vec::new())
+        }
+        crate::services::plan_mode::types::ClarificationInputType::Textarea => {
+            ("textarea".to_string(), Vec::new())
+        }
+        crate::services::plan_mode::types::ClarificationInputType::SingleSelect(options) => {
+            ("single_select".to_string(), options.clone())
+        }
+        crate::services::plan_mode::types::ClarificationInputType::Boolean => {
+            ("boolean".to_string(), Vec::new())
+        }
+    }
+}
+
+fn map_pending_clarification(
+    question: Option<&crate::services::plan_mode::types::ClarificationQuestion>,
+) -> Option<PlanClarificationSnapshot> {
+    question.map(|value| {
+        let (input_type, options) = map_clarification_input_type(&value.input_type);
+        PlanClarificationSnapshot {
+            question_id: value.question_id.clone(),
+            question: value.question.clone(),
+            hint: value.hint.clone(),
+            input_type,
+            options,
+            required: false,
+        }
+    })
+}
+
+async fn emit_kernel_updates(
+    app: &tauri::AppHandle,
+    kernel_state: &WorkflowKernelState,
+    kernel_session_ids: &[String],
+    source: &str,
+) {
+    for kernel_session_id in kernel_session_ids {
+        if let Ok(session_state) = kernel_state.get_session_state(kernel_session_id).await {
+            let revision = (session_state.events.len() + session_state.checkpoints.len()) as u64;
+            let payload = WorkflowKernelUpdatedEvent {
+                session_state,
+                revision,
+                source: source.to_string(),
+            };
+            let _ = app.emit(WORKFLOW_KERNEL_UPDATED_CHANNEL, payload);
+        }
+    }
+}
+
+async fn sync_kernel_plan_snapshot_and_emit(
+    app: &tauri::AppHandle,
+    kernel_state: &WorkflowKernelState,
+    session: &PlanModeSession,
+    source: &str,
+) {
+    let phase = Some(plan_phase_to_kernel_phase(session.phase).to_string());
+    let pending = map_pending_clarification(session.current_question.as_ref());
+    let kernel_session_ids = kernel_state
+        .sync_plan_snapshot_by_linked_session(&session.session_id, phase, pending)
+        .await
+        .unwrap_or_default();
+    emit_kernel_updates(app, kernel_state, &kernel_session_ids, source).await;
+}
+
 // ============================================================================
 // Commands
 // ============================================================================
@@ -105,6 +198,8 @@ pub async fn enter_plan_mode(
     state: tauri::State<'_, PlanModeState>,
     app_state: tauri::State<'_, AppState>,
     knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
+    kernel_state: tauri::State<'_, WorkflowKernelState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<CommandResponse<PlanModeSession>, String> {
     if description.trim().is_empty() {
         return Ok(CommandResponse::err("Task description cannot be empty"));
@@ -231,6 +326,14 @@ pub async fn enter_plan_mode(
                 sessions.insert(session.session_id.clone(), session.clone());
             }
 
+            sync_kernel_plan_snapshot_and_emit(
+                &app_handle,
+                kernel_state.inner(),
+                &session,
+                "plan_mode.enter_plan_mode",
+            )
+            .await;
+
             Ok(CommandResponse::ok(session))
         } => result,
     };
@@ -253,6 +356,8 @@ pub async fn submit_plan_clarification(
     state: tauri::State<'_, PlanModeState>,
     app_state: tauri::State<'_, AppState>,
     knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
+    kernel_state: tauri::State<'_, WorkflowKernelState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<CommandResponse<PlanModeSession>, String> {
     // Snapshot data needed for question generation.
     let (description, analysis, mut clarifications, adapter_name, current_question_text) = {
@@ -373,7 +478,18 @@ pub async fn submit_plan_clarification(
         }
     }
 
-    Ok(CommandResponse::ok(session.clone()))
+    let updated_session = session.clone();
+    drop(sessions);
+
+    sync_kernel_plan_snapshot_and_emit(
+        &app_handle,
+        kernel_state.inner(),
+        &updated_session,
+        "plan_mode.submit_plan_clarification",
+    )
+    .await;
+
+    Ok(CommandResponse::ok(updated_session))
 }
 
 /// Skip clarification and proceed to planning.
@@ -381,6 +497,8 @@ pub async fn submit_plan_clarification(
 pub async fn skip_plan_clarification(
     session_id: String,
     state: tauri::State<'_, PlanModeState>,
+    kernel_state: tauri::State<'_, WorkflowKernelState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<CommandResponse<PlanModeSession>, String> {
     let mut sessions = state.sessions.write().await;
     let session = sessions
@@ -389,6 +507,15 @@ pub async fn skip_plan_clarification(
 
     session.phase = PlanModePhase::Planning;
     let result = session.clone();
+    drop(sessions);
+
+    sync_kernel_plan_snapshot_and_emit(
+        &app_handle,
+        kernel_state.inner(),
+        &result,
+        "plan_mode.skip_plan_clarification",
+    )
+    .await;
 
     Ok(CommandResponse::ok(result))
 }
@@ -407,6 +534,8 @@ pub async fn generate_plan(
     state: tauri::State<'_, PlanModeState>,
     app_state: tauri::State<'_, AppState>,
     knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
+    kernel_state: tauri::State<'_, WorkflowKernelState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<CommandResponse<Plan>, String> {
     // Extract session data
     let (description, domain, adapter_name, clarifications) = {
@@ -476,12 +605,23 @@ pub async fn generate_plan(
             {
                 Ok(plan) => {
                     // Update session
+                    let updated_session = {
                     let mut sessions = state.sessions.write().await;
                     let session = sessions
                         .get_mut(&session_id)
                         .ok_or_else(|| "No active plan mode session".to_string())?;
                     session.plan = Some(plan.clone());
                     session.phase = PlanModePhase::ReviewingPlan;
+                        session.clone()
+                    };
+
+                    sync_kernel_plan_snapshot_and_emit(
+                        &app_handle,
+                        kernel_state.inner(),
+                        &updated_session,
+                        "plan_mode.generate_plan",
+                    )
+                    .await;
 
                     Ok(CommandResponse::ok(plan))
                 }
@@ -510,6 +650,7 @@ pub async fn approve_plan(
     knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
     standalone_state: tauri::State<'_, crate::commands::standalone::StandaloneState>,
     permission_state: tauri::State<'_, crate::commands::permissions::PermissionState>,
+    kernel_state: tauri::State<'_, WorkflowKernelState>,
     app_handle: tauri::AppHandle,
 ) -> Result<CommandResponse<bool>, String> {
     // Validate
@@ -546,14 +687,23 @@ pub async fn approve_plan(
     drop(registry);
 
     // Update session to executing
-    {
+    let executing_session_snapshot = {
         let mut sessions = state.sessions.write().await;
         let session = sessions
             .get_mut(&session_id)
             .ok_or_else(|| "No active plan mode session".to_string())?;
         session.plan = Some(plan.clone());
         session.phase = PlanModePhase::Executing;
-    }
+        session.clone()
+    };
+
+    sync_kernel_plan_snapshot_and_emit(
+        &app_handle,
+        kernel_state.inner(),
+        &executing_session_snapshot,
+        "plan_mode.approve_plan.executing",
+    )
+    .await;
 
     // Set cancellation token
     let cancel_token = CancellationToken::new();
@@ -619,6 +769,7 @@ pub async fn approve_plan(
         let config = crate::services::plan_mode::step_executor::StepExecutionConfig::default();
 
         let mut plan_mut = plan;
+        let app_for_execute = app_handle.clone();
 
         let result = crate::services::plan_mode::step_executor::execute_plan(
             &sid,
@@ -629,12 +780,13 @@ pub async fn approve_plan(
             config,
             execution_context,
             lang_instruction,
-            app_handle,
+            app_for_execute,
             cancel_token,
         )
         .await;
 
         // Update session with results
+        let mut updated_session_snapshot: Option<PlanModeSession> = None;
         let mut sessions = sessions_arc.write().await;
         if let Some(session) = sessions.get_mut(&sid) {
             match result {
@@ -669,6 +821,19 @@ pub async fn approve_plan(
                     );
                 }
             }
+            updated_session_snapshot = Some(session.clone());
+        }
+        drop(sessions);
+
+        if let Some(updated_session) = updated_session_snapshot {
+            let kernel_state = app_handle.state::<WorkflowKernelState>();
+            sync_kernel_plan_snapshot_and_emit(
+                &app_handle,
+                kernel_state.inner(),
+                &updated_session,
+                "plan_mode.approve_plan.completed",
+            )
+            .await;
         }
 
         // Clear cancellation token
@@ -949,7 +1114,11 @@ async fn build_plan_conversation_context(
     let config = context_sources
         .cloned()
         .unwrap_or_else(default_plan_context_sources);
-    let knowledge_requested = config.knowledge.as_ref().map(|k| k.enabled).unwrap_or(false);
+    let knowledge_requested = config
+        .knowledge
+        .as_ref()
+        .map(|k| k.enabled)
+        .unwrap_or(false);
 
     let enriched = query_selected_context(
         &config,

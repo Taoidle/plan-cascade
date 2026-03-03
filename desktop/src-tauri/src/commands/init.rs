@@ -13,6 +13,7 @@ use crate::commands::plugins::PluginState;
 use crate::commands::remote::RemoteState;
 use crate::commands::spec_interview::SpecInterviewState;
 use crate::commands::standalone::StandaloneState;
+use crate::commands::webhook::WebhookState;
 use crate::models::response::CommandResponse;
 use crate::services::mcp::McpService;
 use crate::services::orchestrator::index_manager::IndexManager;
@@ -82,6 +83,7 @@ pub async fn init_app(
     state: State<'_, AppState>,
     standalone_state: State<'_, StandaloneState>,
     remote_state: State<'_, RemoteState>,
+    webhook_state: State<'_, WebhookState>,
     plugin_state: State<'_, PluginState>,
     spec_interview_state: State<'_, SpecInterviewState>,
     mcp_state: State<'_, McpRuntimeState>,
@@ -92,6 +94,10 @@ pub async fn init_app(
     // Initialize all services
     match state.initialize().await {
         Ok(_) => {
+            if let Err(e) = webhook_state.start_worker_if_needed(state.inner()).await {
+                tracing::warn!("Webhook worker initialization failed: {}", e);
+            }
+
             emit_init_progress(&app, InitStage::Plugins, 2);
 
             // Initialize the plugin system early (ADR-F003).
@@ -206,6 +212,7 @@ pub async fn init_app(
             let remote_gateway_auto_started = match crate::commands::remote::try_auto_start_gateway(
                 &remote_state,
                 &state,
+                &webhook_state,
             )
             .await
             {

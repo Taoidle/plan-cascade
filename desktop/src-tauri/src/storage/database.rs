@@ -1241,16 +1241,37 @@ impl Database {
                 response_body TEXT,
                 attempts INTEGER NOT NULL DEFAULT 0,
                 last_attempt_at TEXT,
+                next_retry_at TEXT,
+                last_error TEXT,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (channel_id) REFERENCES webhook_channels(id) ON DELETE CASCADE
             )",
             [],
         )?;
 
+        // Migration: add retry metadata columns for delivery reliability.
+        if !Self::table_has_column(&conn, "webhook_deliveries", "next_retry_at") {
+            let _ = conn.execute(
+                "ALTER TABLE webhook_deliveries ADD COLUMN next_retry_at TEXT",
+                [],
+            );
+        }
+        if !Self::table_has_column(&conn, "webhook_deliveries", "last_error") {
+            let _ = conn.execute(
+                "ALTER TABLE webhook_deliveries ADD COLUMN last_error TEXT",
+                [],
+            );
+        }
+
         // Index for delivery retry queries
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_status
              ON webhook_deliveries(status, last_attempt_at)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_retry_due
+             ON webhook_deliveries(status, next_retry_at, attempts)",
             [],
         )?;
 
@@ -2065,8 +2086,8 @@ impl Database {
         let payload_json = serde_json::to_string(&delivery.payload).unwrap_or_default();
 
         conn.execute(
-            "INSERT INTO webhook_deliveries (id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO webhook_deliveries (id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, next_retry_at, last_error, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 delivery.id,
                 delivery.channel_id,
@@ -2077,6 +2098,8 @@ impl Database {
                 delivery.response_body,
                 delivery.attempts,
                 delivery.last_attempt_at,
+                delivery.next_retry_at,
+                delivery.last_error,
                 delivery.created_at,
             ],
         )?;
@@ -2096,7 +2119,7 @@ impl Database {
         match channel_id {
             Some(cid) => {
                 let mut stmt = conn.prepare(
-                    "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, created_at
+                    "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, next_retry_at, last_error, created_at
                      FROM webhook_deliveries WHERE channel_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
                 )?;
                 let deliveries = stmt
@@ -2109,7 +2132,7 @@ impl Database {
             }
             None => {
                 let mut stmt = conn.prepare(
-                    "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, created_at
+                    "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, next_retry_at, last_error, created_at
                      FROM webhook_deliveries ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
                 )?;
                 let deliveries = stmt
@@ -2131,9 +2154,9 @@ impl Database {
         let conn = self.get_connection()?;
 
         let mut stmt = conn.prepare(
-            "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, created_at
+            "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, next_retry_at, last_error, created_at
              FROM webhook_deliveries
-             WHERE status = 'failed' AND attempts < ?1
+             WHERE status IN ('failed', 'retrying') AND attempts < ?1
              ORDER BY last_attempt_at ASC",
         )?;
 
@@ -2147,6 +2170,53 @@ impl Database {
         Ok(deliveries)
     }
 
+    /// Get failed/retrying deliveries that are due for retry now.
+    pub fn get_deliveries_due_for_retry(
+        &self,
+        max_attempts: u32,
+        now_rfc3339: &str,
+    ) -> AppResult<Vec<crate::services::webhook::types::WebhookDelivery>> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, next_retry_at, last_error, created_at
+             FROM webhook_deliveries
+             WHERE status IN ('failed', 'retrying')
+               AND attempts < ?1
+               AND (next_retry_at IS NULL OR next_retry_at <= ?2)
+             ORDER BY COALESCE(next_retry_at, last_attempt_at) ASC",
+        )?;
+
+        let deliveries = stmt
+            .query_map(params![max_attempts, now_rfc3339], |row| {
+                Self::row_to_webhook_delivery(row)
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(deliveries)
+    }
+
+    /// Count failed/retrying deliveries currently in queue.
+    pub fn count_failed_webhook_deliveries(&self) -> AppResult<u32> {
+        let conn = self.get_connection()?;
+        let count: u32 = conn.query_row(
+            "SELECT COUNT(*) FROM webhook_deliveries WHERE status IN ('failed', 'retrying')",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    /// Delete historical delivery records older than the provided timestamp.
+    pub fn delete_webhook_deliveries_before(&self, cutoff_rfc3339: &str) -> AppResult<u32> {
+        let conn = self.get_connection()?;
+        let deleted = conn.execute(
+            "DELETE FROM webhook_deliveries WHERE created_at < ?1",
+            params![cutoff_rfc3339],
+        )?;
+        Ok(deleted as u32)
+    }
+
     /// Update a webhook delivery status.
     pub fn update_webhook_delivery_status(
         &self,
@@ -2155,7 +2225,8 @@ impl Database {
         let conn = self.get_connection()?;
 
         conn.execute(
-            "UPDATE webhook_deliveries SET status = ?2, status_code = ?3, response_body = ?4, attempts = ?5, last_attempt_at = ?6
+            "UPDATE webhook_deliveries
+             SET status = ?2, status_code = ?3, response_body = ?4, attempts = ?5, last_attempt_at = ?6, next_retry_at = ?7, last_error = ?8
              WHERE id = ?1",
             params![
                 delivery.id,
@@ -2164,6 +2235,8 @@ impl Database {
                 delivery.response_body,
                 delivery.attempts,
                 delivery.last_attempt_at,
+                delivery.next_retry_at,
+                delivery.last_error,
             ],
         )?;
 
@@ -2178,7 +2251,7 @@ impl Database {
         let conn = self.get_connection()?;
 
         let result = conn.query_row(
-            "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, created_at
+            "SELECT id, channel_id, event_type, payload, status, status_code, response_body, attempts, last_attempt_at, next_retry_at, last_error, created_at
              FROM webhook_deliveries WHERE id = ?1",
             params![id],
             |row| Self::row_to_webhook_delivery(row),
@@ -2252,7 +2325,9 @@ impl Database {
         let response_body: Option<String> = row.get(6)?;
         let attempts: u32 = row.get(7)?;
         let last_attempt_at: String = row.get::<_, String>(8).unwrap_or_default();
-        let created_at: String = row.get(9)?;
+        let next_retry_at: Option<String> = row.get(9)?;
+        let last_error: Option<String> = row.get(10)?;
+        let created_at: String = row.get(11)?;
 
         let event_type: crate::services::webhook::types::WebhookEventType =
             serde_json::from_str(&format!("\"{}\"", event_type_str))
@@ -2273,6 +2348,8 @@ impl Database {
             response_body,
             attempts,
             last_attempt_at,
+            next_retry_at,
+            last_error,
             created_at,
         })
     }
@@ -3294,6 +3371,7 @@ mod tests {
             .collect();
 
         assert!(indexes.contains(&"idx_webhook_deliveries_status".to_string()));
+        assert!(indexes.contains(&"idx_webhook_deliveries_retry_due".to_string()));
     }
 
     #[test]
@@ -3569,6 +3647,81 @@ mod tests {
         // With max_attempts=1, failed delivery should not appear (attempts >= max)
         let failed = db.get_failed_deliveries(1).unwrap();
         assert_eq!(failed.len(), 0);
+    }
+
+    #[test]
+    fn test_webhook_delivery_retry_metadata_roundtrip() {
+        use crate::services::webhook::types::*;
+
+        let db = create_test_db().unwrap();
+
+        let channel = WebhookChannelConfig {
+            id: "ch-retry-meta".to_string(),
+            name: "Retry metadata".to_string(),
+            channel_type: WebhookChannelType::Custom,
+            enabled: true,
+            url: "https://example.com/hook".to_string(),
+            secret: None,
+            scope: WebhookScope::Global,
+            events: vec![WebhookEventType::TaskFailed],
+            template: None,
+            created_at: "2026-03-03T00:00:00Z".to_string(),
+            updated_at: "2026-03-03T00:00:00Z".to_string(),
+        };
+        db.insert_webhook_channel(&channel).unwrap();
+
+        let mut delivery = WebhookDelivery::new(&channel, &WebhookPayload::default());
+        delivery.status = DeliveryStatus::Failed;
+        delivery.attempts = 2;
+        delivery.next_retry_at = Some("2026-03-03T00:05:00Z".to_string());
+        delivery.last_error = Some("HTTP 500".to_string());
+        db.insert_webhook_delivery(&delivery).unwrap();
+
+        let loaded = db.get_webhook_delivery(&delivery.id).unwrap().unwrap();
+        assert_eq!(loaded.next_retry_at, Some("2026-03-03T00:05:00Z".to_string()));
+        assert_eq!(loaded.last_error, Some("HTTP 500".to_string()));
+    }
+
+    #[test]
+    fn test_webhook_get_deliveries_due_for_retry() {
+        use crate::services::webhook::types::*;
+
+        let db = create_test_db().unwrap();
+        let channel = WebhookChannelConfig {
+            id: "ch-due".to_string(),
+            name: "Due test".to_string(),
+            channel_type: WebhookChannelType::Custom,
+            enabled: true,
+            url: "https://example.com/hook".to_string(),
+            secret: None,
+            scope: WebhookScope::Global,
+            events: vec![WebhookEventType::TaskFailed],
+            template: None,
+            created_at: "2026-03-03T00:00:00Z".to_string(),
+            updated_at: "2026-03-03T00:00:00Z".to_string(),
+        };
+        db.insert_webhook_channel(&channel).unwrap();
+
+        let mut due = WebhookDelivery::new(&channel, &WebhookPayload::default());
+        due.status = DeliveryStatus::Failed;
+        due.attempts = 1;
+        due.next_retry_at = Some("2026-03-03T00:00:00Z".to_string());
+        db.insert_webhook_delivery(&due).unwrap();
+
+        let mut not_due = WebhookDelivery::new(&channel, &WebhookPayload::default());
+        not_due.status = DeliveryStatus::Failed;
+        not_due.attempts = 1;
+        not_due.next_retry_at = Some("2026-03-03T01:00:00Z".to_string());
+        db.insert_webhook_delivery(&not_due).unwrap();
+
+        let due_items = db
+            .get_deliveries_due_for_retry(5, "2026-03-03T00:30:00Z")
+            .unwrap();
+        assert_eq!(due_items.len(), 1);
+        assert_eq!(due_items[0].id, due.id);
+
+        let queue_len = db.count_failed_webhook_deliveries().unwrap();
+        assert_eq!(queue_len, 2);
     }
 
     #[test]

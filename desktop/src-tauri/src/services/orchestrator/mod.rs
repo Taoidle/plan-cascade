@@ -31,6 +31,7 @@ pub mod lsp_enricher;
 pub mod lsp_registry;
 pub mod permission_gate;
 pub mod permissions;
+pub mod rate_limit_classifier;
 mod service;
 pub mod transfer;
 pub mod tree_sitter_parser;

@@ -59,6 +59,8 @@ pub enum EmbeddingError {
     RateLimited {
         message: String,
         retry_after: Option<u32>,
+        status: Option<u16>,
+        provider_code: Option<String>,
     },
 
     /// Configuration is invalid or incomplete.
@@ -887,7 +889,9 @@ mod tests {
         .is_retryable());
         assert!(EmbeddingError::RateLimited {
             message: "slow down".into(),
-            retry_after: Some(5)
+            retry_after: Some(5),
+            status: Some(429),
+            provider_code: None,
         }
         .is_retryable());
         assert!(EmbeddingError::ServerError {
@@ -915,6 +919,8 @@ mod tests {
         let err = EmbeddingError::RateLimited {
             message: "slow down".into(),
             retry_after: Some(30),
+            status: Some(429),
+            provider_code: Some("Throttling".into()),
         };
         assert_eq!(err.retry_after_secs(), Some(30));
 

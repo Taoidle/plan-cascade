@@ -8,7 +8,8 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -28,9 +29,14 @@ use crate::services::task_mode::exploration::{
     self, ExplorationResult, SummaryQuality, SummarySource,
 };
 use crate::services::task_mode::prd_generator;
+use crate::services::workflow_kernel::{
+    WorkflowKernelState, WorkflowKernelUpdatedEvent, WorkflowStatus,
+    WORKFLOW_KERNEL_UPDATED_CHANNEL,
+};
 
 use crate::state::AppState;
 use crate::storage::{ConfigService, KeyringService};
+use tauri::Emitter;
 
 // ============================================================================
 // Types
@@ -437,6 +443,11 @@ impl TaskModeState {
             execution_results: Arc::new(RwLock::new(HashMap::new())),
         }
     }
+
+    pub async fn get_session_snapshot(&self, session_id: &str) -> Option<TaskModeSession> {
+        let sessions = self.sessions.read().await;
+        sessions.get(session_id).cloned()
+    }
 }
 
 const TASK_OPERATION_CANCELLED_ERROR: &str = "Operation cancelled";
@@ -473,6 +484,115 @@ async fn clear_task_operation_token(state: &TaskModeState, session_id: &str, ope
     }
 }
 
+fn task_status_to_kernel_phase(status: &TaskModeStatus) -> &'static str {
+    match status {
+        TaskModeStatus::Initialized => "configuring",
+        TaskModeStatus::Exploring => "exploring",
+        TaskModeStatus::GeneratingPrd => "generating_prd",
+        TaskModeStatus::ReviewingPrd => "reviewing_prd",
+        TaskModeStatus::Executing => "executing",
+        TaskModeStatus::Completed => "completed",
+        TaskModeStatus::Failed => "failed",
+        TaskModeStatus::Cancelled => "cancelled",
+    }
+}
+
+fn task_status_to_kernel_status(status: &TaskModeStatus) -> Option<WorkflowStatus> {
+    match status {
+        TaskModeStatus::Completed => Some(WorkflowStatus::Completed),
+        TaskModeStatus::Failed => Some(WorkflowStatus::Failed),
+        TaskModeStatus::Cancelled => Some(WorkflowStatus::Cancelled),
+        _ => None,
+    }
+}
+
+fn infer_current_story_from_progress(progress: &BatchExecutionProgress) -> Option<String> {
+    progress
+        .story_statuses
+        .iter()
+        .find_map(|(story_id, status)| {
+            if status == "running" || status == "executing" {
+                Some(story_id.clone())
+            } else {
+                None
+            }
+        })
+}
+
+async fn emit_kernel_updates(
+    app: &tauri::AppHandle,
+    kernel_state: &WorkflowKernelState,
+    kernel_session_ids: &[String],
+    source: &str,
+) {
+    for kernel_session_id in kernel_session_ids {
+        if let Ok(session_state) = kernel_state.get_session_state(kernel_session_id).await {
+            let revision = (session_state.events.len() + session_state.checkpoints.len()) as u64;
+            let payload = WorkflowKernelUpdatedEvent {
+                session_state,
+                revision,
+                source: source.to_string(),
+            };
+            let _ = app.emit(WORKFLOW_KERNEL_UPDATED_CHANNEL, payload);
+        }
+    }
+}
+
+async fn sync_kernel_task_snapshot_and_emit(
+    app: &tauri::AppHandle,
+    kernel_state: &WorkflowKernelState,
+    session: &TaskModeSession,
+    phase_override: Option<&str>,
+    source: &str,
+) {
+    let phase = phase_override
+        .map(|value| value.to_string())
+        .or_else(|| Some(task_status_to_kernel_phase(&session.status).to_string()));
+    let (current_story_id, completed_stories, failed_stories) = match session.progress.as_ref() {
+        Some(progress) => (
+            infer_current_story_from_progress(progress),
+            Some(progress.stories_completed as u64),
+            Some(progress.stories_failed as u64),
+        ),
+        None => (None, Some(0), Some(0)),
+    };
+
+    let kernel_session_ids = kernel_state
+        .sync_task_snapshot_by_linked_session(
+            &session.session_id,
+            phase,
+            current_story_id,
+            completed_stories,
+            failed_stories,
+            task_status_to_kernel_status(&session.status),
+        )
+        .await
+        .unwrap_or_default();
+
+    emit_kernel_updates(app, kernel_state, &kernel_session_ids, source).await;
+}
+
+async fn sync_kernel_task_phase_by_linked_session_and_emit(
+    app: &tauri::AppHandle,
+    kernel_state: &WorkflowKernelState,
+    task_session_id: &str,
+    phase: &str,
+    source: &str,
+) {
+    let kernel_session_ids = kernel_state
+        .sync_task_snapshot_by_linked_session(
+            task_session_id,
+            Some(phase.to_string()),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap_or_default();
+    emit_kernel_updates(app, kernel_state, &kernel_session_ids, source).await;
+}
+
 // ============================================================================
 // Commands
 // ============================================================================
@@ -485,6 +605,8 @@ async fn clear_task_operation_token(state: &TaskModeState, session_id: &str, ope
 pub async fn enter_task_mode(
     description: String,
     state: tauri::State<'_, TaskModeState>,
+    kernel_state: tauri::State<'_, WorkflowKernelState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<CommandResponse<TaskModeSession>, String> {
     if description.trim().is_empty() {
         return Ok(CommandResponse::err("Task description cannot be empty"));
@@ -509,6 +631,15 @@ pub async fn enter_task_mode(
         let mut sessions = state.sessions.write().await;
         sessions.insert(session.session_id.clone(), session.clone());
     }
+
+    sync_kernel_task_snapshot_and_emit(
+        &app_handle,
+        kernel_state.inner(),
+        &session,
+        None,
+        "task_mode.enter_task_mode",
+    )
+    .await;
 
     Ok(CommandResponse::ok(session))
 }
@@ -542,6 +673,8 @@ pub async fn generate_task_prd(
     state: tauri::State<'_, TaskModeState>,
     app_state: tauri::State<'_, AppState>,
     knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
+    kernel_state: tauri::State<'_, WorkflowKernelState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<CommandResponse<TaskPrd>, String> {
     // Validate and extract session
     let (description, status) = {
@@ -568,6 +701,16 @@ pub async fn generate_task_prd(
         let mut sessions = state.sessions.write().await;
         if let Some(s) = sessions.get_mut(&session_id) {
             s.status = TaskModeStatus::GeneratingPrd;
+            let snapshot = s.clone();
+            drop(sessions);
+            sync_kernel_task_snapshot_and_emit(
+                &app_handle,
+                kernel_state.inner(),
+                &snapshot,
+                None,
+                "task_mode.generate_task_prd.status_generating",
+            )
+            .await;
         } else {
             return Ok(CommandResponse::err(
                 "Invalid session ID or no active session",
@@ -582,14 +725,27 @@ pub async fn generate_task_prd(
             if let Some(spec_value) = compiled_spec {
                 match prd_generator::convert_compiled_prd_to_task_prd(spec_value) {
                     Ok(prd) => {
+                        let mut updated_session: Option<TaskModeSession> = None;
                         let mut sessions = state.sessions.write().await;
                         if let Some(s) = sessions.get_mut(&session_id) {
                             s.status = TaskModeStatus::ReviewingPrd;
                             s.prd = Some(prd.clone());
+                            updated_session = Some(s.clone());
                         } else {
                             return Ok(CommandResponse::err(
                                 "Invalid session ID or no active session",
                             ));
+                        }
+                        drop(sessions);
+                        if let Some(snapshot) = updated_session.as_ref() {
+                            sync_kernel_task_snapshot_and_emit(
+                                &app_handle,
+                                kernel_state.inner(),
+                                snapshot,
+                                None,
+                                "task_mode.generate_task_prd.compiled_spec_reviewing",
+                            )
+                            .await;
                         }
                         return Ok(CommandResponse::ok(prd));
                     }
@@ -648,9 +804,22 @@ pub async fn generate_task_prd(
                 Ok(p) => p,
                 Err(e) => {
                     // Reset status back to Initialized on failure
+                    let mut updated_session: Option<TaskModeSession> = None;
                     let mut sessions = state.sessions.write().await;
                     if let Some(s) = sessions.get_mut(&session_id) {
                         s.status = TaskModeStatus::Initialized;
+                        updated_session = Some(s.clone());
+                    }
+                    drop(sessions);
+                    if let Some(snapshot) = updated_session.as_ref() {
+                        sync_kernel_task_snapshot_and_emit(
+                            &app_handle,
+                            kernel_state.inner(),
+                            snapshot,
+                            None,
+                            "task_mode.generate_task_prd.provider_resolution_failed",
+                        )
+                        .await;
                     }
                     return Ok(CommandResponse::err(e));
                 }
@@ -705,9 +874,22 @@ pub async fn generate_task_prd(
                 Ok(prd) => prd,
                 Err(e) => {
                     // Reset status back to Initialized on failure
+                    let mut updated_session: Option<TaskModeSession> = None;
                     let mut sessions = state.sessions.write().await;
                     if let Some(s) = sessions.get_mut(&session_id) {
                         s.status = TaskModeStatus::Initialized;
+                        updated_session = Some(s.clone());
+                    }
+                    drop(sessions);
+                    if let Some(snapshot) = updated_session.as_ref() {
+                        sync_kernel_task_snapshot_and_emit(
+                            &app_handle,
+                            kernel_state.inner(),
+                            snapshot,
+                            None,
+                            "task_mode.generate_task_prd.llm_generation_failed",
+                        )
+                        .await;
                     }
                     return Ok(CommandResponse::err(format!(
                         "PRD generation failed: {}",
@@ -718,14 +900,27 @@ pub async fn generate_task_prd(
 
             // Update session with generated PRD
             {
+                let mut updated_session: Option<TaskModeSession> = None;
                 let mut sessions = state.sessions.write().await;
                 if let Some(s) = sessions.get_mut(&session_id) {
                     s.status = TaskModeStatus::ReviewingPrd;
                     s.prd = Some(prd.clone());
+                    updated_session = Some(s.clone());
                 } else {
                     return Ok(CommandResponse::err(
                         "Invalid session ID or no active session",
                     ));
+                }
+                drop(sessions);
+                if let Some(snapshot) = updated_session.as_ref() {
+                    sync_kernel_task_snapshot_and_emit(
+                        &app_handle,
+                        kernel_state.inner(),
+                        snapshot,
+                        None,
+                        "task_mode.generate_task_prd.reviewing_prd",
+                    )
+                    .await;
                 }
             }
 
@@ -736,11 +931,24 @@ pub async fn generate_task_prd(
 
     if matches!(&result, Ok(resp) if !resp.success && resp.error.as_deref() == Some(TASK_OPERATION_CANCELLED_ERROR))
     {
+        let mut updated_session: Option<TaskModeSession> = None;
         let mut sessions = state.sessions.write().await;
         if let Some(session) = sessions.get_mut(&session_id) {
             if session.status == TaskModeStatus::GeneratingPrd {
                 session.status = TaskModeStatus::Initialized;
+                updated_session = Some(session.clone());
             }
+        }
+        drop(sessions);
+        if let Some(snapshot) = updated_session.as_ref() {
+            sync_kernel_task_snapshot_and_emit(
+                &app_handle,
+                kernel_state.inner(),
+                snapshot,
+                None,
+                "task_mode.generate_task_prd.cancelled",
+            )
+            .await;
         }
     }
 
@@ -774,10 +982,9 @@ pub async fn explore_project(
     app_state: tauri::State<'_, AppState>,
     standalone_state: tauri::State<'_, crate::commands::standalone::StandaloneState>,
     knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
+    kernel_state: tauri::State<'_, WorkflowKernelState>,
     app_handle: tauri::AppHandle,
 ) -> Result<CommandResponse<ExplorationResult>, String> {
-    use tauri::Emitter;
-
     // Validate session
     {
         let sessions = state.sessions.read().await;
@@ -803,6 +1010,16 @@ pub async fn explore_project(
         let mut sessions = state.sessions.write().await;
         if let Some(s) = sessions.get_mut(&session_id) {
             s.status = TaskModeStatus::Exploring;
+            let snapshot = s.clone();
+            drop(sessions);
+            sync_kernel_task_snapshot_and_emit(
+                &app_handle,
+                kernel_state.inner(),
+                &snapshot,
+                None,
+                "task_mode.explore_project.status_exploring",
+            )
+            .await;
         } else {
             return Ok(CommandResponse::err(
                 "Invalid session ID or no active session",
@@ -839,14 +1056,27 @@ pub async fn explore_project(
 
         // Reset status
         {
+            let mut updated_session: Option<TaskModeSession> = None;
             let mut sessions = state.sessions.write().await;
             if let Some(s) = sessions.get_mut(&session_id) {
                 s.status = TaskModeStatus::Initialized;
                 s.exploration_result = Some(result.clone());
+                updated_session = Some(s.clone());
             } else {
                 return Ok(CommandResponse::err(
                     "Invalid session ID or no active session",
                 ));
+            }
+            drop(sessions);
+            if let Some(snapshot) = updated_session.as_ref() {
+                sync_kernel_task_snapshot_and_emit(
+                    &app_handle,
+                    kernel_state.inner(),
+                    snapshot,
+                    None,
+                    "task_mode.explore_project.quick_initialized",
+                )
+                .await;
             }
         }
         return Ok(CommandResponse::ok(result));
@@ -1184,14 +1414,27 @@ pub async fn explore_project(
 
     // Store result and reset status
     {
+        let mut updated_session: Option<TaskModeSession> = None;
         let mut sessions = state.sessions.write().await;
         if let Some(s) = sessions.get_mut(&session_id) {
             s.status = TaskModeStatus::Initialized;
             s.exploration_result = Some(result.clone());
+            updated_session = Some(s.clone());
         } else {
             return Ok(CommandResponse::err(
                 "Invalid session ID or no active session",
             ));
+        }
+        drop(sessions);
+        if let Some(snapshot) = updated_session.as_ref() {
+            sync_kernel_task_snapshot_and_emit(
+                &app_handle,
+                kernel_state.inner(),
+                snapshot,
+                None,
+                "task_mode.explore_project.complete_initialized",
+            )
+            .await;
         }
     }
 
@@ -1211,11 +1454,24 @@ pub async fn explore_project(
 
     if matches!(&result, Ok(resp) if !resp.success && resp.error.as_deref() == Some(TASK_OPERATION_CANCELLED_ERROR))
     {
+        let mut updated_session: Option<TaskModeSession> = None;
         let mut sessions = state.sessions.write().await;
         if let Some(session) = sessions.get_mut(&session_id) {
             if session.status == TaskModeStatus::Exploring {
                 session.status = TaskModeStatus::Initialized;
+                updated_session = Some(session.clone());
             }
+        }
+        drop(sessions);
+        if let Some(snapshot) = updated_session.as_ref() {
+            sync_kernel_task_snapshot_and_emit(
+                &app_handle,
+                kernel_state.inner(),
+                snapshot,
+                None,
+                "task_mode.explore_project.cancelled",
+            )
+            .await;
         }
     }
 
@@ -1415,6 +1671,7 @@ pub async fn approve_task_prd(
     session_id: String,
     prd: TaskPrd,
     state: tauri::State<'_, TaskModeState>,
+    kernel_state: tauri::State<'_, WorkflowKernelState>,
     app_state: tauri::State<'_, AppState>,
     knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
     plugin_state: tauri::State<'_, crate::commands::plugins::PluginState>,
@@ -1479,6 +1736,7 @@ pub async fn approve_task_prd(
             let mut approved_prd = prd;
             approved_prd.batches = batches;
             {
+                let mut updated_session: Option<TaskModeSession> = None;
                 let mut sessions = state.sessions.write().await;
                 let session = match sessions.get_mut(&session_id) {
                     Some(s) => s,
@@ -1490,6 +1748,18 @@ pub async fn approve_task_prd(
                 };
                 session.prd = Some(approved_prd);
                 session.status = TaskModeStatus::Executing;
+                updated_session = Some(session.clone());
+                drop(sessions);
+                if let Some(snapshot) = updated_session.as_ref() {
+                    sync_kernel_task_snapshot_and_emit(
+                        &app,
+                        kernel_state.inner(),
+                        snapshot,
+                        None,
+                        "task_mode.approve_task_prd.status_executing",
+                    )
+                    .await;
+                }
             }
 
             // Create cancellation token for this execution
@@ -1509,6 +1779,7 @@ pub async fn approve_task_prd(
             let sessions_arc = state.sessions.clone();
             let results_arc = state.execution_results.clone();
             let tokens_arc = state.cancellation_tokens.clone();
+            let kernel_state_handle = kernel_state.inner().clone();
             let sid = session_id.clone();
             let app_handle = app.clone();
             let stories_for_exec = stories.clone();
@@ -1672,9 +1943,81 @@ pub async fn approve_task_prd(
 
                 // Create emit callback that sends events via Tauri AppHandle
                 let app_for_emit = app_handle.clone();
+                let kernel_for_emit = kernel_state_handle.clone();
+                let sid_for_emit = sid.clone();
+                let completed_counter = Arc::new(AtomicU64::new(0));
+                let failed_counter = Arc::new(AtomicU64::new(0));
+                let current_story = Arc::new(Mutex::new(None::<String>));
                 let emit = move |event: TaskModeProgressEvent| {
-                    use tauri::Emitter;
                     let _ = app_for_emit.emit(TASK_MODE_EVENT_CHANNEL, &event);
+
+                    match event.event_type.as_str() {
+                        "story_started" => {
+                            if let Ok(mut story) = current_story.lock() {
+                                *story = event.story_id.clone();
+                            }
+                        }
+                        "story_completed" => {
+                            completed_counter.fetch_add(1, Ordering::Relaxed);
+                            if let Ok(mut story) = current_story.lock() {
+                                *story = None;
+                            }
+                        }
+                        "story_failed" => {
+                            failed_counter.fetch_add(1, Ordering::Relaxed);
+                            if let Ok(mut story) = current_story.lock() {
+                                *story = None;
+                            }
+                        }
+                        _ => {}
+                    }
+
+                    let phase = match event.event_type.as_str() {
+                        "execution_completed" => "completed",
+                        "execution_cancelled" => "cancelled",
+                        "error" => "failed",
+                        _ => "executing",
+                    };
+                    let status = match event.event_type.as_str() {
+                        "execution_completed" => Some(WorkflowStatus::Completed),
+                        "execution_cancelled" => Some(WorkflowStatus::Cancelled),
+                        "error" => Some(WorkflowStatus::Failed),
+                        _ => None,
+                    };
+                    let current_story_id = if event.event_type == "story_started" {
+                        event.story_id.clone()
+                    } else if event.event_type == "story_completed"
+                        || event.event_type == "story_failed"
+                    {
+                        None
+                    } else {
+                        current_story.lock().ok().and_then(|story| story.clone())
+                    };
+                    let completed = completed_counter.load(Ordering::Relaxed);
+                    let failed = failed_counter.load(Ordering::Relaxed);
+                    let kernel_for_emit = kernel_for_emit.clone();
+                    let app_for_emit = app_for_emit.clone();
+                    let sid_for_emit = sid_for_emit.clone();
+                    tokio::spawn(async move {
+                        let kernel_session_ids = kernel_for_emit
+                            .sync_task_snapshot_by_linked_session(
+                                &sid_for_emit,
+                                Some(phase.to_string()),
+                                current_story_id,
+                                Some(completed),
+                                Some(failed),
+                                status,
+                            )
+                            .await
+                            .unwrap_or_default();
+                        emit_kernel_updates(
+                            &app_for_emit,
+                            &kernel_for_emit,
+                            &kernel_session_ids,
+                            "task_mode.approve_task_prd.progress_event",
+                        )
+                        .await;
+                    });
                 };
 
                 // Resolve project path from current working directory
@@ -1699,6 +2042,7 @@ pub async fn approve_task_prd(
                     .await;
 
                 // Update session state based on result
+                let mut kernel_snapshot: Option<TaskModeSession> = None;
                 let mut sessions = sessions_arc.write().await;
                 if let Some(session) = sessions.get_mut(&sid) {
                     match &result {
@@ -1717,11 +2061,24 @@ pub async fn approve_task_prd(
                             // Store the result
                             let mut results = results_arc.write().await;
                             results.insert(sid.clone(), exec_result.clone());
+                            kernel_snapshot = Some(session.clone());
                         }
                         Err(_) => {
                             session.status = TaskModeStatus::Failed;
+                            kernel_snapshot = Some(session.clone());
                         }
                     }
+                }
+                drop(sessions);
+                if let Some(snapshot) = kernel_snapshot.as_ref() {
+                    sync_kernel_task_snapshot_and_emit(
+                        &app_handle,
+                        &kernel_state_handle,
+                        snapshot,
+                        None,
+                        "task_mode.approve_task_prd.execution_terminal",
+                    )
+                    .await;
                 }
 
                 let mut tokens = tokens_arc.write().await;
@@ -1782,20 +2139,24 @@ pub async fn get_task_execution_status(
 pub async fn cancel_task_execution(
     session_id: String,
     state: tauri::State<'_, TaskModeState>,
+    kernel_state: tauri::State<'_, WorkflowKernelState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<CommandResponse<bool>, String> {
-    let sessions = state.sessions.read().await;
-    let session = match sessions.get(&session_id) {
-        Some(s) => s,
-        _ => {
-            return Ok(CommandResponse::err(
-                "Invalid session ID or no active session",
-            ))
+    let session_snapshot = {
+        let sessions = state.sessions.read().await;
+        let session = match sessions.get(&session_id) {
+            Some(s) => s,
+            _ => {
+                return Ok(CommandResponse::err(
+                    "Invalid session ID or no active session",
+                ))
+            }
+        };
+        if session.status != TaskModeStatus::Executing {
+            return Ok(CommandResponse::err("No execution in progress to cancel"));
         }
+        session.clone()
     };
-
-    if session.status != TaskModeStatus::Executing {
-        return Ok(CommandResponse::err("No execution in progress to cancel"));
-    }
 
     // Trigger the cancellation token
     let ct = state.cancellation_tokens.read().await;
@@ -1804,6 +2165,15 @@ pub async fn cancel_task_execution(
     } else {
         return Ok(CommandResponse::err("No execution in progress to cancel"));
     }
+
+    sync_kernel_task_snapshot_and_emit(
+        &app_handle,
+        kernel_state.inner(),
+        &session_snapshot,
+        Some("executing"),
+        "task_mode.cancel_task_execution.requested",
+    )
+    .await;
 
     // Note: The background task will update session.status to Cancelled
     // when it detects the cancellation token.
@@ -2535,6 +2905,8 @@ pub async fn run_requirement_analysis(
     app_state: tauri::State<'_, AppState>,
     state: tauri::State<'_, TaskModeState>,
     knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
+    kernel_state: tauri::State<'_, WorkflowKernelState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<CommandResponse<RequirementAnalysisResult>, String> {
     use crate::services::persona::{PersonaRegistry, PersonaRole};
 
@@ -2550,6 +2922,16 @@ pub async fn run_requirement_analysis(
             }
         }
     }
+
+    sync_kernel_task_phase_by_linked_session_and_emit(
+        &app_handle,
+        kernel_state.inner(),
+        &session_id,
+        "requirement_analysis",
+        "task_mode.run_requirement_analysis.started",
+    )
+    .await;
+
     let (operation_id, operation_token) = register_task_operation_token(&state, &session_id).await;
     let result = tokio::select! {
         _ = operation_token.cancelled() => Ok(CommandResponse::err(TASK_OPERATION_CANCELLED_ERROR)),
@@ -2736,6 +3118,16 @@ Be specific and actionable. Reference concrete technical details when available.
         } => result,
     };
     clear_task_operation_token(&state, &session_id, &operation_id).await;
+    if let Some(session_snapshot) = state.get_session_snapshot(&session_id).await {
+        sync_kernel_task_snapshot_and_emit(
+            &app_handle,
+            kernel_state.inner(),
+            &session_snapshot,
+            None,
+            "task_mode.run_requirement_analysis.finished",
+        )
+        .await;
+    }
     result
 }
 
@@ -2762,6 +3154,8 @@ pub async fn run_architecture_review(
     app_state: tauri::State<'_, AppState>,
     state: tauri::State<'_, TaskModeState>,
     knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
+    kernel_state: tauri::State<'_, WorkflowKernelState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<CommandResponse<ArchitectureReviewResult>, String> {
     use crate::services::persona::{PersonaRegistry, PersonaRole};
 
@@ -2777,6 +3171,16 @@ pub async fn run_architecture_review(
             }
         }
     }
+
+    sync_kernel_task_phase_by_linked_session_and_emit(
+        &app_handle,
+        kernel_state.inner(),
+        &session_id,
+        "architecture_review",
+        "task_mode.run_architecture_review.started",
+    )
+    .await;
+
     let (operation_id, operation_token) = register_task_operation_token(&state, &session_id).await;
     let result = tokio::select! {
         _ = operation_token.cancelled() => Ok(CommandResponse::err(TASK_OPERATION_CANCELLED_ERROR)),
@@ -3007,6 +3411,16 @@ testing strategy, dependency management, and integration patterns.
         } => result,
     };
     clear_task_operation_token(&state, &session_id, &operation_id).await;
+    if let Some(session_snapshot) = state.get_session_snapshot(&session_id).await {
+        sync_kernel_task_snapshot_and_emit(
+            &app_handle,
+            kernel_state.inner(),
+            &session_snapshot,
+            None,
+            "task_mode.run_architecture_review.finished",
+        )
+        .await;
+    }
     result
 }
 
@@ -3025,10 +3439,24 @@ testing strategy, dependency management, and integration patterns.
 /// * `project_path` - Optional project root. Falls back to cwd.
 #[tauri::command]
 pub async fn prepare_design_doc_for_task(
+    session_id: Option<String>,
     prd: TaskPrd,
     project_path: Option<String>,
+    kernel_state: tauri::State<'_, WorkflowKernelState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<CommandResponse<GenerateResult>, String> {
     use crate::services::design::DesignDocGenerator;
+
+    if let Some(task_session_id) = session_id.as_ref().map(String::as_str) {
+        sync_kernel_task_phase_by_linked_session_and_emit(
+            &app_handle,
+            kernel_state.inner(),
+            task_session_id,
+            "generating_design_doc",
+            "task_mode.prepare_design_doc.started",
+        )
+        .await;
+    }
 
     // 1. Resolve project path
     let base = match project_path {
@@ -3041,20 +3469,64 @@ pub async fn prepare_design_doc_for_task(
     let json = match serde_json::to_string_pretty(&prd) {
         Ok(j) => j,
         Err(e) => {
+            if let Some(task_session_id) = session_id.as_ref().map(String::as_str) {
+                sync_kernel_task_phase_by_linked_session_and_emit(
+                    &app_handle,
+                    kernel_state.inner(),
+                    task_session_id,
+                    "failed",
+                    "task_mode.prepare_design_doc.failed_serialize",
+                )
+                .await;
+            }
             return Ok(CommandResponse::err(format!(
                 "Failed to serialize PRD: {}",
                 e
-            )))
+            )));
         }
     };
     if let Err(e) = std::fs::write(&prd_path, &json) {
+        if let Some(task_session_id) = session_id.as_ref().map(String::as_str) {
+            sync_kernel_task_phase_by_linked_session_and_emit(
+                &app_handle,
+                kernel_state.inner(),
+                task_session_id,
+                "failed",
+                "task_mode.prepare_design_doc.failed_write",
+            )
+            .await;
+        }
         return Ok(CommandResponse::err(format!("Failed to write PRD: {}", e)));
     }
 
     // 3. Call existing DesignDocGenerator
     match DesignDocGenerator::generate_from_file(&prd_path, None, true) {
-        Ok(result) => Ok(CommandResponse::ok(result)),
-        Err(e) => Ok(CommandResponse::err(e.to_string())),
+        Ok(result) => {
+            if let Some(task_session_id) = session_id.as_ref().map(String::as_str) {
+                sync_kernel_task_phase_by_linked_session_and_emit(
+                    &app_handle,
+                    kernel_state.inner(),
+                    task_session_id,
+                    "reviewing_prd",
+                    "task_mode.prepare_design_doc.completed",
+                )
+                .await;
+            }
+            Ok(CommandResponse::ok(result))
+        }
+        Err(e) => {
+            if let Some(task_session_id) = session_id.as_ref().map(String::as_str) {
+                sync_kernel_task_phase_by_linked_session_and_emit(
+                    &app_handle,
+                    kernel_state.inner(),
+                    task_session_id,
+                    "failed",
+                    "task_mode.prepare_design_doc.failed_generate",
+                )
+                .await;
+            }
+            Ok(CommandResponse::err(e.to_string()))
+        }
     }
 }
 

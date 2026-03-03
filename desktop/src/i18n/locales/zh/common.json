@@ -135,12 +135,17 @@
   },
 
   "docsIndexing": {
+    "queued": "文档排队中...",
     "scanning": "扫描文档中...",
     "indexing": "文档 {{progress}}%",
     "indexed": "{{count}} 文档",
+    "retryWaiting": "等待重试",
+    "retryNow": "立即重试",
     "changesPending": "文档已变更",
     "syncing": "同步文档中...",
     "syncDocs": "同步",
+    "rebuild": "重建文档索引",
+    "rebuilding": "重建文档索引中...",
     "error": "文档错误"
   },
 

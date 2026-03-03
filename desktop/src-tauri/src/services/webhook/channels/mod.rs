@@ -4,6 +4,7 @@
 //! plus channel module exports.
 
 pub mod custom;
+pub mod discord;
 pub mod feishu;
 pub mod slack;
 pub mod telegram;
@@ -11,7 +12,8 @@ pub mod telegram;
 use async_trait::async_trait;
 
 use super::types::{
-    WebhookChannelConfig, WebhookChannelType, WebhookError, WebhookPayload, WebhookTestResult,
+    WebhookChannelConfig, WebhookChannelType, WebhookError, WebhookPayload, WebhookSendResult,
+    WebhookTestResult,
 };
 
 /// Async trait for webhook channel implementations.
@@ -29,7 +31,7 @@ pub trait WebhookChannel: Send + Sync {
         &self,
         payload: &WebhookPayload,
         config: &WebhookChannelConfig,
-    ) -> Result<(), WebhookError>;
+    ) -> Result<WebhookSendResult, WebhookError>;
 
     /// Test the channel connection by sending a test notification.
     async fn test(&self, config: &WebhookChannelConfig) -> Result<WebhookTestResult, WebhookError>;

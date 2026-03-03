@@ -24,6 +24,7 @@ use tauri::State;
 use tokio::sync::RwLock;
 
 use crate::commands::proxy::resolve_provider_proxy;
+use crate::commands::webhook::WebhookState;
 use crate::models::response::CommandResponse;
 use crate::services::remote::gateway::RemoteGatewayService;
 use crate::services::remote::session_bridge::{BridgeServices, SessionBridge};
@@ -108,6 +109,7 @@ pub async fn get_remote_gateway_status(
 pub async fn start_remote_gateway(
     remote_state: State<'_, RemoteState>,
     app_state: State<'_, AppState>,
+    webhook_state: State<'_, WebhookState>,
 ) -> Result<CommandResponse<()>, String> {
     // Read configs from database
     let config_result = app_state
@@ -168,7 +170,16 @@ pub async fn start_remote_gateway(
     }
 
     // Create gateway
-    let gateway = RemoteGatewayService::new(gateway_config, telegram_config, bridge, db);
+    let mut gateway = RemoteGatewayService::new(gateway_config, telegram_config, bridge, db);
+    match webhook_state.get_or_init(app_state.inner()).await {
+        Ok(webhook_service) => {
+            gateway.set_webhook_service(webhook_service);
+            let _ = webhook_state.start_worker_if_needed(app_state.inner()).await;
+        }
+        Err(err) => {
+            tracing::warn!("Webhook service unavailable for remote gateway: {}", err);
+        }
+    }
 
     // Start gateway
     if let Err(e) = gateway.start(proxy.as_ref()).await {
@@ -519,6 +530,7 @@ pub async fn get_remote_audit_log(
 pub async fn try_auto_start_gateway(
     remote_state: &RemoteState,
     app_state: &AppState,
+    webhook_state: &WebhookState,
 ) -> Result<bool, String> {
     // Read gateway config from database
     let config_result = app_state
@@ -603,7 +615,19 @@ pub async fn try_auto_start_gateway(
     }
 
     // Create and start gateway
-    let gateway = RemoteGatewayService::new(gw_config, telegram_config, bridge, db);
+    let mut gateway = RemoteGatewayService::new(gw_config, telegram_config, bridge, db);
+    match webhook_state.get_or_init(app_state).await {
+        Ok(webhook_service) => {
+            gateway.set_webhook_service(webhook_service);
+            let _ = webhook_state.start_worker_if_needed(app_state).await;
+        }
+        Err(err) => {
+            tracing::warn!(
+                "Webhook service unavailable for remote auto-start gateway: {}",
+                err
+            );
+        }
+    }
     match gateway.start(proxy.as_ref()).await {
         Ok(()) => {
             tracing::info!("Remote gateway auto-started successfully");

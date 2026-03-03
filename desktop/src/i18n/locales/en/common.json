@@ -135,12 +135,17 @@
   },
 
   "docsIndexing": {
+    "queued": "Docs queued",
     "scanning": "Scanning docs...",
     "indexing": "Docs {{progress}}%",
     "indexed": "{{count}} docs",
+    "retryWaiting": "Retry waiting",
+    "retryNow": "Retry now",
     "changesPending": "Docs changed",
     "syncing": "Syncing docs...",
     "syncDocs": "Sync",
+    "rebuild": "Rebuild docs",
+    "rebuilding": "Rebuilding docs...",
     "error": "Docs error"
   },
 

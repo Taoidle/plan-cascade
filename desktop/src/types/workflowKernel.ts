@@ -28,20 +28,46 @@ export interface ChatState {
   lastAssistantMessage: string | null;
 }
 
+export interface PlanClarificationSnapshot {
+  questionId: string;
+  question: string;
+  hint: string | null;
+  inputType: string;
+  options: string[];
+  required: boolean;
+}
+
 export interface PlanState {
   phase: string;
   planId: string | null;
   runningStepId: string | null;
+  pendingClarification: PlanClarificationSnapshot | null;
+  // DEPRECATED: legacy compatibility field.
   pendingQuestion: string | null;
   retryableSteps: string[];
   planRevision: number;
   lastEditOperation: string | null;
 }
 
+export interface TaskInterviewSnapshot {
+  interviewId: string;
+  questionId: string;
+  question: string;
+  hint: string | null;
+  required: boolean;
+  inputType: string;
+  options: string[];
+  allowCustom: boolean;
+  questionNumber: number;
+  totalQuestions: number;
+}
+
 export interface TaskState {
   phase: string;
   prdId: string | null;
   currentStoryId: string | null;
+  interviewSessionId: string | null;
+  pendingInterview: TaskInterviewSnapshot | null;
   completedStories: number;
   failedStories: number;
 }

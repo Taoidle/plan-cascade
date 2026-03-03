@@ -42,6 +42,8 @@ import { useToast } from '../shared/Toast';
 import { useContextSourcesStore } from '../../store/contextSources';
 import { buildConversationHistory } from '../../lib/contextBridge';
 import { ChatTranscript } from './ChatTranscript';
+import type { PlanClarifyQuestionCardData } from '../../types/planModeCard';
+import type { InterviewQuestionCardData } from '../../types/workflowCard';
 import {
   clearPersistedSimpleChatQueue,
   loadPersistedSimpleChatQueue,
@@ -446,8 +448,8 @@ export function SimpleMode() {
   const cancelWorkflow = useWorkflowOrchestratorStore((s) => s.cancelWorkflow);
   const taskWorkflowCancelling = useWorkflowOrchestratorStore((s) => s.isCancelling);
   const resetWorkflow = useWorkflowOrchestratorStore((s) => s.resetWorkflow);
-  const isInterviewSubmitting =
-    useWorkflowOrchestratorStore((s) => s.phase === 'interviewing') && pendingQuestion === null;
+  const interviewStorePhase = useWorkflowOrchestratorStore((s) => s.phase);
+  const syncTaskRuntimeFromKernel = useWorkflowOrchestratorStore((s) => s.syncRuntimeFromKernel);
 
   // Plan mode orchestrator
   const pendingClarifyQuestion = usePlanOrchestratorStore((s) => s.pendingClarifyQuestion);
@@ -459,29 +461,121 @@ export function SimpleMode() {
   const cancelPlanWorkflow = usePlanOrchestratorStore((s) => s.cancelWorkflow);
   const planWorkflowCancelling = usePlanOrchestratorStore((s) => s.isCancelling);
   const resetPlanWorkflow = usePlanOrchestratorStore((s) => s.resetWorkflow);
+  const syncPlanRuntimeFromKernel = usePlanOrchestratorStore((s) => s.syncRuntimeFromKernel);
 
   const workflowKernelTaskPhase = workflowKernelSession?.modeSnapshots.task?.phase ?? 'idle';
   const workflowKernelPlanPhase = workflowKernelSession?.modeSnapshots.plan?.phase ?? 'idle';
   const workflowKernelChatPhase = workflowKernelSession?.modeSnapshots.chat?.phase ?? 'ready';
+  const workflowKernelPendingInterview = workflowKernelSession?.modeSnapshots.task?.pendingInterview ?? null;
+  const workflowKernelPendingClarification = workflowKernelSession?.modeSnapshots.plan?.pendingClarification ?? null;
+  const workflowKernelLinkedTaskSessionId = workflowKernelSession?.linkedModeSessions?.task ?? null;
+  const workflowKernelLinkedPlanSessionId = workflowKernelSession?.linkedModeSessions?.plan ?? null;
+
+  const normalizeInterviewInputType = (
+    inputType: string | null | undefined,
+  ): InterviewQuestionCardData['inputType'] => {
+    switch (inputType) {
+      case 'boolean':
+        return 'boolean';
+      case 'single_select':
+        return 'single_select';
+      case 'multi_select':
+        return 'multi_select';
+      case 'textarea':
+        return 'textarea';
+      case 'text':
+      case 'list':
+      default:
+        return 'text';
+    }
+  };
+
+  const normalizePlanClarifyInputType = (
+    inputType: string | null | undefined,
+  ): PlanClarifyQuestionCardData['inputType'] => {
+    switch (inputType) {
+      case 'boolean':
+        return 'boolean';
+      case 'single_select':
+        return 'single_select';
+      case 'textarea':
+        return 'textarea';
+      case 'text':
+      default:
+        return 'text';
+    }
+  };
+
+  const kernelInterviewQuestion: InterviewQuestionCardData | null = workflowKernelPendingInterview
+    ? {
+        questionId: workflowKernelPendingInterview.questionId,
+        question: workflowKernelPendingInterview.question,
+        hint: workflowKernelPendingInterview.hint,
+        required: workflowKernelPendingInterview.required,
+        inputType: normalizeInterviewInputType(workflowKernelPendingInterview.inputType),
+        options: workflowKernelPendingInterview.options ?? [],
+        allowCustom: workflowKernelPendingInterview.allowCustom ?? true,
+        questionNumber: workflowKernelPendingInterview.questionNumber ?? 1,
+        totalQuestions: workflowKernelPendingInterview.totalQuestions ?? 1,
+      }
+    : null;
+
+  const kernelPlanClarifyQuestion: PlanClarifyQuestionCardData | null = workflowKernelPendingClarification
+    ? {
+        questionId: workflowKernelPendingClarification.questionId,
+        question: workflowKernelPendingClarification.question,
+        hint: workflowKernelPendingClarification.hint,
+        inputType: normalizePlanClarifyInputType(workflowKernelPendingClarification.inputType),
+        options: workflowKernelPendingClarification.options ?? [],
+      }
+    : null;
+
+  const taskPendingQuestion = simpleKernelSot ? kernelInterviewQuestion : pendingQuestion;
+  const planPendingQuestion = simpleKernelSot ? kernelPlanClarifyQuestion : pendingClarifyQuestion;
   const workflowPhase = simpleKernelSot ? workflowKernelTaskPhase : workflowPhaseLegacy;
   const planPhase = simpleKernelSot ? workflowKernelPlanPhase : planPhaseLegacy;
   const chatPhase = simpleKernelSot ? workflowKernelChatPhase : isRunning ? 'running' : 'ready';
   const rightPanelPhase = workflowMode === 'task' ? workflowPhase : workflowMode === 'plan' ? planPhase : chatPhase;
-  const taskInterviewingPhase =
-    workflowMode === 'task' && (workflowPhase === 'interviewing' || workflowPhaseLegacy === 'interviewing');
-  const planClarifyingPhase =
-    workflowMode === 'plan' && (planPhase === 'clarifying' || planPhaseLegacy === 'clarifying');
+  const taskInterviewingPhase = workflowMode === 'task' && workflowPhase === 'interviewing';
+  const planClarifyingPhase = workflowMode === 'plan' && planPhase === 'clarifying';
 
   const hasStructuredInterviewQuestion =
     taskInterviewingPhase &&
-    !!pendingQuestion &&
-    (pendingQuestion.inputType === 'boolean' ||
-      pendingQuestion.inputType === 'single_select' ||
-      pendingQuestion.inputType === 'multi_select');
-  const hasTextInterviewQuestion = taskInterviewingPhase && !!pendingQuestion && !hasStructuredInterviewQuestion;
-  const hasPlanClarifyQuestion = planClarifyingPhase && !!pendingClarifyQuestion;
+    !!taskPendingQuestion &&
+    (taskPendingQuestion.inputType === 'boolean' ||
+      taskPendingQuestion.inputType === 'single_select' ||
+      taskPendingQuestion.inputType === 'multi_select');
+  const hasTextInterviewQuestion = taskInterviewingPhase && !!taskPendingQuestion && !hasStructuredInterviewQuestion;
+  const hasPlanClarifyQuestion = planClarifyingPhase && !!planPendingQuestion;
   const effectiveTaskPhaseForInput = taskInterviewingPhase ? 'interviewing' : workflowPhase;
   const effectivePlanPhaseForInput = planClarifyingPhase ? 'clarifying' : planPhase;
+  const isInterviewSubmitting = taskInterviewingPhase && taskPendingQuestion === null && interviewStorePhase === 'interviewing';
+
+  useEffect(() => {
+    if (!simpleKernelSot) return;
+    syncTaskRuntimeFromKernel({
+      sessionId: workflowKernelLinkedTaskSessionId,
+      interviewId: workflowKernelPendingInterview?.interviewId ?? null,
+      pendingQuestion: kernelInterviewQuestion,
+      phase: workflowKernelTaskPhase,
+    });
+    syncPlanRuntimeFromKernel({
+      sessionId: workflowKernelLinkedPlanSessionId,
+      phase: workflowKernelPlanPhase,
+      pendingClarifyQuestion: kernelPlanClarifyQuestion,
+    });
+  }, [
+    simpleKernelSot,
+    syncTaskRuntimeFromKernel,
+    syncPlanRuntimeFromKernel,
+    workflowKernelLinkedTaskSessionId,
+    workflowKernelLinkedPlanSessionId,
+    workflowKernelPendingInterview?.interviewId,
+    workflowKernelTaskPhase,
+    workflowKernelPlanPhase,
+    kernelInterviewQuestion,
+    kernelPlanClarifyQuestion,
+  ]);
 
   // Tool permission state
   const permissionRequest = useToolPermissionStore((s) => s.pendingRequest);
@@ -595,14 +689,14 @@ export function SimpleMode() {
             metadata: { mode: workflowMode, phase: workflowPhase },
           });
           addPrdFeedback(prompt);
-        } else if (taskInterviewingPhase && pendingQuestion && !hasStructuredInterviewQuestion) {
+        } else if (taskInterviewingPhase && taskPendingQuestion && !hasStructuredInterviewQuestion) {
           await transitionAndSubmitWorkflowKernelInput(workflowMode, {
             type: 'task_interview_answer',
             content: prompt,
             metadata: {
               mode: workflowMode,
               phase: workflowPhase,
-              questionId: pendingQuestion.questionId,
+              questionId: taskPendingQuestion.questionId,
             },
           });
           await submitInterviewAnswer(prompt);
@@ -611,18 +705,18 @@ export function SimpleMode() {
       }
 
       // Route plan clarification through plan orchestrator
-      if (planClarifyingPhase && pendingClarifyQuestion) {
+      if (planClarifyingPhase && planPendingQuestion) {
         await transitionAndSubmitWorkflowKernelInput(workflowMode, {
           type: 'plan_clarification',
           content: prompt,
           metadata: {
             mode: workflowMode,
             phase: planPhase,
-            questionId: pendingClarifyQuestion.questionId,
+            questionId: planPendingQuestion.questionId,
           },
         });
         await submitPlanClarification({
-          questionId: pendingClarifyQuestion.questionId,
+          questionId: planPendingQuestion.questionId,
           answer: prompt,
           skipped: false,
         });
@@ -645,10 +739,10 @@ export function SimpleMode() {
       workflowMode,
       workflowPhase,
       taskInterviewingPhase,
-      pendingQuestion,
+      taskPendingQuestion,
       planPhase,
       planClarifyingPhase,
-      pendingClarifyQuestion,
+      planPendingQuestion,
       hasStructuredInterviewQuestion,
       overrideConfigNatural,
       addPrdFeedback,
@@ -662,7 +756,7 @@ export function SimpleMode() {
     async (answer: string) => {
       const normalized = answer.trim();
       if (!normalized) return;
-      const questionId = pendingQuestion?.questionId;
+      const questionId = taskPendingQuestion?.questionId;
       await transitionAndSubmitWorkflowKernelInput('task', {
         type: 'task_interview_answer',
         content: normalized,
@@ -675,11 +769,11 @@ export function SimpleMode() {
       });
       await submitInterviewAnswer(normalized);
     },
-    [pendingQuestion?.questionId, submitInterviewAnswer, transitionAndSubmitWorkflowKernelInput, workflowPhase],
+    [taskPendingQuestion?.questionId, submitInterviewAnswer, transitionAndSubmitWorkflowKernelInput, workflowPhase],
   );
 
   const handleSkipInterviewQuestion = useCallback(async () => {
-    const questionId = pendingQuestion?.questionId;
+    const questionId = taskPendingQuestion?.questionId;
     await transitionAndSubmitWorkflowKernelInput('task', {
       type: 'task_interview_answer',
       content: '[skip]',
@@ -692,10 +786,10 @@ export function SimpleMode() {
       },
     });
     await skipInterviewQuestion();
-  }, [pendingQuestion?.questionId, skipInterviewQuestion, transitionAndSubmitWorkflowKernelInput, workflowPhase]);
+  }, [taskPendingQuestion?.questionId, skipInterviewQuestion, transitionAndSubmitWorkflowKernelInput, workflowPhase]);
 
   const handleSkipPlanClarifyQuestion = useCallback(async () => {
-    const questionId = pendingClarifyQuestion?.questionId;
+    const questionId = planPendingQuestion?.questionId;
     await transitionAndSubmitWorkflowKernelInput('plan', {
       type: 'plan_clarification',
       content: '[skip]',
@@ -707,13 +801,13 @@ export function SimpleMode() {
         skipped: true,
       },
     });
-    if (!pendingClarifyQuestion) return;
+    if (!planPendingQuestion) return;
     await submitPlanClarification({
-      questionId: pendingClarifyQuestion.questionId,
+      questionId: planPendingQuestion.questionId,
       answer: '',
       skipped: true,
     });
-  }, [pendingClarifyQuestion, planPhase, submitPlanClarification, transitionAndSubmitWorkflowKernelInput]);
+  }, [planPendingQuestion, planPhase, submitPlanClarification, transitionAndSubmitWorkflowKernelInput]);
 
   const handleSkipPlanClarification = useCallback(async () => {
     await transitionAndSubmitWorkflowKernelInput('plan', {
@@ -723,12 +817,12 @@ export function SimpleMode() {
         mode: 'plan',
         phase: planPhase,
         source: 'plan_clarify_skip_all',
-        questionId: pendingClarifyQuestion?.questionId ?? null,
+        questionId: planPendingQuestion?.questionId ?? null,
         skippedAll: true,
       },
     });
     await skipPlanClarification();
-  }, [pendingClarifyQuestion?.questionId, planPhase, skipPlanClarification, transitionAndSubmitWorkflowKernelInput]);
+  }, [planPendingQuestion?.questionId, planPhase, skipPlanClarification, transitionAndSubmitWorkflowKernelInput]);
 
   const removeQueuedChatMessage = useCallback((id: string) => {
     setQueuedChatMessages((prev) => prev.filter((msg) => msg.id !== id));
@@ -973,15 +1067,13 @@ export function SimpleMode() {
       effectiveTaskPhaseForInput === 'requirement_analysis' ||
       effectiveTaskPhaseForInput === 'generating_prd' ||
       effectiveTaskPhaseForInput === 'generating_design_doc' ||
-      effectiveTaskPhaseForInput === 'executing' ||
-      (effectiveTaskPhaseForInput === 'interviewing' && pendingQuestion === null));
+      effectiveTaskPhaseForInput === 'executing');
   const isPlanWorkflowBusy =
     workflowMode === 'plan' &&
     (planIsBusy ||
       effectivePlanPhaseForInput === 'analyzing' ||
       effectivePlanPhaseForInput === 'planning' ||
-      effectivePlanPhaseForInput === 'executing' ||
-      (effectivePlanPhaseForInput === 'clarifying' && pendingClarifyQuestion === null));
+      effectivePlanPhaseForInput === 'executing');
   const isStructuredWorkflowCancelling =
     (workflowMode === 'task' && taskWorkflowCancelling) || (workflowMode === 'plan' && planWorkflowCancelling);
   const canQueueWhileRunning =
@@ -1000,15 +1092,8 @@ export function SimpleMode() {
     inputBusy ||
     isStructuredWorkflowCancelling ||
     hasStructuredInterviewQuestion ||
-    (workflowMode !== 'chat' && isRunning) ||
-    (effectiveTaskPhaseForInput === 'interviewing' && pendingQuestion === null) ||
-    (effectivePlanPhaseForInput === 'clarifying' && pendingClarifyQuestion === null);
-  const inputLoading =
-    (inputBusy ||
-      (workflowMode !== 'chat' && isRunning) ||
-      (effectiveTaskPhaseForInput === 'interviewing' && pendingQuestion === null) ||
-      (effectivePlanPhaseForInput === 'clarifying' && pendingClarifyQuestion === null)) &&
-    !(workflowMode === 'chat' && isRunning);
+    (workflowMode !== 'chat' && isRunning);
+  const inputLoading = (inputBusy || (workflowMode !== 'chat' && isRunning)) && !(workflowMode === 'chat' && isRunning);
   const hoverPanelsEnabled = autoPanelHoverEnabled && supportsPointerHover;
   const isLeftPanelOpen = !sidebarCollapsed || leftPanelHoverExpanded;
   const isRightPanelOpen = rightPanelOpen || rightPanelHoverExpanded;
@@ -1337,9 +1422,9 @@ export function SimpleMode() {
               ) : (
                 <div className="p-4 space-y-3">
                   {/* Structured interview keeps dedicated controls, while the composer stays mounted. */}
-                  {hasStructuredInterviewQuestion && pendingQuestion && (
+                  {hasStructuredInterviewQuestion && taskPendingQuestion && (
                     <InterviewInputPanel
-                      question={pendingQuestion}
+                      question={taskPendingQuestion}
                       onSubmit={handleStructuredInterviewSubmit}
                       onSkip={handleSkipInterviewQuestion}
                       loading={isInterviewSubmitting}
@@ -1347,7 +1432,7 @@ export function SimpleMode() {
                   )}
 
                   {/* Text interview question prompt */}
-                  {hasTextInterviewQuestion && pendingQuestion && (
+                  {hasTextInterviewQuestion && taskPendingQuestion && (
                     <div className="rounded-lg border border-violet-200 dark:border-violet-800 bg-violet-50/40 dark:bg-violet-900/20 px-3 py-2">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
@@ -1355,15 +1440,15 @@ export function SimpleMode() {
                             {t('workflow.interview.questionTitle', { defaultValue: 'Interview Question' })}
                           </p>
                           <p className="mt-1 text-sm font-medium text-violet-800 dark:text-violet-200">
-                            {pendingQuestion.question}
+                            {taskPendingQuestion.question}
                           </p>
-                          {pendingQuestion.hint && (
+                          {taskPendingQuestion.hint && (
                             <p className="mt-1 text-xs text-violet-600/80 dark:text-violet-300/80">
-                              {pendingQuestion.hint}
+                              {taskPendingQuestion.hint}
                             </p>
                           )}
                         </div>
-                        {!pendingQuestion.required && (
+                        {!taskPendingQuestion.required && (
                           <button
                             onClick={() => {
                               void handleSkipInterviewQuestion();
@@ -1378,7 +1463,7 @@ export function SimpleMode() {
                   )}
 
                   {/* Plan clarify prompt while still using the shared composer */}
-                  {hasPlanClarifyQuestion && pendingClarifyQuestion && (
+                  {hasPlanClarifyQuestion && planPendingQuestion && (
                     <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-900/20 px-3 py-2">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
@@ -1386,11 +1471,11 @@ export function SimpleMode() {
                             {t('planMode:clarify.title', { defaultValue: 'Clarification Needed' })}
                           </p>
                           <p className="mt-1 text-sm font-medium text-amber-800 dark:text-amber-200">
-                            {pendingClarifyQuestion.question}
+                            {planPendingQuestion.question}
                           </p>
-                          {pendingClarifyQuestion.hint && (
+                          {planPendingQuestion.hint && (
                             <p className="mt-1 text-xs text-amber-700/80 dark:text-amber-300/80">
-                              {pendingClarifyQuestion.hint}
+                              {planPendingQuestion.hint}
                             </p>
                           )}
                         </div>
@@ -1417,7 +1502,7 @@ export function SimpleMode() {
                   )}
 
                   {/* Question generation/loading hints */}
-                  {taskInterviewingPhase && !pendingQuestion && (
+                  {taskInterviewingPhase && !taskPendingQuestion && (
                     <div className="px-3 py-2 flex items-center gap-2 text-sm text-violet-600 dark:text-violet-400">
                       <svg
                         className="animate-spin h-4 w-4"
@@ -1435,7 +1520,7 @@ export function SimpleMode() {
                       <span>{t('workflow.interview.generating', { defaultValue: 'Generating next question...' })}</span>
                     </div>
                   )}
-                  {planClarifyingPhase && !pendingClarifyQuestion && (
+                  {planClarifyingPhase && !planPendingQuestion && (
                     <div className="px-3 py-2 flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
                       <svg
                         className="animate-spin h-4 w-4"
@@ -1481,7 +1566,7 @@ export function SimpleMode() {
                               ? t('workflow.input.interviewPlaceholder', {
                                   defaultValue: 'Type your answer to the interview question...',
                                 })
-                              : planClarifyingPhase && pendingClarifyQuestion
+                              : planClarifyingPhase && planPendingQuestion
                                 ? t('planMode:clarify.inputPlaceholder', { defaultValue: 'Type your clarification...' })
                                 : workflowMode === 'task'
                                   ? t('workflow.input.taskPlaceholder', {

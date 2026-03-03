@@ -22,8 +22,14 @@ function statusBadgeClass(status: string): string {
       return 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300';
     case 'changes_pending':
       return 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300';
+    case 'queued':
+      return 'bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300';
     case 'indexing':
       return 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300';
+    case 'retry_waiting':
+      return 'bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300';
+    case 'error':
+      return 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300';
     default:
       return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
   }
@@ -32,7 +38,10 @@ function statusBadgeClass(status: string): string {
 function formatStatusLabel(status: string, t: (key: string, options?: Record<string, unknown>) => string): string {
   if (status === 'indexed') return t('syncHealth.statusIndexed', { defaultValue: 'Indexed' });
   if (status === 'changes_pending') return t('syncHealth.statusChangesPending', { defaultValue: 'Changes Pending' });
+  if (status === 'queued') return t('syncHealth.statusQueued', { defaultValue: 'Queued' });
   if (status === 'indexing') return t('syncHealth.statusIndexing', { defaultValue: 'Indexing' });
+  if (status === 'retry_waiting') return t('syncHealth.statusRetryWaiting', { defaultValue: 'Retry Waiting' });
+  if (status === 'error') return t('syncHealth.statusError', { defaultValue: 'Error' });
   if (status === 'none') return t('syncHealth.statusNone', { defaultValue: 'Not Initialized' });
   return status;
 }
@@ -51,6 +60,7 @@ export function SyncHealthPanel({ projectId, collection }: SyncHealthPanelProps)
     fetchDocsStatus,
     ensureDocsCollection,
     syncDocsCollection,
+    rebuildDocsCollection,
     checkForUpdates,
     applyUpdates,
   } = useKnowledgeStore();
@@ -81,6 +91,11 @@ export function SyncHealthPanel({ projectId, collection }: SyncHealthPanelProps)
     if (!effectiveWorkspacePath) return;
     await syncDocsCollection(effectiveWorkspacePath, projectId);
   }, [effectiveWorkspacePath, projectId, syncDocsCollection]);
+
+  const handleRebuild = useCallback(async () => {
+    if (!effectiveWorkspacePath) return;
+    await rebuildDocsCollection(effectiveWorkspacePath, projectId, 'safe_swap');
+  }, [effectiveWorkspacePath, projectId, rebuildDocsCollection]);
 
   const hasChanges =
     pendingUpdates &&
@@ -146,6 +161,21 @@ export function SyncHealthPanel({ projectId, collection }: SyncHealthPanelProps)
           </div>
         </div>
 
+        {docsStatus?.last_error && (
+          <div className="rounded border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
+            <div className="font-semibold mb-1">
+              {t('syncHealth.lastError', { defaultValue: 'Last Error' })}
+              {docsStatus.last_error_code ? ` (${docsStatus.last_error_code})` : ''}
+            </div>
+            <div className="break-all">{docsStatus.last_error}</div>
+            {docsStatus.next_retry_at && (
+              <div className="mt-1">
+                {t('syncHealth.nextRetryAt', { defaultValue: 'Next Retry' })}: {docsStatus.next_retry_at}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={handleRefreshStatus}
@@ -189,6 +219,19 @@ export function SyncHealthPanel({ projectId, collection }: SyncHealthPanelProps)
             {isSyncingDocs
               ? t('syncHealth.syncing', { defaultValue: 'Syncing...' })
               : t('syncHealth.syncNow', { defaultValue: 'Sync Docs Now' })}
+          </button>
+          <button
+            onClick={handleRebuild}
+            disabled={!effectiveWorkspacePath || isSyncingDocs}
+            className={clsx(
+              'text-sm px-3 py-1.5 rounded-md',
+              'bg-red-600 hover:bg-red-700 text-white',
+              'disabled:opacity-50 disabled:cursor-not-allowed',
+            )}
+          >
+            {isSyncingDocs
+              ? t('syncHealth.rebuilding', { defaultValue: 'Rebuilding...' })
+              : t('syncHealth.rebuildDocs', { defaultValue: 'Rebuild Docs Index' })}
           </button>
         </div>
 

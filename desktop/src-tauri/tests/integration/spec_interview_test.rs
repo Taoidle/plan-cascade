@@ -44,6 +44,7 @@ fn standard_config() -> InterviewConfig {
         first_principles: false,
         project_path: Some("/tmp/test-project".to_string()),
         exploration_context: None,
+        task_session_id: None,
         locale: "en".to_string(),
     }
 }
@@ -125,6 +126,7 @@ fn test_first_principles_mode_adds_problem_question() {
         first_principles: true,
         project_path: None,
         exploration_context: None,
+        task_session_id: None,
         locale: "en".to_string(),
     };
 
@@ -763,6 +765,7 @@ fn test_quick_flow_config() {
         first_principles: false,
         project_path: None,
         exploration_context: None,
+        task_session_id: None,
         locale: "en".to_string(),
     };
 

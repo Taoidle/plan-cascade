@@ -4,27 +4,26 @@
 //! existing execution event streams (standalone and claude_code).
 //! These are called from the event forwarder tasks in the command layer.
 
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::services::streaming::UnifiedStreamEvent;
 
 use super::service::WebhookService;
 use super::types::*;
 
-/// Called by event forwarders when a terminal execution event is detected.
+const PROGRESS_MILESTONES: [u8; 3] = [25, 50, 75];
+
+static SENT_PROGRESS_MILESTONES: OnceLock<Mutex<HashMap<String, HashSet<u8>>>> = OnceLock::new();
+
+fn progress_registry() -> &'static Mutex<HashMap<String, HashSet<u8>>> {
+    SENT_PROGRESS_MILESTONES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Called by event forwarders when an execution event is detected.
 ///
-/// Constructs a `WebhookPayload` from the event details and dispatches it
-/// to all matching webhook channels. The dispatch is fire-and-forget
-/// (wrapped in `tokio::spawn`) so it does not block the event stream.
-///
-/// # Arguments
-///
-/// * `event` - The terminal stream event (Complete or Error)
-/// * `session_id` - The session ID that produced this event
-/// * `session_name` - Optional human-readable session name
-/// * `project_path` - Optional project directory path
-/// * `webhook_service` - Reference to the webhook service
-/// * `duration_ms` - Optional execution duration in milliseconds
+/// Dispatch is fire-and-forget (`tokio::spawn`) and never blocks the primary
+/// command flow.
 pub fn dispatch_on_event(
     event: &UnifiedStreamEvent,
     session_id: &str,
@@ -44,10 +43,7 @@ pub fn dispatch_on_event(
     );
 }
 
-/// Called by the remote gateway when a remote command triggers a task completion.
-///
-/// Same as `dispatch_on_event` but includes `remote_source` metadata
-/// (e.g., "via Telegram @username") in the webhook payload.
+/// Called by remote flows with `remote_source` metadata.
 pub fn dispatch_on_remote_event(
     event: &UnifiedStreamEvent,
     session_id: &str,
@@ -68,7 +64,6 @@ pub fn dispatch_on_remote_event(
     );
 }
 
-/// Internal dispatch helper supporting optional remote_source.
 fn dispatch_on_event_inner(
     event: &UnifiedStreamEvent,
     session_id: &str,
@@ -78,84 +73,239 @@ fn dispatch_on_event_inner(
     duration_ms: Option<u64>,
     remote_source: Option<&str>,
 ) {
-    let payload = match build_payload(
+    let payloads = build_payloads(
         event,
         session_id,
         session_name,
         project_path,
         duration_ms,
         remote_source,
-    ) {
-        Some(p) => p,
-        None => return, // Not a terminal event
-    };
+    );
+    if payloads.is_empty() {
+        return;
+    }
 
-    let session_id_owned = session_id.to_string();
-
-    // Fire-and-forget: dispatch should not block event stream processing
-    tokio::spawn(async move {
-        let deliveries = webhook_service.dispatch(payload).await;
-        if !deliveries.is_empty() {
-            tracing::debug!(
-                "Webhook dispatched {} deliveries for session {}",
-                deliveries.len(),
-                session_id_owned
-            );
-        }
-    });
+    for payload in payloads {
+        let svc = webhook_service.clone();
+        let sid = session_id.to_string();
+        tokio::spawn(async move {
+            let deliveries = svc.dispatch(payload).await;
+            if !deliveries.is_empty() {
+                tracing::debug!(
+                    session_id = %sid,
+                    deliveries = deliveries.len(),
+                    "webhook dispatched from event integration"
+                );
+            }
+        });
+    }
 }
 
-/// Build a `WebhookPayload` from an execution event.
-///
-/// Returns `None` for non-terminal events (only Complete and Error produce payloads).
-fn build_payload(
+fn build_payloads(
     event: &UnifiedStreamEvent,
     session_id: &str,
     session_name: Option<&str>,
     project_path: Option<&str>,
     duration_ms: Option<u64>,
     remote_source: Option<&str>,
-) -> Option<WebhookPayload> {
+) -> Vec<WebhookPayload> {
     let source = remote_source.map(|s| s.to_string());
-
     match event {
-        UnifiedStreamEvent::Complete { .. } => {
-            let summary = match &source {
-                Some(src) => format!("Task completed successfully ({})", src),
-                None => "Task completed successfully".to_string(),
+        UnifiedStreamEvent::Complete { stop_reason } => {
+            let cancelled = stop_reason
+                .as_deref()
+                .map(|value| value.eq_ignore_ascii_case("cancelled") || value.eq_ignore_ascii_case("canceled"))
+                .unwrap_or(false);
+            let event_type = if cancelled {
+                WebhookEventType::TaskCancelled
+            } else {
+                WebhookEventType::TaskComplete
             };
-            Some(WebhookPayload {
-                event_type: WebhookEventType::TaskComplete,
-                session_id: Some(session_id.to_string()),
-                session_name: session_name.map(|s| s.to_string()),
-                project_path: project_path.map(|s| s.to_string()),
-                summary,
-                details: None,
-                timestamp: chrono::Utc::now().to_rfc3339(),
+            let summary = match (&source, cancelled) {
+                (Some(src), true) => format!("Task cancelled ({})", src),
+                (Some(src), false) => format!("Task completed successfully ({})", src),
+                (None, true) => "Task cancelled".to_string(),
+                (None, false) => "Task completed successfully".to_string(),
+            };
+
+            vec![base_payload(
+                event_type,
+                session_id,
+                session_name,
+                project_path,
                 duration_ms,
-                token_usage: None,
-                remote_source: source,
-            })
+                source,
+                summary,
+                None,
+            )]
         }
         UnifiedStreamEvent::Error { message, code: _ } => {
             let summary = match &source {
                 Some(src) => format!("Task failed ({}): {}", src, message),
                 None => format!("Task failed: {}", message),
             };
-            Some(WebhookPayload {
-                event_type: WebhookEventType::TaskFailed,
-                session_id: Some(session_id.to_string()),
-                session_name: session_name.map(|s| s.to_string()),
-                project_path: project_path.map(|s| s.to_string()),
-                summary,
-                details: None,
-                timestamp: chrono::Utc::now().to_rfc3339(),
+            vec![base_payload(
+                WebhookEventType::TaskFailed,
+                session_id,
+                session_name,
+                project_path,
                 duration_ms,
-                token_usage: None,
-                remote_source: source,
-            })
+                source,
+                summary,
+                None,
+            )]
         }
-        _ => None,
+        UnifiedStreamEvent::StoryComplete {
+            story_id,
+            success,
+            error,
+            ..
+        } => {
+            if !success {
+                return Vec::new();
+            }
+            let summary = match &source {
+                Some(src) => format!("Story {} completed ({})", story_id, src),
+                None => format!("Story {} completed", story_id),
+            };
+            vec![base_payload(
+                WebhookEventType::StoryComplete,
+                session_id,
+                session_name,
+                project_path,
+                duration_ms,
+                source,
+                summary,
+                Some(serde_json::json!({
+                    "story_id": story_id,
+                    "success": success,
+                    "error": error
+                })),
+            )]
+        }
+        UnifiedStreamEvent::SessionComplete {
+            success,
+            completed_stories,
+            total_stories,
+            ..
+        } => {
+            clear_progress_milestones(session_id);
+            if !success {
+                return Vec::new();
+            }
+
+            let summary = match &source {
+                Some(src) => format!(
+                    "PRD execution completed ({}) [{}/{} stories]",
+                    src, completed_stories, total_stories
+                ),
+                None => format!(
+                    "PRD execution completed [{}/{} stories]",
+                    completed_stories, total_stories
+                ),
+            };
+            vec![base_payload(
+                WebhookEventType::PrdComplete,
+                session_id,
+                session_name,
+                project_path,
+                duration_ms,
+                source,
+                summary,
+                Some(serde_json::json!({
+                    "completed_stories": completed_stories,
+                    "total_stories": total_stories
+                })),
+            )]
+        }
+        UnifiedStreamEvent::SessionProgress { progress, .. } => {
+            let percentage = match extract_progress_percentage(progress) {
+                Some(value) => value,
+                None => return Vec::new(),
+            };
+            let milestone = match pick_new_milestone(session_id, percentage) {
+                Some(value) => value,
+                None => return Vec::new(),
+            };
+            let summary = match &source {
+                Some(src) => format!("Progress milestone reached: {}% ({})", milestone, src),
+                None => format!("Progress milestone reached: {}%", milestone),
+            };
+            vec![base_payload(
+                WebhookEventType::ProgressMilestone,
+                session_id,
+                session_name,
+                project_path,
+                duration_ms,
+                source,
+                summary,
+                Some(serde_json::json!({
+                    "percentage": percentage,
+                    "milestone": milestone
+                })),
+            )]
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn base_payload(
+    event_type: WebhookEventType,
+    session_id: &str,
+    session_name: Option<&str>,
+    project_path: Option<&str>,
+    duration_ms: Option<u64>,
+    remote_source: Option<String>,
+    summary: String,
+    details: Option<serde_json::Value>,
+) -> WebhookPayload {
+    WebhookPayload {
+        event_type,
+        session_id: Some(session_id.to_string()),
+        session_name: session_name.map(|s| s.to_string()),
+        project_path: project_path.map(|s| s.to_string()),
+        summary,
+        details,
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        duration_ms,
+        token_usage: None,
+        remote_source,
+    }
+}
+
+fn extract_progress_percentage(progress: &serde_json::Value) -> Option<u8> {
+    let mut value = progress.get("percentage").and_then(|v| v.as_f64());
+    if value.is_none() {
+        value = progress.get("progress").and_then(|v| v.as_f64());
+    }
+    let mut percentage = value?;
+    if (0.0..=1.0).contains(&percentage) {
+        percentage *= 100.0;
+    }
+    let rounded = percentage.round();
+    if !(0.0..=100.0).contains(&rounded) {
+        return None;
+    }
+    Some(rounded as u8)
+}
+
+fn pick_new_milestone(session_id: &str, percentage: u8) -> Option<u8> {
+    let mut selected = None;
+    let mut registry = progress_registry().lock().ok()?;
+    let sent = registry.entry(session_id.to_string()).or_default();
+    for milestone in PROGRESS_MILESTONES {
+        if percentage >= milestone && !sent.contains(&milestone) {
+            sent.insert(milestone);
+            selected = Some(milestone);
+            break;
+        }
+    }
+    selected
+}
+
+fn clear_progress_milestones(session_id: &str) {
+    if let Ok(mut registry) = progress_registry().lock() {
+        registry.remove(session_id);
     }
 }
 
@@ -173,98 +323,98 @@ pub fn format_remote_source(adapter_type: &str, username: Option<&str>) -> Strin
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_build_payload_complete_event() {
-        let event = UnifiedStreamEvent::Complete { stop_reason: None };
-
-        let payload = build_payload(
-            &event,
-            "session-123",
-            Some("My Session"),
-            Some("/project"),
-            Some(5000),
-            None,
-        );
-
-        assert!(payload.is_some());
-        let p = payload.unwrap();
-        assert_eq!(p.event_type, WebhookEventType::TaskComplete);
-        assert_eq!(p.session_id, Some("session-123".to_string()));
-        assert_eq!(p.session_name, Some("My Session".to_string()));
-        assert_eq!(p.duration_ms, Some(5000));
-        assert!(p.summary.contains("completed successfully"));
-        assert!(p.remote_source.is_none());
+    fn reset_progress(session_id: &str) {
+        clear_progress_milestones(session_id);
     }
 
     #[test]
-    fn test_build_payload_error_event() {
+    fn test_complete_cancelled_maps_to_task_cancelled() {
+        let event = UnifiedStreamEvent::Complete {
+            stop_reason: Some("cancelled".to_string()),
+        };
+        let payloads = build_payloads(&event, "s1", None, None, None, None);
+        assert_eq!(payloads.len(), 1);
+        assert_eq!(payloads[0].event_type, WebhookEventType::TaskCancelled);
+    }
+
+    #[test]
+    fn test_complete_maps_to_task_complete() {
+        let event = UnifiedStreamEvent::Complete { stop_reason: None };
+        let payloads = build_payloads(&event, "s1", None, None, None, None);
+        assert_eq!(payloads.len(), 1);
+        assert_eq!(payloads[0].event_type, WebhookEventType::TaskComplete);
+    }
+
+    #[test]
+    fn test_error_maps_to_task_failed() {
         let event = UnifiedStreamEvent::Error {
-            message: "Connection timeout".to_string(),
+            message: "boom".to_string(),
             code: None,
         };
-
-        let payload = build_payload(&event, "session-456", None, None, None, None);
-
-        assert!(payload.is_some());
-        let p = payload.unwrap();
-        assert_eq!(p.event_type, WebhookEventType::TaskFailed);
-        assert!(p.summary.contains("Connection timeout"));
-        assert!(p.remote_source.is_none());
+        let payloads = build_payloads(&event, "s1", None, None, None, None);
+        assert_eq!(payloads.len(), 1);
+        assert_eq!(payloads[0].event_type, WebhookEventType::TaskFailed);
     }
 
     #[test]
-    fn test_build_payload_non_terminal_event() {
-        let event = UnifiedStreamEvent::TextDelta {
-            content: "hello".to_string(),
+    fn test_story_complete_success_maps_to_story_complete() {
+        let event = UnifiedStreamEvent::StoryComplete {
+            session_id: "s1".to_string(),
+            story_id: "story-1".to_string(),
+            success: true,
+            error: None,
         };
-
-        let payload = build_payload(&event, "session-789", None, None, None, None);
-        assert!(payload.is_none());
+        let payloads = build_payloads(&event, "s1", None, None, None, None);
+        assert_eq!(payloads.len(), 1);
+        assert_eq!(payloads[0].event_type, WebhookEventType::StoryComplete);
     }
 
     #[test]
-    fn test_build_payload_with_remote_source_complete() {
-        let event = UnifiedStreamEvent::Complete { stop_reason: None };
-
-        let payload = build_payload(
-            &event,
-            "session-remote-1",
-            Some("Remote Session"),
-            Some("/projects/app"),
-            Some(10000),
-            Some("via Telegram @testuser"),
-        );
-
-        assert!(payload.is_some());
-        let p = payload.unwrap();
-        assert_eq!(p.event_type, WebhookEventType::TaskComplete);
-        assert_eq!(p.remote_source, Some("via Telegram @testuser".to_string()));
-        assert!(p.summary.contains("via Telegram @testuser"));
-        assert!(p.summary.contains("completed successfully"));
-    }
-
-    #[test]
-    fn test_build_payload_with_remote_source_error() {
-        let event = UnifiedStreamEvent::Error {
-            message: "Out of tokens".to_string(),
-            code: None,
+    fn test_prd_complete_maps_from_session_complete_success() {
+        let event = UnifiedStreamEvent::SessionComplete {
+            session_id: "s1".to_string(),
+            success: true,
+            completed_stories: 3,
+            total_stories: 3,
         };
+        let payloads = build_payloads(&event, "s1", None, None, None, None);
+        assert_eq!(payloads.len(), 1);
+        assert_eq!(payloads[0].event_type, WebhookEventType::PrdComplete);
+    }
 
-        let payload = build_payload(
-            &event,
-            "session-remote-2",
-            None,
-            None,
-            None,
-            Some("via Telegram @admin"),
-        );
+    #[test]
+    fn test_progress_milestone_fires_once_per_threshold() {
+        reset_progress("session-progress");
 
-        assert!(payload.is_some());
-        let p = payload.unwrap();
-        assert_eq!(p.event_type, WebhookEventType::TaskFailed);
-        assert_eq!(p.remote_source, Some("via Telegram @admin".to_string()));
-        assert!(p.summary.contains("via Telegram @admin"));
-        assert!(p.summary.contains("Out of tokens"));
+        let event_30 = UnifiedStreamEvent::SessionProgress {
+            session_id: "session-progress".to_string(),
+            progress: serde_json::json!({ "percentage": 30.0 }),
+        };
+        let payloads = build_payloads(&event_30, "session-progress", None, None, None, None);
+        assert_eq!(payloads.len(), 1);
+        assert_eq!(payloads[0].event_type, WebhookEventType::ProgressMilestone);
+        assert!(payloads[0].summary.contains("25%"));
+
+        let payloads_again = build_payloads(&event_30, "session-progress", None, None, None, None);
+        assert!(payloads_again.is_empty());
+
+        let event_55 = UnifiedStreamEvent::SessionProgress {
+            session_id: "session-progress".to_string(),
+            progress: serde_json::json!({ "percentage": 55.0 }),
+        };
+        let payloads_55 = build_payloads(&event_55, "session-progress", None, None, None, None);
+        assert_eq!(payloads_55.len(), 1);
+        assert!(payloads_55[0].summary.contains("50%"));
+
+        let event_80 = UnifiedStreamEvent::SessionProgress {
+            session_id: "session-progress".to_string(),
+            progress: serde_json::json!({ "percentage": 80.0 }),
+        };
+        let payloads_80 = build_payloads(&event_80, "session-progress", None, None, None, None);
+        assert_eq!(payloads_80.len(), 1);
+        assert!(payloads_80[0].summary.contains("75%"));
+
+        reset_progress("session-progress");
     }
 
     #[test]

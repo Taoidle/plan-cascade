@@ -3,6 +3,7 @@ import {
   ragCheckCollectionUpdates,
   ragEnsureDocsCollection,
   ragGetDocsStatus,
+  ragRebuildDocsCollection,
   ragSyncDocsCollection,
 } from '../../lib/knowledgeApi';
 import type { KnowledgeState } from '../knowledge';
@@ -13,7 +14,13 @@ export function createSyncSlice(
   get: GetState,
 ): Pick<
   KnowledgeState,
-  'fetchDocsStatus' | 'ensureDocsCollection' | 'syncDocsCollection' | 'clearError' | 'checkForUpdates' | 'applyUpdates'
+  | 'fetchDocsStatus'
+  | 'ensureDocsCollection'
+  | 'syncDocsCollection'
+  | 'rebuildDocsCollection'
+  | 'clearError'
+  | 'checkForUpdates'
+  | 'applyUpdates'
 > {
   return {
     fetchDocsStatus: async (workspacePath: string, projectId: string) => {
@@ -75,6 +82,36 @@ export function createSyncSlice(
           set({
             isSyncingDocs: false,
             error: result.error ?? 'Failed to sync docs collection',
+          });
+          return false;
+        }
+        const store = get();
+        await store.fetchCollections(projectId);
+        await store.fetchDocsStatus(workspacePath, projectId);
+        set({ isSyncingDocs: false });
+        return true;
+      } catch (err) {
+        set({
+          isSyncingDocs: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return false;
+      }
+    },
+
+    rebuildDocsCollection: async (
+      workspacePath: string,
+      projectId: string,
+      mode: 'safe_swap' | 'replace' = 'safe_swap',
+    ) => {
+      if (!workspacePath) return false;
+      set({ isSyncingDocs: true, error: null });
+      try {
+        const result = await ragRebuildDocsCollection(workspacePath, projectId, mode);
+        if (!result.success) {
+          set({
+            isSyncingDocs: false,
+            error: result.error ?? 'Failed to rebuild docs collection',
           });
           return false;
         }

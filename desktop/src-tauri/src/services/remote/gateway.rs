@@ -305,7 +305,11 @@ impl RemoteGatewayService {
             }
             RemoteCommand::Status => bridge.get_status_text(msg.chat_id).await,
             RemoteCommand::Cancel => match bridge.cancel_execution(msg.chat_id).await {
-                Ok(()) => "Execution cancelled.".to_string(),
+                Ok(()) => {
+                    should_dispatch_webhook = true;
+                    webhook_event_type = WebhookEventType::TaskCancelled;
+                    "Execution cancelled.".to_string()
+                }
                 Err(e) => ResponseMapper::format_error(&e),
             },
             RemoteCommand::CloseSession => match bridge.close_session(msg.chat_id).await {
@@ -343,6 +347,9 @@ impl RemoteGatewayService {
                     }
                     WebhookEventType::TaskFailed => {
                         format!("Task failed ({})", remote_source)
+                    }
+                    WebhookEventType::TaskCancelled => {
+                        format!("Task cancelled ({})", remote_source)
                     }
                     _ => response.clone(),
                 };

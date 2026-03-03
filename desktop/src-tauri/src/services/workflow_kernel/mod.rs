@@ -92,10 +92,27 @@ impl Default for ChatState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PlanClarificationSnapshot {
+    pub question_id: String,
+    pub question: String,
+    pub hint: Option<String>,
+    pub input_type: String,
+    #[serde(default)]
+    pub options: Vec<String>,
+    #[serde(default)]
+    pub required: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PlanState {
     pub phase: String,
     pub plan_id: Option<String>,
     pub running_step_id: Option<String>,
+    #[serde(default)]
+    pub pending_clarification: Option<PlanClarificationSnapshot>,
+    // DEPRECATED: legacy fallback field kept for persisted-session compatibility.
+    #[serde(default)]
     pub pending_question: Option<String>,
     pub retryable_steps: Vec<String>,
     pub plan_revision: u64,
@@ -108,6 +125,7 @@ impl Default for PlanState {
             phase: "idle".to_string(),
             plan_id: None,
             running_step_id: None,
+            pending_clarification: None,
             pending_question: None,
             retryable_steps: Vec::new(),
             plan_revision: 0,
@@ -118,10 +136,30 @@ impl Default for PlanState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TaskInterviewSnapshot {
+    pub interview_id: String,
+    pub question_id: String,
+    pub question: String,
+    pub hint: Option<String>,
+    pub required: bool,
+    pub input_type: String,
+    #[serde(default)]
+    pub options: Vec<String>,
+    #[serde(default)]
+    pub allow_custom: bool,
+    pub question_number: u32,
+    pub total_questions: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskState {
     pub phase: String,
     pub prd_id: Option<String>,
     pub current_story_id: Option<String>,
+    pub interview_session_id: Option<String>,
+    #[serde(default)]
+    pub pending_interview: Option<TaskInterviewSnapshot>,
     pub completed_stories: u64,
     pub failed_stories: u64,
 }
@@ -132,6 +170,8 @@ impl Default for TaskState {
             phase: "idle".to_string(),
             prd_id: None,
             current_story_id: None,
+            interview_session_id: None,
+            pending_interview: None,
             completed_stories: 0,
             failed_stories: 0,
         }
@@ -324,6 +364,23 @@ pub struct WorkflowKernelUpdatedEvent {
     pub source: String,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct PlanSnapshotRehydrate {
+    pub phase: Option<String>,
+    pub running_step_id: Option<String>,
+    pub pending_clarification: Option<PlanClarificationSnapshot>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TaskSnapshotRehydrate {
+    pub phase: Option<String>,
+    pub current_story_id: Option<String>,
+    pub completed_stories: Option<u64>,
+    pub failed_stories: Option<u64>,
+    pub interview_session_id: Option<String>,
+    pub pending_interview: Option<TaskInterviewSnapshot>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedSessionRecord {
@@ -333,6 +390,7 @@ struct PersistedSessionRecord {
 }
 
 /// In-memory kernel state with persisted event/checkpoint record per session.
+#[derive(Clone)]
 pub struct WorkflowKernelState {
     sessions: Arc<RwLock<HashMap<String, WorkflowSession>>>,
     events: Arc<RwLock<HashMap<String, Vec<WorkflowEventV2>>>>,
@@ -663,6 +721,295 @@ impl WorkflowKernelState {
         Ok(updated_session)
     }
 
+    async fn kernel_sessions_linked_to_mode_session(
+        &self,
+        mode: WorkflowMode,
+        mode_session_id: &str,
+    ) -> Vec<String> {
+        let normalized_mode_session_id = mode_session_id.trim();
+        if normalized_mode_session_id.is_empty() {
+            return Vec::new();
+        }
+
+        let sessions = self.sessions.read().await;
+        sessions
+            .iter()
+            .filter_map(|(kernel_session_id, session)| {
+                let matches = session
+                    .linked_mode_sessions
+                    .get(&mode)
+                    .map(|linked| linked == normalized_mode_session_id)
+                    .unwrap_or(false);
+                if matches {
+                    Some(kernel_session_id.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    pub async fn find_linked_task_session_by_interview_session(
+        &self,
+        interview_session_id: &str,
+    ) -> Option<String> {
+        let normalized_interview_session_id = interview_session_id.trim();
+        if normalized_interview_session_id.is_empty() {
+            return None;
+        }
+
+        let sessions = self.sessions.read().await;
+        sessions.values().find_map(|session| {
+            let task_snapshot = session.mode_snapshots.task.as_ref()?;
+            let interview_id_matches = task_snapshot
+                .interview_session_id
+                .as_ref()
+                .map(|value| value == normalized_interview_session_id)
+                .unwrap_or(false);
+            if !interview_id_matches {
+                return None;
+            }
+            session
+                .linked_mode_sessions
+                .get(&WorkflowMode::Task)
+                .cloned()
+        })
+    }
+
+    pub async fn sync_plan_snapshot_by_linked_session(
+        &self,
+        plan_session_id: &str,
+        phase: Option<String>,
+        pending_clarification: Option<PlanClarificationSnapshot>,
+    ) -> Result<Vec<String>, String> {
+        let linked_kernel_sessions = self
+            .kernel_sessions_linked_to_mode_session(WorkflowMode::Plan, plan_session_id)
+            .await;
+        if linked_kernel_sessions.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        {
+            let mut sessions = self.sessions.write().await;
+            for kernel_session_id in &linked_kernel_sessions {
+                if let Some(session) = sessions.get_mut(kernel_session_id) {
+                    session.mode_snapshots.ensure_mode(WorkflowMode::Plan);
+                    let plan = session.mode_snapshots.plan_mut();
+                    if let Some(next_phase) = phase
+                        .as_ref()
+                        .map(|value| value.trim())
+                        .filter(|value| !value.is_empty())
+                    {
+                        plan.phase = next_phase.to_string();
+                    }
+                    plan.pending_clarification = pending_clarification.clone();
+                    plan.pending_question = plan
+                        .pending_clarification
+                        .as_ref()
+                        .map(|snapshot| snapshot.question.clone());
+                    if plan.pending_clarification.is_none() && phase.is_some() {
+                        plan.pending_question = None;
+                    }
+                    session.updated_at = now_rfc3339();
+                }
+            }
+        }
+
+        for kernel_session_id in &linked_kernel_sessions {
+            self.persist_session_record(kernel_session_id).await?;
+        }
+
+        Ok(linked_kernel_sessions)
+    }
+
+    pub async fn sync_task_snapshot_by_linked_session(
+        &self,
+        task_session_id: &str,
+        phase: Option<String>,
+        current_story_id: Option<String>,
+        completed_stories: Option<u64>,
+        failed_stories: Option<u64>,
+        status: Option<WorkflowStatus>,
+    ) -> Result<Vec<String>, String> {
+        let linked_kernel_sessions = self
+            .kernel_sessions_linked_to_mode_session(WorkflowMode::Task, task_session_id)
+            .await;
+        if linked_kernel_sessions.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        {
+            let mut sessions = self.sessions.write().await;
+            for kernel_session_id in &linked_kernel_sessions {
+                if let Some(session) = sessions.get_mut(kernel_session_id) {
+                    session.mode_snapshots.ensure_mode(WorkflowMode::Task);
+                    let task = session.mode_snapshots.task_mut();
+                    if let Some(next_phase) = phase
+                        .as_ref()
+                        .map(|value| value.trim())
+                        .filter(|value| !value.is_empty())
+                    {
+                        task.phase = next_phase.to_string();
+                    }
+                    if let Some(story_id) = current_story_id
+                        .as_ref()
+                        .map(|value| value.trim())
+                        .filter(|value| !value.is_empty())
+                    {
+                        task.current_story_id = Some(story_id.to_string());
+                    }
+                    if let Some(completed) = completed_stories {
+                        task.completed_stories = completed;
+                    }
+                    if let Some(failed) = failed_stories {
+                        task.failed_stories = failed;
+                    }
+                    if let Some(next_status) = status {
+                        session.status = next_status;
+                    }
+                    if phase.as_deref() != Some("interviewing") {
+                        task.pending_interview = None;
+                    }
+                    session.updated_at = now_rfc3339();
+                }
+            }
+        }
+
+        for kernel_session_id in &linked_kernel_sessions {
+            self.persist_session_record(kernel_session_id).await?;
+        }
+
+        Ok(linked_kernel_sessions)
+    }
+
+    pub async fn sync_task_interview_snapshot_by_linked_session(
+        &self,
+        task_session_id: &str,
+        interview_session_id: Option<String>,
+        phase: Option<String>,
+        pending_interview: Option<TaskInterviewSnapshot>,
+    ) -> Result<Vec<String>, String> {
+        let linked_kernel_sessions = self
+            .kernel_sessions_linked_to_mode_session(WorkflowMode::Task, task_session_id)
+            .await;
+        if linked_kernel_sessions.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        {
+            let mut sessions = self.sessions.write().await;
+            for kernel_session_id in &linked_kernel_sessions {
+                if let Some(session) = sessions.get_mut(kernel_session_id) {
+                    session.mode_snapshots.ensure_mode(WorkflowMode::Task);
+                    let task = session.mode_snapshots.task_mut();
+                    if let Some(next_phase) = phase
+                        .as_ref()
+                        .map(|value| value.trim())
+                        .filter(|value| !value.is_empty())
+                    {
+                        task.phase = next_phase.to_string();
+                    }
+                    if let Some(interview_session_id) = interview_session_id
+                        .as_ref()
+                        .map(|value| value.trim())
+                        .filter(|value| !value.is_empty())
+                    {
+                        task.interview_session_id = Some(interview_session_id.to_string());
+                    }
+                    task.pending_interview = pending_interview.clone();
+                    session.updated_at = now_rfc3339();
+                }
+            }
+        }
+
+        for kernel_session_id in &linked_kernel_sessions {
+            self.persist_session_record(kernel_session_id).await?;
+        }
+
+        Ok(linked_kernel_sessions)
+    }
+
+    pub async fn rehydrate_from_linked_sessions(
+        &self,
+        kernel_session_id: &str,
+        plan_snapshot: Option<PlanSnapshotRehydrate>,
+        task_snapshot: Option<TaskSnapshotRehydrate>,
+    ) -> Result<WorkflowSession, String> {
+        {
+            let mut sessions = self.sessions.write().await;
+            let session = sessions
+                .get_mut(kernel_session_id)
+                .ok_or_else(|| format!("Workflow session not found: {kernel_session_id}"))?;
+
+            if let Some(plan_snapshot) = plan_snapshot {
+                session.mode_snapshots.ensure_mode(WorkflowMode::Plan);
+                let plan = session.mode_snapshots.plan_mut();
+                if let Some(next_phase) = plan_snapshot
+                    .phase
+                    .as_ref()
+                    .map(|value| value.trim())
+                    .filter(|value| !value.is_empty())
+                {
+                    plan.phase = next_phase.to_string();
+                }
+                if let Some(running_step_id) = plan_snapshot
+                    .running_step_id
+                    .as_ref()
+                    .map(|value| value.trim())
+                    .filter(|value| !value.is_empty())
+                {
+                    plan.running_step_id = Some(running_step_id.to_string());
+                }
+                plan.pending_clarification = plan_snapshot.pending_clarification.clone();
+                plan.pending_question = plan
+                    .pending_clarification
+                    .as_ref()
+                    .map(|snapshot| snapshot.question.clone());
+            }
+
+            if let Some(task_snapshot) = task_snapshot {
+                session.mode_snapshots.ensure_mode(WorkflowMode::Task);
+                let task = session.mode_snapshots.task_mut();
+                if let Some(next_phase) = task_snapshot
+                    .phase
+                    .as_ref()
+                    .map(|value| value.trim())
+                    .filter(|value| !value.is_empty())
+                {
+                    task.phase = next_phase.to_string();
+                }
+                if let Some(current_story_id) = task_snapshot
+                    .current_story_id
+                    .as_ref()
+                    .map(|value| value.trim())
+                    .filter(|value| !value.is_empty())
+                {
+                    task.current_story_id = Some(current_story_id.to_string());
+                }
+                if let Some(completed_stories) = task_snapshot.completed_stories {
+                    task.completed_stories = completed_stories;
+                }
+                if let Some(failed_stories) = task_snapshot.failed_stories {
+                    task.failed_stories = failed_stories;
+                }
+                if let Some(interview_session_id) = task_snapshot
+                    .interview_session_id
+                    .as_ref()
+                    .map(|value| value.trim())
+                    .filter(|value| !value.is_empty())
+                {
+                    task.interview_session_id = Some(interview_session_id.to_string());
+                }
+                task.pending_interview = task_snapshot.pending_interview;
+            }
+
+            session.updated_at = now_rfc3339();
+        }
+
+        self.persist_session_record(kernel_session_id).await?;
+        self.get_session(kernel_session_id).await
+    }
+
     pub async fn apply_plan_edit(
         &self,
         session_id: &str,
@@ -900,11 +1247,50 @@ impl WorkflowKernelState {
                 plan.phase = "idle".to_string();
                 repaired.push("mode_snapshots.plan.phase".to_string());
             }
+            if plan.pending_clarification.is_none() {
+                if let Some(legacy_question) = plan
+                    .pending_question
+                    .as_ref()
+                    .map(|value| value.trim())
+                    .filter(|value| !value.is_empty())
+                {
+                    plan.pending_clarification = Some(PlanClarificationSnapshot {
+                        question_id: "legacy-recovered-question".to_string(),
+                        question: legacy_question.to_string(),
+                        hint: None,
+                        input_type: "text".to_string(),
+                        options: Vec::new(),
+                        required: false,
+                    });
+                    repaired.push("mode_snapshots.plan.pending_clarification".to_string());
+                }
+            }
+            if let Some(pending) = plan.pending_clarification.as_ref() {
+                if plan
+                    .pending_question
+                    .as_ref()
+                    .map(|value| value.trim())
+                    .unwrap_or("")
+                    .is_empty()
+                {
+                    plan.pending_question = Some(pending.question.clone());
+                    repaired.push("mode_snapshots.plan.pending_question".to_string());
+                }
+            }
         }
         if let Some(task) = session.mode_snapshots.task.as_mut() {
             if task.phase.trim().is_empty() {
                 task.phase = "idle".to_string();
                 repaired.push("mode_snapshots.task.phase".to_string());
+            }
+            if task
+                .interview_session_id
+                .as_ref()
+                .map(|value| value.trim())
+                .unwrap_or("")
+                .is_empty()
+            {
+                task.interview_session_id = None;
             }
         }
 
@@ -1445,6 +1831,110 @@ mod tests {
                 .get(&WorkflowMode::Task)
                 .map(String::as_str),
             Some("task-session-123")
+        );
+    }
+
+    #[tokio::test]
+    async fn repair_snapshot_integrity_converts_legacy_pending_question() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let kernel = WorkflowKernelState::new_with_storage_dir(temp_dir.path().to_path_buf());
+
+        let mut session = kernel
+            .open_session(Some(WorkflowMode::Plan), None)
+            .await
+            .expect("open session");
+        {
+            session.mode_snapshots.ensure_mode(WorkflowMode::Plan);
+            let plan = session.mode_snapshots.plan_mut();
+            plan.pending_question = Some("Need legacy clarification".to_string());
+            plan.pending_clarification = None;
+        }
+
+        let repaired = WorkflowKernelState::repair_snapshot_integrity(&mut session);
+        let plan = session.mode_snapshots.plan.as_ref().expect("plan snapshot");
+        let pending = plan
+            .pending_clarification
+            .as_ref()
+            .expect("pending clarification converted from legacy field");
+
+        assert_eq!(pending.question, "Need legacy clarification");
+        assert_eq!(pending.question_id, "legacy-recovered-question");
+        assert!(repaired
+            .iter()
+            .any(|item| item == "mode_snapshots.plan.pending_clarification"));
+    }
+
+    #[tokio::test]
+    async fn rehydrate_from_linked_sessions_restores_pending_interactions() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let kernel = WorkflowKernelState::new_with_storage_dir(temp_dir.path().to_path_buf());
+
+        let session = kernel
+            .open_session(Some(WorkflowMode::Task), None)
+            .await
+            .expect("open session");
+        let session_id = session.session_id.clone();
+
+        let plan_snapshot = PlanSnapshotRehydrate {
+            phase: Some("clarifying".to_string()),
+            running_step_id: None,
+            pending_clarification: Some(PlanClarificationSnapshot {
+                question_id: "plan-q1".to_string(),
+                question: "Which scope should be prioritized?".to_string(),
+                hint: Some("Choose one primary objective".to_string()),
+                input_type: "single_select".to_string(),
+                options: vec!["Performance".to_string(), "UX".to_string()],
+                required: true,
+            }),
+        };
+        let task_snapshot = TaskSnapshotRehydrate {
+            phase: Some("interviewing".to_string()),
+            current_story_id: Some("S001".to_string()),
+            completed_stories: Some(2),
+            failed_stories: Some(1),
+            interview_session_id: Some("interview-session-1".to_string()),
+            pending_interview: Some(TaskInterviewSnapshot {
+                interview_id: "interview-session-1".to_string(),
+                question_id: "task-q1".to_string(),
+                question: "Should we keep backward compatibility?".to_string(),
+                hint: Some("Answer yes/no with rationale".to_string()),
+                required: true,
+                input_type: "boolean".to_string(),
+                options: vec!["yes".to_string(), "no".to_string()],
+                allow_custom: false,
+                question_number: 1,
+                total_questions: 4,
+            }),
+        };
+
+        let updated = kernel
+            .rehydrate_from_linked_sessions(&session_id, Some(plan_snapshot), Some(task_snapshot))
+            .await
+            .expect("rehydrate linked sessions");
+
+        let plan = updated.mode_snapshots.plan.as_ref().expect("plan snapshot");
+        assert_eq!(plan.phase, "clarifying");
+        assert_eq!(
+            plan.pending_clarification
+                .as_ref()
+                .map(|item| item.question_id.as_str()),
+            Some("plan-q1")
+        );
+        assert_eq!(
+            plan.pending_question.as_deref(),
+            Some("Which scope should be prioritized?")
+        );
+
+        let task = updated.mode_snapshots.task.as_ref().expect("task snapshot");
+        assert_eq!(task.phase, "interviewing");
+        assert_eq!(task.current_story_id.as_deref(), Some("S001"));
+        assert_eq!(task.completed_stories, 2);
+        assert_eq!(task.failed_stories, 1);
+        assert_eq!(
+            task.pending_interview
+                .as_ref()
+                .map(|item| item.question_id.as_str()),
+            Some("task-q1")
         );
     }
 

@@ -66,7 +66,15 @@ export interface WebhookDelivery {
   response_body?: string;
   attempts: number;
   last_attempt_at: string;
+  next_retry_at?: string;
+  last_error?: string;
   created_at: string;
+}
+
+export interface WebhookHealth {
+  worker_running: boolean;
+  failed_queue_length: number;
+  last_retry_at?: string;
 }
 
 export interface WebhookTestResult {
@@ -215,6 +223,21 @@ export async function retryWebhookDelivery(deliveryId: string): Promise<CommandR
     return await invoke<CommandResponse<WebhookDelivery>>('retry_webhook_delivery', {
       delivery_id: deliveryId,
     });
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Get webhook worker health and failed queue metrics.
+ */
+export async function getWebhookHealth(): Promise<CommandResponse<WebhookHealth>> {
+  try {
+    return await invoke<CommandResponse<WebhookHealth>>('get_webhook_health');
   } catch (error) {
     return {
       success: false,

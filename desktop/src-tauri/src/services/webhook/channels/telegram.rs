@@ -55,7 +55,7 @@ impl WebhookChannel for TelegramNotifyChannel {
         &self,
         payload: &WebhookPayload,
         config: &WebhookChannelConfig,
-    ) -> Result<(), WebhookError> {
+    ) -> Result<WebhookSendResult, WebhookError> {
         let bot_token = config.secret.as_deref().ok_or_else(|| {
             WebhookError::InvalidConfig("Telegram bot token not configured".to_string())
         })?;
@@ -64,6 +64,7 @@ impl WebhookChannel for TelegramNotifyChannel {
         let text = self.format_message(payload, config.template.as_deref());
 
         let api_url = format!("https://api.telegram.org/bot{}/sendMessage", bot_token);
+        let started = std::time::Instant::now();
 
         let body = serde_json::json!({
             "chat_id": chat_id,
@@ -79,16 +80,25 @@ impl WebhookChannel for TelegramNotifyChannel {
             .send()
             .await?;
 
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let body = response.text().await.unwrap_or_default();
-            return Err(WebhookError::HttpError(format!(
-                "Telegram returned HTTP {}: {}",
-                status, body
-            )));
+        let status = response.status().as_u16();
+        let response_body = response.text().await.ok().filter(|s| !s.is_empty());
+        if status >= 200 && status < 300 {
+            Ok(WebhookSendResult {
+                success: true,
+                status_code: Some(status),
+                latency_ms: started.elapsed().as_millis() as u32,
+                response_body,
+                error: None,
+            })
+        } else {
+            Ok(WebhookSendResult {
+                success: false,
+                status_code: Some(status),
+                latency_ms: started.elapsed().as_millis() as u32,
+                response_body: response_body.clone(),
+                error: Some(format!("Telegram returned HTTP {}", status)),
+            })
         }
-
-        Ok(())
     }
 
     async fn test(&self, config: &WebhookChannelConfig) -> Result<WebhookTestResult, WebhookError> {
@@ -99,16 +109,15 @@ impl WebhookChannel for TelegramNotifyChannel {
             ..Default::default()
         };
 
-        let start = std::time::Instant::now();
         match self.send(&test_payload, config).await {
-            Ok(()) => Ok(WebhookTestResult {
-                success: true,
-                latency_ms: Some(start.elapsed().as_millis() as u32),
-                error: None,
+            Ok(send_result) => Ok(WebhookTestResult {
+                success: send_result.success,
+                latency_ms: Some(send_result.latency_ms),
+                error: send_result.error,
             }),
             Err(e) => Ok(WebhookTestResult {
                 success: false,
-                latency_ms: Some(start.elapsed().as_millis() as u32),
+                latency_ms: None,
                 error: Some(e.to_string()),
             }),
         }
