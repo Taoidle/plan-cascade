@@ -367,9 +367,22 @@ function createKernelSession(activeMode: 'chat' | 'plan' | 'task' = 'chat'): Wor
       },
       plan: {
         phase: 'idle',
+        planId: null,
+        runningStepId: null,
+        pendingClarification: null,
+        pendingQuestion: null,
+        retryableSteps: [],
+        planRevision: 0,
+        lastEditOperation: null,
       },
       task: {
         phase: 'idle',
+        prdId: null,
+        currentStoryId: null,
+        interviewSessionId: null,
+        pendingInterview: null,
+        completedStories: 0,
+        failedStories: 0,
       },
     },
     handoffContext: {
@@ -437,7 +450,6 @@ function resetStates() {
     sidebarCollapsed: false,
     setSidebarCollapsed: vi.fn(),
     autoPanelHoverEnabled: false,
-    simpleKernelSot: true,
   });
 
   storeHarness.setWorkflowKernelState({
@@ -560,7 +572,7 @@ describe('SimpleMode', () => {
     expect(screen.getByText('Connection refused')).toBeInTheDocument();
   });
 
-  it('starts task workflow and links task session when SIMPLE_KERNEL_SOT is enabled', async () => {
+  it('starts task workflow and links task session', async () => {
     renderSimpleMode();
 
     fireEvent.click(screen.getByTestId('mode-task'));
@@ -577,7 +589,7 @@ describe('SimpleMode', () => {
     });
   });
 
-  it('starts plan workflow and links plan session when SIMPLE_KERNEL_SOT is enabled', async () => {
+  it('starts plan workflow and links plan session', async () => {
     renderSimpleMode();
 
     fireEvent.click(screen.getByTestId('mode-plan'));
@@ -594,11 +606,7 @@ describe('SimpleMode', () => {
     });
   });
 
-  it('uses legacy phase and refresh polling fallback when SIMPLE_KERNEL_SOT is disabled', async () => {
-    storeHarness.setSettingsState({
-      ...storeHarness.getSettingsState(),
-      simpleKernelSot: false,
-    });
+  it('uses kernel snapshot phase as single source of truth', async () => {
     storeHarness.setWorkflowOrchestratorState({
       ...storeHarness.getWorkflowOrchestratorState(),
       phase: 'executing',
@@ -612,7 +620,10 @@ describe('SimpleMode', () => {
         ...kernelSession,
         modeSnapshots: {
           ...kernelSession.modeSnapshots,
-          task: { phase: 'idle' },
+          task: {
+            ...kernelSession.modeSnapshots.task,
+            phase: 'idle',
+          },
         },
       },
     });
@@ -625,41 +636,18 @@ describe('SimpleMode', () => {
 
     fireEvent.click(screen.getByTestId('toggle-output'));
     await waitFor(() => {
-      expect(screen.getByTestId('tabbed-right-panel')).toHaveAttribute('data-workflow-phase', 'executing');
+      expect(screen.getByTestId('tabbed-right-panel')).toHaveAttribute('data-workflow-phase', 'idle');
     });
 
     await new Promise((resolve) => setTimeout(resolve, 1700));
-    expect(storeHarness.getWorkflowKernelState().refreshSessionState).toHaveBeenCalled();
-  });
-
-  it('does not link mode session when SIMPLE_KERNEL_SOT is disabled', async () => {
-    storeHarness.setSettingsState({
-      ...storeHarness.getSettingsState(),
-      simpleKernelSot: false,
-    });
-
-    renderSimpleMode();
-    fireEvent.click(screen.getByTestId('mode-task'));
-    await waitFor(() => {
-      expect(screen.getByTestId('toolbar-workflow-mode')).toHaveTextContent('task');
-    });
-
-    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'Run task in legacy rollout' } });
-    fireEvent.click(screen.getByTestId('composer-submit'));
-
-    await waitFor(() => {
-      expect(storeHarness.getWorkflowOrchestratorState().startWorkflow).toHaveBeenCalledWith(
-        'Run task in legacy rollout',
-      );
-    });
-    expect(storeHarness.getWorkflowKernelState().linkModeSession).not.toHaveBeenCalled();
+    expect(storeHarness.getWorkflowKernelState().refreshSessionState).not.toHaveBeenCalled();
   });
 
   it('shows task interview input panel when kernel has pending interview even if orchestrator question is empty', async () => {
     const kernelSession = createKernelSession('task');
     kernelSession.linkedModeSessions.task = 'task-session-1';
     kernelSession.modeSnapshots.task = {
-      ...kernelSession.modeSnapshots.task,
+      ...kernelSession.modeSnapshots.task!,
       phase: 'interviewing',
       pendingInterview: {
         interviewId: 'interview-1',
@@ -703,7 +691,7 @@ describe('SimpleMode', () => {
     const kernelSession = createKernelSession('plan');
     kernelSession.linkedModeSessions.plan = 'plan-session-1';
     kernelSession.modeSnapshots.plan = {
-      ...kernelSession.modeSnapshots.plan,
+      ...kernelSession.modeSnapshots.plan!,
       phase: 'clarifying',
       pendingClarification: {
         questionId: 'q1',

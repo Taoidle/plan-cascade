@@ -51,9 +51,6 @@ vi.mock('react-i18next', () => ({
         'general.knowledgeBase.kbIngestJobScopedProgress': 'Use job-scoped ingest progress events',
         'general.knowledgeBase.kbIngestJobScopedProgressDescription': 'Isolate upload progress by job',
         'general.simpleWorkflow.title': 'Simple Workflow Rollout',
-        'general.simpleWorkflow.simpleKernelSot': 'SIMPLE_KERNEL_SOT (Kernel phase source of truth)',
-        'general.simpleWorkflow.simpleKernelSotDescription':
-          'Use workflow-kernel snapshots and events as the primary phase authority.',
         'general.simpleWorkflow.typedCardPipeline': 'TYPED_CARD_PIPELINE (Structured card payload path)',
         'general.simpleWorkflow.typedCardPipelineDescription':
           'Render workflow cards from typed payloads first, with JSON fallback for legacy history.',
@@ -160,7 +157,6 @@ const mockSetKnowledgeAutoEnsureDocsCollection = vi.fn();
 const mockSetKbQueryRunsV2 = vi.fn();
 const mockSetKbPickerServerSearch = vi.fn();
 const mockSetKbIngestJobScopedProgress = vi.fn();
-const mockSetSimpleKernelSot = vi.fn();
 const mockSetTypedCardPipeline = vi.fn();
 
 const mockSettingsState = {
@@ -181,7 +177,6 @@ const mockSettingsState = {
   kbQueryRunsV2: true,
   kbPickerServerSearch: true,
   kbIngestJobScopedProgress: true,
-  simpleKernelSot: true,
   typedCardPipeline: true,
   agents: [
     { name: 'claude-code', enabled: true, command: 'claude', isDefault: true },
@@ -209,7 +204,6 @@ const mockSettingsState = {
   setKbQueryRunsV2: mockSetKbQueryRunsV2,
   setKbPickerServerSearch: mockSetKbPickerServerSearch,
   setKbIngestJobScopedProgress: mockSetKbIngestJobScopedProgress,
-  setSimpleKernelSot: mockSetSimpleKernelSot,
   setTypedCardPipeline: mockSetTypedCardPipeline,
 };
 

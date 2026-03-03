@@ -62,8 +62,6 @@
 
     "simpleWorkflow": {
       "title": "Simple ワークフローのロールアウト",
-      "simpleKernelSot": "SIMPLE_KERNEL_SOT（Kernel phase の単一真実源）",
-      "simpleKernelSotDescription": "workflow-kernel のスナップショットとイベントを主要な phase の基準として使用します。",
       "typedCardPipeline": "TYPED_CARD_PIPELINE（型付きカード経路）",
       "typedCardPipelineDescription": "ワークフローカードは型付き payload を優先し、履歴 JSON の互換フォールバックを維持します。"
     },

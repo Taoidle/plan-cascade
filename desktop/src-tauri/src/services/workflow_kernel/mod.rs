@@ -275,6 +275,7 @@ pub struct WorkflowEventV2 {
 pub enum UserInputIntentType {
     ChatMessage,
     ModeEntryPrompt,
+    FollowUpIntent,
     PlanClarification,
     PlanEditInstruction,
     PlanApproval,

@@ -68,7 +68,7 @@ describe('SimpleInputComposer', () => {
   it('renders queued messages and removes one on click', () => {
     const onRemoveQueuedChatMessage = vi.fn();
     const props = makeProps({
-      queuedChatMessages: [{ id: 'q1', prompt: 'queued prompt', submitAsFollowUp: true }],
+      queuedChatMessages: [{ id: 'q1', prompt: 'queued prompt', submitAsFollowUp: true, mode: 'chat', attempts: 0 }],
       onRemoveQueuedChatMessage,
     });
 

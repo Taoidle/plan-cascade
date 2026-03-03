@@ -18,8 +18,6 @@ function eventIcon(eventType: string): string {
       return '\u2705';
     case 'step_failed':
       return '\u274C';
-    case 'batch_completed':
-      return '\u2714';
     default:
       return '\u2022';
   }
@@ -35,8 +33,6 @@ function eventLabel(eventType: string, t: (key: string, defaultValue: string) =>
       return t('execution.stepCompleted', 'Step Completed');
     case 'step_failed':
       return t('execution.stepFailed', 'Step Failed');
-    case 'batch_completed':
-      return t('execution.batchComplete', 'Batch Complete');
     default:
       return eventType;
   }

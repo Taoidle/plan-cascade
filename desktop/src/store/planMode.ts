@@ -173,8 +173,6 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
           currentQuestion: result.data.currentQuestion ?? null,
           isLoading: false,
         });
-        // Subscribe to events
-        await get().subscribeToEvents();
       } else {
         set({ isLoading: false, error: result.error || 'Failed to enter plan mode' });
       }

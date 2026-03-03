@@ -62,8 +62,6 @@
 
     "simpleWorkflow": {
       "title": "Simple 工作流灰度",
-      "simpleKernelSot": "SIMPLE_KERNEL_SOT（Kernel phase 单一真相源）",
-      "simpleKernelSotDescription": "将 workflow-kernel 的快照与事件作为主要 phase 权威来源。",
       "typedCardPipeline": "TYPED_CARD_PIPELINE（类型化 Card 渲染链路）",
       "typedCardPipelineDescription": "优先使用类型化 payload 渲染工作流卡片，并保留历史 JSON 兼容回放。"
     },

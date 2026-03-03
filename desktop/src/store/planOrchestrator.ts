@@ -379,6 +379,25 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       const { sessionId } = get();
       if (payload.sessionId !== sessionId) return;
 
+      const planModeState = usePlanModeStore.getState();
+      const planModePatch: {
+        currentBatch: number;
+        totalBatches: number;
+        stepStatuses?: Record<string, string>;
+        sessionPhase?: PlanModePhase;
+        error?: string | null;
+        isCancelling?: boolean;
+      } = {
+        currentBatch: payload.currentBatch,
+        totalBatches: payload.totalBatches,
+      };
+      if (payload.stepId && payload.stepStatus) {
+        planModePatch.stepStatuses = {
+          ...planModeState.stepStatuses,
+          [payload.stepId]: payload.stepStatus,
+        };
+      }
+
       // Inject step update cards
       const stepTitle = plan.steps.find((s) => s.id === payload.stepId)?.title;
 
@@ -431,7 +450,9 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
 
       // On completion, inject completion card
       if (payload.eventType === 'execution_completed') {
-        const planModeState = usePlanModeStore.getState();
+        planModePatch.sessionPhase = 'completed';
+        planModePatch.isCancelling = false;
+        usePlanModeStore.setState(planModePatch);
         planModeState.fetchReport().then(() => {
           if (get()._runToken !== runToken) return;
           const { report } = usePlanModeStore.getState();
@@ -446,11 +467,27 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
               stepSummaries: report.stepSummaries,
             } satisfies PlanCompletionCardData);
           }
-          set({ phase: report?.success ? 'completed' : 'failed', isBusy: false, isCancelling: false });
+          usePlanModeStore.setState({ sessionPhase: report?.success ? 'completed' : 'failed', isCancelling: false });
+          set({
+            phase: report?.success ? 'completed' : 'failed',
+            isBusy: false,
+            isCancelling: false,
+            _progressUnlisten: null,
+          });
+          unlisten();
         });
       } else if (payload.eventType === 'execution_cancelled') {
         if (get()._runToken !== runToken) return;
-        set({ phase: 'cancelled', isBusy: false, isCancelling: false });
+        planModePatch.sessionPhase = 'cancelled';
+        planModePatch.isCancelling = false;
+        usePlanModeStore.setState(planModePatch);
+        set({ phase: 'cancelled', isBusy: false, isCancelling: false, _progressUnlisten: null });
+        unlisten();
+      } else {
+        if (payload.eventType === 'step_failed' && payload.error) {
+          planModePatch.error = payload.error;
+        }
+        usePlanModeStore.setState(planModePatch);
       }
     });
 
@@ -470,18 +507,53 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       conversationHistory.length > 0
         ? conversationHistory.map((t) => `user: ${t.user}\nassistant: ${t.assistant}`).join('\n')
         : undefined;
-    await planStore.approvePlan(
-      plan,
-      undefined,
-      undefined,
-      undefined,
-      projectPath,
-      contextSources,
-      contextStr,
-      i18n.language,
-    );
+    try {
+      await planStore.approvePlan(
+        plan,
+        undefined,
+        undefined,
+        undefined,
+        projectPath,
+        contextSources,
+        contextStr,
+        i18n.language,
+      );
+    } catch (error) {
+      if (get()._progressUnlisten) {
+        get()._progressUnlisten?.();
+      } else {
+        unlisten();
+      }
+      set({ _progressUnlisten: null, phase: 'reviewing_plan', isBusy: false, isCancelling: false });
+      injectError(
+        i18n.t('planMode:orchestrator.approveFailed', 'Failed to start plan execution'),
+        error instanceof Error ? error.message : String(error),
+      );
+      return;
+    }
+
     if (get()._runToken !== runToken) {
-      unlisten();
+      if (get()._progressUnlisten) {
+        get()._progressUnlisten?.();
+      } else {
+        unlisten();
+      }
+      set({ _progressUnlisten: null });
+      return;
+    }
+
+    const latestPlanState = usePlanModeStore.getState();
+    if (latestPlanState.error) {
+      if (get()._progressUnlisten) {
+        get()._progressUnlisten?.();
+      } else {
+        unlisten();
+      }
+      set({ _progressUnlisten: null, phase: 'reviewing_plan', isBusy: false, isCancelling: false });
+      injectError(
+        i18n.t('planMode:orchestrator.approveFailed', 'Failed to start plan execution'),
+        latestPlanState.error,
+      );
     }
   },
 

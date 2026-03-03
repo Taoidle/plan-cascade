@@ -108,6 +108,7 @@ export interface WorkflowEventV2 {
 export type UserInputIntentType =
   | 'chat_message'
   | 'mode_entry_prompt'
+  | 'follow_up_intent'
   | 'plan_clarification'
   | 'plan_edit_instruction'
   | 'plan_approval'

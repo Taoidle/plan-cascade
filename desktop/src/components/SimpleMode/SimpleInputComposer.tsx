@@ -235,7 +235,7 @@ export function SimpleInputComposer({
         onClearAgent={onClearAgent}
       />
 
-      {workflowMode === 'chat' && queuedChatMessages.length > 0 && (
+      {queuedChatMessages.length > 0 && (
         <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 px-3 py-2">
           <p className="text-xs font-medium text-gray-600 dark:text-gray-300">
             {t('workflow.queue.title', {
@@ -251,7 +251,18 @@ export function SimpleInputComposer({
                 className="flex items-center gap-2 rounded bg-white dark:bg-gray-900 px-2 py-1 border border-gray-200 dark:border-gray-700"
               >
                 <span className="text-2xs text-gray-500 dark:text-gray-400 shrink-0">#{index + 1}</span>
+                <span className="text-2xs px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-300 shrink-0">
+                  {message.mode}
+                </span>
                 <span className="text-xs text-gray-700 dark:text-gray-200 truncate flex-1">{message.prompt}</span>
+                {message.attempts > 0 && (
+                  <span className="text-2xs text-amber-600 dark:text-amber-300 shrink-0">
+                    {t('workflow.queue.retryCount', {
+                      count: message.attempts,
+                      defaultValue: `retry ${message.attempts}`,
+                    })}
+                  </span>
+                )}
                 <button
                   onClick={() => onRemoveQueuedChatMessage(message.id)}
                   className="text-2xs text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 transition-colors"

@@ -111,7 +111,7 @@ export interface PlanBatchData {
 
 /** Plan step update card data (Executing phase) */
 export interface PlanStepUpdateCardData {
-  eventType: 'batch_started' | 'step_started' | 'step_completed' | 'step_failed' | 'batch_completed';
+  eventType: 'batch_started' | 'step_started' | 'step_completed' | 'step_failed';
   currentBatch: number;
   totalBatches: number;
   stepId?: string;

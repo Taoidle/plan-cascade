@@ -10,6 +10,7 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { CrossModeConversationTurn } from '../types/crossModeContext';
+import { deriveGateOverallStatus } from '../lib/gateStatus';
 
 // ============================================================================
 // Types
@@ -332,8 +333,6 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
           prd: session.prd,
           isLoading: false,
         });
-        // Subscribe to events
-        await get().subscribeToEvents();
       } else {
         set({ isLoading: false, error: result.error ?? 'Failed to enter task mode' });
       }
@@ -550,25 +549,11 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
         }
 
         if (payload.storyId && payload.gateResults && payload.gateResults.length > 0) {
-          const hasFailed = payload.gateResults.some((gate) => gate.status === 'failed');
-          const hasRunning = payload.gateResults.some((gate) => gate.status === 'running');
-          const hasPending = payload.gateResults.some((gate) => gate.status === 'pending');
-          const allSkipped = payload.gateResults.every((gate) => gate.status === 'skipped');
-          const overallStatus: GateStatus = hasFailed
-            ? 'failed'
-            : hasRunning
-              ? 'running'
-              : hasPending
-                ? 'pending'
-                : allSkipped
-                  ? 'skipped'
-                  : 'passed';
-
           updates.qualityGateResults = {
             ...prevQualityGateResults,
             [payload.storyId]: {
               storyId: payload.storyId,
-              overallStatus,
+              overallStatus: deriveGateOverallStatus(payload.gateResults),
               gates: payload.gateResults,
             },
           };

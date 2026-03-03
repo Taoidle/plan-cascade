@@ -37,8 +37,6 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
     setKbPickerServerSearch,
     kbIngestJobScopedProgress,
     setKbIngestJobScopedProgress,
-    simpleKernelSot,
-    setSimpleKernelSot,
     typedCardPipeline,
     setTypedCardPipeline,
   } = useSettingsStore();
@@ -306,34 +304,6 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
         <h3 className="text-sm font-medium text-gray-900 dark:text-white">
           {t('general.simpleWorkflow.title', { defaultValue: 'Simple Workflow Rollout' })}
         </h3>
-        <label
-          className={clsx(
-            'flex items-start gap-4 p-4 rounded-lg border cursor-pointer',
-            'transition-colors',
-            'border-gray-200 dark:border-gray-700',
-            'hover:bg-gray-50 dark:hover:bg-gray-800',
-          )}
-        >
-          <input
-            type="checkbox"
-            checked={simpleKernelSot}
-            onChange={(e) => setSimpleKernelSot(e.target.checked)}
-            className="mt-1 text-primary-600"
-          />
-          <div>
-            <div className="font-medium text-gray-900 dark:text-white text-sm">
-              {t('general.simpleWorkflow.simpleKernelSot', {
-                defaultValue: 'SIMPLE_KERNEL_SOT (Kernel phase source of truth)',
-              })}
-            </div>
-            <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              {t('general.simpleWorkflow.simpleKernelSotDescription', {
-                defaultValue: 'Use workflow-kernel snapshots and events as the primary phase authority.',
-              })}
-            </div>
-          </div>
-        </label>
-
         <label
           className={clsx(
             'flex items-start gap-4 p-4 rounded-lg border cursor-pointer',

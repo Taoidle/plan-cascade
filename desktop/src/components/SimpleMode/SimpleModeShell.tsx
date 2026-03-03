@@ -132,7 +132,6 @@ export function SimpleModeShell() {
   const sidebarCollapsed = useSettingsStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useSettingsStore((s) => s.setSidebarCollapsed);
   const autoPanelHoverEnabled = useSettingsStore((s) => s.autoPanelHoverEnabled);
-  const simpleKernelSot = useSettingsStore((s) => s.simpleKernelSot);
 
   const [description, setDescription] = useState('');
   const [leftPanelHoverExpanded, setLeftPanelHoverExpanded] = useState(false);
@@ -224,11 +223,11 @@ export function SimpleModeShell() {
         );
       }
 
-      if (workflowMode === 'chat' && newMode !== 'chat' && queuedChatMessages.length > 0) {
+      if (newMode !== workflowMode && queuedChatMessages.length > 0) {
         setQueuedChatMessages([]);
         showToast(
           t('workflow.clearQueuedMessages', {
-            defaultValue: 'Cleared queued chat messages when leaving Chat mode.',
+            defaultValue: 'Cleared queued follow-up messages when switching workflow mode.',
           }),
           'info',
         );
@@ -330,24 +329,10 @@ export function SimpleModeShell() {
   }, [workspacePath, rightPanelWidth]);
 
   useEffect(() => {
-    if (!simpleKernelSot) return;
     const activeMode = workflowKernelSession?.activeMode;
     if (!activeMode || activeMode === workflowMode) return;
     setWorkflowMode(activeMode);
-  }, [simpleKernelSot, workflowKernelSession?.activeMode, workflowMode]);
-
-  useEffect(() => {
-    if (simpleKernelSot) return;
-    if (!workflowKernelSessionId) return;
-    if (typeof window === 'undefined') return;
-
-    const timer = window.setInterval(() => {
-      void useWorkflowKernelStore.getState().refreshSessionState();
-    }, 1500);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [simpleKernelSot, workflowKernelSessionId]);
+  }, [workflowKernelSession?.activeMode, workflowMode]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
@@ -440,8 +425,6 @@ export function SimpleModeShell() {
     };
   }, [bridgeSessionId, workspacePath]);
 
-  const pendingQuestion = useWorkflowOrchestratorStore((s) => s.pendingQuestion);
-  const workflowPhaseLegacy = useWorkflowOrchestratorStore((s) => s.phase);
   const startWorkflow = useWorkflowOrchestratorStore((s) => s.startWorkflow);
   const submitInterviewAnswer = useWorkflowOrchestratorStore((s) => s.submitInterviewAnswer);
   const skipInterviewQuestion = useWorkflowOrchestratorStore((s) => s.skipInterviewQuestion);
@@ -454,8 +437,6 @@ export function SimpleModeShell() {
   const syncTaskRuntimeFromKernel = useWorkflowOrchestratorStore((s) => s.syncRuntimeFromKernel);
 
   // Plan mode orchestrator
-  const pendingClarifyQuestion = usePlanOrchestratorStore((s) => s.pendingClarifyQuestion);
-  const planPhaseLegacy = usePlanOrchestratorStore((s) => s.phase);
   const planIsBusy = usePlanOrchestratorStore((s) => s.isBusy);
   const startPlanWorkflow = usePlanOrchestratorStore((s) => s.startPlanWorkflow);
   const submitPlanClarification = usePlanOrchestratorStore((s) => s.submitClarification);
@@ -530,11 +511,11 @@ export function SimpleModeShell() {
     };
   }, [workflowKernelPendingClarification]);
 
-  const taskPendingQuestion = simpleKernelSot ? kernelInterviewQuestion : pendingQuestion;
-  const planPendingQuestion = simpleKernelSot ? kernelPlanClarifyQuestion : pendingClarifyQuestion;
-  const workflowPhase = simpleKernelSot ? workflowKernelTaskPhase : workflowPhaseLegacy;
-  const planPhase = simpleKernelSot ? workflowKernelPlanPhase : planPhaseLegacy;
-  const chatPhase = simpleKernelSot ? workflowKernelChatPhase : isRunning ? 'running' : 'ready';
+  const taskPendingQuestion = kernelInterviewQuestion;
+  const planPendingQuestion = kernelPlanClarifyQuestion;
+  const workflowPhase = workflowKernelTaskPhase;
+  const planPhase = workflowKernelPlanPhase;
+  const chatPhase = workflowKernelChatPhase;
   const rightPanelPhase = workflowMode === 'task' ? workflowPhase : workflowMode === 'plan' ? planPhase : chatPhase;
   const taskInterviewingPhase = workflowMode === 'task' && workflowPhase === 'interviewing';
   const planClarifyingPhase = workflowMode === 'plan' && planPhase === 'clarifying';
@@ -553,7 +534,6 @@ export function SimpleModeShell() {
     taskInterviewingPhase && taskPendingQuestion === null && interviewStorePhase === 'interviewing';
 
   useEffect(() => {
-    if (!simpleKernelSot) return;
     syncTaskRuntimeFromKernel({
       sessionId: workflowKernelLinkedTaskSessionId,
       interviewId: workflowKernelPendingInterview?.interviewId ?? null,
@@ -566,7 +546,6 @@ export function SimpleModeShell() {
       pendingClarifyQuestion: kernelPlanClarifyQuestion,
     });
   }, [
-    simpleKernelSot,
     syncTaskRuntimeFromKernel,
     syncPlanRuntimeFromKernel,
     workflowKernelLinkedTaskSessionId,
@@ -634,7 +613,7 @@ export function SimpleModeShell() {
         // Route Task mode through the workflow orchestrator
         await startWorkflow(prompt);
         const taskModeSessionId = useWorkflowOrchestratorStore.getState().sessionId;
-        if (simpleKernelSot && taskModeSessionId) {
+        if (taskModeSessionId) {
           await linkWorkflowKernelModeSession('task', taskModeSessionId);
         }
         return;
@@ -644,7 +623,7 @@ export function SimpleModeShell() {
         // Route Plan mode through the plan orchestrator
         await startPlanWorkflow(prompt);
         const planModeSessionId = usePlanOrchestratorStore.getState().sessionId;
-        if (simpleKernelSot && planModeSessionId) {
+        if (planModeSessionId) {
           await linkWorkflowKernelModeSession('plan', planModeSessionId);
         }
         return;
@@ -659,7 +638,6 @@ export function SimpleModeShell() {
       start,
       startWorkflow,
       startPlanWorkflow,
-      simpleKernelSot,
       linkWorkflowKernelModeSession,
       transitionAndSubmitWorkflowKernelInput,
       workflowMode,
@@ -674,8 +652,8 @@ export function SimpleModeShell() {
         setDescription('');
       }
 
-      // Route through orchestrator if in active Task workflow phase
-      if (workflowMode === 'task' && workflowPhase !== 'idle') {
+      // Route through orchestrator for task-specific interactive phases.
+      if (workflowMode === 'task') {
         if (workflowPhase === 'configuring') {
           await transitionAndSubmitWorkflowKernelInput(workflowMode, {
             type: 'task_configuration',
@@ -683,14 +661,18 @@ export function SimpleModeShell() {
             metadata: { mode: workflowMode, phase: workflowPhase },
           });
           overrideConfigNatural(prompt);
-        } else if (workflowPhase === 'reviewing_prd') {
+          return;
+        }
+        if (workflowPhase === 'reviewing_prd') {
           await transitionAndSubmitWorkflowKernelInput(workflowMode, {
             type: 'task_prd_feedback',
             content: prompt,
             metadata: { mode: workflowMode, phase: workflowPhase },
           });
           addPrdFeedback(prompt);
-        } else if (taskInterviewingPhase && taskPendingQuestion && !hasStructuredInterviewQuestion) {
+          return;
+        }
+        if (taskInterviewingPhase && taskPendingQuestion && !hasStructuredInterviewQuestion) {
           await transitionAndSubmitWorkflowKernelInput(workflowMode, {
             type: 'task_interview_answer',
             content: prompt,
@@ -701,8 +683,8 @@ export function SimpleModeShell() {
             },
           });
           await submitInterviewAnswer(prompt);
+          return;
         }
-        return;
       }
 
       // Route plan clarification through plan orchestrator
@@ -830,7 +812,7 @@ export function SimpleModeShell() {
   }, []);
 
   const queueChatMessage = useCallback(
-    (prompt: string, submitAsFollowUp: boolean) => {
+    (prompt: string, submitAsFollowUp: boolean, mode: WorkflowMode) => {
       setQueuedChatMessages((prev) => {
         if (prev.length >= MAX_QUEUED_CHAT_MESSAGES) {
           showToast(
@@ -844,7 +826,7 @@ export function SimpleModeShell() {
         }
 
         const nextId = `queued-${Date.now()}-${queueIdRef.current++}`;
-        return [...prev, { id: nextId, prompt, submitAsFollowUp }];
+        return [...prev, { id: nextId, prompt, submitAsFollowUp, mode, attempts: 0 }];
       });
     },
     [showToast, t],
@@ -866,7 +848,17 @@ export function SimpleModeShell() {
       (workflowMode === 'task' && taskWorkflowActive) ||
       (workflowMode === 'plan' && planWorkflowActive);
 
-    if (workflowMode === 'chat' && isRunning) {
+    const queueableExecution =
+      !executionIsCancelling &&
+      !isAnalyzingStrategy &&
+      !taskWorkflowCancelling &&
+      !planWorkflowCancelling &&
+      !hasStructuredInterviewQuestion &&
+      ((workflowMode === 'chat' && isRunning) ||
+        (workflowMode === 'task' && workflowPhase === 'executing') ||
+        (workflowMode === 'plan' && planPhase === 'executing'));
+
+    if (queueableExecution) {
       if (attachments.length > 0) {
         showToast(
           t('workflow.queueAttachmentsNotSupported', {
@@ -876,7 +868,18 @@ export function SimpleModeShell() {
         );
         return;
       }
-      queueChatMessage(prompt, submitAsFollowUp);
+      await transitionAndSubmitWorkflowKernelInput(workflowMode, {
+        type: 'follow_up_intent',
+        content: prompt,
+        metadata: {
+          mode: workflowMode,
+          queued: true,
+          source: 'simple_mode_follow_up_queue',
+          queueDepthBeforeEnqueue: queuedChatMessages.length,
+          phase: workflowMode === 'task' ? workflowPhase : workflowMode === 'plan' ? planPhase : null,
+        },
+      });
+      queueChatMessage(prompt, submitAsFollowUp, workflowMode);
       setDescription('');
       return;
     }
@@ -893,6 +896,13 @@ export function SimpleModeShell() {
     workflowPhase,
     planPhase,
     isRunning,
+    executionIsCancelling,
+    isAnalyzingStrategy,
+    taskWorkflowCancelling,
+    planWorkflowCancelling,
+    hasStructuredInterviewQuestion,
+    transitionAndSubmitWorkflowKernelInput,
+    queuedChatMessages.length,
     attachments.length,
     showToast,
     t,
@@ -1078,11 +1088,13 @@ export function SimpleModeShell() {
   const isStructuredWorkflowCancelling =
     (workflowMode === 'task' && taskWorkflowCancelling) || (workflowMode === 'plan' && planWorkflowCancelling);
   const canQueueWhileRunning =
-    workflowMode === 'chat' &&
-    isRunning &&
     !executionIsCancelling &&
     !isAnalyzingStrategy &&
-    !hasStructuredInterviewQuestion;
+    !isStructuredWorkflowCancelling &&
+    !hasStructuredInterviewQuestion &&
+    ((workflowMode === 'chat' && isRunning) ||
+      (workflowMode === 'task' && isTaskWorkflowActive && effectiveTaskPhaseForInput === 'executing') ||
+      (workflowMode === 'plan' && isPlanWorkflowActive && effectivePlanPhaseForInput === 'executing'));
   const inputBusy =
     executionIsCancelling ||
     isAnalyzingStrategy ||
@@ -1090,11 +1102,11 @@ export function SimpleModeShell() {
     isPlanWorkflowBusy ||
     (isSubmitting && !canQueueWhileRunning);
   const inputDisabled =
-    inputBusy ||
+    (inputBusy && !canQueueWhileRunning) ||
     isStructuredWorkflowCancelling ||
     hasStructuredInterviewQuestion ||
-    (workflowMode !== 'chat' && isRunning);
-  const inputLoading = (inputBusy || (workflowMode !== 'chat' && isRunning)) && !(workflowMode === 'chat' && isRunning);
+    (!canQueueWhileRunning && workflowMode !== 'chat' && isRunning);
+  const inputLoading = inputBusy && !canQueueWhileRunning;
   const handleClearActiveAgent = useCallback(() => {
     useAgentsStore.getState().clearActiveAgent();
     useExecutionStore.setState({ activeAgentId: null, activeAgentName: null });
@@ -1224,28 +1236,81 @@ export function SimpleModeShell() {
   );
 
   useEffect(() => {
-    if (workflowMode !== 'chat' || queuedChatMessages.length === 0) return;
-    if (isRunning || isSubmitting || isAnalyzingStrategy || permissionRequest) return;
+    if (queuedChatMessages.length === 0) return;
+    if (
+      isRunning ||
+      isSubmitting ||
+      isAnalyzingStrategy ||
+      permissionRequest ||
+      isTaskWorkflowBusy ||
+      isPlanWorkflowBusy
+    ) {
+      return;
+    }
     if (queueDispatchInFlightRef.current) return;
 
     const [nextMessage] = queuedChatMessages;
     if (!nextMessage) return;
+    if (nextMessage.mode !== workflowMode) return;
 
     queueDispatchInFlightRef.current = true;
     setQueuedChatMessages((prev) => prev.slice(1));
     const run = nextMessage.submitAsFollowUp ? handleFollowUp(nextMessage.prompt) : handleStart(nextMessage.prompt);
-    void Promise.resolve(run).finally(() => {
-      queueDispatchInFlightRef.current = false;
-    });
+    void Promise.resolve(run)
+      .then(() => {
+        showToast(
+          t('workflow.queue.consumed', {
+            defaultValue: 'Queued follow-up consumed.',
+          }),
+          'success',
+        );
+      })
+      .catch((error) => {
+        const retryCount = nextMessage.attempts + 1;
+        if (retryCount <= 2) {
+          setQueuedChatMessages((prev) => [
+            {
+              ...nextMessage,
+              attempts: retryCount,
+            },
+            ...prev,
+          ]);
+          showToast(
+            t('workflow.queue.retrying', {
+              attempt: retryCount,
+              defaultValue: `Queued follow-up failed, retrying (${retryCount}/2).`,
+            }),
+            'info',
+          );
+          return;
+        }
+
+        showToast(
+          t('workflow.queue.failed', {
+            defaultValue: 'Queued follow-up failed and was dropped.',
+          }),
+          'error',
+        );
+        if (error) {
+          console.error('[simple-mode] queued follow-up failed', error);
+        }
+      })
+      .finally(() => {
+        queueDispatchInFlightRef.current = false;
+      });
   }, [
-    workflowMode,
     queuedChatMessages,
+    workflowMode,
     isRunning,
     isSubmitting,
     isAnalyzingStrategy,
     permissionRequest,
+    isTaskWorkflowBusy,
+    isPlanWorkflowBusy,
     handleFollowUp,
     handleStart,
+    showToast,
+    t,
   ]);
 
   useEffect(() => {

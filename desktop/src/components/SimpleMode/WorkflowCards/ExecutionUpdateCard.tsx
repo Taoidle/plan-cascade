@@ -77,17 +77,6 @@ function EventIcon({ eventType }: { eventType: ExecutionUpdateCardData['eventTyp
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
         </svg>
       );
-    case 'batch_complete':
-      return (
-        <svg className={clsx(cls, 'text-green-500')} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-          />
-        </svg>
-      );
     default:
       return null;
   }
@@ -103,8 +92,6 @@ function formatEventType(type: ExecutionUpdateCardData['eventType'], t: (key: st
       return t('workflow.execution.storyCompleted');
     case 'story_failed':
       return t('workflow.execution.storyFailed');
-    case 'batch_complete':
-      return t('workflow.execution.batchComplete');
     default:
       return type;
   }

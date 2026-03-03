@@ -62,8 +62,6 @@
 
     "simpleWorkflow": {
       "title": "Simple Workflow Rollout",
-      "simpleKernelSot": "SIMPLE_KERNEL_SOT (Kernel phase source of truth)",
-      "simpleKernelSotDescription": "Use workflow-kernel snapshots and events as the primary phase authority.",
       "typedCardPipeline": "TYPED_CARD_PIPELINE (Structured card payload path)",
       "typedCardPipelineDescription": "Render workflow cards from typed payloads first, with JSON fallback for legacy history."
     },

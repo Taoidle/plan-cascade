@@ -15,7 +15,7 @@ export type StandaloneContextTurns = 2 | 4 | 6 | 8 | 10 | 20 | 50 | 100 | 200 | 
 export type GlmEndpoint = 'standard' | 'coding' | 'international' | 'international-coding';
 export type MinimaxEndpoint = 'international' | 'china';
 export type QwenEndpoint = 'china' | 'singapore' | 'us';
-const SETTINGS_PERSIST_VERSION = 2;
+const SETTINGS_PERSIST_VERSION = 3;
 const EXECUTION_PHASE_IDS = ['planning', 'implementation', 'retry', 'refactor', 'review'] as const;
 
 function normalizeProviderKey(provider: string): string {
@@ -86,7 +86,6 @@ interface SettingsState {
   kbQueryRunsV2: boolean;
   kbPickerServerSearch: boolean;
   kbIngestJobScopedProgress: boolean;
-  simpleKernelSot: boolean;
   simpleContextUnifiedStore: boolean;
   typedCardPipeline: boolean;
 
@@ -158,7 +157,6 @@ interface SettingsState {
   setKbQueryRunsV2: (enabled: boolean) => void;
   setKbPickerServerSearch: (enabled: boolean) => void;
   setKbIngestJobScopedProgress: (enabled: boolean) => void;
-  setSimpleKernelSot: (enabled: boolean) => void;
   setSimpleContextUnifiedStore: (enabled: boolean) => void;
   setTypedCardPipeline: (enabled: boolean) => void;
 
@@ -223,7 +221,6 @@ const defaultSettings = {
   kbQueryRunsV2: true,
   kbPickerServerSearch: true,
   kbIngestJobScopedProgress: true,
-  simpleKernelSot: true,
   simpleContextUnifiedStore: false,
   typedCardPipeline: true,
 
@@ -289,6 +286,12 @@ function applyV2ForcedDefaults(state: Partial<SettingsState>): Partial<SettingsS
     };
   }
   nextState.phaseConfigs = phaseConfigs;
+  return nextState;
+}
+
+function applyV3ForcedDefaults(state: Partial<SettingsState>): Partial<SettingsState> {
+  const nextState = applyV2ForcedDefaults(state);
+  delete (nextState as Record<string, unknown>).simpleKernelSot;
   return nextState;
 }
 
@@ -417,7 +420,6 @@ export const useSettingsStore = create<SettingsState>()(
       setKbQueryRunsV2: (enabled: boolean) => set({ kbQueryRunsV2: enabled }),
       setKbPickerServerSearch: (enabled: boolean) => set({ kbPickerServerSearch: enabled }),
       setKbIngestJobScopedProgress: (enabled: boolean) => set({ kbIngestJobScopedProgress: enabled }),
-      setSimpleKernelSot: (enabled: boolean) => set({ simpleKernelSot: enabled }),
       setSimpleContextUnifiedStore: (enabled: boolean) => set({ simpleContextUnifiedStore: enabled }),
       setTypedCardPipeline: (enabled: boolean) => set({ typedCardPipeline: enabled }),
 
@@ -449,16 +451,22 @@ export const useSettingsStore = create<SettingsState>()(
       version: SETTINGS_PERSIST_VERSION,
       migrate: (persistedState, version) => {
         const state = (persistedState ?? {}) as Partial<SettingsState>;
-        if (version < SETTINGS_PERSIST_VERSION) {
-          return applyV2ForcedDefaults(state);
+        if (version < 2) {
+          return applyV3ForcedDefaults(state);
         }
-        return state;
+        if (version < 3) {
+          return applyV3ForcedDefaults(state);
+        }
+        const nextState = { ...state } as Record<string, unknown>;
+        delete nextState.simpleKernelSot;
+        return nextState as Partial<SettingsState>;
       },
       partialize: (state) => {
         return Object.fromEntries(Object.entries(state).filter(([key]) => key !== 'apiKey')) as Partial<SettingsState>;
       },
       merge: (persisted, current) => {
         const merged = { ...current, ...(persisted as object) };
+        delete (merged as Record<string, unknown>).simpleKernelSot;
         const mergedState = merged as SettingsState;
         // API keys are not persisted in frontend state.
         mergedState.apiKey = '';

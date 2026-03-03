@@ -180,6 +180,59 @@ async fn sync_kernel_plan_snapshot_and_emit(
     emit_kernel_updates(app, kernel_state, &kernel_session_ids, source).await;
 }
 
+fn default_model_for_provider(provider: &str) -> String {
+    match provider {
+        "anthropic" => "claude-sonnet-4-20250514".to_string(),
+        "openai" => "gpt-4o".to_string(),
+        "deepseek" => "deepseek-chat".to_string(),
+        "glm" => "glm-5".to_string(),
+        "qwen" => "qwen3-max".to_string(),
+        "minimax" => "MiniMax-M2.5".to_string(),
+        "ollama" => "qwen2.5-coder:14b".to_string(),
+        _ => "claude-sonnet-4-20250514".to_string(),
+    }
+}
+
+async fn resolve_plan_provider_and_model(
+    provider: Option<String>,
+    model: Option<String>,
+    app_state: &tauri::State<'_, AppState>,
+) -> (String, String) {
+    let provider_from_db = app_state
+        .with_database(|db| db.get_setting("llm_provider"))
+        .await
+        .ok()
+        .flatten()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    let resolved_provider = provider
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or(provider_from_db)
+        .unwrap_or_else(|| "anthropic".to_string());
+
+    let canonical_provider = crate::commands::standalone::normalize_provider_name(&resolved_provider)
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| resolved_provider.trim().to_ascii_lowercase());
+
+    let model_from_db = app_state
+        .with_database(|db| db.get_setting("llm_model"))
+        .await
+        .ok()
+        .flatten()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    let resolved_model = model
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or(model_from_db)
+        .unwrap_or_else(|| default_model_for_provider(&canonical_provider));
+
+    (canonical_provider, resolved_model)
+}
+
 // ============================================================================
 // Commands
 // ============================================================================
@@ -559,10 +612,10 @@ pub async fn generate_plan(
         )
     };
 
-    let (prov, mdl) = match (&provider, &model) {
-        (Some(p), Some(m)) => (p.as_str(), m.as_str()),
-        _ => return Ok(CommandResponse::err("Provider and model are required")),
-    };
+    let (resolved_provider, resolved_model) =
+        resolve_plan_provider_and_model(provider, model, &app_state).await;
+    let prov = resolved_provider.as_str();
+    let mdl = resolved_model.as_str();
     let (operation_id, operation_token) = register_plan_operation_token(&state, &session_id).await;
     let result = tokio::select! {
         _ = operation_token.cancelled() => Ok(CommandResponse::err(PLAN_OPERATION_CANCELLED_ERROR)),
@@ -670,10 +723,10 @@ pub async fn approve_plan(
         (plan.adapter_name.clone(), session.description.clone())
     };
 
-    let (prov, mdl) = match (&provider, &model) {
-        (Some(p), Some(m)) => (p.as_str(), m.as_str()),
-        _ => return Ok(CommandResponse::err("Provider and model are required")),
-    };
+    let (resolved_provider, resolved_model) =
+        resolve_plan_provider_and_model(provider, model, &app_state).await;
+    let prov = resolved_provider.as_str();
+    let mdl = resolved_model.as_str();
 
     let provider_config = resolve_provider_config(prov, mdl, None, base_url.clone(), &app_state)
         .await

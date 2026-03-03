@@ -185,7 +185,7 @@ export interface PrdBatchData {
 
 /** Execution update card data */
 export interface ExecutionUpdateCardData {
-  eventType: 'batch_start' | 'story_start' | 'story_complete' | 'story_failed' | 'batch_complete';
+  eventType: 'batch_start' | 'story_start' | 'story_complete' | 'story_failed';
   currentBatch: number;
   totalBatches: number;
   storyId: string | null;

@@ -20,6 +20,7 @@ import { useTaskModeStore, type TaskPrd, type StrategyAnalysis, type GateResult 
 import { useSpecInterviewStore, type InterviewQuestion, type InterviewSession } from './specInterview';
 import { useSettingsStore } from './settings';
 import { buildConversationHistory, synthesizePlanningTurn, synthesizeExecutionTurn } from '../lib/contextBridge';
+import { deriveGateOverallStatus } from '../lib/gateStatus';
 import type { CrossModeConversationTurn } from '../types/crossModeContext';
 import type {
   WorkflowPhase,
@@ -1666,10 +1667,45 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
       const payload = event.payload;
       const state = get();
       if (state.sessionId && payload.sessionId !== state.sessionId) return;
+      const taskModeState = useTaskModeStore.getState();
+      const taskModePatch: {
+        currentBatch: number;
+        totalBatches: number;
+        storyStatuses?: Record<string, string>;
+        qualityGateResults?: typeof taskModeState.qualityGateResults;
+        sessionStatus?:
+          | 'initialized'
+          | 'generating_prd'
+          | 'reviewing_prd'
+          | 'executing'
+          | 'completed'
+          | 'failed'
+          | 'cancelled';
+        isCancelling?: boolean;
+        error?: string | null;
+      } = {
+        currentBatch: payload.currentBatch,
+        totalBatches: payload.totalBatches,
+      };
 
       // Accumulate story status
       if (payload.storyId && payload.storyStatus) {
         accumulatedStatuses[payload.storyId] = payload.storyStatus;
+        taskModePatch.storyStatuses = {
+          ...taskModeState.storyStatuses,
+          [payload.storyId]: payload.storyStatus,
+        };
+      }
+
+      if (payload.storyId && payload.gateResults && payload.gateResults.length > 0) {
+        taskModePatch.qualityGateResults = {
+          ...taskModeState.qualityGateResults,
+          [payload.storyId]: {
+            storyId: payload.storyId,
+            overallStatus: deriveGateOverallStatus(payload.gateResults),
+            gates: payload.gateResults,
+          },
+        };
       }
 
       // Resolve story title from editablePrd
@@ -1727,7 +1763,7 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
             injectCard('gate_result', {
               storyId: payload.storyId,
               storyTitle: storyTitle ?? payload.storyId,
-              overallStatus: payload.gateResults.every((g) => g.status === 'passed') ? 'passed' : 'failed',
+              overallStatus: deriveGateOverallStatus(payload.gateResults),
               gates: payload.gateResults,
               codeReviewScores: [],
             } as GateResultCardData);
@@ -1752,7 +1788,7 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
             injectCard('gate_result', {
               storyId: payload.storyId,
               storyTitle: storyTitle ?? payload.storyId,
-              overallStatus: 'failed',
+              overallStatus: deriveGateOverallStatus(payload.gateResults),
               gates: payload.gateResults,
               codeReviewScores: [],
             } as GateResultCardData);
@@ -1765,6 +1801,9 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
           const completedCount = Object.values(accumulatedStatuses).filter((s) => s === 'completed').length;
           const failedCount = Object.values(accumulatedStatuses).filter((s) => s === 'failed').length;
           const success = failedCount === 0;
+          taskModePatch.sessionStatus = success ? 'completed' : 'failed';
+          taskModePatch.isCancelling = false;
+          useTaskModeStore.setState(taskModePatch);
 
           injectCard('completion_report', {
             success,
@@ -1802,6 +1841,9 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
         }
 
         case 'execution_cancelled': {
+          taskModePatch.sessionStatus = 'cancelled';
+          taskModePatch.isCancelling = false;
+          useTaskModeStore.setState(taskModePatch);
           set({ phase: 'cancelled', isCancelling: false });
           injectInfo(
             i18n.t('workflow.orchestrator.workflowCancelled', {
@@ -1814,10 +1856,22 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
         }
 
         case 'error': {
+          if (payload.error) {
+            taskModePatch.error = payload.error;
+          }
+          taskModePatch.isCancelling = false;
+          useTaskModeStore.setState(taskModePatch);
           set({ isCancelling: false });
           if (payload.error) {
             injectError('Execution Error', payload.error);
           }
+          break;
+        }
+        default: {
+          if (payload.eventType === 'story_failed' && payload.error) {
+            taskModePatch.error = payload.error;
+          }
+          useTaskModeStore.setState(taskModePatch);
           break;
         }
       }
