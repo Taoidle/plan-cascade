@@ -19,14 +19,16 @@ use crate::services::tools::trait_def::{Tool, ToolExecutionContext};
 /// Each MCP tool discovered via `tools/list` is wrapped in an adapter
 /// that proxies `execute()` calls to the MCP server via `tools/call`.
 ///
-/// Tool names are namespaced as `mcp:{server_name}:{tool_name}` to
+/// Tool names are namespaced as `mcp:{server_id}:{tool_name}` to
 /// avoid conflicts with built-in tools.
 pub struct McpToolAdapter {
+    /// Stable server ID backing this tool namespace
+    server_id: String,
     /// Name of the MCP server providing this tool
     server_name: String,
     /// Original tool name as reported by the MCP server
     tool_name: String,
-    /// Qualified name: "mcp:{server_name}:{tool_name}"
+    /// Qualified name: "mcp:{server_id}:{tool_name}"
     qualified_name: String,
     /// Tool description
     description: String,
@@ -45,6 +47,7 @@ impl McpToolAdapter {
     /// `input_schema`: Raw JSON Schema from the MCP server (will be sanitized)
     /// `client`: Shared reference to the MCP client
     pub fn new(
+        server_id: String,
         server_name: String,
         tool_name: String,
         description: String,
@@ -54,9 +57,10 @@ impl McpToolAdapter {
         // Sanitize the schema for LLM compatibility
         sanitize_schema(&mut input_schema);
 
-        let qualified_name = format!("mcp:{}:{}", server_name, tool_name);
+        let qualified_name = format!("mcp:{}:{}", server_id, tool_name);
 
         Self {
+            server_id,
             server_name,
             tool_name,
             qualified_name,
@@ -76,12 +80,20 @@ impl McpToolAdapter {
         &self.server_name
     }
 
+    /// Get the stable server id.
+    pub fn server_id(&self) -> &str {
+        &self.server_id
+    }
+
     /// Get the qualified name (mcp:server:tool)
     pub fn qualified_name(&self) -> &str {
         &self.qualified_name
     }
 
-    /// Parse a qualified MCP tool name into (server_name, tool_name).
+    /// Parse a qualified MCP tool name into (server_token, tool_name).
+    ///
+    /// `server_token` may be either a stable server id (current format) or a
+    /// legacy server name. Both are accepted for backward compatibility.
     /// Returns None if the name doesn't match the expected format.
     pub fn parse_qualified_name(name: &str) -> Option<(&str, &str)> {
         let parts: Vec<&str> = name.splitn(3, ':').collect();
@@ -282,6 +294,7 @@ for line in sys.stdin:
 
         let tool_info = &tools[0];
         let adapter = McpToolAdapter::new(
+            "adapter-id".to_string(),
             "adapter-test".to_string(),
             tool_info.name.clone(),
             tool_info.description.clone(),
@@ -290,7 +303,7 @@ for line in sys.stdin:
         );
 
         // Verify trait methods
-        assert_eq!(adapter.name(), "mcp:adapter-test:greet");
+        assert_eq!(adapter.name(), "mcp:adapter-id:greet");
         assert_eq!(adapter.description(), "Greets someone");
         assert!(adapter.is_long_running());
 

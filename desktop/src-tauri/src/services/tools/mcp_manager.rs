@@ -4,13 +4,13 @@
 //! discovered tools into the ToolRegistry.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::services::tools::mcp_adapter::McpToolAdapter;
 use crate::services::tools::mcp_client::{McpClient, McpServerConfig, McpTransportConfig};
-use crate::services::tools::trait_def::ToolRegistry;
+use crate::services::tools::trait_def::{Tool, ToolRegistry};
 use crate::utils::error::{AppError, AppResult};
 
 /// Information about a connected MCP server and its tools.
@@ -48,6 +48,17 @@ pub struct McpManager {
     connected_at: RwLock<HashMap<String, String>>,
 }
 
+struct PreparedConnection {
+    server_id: String,
+    server_name: String,
+    transport_kind: String,
+    client: Arc<McpClient>,
+    protocol_version: String,
+    tool_names: Vec<String>,
+    qualified_names: Vec<String>,
+    adapters: Vec<Arc<dyn Tool>>,
+}
+
 impl McpManager {
     pub fn new() -> Self {
         Self {
@@ -58,16 +69,49 @@ impl McpManager {
         }
     }
 
-    pub async fn connect_server(
-        &self,
-        config: &McpServerConfig,
-        registry: &mut ToolRegistry,
-    ) -> AppResult<ConnectedServerInfo> {
-        let server_id = if config.id.is_empty() {
+    fn server_id_from_config(config: &McpServerConfig) -> String {
+        if config.id.is_empty() {
             config.name.clone()
         } else {
             config.id.clone()
-        };
+        }
+    }
+
+    fn transport_kind(config: &McpServerConfig) -> &'static str {
+        match &config.transport {
+            McpTransportConfig::Stdio { .. } => "stdio",
+            McpTransportConfig::Http { .. } => "stream_http",
+        }
+    }
+
+    fn error_class(raw: &str) -> &'static str {
+        let lower = raw.to_lowercase();
+        if lower.contains("unauthorized")
+            || lower.contains("forbidden")
+            || lower.contains("401")
+            || lower.contains("403")
+            || lower.contains("auth")
+        {
+            "auth"
+        } else if lower.contains("protocol")
+            || lower.contains("initialize")
+            || lower.contains("tools/list")
+            || lower.contains("jsonrpc")
+        {
+            "protocol"
+        } else if lower.contains("header")
+            || lower.contains("url")
+            || lower.contains("schema")
+            || lower.contains("validation")
+        {
+            "schema"
+        } else {
+            "transport"
+        }
+    }
+
+    async fn prepare_connection(&self, config: &McpServerConfig) -> AppResult<PreparedConnection> {
+        let server_id = Self::server_id_from_config(config);
         let server_name = config.name.clone();
 
         {
@@ -80,58 +124,217 @@ impl McpManager {
             }
         }
 
+        tracing::info!(
+            event = "connect_attempt",
+            server_id = %server_id,
+            server_name = %server_name,
+            transport = Self::transport_kind(config),
+            "Connecting MCP server"
+        );
+
         let client = Arc::new(McpClient::connect(config).await?);
         let protocol_version = client.server_info().protocol_version.clone();
         let tools = client.list_tools().await?;
 
         let mut tool_names = Vec::new();
         let mut qualified_names = Vec::new();
+        let mut seen = HashSet::new();
+        let mut adapters: Vec<Arc<dyn Tool>> = Vec::new();
 
         for tool_info in &tools {
-            let adapter = McpToolAdapter::new(
+            let adapter = Arc::new(McpToolAdapter::new(
+                server_id.clone(),
                 server_name.clone(),
                 tool_info.name.clone(),
                 tool_info.description.clone(),
                 tool_info.input_schema.clone(),
                 client.clone(),
-            );
+            ));
 
             let qualified_name = adapter.qualified_name().to_string();
+            if !seen.insert(qualified_name.clone()) {
+                let _ = client.disconnect().await;
+                return Err(AppError::validation(format!(
+                    "Duplicate MCP tool '{}' reported by server '{}'",
+                    qualified_name, server_name
+                )));
+            }
+
             tool_names.push(tool_info.name.clone());
-            qualified_names.push(qualified_name.clone());
-            registry.register(Arc::new(adapter));
+            qualified_names.push(qualified_name);
+            adapters.push(adapter);
         }
 
-        let connected_at = chrono::Utc::now().to_rfc3339();
+        Ok(PreparedConnection {
+            server_id,
+            server_name,
+            transport_kind: Self::transport_kind(config).to_string(),
+            client,
+            protocol_version,
+            tool_names,
+            qualified_names,
+            adapters,
+        })
+    }
 
+    fn register_prepared_tools(
+        prepared: &PreparedConnection,
+        registry: &mut ToolRegistry,
+    ) -> AppResult<()> {
+        for qualified_name in &prepared.qualified_names {
+            if registry.get(qualified_name).is_some() {
+                return Err(AppError::validation(format!(
+                    "MCP tool '{}' is already registered",
+                    qualified_name
+                )));
+            }
+        }
+
+        for adapter in &prepared.adapters {
+            registry.register(adapter.clone());
+        }
+
+        Ok(())
+    }
+
+    async fn commit_prepared_connection(&self, prepared: &PreparedConnection) -> String {
+        let connected_at = chrono::Utc::now().to_rfc3339();
         {
             let mut clients = self.clients.write().await;
-            clients.insert(server_id.clone(), client);
+            clients.insert(prepared.server_id.clone(), prepared.client.clone());
         }
         {
             let mut server_tools = self.server_tools.write().await;
-            server_tools.insert(server_id.clone(), qualified_names.clone());
+            server_tools.insert(prepared.server_id.clone(), prepared.qualified_names.clone());
         }
         {
             let mut server_names = self.server_names.write().await;
-            server_names.insert(server_id.clone(), server_name.clone());
+            server_names.insert(prepared.server_id.clone(), prepared.server_name.clone());
         }
         {
             let mut connected = self.connected_at.write().await;
-            connected.insert(server_id.clone(), connected_at.clone());
+            connected.insert(prepared.server_id.clone(), connected_at.clone());
         }
+        connected_at
+    }
 
-        Ok(ConnectedServerInfo {
-            server_id,
-            server_name,
+    fn as_connected_info(
+        prepared: &PreparedConnection,
+        connected_at: String,
+    ) -> ConnectedServerInfo {
+        ConnectedServerInfo {
+            server_id: prepared.server_id.clone(),
+            server_name: prepared.server_name.clone(),
             connection_state: "connected".to_string(),
-            tool_names,
-            qualified_tool_names: qualified_names,
-            protocol_version,
+            tool_names: prepared.tool_names.clone(),
+            qualified_tool_names: prepared.qualified_names.clone(),
+            protocol_version: prepared.protocol_version.clone(),
             connected_at: Some(connected_at),
             last_error: None,
             retry_count: 0,
-        })
+        }
+    }
+
+    pub async fn connect_server_with_registry_lock(
+        &self,
+        config: &McpServerConfig,
+        registry: Arc<RwLock<ToolRegistry>>,
+    ) -> AppResult<ConnectedServerInfo> {
+        let prepared = match self.prepare_connection(config).await {
+            Ok(prepared) => prepared,
+            Err(e) => {
+                tracing::warn!(
+                    event = "connect_failure",
+                    server_id = %Self::server_id_from_config(config),
+                    server_name = %config.name,
+                    transport = Self::transport_kind(config),
+                    error = %e,
+                    error_class = Self::error_class(&e.to_string()),
+                    "Failed to connect MCP server"
+                );
+                return Err(e);
+            }
+        };
+
+        {
+            let mut guard = registry.write().await;
+            if let Err(e) = Self::register_prepared_tools(&prepared, &mut guard) {
+                let _ = prepared.client.disconnect().await;
+                tracing::warn!(
+                    event = "connect_failure",
+                    server_id = %prepared.server_id,
+                    server_name = %prepared.server_name,
+                    transport = %prepared.transport_kind,
+                    error = %e,
+                    error_class = "registry",
+                    "Failed to register MCP tools"
+                );
+                return Err(e);
+            }
+        }
+
+        let connected_at = self.commit_prepared_connection(&prepared).await;
+
+        tracing::info!(
+            event = "connect_success",
+            server_id = %prepared.server_id,
+            server_name = %prepared.server_name,
+            transport = %prepared.transport_kind,
+            tool_count = prepared.qualified_names.len(),
+            protocol_version = %prepared.protocol_version,
+            "Connected MCP server"
+        );
+
+        Ok(Self::as_connected_info(&prepared, connected_at))
+    }
+
+    pub async fn connect_server(
+        &self,
+        config: &McpServerConfig,
+        registry: &mut ToolRegistry,
+    ) -> AppResult<ConnectedServerInfo> {
+        let prepared = match self.prepare_connection(config).await {
+            Ok(prepared) => prepared,
+            Err(e) => {
+                tracing::warn!(
+                    event = "connect_failure",
+                    server_id = %Self::server_id_from_config(config),
+                    server_name = %config.name,
+                    transport = Self::transport_kind(config),
+                    error = %e,
+                    error_class = Self::error_class(&e.to_string()),
+                    "Failed to connect MCP server"
+                );
+                return Err(e);
+            }
+        };
+        if let Err(e) = Self::register_prepared_tools(&prepared, registry) {
+            let _ = prepared.client.disconnect().await;
+            tracing::warn!(
+                event = "connect_failure",
+                server_id = %prepared.server_id,
+                server_name = %prepared.server_name,
+                transport = %prepared.transport_kind,
+                error = %e,
+                error_class = "registry",
+                "Failed to register MCP tools"
+            );
+            return Err(e);
+        }
+
+        let connected_at = self.commit_prepared_connection(&prepared).await;
+
+        tracing::info!(
+            event = "connect_success",
+            server_id = %prepared.server_id,
+            server_name = %prepared.server_name,
+            transport = %prepared.transport_kind,
+            tool_count = prepared.qualified_names.len(),
+            protocol_version = %prepared.protocol_version,
+            "Connected MCP server"
+        );
+
+        Ok(Self::as_connected_info(&prepared, connected_at))
     }
 
     pub async fn disconnect_server(
@@ -174,6 +377,13 @@ impl McpManager {
         for name in &tool_names {
             registry.unregister(name);
         }
+
+        tracing::info!(
+            event = "disconnect",
+            server_id = %server_id,
+            removed_tool_count = tool_names.len(),
+            "Disconnected MCP server"
+        );
 
         Ok(())
     }

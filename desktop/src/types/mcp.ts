@@ -42,17 +42,22 @@ export interface CreateMcpServerRequest {
   env?: Record<string, string>;
   url?: string;
   headers?: Record<string, string>;
+  auto_connect?: boolean;
 }
 
 /** Request to update an existing MCP server */
 export interface UpdateMcpServerRequest {
   name?: string;
+  server_type?: McpServerType;
   command?: string;
+  clear_command?: boolean;
   args?: string[];
   env?: Record<string, string>;
   url?: string;
+  clear_url?: boolean;
   headers?: Record<string, string>;
   enabled?: boolean;
+  auto_connect?: boolean;
 }
 
 /** Result of health check */
@@ -60,6 +65,9 @@ export interface HealthCheckResult {
   server_id: string;
   status: McpServerStatus;
   checked_at: string;
+  latency_ms?: number | null;
+  protocol_version?: string | null;
+  tool_count?: number | null;
 }
 
 /** Result of importing servers from Claude Desktop */
@@ -69,6 +77,9 @@ export interface ImportResult {
   failed: number;
   servers: string[];
   errors: string[];
+  will_add?: string[];
+  will_skip?: string[];
+  will_fail?: string[];
 }
 
 /** Connected MCP server runtime state */
@@ -95,6 +106,10 @@ export interface McpToolDefinition {
   name: string;
   description: string;
   input_schema: Record<string, unknown>;
+}
+
+export interface McpExportPayload {
+  mcpServers: Record<string, Record<string, unknown>>;
 }
 
 /** Generic command response from Tauri */

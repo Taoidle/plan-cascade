@@ -92,6 +92,8 @@ fn main() {
             plan_cascade_desktop::commands::mcp::connect_enabled_mcp_servers,
             plan_cascade_desktop::commands::mcp::list_connected_mcp_servers,
             plan_cascade_desktop::commands::mcp::list_mcp_tools,
+            plan_cascade_desktop::commands::mcp::get_mcp_server_detail,
+            plan_cascade_desktop::commands::mcp::export_mcp_servers,
             // Claude Code commands
             plan_cascade_desktop::commands::claude_code::start_chat,
             plan_cascade_desktop::commands::claude_code::send_message,

@@ -8,37 +8,51 @@ import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import * as Switch from '@radix-ui/react-switch';
-import { PlayIcon, Pencil1Icon, TrashIcon, GearIcon, Link2Icon } from '@radix-ui/react-icons';
-import type { McpServer, McpServerStatus } from '../../types/mcp';
+import { PlayIcon, Pencil1Icon, TrashIcon, GearIcon, Link2Icon, ListBulletIcon } from '@radix-ui/react-icons';
+import type { McpServer, McpServerStatus, ConnectedServerInfo } from '../../types/mcp';
 import { isStatusError } from '../../types/mcp';
 
 interface ServerCardProps {
   server: McpServer;
   connected?: boolean;
+  connectedInfo?: ConnectedServerInfo;
   onTest: () => void;
   onToggle: (enabled: boolean) => void;
   onConnect: () => void;
   onDisconnect: () => void;
   onEdit: () => void;
   onDelete: () => void;
-  isLoading?: boolean;
+  onViewTools?: () => void;
+  isConnecting?: boolean;
+  isDisconnecting?: boolean;
+  isTesting?: boolean;
+  isToggling?: boolean;
+  isDeleting?: boolean;
 }
 
 export function ServerCard({
   server,
   connected = false,
+  connectedInfo,
   onTest,
   onToggle,
   onConnect,
   onDisconnect,
   onEdit,
   onDelete,
-  isLoading = false,
+  onViewTools,
+  isConnecting = false,
+  isDisconnecting = false,
+  isTesting = false,
+  isToggling = false,
+  isDeleting = false,
 }: ServerCardProps) {
   const { t } = useTranslation();
 
   const statusColor = getServerStatusColor(server.status, server.enabled);
   const statusLabel = getStatusDisplay(server.status, t);
+  const isConnectBusy = isConnecting || isDisconnecting;
+  const isAnyBusy = isConnecting || isDisconnecting || isTesting || isToggling || isDeleting;
 
   return (
     <div
@@ -82,7 +96,7 @@ export function ServerCard({
         <Switch.Root
           checked={server.enabled}
           onCheckedChange={onToggle}
-          disabled={isLoading}
+          disabled={isToggling || isDeleting}
           className={clsx(
             'w-9 h-5 rounded-full relative',
             'bg-gray-300 dark:bg-gray-600',
@@ -120,13 +134,24 @@ export function ServerCard({
             <code className="truncate max-w-xs">{server.url}</code>
           </div>
         )}
+        {connectedInfo && (
+          <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400 space-y-0.5">
+            <p>
+              protocol={connectedInfo.protocol_version || 'unknown'} tools={connectedInfo.tool_names.length}
+            </p>
+            {connectedInfo.connected_at && <p>connected_at={connectedInfo.connected_at}</p>}
+            {connectedInfo.last_error && (
+              <p className="text-red-600 dark:text-red-400">last_error={connectedInfo.last_error}</p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Action Buttons */}
       <div className="flex items-center gap-2">
         <button
           onClick={connected ? onDisconnect : onConnect}
-          disabled={isLoading || !server.enabled}
+          disabled={isConnectBusy || isDeleting || !server.enabled}
           className={clsx(
             'flex items-center gap-1 px-2.5 py-1.5 rounded-md',
             connected
@@ -136,12 +161,20 @@ export function ServerCard({
             'text-xs font-medium transition-colors',
           )}
         >
-          <span>{connected ? t('mcp.disconnect') : t('mcp.connect')}</span>
+          <span>
+            {connected
+              ? isDisconnecting
+                ? t('mcp.disconnecting', 'Disconnecting...')
+                : t('mcp.disconnect')
+              : isConnecting
+                ? t('mcp.connecting', 'Connecting...')
+                : t('mcp.connect')}
+          </span>
         </button>
 
         <button
           onClick={onTest}
-          disabled={isLoading || !server.enabled}
+          disabled={isTesting || isAnyBusy || !server.enabled}
           className={clsx(
             'flex items-center gap-1 px-2.5 py-1.5 rounded-md',
             'bg-primary-100 dark:bg-primary-900/50',
@@ -152,12 +185,30 @@ export function ServerCard({
           )}
         >
           <PlayIcon className="w-3 h-3" />
-          <span>{t('mcp.test')}</span>
+          <span>{isTesting ? t('mcp.testing', 'Testing...') : t('mcp.test')}</span>
         </button>
+
+        {connectedInfo && onViewTools && (
+          <button
+            onClick={onViewTools}
+            disabled={isAnyBusy}
+            className={clsx(
+              'flex items-center gap-1 px-2.5 py-1.5 rounded-md',
+              'bg-indigo-100 dark:bg-indigo-900/50',
+              'text-indigo-700 dark:text-indigo-300',
+              'hover:bg-indigo-200 dark:hover:bg-indigo-800',
+              'disabled:opacity-50 disabled:cursor-not-allowed',
+              'text-xs font-medium transition-colors',
+            )}
+          >
+            <ListBulletIcon className="w-3 h-3" />
+            <span>{t('mcp.viewTools', 'View Tools')}</span>
+          </button>
+        )}
 
         <button
           onClick={onEdit}
-          disabled={isLoading}
+          disabled={isAnyBusy}
           className={clsx(
             'flex items-center gap-1 px-2.5 py-1.5 rounded-md',
             'bg-gray-100 dark:bg-gray-700',
@@ -173,7 +224,7 @@ export function ServerCard({
 
         <button
           onClick={onDelete}
-          disabled={isLoading}
+          disabled={isAnyBusy}
           className={clsx(
             'flex items-center gap-1 px-2.5 py-1.5 rounded-md',
             'bg-red-100 dark:bg-red-900/50',

@@ -23,6 +23,8 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
+  const [resultIsDryRun, setResultIsDryRun] = useState(false);
+  const [previewOnly, setPreviewOnly] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleImport = async () => {
@@ -31,10 +33,13 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
     setResult(null);
 
     try {
-      const response = await invoke<CommandResponse<ImportResult>>('import_from_claude_desktop');
+      const response = await invoke<CommandResponse<ImportResult>>('import_from_claude_desktop', {
+        dryRun: previewOnly,
+      });
 
       if (response.success && response.data) {
         setResult(response.data);
+        setResultIsDryRun(previewOnly);
       } else {
         setError(response.error || t('mcp.errors.importServers'));
       }
@@ -63,10 +68,12 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
 
       const response = await invoke<CommandResponse<ImportResult>>('import_mcp_from_file', {
         path: filePath,
+        dryRun: previewOnly,
       });
 
       if (response.success && response.data) {
         setResult(response.data);
+        setResultIsDryRun(previewOnly);
       } else {
         setError(response.error || t('mcp.errors.importServers'));
       }
@@ -78,13 +85,29 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
   };
 
   const handleClose = () => {
-    if (result && result.added > 0) {
+    if (result && result.added > 0 && !resultIsDryRun) {
       onImportComplete();
     }
     setResult(null);
+    setResultIsDryRun(false);
     setError(null);
     onOpenChange(false);
   };
+
+  const addedEntries = result
+    ? resultIsDryRun
+      ? result.will_add && result.will_add.length > 0
+        ? result.will_add
+        : result.servers
+      : result.servers
+    : [];
+  const failedEntries = result
+    ? resultIsDryRun
+      ? result.will_fail && result.will_fail.length > 0
+        ? result.will_fail
+        : result.errors
+      : result.errors
+    : [];
 
   return (
     <Dialog.Root open={open} onOpenChange={handleClose}>
@@ -141,7 +164,7 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
                   ) : (
                     <>
                       <DownloadIcon className="w-4 h-4" />
-                      <span>{t('mcp.importNow')}</span>
+                      <span>{previewOnly ? t('mcp.previewImport', 'Preview Import') : t('mcp.importNow')}</span>
                     </>
                   )}
                 </button>
@@ -160,6 +183,16 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
                   <DownloadIcon className="w-4 h-4" />
                   <span>{t('mcp.importJsonFile')}</span>
                 </button>
+
+                <label className="mt-3 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+                  <input
+                    type="checkbox"
+                    checked={previewOnly}
+                    onChange={(e) => setPreviewOnly(e.target.checked)}
+                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  />
+                  <span>{t('mcp.previewOnly', 'Preview only (do not persist)')}</span>
+                </label>
               </>
             )}
 
@@ -169,26 +202,32 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
                 <div className="grid grid-cols-3 gap-3">
                   <div className="p-3 rounded-md bg-green-100 dark:bg-green-900/30 text-center">
                     <p className="text-2xl font-bold text-green-700 dark:text-green-300">{result.added}</p>
-                    <p className="text-xs text-green-600 dark:text-green-400">{t('mcp.added')}</p>
+                    <p className="text-xs text-green-600 dark:text-green-400">
+                      {resultIsDryRun ? t('mcp.wouldAdd', 'Would Add') : t('mcp.added')}
+                    </p>
                   </div>
                   <div className="p-3 rounded-md bg-yellow-100 dark:bg-yellow-900/30 text-center">
                     <p className="text-2xl font-bold text-yellow-700 dark:text-yellow-300">{result.skipped}</p>
-                    <p className="text-xs text-yellow-600 dark:text-yellow-400">{t('mcp.skipped')}</p>
+                    <p className="text-xs text-yellow-600 dark:text-yellow-400">
+                      {resultIsDryRun ? t('mcp.wouldSkip', 'Would Skip') : t('mcp.skipped')}
+                    </p>
                   </div>
                   <div className="p-3 rounded-md bg-red-100 dark:bg-red-900/30 text-center">
                     <p className="text-2xl font-bold text-red-700 dark:text-red-300">{result.failed}</p>
-                    <p className="text-xs text-red-600 dark:text-red-400">{t('mcp.failed')}</p>
+                    <p className="text-xs text-red-600 dark:text-red-400">
+                      {resultIsDryRun ? t('mcp.wouldFail', 'Would Fail') : t('mcp.failed')}
+                    </p>
                   </div>
                 </div>
 
                 {/* Added Servers */}
-                {result.servers.length > 0 && (
+                {addedEntries.length > 0 && (
                   <div>
                     <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      {t('mcp.importedServers')}
+                      {resultIsDryRun ? t('mcp.wouldAdd', 'Would Add') : t('mcp.importedServers')}
                     </p>
                     <div className="space-y-1">
-                      {result.servers.map((name, i) => (
+                      {addedEntries.map((name, i) => (
                         <div key={i} className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                           <CheckIcon className="w-4 h-4 text-green-500" />
                           <span>{name}</span>
@@ -198,12 +237,27 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
                   </div>
                 )}
 
+                {resultIsDryRun && (result.will_skip?.length || 0) > 0 && (
+                  <div>
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      {t('mcp.wouldSkip', 'Would Skip')}
+                    </p>
+                    <div className="space-y-1 max-h-24 overflow-y-auto">
+                      {result.will_skip?.map((entry, i) => (
+                        <div key={i} className="text-xs text-yellow-700 dark:text-yellow-300">
+                          {entry}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Errors */}
-                {result.errors.length > 0 && (
+                {failedEntries.length > 0 && (
                   <div>
                     <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('mcp.importErrors')}</p>
                     <div className="space-y-1 max-h-32 overflow-y-auto">
-                      {result.errors.map((err, i) => (
+                      {failedEntries.map((err, i) => (
                         <div key={i} className="flex items-start gap-2 text-xs text-red-600 dark:text-red-400">
                           <CrossCircledIcon className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
                           <span>{err}</span>

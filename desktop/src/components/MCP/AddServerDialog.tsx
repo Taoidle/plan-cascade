@@ -1,10 +1,10 @@
 /**
  * AddServerDialog Component
  *
- * Dialog for adding a new MCP server.
+ * Dialog for adding or editing an MCP server.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
@@ -16,19 +16,24 @@ interface AddServerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onServerAdded: (server: McpServer) => void;
+  onServerUpdated?: (server: McpServer) => void;
+  server?: McpServer | null;
 }
 
-export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServerDialogProps) {
+export function AddServerDialog({ open, onOpenChange, onServerAdded, onServerUpdated, server }: AddServerDialogProps) {
   const { t } = useTranslation();
   const [serverType, setServerType] = useState<McpServerType>('stdio');
   const [name, setName] = useState('');
   const [command, setCommand] = useState('');
   const [args, setArgs] = useState('');
   const [url, setUrl] = useState('');
+  const [autoConnect, setAutoConnect] = useState(true);
   const [envVars, setEnvVars] = useState<Array<{ key: string; value: string }>>([]);
   const [headerVars, setHeaderVars] = useState<Array<{ key: string; value: string }>>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const isEditMode = !!server;
 
   const resetForm = () => {
     setServerType('stdio');
@@ -36,10 +41,29 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
     setCommand('');
     setArgs('');
     setUrl('');
+    setAutoConnect(true);
     setEnvVars([]);
     setHeaderVars([]);
     setError(null);
   };
+
+  useEffect(() => {
+    if (!open) return;
+
+    if (server) {
+      setServerType(server.server_type);
+      setName(server.name);
+      setCommand(server.command ?? '');
+      setArgs(server.args.join(' '));
+      setUrl(server.url ?? '');
+      setAutoConnect(server.auto_connect ?? true);
+      setEnvVars(Object.entries(server.env ?? {}).map(([key, value]) => ({ key, value })));
+      setHeaderVars(Object.entries(server.headers ?? {}).map(([key, value]) => ({ key, value })));
+      setError(null);
+    } else {
+      resetForm();
+    }
+  }, [open, server]);
 
   const parseArgs = (raw: string): string[] => {
     const tokens = raw.match(/[^\s"']+|"([^"]*)"|'([^']*)'/g) || [];
@@ -57,13 +81,13 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
     setError(null);
 
     try {
-      // Build env map
       const env: Record<string, string> = {};
       envVars.forEach((v) => {
         if (v.key.trim()) {
           env[v.key.trim()] = v.value;
         }
       });
+
       const headers: Record<string, string> = {};
       headerVars.forEach((v) => {
         if (v.key.trim()) {
@@ -71,21 +95,45 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
         }
       });
 
-      const response = await invoke<CommandResponse<McpServer>>('add_mcp_server', {
-        name,
-        serverType: serverType,
-        command: serverType === 'stdio' ? command : null,
-        args: serverType === 'stdio' ? parseArgs(args) : null,
-        env: serverType === 'stdio' && Object.keys(env).length > 0 ? env : null,
-        url: serverType === 'stream_http' ? url : null,
-        headers: serverType === 'stream_http' && Object.keys(headers).length > 0 ? headers : null,
-      });
+      if (isEditMode && server) {
+        const response = await invoke<CommandResponse<McpServer>>('update_mcp_server', {
+          id: server.id,
+          name,
+          serverType,
+          command: serverType === 'stdio' ? command : null,
+          clearCommand: serverType !== 'stdio',
+          args: serverType === 'stdio' ? parseArgs(args) : [],
+          env: serverType === 'stdio' ? env : {},
+          url: serverType === 'stream_http' ? url : null,
+          clearUrl: serverType !== 'stream_http',
+          headers: serverType === 'stream_http' ? headers : {},
+          autoConnect,
+        });
 
-      if (response.success && response.data) {
-        onServerAdded(response.data);
-        resetForm();
+        if (response.success && response.data) {
+          onServerUpdated?.(response.data);
+          onOpenChange(false);
+        } else {
+          setError(response.error || t('mcp.errors.addServer'));
+        }
       } else {
-        setError(response.error || t('mcp.errors.addServer'));
+        const response = await invoke<CommandResponse<McpServer>>('add_mcp_server', {
+          name,
+          serverType,
+          command: serverType === 'stdio' ? command : null,
+          args: serverType === 'stdio' ? parseArgs(args) : null,
+          env: serverType === 'stdio' && Object.keys(env).length > 0 ? env : null,
+          url: serverType === 'stream_http' ? url : null,
+          headers: serverType === 'stream_http' && Object.keys(headers).length > 0 ? headers : null,
+          autoConnect,
+        });
+
+        if (response.success && response.data) {
+          onServerAdded(response.data);
+          resetForm();
+        } else {
+          setError(response.error || t('mcp.errors.addServer'));
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('mcp.errors.addServer'));
@@ -122,8 +170,15 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
     setHeaderVars(updated);
   };
 
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen && !isEditMode) {
+      resetForm();
+    }
+    onOpenChange(nextOpen);
+  };
+
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root open={open} onOpenChange={handleOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 bg-black/50 animate-in fade-in-0" />
         <Dialog.Content
@@ -136,10 +191,9 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
           )}
         >
           <form onSubmit={handleSubmit}>
-            {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
               <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-white">
-                {t('mcp.addServerTitle')}
+                {isEditMode ? t('mcp.editServerTitle', 'Edit MCP Server') : t('mcp.addServerTitle')}
               </Dialog.Title>
               <Dialog.Close asChild>
                 <button type="button" className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800">
@@ -148,9 +202,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
               </Dialog.Close>
             </div>
 
-            {/* Body */}
             <div className="p-4 space-y-4">
-              {/* Server Type */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   {t('mcp.serverType')}
@@ -183,7 +235,6 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                 </div>
               </div>
 
-              {/* Name */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   {t('mcp.serverName')}
@@ -204,7 +255,16 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                 />
               </div>
 
-              {/* Stdio Fields */}
+              <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={autoConnect}
+                  onChange={(e) => setAutoConnect(e.target.checked)}
+                  className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                />
+                <span>{t('mcp.autoConnect', 'Auto-connect on startup')}</span>
+              </label>
+
               {serverType === 'stdio' && (
                 <>
                   <div>
@@ -246,7 +306,6 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                     />
                   </div>
 
-                  {/* Environment Variables */}
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -302,7 +361,6 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                 </>
               )}
 
-              {/* Stream HTTP Fields */}
               {serverType === 'stream_http' && (
                 <>
                   <div>
@@ -378,7 +436,6 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                 </>
               )}
 
-              {/* Error */}
               {error && (
                 <div className="p-3 rounded-md bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-sm">
                   {error}
@@ -386,7 +443,6 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
               )}
             </div>
 
-            {/* Footer */}
             <div className="flex justify-end gap-2 p-4 border-t border-gray-200 dark:border-gray-700">
               <Dialog.Close asChild>
                 <button
@@ -412,7 +468,13 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded }: AddServer
                   'disabled:opacity-50',
                 )}
               >
-                {loading ? t('common.adding') : t('mcp.addServer')}
+                {loading
+                  ? isEditMode
+                    ? t('common.saving')
+                    : t('common.adding')
+                  : isEditMode
+                    ? t('common.save')
+                    : t('mcp.addServer')}
               </button>
             </div>
           </form>

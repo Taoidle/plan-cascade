@@ -628,7 +628,7 @@ fn import_mcp_servers(
         if !server.env.is_empty() {
             let key = format!("mcp/{}/env", server.id);
             let raw = serde_json::to_string(&server.env)?;
-            let _ = keyring.set_api_key(&key, &raw);
+            keyring.set_api_key(&key, &raw)?;
             server.has_env_secret = true;
             server.env.clear();
         }
@@ -636,7 +636,7 @@ fn import_mcp_servers(
         if !server.headers.is_empty() {
             let key = format!("mcp/{}/headers", server.id);
             let raw = serde_json::to_string(&server.headers)?;
-            let _ = keyring.set_api_key(&key, &raw);
+            keyring.set_api_key(&key, &raw)?;
             server.has_headers_secret = true;
             server.headers.clear();
         }

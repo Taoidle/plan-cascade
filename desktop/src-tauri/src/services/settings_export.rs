@@ -403,8 +403,27 @@ pub fn import_backend_settings(
 
     // 8. MCP servers — upsert by id
     import_section(&mut result, "mcp_servers", || {
+        let keyring = crate::storage::KeyringService::new();
         for server_value in &backend.mcp_servers {
             let server: crate::models::McpServer = serde_json::from_value(server_value.clone())?;
+            let mut server = server;
+
+            if !server.env.is_empty() {
+                let key = format!("mcp/{}/env", server.id);
+                let raw = serde_json::to_string(&server.env)?;
+                keyring.set_api_key(&key, &raw)?;
+                server.has_env_secret = true;
+                server.env.clear();
+            }
+
+            if !server.headers.is_empty() {
+                let key = format!("mcp/{}/headers", server.id);
+                let raw = serde_json::to_string(&server.headers)?;
+                keyring.set_api_key(&key, &raw)?;
+                server.has_headers_secret = true;
+                server.headers.clear();
+            }
+
             // Try update first, if no rows affected then insert
             match db.get_mcp_server(&server.id)? {
                 Some(_) => db.update_mcp_server(&server)?,

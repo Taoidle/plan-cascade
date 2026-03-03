@@ -191,18 +191,27 @@ pub struct CreateMcpServerRequest {
     pub env: Option<HashMap<String, String>>,
     pub url: Option<String>,
     pub headers: Option<HashMap<String, String>>,
+    pub auto_connect: Option<bool>,
 }
 
 /// Request to update an existing MCP server
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateMcpServerRequest {
     pub name: Option<String>,
+    pub server_type: Option<McpServerType>,
     pub command: Option<String>,
+    /// Explicitly clear command (set to null) when true.
+    #[serde(default)]
+    pub clear_command: bool,
     pub args: Option<Vec<String>>,
     pub env: Option<HashMap<String, String>>,
     pub url: Option<String>,
+    /// Explicitly clear URL (set to null) when true.
+    #[serde(default)]
+    pub clear_url: bool,
     pub headers: Option<HashMap<String, String>>,
     pub enabled: Option<bool>,
+    pub auto_connect: Option<bool>,
 }
 
 /// Result of health check
@@ -211,6 +220,12 @@ pub struct HealthCheckResult {
     pub server_id: String,
     pub status: McpServerStatus,
     pub checked_at: String,
+    #[serde(default)]
+    pub latency_ms: Option<u64>,
+    #[serde(default)]
+    pub protocol_version: Option<String>,
+    #[serde(default)]
+    pub tool_count: Option<u32>,
 }
 
 /// Result of importing servers from Claude Desktop
@@ -221,6 +236,12 @@ pub struct ImportResult {
     pub failed: u32,
     pub servers: Vec<String>,
     pub errors: Vec<String>,
+    #[serde(default)]
+    pub will_add: Vec<String>,
+    #[serde(default)]
+    pub will_skip: Vec<String>,
+    #[serde(default)]
+    pub will_fail: Vec<String>,
 }
 
 #[cfg(test)]

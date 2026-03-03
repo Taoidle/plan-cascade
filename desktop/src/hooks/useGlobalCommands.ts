@@ -7,7 +7,7 @@
  * Story 004: Command Palette Enhancement
  */
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   useGlobalCommandPalette,
@@ -65,6 +65,14 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
   const analyticsStore = useAnalyticsStore();
   const projectsStore = useProjectsStore();
   const timelineStore = useTimelineStore();
+
+  const dispatchMcpAction = useCallback(
+    (action: 'open-add' | 'open-import' | 'refresh' | 'test-enabled' | 'export') => {
+      if (typeof window === 'undefined') return;
+      window.dispatchEvent(new CustomEvent('plan-cascade:mcp-command', { detail: { action } }));
+    },
+    [],
+  );
 
   // Update current context based on mode
   useEffect(() => {
@@ -475,6 +483,7 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         icon: PlusIcon,
         action: () => {
           setMode('mcp');
+          dispatchMcpAction('open-add');
         },
         keywords: ['mcp', 'add', 'server', 'new'],
         priority: 85,
@@ -488,6 +497,7 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         icon: ResetIcon,
         action: () => {
           setMode('mcp');
+          dispatchMcpAction('refresh');
         },
         keywords: ['mcp', 'refresh', 'servers', 'reload'],
         priority: 70,
@@ -501,6 +511,7 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         icon: ArchiveIcon,
         action: () => {
           setMode('mcp');
+          dispatchMcpAction('open-import');
         },
         keywords: ['mcp', 'import', 'config', 'configuration'],
         priority: 60,
@@ -514,6 +525,7 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         icon: DownloadIcon,
         action: () => {
           setMode('mcp');
+          dispatchMcpAction('export');
         },
         keywords: ['mcp', 'export', 'config', 'backup'],
         priority: 55,
@@ -527,13 +539,14 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         icon: CheckCircledIcon,
         action: () => {
           setMode('mcp');
+          dispatchMcpAction('test-enabled');
         },
         keywords: ['mcp', 'test', 'connection', 'verify'],
         priority: 65,
         contexts: ['expert', 'mcp'],
       },
     ],
-    [t, setMode],
+    [dispatchMcpAction, t, setMode],
   );
 
   // ============================================================================

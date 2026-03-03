@@ -4,50 +4,167 @@
  * Main component for displaying and managing MCP servers.
  */
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
-import { PlusIcon, DownloadIcon, ReloadIcon } from '@radix-ui/react-icons';
-import type { McpServer, CommandResponse, HealthCheckResult, ConnectedServerInfo } from '../../types/mcp';
+import { PlusIcon, DownloadIcon, ReloadIcon, UploadIcon, InfoCircledIcon, Cross2Icon } from '@radix-ui/react-icons';
+import type {
+  McpServer,
+  CommandResponse,
+  HealthCheckResult,
+  ConnectedServerInfo,
+  McpExportPayload,
+} from '../../types/mcp';
 import { ServerCard } from './ServerCard';
 import { AddServerDialog } from './AddServerDialog';
 import { ImportDialog } from './ImportDialog';
+import { useToast } from '../shared/Toast';
+import { localTimestampForFilename, saveTextWithDialog } from '../../lib/exportUtils';
+
+type McpCommandAction = 'open-add' | 'open-import' | 'refresh' | 'test-enabled' | 'export';
+type McpEventStatus = 'success' | 'error' | 'info';
+
+interface McpEventRecord {
+  id: string;
+  at: string;
+  action: string;
+  status: McpEventStatus;
+  serverId?: string;
+  serverName?: string;
+  detail?: string;
+}
+
+const MCP_COMMAND_EVENT = 'plan-cascade:mcp-command';
+
+function addToSet(prev: Set<string>, id: string) {
+  const next = new Set(prev);
+  next.add(id);
+  return next;
+}
+
+function removeFromSet(prev: Set<string>, id: string) {
+  const next = new Set(prev);
+  next.delete(id);
+  return next;
+}
 
 export function ServerRegistry() {
   const { t } = useTranslation();
+  const { showToast } = useToast();
   const [servers, setServers] = useState<McpServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [testingServerId, setTestingServerId] = useState<string | null>(null);
-  const [connectedServerIds, setConnectedServerIds] = useState<Set<string>>(new Set());
+  const [serverErrors, setServerErrors] = useState<Record<string, string>>({});
+  const [testingIds, setTestingIds] = useState<Set<string>>(new Set());
+  const [connectingIds, setConnectingIds] = useState<Set<string>>(new Set());
+  const [disconnectingIds, setDisconnectingIds] = useState<Set<string>>(new Set());
+  const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+  const [connectedServers, setConnectedServers] = useState<Record<string, ConnectedServerInfo>>({});
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [editingServer, setEditingServer] = useState<McpServer | null>(null);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [eventLog, setEventLog] = useState<McpEventRecord[]>([]);
+  const [selectedToolServerId, setSelectedToolServerId] = useState<string | null>(null);
 
-  // Fetch servers
-  const fetchServers = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await invoke<CommandResponse<McpServer[]>>('list_mcp_servers');
-      if (response.success && response.data) {
-        setServers(response.data);
-      } else {
-        setError(response.error || t('mcp.errors.fetchServers'));
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('mcp.errors.fetchServers'));
-    } finally {
-      setLoading(false);
+  const connectedServerIds = useMemo(() => new Set(Object.keys(connectedServers)), [connectedServers]);
+  const selectedToolServer = selectedToolServerId ? connectedServers[selectedToolServerId] : null;
+  const duplicateServerNames = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const server of servers) {
+      counts.set(server.name, (counts.get(server.name) || 0) + 1);
     }
-  }, [t]);
+    return new Set(
+      Array.from(counts.entries())
+        .filter(([, count]) => count > 1)
+        .map(([name]) => name),
+    );
+  }, [servers]);
+
+  const setServerError = useCallback((serverId: string, message: string | null) => {
+    setServerErrors((prev) => {
+      const next = { ...prev };
+      if (!message) {
+        delete next[serverId];
+      } else {
+        next[serverId] = message;
+      }
+      return next;
+    });
+  }, []);
+
+  const appendEvent = useCallback(
+    (
+      action: string,
+      status: McpEventStatus,
+      options?: {
+        server?: McpServer;
+        serverId?: string;
+        detail?: string;
+      },
+    ) => {
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const next: McpEventRecord = {
+        id,
+        at: new Date().toISOString(),
+        action,
+        status,
+        serverId: options?.serverId || options?.server?.id,
+        serverName: options?.server?.name,
+        detail: options?.detail,
+      };
+      setEventLog((prev) => [next, ...prev].slice(0, 20));
+    },
+    [],
+  );
+
+  const fetchServers = useCallback(
+    async (silent = false) => {
+      if (!silent) {
+        setLoading(true);
+      }
+      if (!silent && servers.length === 0) {
+        setError(null);
+      }
+
+      try {
+        const response = await invoke<CommandResponse<McpServer[]>>('list_mcp_servers');
+        if (response.success && response.data) {
+          setServers(response.data);
+          setError(null);
+        } else {
+          const message = response.error || t('mcp.errors.fetchServers');
+          if (servers.length === 0) {
+            setError(message);
+          }
+          showToast(message, 'error');
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : t('mcp.errors.fetchServers');
+        if (servers.length === 0) {
+          setError(message);
+        }
+        showToast(message, 'error');
+      } finally {
+        if (!silent) {
+          setLoading(false);
+        }
+      }
+    },
+    [servers.length, showToast, t],
+  );
 
   const fetchConnectedServers = useCallback(async () => {
     try {
       const response = await invoke<CommandResponse<ConnectedServerInfo[]>>('list_connected_mcp_servers');
       if (response.success && response.data) {
-        setConnectedServerIds(new Set(response.data.map((s) => s.server_id)));
+        const next: Record<string, ConnectedServerInfo> = {};
+        response.data.forEach((info) => {
+          next[info.server_id] = info;
+        });
+        setConnectedServers(next);
       }
     } catch (err) {
       console.warn('Failed to fetch connected MCP servers', err);
@@ -59,128 +176,314 @@ export function ServerRegistry() {
     fetchConnectedServers();
   }, [fetchServers, fetchConnectedServers]);
 
-  // Test server connection
-  const handleTest = async (serverId: string) => {
-    setTestingServerId(serverId);
-
-    try {
-      const response = await invoke<CommandResponse<HealthCheckResult>>('test_mcp_server', {
-        id: serverId,
-      });
-
-      if (response.success && response.data) {
-        // Update server status in local state
-        setServers((prev) =>
-          prev.map((s) =>
-            s.id === serverId ? { ...s, status: response.data!.status, last_checked: response.data!.checked_at } : s,
-          ),
-        );
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('mcp.errors.testConnection'));
-      console.error('Test failed:', err);
-    } finally {
-      setTestingServerId(null);
+  useEffect(() => {
+    if (selectedToolServerId && !connectedServers[selectedToolServerId]) {
+      setSelectedToolServerId(null);
     }
-  };
+  }, [connectedServers, selectedToolServerId]);
 
-  // Toggle server enabled
-  const handleToggle = async (serverId: string, enabled: boolean) => {
-    try {
-      const response = await invoke<CommandResponse<McpServer>>('toggle_mcp_server', {
-        id: serverId,
-        enabled,
-      });
+  const withAction = useCallback(
+    async (id: string, setState: React.Dispatch<React.SetStateAction<Set<string>>>, fn: () => Promise<void>) => {
+      setState((prev) => addToSet(prev, id));
+      try {
+        await fn();
+      } finally {
+        setState((prev) => removeFromSet(prev, id));
+      }
+    },
+    [],
+  );
 
-      if (response.success && response.data) {
-        setServers((prev) => prev.map((s) => (s.id === serverId ? response.data! : s)));
-        if (!enabled && connectedServerIds.has(serverId)) {
-          await invoke<CommandResponse<void>>('disconnect_mcp_server', { id: serverId });
-          await fetchConnectedServers();
+  const handleTest = useCallback(
+    async (serverId: string) => {
+      await withAction(serverId, setTestingIds, async () => {
+        setServerError(serverId, null);
+        try {
+          const response = await invoke<CommandResponse<HealthCheckResult>>('test_mcp_server', {
+            id: serverId,
+          });
+
+          if (response.success && response.data) {
+            setServers((prev) =>
+              prev.map((s) =>
+                s.id === serverId
+                  ? {
+                      ...s,
+                      status: response.data!.status,
+                      last_checked: response.data!.checked_at,
+                      last_error: typeof response.data!.status === 'object' ? response.data!.status.error : null,
+                    }
+                  : s,
+              ),
+            );
+
+            const testLabel = response.data.latency_ms != null ? ` (${response.data.latency_ms}ms)` : '';
+            if (response.data.status === 'connected') {
+              showToast(`${t('mcp.status.connected')}${testLabel}`, 'success');
+              const server = servers.find((s) => s.id === serverId);
+              appendEvent('test', 'success', {
+                server,
+                serverId,
+                detail: `latency=${response.data.latency_ms ?? 'n/a'}ms tools=${response.data.tool_count ?? 'n/a'}`,
+              });
+            } else {
+              showToast(`${t('mcp.status.error', { message: '' })}${testLabel}`.trim(), 'error');
+              const server = servers.find((s) => s.id === serverId);
+              appendEvent('test', 'error', {
+                server,
+                serverId,
+                detail: response.data.protocol_version || t('mcp.status.error', { message: '' }),
+              });
+            }
+            await fetchServers(true);
+          } else {
+            const message = response.error || t('mcp.errors.testConnection');
+            setServerError(serverId, message);
+            showToast(message, 'error');
+            const server = servers.find((s) => s.id === serverId);
+            appendEvent('test', 'error', { server, serverId, detail: message });
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : t('mcp.errors.testConnection');
+          setServerError(serverId, message);
+          showToast(message, 'error');
+          const server = servers.find((s) => s.id === serverId);
+          appendEvent('test', 'error', { server, serverId, detail: message });
         }
+      });
+    },
+    [appendEvent, fetchServers, servers, setServerError, showToast, t, withAction],
+  );
+
+  const handleToggle = async (serverId: string, enabled: boolean) => {
+    await withAction(serverId, setTogglingIds, async () => {
+      setServerError(serverId, null);
+      try {
+        const response = await invoke<CommandResponse<McpServer>>('toggle_mcp_server', {
+          id: serverId,
+          enabled,
+        });
+
+        if (response.success && response.data) {
+          setServers((prev) => prev.map((s) => (s.id === serverId ? response.data! : s)));
+          if (!enabled && connectedServerIds.has(serverId)) {
+            await invoke<CommandResponse<void>>('disconnect_mcp_server', { id: serverId });
+            await fetchConnectedServers();
+            await fetchServers(true);
+          }
+          appendEvent('toggle', 'info', {
+            server: response.data,
+            serverId,
+            detail: `enabled=${enabled}`,
+          });
+        } else {
+          const message = response.error || t('mcp.errors.toggleServer');
+          setServerError(serverId, message);
+          showToast(message, 'error');
+          const server = servers.find((s) => s.id === serverId);
+          appendEvent('toggle', 'error', { server, serverId, detail: message });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : t('mcp.errors.toggleServer');
+        setServerError(serverId, message);
+        showToast(message, 'error');
+        const server = servers.find((s) => s.id === serverId);
+        appendEvent('toggle', 'error', { server, serverId, detail: message });
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('mcp.errors.toggleServer'));
-      console.error('Toggle failed:', err);
-    }
+    });
   };
 
   const handleConnect = async (serverId: string) => {
-    try {
-      const response = await invoke<CommandResponse<ConnectedServerInfo>>('connect_mcp_server', { id: serverId });
-      if (response.success) {
-        await fetchConnectedServers();
-      } else {
-        setError(response.error || t('mcp.errors.connectServer'));
+    await withAction(serverId, setConnectingIds, async () => {
+      setServerError(serverId, null);
+      try {
+        const response = await invoke<CommandResponse<ConnectedServerInfo>>('connect_mcp_server', { id: serverId });
+        if (response.success) {
+          await fetchConnectedServers();
+          await fetchServers(true);
+          showToast(t('mcp.status.connected'), 'success');
+          const server = servers.find((s) => s.id === serverId);
+          appendEvent('connect', 'success', { server, serverId });
+        } else {
+          const message = response.error || t('mcp.errors.connectServer');
+          setServerError(serverId, message);
+          showToast(message, 'error');
+          const server = servers.find((s) => s.id === serverId);
+          appendEvent('connect', 'error', { server, serverId, detail: message });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : t('mcp.errors.connectServer');
+        setServerError(serverId, message);
+        showToast(message, 'error');
+        const server = servers.find((s) => s.id === serverId);
+        appendEvent('connect', 'error', { server, serverId, detail: message });
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('mcp.errors.connectServer'));
-      console.error('Connect failed:', err);
-    }
+    });
   };
 
   const handleDisconnect = async (serverId: string) => {
-    try {
-      const response = await invoke<CommandResponse<void>>('disconnect_mcp_server', { id: serverId });
-      if (response.success) {
-        await fetchConnectedServers();
-      } else {
-        setError(response.error || t('mcp.errors.disconnectServer'));
+    await withAction(serverId, setDisconnectingIds, async () => {
+      setServerError(serverId, null);
+      try {
+        const response = await invoke<CommandResponse<void>>('disconnect_mcp_server', { id: serverId });
+        if (response.success) {
+          await fetchConnectedServers();
+          await fetchServers(true);
+          showToast(t('mcp.status.disconnected'), 'info');
+          const server = servers.find((s) => s.id === serverId);
+          appendEvent('disconnect', 'success', { server, serverId });
+        } else {
+          const message = response.error || t('mcp.errors.disconnectServer');
+          setServerError(serverId, message);
+          showToast(message, 'error');
+          const server = servers.find((s) => s.id === serverId);
+          appendEvent('disconnect', 'error', { server, serverId, detail: message });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : t('mcp.errors.disconnectServer');
+        setServerError(serverId, message);
+        showToast(message, 'error');
+        const server = servers.find((s) => s.id === serverId);
+        appendEvent('disconnect', 'error', { server, serverId, detail: message });
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('mcp.errors.disconnectServer'));
-      console.error('Disconnect failed:', err);
-    }
+    });
   };
 
-  // Delete server
   const handleDelete = async (serverId: string) => {
-    if (!confirm(t('mcp.confirmDelete'))) return;
+    const confirmed = confirm(
+      t('mcp.confirmDeleteWithDisconnect', {
+        defaultValue: 'Are you sure you want to delete this server? If connected, it will be disconnected first.',
+      }),
+    );
+    if (!confirmed) return;
 
-    try {
-      const response = await invoke<CommandResponse<void>>('remove_mcp_server', {
-        id: serverId,
-      });
-
-      if (response.success) {
-        setServers((prev) => prev.filter((s) => s.id !== serverId));
-        setConnectedServerIds((prev) => {
-          const next = new Set(prev);
-          next.delete(serverId);
-          return next;
+    await withAction(serverId, setDeletingIds, async () => {
+      setServerError(serverId, null);
+      try {
+        const response = await invoke<CommandResponse<void>>('remove_mcp_server', {
+          id: serverId,
         });
-      } else {
-        setError(response.error || t('mcp.errors.deleteServer'));
+
+        if (response.success) {
+          const server = servers.find((s) => s.id === serverId);
+          setServers((prev) => prev.filter((s) => s.id !== serverId));
+          setConnectedServers((prev) => {
+            const next = { ...prev };
+            delete next[serverId];
+            return next;
+          });
+          if (selectedToolServerId === serverId) {
+            setSelectedToolServerId(null);
+          }
+          appendEvent('delete', 'success', { server, serverId });
+          showToast(t('common.done'), 'success');
+        } else {
+          const message = response.error || t('mcp.errors.deleteServer');
+          setServerError(serverId, message);
+          showToast(message, 'error');
+          const server = servers.find((s) => s.id === serverId);
+          appendEvent('delete', 'error', { server, serverId, detail: message });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : t('mcp.errors.deleteServer');
+        setServerError(serverId, message);
+        showToast(message, 'error');
+        const server = servers.find((s) => s.id === serverId);
+        appendEvent('delete', 'error', { server, serverId, detail: message });
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('mcp.errors.deleteServer'));
-      console.error('Delete failed:', err);
-    }
+    });
   };
 
-  // Handle server added
   const handleServerAdded = (server: McpServer) => {
     setServers((prev) => [...prev, server]);
     setAddDialogOpen(false);
+    appendEvent('add', 'success', { server });
+    showToast(t('common.done'), 'success');
   };
 
-  // Handle import complete
-  const handleImportComplete = () => {
-    fetchServers();
-    setImportDialogOpen(false);
+  const handleServerUpdated = (updated: McpServer) => {
+    setServers((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+    setEditingServer(null);
+    appendEvent('update', 'success', { server: updated });
+    showToast(t('common.done'), 'success');
   };
+
+  const handleImportComplete = () => {
+    void fetchServers(true);
+    void fetchConnectedServers();
+    appendEvent('import', 'success');
+    setImportDialogOpen(false);
+    showToast(t('common.done'), 'success');
+  };
+
+  const handleExport = useCallback(async () => {
+    try {
+      const response = await invoke<CommandResponse<McpExportPayload>>('export_mcp_servers');
+      if (!response.success || !response.data) {
+        showToast(response.error || t('mcp.errors.fetchServers'), 'error');
+        appendEvent('export', 'error', { detail: response.error || t('mcp.errors.fetchServers') });
+        return;
+      }
+
+      const filename = `mcp-config-${localTimestampForFilename()}.json`;
+      const saved = await saveTextWithDialog(filename, JSON.stringify(response.data, null, 2));
+      if (saved) {
+        showToast(t('commands.mcp.exportConfigDesc'), 'success');
+        appendEvent('export', 'success');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('mcp.errors.fetchServers');
+      showToast(message, 'error');
+      appendEvent('export', 'error', { detail: message });
+    }
+  }, [appendEvent, showToast, t]);
+
+  const handleTestEnabled = useCallback(async () => {
+    const enabledIds = servers.filter((s) => s.enabled).map((s) => s.id);
+    for (const id of enabledIds) {
+      await handleTest(id);
+    }
+    appendEvent('test_enabled', 'info', { detail: `count=${enabledIds.length}` });
+  }, [appendEvent, handleTest, servers]);
+
+  useEffect(() => {
+    const listener = (evt: Event) => {
+      const detail = (evt as CustomEvent<{ action?: McpCommandAction }>).detail;
+      switch (detail?.action) {
+        case 'open-add':
+          setAddDialogOpen(true);
+          break;
+        case 'open-import':
+          setImportDialogOpen(true);
+          break;
+        case 'refresh':
+          void fetchServers(true);
+          void fetchConnectedServers();
+          break;
+        case 'test-enabled':
+          void handleTestEnabled();
+          break;
+        case 'export':
+          void handleExport();
+          break;
+        default:
+          break;
+      }
+    };
+
+    window.addEventListener(MCP_COMMAND_EVENT, listener as EventListener);
+    return () => window.removeEventListener(MCP_COMMAND_EVENT, listener as EventListener);
+  }, [fetchConnectedServers, fetchServers, handleExport, handleTestEnabled]);
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t('mcp.title')}</h2>
 
           <div className="flex items-center gap-2">
-            {/* Refresh Button */}
             <button
-              onClick={fetchServers}
+              onClick={() => fetchServers()}
               disabled={loading}
               className={clsx(
                 'p-2 rounded-md',
@@ -195,7 +498,21 @@ export function ServerRegistry() {
               <ReloadIcon className={clsx('w-4 h-4', loading && 'animate-spin')} />
             </button>
 
-            {/* Import Button */}
+            <button
+              onClick={handleExport}
+              className={clsx(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-md',
+                'bg-gray-100 dark:bg-gray-800',
+                'text-gray-700 dark:text-gray-300',
+                'hover:bg-gray-200 dark:hover:bg-gray-700',
+                'text-sm font-medium',
+                'transition-colors',
+              )}
+            >
+              <UploadIcon className="w-4 h-4" />
+              <span>{t('commands.mcp.exportConfig')}</span>
+            </button>
+
             <button
               onClick={() => setImportDialogOpen(true)}
               className={clsx(
@@ -211,7 +528,6 @@ export function ServerRegistry() {
               <span>{t('mcp.import')}</span>
             </button>
 
-            {/* Add Button */}
             <button
               onClick={() => setAddDialogOpen(true)}
               className={clsx(
@@ -230,27 +546,23 @@ export function ServerRegistry() {
         <p className="text-sm text-gray-500 dark:text-gray-400">{t('mcp.description')}</p>
       </div>
 
-      {/* Server List */}
       <div className="flex-1 overflow-y-auto p-4">
         {loading && servers.length === 0 ? (
-          // Loading state
           <div className="space-y-4">
             <ServerSkeleton />
             <ServerSkeleton />
           </div>
         ) : error ? (
-          // Error state
           <div className="text-center py-8">
             <p className="text-sm text-red-500 dark:text-red-400">{error}</p>
             <button
-              onClick={fetchServers}
+              onClick={() => fetchServers()}
               className="mt-2 text-sm text-primary-600 dark:text-primary-400 hover:underline"
             >
               {t('common.retry')}
             </button>
           </div>
         ) : servers.length === 0 ? (
-          // Empty state
           <div className="text-center py-12">
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
               <PlusIcon className="w-8 h-8 text-gray-400" />
@@ -287,31 +599,202 @@ export function ServerRegistry() {
             </div>
           </div>
         ) : (
-          // Server cards
-          <div className="grid gap-4 grid-cols-1 lg:grid-cols-2 3xl:grid-cols-3">
-            {servers.map((server) => (
-              <ServerCard
-                key={server.id}
-                server={server}
-                connected={connectedServerIds.has(server.id)}
-                onTest={() => handleTest(server.id)}
-                onToggle={(enabled) => handleToggle(server.id, enabled)}
-                onConnect={() => handleConnect(server.id)}
-                onDisconnect={() => handleDisconnect(server.id)}
-                onEdit={() => {
-                  // TODO: Open edit dialog
-                  console.log('Edit:', server.id);
-                }}
-                onDelete={() => handleDelete(server.id)}
-                isLoading={testingServerId === server.id}
-              />
-            ))}
-          </div>
+          <>
+            <div className="grid gap-4 grid-cols-1 lg:grid-cols-2 3xl:grid-cols-3">
+              {servers.map((server) => {
+                return (
+                  <div key={server.id} className="space-y-2">
+                    <ServerCard
+                      server={server}
+                      connected={connectedServerIds.has(server.id)}
+                      connectedInfo={connectedServers[server.id]}
+                      onTest={() => handleTest(server.id)}
+                      onToggle={(enabled) => handleToggle(server.id, enabled)}
+                      onConnect={() => handleConnect(server.id)}
+                      onDisconnect={() => handleDisconnect(server.id)}
+                      onEdit={async () => {
+                        try {
+                          const response = await invoke<CommandResponse<McpServer>>('get_mcp_server_detail', {
+                            id: server.id,
+                            includeSecrets: true,
+                          });
+                          if (response.success && response.data) {
+                            setEditingServer(response.data);
+                          } else {
+                            showToast(response.error || t('mcp.errors.fetchServers'), 'error');
+                          }
+                        } catch (err) {
+                          showToast(err instanceof Error ? err.message : t('mcp.errors.fetchServers'), 'error');
+                        }
+                      }}
+                      onDelete={() => handleDelete(server.id)}
+                      onViewTools={
+                        connectedServers[server.id]
+                          ? () => {
+                              setSelectedToolServerId(server.id);
+                            }
+                          : undefined
+                      }
+                      isConnecting={connectingIds.has(server.id)}
+                      isDisconnecting={disconnectingIds.has(server.id)}
+                      isTesting={testingIds.has(server.id)}
+                      isToggling={togglingIds.has(server.id)}
+                      isDeleting={deletingIds.has(server.id)}
+                    />
+                    {serverErrors[server.id] && (
+                      <div className="text-xs rounded-md border border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-900/20 text-red-700 dark:text-red-300 px-2 py-1.5">
+                        {serverErrors[server.id]}
+                      </div>
+                    )}
+                    {duplicateServerNames.has(server.name) && (
+                      <div className="text-xs rounded-md border border-yellow-200 bg-yellow-50 dark:border-yellow-900/40 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-300 px-2 py-1.5">
+                        {t(
+                          'mcp.duplicateNameWarning',
+                          'Duplicate server name detected. Runtime tools remain isolated by server id.',
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-4 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+              <button
+                onClick={() => setShowDiagnostics((v) => !v)}
+                className="w-full flex items-center justify-between px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                <span className="inline-flex items-center gap-2 text-gray-700 dark:text-gray-300">
+                  <InfoCircledIcon className="w-4 h-4" />
+                  {t('mcp.diagnosticsTitle', 'Connection Diagnostics')}
+                </span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">{showDiagnostics ? 'Hide' : 'Show'}</span>
+              </button>
+              {showDiagnostics && (
+                <div className="p-3 space-y-2 bg-white dark:bg-gray-900">
+                  {Object.values(connectedServers).length === 0 ? (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {t('mcp.noConnectedServers', 'No connected MCP servers')}
+                    </p>
+                  ) : (
+                    Object.values(connectedServers).map((info) => (
+                      <div
+                        key={info.server_id}
+                        className="text-xs rounded border border-gray-200 dark:border-gray-700 p-2"
+                      >
+                        <p className="font-medium text-gray-900 dark:text-white">{info.server_name}</p>
+                        <p className="text-gray-500 dark:text-gray-400">
+                          protocol={info.protocol_version || 'unknown'} tools={info.tool_names.length}
+                        </p>
+                        {info.tool_names.length > 0 && (
+                          <p className="text-gray-600 dark:text-gray-300 mt-1 break-all">
+                            {info.tool_names.join(', ')}
+                          </p>
+                        )}
+                      </div>
+                    ))
+                  )}
+
+                  <div className="pt-2 mt-2 border-t border-gray-200 dark:border-gray-700">
+                    <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      {t('mcp.recentEvents', 'Recent MCP Events')}
+                    </p>
+                    {eventLog.length === 0 ? (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {t('mcp.noRecentEvents', 'No recent MCP events')}
+                      </p>
+                    ) : (
+                      <div className="space-y-1.5 max-h-52 overflow-y-auto">
+                        {eventLog.map((evt) => (
+                          <div key={evt.id} className="text-xs rounded border border-gray-200 dark:border-gray-700 p-2">
+                            <p
+                              className={clsx(
+                                'font-medium',
+                                evt.status === 'success' && 'text-green-700 dark:text-green-300',
+                                evt.status === 'error' && 'text-red-700 dark:text-red-300',
+                                evt.status === 'info' && 'text-gray-700 dark:text-gray-300',
+                              )}
+                            >
+                              {evt.action}
+                              {evt.serverName ? ` - ${evt.serverName}` : ''}
+                            </p>
+                            {evt.detail && <p className="text-gray-600 dark:text-gray-400 break-all">{evt.detail}</p>}
+                            <p className="text-gray-500 dark:text-gray-500">{new Date(evt.at).toLocaleString()}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
         )}
       </div>
 
-      {/* Dialogs */}
-      <AddServerDialog open={addDialogOpen} onOpenChange={setAddDialogOpen} onServerAdded={handleServerAdded} />
+      {selectedToolServer && (
+        <div className="fixed inset-0 z-50">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setSelectedToolServerId(null)}
+            aria-label={t('common.close')}
+          />
+          <div className="absolute right-0 top-0 h-full w-full max-w-md bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 shadow-xl p-4 flex flex-col">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                  {t('mcp.toolsDrawerTitle', 'MCP Tools')}
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{selectedToolServer.server_name}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedToolServerId(null)}
+                className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                <Cross2Icon className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+              </button>
+            </div>
+
+            <div className="text-xs text-gray-600 dark:text-gray-400 mb-3">
+              <p>protocol={selectedToolServer.protocol_version || 'unknown'}</p>
+              {selectedToolServer.connected_at && <p>connected_at={selectedToolServer.connected_at}</p>}
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-2">
+              {selectedToolServer.qualified_tool_names.length === 0 ? (
+                <p className="text-xs text-gray-500 dark:text-gray-400">{t('mcp.noTools', 'No tools found')}</p>
+              ) : (
+                selectedToolServer.qualified_tool_names.map((tool) => (
+                  <div key={tool} className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1.5">
+                    <p className="text-xs font-mono text-gray-800 dark:text-gray-200 break-all">{tool}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <AddServerDialog
+        open={addDialogOpen}
+        onOpenChange={setAddDialogOpen}
+        onServerAdded={handleServerAdded}
+        onServerUpdated={handleServerUpdated}
+      />
+
+      <AddServerDialog
+        open={!!editingServer}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingServer(null);
+          }
+        }}
+        onServerAdded={handleServerAdded}
+        onServerUpdated={handleServerUpdated}
+        server={editingServer}
+      />
 
       <ImportDialog
         open={importDialogOpen}
@@ -338,10 +821,8 @@ function ServerSkeleton() {
       <div className="h-4 w-48 bg-gray-100 dark:bg-gray-800 rounded mb-3 animate-skeleton" />
       <div className="flex gap-2">
         <div className="h-7 w-16 bg-gray-100 dark:bg-gray-800 rounded animate-skeleton" />
-        <div className="h-7 w-14 bg-gray-100 dark:bg-gray-800 rounded animate-skeleton" />
+        <div className="h-7 w-16 bg-gray-100 dark:bg-gray-800 rounded animate-skeleton" />
       </div>
     </div>
   );
 }
-
-export default ServerRegistry;

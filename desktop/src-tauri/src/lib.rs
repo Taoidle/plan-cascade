@@ -90,6 +90,7 @@ pub use commands::{
     execute_standalone_with_session,
     export_agents,
     export_all_settings,
+    export_mcp_servers,
     export_usage_streaming_job,
     extract_session_memories,
     fetch_marketplace,
@@ -122,6 +123,7 @@ pub use commands::{
     get_interview_state,
     get_knowledge_feature_flags,
     get_lsp_status,
+    get_mcp_server_detail,
     get_memory_stats,
     // Plugin commands
     get_plugin_compat_report,

@@ -4,12 +4,14 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::Stdio;
+use std::time::{Duration, Instant};
 
 use crate::models::{
     CreateMcpServerRequest, HealthCheckResult, ImportResult, McpServer, McpServerStatus,
     McpServerType, UpdateMcpServerRequest,
 };
+use crate::services::tools::mcp_client::McpClient;
+use crate::services::tools::mcp_manager::McpManager;
 use crate::storage::database::Database;
 use crate::storage::KeyringService;
 use crate::utils::error::{AppError, AppResult};
@@ -75,6 +77,11 @@ impl McpService {
         }
     }
 
+    fn clear_sensitive_payload(server: &mut McpServer) {
+        server.env.clear();
+        server.headers.clear();
+    }
+
     fn persist_sensitive(
         &self,
         server: &mut McpServer,
@@ -119,9 +126,18 @@ impl McpService {
 
     /// List all MCP servers.
     pub fn list_servers(&self) -> AppResult<Vec<McpServer>> {
+        self.list_servers_with_secrets(false)
+    }
+
+    /// List all MCP servers, optionally including hydrated sensitive values.
+    pub fn list_servers_with_secrets(&self, include_secrets: bool) -> AppResult<Vec<McpServer>> {
         let mut servers = self.db.list_mcp_servers()?;
         for server in &mut servers {
-            self.hydrate_sensitive(server);
+            if include_secrets {
+                self.hydrate_sensitive(server);
+            } else {
+                Self::clear_sensitive_payload(server);
+            }
         }
         Ok(servers)
     }
@@ -129,7 +145,7 @@ impl McpService {
     /// List enabled MCP servers that should auto-connect.
     pub fn list_enabled_auto_connect_servers(&self) -> AppResult<Vec<McpServer>> {
         Ok(self
-            .list_servers()?
+            .list_servers_with_secrets(true)?
             .into_iter()
             .filter(|s| s.enabled && s.auto_connect)
             .collect())
@@ -137,11 +153,24 @@ impl McpService {
 
     /// Get a server by ID.
     pub fn get_server(&self, id: &str) -> AppResult<Option<McpServer>> {
+        self.get_server_with_secrets(id, true)
+    }
+
+    /// Get a server by ID, optionally including hydrated sensitive values.
+    pub fn get_server_with_secrets(
+        &self,
+        id: &str,
+        include_secrets: bool,
+    ) -> AppResult<Option<McpServer>> {
         let mut server = match self.db.get_mcp_server(id)? {
             Some(s) => s,
             None => return Ok(None),
         };
-        self.hydrate_sensitive(&mut server);
+        if include_secrets {
+            self.hydrate_sensitive(&mut server);
+        } else {
+            Self::clear_sensitive_payload(&mut server);
+        }
         Ok(Some(server))
     }
 
@@ -161,7 +190,7 @@ impl McpService {
             has_env_secret: false,
             has_headers_secret: false,
             enabled: true,
-            auto_connect: true,
+            auto_connect: request.auto_connect.unwrap_or(true),
             status: McpServerStatus::Unknown,
             last_error: None,
             last_connected_at: None,
@@ -189,25 +218,52 @@ impl McpService {
         if let Some(name) = request.name {
             server.name = name;
         }
+        if let Some(server_type) = request.server_type {
+            server.server_type = server_type;
+        }
+        if request.clear_command {
+            server.command = None;
+        }
         if let Some(command) = request.command {
             server.command = Some(command);
         }
         if let Some(args) = request.args {
             server.args = args;
         }
-        let env_updated = request.env.is_some();
+        let mut env_updated = request.env.is_some();
         if let Some(env) = request.env {
             server.env = env;
+        }
+        if request.clear_url {
+            server.url = None;
         }
         if let Some(url) = request.url {
             server.url = Some(url);
         }
-        let headers_updated = request.headers.is_some();
+        let mut headers_updated = request.headers.is_some();
         if let Some(headers) = request.headers {
             server.headers = headers;
         }
         if let Some(enabled) = request.enabled {
             server.enabled = enabled;
+        }
+        if let Some(auto_connect) = request.auto_connect {
+            server.auto_connect = auto_connect;
+        }
+
+        // Keep the non-selected transport clean.
+        match server.server_type {
+            McpServerType::Stdio => {
+                server.url = None;
+                server.headers.clear();
+                headers_updated = true;
+            }
+            McpServerType::StreamHttp => {
+                server.command = None;
+                server.args.clear();
+                server.env.clear();
+                env_updated = true;
+            }
         }
 
         server.validate().map_err(AppError::validation)?;
@@ -237,97 +293,158 @@ impl McpService {
         let server = self
             .get_server(id)?
             .ok_or_else(|| AppError::not_found(format!("Server not found: {}", id)))?;
-
-        let status = match server.server_type {
-            McpServerType::Stdio => self.test_stdio_server(&server).await,
-            McpServerType::StreamHttp => self.test_stream_http_server(&server).await,
+        let transport = match server.server_type {
+            McpServerType::Stdio => "stdio",
+            McpServerType::StreamHttp => "stream_http",
         };
 
-        self.db.update_mcp_server_status(id, &status)?;
+        tracing::info!(
+            event = "test_attempt",
+            server_id = %id,
+            server_name = %server.name,
+            transport = transport,
+            "Testing MCP server"
+        );
+
+        let config = McpManager::config_from_model(&server)?;
+        let start = Instant::now();
+
+        let test_result = tokio::time::timeout(Duration::from_secs(10), async {
+            let client = McpClient::connect(&config).await?;
+            let protocol_version = client.server_info().protocol_version.clone();
+            let tools = client.list_tools().await?;
+            let tool_count = tools.len() as u32;
+            if let Some(health_tool) = tools.iter().find(|tool| {
+                matches!(
+                    tool.name.as_str(),
+                    "ping" | "health" | "health_check" | "healthcheck"
+                )
+            }) {
+                let requires_args = health_tool
+                    .input_schema
+                    .get("required")
+                    .and_then(|value| value.as_array())
+                    .map(|required| !required.is_empty())
+                    .unwrap_or(false);
+                if !requires_args {
+                    client.call_tool(&health_tool.name, serde_json::json!({})).await?;
+                }
+            }
+            let _ = client.disconnect().await;
+            Ok::<(String, u32), AppError>((protocol_version, tool_count))
+        })
+        .await;
+
+        let latency_ms = start.elapsed().as_millis() as u64;
+
+        let (status, protocol_version, tool_count) = match test_result {
+            Ok(Ok((protocol_version, tool_count))) => {
+                self.mark_server_connected(id)?;
+                tracing::info!(
+                    event = "test_success",
+                    server_id = %id,
+                    server_name = %server.name,
+                    transport = transport,
+                    latency_ms = latency_ms,
+                    tool_count = tool_count,
+                    protocol_version = %protocol_version,
+                    "MCP server health check succeeded"
+                );
+                (
+                    McpServerStatus::Connected,
+                    Some(protocol_version),
+                    Some(tool_count),
+                )
+            }
+            Ok(Err(e)) => {
+                let classified = Self::classify_error(&e.to_string());
+                self.mark_server_connection_error(id, &classified)?;
+                tracing::warn!(
+                    event = "test_failure",
+                    server_id = %id,
+                    server_name = %server.name,
+                    transport = transport,
+                    latency_ms = latency_ms,
+                    error_class = %classified.split(':').next().unwrap_or("transport"),
+                    error = %classified,
+                    "MCP server health check failed"
+                );
+                (McpServerStatus::Error(classified), None, None)
+            }
+            Err(_) => {
+                let timeout_err = "transport: connection timeout".to_string();
+                self.mark_server_connection_error(id, &timeout_err)?;
+                tracing::warn!(
+                    event = "test_failure",
+                    server_id = %id,
+                    server_name = %server.name,
+                    transport = transport,
+                    latency_ms = latency_ms,
+                    error_class = "transport",
+                    error = %timeout_err,
+                    "MCP server health check timed out"
+                );
+                (McpServerStatus::Error(timeout_err), None, None)
+            }
+        };
 
         Ok(HealthCheckResult {
             server_id: id.to_string(),
             status,
             checked_at: chrono::Utc::now().to_rfc3339(),
+            latency_ms: Some(latency_ms),
+            protocol_version,
+            tool_count,
         })
     }
 
-    async fn test_stdio_server(&self, server: &McpServer) -> McpServerStatus {
-        let command = match &server.command {
-            Some(cmd) => cmd.clone(),
-            None => return McpServerStatus::Error("No command specified".to_string()),
+    fn classify_error(raw: &str) -> String {
+        let lower = raw.to_lowercase();
+        let class = if lower.contains("unauthorized")
+            || lower.contains("forbidden")
+            || lower.contains("401")
+            || lower.contains("403")
+            || lower.contains("auth")
+        {
+            "auth"
+        } else if lower.contains("protocol")
+            || lower.contains("initialize")
+            || lower.contains("tools/list")
+            || lower.contains("jsonrpc")
+        {
+            "protocol"
+        } else if lower.contains("header")
+            || lower.contains("url")
+            || lower.contains("schema")
+            || lower.contains("validation")
+        {
+            "schema"
+        } else {
+            "transport"
         };
 
-        let args = server.args.clone();
-        let env = server.env.clone();
-
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            tokio::task::spawn_blocking(move || {
-                let mut env_vars: HashMap<String, String> = std::env::vars().collect();
-                for (key, value) in &env {
-                    env_vars.insert(key.clone(), value.clone());
-                }
-
-                let spawn_result = std::process::Command::new(&command)
-                    .args(&args)
-                    .envs(&env_vars)
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .spawn();
-
-                match spawn_result {
-                    Ok(mut child) => {
-                        let _ = child.kill();
-                        Ok(())
-                    }
-                    Err(e) => Err(format!("Failed to spawn: {}", e)),
-                }
-            }),
-        )
-        .await;
-
-        match result {
-            Ok(Ok(Ok(()))) => McpServerStatus::Connected,
-            Ok(Ok(Err(e))) => McpServerStatus::Error(e),
-            Ok(Err(e)) => McpServerStatus::Error(format!("Task error: {}", e)),
-            Err(_) => McpServerStatus::Error("Spawn timeout".to_string()),
-        }
+        format!("{}: {}", class, raw)
     }
 
-    async fn test_stream_http_server(&self, server: &McpServer) -> McpServerStatus {
-        let url = match &server.url {
-            Some(u) => u,
-            None => return McpServerStatus::Error("No URL specified".to_string()),
-        };
+    pub fn mark_server_connected(&self, id: &str) -> AppResult<()> {
+        self.db.mark_mcp_server_connected(id)
+    }
 
-        let client = match reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(5))
-            .build()
-        {
-            Ok(c) => c,
-            Err(e) => return McpServerStatus::Error(format!("HTTP client error: {}", e)),
-        };
+    pub fn mark_server_disconnected(&self, id: &str) -> AppResult<()> {
+        self.db.mark_mcp_server_disconnected(id)
+    }
 
-        let mut request = client.get(url);
-        for (key, value) in &server.headers {
-            request = request.header(key, value);
-        }
-
-        match request.send().await {
-            Ok(response)
-                if response.status().is_success() || response.status().is_informational() =>
-            {
-                McpServerStatus::Connected
-            }
-            Ok(response) => McpServerStatus::Error(format!("HTTP {}", response.status())),
-            Err(e) => McpServerStatus::Error(format!("Request failed: {}", e)),
-        }
+    pub fn mark_server_connection_error(&self, id: &str, error: &str) -> AppResult<()> {
+        self.db.mark_mcp_server_connection_error(id, error)
     }
 
     /// Import servers from Claude Desktop configuration.
     pub fn import_from_claude_desktop(&self) -> AppResult<ImportResult> {
+        self.import_from_claude_desktop_with_options(false)
+    }
+
+    /// Import servers from Claude Desktop configuration with options.
+    pub fn import_from_claude_desktop_with_options(&self, dry_run: bool) -> AppResult<ImportResult> {
         let config_path = Self::get_claude_desktop_config_path();
 
         if !config_path.exists() {
@@ -337,20 +454,28 @@ impl McpService {
                 failed: 0,
                 servers: vec![],
                 errors: vec!["Claude Desktop config not found".to_string()],
+                will_add: vec![],
+                will_skip: vec![],
+                will_fail: vec![],
             });
         }
 
         let content = std::fs::read_to_string(&config_path)?;
-        self.import_from_json_str(&content)
+        self.import_from_json_str(&content, dry_run)
     }
 
     /// Import servers from a JSON configuration file path.
     pub fn import_from_file(&self, path: &str) -> AppResult<ImportResult> {
-        let content = std::fs::read_to_string(path)?;
-        self.import_from_json_str(&content)
+        self.import_from_file_with_options(path, false)
     }
 
-    fn import_from_json_str(&self, content: &str) -> AppResult<ImportResult> {
+    /// Import servers from a JSON configuration file path with options.
+    pub fn import_from_file_with_options(&self, path: &str, dry_run: bool) -> AppResult<ImportResult> {
+        let content = std::fs::read_to_string(path)?;
+        self.import_from_json_str(&content, dry_run)
+    }
+
+    fn import_from_json_str(&self, content: &str, dry_run: bool) -> AppResult<ImportResult> {
         let config: serde_json::Value = serde_json::from_str(content)
             .map_err(|e| AppError::parse(format!("Invalid JSON: {}", e)))?;
 
@@ -360,11 +485,14 @@ impl McpService {
             failed: 0,
             servers: vec![],
             errors: vec![],
+            will_add: vec![],
+            will_skip: vec![],
+            will_fail: vec![],
         };
 
         if let Some(mcp_servers) = config.get("mcpServers").and_then(|v| v.as_object()) {
             for (name, server_config) in mcp_servers {
-                self.apply_import_result(name, server_config, &mut result);
+                self.apply_import_result(name, server_config, dry_run, &mut result);
             }
             return Ok(result);
         }
@@ -375,7 +503,7 @@ impl McpService {
                     .get("name")
                     .and_then(|v| v.as_str())
                     .unwrap_or("unnamed");
-                self.apply_import_result(name, item, &mut result);
+                self.apply_import_result(name, item, dry_run, &mut result);
             }
             return Ok(result);
         }
@@ -384,6 +512,12 @@ impl McpService {
             "No MCP server definitions found (expected `mcpServers` object or `servers` array)"
                 .to_string(),
         );
+        if dry_run {
+            result.will_fail.push(
+                "No MCP server definitions found (expected `mcpServers` object or `servers` array)"
+                    .to_string(),
+            );
+        }
         Ok(result)
     }
 
@@ -391,20 +525,23 @@ impl McpService {
         &self,
         name: &str,
         server_config: &serde_json::Value,
+        dry_run: bool,
         result: &mut ImportResult,
     ) {
-        match self.import_single_server(name, server_config) {
+        match self.import_single_server(name, server_config, dry_run) {
             Ok(ImportSingleResult::Added(server_name)) => {
                 result.added += 1;
                 result.servers.push(server_name);
-            }
-            Ok(ImportSingleResult::Skipped(reason)) => {
-                result.skipped += 1;
-                result.errors.push(format!("{}: {}", name, reason));
+                if dry_run {
+                    result.will_add.push(name.to_string());
+                }
             }
             Err(e) => {
                 result.failed += 1;
                 result.errors.push(format!("{}: {}", name, e));
+                if dry_run {
+                    result.will_fail.push(format!("{}: {}", name, e));
+                }
             }
         }
     }
@@ -445,11 +582,8 @@ impl McpService {
         &self,
         name: &str,
         config: &serde_json::Value,
+        dry_run: bool,
     ) -> AppResult<ImportSingleResult> {
-        if self.db.get_mcp_server_by_name(name)?.is_some() {
-            return Ok(ImportSingleResult::Skipped("Already exists".to_string()));
-        }
-
         let command = config
             .get("command")
             .and_then(|v| v.as_str())
@@ -510,16 +644,18 @@ impl McpService {
             env: Some(env),
             url,
             headers: Some(headers),
+            auto_connect: Some(true),
         };
 
-        self.add_server(request)?;
+        if !dry_run {
+            self.add_server(request)?;
+        }
         Ok(ImportSingleResult::Added(name.to_string()))
     }
 }
 
 enum ImportSingleResult {
     Added(String),
-    Skipped(String),
 }
 
 #[cfg(test)]

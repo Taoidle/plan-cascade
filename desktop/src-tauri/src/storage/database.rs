@@ -1851,6 +1851,54 @@ impl Database {
         Ok(())
     }
 
+    /// Mark an MCP server as connected and reset transient error counters.
+    pub fn mark_mcp_server_connected(&self, id: &str) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "UPDATE mcp_servers
+             SET status = 'connected',
+                 last_error = NULL,
+                 last_connected_at = CURRENT_TIMESTAMP,
+                 retry_count = 0,
+                 last_checked = CURRENT_TIMESTAMP,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?1",
+            params![id],
+        )?;
+        Ok(())
+    }
+
+    /// Mark an MCP server as disconnected.
+    pub fn mark_mcp_server_disconnected(&self, id: &str) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "UPDATE mcp_servers
+             SET status = 'disconnected',
+                 last_error = NULL,
+                 last_checked = CURRENT_TIMESTAMP,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?1",
+            params![id],
+        )?;
+        Ok(())
+    }
+
+    /// Mark an MCP server connection failure and increment retry counter.
+    pub fn mark_mcp_server_connection_error(&self, id: &str, error: &str) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "UPDATE mcp_servers
+             SET status = ?2,
+                 last_error = ?3,
+                 retry_count = retry_count + 1,
+                 last_checked = CURRENT_TIMESTAMP,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?1",
+            params![id, format!("error:{}", error), error],
+        )?;
+        Ok(())
+    }
+
     /// Get MCP server by name (for duplicate detection)
     pub fn get_mcp_server_by_name(
         &self,
