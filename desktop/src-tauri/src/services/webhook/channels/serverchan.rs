@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 
-use super::WebhookChannel;
+use super::{format_timestamp_for_display, WebhookChannel};
 use crate::services::proxy::ProxyConfig;
 use crate::services::webhook::types::*;
 
@@ -69,10 +69,17 @@ impl ServerChanChannel {
             }
 
             if let Some(node) = Self::parse_sctp_node(send_key) {
-                return Ok(format!("https://{}.push.ft07.com/send/{}.send", node, send_key));
+                return Ok(format!(
+                    "https://{}.push.ft07.com/send/{}.send",
+                    node, send_key
+                ));
             }
 
-            return Ok(format!("{}/{}.send", target.trim_end_matches('/'), send_key));
+            return Ok(format!(
+                "{}/{}.send",
+                target.trim_end_matches('/'),
+                send_key
+            ));
         }
 
         if target.contains("{sendkey}") {
@@ -95,9 +102,11 @@ impl ServerChanChannel {
     fn parse_api_error(response_body: Option<&str>) -> Option<String> {
         let response_body = response_body?;
         let parsed: serde_json::Value = serde_json::from_str(response_body).ok()?;
-        let code = parsed
-            .get("code")
-            .and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse::<i64>().ok()))?;
+        let code = parsed.get("code").and_then(|value| {
+            value
+                .as_i64()
+                .or_else(|| value.as_str()?.parse::<i64>().ok())
+        })?;
 
         if code == 0 {
             return None;
@@ -134,7 +143,10 @@ impl WebhookChannel for ServerChanChannel {
 
         let mut form = HashMap::new();
         form.insert("text", format!("{}", payload.event_type));
-        form.insert("desp", self.format_message(payload, config.template.as_deref()));
+        form.insert(
+            "desp",
+            self.format_message(payload, config.template.as_deref()),
+        );
 
         let response = self
             .client
@@ -231,7 +243,7 @@ impl WebhookChannel for ServerChanChannel {
         }
         lines.push(format!(
             "**Time**: {}",
-            Self::escape_markdown(&payload.timestamp)
+            Self::escape_markdown(&format_timestamp_for_display(&payload.timestamp))
         ));
         lines.join("\n\n")
     }

@@ -7,7 +7,7 @@
 
 use async_trait::async_trait;
 
-use super::WebhookChannel;
+use super::{format_timestamp_for_display, WebhookChannel};
 use crate::services::proxy::ProxyConfig;
 use crate::services::webhook::types::*;
 
@@ -100,7 +100,7 @@ impl FeishuChannel {
         }
         markdown_lines.push(format!(
             "**Time**: {}",
-            Self::escape_lark_md(&payload.timestamp)
+            Self::escape_lark_md(&format_timestamp_for_display(&payload.timestamp))
         ));
         markdown_lines.join("\n")
     }
@@ -121,7 +121,10 @@ impl FeishuChannel {
         if let Some(ms) = payload.duration_ms {
             lines.push(format!("**Duration**: {}s", ms / 1000));
         }
-        lines.push(format!("**Time**: {}", payload.timestamp));
+        lines.push(format!(
+            "**Time**: {}",
+            format_timestamp_for_display(&payload.timestamp)
+        ));
         lines.join("\n")
     }
 

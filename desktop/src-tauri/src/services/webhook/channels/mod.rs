@@ -17,6 +17,16 @@ use super::types::{
     WebhookTestResult,
 };
 
+pub(super) fn format_timestamp_for_display(timestamp: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(timestamp)
+        .map(|dt| {
+            dt.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M:%S %:z")
+                .to_string()
+        })
+        .unwrap_or_else(|_| timestamp.to_string())
+}
+
 /// Async trait for webhook channel implementations.
 ///
 /// Each channel is responsible for formatting messages to a platform-specific

@@ -4,7 +4,7 @@
 
 use async_trait::async_trait;
 
-use super::WebhookChannel;
+use super::{format_timestamp_for_display, WebhookChannel};
 use crate::services::proxy::ProxyConfig;
 use crate::services::webhook::types::*;
 
@@ -128,7 +128,10 @@ impl WebhookChannel for SlackChannel {
         }
         context_elements.push(serde_json::json!({
             "type": "mrkdwn",
-            "text": format!("Timestamp: {}", payload.timestamp)
+            "text": format!(
+                "Timestamp: {}",
+                format_timestamp_for_display(&payload.timestamp)
+            )
         }));
 
         let blocks = serde_json::json!({
