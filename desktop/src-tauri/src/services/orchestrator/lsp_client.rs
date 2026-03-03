@@ -17,6 +17,7 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::oneshot;
 use tokio::time::{timeout, Duration};
 use tracing::{debug, warn};
+use url::Url;
 
 /// Default timeout for LSP requests (30 seconds).
 const REQUEST_TIMEOUT_SECS: u64 = 30;
@@ -129,7 +130,9 @@ impl LspClient {
         let root_uri = if root_uri.starts_with("file://") {
             root_uri.to_string()
         } else {
-            format!("file://{}", root_uri)
+            Url::from_file_path(std::path::Path::new(root_uri))
+                .map_err(|_| anyhow::anyhow!("Invalid root path for file URI: {}", root_uri))?
+                .to_string()
         };
 
         let init_params = lsp_types::InitializeParams {
@@ -217,6 +220,27 @@ impl LspClient {
                 )
             })?;
 
+        if result
+            .get("__lsp_error")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            let code = result
+                .get("code")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(-32000);
+            let message = result
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown LSP error");
+            return Err(anyhow::anyhow!(
+                "LSP request '{}' failed (code={}): {}",
+                R::METHOD,
+                code,
+                message
+            ));
+        }
+
         let parsed: R::Result = serde_json::from_value(result)?;
         Ok(parsed)
     }
@@ -303,7 +327,10 @@ impl LspClient {
             loop {
                 header_buf.clear();
                 match reader.read_line(&mut header_buf).await {
-                    Ok(0) => return, // EOF
+                    Ok(0) => {
+                        Self::fail_pending_requests(&pending, "LSP stdout closed (EOF)");
+                        return;
+                    }
                     Ok(_) => {
                         let line = header_buf.trim();
                         if line.is_empty() {
@@ -315,7 +342,13 @@ impl LspClient {
                             }
                         }
                     }
-                    Err(_) => return,
+                    Err(e) => {
+                        Self::fail_pending_requests(
+                            &pending,
+                            &format!("LSP stdout read error: {}", e),
+                        );
+                        return;
+                    }
                 }
             }
 
@@ -327,6 +360,7 @@ impl LspClient {
             // Read the body
             let mut body = vec![0u8; content_length];
             if reader.read_exact(&mut body).await.is_err() {
+                Self::fail_pending_requests(&pending, "LSP message body read failed");
                 return;
             }
 
@@ -364,6 +398,20 @@ impl LspClient {
                 }
             }
             // else: server notification — we ignore these for now
+        }
+    }
+
+    fn fail_pending_requests(pending: &DashMap<i64, oneshot::Sender<Value>>, reason: &str) {
+        warn!(reason, "LSP reader loop ended, failing pending requests");
+        let pending_ids: Vec<i64> = pending.iter().map(|entry| *entry.key()).collect();
+        for id in pending_ids {
+            if let Some((_, sender)) = pending.remove(&id) {
+                let _ = sender.send(serde_json::json!({
+                    "__lsp_error": true,
+                    "code": -32000,
+                    "message": reason,
+                }));
+            }
         }
     }
 }
@@ -525,6 +573,20 @@ mod tests {
         // Attempt to receive with a very short timeout
         let result = timeout(Duration::from_millis(50), rx).await;
         assert!(result.is_err(), "Should timeout when no response arrives");
+    }
+
+    #[tokio::test]
+    async fn test_fail_pending_requests_emits_structured_error() {
+        let pending: Arc<DashMap<i64, oneshot::Sender<Value>>> = Arc::new(DashMap::new());
+        let (tx, rx) = oneshot::channel::<Value>();
+        pending.insert(99, tx);
+
+        LspClient::fail_pending_requests(&pending, "reader EOF");
+
+        let value = rx.await.expect("pending receiver should resolve");
+        assert_eq!(value["__lsp_error"], serde_json::json!(true));
+        assert_eq!(value["message"], serde_json::json!("reader EOF"));
+        assert!(pending.is_empty());
     }
 
     // =========================================================================

@@ -15,7 +15,14 @@ export interface LspServerStatus {
   detected: boolean;
   binary_path: string | null;
   version: string | null;
+  detected_at: string | null;
   install_hint: string;
+}
+
+/** Persisted LSP preferences (backend source of truth). */
+export interface LspPreferences {
+  autoEnrich: boolean;
+  incrementalDebounceMs: number;
 }
 
 /** Enrichment pass results */

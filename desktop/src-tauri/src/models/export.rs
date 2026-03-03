@@ -29,6 +29,8 @@ pub struct BackendSettingsExport {
     pub config: serde_json::Value,
     /// Embedding configuration from SQLite settings table
     pub embedding: Option<serde_json::Value>,
+    /// LSP preferences from SQLite settings table (`lsp_preferences_v1`)
+    pub lsp: Option<LspPreferencesExport>,
     /// Proxy settings (global + per-strategy + custom)
     pub proxy: ProxyExport,
     /// Webhook channel configurations
@@ -43,6 +45,13 @@ pub struct BackendSettingsExport {
     pub mcp_servers: Vec<serde_json::Value>,
     /// Plugin settings from ~/.plan-cascade/plugin-settings.json
     pub plugin_settings: Option<serde_json::Value>,
+}
+
+/// LSP preference export payload.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LspPreferencesExport {
+    pub auto_enrich: bool,
+    pub incremental_debounce_ms: u64,
 }
 
 /// Proxy settings export structure.

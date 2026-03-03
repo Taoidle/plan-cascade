@@ -12,7 +12,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
@@ -40,6 +40,10 @@ use crate::storage::KeyringService;
 
 /// Tauri event name for index progress updates.
 const INDEX_PROGRESS_EVENT: &str = "index-progress";
+const LSP_PREFERENCES_KEY: &str = "lsp_preferences_v1";
+const DEFAULT_LSP_ENRICHMENT_DEBOUNCE_MS: u64 = 3000;
+const MIN_LSP_ENRICHMENT_DEBOUNCE_MS: u64 = 500;
+const MAX_LSP_ENRICHMENT_DEBOUNCE_MS: u64 = 60_000;
 
 /// Serializable status event emitted to the frontend via Tauri events.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,6 +73,19 @@ pub struct IndexStatusEvent {
 
 fn default_lsp_enrichment_none() -> String {
     "none".into()
+}
+
+#[derive(Debug, Deserialize)]
+struct PersistedLspPreferences {
+    #[serde(
+        default = "default_lsp_incremental_debounce_ms",
+        alias = "incrementalDebounceMs"
+    )]
+    incremental_debounce_ms: u64,
+}
+
+fn default_lsp_incremental_debounce_ms() -> u64 {
+    DEFAULT_LSP_ENRICHMENT_DEBOUNCE_MS
 }
 
 /// Internal bookkeeping for a running indexer.
@@ -111,6 +128,8 @@ pub struct IndexManager {
     enrichment_locks: RwLock<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// Cached flag: whether a project has enrichment data (avoid re-querying DB).
     enrichment_enabled: RwLock<HashMap<String, bool>>,
+    /// Live incremental LSP enrichment debounce in milliseconds.
+    lsp_incremental_debounce_ms: Arc<AtomicU64>,
     /// Optional LLM provider for component classification (Phase 1a).
     llm_provider: RwLock<Option<Arc<dyn LlmProvider>>>,
 }
@@ -118,8 +137,10 @@ pub struct IndexManager {
 impl IndexManager {
     /// Create a new `IndexManager` backed by the given database connection pool.
     pub fn new(pool: DbPool) -> Self {
+        let index_store = Arc::new(IndexStore::new(pool.clone()));
+        let initial_debounce = load_persisted_lsp_debounce(index_store.as_ref());
         Self {
-            index_store: Arc::new(IndexStore::new(pool.clone())),
+            index_store,
             db_pool: pool,
             active_indexers: RwLock::new(HashMap::new()),
             statuses: Arc::new(RwLock::new(HashMap::new())),
@@ -131,6 +152,7 @@ impl IndexManager {
             lsp_enrichers: RwLock::new(HashMap::new()),
             enrichment_locks: RwLock::new(HashMap::new()),
             enrichment_enabled: RwLock::new(HashMap::new()),
+            lsp_incremental_debounce_ms: Arc::new(AtomicU64::new(initial_debounce)),
             llm_provider: RwLock::new(None),
         }
     }
@@ -381,7 +403,7 @@ impl IndexManager {
             Self::create_file_watcher(project_path);
 
         // Build enrichment pipeline (debounce loop + callback) for incremental LSP enrichment.
-        let enrichment_cb = self.build_enrichment_pipeline(project_path, 3000).await;
+        let enrichment_cb = self.build_enrichment_pipeline(project_path).await;
 
         // Capture provider display name before embedding_mgr is moved into the indexer.
         let provider_display_name = embedding_mgr.display_name().to_string();
@@ -815,6 +837,21 @@ impl IndexManager {
         map.insert(project_path.to_string(), enabled);
     }
 
+    /// Update the live incremental LSP enrichment debounce value (milliseconds).
+    pub async fn set_lsp_incremental_debounce_ms(&self, ms: u64) {
+        let normalized = ms.clamp(
+            MIN_LSP_ENRICHMENT_DEBOUNCE_MS,
+            MAX_LSP_ENRICHMENT_DEBOUNCE_MS,
+        );
+        self.lsp_incremental_debounce_ms
+            .store(normalized, Ordering::Release);
+    }
+
+    /// Read the current live incremental LSP enrichment debounce value.
+    pub fn get_lsp_incremental_debounce_ms(&self) -> u64 {
+        self.lsp_incremental_debounce_ms.load(Ordering::Acquire)
+    }
+
     /// Check cached enrichment-enabled flag, falling back to DB query.
     pub async fn is_enrichment_enabled(&self, project_path: &str) -> bool {
         {
@@ -989,7 +1026,7 @@ impl IndexManager {
         });
 
         // Build enrichment pipeline for incremental LSP enrichment.
-        let enrichment_cb = self.build_enrichment_pipeline(project_path, 3000).await;
+        let enrichment_cb = self.build_enrichment_pipeline(project_path).await;
 
         // Load user-configured codebase index exclusions.
         let codebase_config = self.load_codebase_index_config();
@@ -1137,18 +1174,14 @@ impl IndexManager {
     ///
     /// Returns the `EnrichmentCallback` that should be attached to the
     /// `BackgroundIndexer` via `with_enrichment_callback`.
-    async fn build_enrichment_pipeline(
-        &self,
-        project_path: &str,
-        debounce_ms: u64,
-    ) -> EnrichmentCallback {
+    async fn build_enrichment_pipeline(&self, project_path: &str) -> EnrichmentCallback {
         let (enrichment_tx, enrichment_rx) = tokio::sync::mpsc::channel::<Vec<String>>(256);
 
         let enricher = self.get_or_create_lsp_enricher(project_path).await;
         let lock = self.get_enrichment_lock(project_path).await;
         let index_store = self.index_store.clone();
+        let debounce_ms = Arc::clone(&self.lsp_incremental_debounce_ms);
         let pp = project_path.to_string();
-        let debounce = Duration::from_millis(debounce_ms);
 
         tokio::spawn(async move {
             run_enrichment_debounce_loop(
@@ -1157,7 +1190,7 @@ impl IndexManager {
                 &enricher,
                 &lock,
                 &index_store,
-                debounce,
+                &debounce_ms,
             )
             .await;
         });
@@ -1322,7 +1355,7 @@ async fn run_enrichment_debounce_loop(
     enricher: &LspEnricher,
     lock: &tokio::sync::Mutex<()>,
     index_store: &IndexStore,
-    debounce: Duration,
+    debounce_ms: &Arc<AtomicU64>,
 ) {
     use std::collections::HashSet as StdHashSet;
 
@@ -1335,7 +1368,11 @@ async fn run_enrichment_debounce_loop(
         let mut pending: StdHashSet<String> = first.into_iter().collect();
 
         // 2. Fixed-window debounce: collect more within the window.
-        let deadline = tokio::time::Instant::now() + debounce;
+        let live_debounce_ms = debounce_ms.load(Ordering::Acquire).clamp(
+            MIN_LSP_ENRICHMENT_DEBOUNCE_MS,
+            MAX_LSP_ENRICHMENT_DEBOUNCE_MS,
+        );
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(live_debounce_ms);
         loop {
             tokio::select! {
                 more = rx.recv() => {
@@ -1392,6 +1429,36 @@ async fn run_enrichment_debounce_loop(
     );
 }
 
+fn normalize_lsp_incremental_debounce_ms(ms: u64) -> u64 {
+    ms.clamp(
+        MIN_LSP_ENRICHMENT_DEBOUNCE_MS,
+        MAX_LSP_ENRICHMENT_DEBOUNCE_MS,
+    )
+}
+
+fn load_persisted_lsp_debounce(index_store: &IndexStore) -> u64 {
+    match index_store.get_setting(LSP_PREFERENCES_KEY) {
+        Ok(Some(raw)) => match serde_json::from_str::<PersistedLspPreferences>(&raw) {
+            Ok(parsed) => normalize_lsp_incremental_debounce_ms(parsed.incremental_debounce_ms),
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    "index manager: failed to parse persisted lsp preferences, using default debounce"
+                );
+                DEFAULT_LSP_ENRICHMENT_DEBOUNCE_MS
+            }
+        },
+        Ok(None) => DEFAULT_LSP_ENRICHMENT_DEBOUNCE_MS,
+        Err(e) => {
+            warn!(
+                error = %e,
+                "index manager: failed to load persisted lsp preferences, using default debounce"
+            );
+            DEFAULT_LSP_ENRICHMENT_DEBOUNCE_MS
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1422,6 +1489,36 @@ mod tests {
         assert_eq!(status.indexed_files, 0);
         assert_eq!(status.total_files, 0);
         assert!(status.error_message.is_none());
+    }
+
+    #[tokio::test]
+    async fn set_lsp_incremental_debounce_ms_clamps_range() {
+        let mgr = IndexManager::new(test_pool());
+
+        mgr.set_lsp_incremental_debounce_ms(100).await;
+        assert_eq!(
+            mgr.get_lsp_incremental_debounce_ms(),
+            MIN_LSP_ENRICHMENT_DEBOUNCE_MS
+        );
+
+        mgr.set_lsp_incremental_debounce_ms(120_000).await;
+        assert_eq!(
+            mgr.get_lsp_incremental_debounce_ms(),
+            MAX_LSP_ENRICHMENT_DEBOUNCE_MS
+        );
+    }
+
+    #[test]
+    fn constructor_loads_persisted_lsp_debounce() {
+        let db = Database::new_in_memory().expect("in-memory db");
+        db.set_setting(
+            LSP_PREFERENCES_KEY,
+            r#"{"autoEnrich":true,"incrementalDebounceMs":1500}"#,
+        )
+        .expect("persist lsp preferences");
+
+        let mgr = IndexManager::new(db.pool().clone());
+        assert_eq!(mgr.get_lsp_incremental_debounce_ms(), 1500);
     }
 
     // -----------------------------------------------------------------------

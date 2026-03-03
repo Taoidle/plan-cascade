@@ -113,6 +113,7 @@ pub use commands::{
     get_diff_from_current,
     get_embedding_api_key,
     get_embedding_config,
+    get_enrichment_debounce,
     get_enrichment_report,
     get_evaluation_reports,
     get_gate_result,
@@ -122,6 +123,7 @@ pub use commands::{
     get_health,
     get_interview_state,
     get_knowledge_feature_flags,
+    get_lsp_preferences,
     get_lsp_status,
     get_mcp_server_detail,
     get_memory_stats,
@@ -291,6 +293,7 @@ pub use commands::{
     set_embedding_api_key,
     set_embedding_config,
     set_knowledge_feature_flags,
+    set_lsp_preferences,
     set_working_directory,
     // Claude Code commands
     start_chat,

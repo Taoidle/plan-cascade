@@ -1622,6 +1622,16 @@ impl IndexStore {
         Ok(())
     }
 
+    /// Delete an LSP server cache entry by language.
+    pub fn delete_lsp_server(&self, language: &str) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "DELETE FROM lsp_servers WHERE language = ?1",
+            params![language],
+        )?;
+        Ok(())
+    }
+
     /// Get all cached LSP server entries.
     pub fn get_lsp_servers(&self) -> AppResult<Vec<LspServerInfo>> {
         let conn = self.get_connection()?;

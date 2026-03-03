@@ -661,6 +661,13 @@
       "duration": "Duration"
     },
 
+    "errors": {
+      "LSP_NO_SERVERS_DETECTED": "No available language servers were detected. Install a server and run detection again.",
+      "LSP_NO_LIVE_CLIENTS": "Detected servers could not be started. Re-run detection or verify server installation.",
+      "LSP_DB_UNAVAILABLE": "LSP database is unavailable. Restart the app and try again.",
+      "LSP_ENRICHMENT_FAILED": "LSP enrichment failed. Check server installation and logs, then retry."
+    },
+
     "info": {
       "title": "About LSP Enrichment",
       "description": "LSP enrichment is optional and enhances the Tree-sitter index with type information, cross-references, and call graphs from detected language servers. It runs as a post-processing pass after indexing."

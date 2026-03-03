@@ -363,6 +363,8 @@ fn main() {
             plan_cascade_desktop::commands::lsp::trigger_lsp_enrichment,
             plan_cascade_desktop::commands::lsp::get_enrichment_report,
             plan_cascade_desktop::commands::lsp::get_enrichment_debounce,
+            plan_cascade_desktop::commands::lsp::get_lsp_preferences,
+            plan_cascade_desktop::commands::lsp::set_lsp_preferences,
             // Guardrail commands
             plan_cascade_desktop::commands::guardrails::list_guardrails,
             plan_cascade_desktop::commands::guardrails::toggle_guardrail,

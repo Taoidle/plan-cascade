@@ -661,6 +661,13 @@
       "duration": "耗时"
     },
 
+    "errors": {
+      "LSP_NO_SERVERS_DETECTED": "未检测到可用语言服务器。请先安装服务器并重新检测。",
+      "LSP_NO_LIVE_CLIENTS": "检测到的服务器无法启动。请重新检测或检查安装状态。",
+      "LSP_DB_UNAVAILABLE": "LSP 数据库不可用。请重启应用后重试。",
+      "LSP_ENRICHMENT_FAILED": "LSP 增强失败。请检查服务器安装与日志后重试。"
+    },
+
     "info": {
       "title": "关于 LSP 增强",
       "description": "LSP 增强是可选功能，通过检测到的语言服务器为 Tree-sitter 索引添加类型信息、交叉引用和调用图。它在索引完成后作为后处理步骤运行。"

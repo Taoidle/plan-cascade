@@ -31,6 +31,22 @@ function formatDuration(ms: number): string {
   return `${seconds}s`;
 }
 
+function mapLspErrorMessage(t: (key: string) => string, rawError: string): string {
+  const code = rawError.split(':')[0]?.trim();
+  switch (code) {
+    case 'LSP_NO_SERVERS_DETECTED':
+      return t('lsp.errors.LSP_NO_SERVERS_DETECTED');
+    case 'LSP_NO_LIVE_CLIENTS':
+      return t('lsp.errors.LSP_NO_LIVE_CLIENTS');
+    case 'LSP_DB_UNAVAILABLE':
+      return t('lsp.errors.LSP_DB_UNAVAILABLE');
+    case 'LSP_ENRICHMENT_FAILED':
+      return t('lsp.errors.LSP_ENRICHMENT_FAILED');
+    default:
+      return rawError;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -45,11 +61,13 @@ export function LspSection() {
     isEnriching,
     autoEnrich,
     enrichmentDebounceMs,
+    preferencesLoaded,
     error,
     detect,
     fetchStatus,
     enrich,
     fetchReport,
+    loadPreferences,
     setAutoEnrich,
     setEnrichmentDebounceMs,
     clearError,
@@ -61,11 +79,12 @@ export function LspSection() {
   useEffect(() => {
     void fetchStatus();
     void fetchReport();
-  }, [fetchStatus, fetchReport]);
+    void loadPreferences();
+  }, [fetchStatus, fetchReport, loadPreferences]);
 
   // Handle detect
   const handleDetect = useCallback(async () => {
-    await detect();
+    await detect(true);
   }, [detect]);
 
   // Handle manual enrich
@@ -138,6 +157,7 @@ export function LspSection() {
                 const serverName = serverStatus?.server_name ?? lang.serverName;
                 const version = serverStatus?.version;
                 const installHint = serverStatus?.install_hint;
+                const binaryPath = serverStatus?.binary_path;
 
                 return (
                   <tr key={lang.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
@@ -157,9 +177,20 @@ export function LspSection() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">
-                      {detected && version ? (
-                        <span>{t('lsp.servers.version', { version })}</span>
-                      ) : !detected && installHint ? (
+                      {detected ? (
+                        <div className="space-y-1">
+                          {version && <div>{t('lsp.servers.version', { version })}</div>}
+                          {binaryPath && (
+                            <div
+                              className="truncate max-w-[360px]"
+                              title={binaryPath}
+                              aria-label={`${lang.displayName}-binary-path`}
+                            >
+                              {binaryPath}
+                            </div>
+                          )}
+                        </div>
+                      ) : installHint ? (
                         <code className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-xs">
                           {installHint}
                         </code>
@@ -180,7 +211,10 @@ export function LspSection() {
           <input
             type="checkbox"
             checked={autoEnrich}
-            onChange={(e) => setAutoEnrich(e.target.checked)}
+            onChange={(e) => {
+              void setAutoEnrich(e.target.checked);
+            }}
+            disabled={!preferencesLoaded}
             className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
           />
           <div>
@@ -197,7 +231,10 @@ export function LspSection() {
           <select
             id="enrichment-debounce"
             value={enrichmentDebounceMs}
-            onChange={(e) => setEnrichmentDebounceMs(Number(e.target.value))}
+            onChange={(e) => {
+              void setEnrichmentDebounceMs(Number(e.target.value));
+            }}
+            disabled={!preferencesLoaded}
             className={clsx(
               'px-2 py-1 rounded-md text-sm',
               'bg-gray-100 dark:bg-gray-800',
@@ -282,7 +319,7 @@ export function LspSection() {
         <div className="flex items-start gap-2 p-3 rounded-lg border border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20">
           <CrossCircledIcon className="w-5 h-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
           <div>
-            <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
+            <p className="text-sm text-red-700 dark:text-red-300">{mapLspErrorMessage((key) => t(key), error)}</p>
             <button
               onClick={clearError}
               className="text-xs text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 mt-1 underline"

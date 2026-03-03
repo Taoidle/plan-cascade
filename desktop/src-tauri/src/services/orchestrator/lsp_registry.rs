@@ -4,11 +4,30 @@
 //! Provides a trait-based adapter for language-specific server configuration.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
 use serde_json::Value;
 use tracing::{debug, info};
+
+/// Resolved binary info from detection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DetectedBinary {
+    pub binary_name: String,
+    pub path: PathBuf,
+}
+
+/// Fully resolved server runtime info used by commands/enrichment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DetectedServer {
+    pub language: String,
+    pub server_name: String,
+    pub binary_name: String,
+    pub binary_path: PathBuf,
+    pub command: String,
+    pub args: Vec<String>,
+    pub version: Option<String>,
+}
 
 /// Trait for language-specific server adapters.
 ///
@@ -21,11 +40,25 @@ pub trait LspServerAdapter: Send + Sync {
     fn server_name(&self) -> &str;
 
     /// Detect if the server binary exists on the system.
-    /// Returns the full path to the binary if found.
-    fn detect(&self) -> Option<PathBuf>;
+    /// Returns the chosen executable name and full path when found.
+    fn detect(&self) -> Option<DetectedBinary>;
 
     /// Command and arguments to spawn the server.
     fn command(&self) -> (&str, Vec<String>);
+
+    /// Resolve command/args for a specific detected binary.
+    ///
+    /// Default behavior uses the detected binary absolute path as the command
+    /// with the adapter's default args.
+    fn command_for_binary(&self, _binary_name: &str, binary_path: &Path) -> (String, Vec<String>) {
+        let (_cmd, args) = self.command();
+        (binary_path.to_string_lossy().to_string(), args)
+    }
+
+    /// Human-readable server name for a specific detected binary.
+    fn display_name_for_binary(&self, binary_name: &str) -> String {
+        binary_name.to_string()
+    }
 
     /// Initialization options specific to this server.
     fn init_options(&self) -> Option<Value>;
@@ -36,8 +69,8 @@ pub trait LspServerAdapter: Send + Sync {
 /// Detection results are cached per session to avoid redundant PATH lookups.
 pub struct LspServerRegistry {
     adapters: Vec<Box<dyn LspServerAdapter>>,
-    /// Cached detection results: language -> binary_path
-    detected: RwLock<Option<HashMap<String, PathBuf>>>,
+    /// Cached detection results: language -> resolved server info
+    detected: RwLock<Option<HashMap<String, DetectedServer>>>,
 }
 
 impl LspServerRegistry {
@@ -57,38 +90,50 @@ impl LspServerRegistry {
         }
     }
 
-    /// Run detection for all adapters. Returns detected language -> server name pairs.
+    /// Run detection for all adapters.
     ///
     /// Results are cached: second call returns the cached map without re-detection.
-    pub fn detect_all(&self) -> HashMap<String, String> {
+    pub fn detect_all(&self) -> HashMap<String, DetectedServer> {
+        self.detect_all_with_options(false)
+    }
+
+    /// Run detection with optional cache bypass.
+    pub fn detect_all_with_options(&self, force_refresh: bool) -> HashMap<String, DetectedServer> {
+        if force_refresh {
+            self.clear_cache();
+        }
+
         // Check cache first
         {
             let cache = self.detected.read().unwrap();
             if let Some(ref cached) = *cache {
-                return cached
-                    .iter()
-                    .map(|(lang, _path)| {
-                        let adapter = self.adapters.iter().find(|a| a.language() == lang);
-                        let name = adapter
-                            .map(|a| a.server_name().to_string())
-                            .unwrap_or_default();
-                        (lang.clone(), name)
-                    })
-                    .collect();
+                return cached.clone();
             }
         }
 
         // Run detection
         let mut results = HashMap::new();
         for adapter in &self.adapters {
-            if let Some(path) = adapter.detect() {
+            if let Some(detected) = adapter.detect() {
+                let (command, args) =
+                    adapter.command_for_binary(&detected.binary_name, &detected.path);
+                let server_name = adapter.display_name_for_binary(&detected.binary_name);
+                let resolved = DetectedServer {
+                    language: adapter.language().to_string(),
+                    server_name: server_name.clone(),
+                    binary_name: detected.binary_name.clone(),
+                    binary_path: detected.path.clone(),
+                    command,
+                    args,
+                    version: None,
+                };
                 info!(
                     language = adapter.language(),
-                    server = adapter.server_name(),
-                    path = %path.display(),
+                    server = %server_name,
+                    path = %detected.path.display(),
                     "LSP server detected"
                 );
-                results.insert(adapter.language().to_string(), path);
+                results.insert(adapter.language().to_string(), resolved);
             } else {
                 debug!(
                     language = adapter.language(),
@@ -105,15 +150,6 @@ impl LspServerRegistry {
         }
 
         results
-            .iter()
-            .map(|(lang, _path)| {
-                let adapter = self.adapters.iter().find(|a| a.language() == lang);
-                let name = adapter
-                    .map(|a| a.server_name().to_string())
-                    .unwrap_or_default();
-                (lang.clone(), name)
-            })
-            .collect()
     }
 
     /// Get adapter for a language (regardless of detection status).
@@ -150,20 +186,28 @@ impl LspServerRegistry {
 // =============================================================================
 
 /// Search for a binary in PATH, then in a list of fallback directories.
-fn find_binary(names: &[&str], fallback_dirs: &[PathBuf]) -> Option<PathBuf> {
+fn find_binary(names: &[&str], fallback_dirs: &[PathBuf]) -> Option<DetectedBinary> {
     // Check PATH first
     for name in names {
         if let Some(path) = which_binary(name) {
-            return Some(path);
+            return Some(DetectedBinary {
+                binary_name: (*name).to_string(),
+                path,
+            });
         }
     }
 
     // Check fallback directories
     for dir in fallback_dirs {
         for name in names {
-            let candidate = dir.join(name);
-            if candidate.exists() && candidate.is_file() {
-                return Some(candidate);
+            for candidate_name in command_name_candidates(name) {
+                let candidate = dir.join(&candidate_name);
+                if candidate.exists() && candidate.is_file() {
+                    return Some(DetectedBinary {
+                        binary_name: (*name).to_string(),
+                        path: candidate,
+                    });
+                }
             }
         }
     }
@@ -177,12 +221,28 @@ fn which_binary(name: &str) -> Option<PathBuf> {
     // Try to find in PATH by checking common locations
     let path_var = std::env::var("PATH").unwrap_or_default();
     for dir in std::env::split_paths(&path_var) {
-        let candidate = dir.join(name);
-        if candidate.exists() && candidate.is_file() {
-            return Some(candidate);
+        for candidate_name in command_name_candidates(name) {
+            let candidate = dir.join(&candidate_name);
+            if candidate.exists() && candidate.is_file() {
+                return Some(candidate);
+            }
         }
     }
     None
+}
+
+fn command_name_candidates(name: &str) -> Vec<String> {
+    if cfg!(windows) {
+        if std::path::Path::new(name).extension().is_none() {
+            return vec![
+                format!("{name}.exe"),
+                format!("{name}.cmd"),
+                format!("{name}.bat"),
+                name.to_string(),
+            ];
+        }
+    }
+    vec![name.to_string()]
 }
 
 // =============================================================================
@@ -201,7 +261,7 @@ impl LspServerAdapter for RustAnalyzerAdapter {
         "rust-analyzer"
     }
 
-    fn detect(&self) -> Option<PathBuf> {
+    fn detect(&self) -> Option<DetectedBinary> {
         let home = dirs::home_dir()?;
         let fallbacks = vec![
             home.join(".cargo").join("bin"),
@@ -244,7 +304,7 @@ impl LspServerAdapter for PyrightAdapter {
         "pyright"
     }
 
-    fn detect(&self) -> Option<PathBuf> {
+    fn detect(&self) -> Option<DetectedBinary> {
         let fallbacks = npm_global_bin_dirs();
 
         find_binary(
@@ -255,6 +315,15 @@ impl LspServerAdapter for PyrightAdapter {
 
     fn command(&self) -> (&str, Vec<String>) {
         ("pyright-langserver", vec!["--stdio".to_string()])
+    }
+
+    fn command_for_binary(&self, binary_name: &str, binary_path: &Path) -> (String, Vec<String>) {
+        let args = match binary_name {
+            "pyright-langserver" | "basedpyright-langserver" => vec!["--stdio".to_string()],
+            "pylsp" => vec![],
+            _ => vec!["--stdio".to_string()],
+        };
+        (binary_path.to_string_lossy().to_string(), args)
     }
 
     fn init_options(&self) -> Option<Value> {
@@ -274,7 +343,7 @@ impl LspServerAdapter for GoplsAdapter {
         "gopls"
     }
 
-    fn detect(&self) -> Option<PathBuf> {
+    fn detect(&self) -> Option<DetectedBinary> {
         let home = dirs::home_dir()?;
         let fallbacks = vec![home.join("go").join("bin")];
 
@@ -302,7 +371,7 @@ impl LspServerAdapter for VtslsAdapter {
         "vtsls"
     }
 
-    fn detect(&self) -> Option<PathBuf> {
+    fn detect(&self) -> Option<DetectedBinary> {
         let fallbacks = npm_global_bin_dirs();
 
         find_binary(&["vtsls", "typescript-language-server"], &fallbacks)
@@ -310,6 +379,14 @@ impl LspServerAdapter for VtslsAdapter {
 
     fn command(&self) -> (&str, Vec<String>) {
         ("vtsls", vec!["--stdio".to_string()])
+    }
+
+    fn command_for_binary(&self, binary_name: &str, binary_path: &Path) -> (String, Vec<String>) {
+        let args = match binary_name {
+            "vtsls" | "typescript-language-server" => vec!["--stdio".to_string()],
+            _ => vec!["--stdio".to_string()],
+        };
+        (binary_path.to_string_lossy().to_string(), args)
     }
 
     fn init_options(&self) -> Option<Value> {
@@ -329,7 +406,7 @@ impl LspServerAdapter for JdtlsAdapter {
         "jdtls"
     }
 
-    fn detect(&self) -> Option<PathBuf> {
+    fn detect(&self) -> Option<DetectedBinary> {
         let mut fallbacks = vec![];
 
         // Homebrew prefix (macOS)
@@ -372,6 +449,12 @@ fn npm_global_bin_dirs() -> Vec<PathBuf> {
 
         // Common Linux/macOS paths
         dirs.push(PathBuf::from("/usr/local/bin"));
+    }
+
+    if cfg!(target_os = "windows") {
+        if let Some(data_dir) = dirs::data_dir() {
+            dirs.push(data_dir.join("npm"));
+        }
     }
 
     dirs
@@ -466,6 +549,14 @@ mod tests {
     }
 
     #[test]
+    fn test_pyright_command_for_pylsp() {
+        let adapter = PyrightAdapter;
+        let (cmd, args) = adapter.command_for_binary("pylsp", Path::new("/tmp/pylsp"));
+        assert_eq!(cmd, "/tmp/pylsp");
+        assert!(args.is_empty());
+    }
+
+    #[test]
     fn test_gopls_command() {
         let adapter = GoplsAdapter;
         let (cmd, args) = adapter.command();
@@ -478,6 +569,17 @@ mod tests {
         let adapter = VtslsAdapter;
         let (cmd, args) = adapter.command();
         assert_eq!(cmd, "vtsls");
+        assert_eq!(args, vec!["--stdio"]);
+    }
+
+    #[test]
+    fn test_vtsls_command_for_typescript_language_server() {
+        let adapter = VtslsAdapter;
+        let (cmd, args) = adapter.command_for_binary(
+            "typescript-language-server",
+            Path::new("/tmp/typescript-language-server"),
+        );
+        assert_eq!(cmd, "/tmp/typescript-language-server");
         assert_eq!(args, vec!["--stdio"]);
     }
 

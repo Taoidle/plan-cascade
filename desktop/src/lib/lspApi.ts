@@ -8,7 +8,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import type { CommandResponse } from './tauri';
-import type { LspServerStatus, EnrichmentReport } from '../types/lsp';
+import type { LspServerStatus, EnrichmentReport, LspPreferences } from '../types/lsp';
 
 // ---------------------------------------------------------------------------
 // detect_lsp_servers
@@ -20,9 +20,11 @@ import type { LspServerStatus, EnrichmentReport } from '../types/lsp';
  * Checks PATH and known fallback locations for each language server binary.
  * Results are cached in the lsp_servers table.
  */
-export async function detectLspServers(): Promise<CommandResponse<LspServerStatus[]>> {
+export async function detectLspServers(forceRefresh = false): Promise<CommandResponse<LspServerStatus[]>> {
   try {
-    return await invoke<CommandResponse<LspServerStatus[]>>('detect_lsp_servers');
+    return await invoke<CommandResponse<LspServerStatus[]>>('detect_lsp_servers', {
+      forceRefresh,
+    });
   } catch (error) {
     return {
       success: false,
@@ -106,6 +108,36 @@ export async function getEnrichmentReport(): Promise<CommandResponse<EnrichmentR
 export async function getEnrichmentDebounce(): Promise<CommandResponse<number>> {
   try {
     return await invoke<CommandResponse<number>>('get_enrichment_debounce');
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// LSP preferences
+// ---------------------------------------------------------------------------
+
+export async function getLspPreferences(): Promise<CommandResponse<LspPreferences>> {
+  try {
+    return await invoke<CommandResponse<LspPreferences>>('get_lsp_preferences');
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export async function setLspPreferences(preferences: LspPreferences): Promise<CommandResponse<LspPreferences>> {
+  try {
+    return await invoke<CommandResponse<LspPreferences>>('set_lsp_preferences', {
+      preferences,
+    });
   } catch (error) {
     return {
       success: false,

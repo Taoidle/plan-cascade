@@ -15,7 +15,8 @@ use rusqlite::params;
 use sha2::Sha256;
 
 use crate::models::export::{
-    BackendSettingsExport, GuardrailRuleExport, ProxyExport, RemoteExport, SettingsImportResult,
+    BackendSettingsExport, GuardrailRuleExport, LspPreferencesExport, ProxyExport, RemoteExport,
+    SettingsImportResult,
 };
 use crate::models::settings::AppConfig;
 use crate::storage::{ConfigService, Database};
@@ -26,6 +27,10 @@ const PBKDF2_ITERATIONS: u32 = 100_000;
 const SALT_SIZE: usize = 16;
 const NONCE_SIZE: usize = 12;
 const KEY_SIZE: usize = 32;
+const LSP_PREFERENCES_KEY: &str = "lsp_preferences_v1";
+const DEFAULT_LSP_DEBOUNCE_MS: u64 = 3000;
+const MIN_LSP_DEBOUNCE_MS: u64 = 500;
+const MAX_LSP_DEBOUNCE_MS: u64 = 60_000;
 
 // ============================================================================
 // Password-based encryption
@@ -120,6 +125,11 @@ pub fn collect_backend_settings(
         .get_setting("embedding_config")?
         .and_then(|s| serde_json::from_str(&s).ok());
 
+    // 2b. LSP preferences
+    let lsp = db
+        .get_setting(LSP_PREFERENCES_KEY)?
+        .and_then(|s| parse_lsp_preferences_export(&s));
+
     // 3. Proxy settings
     let proxy_global = db
         .get_setting("proxy_global")?
@@ -186,6 +196,7 @@ pub fn collect_backend_settings(
     Ok(BackendSettingsExport {
         config: config_value,
         embedding,
+        lsp,
         proxy,
         webhooks,
         guardrails,
@@ -313,6 +324,20 @@ pub fn import_backend_settings(
         });
     } else {
         result.skipped_sections.push("embedding".to_string());
+    }
+
+    // 3. Proxy
+    if let Some(ref lsp) = backend.lsp {
+        import_section(&mut result, "lsp", || {
+            let payload = serde_json::json!({
+                "autoEnrich": lsp.auto_enrich,
+                "incrementalDebounceMs": clamp_lsp_debounce_ms(lsp.incremental_debounce_ms),
+            });
+            db.set_setting(LSP_PREFERENCES_KEY, &payload.to_string())?;
+            Ok(())
+        });
+    } else {
+        result.skipped_sections.push("lsp".to_string());
     }
 
     // 3. Proxy
@@ -464,6 +489,28 @@ where
     }
 }
 
+fn parse_lsp_preferences_export(raw: &str) -> Option<LspPreferencesExport> {
+    let value = serde_json::from_str::<serde_json::Value>(raw).ok()?;
+    let auto_enrich = value
+        .get("autoEnrich")
+        .or_else(|| value.get("auto_enrich"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let incremental_debounce_ms = value
+        .get("incrementalDebounceMs")
+        .or_else(|| value.get("incremental_debounce_ms"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(DEFAULT_LSP_DEBOUNCE_MS);
+    Some(LspPreferencesExport {
+        auto_enrich,
+        incremental_debounce_ms: clamp_lsp_debounce_ms(incremental_debounce_ms),
+    })
+}
+
+fn clamp_lsp_debounce_ms(ms: u64) -> u64 {
+    ms.clamp(MIN_LSP_DEBOUNCE_MS, MAX_LSP_DEBOUNCE_MS)
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -527,5 +574,21 @@ mod tests {
         assert!(export.guardrails.is_empty());
         assert!(export.a2a_agents.is_empty());
         assert!(export.mcp_servers.is_empty());
+    }
+
+    #[test]
+    fn test_collect_backend_settings_includes_lsp_preferences() {
+        let db = Database::new_in_memory().unwrap();
+        db.set_setting(
+            LSP_PREFERENCES_KEY,
+            r#"{"autoEnrich":true,"incrementalDebounceMs":5000}"#,
+        )
+        .unwrap();
+
+        let config = AppConfig::default();
+        let export = collect_backend_settings(&db, &config).unwrap();
+        let lsp = export.lsp.expect("lsp section should be exported");
+        assert!(lsp.auto_enrich);
+        assert_eq!(lsp.incremental_debounce_ms, 5000);
     }
 }

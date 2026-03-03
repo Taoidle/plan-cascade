@@ -450,6 +450,7 @@ impl BackgroundIndexer {
                 embedding_service.as_ref(),
                 hnsw_index.as_ref(),
                 batch_callback.as_ref(),
+                enrichment_callback.as_ref(),
                 &extra_excluded_dirs,
                 &extra_excluded_extensions,
             )
@@ -826,6 +827,7 @@ async fn run_incremental_loop(
                     embedding_service,
                     hnsw_index,
                     batch_callback,
+                    enrichment_callback,
                     extra_excluded_dirs,
                     extra_excluded_extensions,
                 )
@@ -901,10 +903,12 @@ async fn run_catchup_sync(
     embedding_service: Option<&Arc<EmbeddingService>>,
     hnsw_index: Option<&Arc<HnswIndex>>,
     batch_callback: Option<&BatchCompleteCallback>,
+    enrichment_callback: Option<&EnrichmentCallback>,
     extra_excluded_dirs: &[String],
     extra_excluded_extensions: &[String],
 ) {
     let project_path = project_root.to_string_lossy().to_string();
+    let mut changed_rel_paths: HashSet<String> = HashSet::new();
 
     // 1. Check existing index entries: remove deleted / gitignored files,
     //    update files whose hash changed.
@@ -934,7 +938,10 @@ async fn run_catchup_sync(
                     }
                 }
                 let _ = index_store.delete_embeddings_for_file(&project_path, rel_path);
+                let _ = index_store
+                    .delete_cross_references_for_files(&project_path, &[rel_path.as_str()]);
                 let _ = index_store.delete_file_index(&project_path, rel_path);
+                changed_rel_paths.insert(rel_path.clone());
                 removed += 1;
                 continue;
             }
@@ -947,6 +954,7 @@ async fn run_catchup_sync(
             }) = run_incremental_index(project_root, index_store, &abs_path)
             {
                 updated += 1;
+                changed_rel_paths.insert(rel_path.clone());
                 // Also update embedding for this file
                 if let Some(emb_mgr) = embedding_manager {
                     let _ = run_incremental_embedding_managed_with_content(
@@ -1038,6 +1046,7 @@ async fn run_catchup_sync(
                     rel_path,
                 }) => {
                     new_files += 1;
+                    changed_rel_paths.insert(rel_path.clone());
                     if content.len() as u64 <= MAX_EMBEDDABLE_FILE_SIZE {
                         if let Some(emb_mgr) = embedding_manager {
                             let _ = run_incremental_embedding_managed_with_content(
@@ -1101,6 +1110,12 @@ async fn run_catchup_sync(
     // Refresh frontend with updated index statistics after catch-up reconciliation.
     if let Some(cb) = batch_callback {
         cb();
+    }
+
+    if !changed_rel_paths.is_empty() {
+        if let Some(cb) = enrichment_callback {
+            cb(changed_rel_paths.into_iter().collect());
+        }
     }
 
     info!("background indexer: catch-up sync complete");

@@ -17,6 +17,10 @@ use crate::state::AppState;
 const KB_QUERY_RUNS_V2_FLAG: &str = "kb_query_runs_v2";
 const KB_PICKER_SERVER_SEARCH_FLAG: &str = "kb_picker_server_search";
 const KB_INGEST_JOB_SCOPED_PROGRESS_FLAG: &str = "kb_ingest_job_scoped_progress";
+const LSP_PREFERENCES_KEY: &str = "lsp_preferences_v1";
+const DEFAULT_LSP_DEBOUNCE_MS: u64 = 3000;
+const MIN_LSP_DEBOUNCE_MS: u64 = 500;
+const MAX_LSP_DEBOUNCE_MS: u64 = 60_000;
 const CLEAR_ALL_DATA_DIRECTORIES: [&str; 8] = [
     "artifacts",
     "analysis-runs",
@@ -474,6 +478,16 @@ fn import_db_sections(
         result.skipped_sections.push("embedding".to_string());
     }
 
+    // LSP preferences
+    if let Some(ref lsp) = backend.lsp {
+        match import_lsp_preferences(db, lsp) {
+            Ok(()) => result.imported_sections.push("lsp".to_string()),
+            Err(e) => result.errors.push(format!("lsp: {}", e)),
+        }
+    } else {
+        result.skipped_sections.push("lsp".to_string());
+    }
+
     // Proxy
     match import_proxy(db, &backend.proxy) {
         Ok(()) => result.imported_sections.push("proxy".to_string()),
@@ -541,6 +555,24 @@ fn import_proxy(
             db.set_setting(key, &json_str)?;
         }
     }
+    Ok(())
+}
+
+fn import_lsp_preferences(
+    db: &crate::storage::Database,
+    lsp: &crate::models::export::LspPreferencesExport,
+) -> crate::utils::error::AppResult<()> {
+    let debounce = if lsp.incremental_debounce_ms == 0 {
+        DEFAULT_LSP_DEBOUNCE_MS
+    } else {
+        lsp.incremental_debounce_ms
+    }
+    .clamp(MIN_LSP_DEBOUNCE_MS, MAX_LSP_DEBOUNCE_MS);
+    let payload = serde_json::json!({
+        "autoEnrich": lsp.auto_enrich,
+        "incrementalDebounceMs": debounce,
+    });
+    db.set_setting(LSP_PREFERENCES_KEY, &payload.to_string())?;
     Ok(())
 }
 
@@ -663,6 +695,7 @@ fn reset_backend_settings(db: &crate::storage::Database) -> crate::utils::error:
         KB_QUERY_RUNS_V2_FLAG,
         KB_PICKER_SERVER_SEARCH_FLAG,
         KB_INGEST_JOB_SCOPED_PROGRESS_FLAG,
+        LSP_PREFERENCES_KEY,
         "feature.kb_query_runs_v2",
         "feature.kb_picker_server_search",
         "feature.kb_ingest_job_scoped_progress",

@@ -1,13 +1,20 @@
 /**
  * LSP Settings Store
  *
- * Zustand store for LSP server detection and enrichment state. Keeps the UI
- * in sync with the backend detection / enrichment results via Tauri IPC.
+ * Zustand store for LSP server detection and enrichment state.
+ * Preferences are persisted in backend settings via Tauri IPC.
  */
 
 import { create } from 'zustand';
-import type { LspServerStatus, EnrichmentReport } from '../types/lsp';
-import { detectLspServers, getLspStatus, triggerLspEnrichment, getEnrichmentReport } from '../lib/lspApi';
+import type { LspServerStatus, EnrichmentReport, LspPreferences } from '../types/lsp';
+import {
+  detectLspServers,
+  getLspStatus,
+  triggerLspEnrichment,
+  getEnrichmentReport,
+  getLspPreferences,
+  setLspPreferences,
+} from '../lib/lspApi';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,17 +34,19 @@ export interface LspState {
 
   // Incremental enrichment debounce (ms)
   enrichmentDebounceMs: number;
+  preferencesLoaded: boolean;
 
   // UI state
   error: string | null;
 
   // Actions
-  detect: () => Promise<void>;
+  detect: (forceRefresh?: boolean) => Promise<void>;
   fetchStatus: () => Promise<void>;
   enrich: (projectPath: string) => Promise<void>;
   fetchReport: () => Promise<void>;
-  setAutoEnrich: (enabled: boolean) => void;
-  setEnrichmentDebounceMs: (ms: number) => void;
+  loadPreferences: () => Promise<void>;
+  setAutoEnrich: (enabled: boolean) => Promise<void>;
+  setEnrichmentDebounceMs: (ms: number) => Promise<void>;
   clearError: () => void;
 }
 
@@ -45,27 +54,37 @@ export interface LspState {
 // Defaults
 // ---------------------------------------------------------------------------
 
+const DEFAULT_DEBOUNCE_MS = 3000;
+
 const DEFAULT_STATE = {
   servers: [],
   isDetecting: false,
   enrichmentReport: null,
   isEnriching: false,
   autoEnrich: false,
-  enrichmentDebounceMs: 3000,
+  enrichmentDebounceMs: DEFAULT_DEBOUNCE_MS,
+  preferencesLoaded: false,
   error: null,
 };
+
+function asPreferences(state: Pick<LspState, 'autoEnrich' | 'enrichmentDebounceMs'>): LspPreferences {
+  return {
+    autoEnrich: state.autoEnrich,
+    incrementalDebounceMs: state.enrichmentDebounceMs,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
 
-export const useLspStore = create<LspState>()((set) => ({
+export const useLspStore = create<LspState>()((set, get) => ({
   ...DEFAULT_STATE,
 
-  detect: async () => {
+  detect: async (forceRefresh = false) => {
     set({ isDetecting: true, error: null });
     try {
-      const result = await detectLspServers();
+      const result = await detectLspServers(forceRefresh);
       if (result.success && result.data) {
         set({ servers: result.data, isDetecting: false });
       } else {
@@ -102,7 +121,7 @@ export const useLspStore = create<LspState>()((set) => ({
       } else {
         set({
           isEnriching: false,
-          error: result.error ?? 'Enrichment failed',
+          error: result.error ?? 'LSP_ENRICHMENT_FAILED',
         });
       }
     } catch (err) {
@@ -124,47 +143,78 @@ export const useLspStore = create<LspState>()((set) => ({
     }
   },
 
-  setAutoEnrich: (enabled: boolean) => {
-    set({ autoEnrich: enabled });
-    // Persist preference to localStorage
+  loadPreferences: async () => {
     try {
-      localStorage.setItem('plan-cascade-lsp-auto-enrich', JSON.stringify(enabled));
-    } catch {
-      // Ignore storage errors
+      const result = await getLspPreferences();
+      if (result.success && result.data) {
+        set({
+          autoEnrich: result.data.autoEnrich,
+          enrichmentDebounceMs: result.data.incrementalDebounceMs,
+          preferencesLoaded: true,
+        });
+      } else {
+        set({
+          preferencesLoaded: true,
+          error: result.error ?? 'Failed to load LSP preferences',
+        });
+      }
+    } catch (err) {
+      set({
+        preferencesLoaded: true,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   },
 
-  setEnrichmentDebounceMs: (ms: number) => {
-    set({ enrichmentDebounceMs: ms });
-    try {
-      localStorage.setItem('plan-cascade-lsp-enrichment-debounce', JSON.stringify(ms));
-    } catch {
-      // Ignore storage errors
+  setAutoEnrich: async (enabled: boolean) => {
+    const previous = get();
+    set({ autoEnrich: enabled, error: null });
+
+    const payload = asPreferences({
+      autoEnrich: enabled,
+      enrichmentDebounceMs: previous.enrichmentDebounceMs,
+    });
+
+    const result = await setLspPreferences(payload);
+    if (result.success && result.data) {
+      set({
+        autoEnrich: result.data.autoEnrich,
+        enrichmentDebounceMs: result.data.incrementalDebounceMs,
+      });
+      return;
     }
+
+    set({
+      autoEnrich: previous.autoEnrich,
+      error: result.error ?? 'Failed to save LSP preferences',
+    });
+  },
+
+  setEnrichmentDebounceMs: async (ms: number) => {
+    const previous = get();
+    set({ enrichmentDebounceMs: ms, error: null });
+
+    const payload = asPreferences({
+      autoEnrich: previous.autoEnrich,
+      enrichmentDebounceMs: ms,
+    });
+
+    const result = await setLspPreferences(payload);
+    if (result.success && result.data) {
+      set({
+        autoEnrich: result.data.autoEnrich,
+        enrichmentDebounceMs: result.data.incrementalDebounceMs,
+      });
+      return;
+    }
+
+    set({
+      enrichmentDebounceMs: previous.enrichmentDebounceMs,
+      error: result.error ?? 'Failed to save LSP preferences',
+    });
   },
 
   clearError: () => set({ error: null }),
 }));
-
-// Hydrate preferences from localStorage on module load
-try {
-  const stored = localStorage.getItem('plan-cascade-lsp-auto-enrich');
-  if (stored !== null) {
-    useLspStore.setState({ autoEnrich: JSON.parse(stored) });
-  }
-} catch {
-  // Ignore parse/storage errors
-}
-try {
-  const debounce = localStorage.getItem('plan-cascade-lsp-enrichment-debounce');
-  if (debounce !== null) {
-    const ms = JSON.parse(debounce);
-    if (typeof ms === 'number' && ms > 0) {
-      useLspStore.setState({ enrichmentDebounceMs: ms });
-    }
-  }
-} catch {
-  // Ignore parse/storage errors
-}
 
 export default useLspStore;

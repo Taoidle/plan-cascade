@@ -6,6 +6,7 @@
 //! in the IndexStore.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -13,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration, Instant};
 use tracing::{debug, info, warn};
+use url::Url;
 
 use super::index_store::IndexStore;
 use super::lsp_client::LspClient;
@@ -72,39 +74,22 @@ impl LspEnricher {
         // Step 1: Detect available language servers
         let detected = self.registry.detect_all();
         if detected.is_empty() {
-            info!("No language servers detected, skipping enrichment");
-            report.duration_ms = start.elapsed().as_millis() as u64;
-            return Ok(report);
+            return Err(anyhow::anyhow!("LSP_NO_SERVERS_DETECTED"));
         }
+
+        // Full enrichment must be based on fresh semantic data.
+        self.index_store.clear_enrichment_data(project_path)?;
 
         info!(
             servers = ?detected.keys().collect::<Vec<_>>(),
             "Starting LSP enrichment pass"
         );
 
-        // Map language names in our index to LSP language identifiers
-        let language_map: HashMap<&str, &str> = [
-            ("rust", "rust"),
-            ("python", "python"),
-            ("go", "go"),
-            ("typescript", "typescript"),
-            ("javascript", "typescript"), // TS server handles JS too
-            ("java", "java"),
-        ]
-        .into_iter()
-        .collect();
-
         // Step 2: Start LSP clients for each detected language
-        for (language, _server_name) in &detected {
-            let adapter = match self.registry.get_adapter(language) {
-                Some(a) => a,
-                None => continue,
-            };
+        for (language, detected_server) in &detected {
+            let args_refs: Vec<&str> = detected_server.args.iter().map(|s| s.as_str()).collect();
 
-            let (cmd, args) = adapter.command();
-            let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-
-            match LspClient::start(cmd, &args_refs, project_path).await {
+            match LspClient::start(&detected_server.command, &args_refs, project_path).await {
                 Ok(client) => {
                     let mut clients = self.clients.write().await;
                     clients.insert(language.clone(), Arc::new(client));
@@ -113,6 +98,7 @@ impl LspEnricher {
                 Err(e) => {
                     warn!(
                         language = language.as_str(),
+                        command = detected_server.command.as_str(),
                         error = %e,
                         "Failed to start LSP client, skipping language"
                     );
@@ -123,31 +109,23 @@ impl LspEnricher {
         // Step 3-4: For each language, enrich symbols
         let languages = report.languages_enriched.clone();
         for language in &languages {
-            let index_language = language_map
-                .iter()
-                .find_map(|(&k, &v)| {
-                    if v == language.as_str() {
-                        Some(k)
-                    } else {
-                        None
+            let mut symbols = Vec::new();
+            for index_language in index_languages_for_server(language) {
+                match self
+                    .index_store
+                    .get_symbols_for_enrichment(project_path, index_language)
+                {
+                    Ok(mut s) => symbols.append(&mut s),
+                    Err(e) => {
+                        warn!(
+                            language = language.as_str(),
+                            index_language,
+                            error = %e,
+                            "Failed to get symbols for enrichment"
+                        );
                     }
-                })
-                .unwrap_or(language.as_str());
-
-            let symbols = match self
-                .index_store
-                .get_symbols_for_enrichment(project_path, index_language)
-            {
-                Ok(s) => s,
-                Err(e) => {
-                    warn!(
-                        language = language.as_str(),
-                        error = %e,
-                        "Failed to get symbols for enrichment"
-                    );
-                    continue;
                 }
-            };
+            }
 
             if symbols.is_empty() {
                 debug!(
@@ -179,35 +157,20 @@ impl LspEnricher {
             let mut window_start = Instant::now();
 
             for (file_path, file_symbols) in &files {
-                // Construct the file URI
-                let file_uri = if file_path.starts_with('/') {
-                    format!("file://{}", file_path)
-                } else {
-                    format!("file://{}/{}", project_path, file_path)
-                };
-
-                let uri = match lsp_types::Uri::from_str(&file_uri) {
+                let full_path = resolve_full_path(project_path, file_path);
+                let uri = match path_to_lsp_uri(&full_path) {
                     Ok(u) => u,
                     Err(_) => continue,
                 };
 
                 // Read the file content for didOpen
-                let full_path = if file_path.starts_with('/') {
-                    file_path.clone()
-                } else {
-                    format!("{}/{}", project_path, file_path)
-                };
-
                 let content = match tokio::fs::read_to_string(&full_path).await {
                     Ok(c) => c,
                     Err(_) => continue, // Skip files we can't read
                 };
 
                 // didOpen
-                let lang_id = language_map
-                    .get(language.as_str())
-                    .copied()
-                    .unwrap_or(language.as_str());
+                let lang_id = language_to_lsp_id(language);
 
                 if let Err(e) = client
                     .notify::<lsp_types::notification::DidOpenTextDocument>(
@@ -335,6 +298,10 @@ impl LspEnricher {
         // Step 6: Shutdown all clients
         self.shutdown_all().await;
 
+        if report.languages_enriched.is_empty() {
+            return Err(anyhow::anyhow!("LSP_NO_LIVE_CLIENTS"));
+        }
+
         report.duration_ms = start.elapsed().as_millis() as u64;
         info!(
             languages = ?report.languages_enriched,
@@ -358,7 +325,7 @@ impl LspEnricher {
         }
 
         let mut active_languages = Vec::new();
-        for (language, _server_name) in &detected {
+        for (language, detected_server) in &detected {
             // Check if a client already exists and is presumably alive.
             {
                 let clients = self.clients.read().await;
@@ -368,16 +335,10 @@ impl LspEnricher {
                 }
             }
 
-            // Start a new client.
-            let adapter = match self.registry.get_adapter(language) {
-                Some(a) => a,
-                None => continue,
-            };
+            // Start a new client from detected command+args.
+            let args_refs: Vec<&str> = detected_server.args.iter().map(|s| s.as_str()).collect();
 
-            let (cmd, args) = adapter.command();
-            let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-
-            match LspClient::start(cmd, &args_refs, project_path).await {
+            match LspClient::start(&detected_server.command, &args_refs, project_path).await {
                 Ok(client) => {
                     let mut clients = self.clients.write().await;
                     clients.insert(language.clone(), Arc::new(client));
@@ -386,6 +347,7 @@ impl LspEnricher {
                 Err(e) => {
                     warn!(
                         language = language.as_str(),
+                        command = detected_server.command.as_str(),
                         error = %e,
                         "Failed to start LSP client for incremental enrichment"
                     );
@@ -437,46 +399,26 @@ impl LspEnricher {
             warn!(error = %e, "Failed to clear stale cross-references for incremental enrichment");
         }
 
-        // Map language names in our index to LSP language identifiers
-        let language_map: HashMap<&str, &str> = [
-            ("rust", "rust"),
-            ("python", "python"),
-            ("go", "go"),
-            ("typescript", "typescript"),
-            ("javascript", "typescript"),
-            ("java", "java"),
-        ]
-        .into_iter()
-        .collect();
-
         // Step 3: For each language, enrich symbols from changed files.
         for language in &active_languages {
-            let index_language = language_map
-                .iter()
-                .find_map(|(&k, &v)| {
-                    if v == language.as_str() {
-                        Some(k)
-                    } else {
-                        None
+            let mut symbols = Vec::new();
+            for index_language in index_languages_for_server(language) {
+                match self.index_store.get_symbols_for_enrichment_by_files(
+                    project_path,
+                    index_language,
+                    &file_refs,
+                ) {
+                    Ok(mut s) => symbols.append(&mut s),
+                    Err(e) => {
+                        warn!(
+                            language = language.as_str(),
+                            index_language,
+                            error = %e,
+                            "Failed to get symbols for incremental enrichment"
+                        );
                     }
-                })
-                .unwrap_or(language.as_str());
-
-            let symbols = match self.index_store.get_symbols_for_enrichment_by_files(
-                project_path,
-                index_language,
-                &file_refs,
-            ) {
-                Ok(s) => s,
-                Err(e) => {
-                    warn!(
-                        language = language.as_str(),
-                        error = %e,
-                        "Failed to get symbols for incremental enrichment"
-                    );
-                    continue;
                 }
-            };
+            }
 
             if symbols.is_empty() {
                 continue;
@@ -508,21 +450,10 @@ impl LspEnricher {
             let mut window_start = Instant::now();
 
             for (file_path, file_symbols) in &files {
-                let file_uri = if file_path.starts_with('/') {
-                    format!("file://{}", file_path)
-                } else {
-                    format!("file://{}/{}", project_path, file_path)
-                };
-
-                let uri = match lsp_types::Uri::from_str(&file_uri) {
+                let full_path = resolve_full_path(project_path, file_path);
+                let uri = match path_to_lsp_uri(&full_path) {
                     Ok(u) => u,
                     Err(_) => continue,
-                };
-
-                let full_path = if file_path.starts_with('/') {
-                    file_path.clone()
-                } else {
-                    format!("{}/{}", project_path, file_path)
                 };
 
                 let content = match tokio::fs::read_to_string(&full_path).await {
@@ -530,10 +461,7 @@ impl LspEnricher {
                     Err(_) => continue,
                 };
 
-                let lang_id = language_map
-                    .get(language.as_str())
-                    .copied()
-                    .unwrap_or(language.as_str());
+                let lang_id = language_to_lsp_id(language);
 
                 if let Err(e) = client
                     .notify::<lsp_types::notification::DidOpenTextDocument>(
@@ -767,14 +695,55 @@ fn extract_type_from_hover(hover: &lsp_types::Hover) -> Option<String> {
 
 /// Convert a file:// URI string to a relative path from the project root.
 fn uri_to_relative_path(uri_str: &str, project_path: &str) -> String {
-    let path = uri_str.strip_prefix("file://").unwrap_or(uri_str);
+    let normalized_project = PathBuf::from(project_path);
+    let decoded_path = Url::parse(uri_str)
+        .ok()
+        .and_then(|url| url.to_file_path().ok())
+        .or_else(|| uri_str.strip_prefix("file://").map(PathBuf::from));
 
-    if let Some(relative) = path.strip_prefix(project_path) {
-        let relative = relative.strip_prefix('/').unwrap_or(relative);
-        relative.to_string()
-    } else {
-        path.to_string()
+    let Some(path) = decoded_path else {
+        return uri_str.to_string();
+    };
+
+    if let Ok(relative) = path.strip_prefix(&normalized_project) {
+        return relative.to_string_lossy().replace('\\', "/");
     }
+
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn language_to_lsp_id(language: &str) -> &str {
+    match language {
+        "typescript" | "javascript" => "typescript",
+        "rust" => "rust",
+        "python" => "python",
+        "go" => "go",
+        "java" => "java",
+        _ => language,
+    }
+}
+
+fn index_languages_for_server(language: &str) -> Vec<&str> {
+    match language {
+        "typescript" => vec!["typescript", "javascript"],
+        _ => vec![language],
+    }
+}
+
+fn resolve_full_path(project_path: &str, file_path: &str) -> PathBuf {
+    let file = Path::new(file_path);
+    if file.is_absolute() {
+        file.to_path_buf()
+    } else {
+        Path::new(project_path).join(file)
+    }
+}
+
+fn path_to_lsp_uri(path: &Path) -> anyhow::Result<lsp_types::Uri> {
+    let url = Url::from_file_path(path)
+        .map_err(|_| anyhow::anyhow!("Failed to convert path to file URI: {}", path.display()))?;
+    lsp_types::Uri::from_str(url.as_str())
+        .map_err(|e| anyhow::anyhow!("Invalid LSP URI '{}': {}", url, e))
 }
 
 /// Extract content from a markdown code block.
@@ -899,5 +868,34 @@ mod tests {
 
         let deserialized: EnrichmentReport = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.languages_enriched.len(), 2);
+    }
+
+    #[test]
+    fn test_uri_to_relative_path_decodes_spaces() {
+        let project = "/tmp/demo project";
+        let uri = "file:///tmp/demo%20project/src/My%20File.ts";
+        let rel = uri_to_relative_path(uri, project);
+        assert_eq!(rel, "src/My File.ts");
+    }
+
+    #[test]
+    fn test_uri_to_relative_path_decodes_non_ascii() {
+        let project = "/tmp/项目";
+        let uri = "file:///tmp/%E9%A1%B9%E7%9B%AE/src/%E6%B5%8B%E8%AF%95.ts";
+        let rel = uri_to_relative_path(uri, project);
+        assert_eq!(rel, "src/测试.ts");
+    }
+
+    #[test]
+    fn test_index_languages_for_typescript_server() {
+        let mapped = index_languages_for_server("typescript");
+        assert_eq!(mapped, vec!["typescript", "javascript"]);
+    }
+
+    #[test]
+    fn test_path_to_lsp_uri_encodes_space() {
+        let path = Path::new("/tmp/demo project/src/main.rs");
+        let uri = path_to_lsp_uri(path).expect("uri conversion");
+        assert!(uri.as_str().contains("demo%20project"));
     }
 }

@@ -56,8 +56,12 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
   const [lspEnrichment, setLspEnrichment] = useState<'none' | 'enriching' | 'enriched'>('none');
 
   const autoEnrich = useLspStore((s) => s.autoEnrich);
+  const preferencesLoaded = useLspStore((s) => s.preferencesLoaded);
+  const hasDetectedServer = useLspStore((s) => s.servers.some((server) => server.detected));
   const isEnriching = useLspStore((s) => s.isEnriching);
   const enrichAction = useLspStore((s) => s.enrich);
+  const loadLspPreferences = useLspStore((s) => s.loadPreferences);
+  const fetchLspStatus = useLspStore((s) => s.fetchStatus);
 
   const applyEvent = useCallback((evt: IndexStatusEvent) => {
     setStatus(evt.status);
@@ -149,18 +153,39 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
     };
   }, [workspacePath, applyEvent]);
 
+  useEffect(() => {
+    if (!workspacePath) {
+      return;
+    }
+    if (!preferencesLoaded) {
+      void loadLspPreferences();
+    }
+    void fetchLspStatus();
+  }, [workspacePath, preferencesLoaded, loadLspPreferences, fetchLspStatus]);
+
   // Auto-trigger LSP enrichment when index completes and autoEnrich is enabled
   useEffect(() => {
     if (
       (status === 'indexed' || status === 'indexed_no_embedding') &&
       autoEnrich &&
+      preferencesLoaded &&
+      hasDetectedServer &&
       !isEnriching &&
       workspacePath &&
       lspEnrichment === 'none'
     ) {
       enrichAction(workspacePath);
     }
-  }, [status, autoEnrich, isEnriching, workspacePath, lspEnrichment, enrichAction]);
+  }, [
+    status,
+    autoEnrich,
+    preferencesLoaded,
+    hasDetectedServer,
+    isEnriching,
+    workspacePath,
+    lspEnrichment,
+    enrichAction,
+  ]);
 
   const handleReindex = useCallback(() => {
     invoke<CommandResponse<boolean>>('trigger_reindex', {
