@@ -150,3 +150,6 @@ export type { WorkflowKernelStore } from './workflowKernel';
 
 export { useContextOpsStore } from './contextOps';
 export type { ContextOpsState } from './contextOps';
+
+export { useMcpUiStore, dispatchMcpUiIntent } from './mcpUi';
+export type { McpUiIntentAction } from './mcpUi';

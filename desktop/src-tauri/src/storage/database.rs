@@ -318,6 +318,14 @@ impl Database {
             [],
         );
 
+        // Ensure case-insensitive MCP server names are unique before adding unique index.
+        Self::normalize_mcp_server_duplicate_names(&conn)?;
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_servers_name_ci_unique
+             ON mcp_servers(LOWER(name))",
+            [],
+        )?;
+
         // MCP catalog cache (signed payload + TTL metadata).
         conn.execute(
             "CREATE TABLE IF NOT EXISTS mcp_catalog_cache (
@@ -1549,6 +1557,61 @@ impl Database {
         .unwrap_or(false)
     }
 
+    /// Normalize duplicate MCP server names in-place by appending numeric suffixes.
+    fn normalize_mcp_server_duplicate_names(conn: &rusqlite::Connection) -> AppResult<()> {
+        let mut stmt = conn.prepare(
+            "SELECT id, name FROM mcp_servers
+             ORDER BY LOWER(name) ASC, created_at ASC, id ASC",
+        )?;
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let mut taken: std::collections::HashSet<String> =
+            rows.iter().map(|(_, name)| name.to_lowercase()).collect();
+        let mut seen: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        let mut renamed = 0u32;
+
+        for (id, name) in rows {
+            let key = name.to_lowercase();
+            let entry = seen.entry(key.clone()).or_insert(0);
+            *entry += 1;
+            if *entry == 1 {
+                continue;
+            }
+
+            let mut suffix = *entry;
+            let base = name.clone();
+            loop {
+                let candidate = format!("{} ({})", base, suffix);
+                let candidate_key = candidate.to_lowercase();
+                if !taken.contains(&candidate_key) {
+                    conn.execute(
+                        "UPDATE mcp_servers
+                         SET name = ?2, updated_at = CURRENT_TIMESTAMP
+                         WHERE id = ?1",
+                        params![id, candidate],
+                    )?;
+                    taken.insert(candidate_key);
+                    renamed += 1;
+                    break;
+                }
+                suffix += 1;
+            }
+        }
+
+        if renamed > 0 {
+            tracing::info!(
+                renamed = renamed,
+                "Normalized duplicate MCP server names before applying unique index"
+            );
+        }
+        Ok(())
+    }
+
     /// Get a connection from the pool
     pub fn get_connection(&self) -> AppResult<r2d2::PooledConnection<SqliteConnectionManager>> {
         self.pool
@@ -2072,6 +2135,55 @@ impl Database {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(AppError::database(e.to_string())),
         }
+    }
+
+    /// Get MCP server by name (case-insensitive).
+    pub fn get_mcp_server_by_name_case_insensitive(
+        &self,
+        name: &str,
+    ) -> AppResult<Option<crate::models::McpServer>> {
+        let conn = self.get_connection()?;
+        let result = conn.query_row(
+            "SELECT id, name, server_type, command, args, env, url, headers,
+                    has_env_secret, has_headers_secret, enabled, auto_connect, status,
+                    last_error, last_connected_at, retry_count,
+                    last_checked, managed_install, catalog_item_id, trust_level,
+                    created_at, updated_at
+             FROM mcp_servers
+             WHERE LOWER(name) = LOWER(?1)
+             LIMIT 1",
+            params![name],
+            |row| Self::row_to_mcp_server(row),
+        );
+        match result {
+            Ok(server) => Ok(Some(server)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(AppError::database(e.to_string())),
+        }
+    }
+
+    /// Check whether an MCP server name conflicts (case-insensitive), excluding an optional id.
+    pub fn find_mcp_server_name_conflict_case_insensitive(
+        &self,
+        name: &str,
+        ignore_id: Option<&str>,
+    ) -> AppResult<bool> {
+        let conn = self.get_connection()?;
+        let count: i64 = match ignore_id {
+            Some(id) => conn.query_row(
+                "SELECT COUNT(*) FROM mcp_servers
+                 WHERE LOWER(name) = LOWER(?1) AND id <> ?2",
+                params![name, id],
+                |row| row.get(0),
+            )?,
+            None => conn.query_row(
+                "SELECT COUNT(*) FROM mcp_servers
+                 WHERE LOWER(name) = LOWER(?1)",
+                params![name],
+                |row| row.get(0),
+            )?,
+        };
+        Ok(count > 0)
     }
 
     /// Helper function to convert a database row to McpServer
@@ -2929,6 +3041,47 @@ mod tests {
         db.delete_setting("test_key").unwrap();
         let value = db.get_setting("test_key").unwrap();
         assert!(value.is_none());
+    }
+
+    #[test]
+    fn test_mcp_duplicate_names_are_normalized_before_unique_index() {
+        let db = create_test_db().unwrap();
+        let conn = db.get_connection().unwrap();
+
+        conn.execute("DROP INDEX IF EXISTS idx_mcp_servers_name_ci_unique", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO mcp_servers (id, name, server_type) VALUES (?1, ?2, ?3)",
+            params!["mcp-1", "Demo", "stdio"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO mcp_servers (id, name, server_type) VALUES (?1, ?2, ?3)",
+            params!["mcp-2", "demo", "stdio"],
+        )
+        .unwrap();
+
+        Database::normalize_mcp_server_duplicate_names(&conn).unwrap();
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_mcp_servers_name_ci_unique ON mcp_servers(LOWER(name))",
+            [],
+        )
+        .unwrap();
+
+        let mut stmt = conn
+            .prepare("SELECT name FROM mcp_servers ORDER BY id ASC")
+            .unwrap();
+        let names: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert_eq!(names.len(), 2);
+        assert_eq!(names[0], "Demo");
+        assert_eq!(names[1], "demo (2)");
+        let lowered: std::collections::HashSet<String> =
+            names.into_iter().map(|name| name.to_lowercase()).collect();
+        assert_eq!(lowered.len(), 2);
     }
 
     // =========================================================================

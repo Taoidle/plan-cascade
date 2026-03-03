@@ -23,23 +23,18 @@ import type {
   McpOauthEvent,
   McpRuntimeInfo,
   McpRuntimeRepairResult,
+  McpExportSecretMode,
 } from '../../types/mcp';
 import { ServerCard } from './ServerCard';
 import { AddServerDialog } from './AddServerDialog';
 import { ImportDialog } from './ImportDialog';
 import { DiscoverTab } from './DiscoverTab';
 import { InstallCatalogDialog } from './InstallCatalogDialog';
+import { McpConfirmSensitiveExportDialog, McpDeleteConfirmDialog, McpExportDialog } from './RegistryDialogs';
 import { useToast } from '../shared/Toast';
 import { localTimestampForFilename, saveTextWithDialog } from '../../lib/exportUtils';
+import { useMcpUiStore, type McpUiIntentAction } from '../../store/mcpUi';
 
-type McpCommandAction =
-  | 'open-add'
-  | 'open-import'
-  | 'open-discover'
-  | 'install-recommended'
-  | 'refresh'
-  | 'test-enabled'
-  | 'export';
 type McpEventStatus = 'success' | 'error' | 'info';
 
 interface McpEventRecord {
@@ -51,8 +46,6 @@ interface McpEventRecord {
   serverName?: string;
   detail?: string;
 }
-
-const MCP_COMMAND_EVENT = 'plan-cascade:mcp-command';
 
 function addToSet(prev: Set<string>, id: string) {
   const next = new Set(prev);
@@ -91,20 +84,15 @@ export function ServerRegistry() {
   const [activeTab, setActiveTab] = useState<'installed' | 'discover'>('installed');
   const [selectedCatalogItem, setSelectedCatalogItem] = useState<McpCatalogItem | null>(null);
   const [installRecommendedNonce, setInstallRecommendedNonce] = useState(0);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportIncludeSecrets, setExportIncludeSecrets] = useState(false);
+  const [confirmSensitiveExportOpen, setConfirmSensitiveExportOpen] = useState(false);
+  const [pendingDeleteServer, setPendingDeleteServer] = useState<McpServer | null>(null);
+  const lastMcpIntent = useMcpUiStore((state) => state.lastIntent);
+  const clearMcpIntent = useMcpUiStore((state) => state.clearIntent);
 
   const connectedServerIds = useMemo(() => new Set(Object.keys(connectedServers)), [connectedServers]);
   const selectedToolServer = selectedToolServerId ? connectedServers[selectedToolServerId] : null;
-  const duplicateServerNames = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const server of servers) {
-      counts.set(server.name, (counts.get(server.name) || 0) + 1);
-    }
-    return new Set(
-      Array.from(counts.entries())
-        .filter(([, count]) => count > 1)
-        .map(([name]) => name),
-    );
-  }, [servers]);
   const installedCatalogItems = useMemo(() => {
     const map: Record<string, { serverId: string; serverName: string; managed: boolean }[]> = {};
     for (const server of servers) {
@@ -542,9 +530,6 @@ export function ServerRegistry() {
   };
 
   const handleDelete = async (serverId: string) => {
-    const confirmed = confirm(t('mcp.confirmDeleteWithDisconnect'));
-    if (!confirmed) return;
-
     await withAction(serverId, setDeletingIds, async () => {
       setServerError(serverId, null);
       try {
@@ -581,6 +566,14 @@ export function ServerRegistry() {
       }
     });
   };
+
+  const requestDelete = useCallback(
+    (serverId: string) => {
+      const server = servers.find((entry) => entry.id === serverId) || null;
+      setPendingDeleteServer(server);
+    },
+    [servers],
+  );
 
   const handleServerAdded = (server: McpServer) => {
     setServers((prev) => [...prev, server]);
@@ -619,32 +612,65 @@ export function ServerRegistry() {
     [appendEvent, fetchConnectedServers, fetchRuntimeInventory, fetchServers, showToast, t],
   );
 
-  const handleExport = useCallback(async () => {
-    try {
-      const response = await invoke<CommandResponse<McpExportPayload>>('export_mcp_servers');
-      if (!response.success || !response.data) {
-        showToast(response.error || t('mcp.errors.fetchServers'), 'error');
-        appendEvent('export', 'error', { detail: response.error || t('mcp.errors.fetchServers') });
-        return;
-      }
+  const handleExport = useCallback(
+    async (secretMode: McpExportSecretMode = 'redacted') => {
+      try {
+        const response = await invoke<CommandResponse<McpExportPayload>>('export_mcp_servers', {
+          options: {
+            secret_mode: secretMode,
+            format_version: '2',
+          },
+        });
+        if (!response.success || !response.data) {
+          showToast(response.error || t('mcp.errors.fetchServers'), 'error');
+          appendEvent('export', 'error', { detail: response.error || t('mcp.errors.fetchServers') });
+          return;
+        }
 
-      const filename = `mcp-config-${localTimestampForFilename()}.json`;
-      const saved = await saveTextWithDialog(filename, JSON.stringify(response.data, null, 2));
-      if (saved) {
-        showToast(t('mcp.exportSuccess'), 'success');
-        appendEvent('export', 'success');
+        const filename = `mcp-config-${localTimestampForFilename()}.json`;
+        const saved = await saveTextWithDialog(filename, JSON.stringify(response.data, null, 2));
+        if (saved) {
+          showToast(t('mcp.exportSuccess'), 'success');
+          appendEvent('export', 'success', {
+            detail:
+              secretMode === 'include'
+                ? t('mcp.exportWithSecrets', {
+                    defaultValue: 'Exported with plaintext secrets included',
+                  })
+                : t('mcp.exportRedacted', {
+                    defaultValue: 'Exported with secrets redacted',
+                  }),
+          });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : t('mcp.errors.fetchServers');
+        showToast(message, 'error');
+        appendEvent('export', 'error', { detail: message });
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : t('mcp.errors.fetchServers');
-      showToast(message, 'error');
-      appendEvent('export', 'error', { detail: message });
+    },
+    [appendEvent, showToast, t],
+  );
+
+  const triggerExportFlow = useCallback(() => {
+    if (exportIncludeSecrets) {
+      setConfirmSensitiveExportOpen(true);
+      return;
     }
-  }, [appendEvent, showToast, t]);
+    setExportDialogOpen(false);
+    void handleExport('redacted');
+  }, [exportIncludeSecrets, handleExport]);
+
+  const openExportDialog = useCallback(() => {
+    setExportIncludeSecrets(false);
+    setExportDialogOpen(true);
+  }, []);
 
   const handleTestEnabled = useCallback(async () => {
     const enabledIds = servers.filter((s) => s.enabled).map((s) => s.id);
-    for (const id of enabledIds) {
-      await handleTest(id);
+    const concurrency = 2;
+    for (let idx = 0; idx < enabledIds.length; idx += concurrency) {
+      const batch = enabledIds.slice(idx, idx + concurrency);
+      await Promise.all(batch.map((id) => handleTest(id)));
     }
     appendEvent('test_enabled', 'info', {
       detail: t('mcp.eventDetails.count', { count: enabledIds.length }),
@@ -652,41 +678,50 @@ export function ServerRegistry() {
   }, [appendEvent, handleTest, servers, t]);
 
   useEffect(() => {
-    const listener = (evt: Event) => {
-      const detail = (evt as CustomEvent<{ action?: McpCommandAction }>).detail;
-      switch (detail?.action) {
-        case 'open-add':
-          setAddDialogOpen(true);
-          break;
-        case 'open-import':
-          setImportDialogOpen(true);
-          break;
-        case 'open-discover':
-          setActiveTab('discover');
-          break;
-        case 'install-recommended':
-          setActiveTab('discover');
-          setInstallRecommendedNonce((prev) => prev + 1);
-          break;
-        case 'refresh':
-          void fetchServers(true);
-          void fetchConnectedServers();
-          void fetchRuntimeInventory(true);
-          break;
-        case 'test-enabled':
-          void handleTestEnabled();
-          break;
-        case 'export':
-          void handleExport();
-          break;
-        default:
-          break;
-      }
-    };
+    const action = lastMcpIntent?.action as McpUiIntentAction | undefined;
+    if (!lastMcpIntent || !action) {
+      return;
+    }
 
-    window.addEventListener(MCP_COMMAND_EVENT, listener as EventListener);
-    return () => window.removeEventListener(MCP_COMMAND_EVENT, listener as EventListener);
-  }, [fetchConnectedServers, fetchRuntimeInventory, fetchServers, handleExport, handleTestEnabled]);
+    switch (action) {
+      case 'open-add':
+        setAddDialogOpen(true);
+        break;
+      case 'open-import':
+        setImportDialogOpen(true);
+        break;
+      case 'open-discover':
+        setActiveTab('discover');
+        break;
+      case 'install-recommended':
+        setActiveTab('discover');
+        setInstallRecommendedNonce((prev) => prev + 1);
+        break;
+      case 'refresh':
+        void fetchServers(true);
+        void fetchConnectedServers();
+        void fetchRuntimeInventory(true);
+        break;
+      case 'test-enabled':
+        void handleTestEnabled();
+        break;
+      case 'export':
+        openExportDialog();
+        break;
+      default:
+        break;
+    }
+
+    clearMcpIntent(lastMcpIntent.id);
+  }, [
+    clearMcpIntent,
+    fetchConnectedServers,
+    fetchRuntimeInventory,
+    fetchServers,
+    handleTestEnabled,
+    lastMcpIntent,
+    openExportDialog,
+  ]);
 
   return (
     <div className="h-full flex flex-col">
@@ -712,7 +747,7 @@ export function ServerRegistry() {
             </button>
 
             <button
-              onClick={handleExport}
+              onClick={openExportDialog}
               className={clsx(
                 'flex items-center gap-1.5 px-3 py-1.5 rounded-md',
                 'bg-gray-100 dark:bg-gray-800',
@@ -889,7 +924,7 @@ export function ServerRegistry() {
                           showToast(err instanceof Error ? err.message : t('mcp.errors.fetchServers'), 'error');
                         }
                       }}
-                      onDelete={() => handleDelete(server.id)}
+                      onDelete={() => requestDelete(server.id)}
                       onViewTools={
                         connectedServers[server.id]
                           ? () => {
@@ -906,11 +941,6 @@ export function ServerRegistry() {
                     {serverErrors[server.id] && (
                       <div className="text-xs rounded-md border border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-900/20 text-red-700 dark:text-red-300 px-2 py-1.5">
                         {serverErrors[server.id]}
-                      </div>
-                    )}
-                    {duplicateServerNames.has(server.name) && (
-                      <div className="text-xs rounded-md border border-yellow-200 bg-yellow-50 dark:border-yellow-900/40 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-300 px-2 py-1.5">
-                        {t('mcp.duplicateNameWarning')}
                       </div>
                     )}
                   </div>
@@ -1098,6 +1128,39 @@ export function ServerRegistry() {
           </div>
         </div>
       )}
+
+      <McpExportDialog
+        open={exportDialogOpen}
+        includeSecrets={exportIncludeSecrets}
+        onOpenChange={setExportDialogOpen}
+        onIncludeSecretsChange={setExportIncludeSecrets}
+        onConfirm={triggerExportFlow}
+      />
+
+      <McpConfirmSensitiveExportDialog
+        open={confirmSensitiveExportOpen}
+        onOpenChange={setConfirmSensitiveExportOpen}
+        onConfirm={() => {
+          setConfirmSensitiveExportOpen(false);
+          setExportDialogOpen(false);
+          void handleExport('include');
+        }}
+      />
+
+      <McpDeleteConfirmDialog
+        server={pendingDeleteServer}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingDeleteServer(null);
+          }
+        }}
+        onConfirm={() => {
+          if (!pendingDeleteServer) return;
+          const deletingId = pendingDeleteServer.id;
+          setPendingDeleteServer(null);
+          void handleDelete(deletingId);
+        }}
+      />
 
       <AddServerDialog
         open={addDialogOpen}

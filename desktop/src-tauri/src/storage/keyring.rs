@@ -5,11 +5,11 @@
 //! (e.g., macOS Keychain access prompts) while maintaining equivalent security.
 //!
 //! Storage layout (in ~/.plan-cascade/):
-//!   .secret_key   — 32-byte random encryption key (permissions 0600)
-//!   secrets.json  — { "provider": "base64(nonce || ciphertext)", ... }
+//!   .secret_key   — versioned encryption key payload (permissions 0600)
+//!   secrets.json  — { "version": 2, "secrets": { "provider": "base64(nonce || ciphertext)" } }
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
@@ -24,63 +24,91 @@ const KEY_FILE: &str = ".secret_key";
 const SECRETS_FILE: &str = "secrets.json";
 const KEY_SIZE: usize = 32;
 const NONCE_SIZE: usize = 12;
+const KEY_FILE_MAGIC: &[u8] = b"PCSK1\0";
+const SECRETS_SCHEMA_VERSION: u32 = 2;
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct SecretsFilePayload {
+    version: u32,
+    secrets: HashMap<String, String>,
+}
 
 /// Internal encrypted storage engine.
 struct SecureStore {
     cipher: Aes256Gcm,
     store_path: PathBuf,
+    key_path: PathBuf,
+    read_only: bool,
 }
 
 impl SecureStore {
     /// Initialize the secure store: load or generate the encryption key.
     fn new(data_dir: &PathBuf) -> AppResult<Self> {
         let key_path = data_dir.join(KEY_FILE);
+        let store_path = data_dir.join(SECRETS_FILE);
+        let mut read_only = false;
 
         let key_bytes = if key_path.exists() {
-            let bytes = std::fs::read(&key_path)
-                .map_err(|e| AppError::keyring(format!("Failed to read encryption key: {}", e)))?;
-            if bytes.len() != KEY_SIZE {
-                return Err(AppError::keyring(format!(
-                    "Invalid encryption key size: expected {}, got {}",
-                    KEY_SIZE,
-                    bytes.len()
-                )));
-            }
-            bytes
+            let bytes = std::fs::read(&key_path).map_err(|e| {
+                AppError::keyring(format!("Failed to read encryption key file: {}", e))
+            })?;
+            Self::decode_key_bytes(&bytes)?
         } else {
             // First run: generate a random encryption key
             let mut key = vec![0u8; KEY_SIZE];
             OsRng.fill_bytes(&mut key);
-            std::fs::write(&key_path, &key)
-                .map_err(|e| AppError::keyring(format!("Failed to write encryption key: {}", e)))?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
-                    .map_err(|e| {
-                        AppError::keyring(format!("Failed to set key file permissions: {}", e))
-                    })?;
-            }
+            Self::write_key_file_atomic(&key_path, &Self::encode_key_bytes(&key))?;
             key
         };
+
+        if !Self::is_secure_permissions(&key_path)? {
+            tracing::warn!(
+                path = %key_path.display(),
+                "Insecure key file permissions detected; secure storage is now read-only"
+            );
+            read_only = true;
+        }
+
+        if store_path.exists() {
+            if !Self::is_secure_permissions(&store_path)? {
+                tracing::warn!(
+                    path = %store_path.display(),
+                    "Insecure secrets file permissions detected; secure storage is now read-only"
+                );
+                read_only = true;
+            }
+            if let Err(e) = Self::load_plaintext_secrets_from_file(&store_path) {
+                tracing::warn!(
+                    path = %store_path.display(),
+                    error = %e,
+                    "Secrets file integrity check failed; secure storage is now read-only"
+                );
+                read_only = true;
+            }
+        }
 
         let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
         let cipher = Aes256Gcm::new(key);
 
         Ok(Self {
             cipher,
-            store_path: data_dir.join(SECRETS_FILE),
+            store_path,
+            key_path,
+            read_only,
         })
     }
 
     /// Encrypt a plaintext string, returning base64(nonce || ciphertext).
     fn encrypt(&self, plaintext: &str) -> AppResult<String> {
+        Self::encrypt_with_cipher(&self.cipher, plaintext)
+    }
+
+    fn encrypt_with_cipher(cipher: &Aes256Gcm, plaintext: &str) -> AppResult<String> {
         let mut nonce_bytes = [0u8; NONCE_SIZE];
         OsRng.fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
 
-        let ciphertext = self
-            .cipher
+        let ciphertext = cipher
             .encrypt(nonce, plaintext.as_bytes())
             .map_err(|e| AppError::keyring(format!("Encryption failed: {}", e)))?;
 
@@ -113,37 +141,212 @@ impl SecureStore {
             .map_err(|e| AppError::keyring(format!("Decrypted data is not valid UTF-8: {}", e)))
     }
 
-    /// Load the secrets map from disk.
+    /// Load plaintext secret payload from disk.
+    fn load_plaintext_secrets_from_file(path: &Path) -> AppResult<HashMap<String, String>> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| AppError::keyring(format!("Failed to read secrets file: {}", e)))?;
+        if content.trim().is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        if let Ok(payload) = serde_json::from_str::<SecretsFilePayload>(&content) {
+            if payload.version == 0 || payload.version > SECRETS_SCHEMA_VERSION {
+                return Err(AppError::keyring(format!(
+                    "Unsupported secrets payload version: {}",
+                    payload.version
+                )));
+            }
+            return Ok(payload.secrets);
+        }
+
+        // Backward compatibility for legacy payload: flat map without version header.
+        if let Ok(legacy) = serde_json::from_str::<HashMap<String, String>>(&content) {
+            return Ok(legacy);
+        }
+
+        Err(AppError::keyring(
+            "Secrets file has invalid JSON payload; refusing to mutate storage",
+        ))
+    }
+
+    /// Load the encrypted secrets map from disk.
     fn load(&self) -> HashMap<String, String> {
         if !self.store_path.exists() {
             return HashMap::new();
         }
-        std::fs::read_to_string(&self.store_path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+        match Self::load_plaintext_secrets_from_file(&self.store_path) {
+            Ok(secrets) => secrets,
+            Err(e) => {
+                tracing::warn!(
+                    path = %self.store_path.display(),
+                    error = %e,
+                    "Failed to parse secrets payload"
+                );
+                HashMap::new()
+            }
+        }
+    }
+
+    fn ensure_writable(&self) -> AppResult<()> {
+        if self.read_only {
+            return Err(AppError::keyring(
+                "Secure storage is read-only due to insecure file permissions or integrity issues",
+            ));
+        }
+        Ok(())
     }
 
     /// Persist the secrets map to disk atomically (write-then-rename).
     fn save(&self, secrets: &HashMap<String, String>) -> AppResult<()> {
-        let json = serde_json::to_string_pretty(secrets)
+        self.ensure_writable()?;
+
+        let payload = SecretsFilePayload {
+            version: SECRETS_SCHEMA_VERSION,
+            secrets: secrets.clone(),
+        };
+        let json = serde_json::to_string_pretty(&payload)
             .map_err(|e| AppError::keyring(format!("Failed to serialize secrets: {}", e)))?;
 
-        // Atomic write: write to temp file then rename
+        // Atomic write with best-effort rollback.
         let tmp_path = self.store_path.with_extension("json.tmp");
-        std::fs::write(&tmp_path, json.as_bytes())
-            .map_err(|e| AppError::keyring(format!("Failed to write secrets file: {}", e)))?;
-        std::fs::rename(&tmp_path, &self.store_path)
-            .map_err(|e| AppError::keyring(format!("Failed to finalize secrets file: {}", e)))?;
+        let backup_path = self.store_path.with_extension("json.bak");
+        let had_original = self.store_path.exists();
 
+        if had_original {
+            if let Err(e) = std::fs::copy(&self.store_path, &backup_path) {
+                tracing::warn!(
+                    path = %self.store_path.display(),
+                    backup = %backup_path.display(),
+                    error = %e,
+                    "Failed to create backup before secrets write"
+                );
+            }
+        }
+
+        std::fs::write(&tmp_path, json.as_bytes()).map_err(|e| {
+            AppError::keyring(format!(
+                "Failed to write temporary secrets file '{}': {}",
+                tmp_path.display(),
+                e
+            ))
+        })?;
+        Self::set_secure_permissions(&tmp_path)?;
+
+        if let Err(e) = std::fs::rename(&tmp_path, &self.store_path) {
+            tracing::error!(
+                path = %self.store_path.display(),
+                tmp = %tmp_path.display(),
+                error = %e,
+                "Failed to finalize secrets file write"
+            );
+            if backup_path.exists() {
+                let _ = std::fs::copy(&backup_path, &self.store_path);
+            }
+            return Err(AppError::keyring(format!(
+                "Failed to finalize secrets file: {}",
+                e
+            )));
+        }
+
+        if backup_path.exists() {
+            let _ = std::fs::remove_file(&backup_path);
+        }
+        Self::set_secure_permissions(&self.store_path)?;
+
+        Ok(())
+    }
+
+    fn encode_key_bytes(key_bytes: &[u8]) -> Vec<u8> {
+        let mut encoded = Vec::with_capacity(KEY_FILE_MAGIC.len() + key_bytes.len());
+        encoded.extend_from_slice(KEY_FILE_MAGIC);
+        encoded.extend_from_slice(key_bytes);
+        encoded
+    }
+
+    fn decode_key_bytes(raw: &[u8]) -> AppResult<Vec<u8>> {
+        if raw.len() == KEY_SIZE {
+            return Ok(raw.to_vec());
+        }
+        if raw.starts_with(KEY_FILE_MAGIC) && raw.len() == KEY_FILE_MAGIC.len() + KEY_SIZE {
+            return Ok(raw[KEY_FILE_MAGIC.len()..].to_vec());
+        }
+        Err(AppError::keyring(format!(
+            "Invalid encryption key size: expected {} or {}, got {}",
+            KEY_SIZE,
+            KEY_FILE_MAGIC.len() + KEY_SIZE,
+            raw.len()
+        )))
+    }
+
+    fn write_key_file_atomic(path: &Path, encoded_key: &[u8]) -> AppResult<()> {
+        let tmp = path.with_extension("tmp");
+        std::fs::write(&tmp, encoded_key).map_err(|e| {
+            AppError::keyring(format!(
+                "Failed to write temporary encryption key file '{}': {}",
+                tmp.display(),
+                e
+            ))
+        })?;
+        Self::set_secure_permissions(&tmp)?;
+        std::fs::rename(&tmp, path).map_err(|e| {
+            AppError::keyring(format!(
+                "Failed to finalize encryption key file '{}': {}",
+                path.display(),
+                e
+            ))
+        })?;
+        Self::set_secure_permissions(path)?;
+        Ok(())
+    }
+
+    fn set_secure_permissions(path: &Path) -> AppResult<()> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ =
-                std::fs::set_permissions(&self.store_path, std::fs::Permissions::from_mode(0o600));
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(
+                |e| {
+                    AppError::keyring(format!(
+                        "Failed to set file permissions for '{}': {}",
+                        path.display(),
+                        e
+                    ))
+                },
+            )?;
         }
-
         Ok(())
+    }
+
+    fn is_secure_permissions(path: &Path) -> AppResult<bool> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = std::fs::metadata(path).map_err(|e| {
+                AppError::keyring(format!(
+                    "Failed to inspect file permissions for '{}': {}",
+                    path.display(),
+                    e
+                ))
+            })?;
+            let mode = metadata.permissions().mode() & 0o777;
+            return Ok((mode & 0o077) == 0);
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = path;
+            Ok(true)
+        }
+    }
+
+    fn save_plaintext_map_with_cipher(
+        &self,
+        secrets: &HashMap<String, String>,
+        cipher: &Aes256Gcm,
+    ) -> AppResult<()> {
+        let mut encrypted = HashMap::with_capacity(secrets.len());
+        for (key, plaintext) in secrets {
+            encrypted.insert(key.clone(), Self::encrypt_with_cipher(cipher, plaintext)?);
+        }
+        self.save(&encrypted)
     }
 }
 
@@ -297,14 +500,63 @@ impl KeyringService {
     /// This replaces all existing secrets with the provided ones.
     pub fn import_all(&self, secrets: &HashMap<String, String>) -> AppResult<()> {
         let store = self.store()?;
-        let mut encrypted_map = HashMap::new();
+        store.save_plaintext_map_with_cipher(secrets, &store.cipher)
+    }
 
-        for (key, plaintext) in secrets {
-            let encrypted = store.encrypt(plaintext)?;
-            encrypted_map.insert(key.clone(), encrypted);
+    /// Rotate MCP secret encryption key and re-encrypt all stored values.
+    ///
+    /// This is an internal maintenance helper and is intentionally not wired to UI yet.
+    pub fn rotate_mcp_secret_key(&mut self) -> AppResult<()> {
+        let current_store = self.store()?;
+        current_store.ensure_writable()?;
+
+        let plaintext = self.export_all_decrypted()?;
+        let previous_key_bytes = std::fs::read(&current_store.key_path).map_err(|e| {
+            AppError::keyring(format!(
+                "Failed to read current encryption key '{}': {}",
+                current_store.key_path.display(),
+                e
+            ))
+        })?;
+
+        let mut rotated_key = vec![0u8; KEY_SIZE];
+        OsRng.fill_bytes(&mut rotated_key);
+
+        if let Err(rotate_err) =
+            SecureStore::write_key_file_atomic(&current_store.key_path, &SecureStore::encode_key_bytes(&rotated_key))
+        {
+            return Err(AppError::keyring(format!(
+                "Failed to rotate encryption key: {}",
+                rotate_err
+            )));
         }
 
-        store.save(&encrypted_map)
+        let rotated_store = match ensure_plan_cascade_dir().and_then(|dir| SecureStore::new(&dir)) {
+            Ok(store) => store,
+            Err(e) => {
+                let _ = SecureStore::write_key_file_atomic(&current_store.key_path, &previous_key_bytes);
+                return Err(AppError::keyring(format!(
+                    "Failed to initialize rotated key store: {}",
+                    e
+                )));
+            }
+        };
+
+        if let Err(e) = rotated_store.save_plaintext_map_with_cipher(&plaintext, &rotated_store.cipher) {
+            tracing::error!(error = %e, "Failed to persist secrets after key rotation; attempting rollback");
+            let _ = SecureStore::write_key_file_atomic(&current_store.key_path, &previous_key_bytes);
+            if let Ok(restored) = ensure_plan_cascade_dir().and_then(|dir| SecureStore::new(&dir)) {
+                self.inner = Some(restored);
+            }
+            return Err(AppError::keyring(format!(
+                "Failed to re-encrypt secrets after key rotation: {}",
+                e
+            )));
+        }
+
+        self.inner = Some(rotated_store);
+        tracing::info!("Rotated MCP secret encryption key successfully");
+        Ok(())
     }
 }
 
@@ -412,5 +664,35 @@ mod tests {
         }
         let tampered = BASE64.encode(&data);
         assert!(store.decrypt(&tampered).is_err());
+    }
+
+    #[test]
+    fn test_legacy_secrets_payload_compatibility() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SecureStore::new(&dir.path().to_path_buf()).unwrap();
+
+        let legacy_payload = serde_json::json!({
+            "openai": store.encrypt("legacy-key").unwrap()
+        });
+        std::fs::write(
+            dir.path().join(SECRETS_FILE),
+            serde_json::to_string(&legacy_payload).unwrap(),
+        )
+        .unwrap();
+
+        let reloaded = SecureStore::new(&dir.path().to_path_buf()).unwrap();
+        let loaded = reloaded.load();
+        let decrypted = reloaded.decrypt(loaded.get("openai").unwrap()).unwrap();
+        assert_eq!(decrypted, "legacy-key");
+    }
+
+    #[test]
+    fn test_integrity_failure_forces_read_only_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let _store = SecureStore::new(&dir.path().to_path_buf()).unwrap();
+        std::fs::write(dir.path().join(SECRETS_FILE), "{invalid").unwrap();
+
+        let reloaded = SecureStore::new(&dir.path().to_path_buf()).unwrap();
+        assert!(reloaded.read_only);
     }
 }

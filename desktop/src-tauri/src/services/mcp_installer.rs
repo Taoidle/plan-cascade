@@ -86,17 +86,7 @@ impl McpInstallerService {
             }
         }
 
-        let mut risk_flags = Vec::new();
-        match item.trust_level {
-            crate::models::McpCatalogTrustLevel::Official => {}
-            crate::models::McpCatalogTrustLevel::Verified => {
-                risk_flags.push("review_commands".to_string());
-            }
-            crate::models::McpCatalogTrustLevel::Community => {
-                risk_flags.push("community_item_confirmation_required".to_string());
-                risk_flags.push("review_commands".to_string());
-            }
-        }
+        let risk_flags = build_install_risk_flags(&item, strategy, !install_commands.is_empty());
 
         Ok(McpInstallPreview {
             item_id: item.id.clone(),
@@ -184,6 +174,19 @@ impl McpInstallerService {
         let item = self.catalog.get_item(&request.item_id)?;
         let strategy = select_strategy(&item, request.selected_strategy.as_deref())?;
         let preview = self.preview_install(&item.id, Some(&strategy.id))?;
+        if let Err(e) = validate_required_secrets(&item, &request) {
+            return self
+                .finalize_failure(
+                    &job_id,
+                    &request.item_id,
+                    phase.clone(),
+                    e.to_string(),
+                    None,
+                    &created_wrapper,
+                    &request,
+                )
+                .await;
+        }
         event_logs.push(format!("selected_strategy:{}", strategy.id));
 
         phase = McpInstallPhase::InstallRuntime;
@@ -1273,6 +1276,136 @@ fn apply_placeholders(input: &str, values: &HashMap<String, String>) -> String {
     output
 }
 
+fn build_install_risk_flags(
+    item: &McpCatalogItem,
+    strategy: &McpInstallStrategy,
+    runtime_install_commands_present: bool,
+) -> Vec<String> {
+    let mut flags = Vec::new();
+    match item.trust_level {
+        crate::models::McpCatalogTrustLevel::Official => {}
+        crate::models::McpCatalogTrustLevel::Verified => {
+            flags.push("review_commands".to_string());
+        }
+        crate::models::McpCatalogTrustLevel::Community => {
+            flags.push("community_caution".to_string());
+            flags.push("community_item_confirmation_required".to_string());
+            flags.push("review_commands".to_string());
+        }
+    }
+
+    if strategy_contains_unpinned_artifact(strategy) {
+        flags.push("unpinned_artifact".to_string());
+    }
+    if runtime_install_commands_present || strategy_requires_command_review(strategy) {
+        flags.push("review_commands".to_string());
+    }
+
+    flags.sort();
+    flags.dedup();
+    flags
+}
+
+fn strategy_requires_command_review(strategy: &McpInstallStrategy) -> bool {
+    matches!(
+        strategy.kind,
+        McpInstallStrategyKind::UvTool
+            | McpInstallStrategyKind::PythonVenv
+            | McpInstallStrategyKind::NodeManagedPkg
+            | McpInstallStrategyKind::Docker
+            | McpInstallStrategyKind::GoBinary
+            | McpInstallStrategyKind::OauthBridgeMcpRemote
+    )
+}
+
+fn strategy_contains_unpinned_artifact(strategy: &McpInstallStrategy) -> bool {
+    if let Some(image) = strategy.recipe.get("image").and_then(|v| v.as_str()) {
+        if docker_image_unpinned(image) {
+            return true;
+        }
+    }
+    if let Some(package) = strategy.recipe.get("package").and_then(|v| v.as_str()) {
+        if package_spec_unpinned(package) {
+            return true;
+        }
+    }
+    if let Some(package) = strategy
+        .recipe
+        .get("bridge_package")
+        .and_then(|v| v.as_str())
+    {
+        if package_spec_unpinned(package) {
+            return true;
+        }
+    }
+    false
+}
+
+fn docker_image_unpinned(image: &str) -> bool {
+    let trimmed = image.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    if trimmed.contains("@sha256:") {
+        return false;
+    }
+
+    let last_segment = trimmed.rsplit('/').next().unwrap_or(trimmed);
+    if let Some((_, tag)) = last_segment.split_once(':') {
+        let normalized = tag.trim();
+        return normalized.is_empty() || normalized.eq_ignore_ascii_case("latest");
+    }
+    true
+}
+
+fn package_spec_unpinned(spec: &str) -> bool {
+    let trimmed = spec.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    if trimmed.starts_with('@') {
+        let scoped_part = &trimmed[1..];
+        if let Some(relative_idx) = scoped_part.rfind('@') {
+            let version = &scoped_part[(relative_idx + 1)..];
+            return version.trim().is_empty() || version.eq_ignore_ascii_case("latest");
+        }
+        return true;
+    }
+    if let Some((_, version)) = trimmed.split_once('@') {
+        return version.trim().is_empty() || version.eq_ignore_ascii_case("latest");
+    }
+    true
+}
+
+fn validate_required_secrets(item: &McpCatalogItem, request: &McpInstallRequest) -> AppResult<()> {
+    let missing: Vec<String> = item
+        .secrets_schema
+        .iter()
+        .filter(|field| field.required)
+        .filter_map(|field| {
+            let value = request
+                .secrets
+                .get(&field.key)
+                .map(|v| v.trim())
+                .unwrap_or("");
+            if value.is_empty() {
+                Some(field.key.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    Err(AppError::validation(format!(
+        "required_secrets_missing: {}",
+        missing.join(", ")
+    )))
+}
+
 fn emit_progress(app: Option<&AppHandle>, event: McpInstallProgressEvent) {
     if let Some(app) = app {
         let _ = app.emit("mcp:install-progress", event);
@@ -1302,5 +1435,98 @@ fn runtime_name(kind: &McpRuntimeKind) -> &'static str {
         McpRuntimeKind::Uv => "uv",
         McpRuntimeKind::Python => "python",
         McpRuntimeKind::Docker => "docker",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{
+        McpCatalogTrustLevel, McpInstallVerification, McpSecretSchemaField, RuntimeRequirement,
+    };
+
+    fn strategy_with_recipe(
+        kind: McpInstallStrategyKind,
+        recipe: serde_json::Value,
+    ) -> McpInstallStrategy {
+        McpInstallStrategy {
+            id: "test".to_string(),
+            kind,
+            priority: 1,
+            requirements: Vec::<RuntimeRequirement>::new(),
+            recipe,
+            verification: McpInstallVerification {
+                require_initialize: true,
+                require_tools_list: true,
+            },
+        }
+    }
+
+    #[test]
+    fn detects_unpinned_artifacts_in_recipe() {
+        let docker = strategy_with_recipe(
+            McpInstallStrategyKind::Docker,
+            serde_json::json!({ "image": "ghcr.io/example/tool:latest" }),
+        );
+        assert!(strategy_contains_unpinned_artifact(&docker));
+
+        let pinned_docker = strategy_with_recipe(
+            McpInstallStrategyKind::Docker,
+            serde_json::json!({ "image": "ghcr.io/example/tool@sha256:abc123" }),
+        );
+        assert!(!strategy_contains_unpinned_artifact(&pinned_docker));
+
+        let npm = strategy_with_recipe(
+            McpInstallStrategyKind::NodeManagedPkg,
+            serde_json::json!({ "package": "@scope/tool" }),
+        );
+        assert!(strategy_contains_unpinned_artifact(&npm));
+
+        let pinned_npm = strategy_with_recipe(
+            McpInstallStrategyKind::NodeManagedPkg,
+            serde_json::json!({ "package": "@scope/tool@1.2.3" }),
+        );
+        assert!(!strategy_contains_unpinned_artifact(&pinned_npm));
+    }
+
+    #[test]
+    fn required_secret_validation_reports_fields() {
+        let item = McpCatalogItem {
+            id: "item".to_string(),
+            name: "Item".to_string(),
+            vendor: "Vendor".to_string(),
+            trust_level: McpCatalogTrustLevel::Official,
+            tags: vec![],
+            docs_url: None,
+            maintained_by: None,
+            os_support: vec![],
+            strategies: vec![],
+            secrets_schema: vec![
+                McpSecretSchemaField {
+                    key: "REQ_ONE".to_string(),
+                    label: "Req One".to_string(),
+                    required: true,
+                    secret_type: None,
+                },
+                McpSecretSchemaField {
+                    key: "OPTIONAL".to_string(),
+                    label: "Optional".to_string(),
+                    required: false,
+                    secret_type: None,
+                },
+            ],
+        };
+
+        let request = McpInstallRequest {
+            item_id: "item".to_string(),
+            server_alias: "alias".to_string(),
+            selected_strategy: None,
+            secrets: HashMap::new(),
+            oauth_mode: None,
+            auto_connect: Some(true),
+        };
+
+        let err = validate_required_secrets(&item, &request).unwrap_err();
+        assert!(err.to_string().contains("REQ_ONE"));
     }
 }

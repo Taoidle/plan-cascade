@@ -12,5 +12,6 @@ export { AddServerDialog } from './AddServerDialog';
 export { ImportDialog } from './ImportDialog';
 export { DiscoverTab } from './DiscoverTab';
 export { InstallCatalogDialog } from './InstallCatalogDialog';
+export { McpExportDialog, McpConfirmSensitiveExportDialog, McpDeleteConfirmDialog } from './RegistryDialogs';
 
 export default ServerRegistry;

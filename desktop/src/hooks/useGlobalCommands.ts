@@ -37,6 +37,7 @@ import { useAgentsStore } from '../store/agents';
 import { useAnalyticsStore } from '../store/analytics';
 import { useProjectsStore } from '../store/projects';
 import { useTimelineStore } from '../store/timeline';
+import { dispatchMcpUiIntent } from '../store/mcpUi';
 import {
   createChatCommands,
   createHelpCommands,
@@ -77,8 +78,7 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         | 'test-enabled'
         | 'export',
     ) => {
-      if (typeof window === 'undefined') return;
-      window.dispatchEvent(new CustomEvent('plan-cascade:mcp-command', { detail: { action } }));
+      dispatchMcpUiIntent(action);
     },
     [],
   );
@@ -466,7 +466,7 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
   );
 
   // ============================================================================
-  // MCP Commands (6 commands)
+  // MCP Commands (8 commands)
   // ============================================================================
 
   const mcpCommands: Command[] = useMemo(

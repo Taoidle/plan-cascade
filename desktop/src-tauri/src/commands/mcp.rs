@@ -14,6 +14,7 @@ use crate::models::{
     McpServer, McpServerType, UpdateMcpServerRequest,
 };
 use crate::services::llm::types::ToolDefinition;
+use crate::services::mcp::McpImportConflictPolicy;
 use crate::services::mcp::McpService;
 use crate::services::mcp_catalog::McpCatalogService;
 use crate::services::mcp_installer::McpInstallerService;
@@ -21,6 +22,7 @@ use crate::services::mcp_runtime_manager::McpRuntimeManager;
 use crate::services::tools::mcp_manager::{ConnectedServerInfo, McpManager};
 use crate::services::tools::runtime_tools;
 use crate::services::tools::trait_def::ToolRegistry;
+use crate::utils::error::AppResult;
 
 pub struct McpRuntimeState {
     pub manager: Arc<McpManager>,
@@ -47,6 +49,21 @@ impl Default for McpRuntimeState {
 pub struct McpAutoConnectResult {
     pub connected: Vec<ConnectedServerInfo>,
     pub failed: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpExportSecretMode {
+    Redacted,
+    Include,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct McpExportOptions {
+    #[serde(alias = "secretMode")]
+    pub secret_mode: Option<McpExportSecretMode>,
+    #[serde(alias = "formatVersion")]
+    pub format_version: Option<String>,
 }
 
 #[tauri::command]
@@ -271,7 +288,9 @@ pub fn get_mcp_server_detail(
 }
 
 #[tauri::command]
-pub fn export_mcp_servers() -> Result<CommandResponse<serde_json::Value>, String> {
+pub fn export_mcp_servers(
+    options: Option<McpExportOptions>,
+) -> Result<CommandResponse<serde_json::Value>, String> {
     let service = match McpService::new() {
         Ok(s) => s,
         Err(e) => return Ok(CommandResponse::err(e.to_string())),
@@ -279,46 +298,90 @@ pub fn export_mcp_servers() -> Result<CommandResponse<serde_json::Value>, String
 
     match service.list_servers_with_secrets(true) {
         Ok(servers) => {
-            let mut mcp_servers = serde_json::Map::new();
-            let mut name_counts: std::collections::HashMap<String, usize> =
-                std::collections::HashMap::new();
-            for server in servers {
-                let mut item = serde_json::Map::new();
-                match server.server_type {
-                    McpServerType::Stdio => {
-                        if let Some(command) = server.command {
-                            item.insert("command".to_string(), serde_json::Value::String(command));
-                        }
-                        if !server.args.is_empty() {
-                            item.insert("args".to_string(), serde_json::json!(server.args));
-                        }
-                        if !server.env.is_empty() {
-                            item.insert("env".to_string(), serde_json::json!(server.env));
-                        }
-                    }
-                    McpServerType::StreamHttp => {
-                        if let Some(url) = server.url {
-                            item.insert("url".to_string(), serde_json::Value::String(url));
-                        }
-                        if !server.headers.is_empty() {
-                            item.insert("headers".to_string(), serde_json::json!(server.headers));
-                        }
-                    }
-                }
-                let count = name_counts.entry(server.name.clone()).or_insert(0);
-                *count += 1;
-                let export_name = if *count == 1 {
-                    server.name
-                } else {
-                    format!("{} ({})", server.name, count)
-                };
-                mcp_servers.insert(export_name, serde_json::Value::Object(item));
+            let secret_mode = options
+                .as_ref()
+                .and_then(|o| o.secret_mode.clone())
+                .unwrap_or(McpExportSecretMode::Redacted);
+            let format_version = options
+                .as_ref()
+                .and_then(|o| o.format_version.as_deref())
+                .unwrap_or("2");
+            match build_export_payload(servers, secret_mode, format_version) {
+                Ok(payload) => Ok(CommandResponse::ok(payload)),
+                Err(e) => Ok(CommandResponse::err(e)),
             }
-            Ok(CommandResponse::ok(
-                serde_json::json!({ "mcpServers": mcp_servers }),
-            ))
         }
         Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+fn build_export_payload(
+    servers: Vec<McpServer>,
+    secret_mode: McpExportSecretMode,
+    format_version: &str,
+) -> Result<serde_json::Value, String> {
+    let mut mcp_servers = serde_json::Map::new();
+    let mut name_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+
+    for server in servers {
+        let mut item = serde_json::Map::new();
+        match server.server_type {
+            McpServerType::Stdio => {
+                if let Some(command) = server.command {
+                    item.insert("command".to_string(), serde_json::Value::String(command));
+                }
+                if !server.args.is_empty() {
+                    item.insert("args".to_string(), serde_json::json!(server.args));
+                }
+                if !server.env.is_empty() {
+                    let env = match secret_mode {
+                        McpExportSecretMode::Include => server.env,
+                        McpExportSecretMode::Redacted => server
+                            .env
+                            .keys()
+                            .map(|k| (k.clone(), "__REDACTED__".to_string()))
+                            .collect(),
+                    };
+                    item.insert("env".to_string(), serde_json::json!(env));
+                }
+            }
+            McpServerType::StreamHttp => {
+                if let Some(url) = server.url {
+                    item.insert("url".to_string(), serde_json::Value::String(url));
+                }
+                if !server.headers.is_empty() {
+                    let headers = match secret_mode {
+                        McpExportSecretMode::Include => server.headers,
+                        McpExportSecretMode::Redacted => server
+                            .headers
+                            .keys()
+                            .map(|k| (k.clone(), "__REDACTED__".to_string()))
+                            .collect(),
+                    };
+                    item.insert("headers".to_string(), serde_json::json!(headers));
+                }
+            }
+        }
+        let count = name_counts.entry(server.name.clone()).or_insert(0);
+        *count += 1;
+        let export_name = if *count == 1 {
+            server.name
+        } else {
+            format!("{} ({})", server.name, count)
+        };
+        mcp_servers.insert(export_name, serde_json::Value::Object(item));
+    }
+
+    match format_version {
+        "1" => Ok(serde_json::json!({ "mcpServers": mcp_servers })),
+        "2" => Ok(serde_json::json!({
+            "version": "2",
+            "exported_at": chrono::Utc::now().to_rfc3339(),
+            "secrets_redacted": secret_mode == McpExportSecretMode::Redacted,
+            "mcpServers": mcp_servers,
+        })),
+        other => Err(format!("Unsupported MCP export format version: {}", other)),
     }
 }
 
@@ -354,13 +417,24 @@ pub fn import_from_claude_desktop(
 pub fn import_mcp_from_file(
     path: String,
     dry_run: Option<bool>,
+    conflict_policy: Option<String>,
 ) -> Result<CommandResponse<ImportResult>, String> {
     let service = match McpService::new() {
         Ok(s) => s,
         Err(e) => return Ok(CommandResponse::err(e.to_string())),
     };
 
-    match service.import_from_file_with_options(&path, dry_run.unwrap_or(false)) {
+    let policy = match conflict_policy.as_deref().unwrap_or("skip") {
+        "skip" => McpImportConflictPolicy::Skip,
+        other => {
+            return Ok(CommandResponse::err(format!(
+                "Unsupported conflict policy: {}",
+                other
+            )))
+        }
+    };
+
+    match service.import_from_file_with_options(&path, dry_run.unwrap_or(false), policy) {
         Ok(result) => Ok(CommandResponse::ok(result)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -450,102 +524,16 @@ pub async fn disconnect_mcp_server(
 pub async fn connect_enabled_mcp_servers(
     state: tauri::State<'_, McpRuntimeState>,
 ) -> Result<CommandResponse<McpAutoConnectResult>, String> {
-    let service = match McpService::new() {
-        Ok(s) => s,
-        Err(e) => return Ok(CommandResponse::err(e.to_string())),
-    };
-
-    let servers = match service.list_enabled_auto_connect_servers() {
-        Ok(s) => s,
-        Err(e) => return Ok(CommandResponse::err(e.to_string())),
-    };
-
-    let mut connected = Vec::new();
-    let mut failed = Vec::new();
-    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
-    let mut join_set = tokio::task::JoinSet::new();
-
-    for server in servers {
-        let config = match McpManager::config_from_model(&server) {
-            Ok(c) => c,
-            Err(e) => {
-                let msg = e.to_string();
-                let _ = service.mark_server_connection_error(&server.id, &msg);
-                failed.push(format!("{}: {}", server.name, msg));
-                continue;
-            }
-        };
-
-        let permit = match semaphore.clone().acquire_owned().await {
-            Ok(p) => p,
-            Err(_) => {
-                let msg = "transport: connector semaphore closed".to_string();
-                let _ = service.mark_server_connection_error(&server.id, &msg);
-                failed.push(format!("{}: {}", server.name, msg));
-                continue;
-            }
-        };
-
-        let manager = state.manager.clone();
-        let registry = state.registry.clone();
-        join_set.spawn(async move {
-            let _permit = permit;
-            let started = std::time::Instant::now();
-            let result = tokio::time::timeout(
-                Duration::from_secs(10),
-                manager.connect_server_with_registry_lock(&config, registry),
-            )
-            .await;
-            let latency_ms = started.elapsed().as_millis() as u64;
-            (server, result, latency_ms)
-        });
+    match reconcile_and_connect_enabled_servers(
+        state.manager.clone(),
+        state.registry.clone(),
+        "manual",
+    )
+    .await
+    {
+        Ok(result) => Ok(CommandResponse::ok(result)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
-
-    let mut success_count = 0u32;
-    let mut latency_total_ms = 0u64;
-    while let Some(joined) = join_set.join_next().await {
-        match joined {
-            Ok((server, Ok(Ok(info)), latency_ms)) => {
-                let _ = service.mark_server_connected(&server.id);
-                success_count += 1;
-                latency_total_ms += latency_ms;
-                connected.push(info);
-            }
-            Ok((server, Ok(Err(e)), _latency_ms)) => {
-                let msg = e.to_string();
-                let _ = service.mark_server_connection_error(&server.id, &msg);
-                failed.push(format!("{}: {}", server.name, msg));
-            }
-            Ok((server, Err(_), _latency_ms)) => {
-                let msg = "transport: connection timeout".to_string();
-                let _ = service.mark_server_connection_error(&server.id, &msg);
-                failed.push(format!("{}: {}", server.name, msg));
-            }
-            Err(e) => {
-                failed.push(format!("task join error: {}", e));
-            }
-        }
-    }
-
-    let average_latency_ms = if success_count > 0 {
-        latency_total_ms / u64::from(success_count)
-    } else {
-        0
-    };
-    tracing::info!(
-        event = "connect_enabled_summary",
-        success_count = success_count,
-        failed_count = failed.len(),
-        average_latency_ms = average_latency_ms,
-        "Completed MCP auto-connect batch"
-    );
-
-    let registry = state.registry.read().await;
-    runtime_tools::replace_from_registry(&registry);
-    Ok(CommandResponse::ok(McpAutoConnectResult {
-        connected,
-        failed,
-    }))
 }
 
 #[tauri::command]
@@ -757,9 +745,120 @@ fn parse_runtime_kind(value: &str) -> Option<McpRuntimeKind> {
     }
 }
 
+pub(crate) async fn reconcile_and_connect_enabled_servers(
+    manager: Arc<McpManager>,
+    registry: Arc<RwLock<ToolRegistry>>,
+    reason: &str,
+) -> AppResult<McpAutoConnectResult> {
+    let service = McpService::new()?;
+    let connected_ids: std::collections::HashSet<String> = manager
+        .list_connected_servers()
+        .await
+        .into_iter()
+        .map(|s| s.server_id)
+        .collect();
+    let (reconciled_count, runtime_connected_count) =
+        service.reconcile_runtime_statuses(&connected_ids)?;
+    tracing::info!(
+        event = "mcp_startup_reconcile_summary",
+        reason = reason,
+        reconciled_count = reconciled_count,
+        runtime_connected_count = runtime_connected_count,
+        "Reconciled persisted MCP statuses with runtime connections"
+    );
+
+    let servers = service.list_enabled_auto_connect_servers()?;
+    let mut connected = Vec::new();
+    let mut failed = Vec::new();
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    let mut join_set = tokio::task::JoinSet::new();
+
+    for server in servers {
+        let config = match McpManager::config_from_model(&server) {
+            Ok(c) => c,
+            Err(e) => {
+                let msg = e.to_string();
+                let _ = service.mark_server_connection_error(&server.id, &msg);
+                failed.push(format!("{}: {}", server.name, msg));
+                continue;
+            }
+        };
+
+        let permit = match semaphore.clone().acquire_owned().await {
+            Ok(p) => p,
+            Err(_) => {
+                let msg = "transport: connector semaphore closed".to_string();
+                let _ = service.mark_server_connection_error(&server.id, &msg);
+                failed.push(format!("{}: {}", server.name, msg));
+                continue;
+            }
+        };
+
+        let manager = manager.clone();
+        let registry = registry.clone();
+        join_set.spawn(async move {
+            let _permit = permit;
+            let started = std::time::Instant::now();
+            let result = tokio::time::timeout(
+                Duration::from_secs(10),
+                manager.connect_server_with_registry_lock(&config, registry),
+            )
+            .await;
+            let latency_ms = started.elapsed().as_millis() as u64;
+            (server, result, latency_ms)
+        });
+    }
+
+    let mut success_count = 0u32;
+    let mut latency_total_ms = 0u64;
+    while let Some(joined) = join_set.join_next().await {
+        match joined {
+            Ok((server, Ok(Ok(info)), latency_ms)) => {
+                let _ = service.mark_server_connected(&server.id);
+                success_count += 1;
+                latency_total_ms += latency_ms;
+                connected.push(info);
+            }
+            Ok((server, Ok(Err(e)), _latency_ms)) => {
+                let msg = e.to_string();
+                let _ = service.mark_server_connection_error(&server.id, &msg);
+                failed.push(format!("{}: {}", server.name, msg));
+            }
+            Ok((server, Err(_), _latency_ms)) => {
+                let msg = "transport: connection timeout".to_string();
+                let _ = service.mark_server_connection_error(&server.id, &msg);
+                failed.push(format!("{}: {}", server.name, msg));
+            }
+            Err(e) => {
+                failed.push(format!("task join error: {}", e));
+            }
+        }
+    }
+
+    let average_latency_ms = if success_count > 0 {
+        latency_total_ms / u64::from(success_count)
+    } else {
+        0
+    };
+    tracing::info!(
+        event = "mcp_autoconnect_summary",
+        reason = reason,
+        success_count = success_count,
+        failed_count = failed.len(),
+        average_latency_ms = average_latency_ms,
+        "Completed MCP auto-connect batch"
+    );
+
+    let registry = registry.read().await;
+    runtime_tools::replace_from_registry(&registry);
+    Ok(McpAutoConnectResult { connected, failed })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::McpServerStatus;
+    use std::collections::HashMap;
 
     #[test]
     fn test_list_mcp_servers() {
@@ -771,5 +870,136 @@ mod tests {
     async fn test_mcp_runtime_state_manager_no_connections() {
         let state = McpRuntimeState::new();
         assert_eq!(state.manager.connected_count().await, 0);
+    }
+
+    #[test]
+    fn test_build_export_payload_redacted_mode_hides_secrets() {
+        let servers = vec![
+            McpServer {
+                id: "mcp-1".to_string(),
+                name: "stdio-server".to_string(),
+                server_type: McpServerType::Stdio,
+                command: Some("echo".to_string()),
+                args: vec!["hello".to_string()],
+                env: HashMap::from([("API_KEY".to_string(), "plaintext".to_string())]),
+                url: None,
+                headers: HashMap::new(),
+                has_env_secret: false,
+                has_headers_secret: false,
+                enabled: true,
+                auto_connect: true,
+                status: McpServerStatus::Unknown,
+                last_error: None,
+                last_connected_at: None,
+                retry_count: 0,
+                last_checked: None,
+                managed_install: false,
+                catalog_item_id: None,
+                trust_level: None,
+                created_at: None,
+                updated_at: None,
+            },
+            McpServer {
+                id: "mcp-2".to_string(),
+                name: "http-server".to_string(),
+                server_type: McpServerType::StreamHttp,
+                command: None,
+                args: vec![],
+                env: HashMap::new(),
+                url: Some("https://example.com/mcp".to_string()),
+                headers: HashMap::from([("Authorization".to_string(), "Bearer token".to_string())]),
+                has_env_secret: false,
+                has_headers_secret: false,
+                enabled: true,
+                auto_connect: true,
+                status: McpServerStatus::Unknown,
+                last_error: None,
+                last_connected_at: None,
+                retry_count: 0,
+                last_checked: None,
+                managed_install: false,
+                catalog_item_id: None,
+                trust_level: None,
+                created_at: None,
+                updated_at: None,
+            },
+        ];
+
+        let payload =
+            build_export_payload(servers, McpExportSecretMode::Redacted, "2").expect("payload");
+        let secrets_redacted = payload
+            .get("secrets_redacted")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        assert!(secrets_redacted);
+
+        let map = payload
+            .get("mcpServers")
+            .and_then(|v| v.as_object())
+            .expect("mcpServers object");
+        let stdio = map.get("stdio-server").and_then(|v| v.as_object()).unwrap();
+        let http = map.get("http-server").and_then(|v| v.as_object()).unwrap();
+        assert_eq!(
+            stdio["env"]["API_KEY"].as_str().unwrap_or_default(),
+            "__REDACTED__"
+        );
+        assert_eq!(
+            http["headers"]["Authorization"]
+                .as_str()
+                .unwrap_or_default(),
+            "__REDACTED__"
+        );
+    }
+
+    #[test]
+    fn test_build_export_payload_include_mode_keeps_secrets() {
+        let servers = vec![McpServer {
+            id: "mcp-1".to_string(),
+            name: "stdio-server".to_string(),
+            server_type: McpServerType::Stdio,
+            command: Some("echo".to_string()),
+            args: vec![],
+            env: HashMap::from([("API_KEY".to_string(), "plaintext".to_string())]),
+            url: None,
+            headers: HashMap::new(),
+            has_env_secret: false,
+            has_headers_secret: false,
+            enabled: true,
+            auto_connect: true,
+            status: McpServerStatus::Unknown,
+            last_error: None,
+            last_connected_at: None,
+            retry_count: 0,
+            last_checked: None,
+            managed_install: false,
+            catalog_item_id: None,
+            trust_level: None,
+            created_at: None,
+            updated_at: None,
+        }];
+
+        let payload =
+            build_export_payload(servers, McpExportSecretMode::Include, "2").expect("payload");
+        let secrets_redacted = payload
+            .get("secrets_redacted")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        assert!(!secrets_redacted);
+
+        let map = payload
+            .get("mcpServers")
+            .and_then(|v| v.as_object())
+            .expect("mcpServers object");
+        let stdio = map.get("stdio-server").and_then(|v| v.as_object()).unwrap();
+        assert_eq!(
+            stdio["env"]["API_KEY"].as_str().unwrap_or_default(),
+            "plaintext"
+        );
+    }
+
+    #[test]
+    fn test_build_export_payload_invalid_format_version() {
+        let payload = build_export_payload(vec![], McpExportSecretMode::Redacted, "9");
+        assert!(payload.is_err());
     }
 }

@@ -123,8 +123,20 @@ export interface McpToolDefinition {
 }
 
 export interface McpExportPayload {
+  version?: string;
+  exported_at?: string;
+  secrets_redacted?: boolean;
   mcpServers: Record<string, Record<string, unknown>>;
 }
+
+export type McpExportSecretMode = 'redacted' | 'include';
+
+export interface McpExportOptions {
+  secret_mode?: McpExportSecretMode;
+  format_version?: '1' | '2';
+}
+
+export type McpImportConflictPolicy = 'skip';
 
 export interface RuntimeRequirement {
   runtime: McpRuntimeKind;
@@ -188,7 +200,7 @@ export interface McpInstallPreview {
   missing_runtimes: McpRuntimeKind[];
   install_commands: string[];
   required_secrets: McpSecretSchemaField[];
-  risk_flags: string[];
+  risk_flags: McpInstallRiskFlag[];
 }
 
 export interface McpInstallRequest {
@@ -199,6 +211,13 @@ export interface McpInstallRequest {
   oauth_mode?: string;
   auto_connect?: boolean;
 }
+
+export type McpInstallRiskFlag =
+  | 'review_commands'
+  | 'community_caution'
+  | 'community_item_confirmation_required'
+  | 'unpinned_artifact'
+  | string;
 
 export type McpInstallStatus = 'running' | 'success' | 'failed';
 export type McpInstallPhase =

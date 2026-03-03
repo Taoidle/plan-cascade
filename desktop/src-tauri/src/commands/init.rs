@@ -9,17 +9,15 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::mcp::McpRuntimeState;
+use crate::commands::mcp::reconcile_and_connect_enabled_servers;
 use crate::commands::plugins::PluginState;
 use crate::commands::remote::RemoteState;
 use crate::commands::spec_interview::SpecInterviewState;
 use crate::commands::standalone::StandaloneState;
 use crate::commands::webhook::WebhookState;
 use crate::models::response::CommandResponse;
-use crate::services::mcp::McpService;
 use crate::services::orchestrator::index_manager::IndexManager;
 use crate::services::recovery::detector::{IncompleteTask, RecoveryDetector};
-use crate::services::tools::mcp_manager::McpManager;
-use crate::services::tools::runtime_tools;
 use crate::state::AppState;
 
 /// Result of application initialization
@@ -177,141 +175,11 @@ pub async fn init_app(
                 let manager = mcp_state.manager.clone();
                 let registry = mcp_state.registry.clone();
                 tauri::async_runtime::spawn(async move {
-                    let service = match McpService::new() {
-                        Ok(s) => s,
-                        Err(e) => {
-                            tracing::warn!(
-                                "Failed to initialize MCP service for auto-connect: {}",
-                                e
-                            );
-                            return;
-                        }
-                    };
-
-                    let servers = match service.list_enabled_auto_connect_servers() {
-                        Ok(s) => s,
-                        Err(e) => {
-                            tracing::warn!("Failed to list auto-connect MCP servers: {}", e);
-                            return;
-                        }
-                    };
-
-                    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(2));
-                    let mut join_set = tokio::task::JoinSet::new();
-
-                    for server in servers {
-                        let config = match McpManager::config_from_model(&server) {
-                            Ok(c) => c,
-                            Err(e) => {
-                                tracing::warn!(
-                                    server_id = %server.id,
-                                    server_name = %server.name,
-                                    error = %e,
-                                    "Skipping MCP server during init auto-connect"
-                                );
-                                let _ = service
-                                    .mark_server_connection_error(&server.id, &e.to_string());
-                                continue;
-                            }
-                        };
-
-                        let permit = match semaphore.clone().acquire_owned().await {
-                            Ok(p) => p,
-                            Err(_) => {
-                                let msg = "transport: connector semaphore closed".to_string();
-                                let _ = service.mark_server_connection_error(&server.id, &msg);
-                                tracing::warn!(
-                                    server_id = %server.id,
-                                    server_name = %server.name,
-                                    error = %msg,
-                                    "Skipping MCP server during init auto-connect"
-                                );
-                                continue;
-                            }
-                        };
-
-                        let manager = manager.clone();
-                        let registry = registry.clone();
-                        join_set.spawn(async move {
-                            let _permit = permit;
-                            let started = std::time::Instant::now();
-                            let result = tokio::time::timeout(
-                                std::time::Duration::from_secs(10),
-                                manager.connect_server_with_registry_lock(&config, registry),
-                            )
-                            .await;
-                            let latency_ms = started.elapsed().as_millis() as u64;
-                            (server, result, latency_ms)
-                        });
+                    if let Err(e) =
+                        reconcile_and_connect_enabled_servers(manager, registry, "startup").await
+                    {
+                        tracing::warn!("MCP init auto-connect failed: {}", e);
                     }
-
-                    let mut success_count = 0u32;
-                    let mut failure_count = 0u32;
-                    let mut latency_total_ms = 0u64;
-
-                    while let Some(joined) = join_set.join_next().await {
-                        match joined {
-                            Ok((server, Ok(Ok(info)), latency_ms)) => {
-                                let _ = service.mark_server_connected(&server.id);
-                                success_count += 1;
-                                latency_total_ms += latency_ms;
-                                tracing::info!(
-                                    server_id = %server.id,
-                                    server_name = %server.name,
-                                    tool_count = info.qualified_tool_names.len(),
-                                    latency_ms = latency_ms,
-                                    "Auto-connected MCP server during init"
-                                );
-                            }
-                            Ok((server, Ok(Err(e)), latency_ms)) => {
-                                failure_count += 1;
-                                tracing::warn!(
-                                    server_id = %server.id,
-                                    server_name = %server.name,
-                                    latency_ms = latency_ms,
-                                    error = %e,
-                                    "Failed to auto-connect MCP server during init"
-                                );
-                                let _ = service
-                                    .mark_server_connection_error(&server.id, &e.to_string());
-                            }
-                            Ok((server, Err(_), latency_ms)) => {
-                                failure_count += 1;
-                                tracing::warn!(
-                                    server_id = %server.id,
-                                    server_name = %server.name,
-                                    latency_ms = latency_ms,
-                                    "Auto-connect MCP server timed out during init"
-                                );
-                                let _ = service.mark_server_connection_error(
-                                    &server.id,
-                                    "transport: connection timeout",
-                                );
-                            }
-                            Err(e) => {
-                                failure_count += 1;
-                                tracing::warn!(
-                                    error = %e,
-                                    "MCP init auto-connect task join failed"
-                                );
-                            }
-                        }
-                    }
-
-                    let registry_guard = registry.read().await;
-                    runtime_tools::replace_from_registry(&registry_guard);
-
-                    let average_latency_ms = if success_count > 0 {
-                        latency_total_ms / u64::from(success_count)
-                    } else {
-                        0
-                    };
-                    tracing::info!(
-                        success_count = success_count,
-                        failure_count = failure_count,
-                        average_latency_ms = average_latency_ms,
-                        "MCP init auto-connect summary"
-                    );
                 });
             }
 

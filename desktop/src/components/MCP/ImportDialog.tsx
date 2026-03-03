@@ -69,6 +69,7 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
       const response = await invoke<CommandResponse<ImportResult>>('import_mcp_from_file', {
         path: filePath,
         dryRun: previewOnly,
+        conflictPolicy: 'skip',
       });
 
       if (response.success && response.data) {
@@ -108,6 +109,7 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
         : result.errors
       : result.errors
     : [];
+  const skippedEntries = result?.will_skip && result.will_skip.length > 0 ? result.will_skip : [];
 
   return (
     <Dialog.Root open={open} onOpenChange={handleClose}>
@@ -237,11 +239,13 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
                   </div>
                 )}
 
-                {resultIsDryRun && (result.will_skip?.length || 0) > 0 && (
+                {skippedEntries.length > 0 && (
                   <div>
-                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('mcp.wouldSkip')}</p>
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      {resultIsDryRun ? t('mcp.wouldSkip') : t('mcp.skipped')}
+                    </p>
                     <div className="space-y-1 max-h-24 overflow-y-auto">
-                      {result.will_skip?.map((entry, i) => (
+                      {skippedEntries.map((entry, i) => (
                         <div key={i} className="text-xs text-yellow-700 dark:text-yellow-300">
                           {entry}
                         </div>

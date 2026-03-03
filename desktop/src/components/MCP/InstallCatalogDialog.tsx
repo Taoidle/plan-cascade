@@ -45,6 +45,15 @@ export function InstallCatalogDialog({ open, item, onOpenChange, onInstalled }: 
   const strategyOptions = useMemo(() => {
     return [...(item?.strategies || [])].sort((a, b) => a.priority - b.priority);
   }, [item]);
+  const missingRequiredSecrets = useMemo(() => {
+    return (preview?.required_secrets || [])
+      .filter((field) => field.required)
+      .filter((field) => !(secrets[field.key] || '').trim())
+      .map((field) => field.key);
+  }, [preview?.required_secrets, secrets]);
+  const hasMissingRequiredSecrets = missingRequiredSecrets.length > 0;
+  const riskFlags = useMemo(() => new Set(preview?.risk_flags || []), [preview?.risk_flags]);
+  const artifactPinned = !riskFlags.has('unpinned_artifact');
 
   useEffect(() => {
     installingRef.current = installing;
@@ -140,6 +149,15 @@ export function InstallCatalogDialog({ open, item, onOpenChange, onInstalled }: 
 
   const handleInstall = async () => {
     if (!item || !alias.trim()) return;
+    if (hasMissingRequiredSecrets) {
+      setError(
+        t('mcp.install.missingRequiredSecrets', {
+          defaultValue: 'Missing required secrets: {{keys}}',
+          keys: missingRequiredSecrets.join(', '),
+        }),
+      );
+      return;
+    }
     setInstalling(true);
     installingRef.current = true;
     setRetrying(false);
@@ -252,6 +270,47 @@ export function InstallCatalogDialog({ open, item, onOpenChange, onInstalled }: 
 
             <section className="space-y-2">
               <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('mcp.install.stepEnvironment')}</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {t('mcp.install.artifactPinStatus', {
+                  defaultValue: 'Artifact pinning: {{status}}',
+                  status: artifactPinned
+                    ? t('mcp.install.pinned', { defaultValue: 'pinned' })
+                    : t('mcp.install.unpinned', { defaultValue: 'unpinned' }),
+                })}
+              </p>
+              {(preview?.risk_flags || []).length > 0 && (
+                <div className="space-y-1">
+                  {(preview?.risk_flags || []).map((flag) => {
+                    const colorClass =
+                      flag === 'unpinned_artifact' || flag === 'community_caution'
+                        ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-300'
+                        : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300';
+                    const label =
+                      flag === 'review_commands'
+                        ? t('mcp.install.riskReviewCommands', {
+                            defaultValue: 'Review install commands before continuing.',
+                          })
+                        : flag === 'community_caution'
+                          ? t('mcp.install.riskCommunityCaution', {
+                              defaultValue: 'Community-maintained entry. Validate source and permissions.',
+                            })
+                          : flag === 'community_item_confirmation_required'
+                            ? t('mcp.install.riskCommunityConfirm', {
+                                defaultValue: 'Extra confirmation required for community entries.',
+                              })
+                            : flag === 'unpinned_artifact'
+                              ? t('mcp.install.riskUnpinnedArtifact', {
+                                  defaultValue: 'Artifact is not pinned to a digest/version.',
+                                })
+                              : flag;
+                    return (
+                      <div key={flag} className={clsx('text-xs rounded-md border px-2 py-1.5', colorClass)}>
+                        {label}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {preview?.missing_runtimes.length ? (
                 <div className="text-xs rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 px-3 py-2">
                   {t('mcp.install.missingRuntimes')}: {preview.missing_runtimes.join(', ')}
@@ -300,11 +359,21 @@ export function InstallCatalogDialog({ open, item, onOpenChange, onInstalled }: 
                   />
                 </div>
               ))}
+              {hasMissingRequiredSecrets && (
+                <p className="text-xs text-amber-700 dark:text-amber-300">
+                  {t('mcp.install.missingRequiredSecrets', {
+                    defaultValue: 'Missing required secrets: {{keys}}',
+                    keys: missingRequiredSecrets.join(', '),
+                  })}
+                </p>
+              )}
               <label className="inline-flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
                 <input type="checkbox" checked={autoConnect} onChange={(e) => setAutoConnect(e.target.checked)} />
                 {t('mcp.autoConnect')}
               </label>
-              {item?.trust_level === 'community' && (
+              {(item?.trust_level === 'community' ||
+                riskFlags.has('community_caution') ||
+                riskFlags.has('community_item_confirmation_required')) && (
                 <label className="inline-flex items-start gap-2 text-xs text-amber-700 dark:text-amber-300 rounded border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-900/20 px-2 py-1.5">
                   <input
                     type="checkbox"
@@ -376,7 +445,7 @@ export function InstallCatalogDialog({ open, item, onOpenChange, onInstalled }: 
             <button
               type="button"
               onClick={handleInstall}
-              disabled={installing || !item || !communityConfirmed}
+              disabled={installing || !item || !communityConfirmed || hasMissingRequiredSecrets}
               className={clsx(
                 'inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm text-white',
                 'bg-primary-600 hover:bg-primary-700 disabled:opacity-50',

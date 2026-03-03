@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+use uuid::Uuid;
 
 use crate::models::{
     CreateMcpServerRequest, HealthCheckResult, ImportResult, McpServer, McpServerStatus,
@@ -21,6 +22,13 @@ pub struct McpService {
     db: Database,
     keyring: KeyringService,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpImportConflictPolicy {
+    Skip,
+}
+
+const REDACTED_PLACEHOLDER: &str = "__REDACTED__";
 
 impl McpService {
     /// Create a new MCP service.
@@ -49,12 +57,7 @@ impl McpService {
     }
 
     fn generate_id() -> String {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
-        format!("mcp-{}", timestamp)
+        format!("mcp-{}", Uuid::new_v4())
     }
 
     fn hydrate_sensitive(&self, server: &mut McpServer) {
@@ -197,6 +200,26 @@ impl McpService {
             .collect())
     }
 
+    /// Reconcile persisted MCP status with current runtime connections.
+    ///
+    /// Returns (reconciled_count, connected_runtime_count).
+    pub fn reconcile_runtime_statuses(
+        &self,
+        connected_server_ids: &std::collections::HashSet<String>,
+    ) -> AppResult<(u32, u32)> {
+        let servers = self.list_servers_with_secrets(false)?;
+        let mut reconciled = 0u32;
+        for server in servers {
+            if matches!(server.status, McpServerStatus::Connected)
+                && !connected_server_ids.contains(&server.id)
+            {
+                self.mark_server_disconnected(&server.id)?;
+                reconciled += 1;
+            }
+        }
+        Ok((reconciled, connected_server_ids.len() as u32))
+    }
+
     /// Get a server by ID.
     pub fn get_server(&self, id: &str) -> AppResult<Option<McpServer>> {
         self.get_server_with_secrets(id, true)
@@ -223,10 +246,12 @@ impl McpService {
     /// Add a new MCP server.
     pub fn add_server(&self, request: CreateMcpServerRequest) -> AppResult<McpServer> {
         let id = Self::generate_id();
+        let name = request.name.trim().to_string();
+        self.ensure_name_unique(&name, None)?;
 
         let mut server = McpServer {
             id: id.clone(),
-            name: request.name,
+            name,
             server_type: request.server_type,
             command: request.command,
             args: request.args.unwrap_or_default(),
@@ -265,7 +290,7 @@ impl McpService {
             .ok_or_else(|| AppError::not_found(format!("Server not found: {}", id)))?;
 
         if let Some(name) = request.name {
-            server.name = name;
+            server.name = name.trim().to_string();
         }
         if let Some(server_type) = request.server_type {
             server.server_type = server_type;
@@ -316,6 +341,7 @@ impl McpService {
         }
 
         server.validate().map_err(AppError::validation)?;
+        self.ensure_name_unique(&server.name, Some(id))?;
         self.persist_sensitive(&mut server, env_updated, headers_updated)?;
 
         self.db.update_mcp_server(&server)?;
@@ -533,12 +559,12 @@ impl McpService {
         }
 
         let content = std::fs::read_to_string(&config_path)?;
-        self.import_from_json_str(&content, dry_run)
+        self.import_from_json_str(&content, dry_run, McpImportConflictPolicy::Skip)
     }
 
     /// Import servers from a JSON configuration file path.
     pub fn import_from_file(&self, path: &str) -> AppResult<ImportResult> {
-        self.import_from_file_with_options(path, false)
+        self.import_from_file_with_options(path, false, McpImportConflictPolicy::Skip)
     }
 
     /// Import servers from a JSON configuration file path with options.
@@ -546,12 +572,18 @@ impl McpService {
         &self,
         path: &str,
         dry_run: bool,
+        conflict_policy: McpImportConflictPolicy,
     ) -> AppResult<ImportResult> {
         let content = std::fs::read_to_string(path)?;
-        self.import_from_json_str(&content, dry_run)
+        self.import_from_json_str(&content, dry_run, conflict_policy)
     }
 
-    fn import_from_json_str(&self, content: &str, dry_run: bool) -> AppResult<ImportResult> {
+    fn import_from_json_str(
+        &self,
+        content: &str,
+        dry_run: bool,
+        conflict_policy: McpImportConflictPolicy,
+    ) -> AppResult<ImportResult> {
         let config: serde_json::Value = serde_json::from_str(content)
             .map_err(|e| AppError::parse(format!("Invalid JSON: {}", e)))?;
 
@@ -568,7 +600,13 @@ impl McpService {
 
         if let Some(mcp_servers) = config.get("mcpServers").and_then(|v| v.as_object()) {
             for (name, server_config) in mcp_servers {
-                self.apply_import_result(name, server_config, dry_run, &mut result);
+                self.apply_import_result(
+                    name,
+                    server_config,
+                    dry_run,
+                    conflict_policy,
+                    &mut result,
+                );
             }
             return Ok(result);
         }
@@ -579,7 +617,7 @@ impl McpService {
                     .get("name")
                     .and_then(|v| v.as_str())
                     .unwrap_or("unnamed");
-                self.apply_import_result(name, item, dry_run, &mut result);
+                self.apply_import_result(name, item, dry_run, conflict_policy, &mut result);
             }
             return Ok(result);
         }
@@ -602,15 +640,20 @@ impl McpService {
         name: &str,
         server_config: &serde_json::Value,
         dry_run: bool,
+        conflict_policy: McpImportConflictPolicy,
         result: &mut ImportResult,
     ) {
-        match self.import_single_server(name, server_config, dry_run) {
+        match self.import_single_server(name, server_config, dry_run, conflict_policy) {
             Ok(ImportSingleResult::Added(server_name)) => {
                 result.added += 1;
                 result.servers.push(server_name);
                 if dry_run {
                     result.will_add.push(name.to_string());
                 }
+            }
+            Ok(ImportSingleResult::Skipped(reason)) => {
+                result.skipped += 1;
+                result.will_skip.push(reason);
             }
             Err(e) => {
                 result.failed += 1;
@@ -659,7 +702,24 @@ impl McpService {
         name: &str,
         config: &serde_json::Value,
         dry_run: bool,
+        conflict_policy: McpImportConflictPolicy,
     ) -> AppResult<ImportSingleResult> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::validation("Server name is required".to_string()));
+        }
+        if matches!(conflict_policy, McpImportConflictPolicy::Skip)
+            && self
+                .db
+                .get_mcp_server_by_name_case_insensitive(name)?
+                .is_some()
+        {
+            return Ok(ImportSingleResult::Skipped(format!(
+                "{}: duplicate_name",
+                name
+            )));
+        }
+
         let command = config
             .get("command")
             .and_then(|v| v.as_str())
@@ -680,7 +740,15 @@ impl McpService {
             .and_then(|v| v.as_object())
             .map(|obj| {
                 obj.iter()
-                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .filter_map(|(k, v)| {
+                        v.as_str().and_then(|s| {
+                            if s == REDACTED_PLACEHOLDER {
+                                None
+                            } else {
+                                Some((k.clone(), s.to_string()))
+                            }
+                        })
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -690,7 +758,15 @@ impl McpService {
             .and_then(|v| v.as_object())
             .map(|obj| {
                 obj.iter()
-                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .filter_map(|(k, v)| {
+                        v.as_str().and_then(|s| {
+                            if s == REDACTED_PLACEHOLDER {
+                                None
+                            } else {
+                                Some((k.clone(), s.to_string()))
+                            }
+                        })
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -727,6 +803,19 @@ impl McpService {
             self.add_server(request)?;
         }
         Ok(ImportSingleResult::Added(name.to_string()))
+    }
+
+    fn ensure_name_unique(&self, name: &str, ignore_id: Option<&str>) -> AppResult<()> {
+        let duplicate = self
+            .db
+            .find_mcp_server_name_conflict_case_insensitive(name, ignore_id)?;
+        if duplicate {
+            return Err(AppError::validation(format!(
+                "MCP server name already exists: {}",
+                name
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -769,12 +858,14 @@ fn normalize_managed_path(path: PathBuf) -> PathBuf {
 
 enum ImportSingleResult {
     Added(String),
+    Skipped(String),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::collections::{HashMap, HashSet};
 
     #[test]
     fn test_generate_id() {
@@ -782,6 +873,85 @@ mod tests {
         let id2 = McpService::generate_id();
         assert!(id1.starts_with("mcp-"));
         assert!(id2.starts_with("mcp-"));
+    }
+
+    #[test]
+    fn test_generate_id_uniqueness() {
+        let mut ids = HashSet::new();
+        for _ in 0..2048 {
+            ids.insert(McpService::generate_id());
+        }
+        assert_eq!(ids.len(), 2048);
+    }
+
+    #[test]
+    fn test_reconcile_runtime_statuses_marks_stale_connected_as_disconnected() {
+        let db = Database::new_in_memory().unwrap();
+        let service = McpService::with_database(db);
+        let server = service
+            .add_server(CreateMcpServerRequest {
+                name: "Reconcile Test".to_string(),
+                server_type: McpServerType::Stdio,
+                command: Some("echo".to_string()),
+                args: Some(vec!["ok".to_string()]),
+                env: Some(HashMap::new()),
+                url: None,
+                headers: Some(HashMap::new()),
+                auto_connect: Some(true),
+            })
+            .unwrap();
+        service.mark_server_connected(&server.id).unwrap();
+
+        let (reconciled, runtime_connected) =
+            service.reconcile_runtime_statuses(&HashSet::new()).unwrap();
+        assert_eq!(reconciled, 1);
+        assert_eq!(runtime_connected, 0);
+
+        let refreshed = service.get_server(&server.id).unwrap().unwrap();
+        assert!(matches!(refreshed.status, McpServerStatus::Disconnected));
+    }
+
+    #[test]
+    fn test_import_result_reports_added_skipped_failed_and_skip_items() {
+        let db = Database::new_in_memory().unwrap();
+        let service = McpService::with_database(db);
+        service
+            .add_server(CreateMcpServerRequest {
+                name: "Existing".to_string(),
+                server_type: McpServerType::Stdio,
+                command: Some("echo".to_string()),
+                args: Some(vec![]),
+                env: Some(HashMap::new()),
+                url: None,
+                headers: Some(HashMap::new()),
+                auto_connect: Some(true),
+            })
+            .unwrap();
+
+        let payload = json!({
+            "mcpServers": {
+                "Existing": { "command": "echo", "args": [] },
+                "Fresh": { "command": "echo", "args": ["ok"] },
+                "Broken": { "args": [] }
+            }
+        });
+        let content = serde_json::to_string(&payload).unwrap();
+
+        let result = service
+            .import_from_json_str(&content, false, McpImportConflictPolicy::Skip)
+            .unwrap();
+        assert_eq!(result.added, 1);
+        assert_eq!(result.skipped, 1);
+        assert_eq!(result.failed, 1);
+        assert!(result.servers.iter().any(|name| name == "Fresh"));
+        assert!(result
+            .will_skip
+            .iter()
+            .any(|entry| entry.contains("Existing")));
+        assert!(result
+            .errors
+            .iter()
+            .any(|entry| entry.starts_with("Broken:")));
     }
 
     #[test]

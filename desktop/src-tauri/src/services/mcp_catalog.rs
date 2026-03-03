@@ -133,6 +133,7 @@ impl McpCatalogService {
                 source = REMOTE_CATALOG_SOURCE_LABEL,
                 updated = false,
                 item_count = items.len(),
+                unpinned_count = count_unpinned_catalog_items(&items),
                 signature_valid = true,
                 "MCP catalog cache is up to date (304)"
             );
@@ -190,6 +191,7 @@ impl McpCatalogService {
             source = REMOTE_CATALOG_SOURCE_LABEL,
             updated = true,
             item_count = items.len(),
+            unpinned_count = count_unpinned_catalog_items(&items),
             signature_valid = true,
             "MCP catalog refreshed from remote source"
         );
@@ -226,6 +228,7 @@ impl McpCatalogService {
             source = BUILTIN_CATALOG_SOURCE_LABEL,
             updated = true,
             item_count = payload.len(),
+            unpinned_count = count_unpinned_catalog_items(&payload),
             signature_valid = signature_valid,
             fallback = error.is_some(),
             "MCP catalog refreshed from builtin seed"
@@ -499,6 +502,72 @@ fn sha256_hex(data: &[u8]) -> String {
         .iter()
         .map(|byte| format!("{:02x}", byte))
         .collect::<String>()
+}
+
+fn count_unpinned_catalog_items(items: &[McpCatalogItem]) -> usize {
+    items
+        .iter()
+        .filter(|item| item.strategies.iter().any(strategy_has_unpinned_artifact))
+        .count()
+}
+
+fn strategy_has_unpinned_artifact(strategy: &McpInstallStrategy) -> bool {
+    if let Some(image) = strategy.recipe.get("image").and_then(|v| v.as_str()) {
+        if docker_image_unpinned(image) {
+            return true;
+        }
+    }
+    if let Some(package) = strategy.recipe.get("package").and_then(|v| v.as_str()) {
+        if package_spec_unpinned(package) {
+            return true;
+        }
+    }
+    if let Some(package) = strategy
+        .recipe
+        .get("bridge_package")
+        .and_then(|v| v.as_str())
+    {
+        if package_spec_unpinned(package) {
+            return true;
+        }
+    }
+    false
+}
+
+fn docker_image_unpinned(image: &str) -> bool {
+    let trimmed = image.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    if trimmed.contains("@sha256:") {
+        return false;
+    }
+
+    let last_segment = trimmed.rsplit('/').next().unwrap_or(trimmed);
+    if let Some((_, tag)) = last_segment.split_once(':') {
+        let normalized = tag.trim();
+        return normalized.is_empty() || normalized.eq_ignore_ascii_case("latest");
+    }
+    true
+}
+
+fn package_spec_unpinned(spec: &str) -> bool {
+    let trimmed = spec.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    if trimmed.starts_with('@') {
+        let scoped_part = &trimmed[1..];
+        if let Some(relative_idx) = scoped_part.rfind('@') {
+            let version = &scoped_part[(relative_idx + 1)..];
+            return version.trim().is_empty() || version.eq_ignore_ascii_case("latest");
+        }
+        return true;
+    }
+    if let Some((_, version)) = trimmed.split_once('@') {
+        return version.trim().is_empty() || version.eq_ignore_ascii_case("latest");
+    }
+    true
 }
 
 fn requirement(runtime: McpRuntimeKind, min_version: &str, optional: bool) -> RuntimeRequirement {
