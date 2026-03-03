@@ -106,6 +106,7 @@ function createMockSkill(overrides: Partial<SkillSummary> = {}): SkillSummary {
     description: 'A test skill',
     version: null,
     tags: ['test'],
+    allowed_tools: [],
     source: { type: 'builtin' },
     priority: 10,
     enabled: true,

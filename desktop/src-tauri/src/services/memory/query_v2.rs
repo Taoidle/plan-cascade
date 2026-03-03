@@ -171,6 +171,8 @@ impl Default for UnifiedMemoryQueryRequestV2 {
 pub struct UnifiedMemoryQueryResultV2 {
     pub trace_id: String,
     pub degraded: bool,
+    #[serde(default)]
+    pub degraded_reason: Option<String>,
     pub candidate_count: usize,
     pub results: Vec<MemorySearchResultV2>,
 }
@@ -608,6 +610,7 @@ pub async fn query_memory_entries_v2(
     let query = request.query.trim();
     let query_keywords = extract_query_keywords(query);
     let mut degraded = false;
+    let mut degraded_reason: Option<String> = None;
     let mut semantic_scores: HashMap<String, f32> = HashMap::new();
     let mut semantic_channel = if request.enable_lexical {
         "lexical_only".to_string()
@@ -619,6 +622,7 @@ pub async fn query_memory_entries_v2(
         let query_embedding = store.embedding_service().embed_text(query);
         if query_embedding.is_empty() {
             degraded = true;
+            degraded_reason = Some("embedding_unavailable".to_string());
         } else {
             let mut semantic_hits = 0usize;
             for candidate in &candidates {
@@ -633,6 +637,7 @@ pub async fn query_memory_entries_v2(
             }
             if semantic_hits == 0 {
                 degraded = true;
+                degraded_reason = Some("semantic_candidates_unavailable".to_string());
             } else {
                 semantic_channel = "tfidf".to_string();
             }
@@ -726,6 +731,7 @@ pub async fn query_memory_entries_v2(
     Ok(UnifiedMemoryQueryResultV2 {
         trace_id,
         degraded,
+        degraded_reason,
         candidate_count,
         results,
     })

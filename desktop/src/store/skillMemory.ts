@@ -772,10 +772,13 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
       }
 
       const updated = response.data?.updated ?? memoryIds.length;
-      get().showToast(
-        tSkillMemory('skillPanel.toasts.memoryReviewSuccess', `Reviewed ${updated} memory candidates`),
-        'success',
-      );
+      const successMessage =
+        decision === 'approve'
+          ? tSkillMemory('skillPanel.toasts.memoryApproveSuccess', `Approved ${updated} memory candidates`)
+          : decision === 'reject'
+            ? tSkillMemory('skillPanel.toasts.memoryRejectSuccess', `Rejected ${updated} memory candidates`)
+            : tSkillMemory('skillPanel.toasts.memoryArchiveSuccess', `Archived ${updated} memory candidates`);
+      get().showToast(successMessage, 'success');
       await Promise.all([
         get().loadPendingMemoryCandidates(projectPath),
         get().loadMemories(projectPath),

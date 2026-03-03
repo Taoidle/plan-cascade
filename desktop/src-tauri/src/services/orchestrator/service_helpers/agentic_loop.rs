@@ -424,6 +424,109 @@ impl OrchestratorService {
         }
     }
 
+    fn env_flag_enabled(name: &str, default: bool) -> bool {
+        std::env::var(name)
+            .ok()
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
+            .unwrap_or(default)
+    }
+
+    fn skill_tool_hard_filter_enabled() -> bool {
+        Self::env_flag_enabled("SKILL_TOOL_HARD_FILTER", true)
+    }
+
+    fn normalized_allowed_tools_from_skill_matches(
+        skills: &[crate::services::skills::model::SkillMatch],
+    ) -> Option<std::collections::HashSet<String>> {
+        let mut allowed = std::collections::HashSet::<String>::new();
+        let mut has_restriction = false;
+        for skill_match in skills {
+            if !skill_match.skill.enabled || skill_match.skill.allowed_tools.is_empty() {
+                continue;
+            }
+            has_restriction = true;
+            for tool in &skill_match.skill.allowed_tools {
+                let normalized = tool.trim().to_ascii_lowercase();
+                if !normalized.is_empty() {
+                    allowed.insert(normalized);
+                }
+            }
+        }
+        if !has_restriction {
+            return None;
+        }
+
+        // Minimal safe baseline to keep repo exploration functional.
+        for safe_tool in ["read", "ls", "glob", "grep", "cwd"] {
+            allowed.insert(safe_tool.to_string());
+        }
+        Some(allowed)
+    }
+
+    fn apply_skill_allowed_tool_filter(
+        tools: &[ToolDefinition],
+        allowed: &std::collections::HashSet<String>,
+    ) -> (Vec<ToolDefinition>, Vec<String>) {
+        let mut blocked = Vec::new();
+        let filtered = tools
+            .iter()
+            .filter(|tool| {
+                let normalized = tool.name.trim().to_ascii_lowercase();
+                let permitted = allowed.contains(&normalized);
+                if !permitted {
+                    blocked.push(tool.name.clone());
+                }
+                permitted
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        (filtered, blocked)
+    }
+
+    fn normalized_skill_allowed_tools(&self) -> Option<std::collections::HashSet<String>> {
+        if !Self::skill_tool_hard_filter_enabled() {
+            return None;
+        }
+        let Some(skills_lock) = self.selected_skills.as_ref() else {
+            return None;
+        };
+        let Ok(skills) = skills_lock.try_read() else {
+            // Fail-open if the lock is contended to avoid stalling execution.
+            return None;
+        };
+        Self::normalized_allowed_tools_from_skill_matches(skills.as_slice())
+    }
+
+    fn filter_tools_by_skill_policy(
+        &self,
+        tools: &[ToolDefinition],
+    ) -> (Vec<ToolDefinition>, Vec<String>) {
+        let Some(allowed) = self.normalized_skill_allowed_tools() else {
+            return (tools.to_vec(), Vec::new());
+        };
+        Self::apply_skill_allowed_tool_filter(tools, &allowed)
+    }
+
+    fn skill_policy_block_reason(&self, tool_name: &str) -> Option<String> {
+        let allowed = self.normalized_skill_allowed_tools()?;
+        let normalized = tool_name.trim().to_ascii_lowercase();
+        if allowed.contains(&normalized) {
+            return None;
+        }
+        let mut allowed_sorted = allowed.into_iter().collect::<Vec<_>>();
+        allowed_sorted.sort();
+        Some(format!(
+            "tool_blocked_by_skill_policy: '{}' is not allowed by active skill policy (allowed_tools={}).",
+            tool_name,
+            allowed_sorted.join(", ")
+        ))
+    }
+
     async fn execute_tool_with_usage(
         &self,
         session_id: &str,
@@ -436,6 +539,19 @@ impl OrchestratorService {
         UsageStats,
         u32,
     ) {
+        if let Some(reason) = self.skill_policy_block_reason(tool_name) {
+            eprintln!(
+                "[skill-tool-policy] blocked tool call: tool={}, session={}, reason={}",
+                tool_name, session_id, reason
+            );
+            return (
+                crate::services::tools::executor::ToolResult::err(reason)
+                    .with_error_code("tool_blocked_by_skill_policy")
+                    .with_retryable(false),
+                UsageStats::default(),
+                0,
+            );
+        }
         if tool_name == "Analyze" {
             return self.execute_analyze_tool_result(arguments, tx).await;
         }
@@ -726,7 +842,7 @@ impl OrchestratorService {
             // Determine which tools to pass to the LLM API, filtering out any
             // tools that have been stripped by Level 2 escalation.
             let stripped = loop_detector.stripped_tools();
-            let filtered_tools: Vec<ToolDefinition> = if !stripped.is_empty() {
+            let stripped_tools: Vec<ToolDefinition> = if !stripped.is_empty() {
                 tools
                     .iter()
                     .filter(|t| !stripped.contains(&t.name))
@@ -735,6 +851,14 @@ impl OrchestratorService {
             } else {
                 tools.to_vec()
             };
+            let (filtered_tools, blocked_by_skill_policy) =
+                self.filter_tools_by_skill_policy(&stripped_tools);
+            if !blocked_by_skill_policy.is_empty() {
+                eprintln!(
+                    "[skill-tool-policy] filtered advertised tools (sub-agent): blocked={}",
+                    blocked_by_skill_policy.join(", ")
+                );
+            }
             let api_tools: &[ToolDefinition] = if use_prompt_fallback {
                 // Don't pass tools to the API; they're in the system prompt
                 &[]
@@ -2062,7 +2186,7 @@ impl OrchestratorService {
             // Determine which tools to pass to the LLM API, filtering out any
             // tools that have been stripped by Level 2 escalation.
             let stripped = loop_detector.stripped_tools();
-            let filtered_tools: Vec<ToolDefinition> = if !stripped.is_empty() {
+            let stripped_tools: Vec<ToolDefinition> = if !stripped.is_empty() {
                 tools
                     .iter()
                     .filter(|t| !stripped.contains(&t.name))
@@ -2071,6 +2195,14 @@ impl OrchestratorService {
             } else {
                 tools.clone()
             };
+            let (filtered_tools, blocked_by_skill_policy) =
+                self.filter_tools_by_skill_policy(&stripped_tools);
+            if !blocked_by_skill_policy.is_empty() {
+                eprintln!(
+                    "[skill-tool-policy] filtered advertised tools: blocked={}",
+                    blocked_by_skill_policy.join(", ")
+                );
+            }
             let api_tools: &[ToolDefinition] = if use_prompt_fallback {
                 // Don't pass tools to the API; they're in the system prompt
                 &[]
@@ -4374,5 +4506,95 @@ impl OrchestratorService {
                     .await;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod skill_tool_policy_tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    fn make_skill_match(
+        id: &str,
+        enabled: bool,
+        allowed_tools: Vec<&str>,
+    ) -> crate::services::skills::model::SkillMatch {
+        crate::services::skills::model::SkillMatch {
+            score: 1.0,
+            match_reason: crate::services::skills::model::MatchReason::UserForced,
+            skill: crate::services::skills::model::SkillSummary {
+                id: id.to_string(),
+                name: id.to_string(),
+                description: String::new(),
+                version: None,
+                tags: vec![],
+                allowed_tools: allowed_tools.into_iter().map(|v| v.to_string()).collect(),
+                source: crate::services::skills::model::SkillSource::User,
+                priority: 100,
+                enabled,
+                detected: false,
+                user_invocable: false,
+                has_hooks: false,
+                inject_into: vec![crate::services::skills::model::InjectionPhase::Always],
+                path: PathBuf::from(format!("{}.md", id)),
+            },
+        }
+    }
+
+    fn make_tool(name: &str) -> ToolDefinition {
+        ToolDefinition {
+            name: name.to_string(),
+            description: String::new(),
+            input_schema: crate::services::llm::types::ParameterSchema::object(
+                None,
+                HashMap::new(),
+                vec![],
+            ),
+        }
+    }
+
+    #[test]
+    fn no_skill_allowlist_means_no_filter() {
+        let matches = vec![
+            make_skill_match("a", true, vec![]),
+            make_skill_match("b", false, vec!["Read"]),
+        ];
+        let allowed = OrchestratorService::normalized_allowed_tools_from_skill_matches(&matches);
+        assert!(allowed.is_none());
+    }
+
+    #[test]
+    fn allowlist_union_includes_minimum_safe_tools() {
+        let matches = vec![
+            make_skill_match("a", true, vec!["Write", "Edit"]),
+            make_skill_match("b", true, vec!["Bash"]),
+        ];
+        let allowed = OrchestratorService::normalized_allowed_tools_from_skill_matches(&matches)
+            .expect("allowlist should be enabled");
+
+        assert!(allowed.contains("write"));
+        assert!(allowed.contains("edit"));
+        assert!(allowed.contains("bash"));
+        for safe in ["read", "ls", "glob", "grep", "cwd"] {
+            assert!(
+                allowed.contains(safe),
+                "safe tool {} must always be allowed when policy is active",
+                safe
+            );
+        }
+    }
+
+    #[test]
+    fn allowlist_filter_blocks_non_whitelisted_tools() {
+        let matches = vec![make_skill_match("skill", true, vec!["Write"])];
+        let allowed = OrchestratorService::normalized_allowed_tools_from_skill_matches(&matches)
+            .expect("allowlist should be enabled");
+        let tools = vec![make_tool("Write"), make_tool("Read"), make_tool("Bash")];
+        let (filtered, blocked) = OrchestratorService::apply_skill_allowed_tool_filter(&tools, &allowed);
+
+        let filtered_names: Vec<String> = filtered.into_iter().map(|tool| tool.name).collect();
+        assert_eq!(filtered_names, vec!["Write".to_string(), "Read".to_string()]);
+        assert_eq!(blocked, vec!["Bash".to_string()]);
     }
 }

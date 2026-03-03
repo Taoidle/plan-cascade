@@ -174,7 +174,9 @@ pub async fn start_remote_gateway(
     match webhook_state.get_or_init(app_state.inner()).await {
         Ok(webhook_service) => {
             gateway.set_webhook_service(webhook_service);
-            let _ = webhook_state.start_worker_if_needed(app_state.inner()).await;
+            let _ = webhook_state
+                .start_worker_if_needed(app_state.inner())
+                .await;
         }
         Err(err) => {
             tracing::warn!("Webhook service unavailable for remote gateway: {}", err);

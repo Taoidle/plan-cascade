@@ -255,12 +255,9 @@ impl OpenAIEmbeddingProvider {
             .unwrap_or(body_text);
         let error_code = error_detail.as_ref().and_then(|d| d.code.as_deref());
 
-        if let Some(signal) = classify_rate_limit(
-            Some(status),
-            Some(headers),
-            error_code,
-            Some(error_message),
-        ) {
+        if let Some(signal) =
+            classify_rate_limit(Some(status), Some(headers), error_code, Some(error_message))
+        {
             return EmbeddingError::RateLimited {
                 message: format!("OpenAI rate limit exceeded: {}", error_message),
                 retry_after: signal.retry_after_secs,
@@ -636,7 +633,8 @@ mod tests {
     fn map_http_error_500_server_error() {
         let provider = OpenAIEmbeddingProvider::new(&default_config());
         let headers = reqwest::header::HeaderMap::new();
-        let err = provider.map_http_error(500, &headers, r#"{"error":{"message":"Internal error"}}"#);
+        let err =
+            provider.map_http_error(500, &headers, r#"{"error":{"message":"Internal error"}}"#);
         assert!(matches!(
             err,
             EmbeddingError::ServerError {

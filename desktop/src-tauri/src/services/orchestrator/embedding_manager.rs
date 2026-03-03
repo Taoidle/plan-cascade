@@ -19,8 +19,8 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::sync::OnceLock;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 use tracing;
@@ -99,7 +99,11 @@ impl CloudEmbeddingGate {
         let wait_for = {
             let mut schedule = self.schedule.lock().await;
             let now = Instant::now();
-            let due = schedule.next_allowed_at.get(&provider).copied().unwrap_or(now);
+            let due = schedule
+                .next_allowed_at
+                .get(&provider)
+                .copied()
+                .unwrap_or(now);
             let wait_for = due.saturating_duration_since(now);
             schedule
                 .next_allowed_at
@@ -443,7 +447,9 @@ impl EmbeddingManager {
         Arc::clone(CLOUD_EMBED_GATE.get_or_init(|| Arc::new(CloudEmbeddingGate::new())))
     }
 
-    async fn acquire_cloud_budget(provider: &dyn EmbeddingProvider) -> Option<OwnedSemaphorePermit> {
+    async fn acquire_cloud_budget(
+        provider: &dyn EmbeddingProvider,
+    ) -> Option<OwnedSemaphorePermit> {
         if provider.is_local() {
             return None;
         }

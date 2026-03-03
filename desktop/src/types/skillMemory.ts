@@ -30,6 +30,7 @@ export interface SkillSummary {
   description: string;
   version: string | null;
   tags: string[];
+  allowed_tools: string[];
   source: SkillSource;
   priority: number;
   enabled: boolean;

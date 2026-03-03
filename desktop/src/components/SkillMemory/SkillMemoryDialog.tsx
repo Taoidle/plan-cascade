@@ -17,6 +17,7 @@ import { Cross2Icon, MagnifyingGlassIcon, PlusIcon, ReloadIcon, TrashIcon } from
 import { useSkillMemoryStore, type SkillSourceFilter, type MemoryCategoryFilter } from '../../store/skillMemory';
 import { useSettingsStore } from '../../store/settings';
 import { useExecutionStore } from '../../store/execution';
+import { useContextOpsStore } from '../../store/contextOps';
 import { SkillRow } from '../SimpleMode/SkillRow';
 import { SkillDetail } from './SkillDetail';
 import { MemoryDetail } from './MemoryDetail';
@@ -118,6 +119,7 @@ function inferMemoryScope(entry: MemoryEntry): MemoryScope {
 function SkillsTab() {
   const { t } = useTranslation('simpleMode');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
+  const latestEnvelope = useContextOpsStore((s) => s.latestEnvelope);
   const skills = useSkillMemoryStore((s) => s.skills);
   const skillsLoading = useSkillMemoryStore((s) => s.skillsLoading);
   const skillSearchQuery = useSkillMemoryStore((s) => s.skillSearchQuery);
@@ -130,6 +132,12 @@ function SkillsTab() {
   const skillDetail = useSkillMemoryStore((s) => s.skillDetail);
 
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
+  const [showWhySkills, setShowWhySkills] = useState(false);
+  const diagnostics = latestEnvelope?.diagnostics;
+  const skillSources = useMemo(
+    () => (latestEnvelope?.sources ?? []).filter((source) => source.kind === 'skills'),
+    [latestEnvelope],
+  );
   const sourceFilters: { value: SkillSourceFilter; label: string }[] = useMemo(
     () => [
       { value: 'all', label: t('skillPanel.sourceFilters.all', { defaultValue: sourceLabelFallback('all') }) },
@@ -264,6 +272,18 @@ function SkillsTab() {
             </button>
           ))}
           <button
+            onClick={() => setShowWhySkills((value) => !value)}
+            className={clsx(
+              'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
+              'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
+            )}
+            title={t('skillPanel.whySkillsTitle', { defaultValue: 'Why these skills' })}
+          >
+            {showWhySkills
+              ? t('skillPanel.hideWhySkills', { defaultValue: 'Hide Why' })
+              : t('skillPanel.showWhySkills', { defaultValue: 'Why Skills?' })}
+          </button>
+          <button
             onClick={handleRefresh}
             className={clsx(
               'ml-auto p-1 rounded-md transition-colors',
@@ -275,6 +295,33 @@ function SkillsTab() {
             <ReloadIcon className="w-3.5 h-3.5" />
           </button>
         </div>
+
+        {showWhySkills && (
+          <div className="rounded-md border border-sky-200 dark:border-sky-900 bg-sky-50/60 dark:bg-sky-900/10 p-2 text-2xs text-sky-800 dark:text-sky-200 space-y-1">
+            <div>
+              {t('skillPanel.selectionReason', { defaultValue: 'Selection reason' })}:{' '}
+              {diagnostics?.selection_reason || t('skillPanel.none', { defaultValue: 'none' })}
+            </div>
+            <div>
+              {t('skillPanel.selectedSkills', { defaultValue: 'Selected skills' })}:{' '}
+              {diagnostics?.selected_skills?.length
+                ? diagnostics.selected_skills.join(', ')
+                : t('skillPanel.none', { defaultValue: 'none' })}
+            </div>
+            <div>
+              {t('skillPanel.blockedTools', { defaultValue: 'Blocked tools' })}:{' '}
+              {diagnostics?.blocked_tools?.length
+                ? diagnostics.blocked_tools.join(', ')
+                : t('skillPanel.none', { defaultValue: 'none' })}
+            </div>
+            {skillSources.length > 0 && (
+              <div>
+                {t('skillPanel.sourceReason', { defaultValue: 'Source reason' })}:{' '}
+                {skillSources.map((s) => s.reason).join(', ')}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Skills list */}
@@ -314,6 +361,7 @@ function SkillsTab() {
 function MemoryTab() {
   const { t } = useTranslation('simpleMode');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
+  const latestEnvelope = useContextOpsStore((s) => s.latestEnvelope);
   const taskId = useExecutionStore((s) => s.taskId);
   const standaloneSessionId = useExecutionStore((s) => s.standaloneSessionId);
   const foregroundOriginSessionId = useExecutionStore((s) => s.foregroundOriginSessionId);
@@ -345,6 +393,12 @@ function MemoryTab() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [memoryViewMode, setMemoryViewMode] = useState<'active' | 'pending'>('active');
   const [selectedPendingIds, setSelectedPendingIds] = useState<Set<string>>(new Set());
+  const [showWhyMemory, setShowWhyMemory] = useState(false);
+  const diagnostics = latestEnvelope?.diagnostics;
+  const memorySources = useMemo(
+    () => (latestEnvelope?.sources ?? []).filter((source) => source.kind === 'memory'),
+    [latestEnvelope],
+  );
   const activeSessionId = useMemo(() => {
     if (foregroundOriginSessionId?.trim()) return foregroundOriginSessionId.trim();
     if (taskId?.trim()) return `claude:${taskId.trim()}`;
@@ -510,7 +564,7 @@ function MemoryTab() {
   }, [pendingMemoryCandidates, selectedPendingIds.size]);
 
   const handleReviewPending = useCallback(
-    async (ids: string[], decision: 'approve' | 'reject') => {
+    async (ids: string[], decision: 'approve' | 'reject' | 'archive') => {
       if (!workspacePath || ids.length === 0) return;
       await reviewPendingMemoryCandidates(workspacePath, ids, decision);
       setSelectedPendingIds((prev) => {
@@ -596,7 +650,48 @@ function MemoryTab() {
           >
             {t('skillPanel.pendingReview', { defaultValue: 'Pending Review' })} ({pendingMemoryCandidates.length})
           </button>
+          <button
+            onClick={() => setShowWhyMemory((value) => !value)}
+            className={clsx(
+              'ml-auto px-2 py-1 rounded-md text-2xs font-medium transition-colors',
+              'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
+            )}
+            title={t('skillPanel.whyMemoryTitle', { defaultValue: 'Why these memories' })}
+          >
+            {showWhyMemory
+              ? t('skillPanel.hideWhyMemory', { defaultValue: 'Hide Why' })
+              : t('skillPanel.showWhyMemory', { defaultValue: 'Why Memory?' })}
+          </button>
         </div>
+
+        {showWhyMemory && (
+          <div className="rounded-md border border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-900/10 p-2 text-2xs text-amber-800 dark:text-amber-200 space-y-1">
+            <div>
+              {t('skillPanel.selectionReason', { defaultValue: 'Selection reason' })}:{' '}
+              {diagnostics?.selection_reason || t('skillPanel.none', { defaultValue: 'none' })}
+            </div>
+            <div>
+              {t('skillPanel.effectiveStatuses', { defaultValue: 'Effective statuses' })}:{' '}
+              {diagnostics?.effective_statuses?.length
+                ? diagnostics.effective_statuses.join(', ')
+                : t('skillPanel.none', { defaultValue: 'none' })}
+            </div>
+            <div>
+              {t('skillPanel.candidateCount', { defaultValue: 'Candidates' })}:{' '}
+              {diagnostics?.memory_candidates_count ?? 0}
+            </div>
+            <div>
+              {t('skillPanel.degradedReason', { defaultValue: 'Degraded reason' })}:{' '}
+              {diagnostics?.degraded_reason || t('skillPanel.none', { defaultValue: 'none' })}
+            </div>
+            {memorySources.length > 0 && (
+              <div>
+                {t('skillPanel.sourceReason', { defaultValue: 'Source reason' })}:{' '}
+                {memorySources.map((s) => s.reason).join(', ')}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Search */}
         <div className="relative">
@@ -709,6 +804,18 @@ function MemoryTab() {
               )}
             >
               {t('skillPanel.rejectSelected', { defaultValue: 'Reject Selected' })}
+            </button>
+            <button
+              onClick={() => void handleReviewPending(Array.from(selectedPendingIds), 'archive')}
+              disabled={selectedPendingIds.size === 0}
+              className={clsx(
+                'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
+                selectedPendingIds.size === 0
+                  ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                  : 'bg-slate-100 dark:bg-slate-900/30 text-slate-700 dark:text-slate-300',
+              )}
+            >
+              {t('skillPanel.archiveSelected', { defaultValue: 'Archive Selected' })}
             </button>
             <button
               onClick={() => workspacePath && void loadPendingMemoryCandidates(workspacePath)}
@@ -910,6 +1017,12 @@ function MemoryTab() {
                         className="px-2 py-0.5 rounded text-2xs font-medium bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300"
                       >
                         {t('skillPanel.reject', { defaultValue: 'Reject' })}
+                      </button>
+                      <button
+                        onClick={() => void handleReviewPending([candidate.id], 'archive')}
+                        className="px-2 py-0.5 rounded text-2xs font-medium bg-slate-100 text-slate-700 dark:bg-slate-900/30 dark:text-slate-300"
+                      >
+                        {t('skillPanel.archive', { defaultValue: 'Archive' })}
                       </button>
                     </div>
                   </div>

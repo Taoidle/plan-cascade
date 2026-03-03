@@ -139,6 +139,7 @@ mod tests {
                 description: format!("Description for {}", name),
                 version: None,
                 tags: vec![],
+                allowed_tools: vec![],
                 source,
                 priority,
                 enabled: true,

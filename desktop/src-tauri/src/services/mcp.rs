@@ -327,7 +327,9 @@ impl McpService {
                     .map(|required| !required.is_empty())
                     .unwrap_or(false);
                 if !requires_args {
-                    client.call_tool(&health_tool.name, serde_json::json!({})).await?;
+                    client
+                        .call_tool(&health_tool.name, serde_json::json!({}))
+                        .await?;
                 }
             }
             let _ = client.disconnect().await;
@@ -444,7 +446,10 @@ impl McpService {
     }
 
     /// Import servers from Claude Desktop configuration with options.
-    pub fn import_from_claude_desktop_with_options(&self, dry_run: bool) -> AppResult<ImportResult> {
+    pub fn import_from_claude_desktop_with_options(
+        &self,
+        dry_run: bool,
+    ) -> AppResult<ImportResult> {
         let config_path = Self::get_claude_desktop_config_path();
 
         if !config_path.exists() {
@@ -470,7 +475,11 @@ impl McpService {
     }
 
     /// Import servers from a JSON configuration file path with options.
-    pub fn import_from_file_with_options(&self, path: &str, dry_run: bool) -> AppResult<ImportResult> {
+    pub fn import_from_file_with_options(
+        &self,
+        path: &str,
+        dry_run: bool,
+    ) -> AppResult<ImportResult> {
         let content = std::fs::read_to_string(path)?;
         self.import_from_json_str(&content, dry_run)
     }

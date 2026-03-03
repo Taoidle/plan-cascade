@@ -970,6 +970,7 @@ async function buildStandaloneMessageWithContextEnvelope(params: {
         compaction: result.data.compaction,
         trace_id: result.data.trace_id,
         assembled_prompt: result.data.assembled_prompt,
+        diagnostics: result.data.diagnostics,
       };
       useContextOpsStore.getState().setLatestEnvelope(envelope);
       const used = result.data.budget?.used_input_tokens;
@@ -1066,6 +1067,7 @@ async function buildClaudePromptWithContextEnvelope(params: {
         compaction: result.data.compaction,
         trace_id: result.data.trace_id,
         assembled_prompt: result.data.assembled_prompt,
+        diagnostics: result.data.diagnostics,
       };
       useContextOpsStore.getState().setLatestEnvelope(envelope);
       const fallbackTag = result.data.fallback_used ? ', fallback' : '';
@@ -5509,7 +5511,6 @@ async function setupTauriEventListeners(get: () => ExecutionState, set: (partial
             });
             get().addLog('Execution completed');
             get().saveToHistory();
-            void triggerMemoryExtraction(get());
           }
           break;
         }

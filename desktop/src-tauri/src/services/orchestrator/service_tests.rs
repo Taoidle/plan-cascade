@@ -3973,6 +3973,7 @@ fn test_sub_agent_inherits_skills_snapshot() {
             description: "Follow Rust idioms and patterns.".to_string(),
             version: None,
             tags: vec!["rust".to_string()],
+            allowed_tools: vec![],
             source: SkillSource::Builtin,
             priority: 10,
             enabled: true,

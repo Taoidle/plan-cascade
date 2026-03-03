@@ -741,7 +741,7 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
       excluded_memory_ids: excludedIds,
       selected_scopes: normalizedScopes,
       session_id: memorySessionId,
-      statuses: ['active'],
+      statuses: [],
       review_mode: 'active_only',
     };
 

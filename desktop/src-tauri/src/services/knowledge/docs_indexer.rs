@@ -211,7 +211,12 @@ impl DocsIndexer {
         format!("{}::{}", Self::normalize_path(workspace_path), project_id)
     }
 
-    async fn emit_status_event(&self, workspace_path: &str, project_id: &str, state: &DocsRuntimeState) {
+    async fn emit_status_event(
+        &self,
+        workspace_path: &str,
+        project_id: &str,
+        state: &DocsRuntimeState,
+    ) {
         let app_handle = self.app_handle.read().await.clone();
         if let Some(handle) = app_handle {
             let _ = handle.emit(
@@ -335,8 +340,7 @@ impl DocsIndexer {
             if retryable && state.retry_count < 5 {
                 let delay = Self::retry_delay_secs(state.retry_count);
                 state.retry_count += 1;
-                state.next_retry_at =
-                    Some(Utc::now() + chrono::Duration::seconds(delay as i64));
+                state.next_retry_at = Some(Utc::now() + chrono::Duration::seconds(delay as i64));
                 state.status = "retry_waiting".to_string();
             } else {
                 state.next_retry_at = None;
@@ -346,7 +350,11 @@ impl DocsIndexer {
         .await;
     }
 
-    pub async fn get_runtime_status(&self, workspace_path: &str, project_id: &str) -> DocsRuntimeState {
+    pub async fn get_runtime_status(
+        &self,
+        workspace_path: &str,
+        project_id: &str,
+    ) -> DocsRuntimeState {
         let key = Self::scope_key(workspace_path, project_id);
         let guard = self.runtime_status.read().await;
         guard.get(&key).cloned().unwrap_or_default()
@@ -507,13 +515,8 @@ impl DocsIndexer {
         let collection = match collection_result {
             Ok(collection) => collection,
             Err(err) => {
-                self.mark_failure(
-                    workspace_path,
-                    project_id,
-                    scanned_files,
-                    &err.to_string(),
-                )
-                .await;
+                self.mark_failure(workspace_path, project_id, scanned_files, &err.to_string())
+                    .await;
                 return Err(err);
             }
         };
@@ -578,12 +581,8 @@ impl DocsIndexer {
             let temp = pipeline
                 .ingest_with_progress(&temp_name, project_id, &description, documents, app_handle)
                 .await?;
-            let temp = pipeline.update_collection(
-                &temp.id,
-                None,
-                None,
-                Some(Some(workspace_path)),
-            )?;
+            let temp =
+                pipeline.update_collection(&temp.id, None, None, Some(Some(workspace_path)))?;
 
             let existing = pipeline
                 .list_collections(project_id)?
@@ -606,7 +605,9 @@ impl DocsIndexer {
                 .into_iter()
                 .find(|c| c.name == canonical_name)
             {
-                pipeline.delete_collection(&existing.name, project_id).await?;
+                pipeline
+                    .delete_collection(&existing.name, project_id)
+                    .await?;
             }
             pipeline
                 .ingest_with_progress(
@@ -627,13 +628,8 @@ impl DocsIndexer {
                 Ok(Some(collection))
             }
             Err(err) => {
-                self.mark_failure(
-                    workspace_path,
-                    project_id,
-                    scanned_files,
-                    &err.to_string(),
-                )
-                .await;
+                self.mark_failure(workspace_path, project_id, scanned_files, &err.to_string())
+                    .await;
                 Err(err)
             }
         }

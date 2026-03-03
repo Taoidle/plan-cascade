@@ -61,6 +61,15 @@ export interface CompactionReport {
   quality_basis?: Record<string, unknown>;
 }
 
+export interface ContextDiagnostics {
+  blocked_tools: string[];
+  effective_statuses: string[];
+  selected_skills: string[];
+  memory_candidates_count: number;
+  degraded_reason?: string | null;
+  selection_reason: string;
+}
+
 export interface ContextEnvelope {
   request_meta: {
     turn_id: string;
@@ -75,6 +84,7 @@ export interface ContextEnvelope {
   compaction: CompactionReport;
   trace_id: string;
   assembled_prompt: string;
+  diagnostics?: ContextDiagnostics;
 }
 
 export interface ContextAssemblyResponse {
@@ -94,6 +104,7 @@ export interface ContextAssemblyResponse {
   injected_source_kinds: string[];
   fallback_used: boolean;
   fallback_reason?: string | null;
+  diagnostics?: ContextDiagnostics;
 }
 
 export interface ContextTraceEvent {
@@ -249,6 +260,7 @@ export async function prepareTurnContextV2(request: {
         sources: assembled.data.sources,
         blocks: assembled.data.blocks,
         compaction: assembled.data.compaction,
+        diagnostics: assembled.data.diagnostics,
       },
       error: null,
     };

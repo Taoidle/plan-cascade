@@ -6,7 +6,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::models::response::CommandResponse;
-use crate::services::memory::extraction::MemoryExtractor;
+use crate::services::memory::extraction::run_session_extraction;
 use crate::services::memory::maintenance::MemoryMaintenance;
 use crate::services::memory::query_policy_v2::{memory_query_tuning_v2, MemoryQueryPresetV2};
 use crate::services::memory::query_v2::{
@@ -18,18 +18,22 @@ use crate::services::memory::query_v2::{
     MemoryReviewDecisionV2, MemoryReviewSummaryV2, MemoryScopeV2, MemoryStatusV2,
     UnifiedMemoryQueryRequestV2, UnifiedMemoryQueryResultV2,
 };
-use crate::services::memory::retrieval::{
-    search_memories, MemorySearchIntent, MemorySearchResultV2,
-};
+use crate::services::memory::retrieval::{MemorySearchIntent, MemorySearchResultV2};
 use crate::services::memory::store::{
-    build_session_project_path, MemoryCategory, MemoryEntry, MemorySearchRequest,
-    MemorySearchResult, MemoryStats, MemoryUpdate, NewMemoryEntry, UpsertResult,
-    GLOBAL_PROJECT_PATH,
+    build_session_project_path, MemoryCategory, MemoryEntry, MemorySearchResult, MemoryStats,
+    MemoryUpdate, NewMemoryEntry, UpsertResult, GLOBAL_PROJECT_PATH,
 };
 use crate::state::AppState;
 
 const EXTRACTION_SESSION_MARKER_PREFIX: &str = "memory_extracted_session:";
 const DEFAULT_SESSION_SCOPE_TTL_DAYS: i64 = 14;
+
+fn env_flag_enabled(name: &str, default: bool) -> bool {
+    std::env::var(name)
+        .ok()
+        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(default)
+}
 
 fn resolve_memory_project_path(
     project_path: &str,
@@ -111,6 +115,10 @@ pub async fn search_project_memories(
     session_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<CommandResponse<Vec<MemorySearchResult>>, String> {
+    eprintln!(
+        "[memory] Deprecated command 'search_project_memories' called; routing to unified query_v2"
+    );
+
     let effective_project_path =
         match resolve_memory_project_path(&project_path, scope.as_deref(), session_id.as_deref()) {
             Ok(path) => path,
@@ -123,20 +131,60 @@ pub async fn search_project_memories(
             .collect::<Vec<_>>()
     });
 
+    let parsed_scope = match scope.as_deref() {
+        Some(value) => match MemoryScopeV2::from_str(value) {
+            Some(scope) => vec![scope],
+            None => {
+                return Ok(CommandResponse::err(format!(
+                    "Invalid memory scope: {}",
+                    value
+                )))
+            }
+        },
+        None => vec![],
+    };
+    if matches!(parsed_scope.first(), Some(MemoryScopeV2::Session))
+        && session_id.as_deref().unwrap_or("").trim().is_empty()
+    {
+        return Ok(CommandResponse::err(
+            "session_id is required for session scope".to_string(),
+        ));
+    }
+
     let tuning = memory_query_tuning_v2(MemoryQueryPresetV2::CommandSearch);
-    let request = MemorySearchRequest {
+    let request = UnifiedMemoryQueryRequestV2 {
         project_path: effective_project_path,
         query,
-        categories: parsed_categories,
-        top_k: top_k.unwrap_or(tuning.top_k_total),
+        scopes: parsed_scope,
+        categories: parsed_categories.unwrap_or_default(),
+        include_ids: vec![],
+        exclude_ids: vec![],
+        session_id,
+        top_k_total: top_k.unwrap_or(tuning.top_k_total),
         min_importance: tuning.min_importance,
+        per_scope_budget: tuning.per_scope_budget,
+        intent: MemorySearchIntent::Default,
+        enable_semantic: true,
+        enable_lexical: true,
+        statuses: vec![MemoryStatusV2::Active],
     };
 
-    match state
-        .with_memory_store(|store| search_memories(store, &request))
-        .await
-    {
-        Ok(results) => Ok(CommandResponse::ok(results)),
+    let store = match state.get_memory_store_arc().await {
+        Ok(store) => store,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+
+    match query_memory_entries_unified_v2(store.as_ref(), &request).await {
+        Ok(results) => Ok(CommandResponse::ok(
+            results
+                .results
+                .into_iter()
+                .map(|row| MemorySearchResult {
+                    entry: row.entry,
+                    relevance_score: row.relevance_score,
+                })
+                .collect(),
+        )),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
 }
@@ -758,6 +806,13 @@ pub async fn extract_session_memories(
         skipped_count: 0,
     };
 
+    if !env_flag_enabled("UNIFIED_SESSION_EXTRACTION", true) {
+        eprintln!(
+            "[memory-extraction] Skipped: UNIFIED_SESSION_EXTRACTION is disabled (source=chat_frontend)"
+        );
+        return Ok(CommandResponse::ok(zero_result));
+    }
+
     if let Some(ref sid) = session_id {
         let marker_key = extraction_marker_key(sid);
         let already_extracted = state
@@ -786,35 +841,12 @@ pub async fn extract_session_memories(
     let provider = match resolve_extraction_provider(&state).await {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("[memory-extraction] Provider resolution failed: {}", e);
+            eprintln!(
+                "[memory-extraction] Provider resolution failed (source=chat_frontend): {}",
+                e
+            );
             return Ok(CommandResponse::ok(zero_result));
         }
-    };
-
-    use crate::services::llm::types::{LlmRequestOptions, Message};
-
-    // Stage 1: If conversation is long, use LLM to create a focused summary
-    // that emphasizes user preferences, tech stack, patterns, etc.
-    let effective_summary = if conversation_summary.len() > MemoryExtractor::SUMMARIZE_THRESHOLD {
-        let summarize_prompt =
-            MemoryExtractor::build_summarization_prompt(&task_description, &conversation_summary);
-        let messages = vec![Message::user(summarize_prompt)];
-        match provider
-            .send_message(messages, None, vec![], LlmRequestOptions::default())
-            .await
-        {
-            Ok(resp) => resp.content.unwrap_or(conversation_summary.clone()),
-            Err(e) => {
-                eprintln!("[memory-extraction] Summarization LLM call failed: {}, falling back to truncation", e);
-                // Summarization failed — fall back to truncated raw content
-                conversation_summary
-                    .chars()
-                    .take(MemoryExtractor::SUMMARIZE_THRESHOLD)
-                    .collect::<String>()
-            }
-        }
-    } else {
-        conversation_summary.clone()
     };
 
     // Load existing memories to avoid duplicates
@@ -823,45 +855,22 @@ pub async fn extract_session_memories(
         .await
         .unwrap_or_default();
 
-    // Stage 2: Build extraction prompt using the (possibly summarized) conversation
-    let prompt = MemoryExtractor::build_extraction_prompt(
+    let entries = match run_session_extraction(
+        provider.as_ref(),
+        &project_path,
         &task_description,
         &[], // files_read not available from frontend trigger
         &[], // key_findings not available from frontend trigger
-        &effective_summary,
-        &existing_memories,
-    );
-
-    // Call LLM for memory extraction
-    let messages = vec![Message::user(prompt)];
-    let response = provider
-        .send_message(messages, None, vec![], LlmRequestOptions::default())
-        .await;
-
-    let response_text = match response {
-        Ok(resp) => match resp.content {
-            Some(text) => text,
-            None => {
-                eprintln!("[memory-extraction] Extraction LLM returned empty content");
-                return Ok(CommandResponse::ok(zero_result));
-            }
-        },
-        Err(e) => {
-            eprintln!("[memory-extraction] Extraction LLM call failed: {}", e);
-            return Ok(CommandResponse::ok(zero_result));
-        }
-    };
-
-    // Parse extraction response
-    let entries = match MemoryExtractor::parse_extraction_response(
-        &response_text,
-        &project_path,
+        &conversation_summary,
         session_id.as_deref(),
-    ) {
+        &existing_memories,
+    )
+    .await
+    {
         Ok(entries) => entries,
         Err(e) => {
             eprintln!(
-                "[memory-extraction] Failed to parse extraction response: {}",
+                "[memory-extraction] Session extraction failed (source=chat_frontend): {}",
                 e
             );
             return Ok(CommandResponse::ok(zero_result));
@@ -871,7 +880,9 @@ pub async fn extract_session_memories(
     let extracted_count = entries.len();
     if extracted_count == 0 {
         mark_session_extraction_done(&state, session_id.as_deref()).await;
-        eprintln!("[memory-extraction] LLM response parsed but yielded 0 entries");
+        eprintln!(
+            "[memory-extraction] LLM response parsed but yielded 0 entries (source=chat_frontend)"
+        );
         return Ok(CommandResponse::ok(zero_result));
     }
 
@@ -889,15 +900,21 @@ pub async fn extract_session_memories(
             Ok(UpsertResult::Merged { .. }) => merged_count += 1,
             Ok(UpsertResult::Skipped { .. }) => skipped_count += 1,
             Err(e) => {
-                eprintln!("[memory-extraction] Upsert failed: {}", e);
+                eprintln!(
+                    "[memory-extraction] Upsert failed (source=chat_frontend): {}",
+                    e
+                );
                 skipped_count += 1;
             }
         }
     }
 
     eprintln!(
-        "[memory-extraction] Done: extracted={}, inserted={}, merged={}, skipped={}",
-        extracted_count, inserted_count, merged_count, skipped_count
+        "[memory-extraction] Done (source=chat_frontend): extracted={}, inserted={}, merged={}, skipped={}",
+        extracted_count,
+        inserted_count,
+        merged_count,
+        skipped_count
     );
 
     mark_session_extraction_done(&state, session_id.as_deref()).await;

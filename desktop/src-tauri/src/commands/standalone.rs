@@ -190,6 +190,54 @@ fn build_memory_hook_config(
     })
 }
 
+async fn wire_skill_hooks_if_enabled(
+    orchestrator: OrchestratorService,
+    app_state: &AppState,
+    project_path: &str,
+    context_sources: Option<&crate::services::task_mode::context_provider::ContextSourceConfig>,
+) -> OrchestratorService {
+    let hooks_enabled = context_sources
+        .and_then(|cfg| cfg.skills.as_ref().map(|skills| skills.enabled))
+        .unwrap_or(true);
+    if !hooks_enabled {
+        return orchestrator;
+    }
+
+    let Some(index) =
+        crate::services::task_mode::context_provider::build_unified_skill_index_for_task(
+            app_state,
+            project_path,
+        )
+        .await
+    else {
+        return orchestrator;
+    };
+
+    let skill_index = Arc::new(RwLock::new(index));
+    let selected_skills = Arc::new(RwLock::new(Vec::new()));
+    orchestrator.with_skill_hooks(
+        skill_index,
+        crate::services::skills::model::SelectionPolicy::default(),
+        selected_skills,
+    )
+}
+
+async fn build_explicit_memory_command_context(
+    app_state: &AppState,
+    project_path: &str,
+    session_id: Option<&str>,
+    user_message: &str,
+) -> Option<String> {
+    let store = app_state.get_memory_store_arc().await.ok()?;
+    crate::services::memory::extraction::execute_explicit_memory_command(
+        store.as_ref(),
+        project_path,
+        session_id,
+        user_message,
+    )
+    .await
+}
+
 fn provider_key_candidates(provider: &str) -> &'static [&'static str] {
     match provider {
         "anthropic" => &["anthropic", "claude", "claude-api"],
@@ -1177,6 +1225,7 @@ pub async fn execute_standalone(
     webhook_state: State<'_, WebhookState>,
     plugin_state: State<'_, super::plugins::PluginState>,
 ) -> Result<CommandResponse<ExecutionResult>, String> {
+    let mut message = message;
     let external_context_injected = external_context_injected
         .or(externalContextInjected)
         .unwrap_or(false);
@@ -1303,6 +1352,21 @@ pub async fn execute_standalone(
 
     // Clone session_id before it's moved into orchestrator_config
     let event_session_id = analysis_session_id.clone().unwrap_or_default();
+
+    if let Some(memory_context) = build_explicit_memory_command_context(
+        app_state.inner(),
+        &project_path,
+        if event_session_id.is_empty() {
+            None
+        } else {
+            Some(event_session_id.as_str())
+        },
+        &message,
+    )
+    .await
+    {
+        message = format!("{}\n\nUser message:\n{}", memory_context, message);
+    }
 
     // Apply the current frontend-selected permission mode before execution starts.
     // This avoids race windows where a reused session may retain stale mode.
@@ -1473,6 +1537,14 @@ pub async fn execute_standalone(
             memory_hook_config,
         );
     }
+
+    orchestrator = wire_skill_hooks_if_enabled(
+        orchestrator,
+        app_state.inner(),
+        &project_path,
+        context_sources.as_ref(),
+    )
+    .await;
 
     // Wire knowledge tool for on-demand SearchKnowledge (replaces pre-injection)
     if let Some(ref cs) = context_sources {
@@ -1955,6 +2027,10 @@ pub async fn execute_standalone_with_session(
         let loaded_memories = std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new()));
         orchestrator = orchestrator.with_memory_hooks(memory_store, loaded_memories);
     }
+
+    orchestrator =
+        wire_skill_hooks_if_enabled(orchestrator, app_state.inner(), &request.project_path, None)
+            .await;
 
     // Wire plugin context (instructions, skills, commands, hooks, permissions) from enabled plugins
     orchestrator = plugin_state.wire_orchestrator(orchestrator, None).await;
@@ -2480,6 +2556,10 @@ pub async fn resume_standalone_execution(
         let loaded_memories = std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new()));
         orchestrator = orchestrator.with_memory_hooks(memory_store, loaded_memories);
     }
+
+    orchestrator =
+        wire_skill_hooks_if_enabled(orchestrator, app_state.inner(), &session.project_path, None)
+            .await;
 
     // Wire plugin context (instructions, skills, commands, hooks, permissions) from enabled plugins
     orchestrator = plugin_state.wire_orchestrator(orchestrator, None).await;

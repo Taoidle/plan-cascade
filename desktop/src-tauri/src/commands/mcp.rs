@@ -179,7 +179,9 @@ pub async fn remove_mcp_server(
         }
 
         let by_id_prefix = format!("mcp:{}:", id);
-        let by_name_prefix = server_name_hint.as_ref().map(|name| format!("mcp:{}:", name));
+        let by_name_prefix = server_name_hint
+            .as_ref()
+            .map(|name| format!("mcp:{}:", name));
         let stale_tools: Vec<String> = registry
             .names()
             .into_iter()
@@ -307,7 +309,9 @@ pub fn export_mcp_servers() -> Result<CommandResponse<serde_json::Value>, String
                 };
                 mcp_servers.insert(export_name, serde_json::Value::Object(item));
             }
-            Ok(CommandResponse::ok(serde_json::json!({ "mcpServers": mcp_servers })))
+            Ok(CommandResponse::ok(
+                serde_json::json!({ "mcpServers": mcp_servers }),
+            ))
         }
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -546,10 +550,8 @@ pub async fn list_connected_mcp_servers(
     let mut servers = state.manager.list_connected_servers().await;
     if let Ok(service) = McpService::new() {
         if let Ok(db_servers) = service.list_servers() {
-            let map: std::collections::HashMap<_, _> = db_servers
-                .into_iter()
-                .map(|s| (s.id.clone(), s))
-                .collect();
+            let map: std::collections::HashMap<_, _> =
+                db_servers.into_iter().map(|s| (s.id.clone(), s)).collect();
             for runtime in &mut servers {
                 if let Some(db) = map.get(&runtime.server_id) {
                     runtime.last_error = db.last_error.clone();

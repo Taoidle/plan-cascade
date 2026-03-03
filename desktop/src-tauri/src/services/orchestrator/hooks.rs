@@ -839,9 +839,27 @@ pub fn register_memory_hooks_with_config(
             // Skip extraction for trivial sessions
             if summary.total_turns < 3 || summary.conversation_content.len() < 100 {
                 tracing::info!(
-                    "[hooks] Memory extraction skipped (trivial session): session={}, turns={}, content_len={}",
+                    "[hooks] Memory extraction skipped (source=orchestrator_hook, trivial session): session={}, turns={}, content_len={}",
                     ctx.session_id, summary.total_turns, summary.conversation_content.len(),
                 );
+                return Ok(());
+            }
+
+            let unified_extraction_enabled = std::env::var("UNIFIED_SESSION_EXTRACTION")
+                .ok()
+                .map(|value| {
+                    matches!(
+                        value.trim().to_ascii_lowercase().as_str(),
+                        "1" | "true" | "yes" | "on"
+                    )
+                })
+                .unwrap_or(true);
+            if !unified_extraction_enabled {
+                tracing::info!(
+                    "[hooks] Memory extraction skipped: UNIFIED_SESSION_EXTRACTION disabled (source=orchestrator_hook, session={})",
+                    ctx.session_id
+                );
+                maybe_generate_skill_from_session(provider.clone(), &store, &ctx, &summary, &project_path).await;
                 return Ok(());
             }
 
@@ -874,138 +892,43 @@ pub fn register_memory_hooks_with_config(
             .unwrap_or_default();
 
             if let Some(ref llm) = provider {
-                // ── LLM-driven extraction (2-stage) ──
-                use crate::services::memory::extraction::MemoryExtractor;
-                use crate::services::llm::types::{
-                    LlmRequestOptions, Message, MessageContent as LlmMessageContent,
-                    MessageRole as LlmMessageRole,
-                };
-
-                let content_for_extraction = &summary.conversation_content;
-
-                // Stage 1: Summarize if content is long
-                let summary_text = if content_for_extraction.len() > MemoryExtractor::SUMMARIZE_THRESHOLD {
-                    let summarize_prompt = MemoryExtractor::build_summarization_prompt(
-                        &summary.task_description,
-                        content_for_extraction,
-                    );
-                    let messages = vec![Message {
-                        role: LlmMessageRole::User,
-                        content: vec![LlmMessageContent::Text { text: summarize_prompt }],
-                    }];
-                    let opts = LlmRequestOptions {
-                        temperature_override: Some(0.2),
-                        ..Default::default()
-                    };
-                    match tokio::time::timeout(
-                        std::time::Duration::from_secs(30),
-                        llm.send_message(messages, None, vec![], opts),
-                    )
-                    .await
-                    {
-                        Ok(Ok(resp)) => resp.content.unwrap_or_else(|| content_for_extraction.clone()),
-                        Ok(Err(e)) => {
-                            tracing::info!(
-                                "[hooks] LLM summarization failed: session={}, error={}",
-                                ctx.session_id, e,
-                            );
-                            content_for_extraction.clone()
-                        }
-                        Err(_) => {
-                            tracing::info!(
-                                "[hooks] LLM summarization timed out: session={}",
-                                ctx.session_id,
-                            );
-                            content_for_extraction.clone()
-                        }
-                    }
-                } else {
-                    content_for_extraction.clone()
-                };
-
-                // Stage 2: Extract structured memories
-                let extraction_prompt = MemoryExtractor::build_extraction_prompt(
+                match crate::services::memory::extraction::run_session_extraction(
+                    llm.as_ref(),
+                    &project_path,
                     &summary.task_description,
                     &summary.files_read,
                     &summary.key_findings,
-                    &summary_text,
+                    &summary.conversation_content,
+                    Some(&ctx.session_id),
                     &all_existing,
-                );
-                let messages = vec![Message {
-                    role: LlmMessageRole::User,
-                    content: vec![LlmMessageContent::Text { text: extraction_prompt }],
-                }];
-                let opts = LlmRequestOptions {
-                    temperature_override: Some(0.2),
-                    ..Default::default()
-                };
-                match tokio::time::timeout(
-                    std::time::Duration::from_secs(30),
-                    llm.send_message(messages, None, vec![], opts),
                 )
                 .await
                 {
-                    Ok(Ok(resp)) => {
-                        let response_text = resp.content.unwrap_or_default();
-
-                        match MemoryExtractor::parse_extraction_response(
-                            &response_text,
-                            &project_path,
-                            Some(&ctx.session_id),
-                        ) {
-                            Ok(new_memories) => {
-                                let mut inserted = 0u32;
-                                let mut merged = 0u32;
-                                for entry in new_memories {
-                                    match store.upsert_memory(entry) {
-                                        Ok(crate::services::memory::store::UpsertResult::Inserted(_)) => inserted += 1,
-                                        Ok(crate::services::memory::store::UpsertResult::Merged { .. }) => merged += 1,
-                                        Ok(crate::services::memory::store::UpsertResult::Skipped { .. }) => {}
-                                        Err(e) => {
-                                            tracing::info!(
-                                                "[hooks] Memory upsert failed: session={}, error={}",
-                                                ctx.session_id, e,
-                                            );
-                                        }
-                                    }
+                    Ok(new_memories) => {
+                        let mut inserted = 0u32;
+                        let mut merged = 0u32;
+                        for entry in new_memories {
+                            match store.upsert_memory(entry) {
+                                Ok(crate::services::memory::store::UpsertResult::Inserted(_)) => inserted += 1,
+                                Ok(crate::services::memory::store::UpsertResult::Merged { .. }) => merged += 1,
+                                Ok(crate::services::memory::store::UpsertResult::Skipped { .. }) => {}
+                                Err(e) => {
+                                    tracing::info!(
+                                        "[hooks] Memory upsert failed: session={}, error={}",
+                                        ctx.session_id, e,
+                                    );
                                 }
-                                tracing::info!(
-                                    "[hooks] LLM memory extraction: session={}, inserted={}, merged={}",
-                                    ctx.session_id, inserted, merged,
-                                );
-                            }
-                            Err(e) => {
-                                tracing::info!(
-                                    "[hooks] LLM extraction parse failed, falling back to rule-based: session={}, error={}",
-                                    ctx.session_id, e,
-                                );
-                                rule_based_memory_extraction(
-                                    &store,
-                                    &ctx,
-                                    &summary,
-                                    &project_path,
-                                    &all_existing,
-                                );
                             }
                         }
-                    }
-                    Ok(Err(e)) => {
                         tracing::info!(
-                            "[hooks] LLM extraction failed, falling back to rule-based: session={}, error={}",
+                            "[hooks] LLM memory extraction (source=orchestrator_hook): session={}, inserted={}, merged={}",
+                            ctx.session_id, inserted, merged,
+                        );
+                    }
+                    Err(e) => {
+                        tracing::info!(
+                            "[hooks] LLM extraction failed, falling back to rule-based (source=orchestrator_hook): session={}, error={}",
                             ctx.session_id, e,
-                        );
-                        rule_based_memory_extraction(
-                            &store,
-                            &ctx,
-                            &summary,
-                            &project_path,
-                            &all_existing,
-                        );
-                    }
-                    Err(_) => {
-                        tracing::info!(
-                            "[hooks] LLM extraction timed out, falling back to rule-based: session={}",
-                            ctx.session_id,
                         );
                         rule_based_memory_extraction(
                             &store,

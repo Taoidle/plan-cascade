@@ -30,11 +30,14 @@ use crate::services::memory::query_v2::{
 };
 use crate::services::memory::retrieval::MemorySearchIntent;
 use crate::services::memory::store::{MemoryCategory, MemoryEntry};
-use crate::services::skills::model::InjectionPhase;
+use crate::services::skills::injector::inject_skill_summaries;
+use crate::services::skills::model::{InjectionPhase, SelectionPolicy, SkillMatch};
 use crate::services::task_mode::context_provider::{
-    ensure_knowledge_initialized_public, query_selected_context, select_skills_for_task_filtered,
-    ContextSourceConfig, KnowledgeSourceConfig, MemorySourceConfig, SkillsSourceConfig,
+    ensure_knowledge_initialized_public, query_selected_context, resolve_memory_statuses,
+    select_skill_matches_for_task_filtered, ContextSourceConfig, KnowledgeSourceConfig,
+    MemorySourceConfig, SkillsSourceConfig,
 };
+use crate::services::tools::definitions::get_tool_definitions_from_registry;
 use crate::services::tools::system_prompt::build_memory_section;
 use crate::state::AppState;
 
@@ -189,6 +192,22 @@ pub struct ContextTrace {
     pub events: Vec<ContextTraceEvent>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ContextDiagnostics {
+    #[serde(default)]
+    pub blocked_tools: Vec<String>,
+    #[serde(default)]
+    pub effective_statuses: Vec<String>,
+    #[serde(default)]
+    pub selected_skills: Vec<String>,
+    #[serde(default)]
+    pub memory_candidates_count: usize,
+    #[serde(default)]
+    pub degraded_reason: Option<String>,
+    #[serde(default)]
+    pub selection_reason: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextEnvelope {
     pub request_meta: ContextRequestMeta,
@@ -198,6 +217,8 @@ pub struct ContextEnvelope {
     pub compaction: CompactionReport,
     pub trace_id: String,
     pub assembled_prompt: String,
+    #[serde(default)]
+    pub diagnostics: ContextDiagnostics,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -212,6 +233,8 @@ pub struct ContextAssemblyResponse {
     pub injected_source_kinds: Vec<String>,
     pub fallback_used: bool,
     pub fallback_reason: Option<String>,
+    #[serde(default)]
+    pub diagnostics: ContextDiagnostics,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -500,6 +523,48 @@ fn parse_memory_intent(intent: Option<&str>) -> MemorySearchIntent {
         "docs" => MemorySearchIntent::Docs,
         _ => MemorySearchIntent::Default,
     }
+}
+
+fn derive_blocked_tools_from_skill_policy(matches: &[SkillMatch]) -> Vec<String> {
+    let mut allowed = HashSet::<String>::new();
+    let mut has_allowlist = false;
+
+    for skill_match in matches {
+        if !skill_match.skill.enabled || skill_match.skill.allowed_tools.is_empty() {
+            continue;
+        }
+        has_allowlist = true;
+        for tool in &skill_match.skill.allowed_tools {
+            let normalized = tool.trim().to_ascii_lowercase();
+            if !normalized.is_empty() {
+                allowed.insert(normalized);
+            }
+        }
+    }
+
+    if !has_allowlist {
+        return vec![];
+    }
+
+    // Keep the minimum safe exploration set aligned with runtime hard filter.
+    for safe_tool in ["read", "ls", "glob", "grep", "cwd"] {
+        allowed.insert(safe_tool.to_string());
+    }
+
+    let mut blocked = get_tool_definitions_from_registry()
+        .into_iter()
+        .filter_map(|tool| {
+            let normalized = tool.name.trim().to_ascii_lowercase();
+            if allowed.contains(&normalized) {
+                None
+            } else {
+                Some(tool.name)
+            }
+        })
+        .collect::<Vec<_>>();
+    blocked.sort();
+    blocked.dedup();
+    blocked
 }
 
 fn now_string() -> String {
@@ -805,6 +870,7 @@ fn map_envelope_to_assembly_response(
         injected_source_kinds,
         fallback_used: false,
         fallback_reason: None,
+        diagnostics: envelope.diagnostics,
     }
 }
 
@@ -858,6 +924,7 @@ fn build_legacy_fallback_response(
         injected_source_kinds,
         fallback_used: true,
         fallback_reason,
+        diagnostics: ContextDiagnostics::default(),
     }
 }
 
@@ -1078,6 +1145,7 @@ async fn prepare_turn_context_v2_internal(
         preserve_anchors: true,
     });
     let fault_injection = request.fault_injection.clone().unwrap_or_default();
+    let mut diagnostics = ContextDiagnostics::default();
 
     let mut trace_events = Vec::new();
     trace_events.push(make_trace_event(
@@ -1263,9 +1331,76 @@ async fn prepare_turn_context_v2_internal(
         }
     }
 
-    // 4) Config-driven sources (knowledge/memory/skills)
+    // 4) Explicit memory command (chat/plan/task only; standalone handles this upstream).
+    if mode != "standalone" {
+        let command_kind = crate::services::memory::detect_memory_command(&request.query).map(|cmd| {
+            match cmd {
+                crate::services::memory::MemoryCommand::Remember { .. } => "remember",
+                crate::services::memory::MemoryCommand::Forget { .. } => "forget",
+                crate::services::memory::MemoryCommand::Query { .. } => "query",
+            }
+        });
+        if let Some(command_kind) = command_kind {
+            match app_state.get_memory_store_arc().await {
+                Ok(memory_store) => {
+                    if let Some(command_context) =
+                        crate::services::memory::extraction::execute_explicit_memory_command(
+                            memory_store.as_ref(),
+                            &project_path,
+                            request.session_id.as_deref(),
+                            &request.query,
+                        )
+                        .await
+                    {
+                        if push_block(
+                            &context_policy,
+                            &mut sources,
+                            &mut blocks,
+                            "memory:explicit_command",
+                            ContextSourceKind::Memory,
+                            "Memory Command",
+                            command_context,
+                            98,
+                            "memory_command_context",
+                            true,
+                        ) {
+                            trace_events.push(make_trace_event(
+                                &trace_id,
+                                TraceEventType::SourceCollected,
+                                Some("memory"),
+                                Some("memory:explicit_command"),
+                                "explicit memory command context injected",
+                                Some(json!({ "command": command_kind })),
+                            ));
+                        } else {
+                            trace_events.push(make_trace_event(
+                                &trace_id,
+                                TraceEventType::SourceSkipped,
+                                Some("memory"),
+                                Some("memory:explicit_command"),
+                                "memory command context excluded by policy",
+                                Some(json!({ "command": command_kind })),
+                            ));
+                        }
+                    }
+                }
+                Err(e) => {
+                    trace_events.push(make_trace_event(
+                        &trace_id,
+                        TraceEventType::SourceFailed,
+                        Some("memory"),
+                        Some("memory:explicit_command"),
+                        "memory store unavailable for explicit command handling",
+                        Some(json!({ "error": e.to_string(), "command": command_kind })),
+                    ));
+                }
+            }
+        }
+    }
+
+    // 5) Config-driven sources (knowledge/memory/skills)
     if let Some(config) = request.context_sources.as_ref() {
-        // 4a) Memory
+        // 5a) Memory
         if config.memory.as_ref().map(|m| m.enabled).unwrap_or(false) {
             if is_source_excluded(
                 &context_policy,
@@ -1343,13 +1478,17 @@ async fn prepare_turn_context_v2_internal(
                         } else {
                             request.query.clone()
                         };
-                        let statuses: Vec<MemoryStatusV2> = if mcfg.statuses.is_empty() {
-                            vec![MemoryStatusV2::Active]
+                        let statuses: Vec<MemoryStatusV2> =
+                            resolve_memory_statuses(&mcfg.statuses, mcfg.review_mode.as_deref());
+                        diagnostics.effective_statuses =
+                            statuses.iter().map(|status| status.as_str().to_string()).collect();
+                        diagnostics.selection_reason = if !mcfg.statuses.is_empty() {
+                            "memory_statuses_explicit".to_string()
                         } else {
-                            mcfg.statuses
-                                .iter()
-                                .filter_map(|status| MemoryStatusV2::from_str(status))
-                                .collect()
+                            format!(
+                                "memory_review_mode:{}",
+                                mcfg.review_mode.as_deref().unwrap_or("active_only")
+                            )
                         };
                         let enable_semantic = context_policy.memory_v2_ranker
                             && !fault_injection.ranker_unavailable
@@ -1386,6 +1525,8 @@ async fn prepare_turn_context_v2_internal(
                                 memory_query_trace_id = Some(result.trace_id.clone());
                                 memory_query_candidate_count = result.candidate_count;
                                 memory_query_degraded = result.degraded;
+                                diagnostics.memory_candidates_count = result.candidate_count;
+                                diagnostics.degraded_reason = result.degraded_reason.clone();
 
                                 if result.degraded {
                                     trace_events.push(make_trace_event(
@@ -1398,6 +1539,7 @@ async fn prepare_turn_context_v2_internal(
                                             "memory_trace_id": result.trace_id,
                                             "candidate_count": result.candidate_count,
                                             "memory_query_latency_ms": memory_query_latency_ms,
+                                            "degraded_reason": result.degraded_reason,
                                         })),
                                     ));
                                 }
@@ -1421,8 +1563,10 @@ async fn prepare_turn_context_v2_internal(
                                     Some(json!({
                                         "error": e.to_string(),
                                         "memory_query_latency_ms": memory_query_latency_ms,
+                                        "degraded_reason": "memory_query_failed",
                                     })),
                                 ));
+                                diagnostics.degraded_reason = Some("memory_query_failed".to_string());
                             }
                         }
                     }
@@ -1455,6 +1599,8 @@ async fn prepare_turn_context_v2_internal(
                                     "degraded": memory_query_degraded,
                                     "memory_query_latency_ms": memory_query_latency_ms,
                                     "memory_trace_id": memory_query_trace_id,
+                                    "effective_statuses": diagnostics.effective_statuses,
+                                    "degraded_reason": diagnostics.degraded_reason,
                                 })),
                             ));
                         }
@@ -1463,7 +1609,7 @@ async fn prepare_turn_context_v2_internal(
             }
         }
 
-        // 4b) Knowledge
+        // 5b) Knowledge
         if config
             .knowledge
             .as_ref()
@@ -1574,7 +1720,7 @@ async fn prepare_turn_context_v2_internal(
             }
         }
 
-        // 4c) Skills
+        // 5c) Skills
         if config.skills.as_ref().map(|s| s.enabled).unwrap_or(false) {
             if is_source_excluded(
                 &context_policy,
@@ -1591,7 +1737,7 @@ async fn prepare_turn_context_v2_internal(
                 ));
             } else {
                 let scfg = config.skills.as_ref().unwrap();
-                let (skills_block, skill_expertise) = select_skills_for_task_filtered(
+                let skill_matches = select_skill_matches_for_task_filtered(
                     &app_state,
                     &project_path,
                     &request.query,
@@ -1599,6 +1745,27 @@ async fn prepare_turn_context_v2_internal(
                     &scfg.selected_skill_ids,
                 )
                 .await;
+                let skills_block = if skill_matches.is_empty() {
+                    String::new()
+                } else {
+                    inject_skill_summaries(&skill_matches, &SelectionPolicy::default())
+                };
+                let skill_expertise = skill_matches
+                    .iter()
+                    .map(|m| format!("{} best practices", m.skill.name))
+                    .collect::<Vec<_>>();
+                diagnostics.selected_skills = skill_matches
+                    .iter()
+                    .map(|m| m.skill.name.clone())
+                    .collect();
+                diagnostics.blocked_tools = derive_blocked_tools_from_skill_policy(&skill_matches);
+                if !diagnostics.selected_skills.is_empty() {
+                    diagnostics.selection_reason = if scfg.selected_skill_ids.is_empty() {
+                        "skills_auto_match".to_string()
+                    } else {
+                        "skills_user_selected".to_string()
+                    };
+                }
 
                 if !skills_block.is_empty() {
                     if push_block(
@@ -1619,12 +1786,21 @@ async fn prepare_turn_context_v2_internal(
                             Some("skills"),
                             Some("skills:selected"),
                             "skills context included",
-                            Some(json!({ "expertise": skill_expertise })),
+                            Some(json!({
+                                "expertise": skill_expertise,
+                                "selected_skills": diagnostics.selected_skills,
+                                "selection_reason": diagnostics.selection_reason,
+                                "blocked_tools": diagnostics.blocked_tools,
+                            })),
                         ));
                     }
                 }
             }
         }
+    }
+
+    if diagnostics.selection_reason.is_empty() {
+        diagnostics.selection_reason = "policy_default_selection".to_string();
     }
 
     let (mut retained_blocks, mut compaction) =
@@ -1718,6 +1894,7 @@ async fn prepare_turn_context_v2_internal(
         compaction,
         trace_id: trace_id.clone(),
         assembled_prompt,
+        diagnostics,
     };
 
     persist_trace_events(
@@ -1823,6 +2000,7 @@ pub async fn prepare_turn_context_v2(
             compaction: data.compaction,
             trace_id: data.trace_id,
             assembled_prompt: data.assembled_prompt,
+            diagnostics: data.diagnostics,
         })),
         None => Ok(CommandResponse::err(
             "assemble_turn_context returned no data".to_string(),
@@ -2859,6 +3037,7 @@ pub async fn list_context_chaos_runs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn make_assemble_request() -> PrepareTurnContextV2Request {
         PrepareTurnContextV2Request {
@@ -3118,5 +3297,45 @@ mod tests {
             response.compaction.trigger_reason,
             "policy_context_v2_disabled"
         );
+    }
+
+    fn make_skill_match(name: &str, allowed_tools: Vec<&str>) -> SkillMatch {
+        SkillMatch {
+            score: 1.0,
+            match_reason: crate::services::skills::model::MatchReason::UserForced,
+            skill: crate::services::skills::model::SkillSummary {
+                id: format!("skill-{}", name.to_ascii_lowercase()),
+                name: name.to_string(),
+                description: "test".to_string(),
+                version: None,
+                tags: vec![],
+                allowed_tools: allowed_tools.into_iter().map(|v| v.to_string()).collect(),
+                source: crate::services::skills::model::SkillSource::Builtin,
+                priority: 1,
+                enabled: true,
+                detected: false,
+                user_invocable: false,
+                has_hooks: false,
+                inject_into: vec![crate::services::skills::model::InjectionPhase::Always],
+                path: PathBuf::from("/tmp/skill"),
+            },
+        }
+    }
+
+    #[test]
+    fn derive_blocked_tools_empty_without_allowlist() {
+        let matches = vec![make_skill_match("NoRestrict", vec![])];
+        let blocked = derive_blocked_tools_from_skill_policy(&matches);
+        assert!(blocked.is_empty());
+    }
+
+    #[test]
+    fn derive_blocked_tools_respects_allowlist_and_safe_baseline() {
+        let matches = vec![make_skill_match("ReadOnly", vec!["Read"])];
+        let blocked = derive_blocked_tools_from_skill_policy(&matches);
+        assert!(!blocked.is_empty());
+        assert!(!blocked.iter().any(|tool| tool.eq_ignore_ascii_case("Read")));
+        assert!(!blocked.iter().any(|tool| tool.eq_ignore_ascii_case("Grep")));
+        assert!(blocked.iter().any(|tool| tool.eq_ignore_ascii_case("Write")));
     }
 }

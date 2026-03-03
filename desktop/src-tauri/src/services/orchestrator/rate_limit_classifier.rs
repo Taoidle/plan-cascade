@@ -163,7 +163,10 @@ mod tests {
         assert!(signal.is_some());
         let signal = signal.unwrap();
         assert_eq!(signal.reason, "provider_code");
-        assert_eq!(signal.provider_code.as_deref(), Some("Throttling.RateQuota"));
+        assert_eq!(
+            signal.provider_code.as_deref(),
+            Some("Throttling.RateQuota")
+        );
     }
 
     #[test]

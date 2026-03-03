@@ -131,6 +131,8 @@ pub struct SkillSummary {
     pub description: String,
     pub version: Option<String>,
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub allowed_tools: Vec<String>,
     pub source: SkillSource,
     pub priority: u32,
     pub enabled: bool,
@@ -255,6 +257,7 @@ impl SkillDocument {
             description: self.description.clone(),
             version: self.version.clone(),
             tags: self.tags.clone(),
+            allowed_tools: self.allowed_tools.clone(),
             source: self.source.clone(),
             priority: self.priority,
             enabled: self.enabled,

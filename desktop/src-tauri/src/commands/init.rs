@@ -180,7 +180,10 @@ pub async fn init_app(
                     let service = match McpService::new() {
                         Ok(s) => s,
                         Err(e) => {
-                            tracing::warn!("Failed to initialize MCP service for auto-connect: {}", e);
+                            tracing::warn!(
+                                "Failed to initialize MCP service for auto-connect: {}",
+                                e
+                            );
                             return;
                         }
                     };
@@ -206,7 +209,8 @@ pub async fn init_app(
                                     error = %e,
                                     "Skipping MCP server during init auto-connect"
                                 );
-                                let _ = service.mark_server_connection_error(&server.id, &e.to_string());
+                                let _ = service
+                                    .mark_server_connection_error(&server.id, &e.to_string());
                                 continue;
                             }
                         };
@@ -268,7 +272,8 @@ pub async fn init_app(
                                     error = %e,
                                     "Failed to auto-connect MCP server during init"
                                 );
-                                let _ = service.mark_server_connection_error(&server.id, &e.to_string());
+                                let _ = service
+                                    .mark_server_connection_error(&server.id, &e.to_string());
                             }
                             Ok((server, Err(_), latency_ms)) => {
                                 failure_count += 1;

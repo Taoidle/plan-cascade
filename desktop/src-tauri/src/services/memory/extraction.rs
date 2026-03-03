@@ -349,6 +349,220 @@ Rules:
     }
 }
 
+/// Run LLM-driven session memory extraction (summarize-if-needed + structured extract).
+///
+/// Returns parsed `NewMemoryEntry` rows ready for upsert.
+pub async fn run_session_extraction(
+    provider: &dyn crate::services::llm::provider::LlmProvider,
+    project_path: &str,
+    task_description: &str,
+    files_read: &[String],
+    key_findings: &[String],
+    conversation_content: &str,
+    session_id: Option<&str>,
+    existing_memories: &[MemoryEntry],
+) -> AppResult<Vec<NewMemoryEntry>> {
+    use crate::services::llm::types::{LlmRequestOptions, Message};
+    use std::time::Duration;
+
+    const LLM_TIMEOUT_SECS: u64 = 30;
+
+    let effective_summary = if conversation_content.len() > MemoryExtractor::SUMMARIZE_THRESHOLD {
+        let summarize_prompt =
+            MemoryExtractor::build_summarization_prompt(task_description, conversation_content);
+        let summarize_call = provider.send_message(
+            vec![Message::user(summarize_prompt)],
+            None,
+            vec![],
+            LlmRequestOptions {
+                temperature_override: Some(0.2),
+                ..Default::default()
+            },
+        );
+        match tokio::time::timeout(Duration::from_secs(LLM_TIMEOUT_SECS), summarize_call).await {
+            Ok(Ok(resp)) => resp.content.unwrap_or_else(|| conversation_content.to_string()),
+            Ok(Err(_)) | Err(_) => conversation_content.to_string(),
+        }
+    } else {
+        conversation_content.to_string()
+    };
+
+    let extraction_prompt = MemoryExtractor::build_extraction_prompt(
+        task_description,
+        files_read,
+        key_findings,
+        &effective_summary,
+        existing_memories,
+    );
+    let extract_call = provider.send_message(
+        vec![Message::user(extraction_prompt)],
+        None,
+        vec![],
+        LlmRequestOptions {
+            temperature_override: Some(0.2),
+            ..Default::default()
+        },
+    );
+    let extraction_response =
+        match tokio::time::timeout(Duration::from_secs(LLM_TIMEOUT_SECS), extract_call).await {
+            Ok(Ok(resp)) => resp,
+            Ok(Err(e)) => {
+                return Err(AppError::command(format!(
+                    "memory extraction llm call failed: {}",
+                    e
+                )))
+            }
+            Err(_) => return Err(AppError::command("memory extraction llm call timed out")),
+        };
+
+    let response_text = extraction_response
+        .content
+        .ok_or_else(|| AppError::command("memory extraction llm returned empty content"))?;
+
+    MemoryExtractor::parse_extraction_response(&response_text, project_path, session_id)
+}
+
+/// Execute explicit memory commands (`remember` / `forget` / `query`) before
+/// the normal agent loop consumes the user message.
+///
+/// Returns a context string that should be injected into the current turn when
+/// a command is detected, otherwise `None`.
+pub async fn execute_explicit_memory_command(
+    store: &crate::services::memory::store::ProjectMemoryStore,
+    project_path: &str,
+    session_id: Option<&str>,
+    user_message: &str,
+) -> Option<String> {
+    use crate::services::memory::query_policy_v2::{memory_query_tuning_v2, MemoryQueryPresetV2};
+    use crate::services::memory::query_v2::{
+        query_memory_entries_v2 as query_memory_entries_unified_v2,
+        review_memory_candidates_v2 as review_memory_candidates_unified_v2, MemoryReviewDecisionV2,
+        MemoryScopeV2, MemoryStatusV2, UnifiedMemoryQueryRequestV2,
+    };
+    use crate::services::memory::retrieval::{extract_query_keywords, MemorySearchIntent};
+    use crate::services::tools::system_prompt::build_memory_section;
+
+    let command = detect_memory_command(user_message)?;
+
+    let mut scopes = vec![MemoryScopeV2::Project, MemoryScopeV2::Global];
+    if session_id.is_some() {
+        scopes.push(MemoryScopeV2::Session);
+    }
+    let search_tuning = memory_query_tuning_v2(MemoryQueryPresetV2::CommandSearch);
+
+    match command {
+        MemoryCommand::Remember { content } => {
+            let trimmed = content.trim();
+            if trimmed.is_empty() {
+                return Some(
+                    "[memory-command] Remember command ignored because content was empty."
+                        .to_string(),
+                );
+            }
+            let _ = store.add_memory(NewMemoryEntry {
+                project_path: project_path.to_string(),
+                category: MemoryCategory::Fact,
+                content: trimmed.to_string(),
+                keywords: extract_query_keywords(trimmed),
+                importance: 0.95,
+                source_session_id: session_id.map(|value| value.to_string()),
+                source_context: Some("explicit_command:remember".to_string()),
+            });
+            Some(format!(
+                "[memory-command] Saved explicit memory (importance=0.95): {}.\nPlease acknowledge this memory update before continuing.",
+                trimmed
+            ))
+        }
+        MemoryCommand::Forget { query } => {
+            let trimmed = query.trim();
+            let request = UnifiedMemoryQueryRequestV2 {
+                project_path: project_path.to_string(),
+                query: trimmed.to_string(),
+                scopes,
+                categories: vec![],
+                include_ids: vec![],
+                exclude_ids: vec![],
+                session_id: session_id.map(|value| value.to_string()),
+                top_k_total: search_tuning.top_k_total.max(20),
+                min_importance: 0.0,
+                per_scope_budget: search_tuning.per_scope_budget.max(24),
+                intent: MemorySearchIntent::Default,
+                enable_semantic: true,
+                enable_lexical: true,
+                statuses: vec![MemoryStatusV2::Active],
+            };
+            let matched = query_memory_entries_unified_v2(store, &request)
+                .await
+                .ok()
+                .map(|rows| {
+                    rows.results
+                        .into_iter()
+                        .map(|row| row.entry.id)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if matched.is_empty() {
+                return Some(format!(
+                    "[memory-command] No active memories matched forget query '{}'.",
+                    trimmed
+                ));
+            }
+            let archived = review_memory_candidates_unified_v2(
+                store,
+                &matched,
+                MemoryReviewDecisionV2::Archive,
+            )
+            .ok()
+            .map(|summary| summary.updated)
+            .unwrap_or(matched.len());
+            Some(format!(
+                "[memory-command] Archived {} memory entries for forget query '{}'.",
+                archived, trimmed
+            ))
+        }
+        MemoryCommand::Query { query } => {
+            let trimmed = query.trim();
+            let request = UnifiedMemoryQueryRequestV2 {
+                project_path: project_path.to_string(),
+                query: trimmed.to_string(),
+                scopes,
+                categories: vec![],
+                include_ids: vec![],
+                exclude_ids: vec![],
+                session_id: session_id.map(|value| value.to_string()),
+                top_k_total: search_tuning.top_k_total.max(20),
+                min_importance: 0.0,
+                per_scope_budget: search_tuning.per_scope_budget.max(24),
+                intent: MemorySearchIntent::Default,
+                enable_semantic: true,
+                enable_lexical: true,
+                statuses: vec![MemoryStatusV2::Active],
+            };
+            let entries = query_memory_entries_unified_v2(store, &request)
+                .await
+                .ok()
+                .map(|rows| {
+                    rows.results
+                        .into_iter()
+                        .map(|row| row.entry)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if entries.is_empty() {
+                return Some(
+                    "[memory-command] No matching active memories found. Respond accordingly."
+                        .to_string(),
+                );
+            }
+            let memory_block = build_memory_section(Some(&entries));
+            Some(format!(
+                "[memory-command] User asked for memory recall. Use the following authoritative memory context to answer directly.\n\n{}",
+                memory_block
+            ))
+        }
+    }
+}
+
 // ============================================================================
 // Tests
 // ============================================================================

@@ -100,6 +100,58 @@ pub struct MemorySourceConfig {
     pub review_mode: Option<String>,
 }
 
+fn env_flag_enabled(name: &str, default: bool) -> bool {
+    std::env::var(name)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(default)
+}
+
+/// Resolve effective memory statuses from explicit statuses + review mode.
+///
+/// Rules:
+/// - Explicit `statuses` has highest priority.
+/// - Empty `statuses` falls back to review mode:
+///   - `include_pending_review` / `diagnostic` => active + pending_review
+///   - otherwise => active only
+/// - `MEMORY_REVIEW_MODE_RESOLVER=0` disables review-mode expansion and keeps
+///   backward-compatible active-only default unless explicit statuses are given.
+pub fn resolve_memory_statuses(
+    selected_statuses: &[String],
+    review_mode: Option<&str>,
+) -> Vec<MemoryStatusV2> {
+    let mut parsed_statuses: Vec<MemoryStatusV2> = selected_statuses
+        .iter()
+        .filter_map(|status| MemoryStatusV2::from_str(status))
+        .collect();
+
+    if !parsed_statuses.is_empty() {
+        return parsed_statuses;
+    }
+
+    if env_flag_enabled("MEMORY_REVIEW_MODE_RESOLVER", true)
+        && matches!(
+            review_mode
+                .unwrap_or("active_only")
+                .trim()
+                .to_ascii_lowercase()
+                .as_str(),
+            "include_pending_review" | "diagnostic"
+        )
+    {
+        parsed_statuses.push(MemoryStatusV2::Active);
+        parsed_statuses.push(MemoryStatusV2::PendingReview);
+        return parsed_statuses;
+    }
+
+    vec![MemoryStatusV2::Active]
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillsSourceConfig {
     pub enabled: bool,
@@ -463,25 +515,7 @@ pub async fn query_memories_for_task_filtered(
         .iter()
         .filter_map(|scope| MemoryScopeV2::from_str(scope))
         .collect();
-    let mut parsed_statuses: Vec<MemoryStatusV2> = selected_statuses
-        .iter()
-        .filter_map(|status| MemoryStatusV2::from_str(status))
-        .collect();
-    if parsed_statuses.is_empty() {
-        if matches!(
-            review_mode
-                .unwrap_or("active_only")
-                .trim()
-                .to_ascii_lowercase()
-                .as_str(),
-            "include_pending_review" | "diagnostic"
-        ) {
-            parsed_statuses.push(MemoryStatusV2::Active);
-            parsed_statuses.push(MemoryStatusV2::PendingReview);
-        } else {
-            parsed_statuses.push(MemoryStatusV2::Active);
-        }
-    }
+    let parsed_statuses = resolve_memory_statuses(selected_statuses, review_mode);
     let should_query = selected_memory_ids.is_empty() || !parsed_categories.is_empty();
     let query_text = if should_query {
         query.to_string()
@@ -531,55 +565,35 @@ pub async fn select_skills_for_task(
     query: &str,
     phase: InjectionPhase,
 ) -> (String, Vec<String>) {
-    let project_root = Path::new(project_path);
-    let index = match build_unified_skill_index_for_task(app_state, project_path).await {
-        Some(idx) => idx,
-        None => return (String::new(), vec![]),
-    };
-
-    let policy = SelectionPolicy::default();
-    let matches: Vec<SkillMatch> =
-        select_skills_for_session(&index, project_root, query, &phase, &policy);
-
-    if matches.is_empty() {
-        return (String::new(), vec![]);
-    }
-
-    // Collect expertise items from matched skill names
-    let expertise: Vec<String> = matches
-        .iter()
-        .map(|m| format!("{} best practices", m.skill.name))
-        .collect();
-
-    let block = inject_skill_summaries(&matches, &policy);
-    (block, expertise)
+    select_skills_for_task_filtered(app_state, project_path, query, phase, &[]).await
 }
 
-/// Select Skills with optional user-specified ID filtering.
+/// Select matched skills with optional user-specified ID filtering.
 ///
 /// - `selected_skill_ids` non-empty → only include those skills (UserForced reason).
-/// - `selected_skill_ids` empty → use automatic selection logic (current behavior).
-pub async fn select_skills_for_task_filtered(
+/// - `selected_skill_ids` empty → use automatic selection logic.
+pub async fn select_skill_matches_for_task_filtered(
     app_state: &AppState,
     project_path: &str,
     query: &str,
     phase: InjectionPhase,
     selected_skill_ids: &[String],
-) -> (String, Vec<String>) {
-    if selected_skill_ids.is_empty() {
-        // Fall back to automatic selection
-        return select_skills_for_task(app_state, project_path, query, phase).await;
-    }
-
+) -> Vec<SkillMatch> {
+    let project_root = Path::new(project_path);
     let index = match build_unified_skill_index_for_task(app_state, project_path).await {
         Some(idx) => idx,
-        None => return (String::new(), vec![]),
+        None => return vec![],
     };
+
+    if selected_skill_ids.is_empty() {
+        let policy = SelectionPolicy::default();
+        return select_skills_for_session(&index, project_root, query, &phase, &policy);
+    }
 
     // Filter to user-selected IDs
     let id_set: std::collections::HashSet<&str> =
         selected_skill_ids.iter().map(|s| s.as_str()).collect();
-    let matches: Vec<SkillMatch> = index
+    index
         .skills()
         .iter()
         .filter(|doc| doc.enabled && id_set.contains(doc.id.as_str()))
@@ -588,7 +602,28 @@ pub async fn select_skills_for_task_filtered(
             match_reason: crate::services::skills::model::MatchReason::UserForced,
             skill: doc.to_summary(false),
         })
-        .collect();
+        .collect()
+}
+
+/// Select Skills with optional user-specified ID filtering.
+///
+/// - `selected_skill_ids` non-empty → only include those skills (UserForced reason).
+/// - `selected_skill_ids` empty → use automatic selection logic.
+pub async fn select_skills_for_task_filtered(
+    app_state: &AppState,
+    project_path: &str,
+    query: &str,
+    phase: InjectionPhase,
+    selected_skill_ids: &[String],
+) -> (String, Vec<String>) {
+    let matches = select_skill_matches_for_task_filtered(
+        app_state,
+        project_path,
+        query,
+        phase,
+        selected_skill_ids,
+    )
+    .await;
 
     if matches.is_empty() {
         return (String::new(), vec![]);
@@ -604,7 +639,7 @@ pub async fn select_skills_for_task_filtered(
     (block, expertise)
 }
 
-async fn build_unified_skill_index_for_task(
+pub async fn build_unified_skill_index_for_task(
     app_state: &AppState,
     project_path: &str,
 ) -> Option<SkillIndex> {
@@ -728,4 +763,36 @@ pub fn merge_enriched_context(
     }
 
     Some(merged)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_memory_statuses_defaults_to_active_only() {
+        let statuses = resolve_memory_statuses(&[], None);
+        assert_eq!(statuses, vec![MemoryStatusV2::Active]);
+    }
+
+    #[test]
+    fn resolve_memory_statuses_respects_review_mode_when_no_explicit_statuses() {
+        let statuses = resolve_memory_statuses(&[], Some("include_pending_review"));
+        assert_eq!(
+            statuses,
+            vec![MemoryStatusV2::Active, MemoryStatusV2::PendingReview]
+        );
+    }
+
+    #[test]
+    fn resolve_memory_statuses_explicit_statuses_override_review_mode() {
+        let statuses = resolve_memory_statuses(
+            &[String::from("archived"), String::from("rejected")],
+            Some("include_pending_review"),
+        );
+        assert_eq!(
+            statuses,
+            vec![MemoryStatusV2::Archived, MemoryStatusV2::Rejected]
+        );
+    }
 }

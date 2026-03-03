@@ -355,7 +355,8 @@ impl QwenEmbeddingProvider {
             }
         }
 
-        if let Some(signal) = classify_rate_limit(Some(status_code), Some(headers), None, Some(body))
+        if let Some(signal) =
+            classify_rate_limit(Some(status_code), Some(headers), None, Some(body))
         {
             return EmbeddingError::RateLimited {
                 message: format!(
@@ -783,7 +784,8 @@ mod tests {
     #[test]
     fn map_api_error_internal_error() {
         let provider = QwenEmbeddingProvider::new(&default_config());
-        let err = provider.map_api_error("InternalError.Timeout", Some("request timeout"), Some(500));
+        let err =
+            provider.map_api_error("InternalError.Timeout", Some("request timeout"), Some(500));
         assert!(matches!(err, EmbeddingError::ServerError { .. }));
         assert!(err.is_retryable());
     }
@@ -798,7 +800,8 @@ mod tests {
     #[test]
     fn map_api_error_data_inspection() {
         let provider = QwenEmbeddingProvider::new(&default_config());
-        let err = provider.map_api_error("DataInspectionFailed", Some("content blocked"), Some(400));
+        let err =
+            provider.map_api_error("DataInspectionFailed", Some("content blocked"), Some(400));
         assert!(matches!(err, EmbeddingError::Other { .. }));
         assert!(err.to_string().contains("restricted content"));
     }
