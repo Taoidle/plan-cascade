@@ -34,8 +34,8 @@ use crate::services::skills::model::InjectionPhase;
 use crate::services::task_mode::context_provider::{
     derive_blocked_tools_from_skill_policy as derive_blocked_tools_from_effective_skills,
     ensure_knowledge_initialized_public, query_selected_context, resolve_effective_skills,
-    resolve_memory_statuses, ContextSourceConfig, KnowledgeSourceConfig, MemorySourceConfig,
-    SkillsSourceConfig,
+    resolve_memory_statuses, ContextSourceConfig, KnowledgeSourceConfig, MemorySelectionMode,
+    MemorySourceConfig, SkillSelectionMode, SkillsSourceConfig,
 };
 use crate::services::tools::system_prompt::build_memory_section;
 use crate::state::AppState;
@@ -209,6 +209,8 @@ pub struct ContextDiagnostics {
     pub degraded_reason: Option<String>,
     #[serde(default)]
     pub selection_reason: String,
+    #[serde(default)]
+    pub selection_origin: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -550,6 +552,53 @@ fn parse_injection_phase(phase: Option<&str>) -> InjectionPhase {
         "implementation" | "executing" | "execution" => InjectionPhase::Implementation,
         _ => InjectionPhase::Always,
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SelectionOrigin {
+    Auto,
+    Explicit,
+}
+
+impl SelectionOrigin {
+    fn as_str(self) -> &'static str {
+        match self {
+            SelectionOrigin::Auto => "auto",
+            SelectionOrigin::Explicit => "explicit",
+        }
+    }
+}
+
+fn infer_memory_selection_origin(config: &MemorySourceConfig) -> SelectionOrigin {
+    if matches!(config.selection_mode, Some(MemorySelectionMode::OnlySelected))
+        || !config.selected_memory_ids.is_empty()
+    {
+        SelectionOrigin::Explicit
+    } else {
+        SelectionOrigin::Auto
+    }
+}
+
+fn infer_skill_selection_origin(config: &SkillsSourceConfig) -> SelectionOrigin {
+    if config.selection_mode == SkillSelectionMode::Explicit || !config.selected_skill_ids.is_empty() {
+        SelectionOrigin::Explicit
+    } else {
+        SelectionOrigin::Auto
+    }
+}
+
+fn merge_selection_origins(origins: &[SelectionOrigin]) -> Option<String> {
+    if origins.is_empty() {
+        return None;
+    }
+    let has_auto = origins.iter().any(|origin| *origin == SelectionOrigin::Auto);
+    let has_explicit = origins
+        .iter()
+        .any(|origin| *origin == SelectionOrigin::Explicit);
+    if has_auto && has_explicit {
+        return Some("mixed".to_string());
+    }
+    Some(origins[0].as_str().to_string())
 }
 
 fn derive_blocked_tools_from_skill_policy(
@@ -1137,6 +1186,7 @@ async fn prepare_turn_context_v2_internal(
     });
     let fault_injection = request.fault_injection.clone().unwrap_or_default();
     let mut diagnostics = ContextDiagnostics::default();
+    let mut selection_origins: Vec<SelectionOrigin> = Vec::new();
 
     let mut trace_events = Vec::new();
     trace_events.push(make_trace_event(
@@ -1408,6 +1458,7 @@ async fn prepare_turn_context_v2_internal(
                 ));
             } else {
                 let mcfg = config.memory.as_ref().unwrap();
+                selection_origins.push(infer_memory_selection_origin(mcfg));
                 let mut memory_entries: Vec<MemoryEntry> = Vec::new();
                 let mut seen_ids = HashSet::new();
                 let mut memory_query_trace_id: Option<String> = None;
@@ -1730,6 +1781,7 @@ async fn prepare_turn_context_v2_internal(
                 ));
             } else {
                 let scfg = config.skills.as_ref().unwrap();
+                selection_origins.push(infer_skill_selection_origin(scfg));
                 let effective = resolve_effective_skills(
                     app_state,
                     &project_path,
@@ -1788,6 +1840,8 @@ async fn prepare_turn_context_v2_internal(
             }
         }
     }
+
+    diagnostics.selection_origin = merge_selection_origins(&selection_origins);
 
     if diagnostics.selection_reason.is_empty() {
         diagnostics.selection_reason = "policy_default_selection".to_string();
@@ -2909,6 +2963,7 @@ pub async fn run_context_chaos_probe(
                     session_id: session_id.clone(),
                     statuses: vec![],
                     review_mode: None,
+                    selection_mode: None,
                 }),
                 skills: Some(SkillsSourceConfig {
                     enabled: false,
@@ -3397,6 +3452,83 @@ mod tests {
         assert!(!blocked.iter().any(|tool| tool.eq_ignore_ascii_case("Read")));
         assert!(!blocked.iter().any(|tool| tool.eq_ignore_ascii_case("Grep")));
         assert!(blocked.iter().any(|tool| tool.eq_ignore_ascii_case("Write")));
+    }
+
+    #[test]
+    fn selection_origin_resolves_auto_for_default_memory_and_skills() {
+        let memory = MemorySourceConfig {
+            enabled: true,
+            selected_categories: Vec::new(),
+            selected_memory_ids: Vec::new(),
+            excluded_memory_ids: Vec::new(),
+            selected_scopes: vec!["project".to_string()],
+            session_id: None,
+            statuses: vec![],
+            review_mode: None,
+            selection_mode: Some(MemorySelectionMode::AutoExclude),
+        };
+        let skills = SkillsSourceConfig {
+            enabled: true,
+            selected_skill_ids: Vec::new(),
+            selection_mode: SkillSelectionMode::Auto,
+        };
+
+        let origins = vec![
+            infer_memory_selection_origin(&memory),
+            infer_skill_selection_origin(&skills),
+        ];
+        assert_eq!(merge_selection_origins(&origins).as_deref(), Some("auto"));
+    }
+
+    #[test]
+    fn selection_origin_resolves_mixed_for_explicit_memory_and_auto_skills() {
+        let memory = MemorySourceConfig {
+            enabled: true,
+            selected_categories: Vec::new(),
+            selected_memory_ids: vec!["mem-1".to_string()],
+            excluded_memory_ids: Vec::new(),
+            selected_scopes: vec!["project".to_string()],
+            session_id: None,
+            statuses: vec!["active".to_string()],
+            review_mode: None,
+            selection_mode: Some(MemorySelectionMode::OnlySelected),
+        };
+        let skills = SkillsSourceConfig {
+            enabled: true,
+            selected_skill_ids: Vec::new(),
+            selection_mode: SkillSelectionMode::Auto,
+        };
+
+        let origins = vec![
+            infer_memory_selection_origin(&memory),
+            infer_skill_selection_origin(&skills),
+        ];
+        assert_eq!(merge_selection_origins(&origins).as_deref(), Some("mixed"));
+    }
+
+    #[test]
+    fn diagnostics_can_hold_selection_origin_blocked_tools_and_degraded_reason() {
+        let diagnostics = ContextDiagnostics {
+            blocked_tools: vec!["Write".to_string(), "Bash".to_string()],
+            degraded_reason: Some("memory_query_failed".to_string()),
+            selection_origin: Some("explicit".to_string()),
+            ..ContextDiagnostics::default()
+        };
+        let value = serde_json::to_value(&diagnostics).expect("serialize diagnostics");
+        assert_eq!(
+            value.get("selection_origin").and_then(|v| v.as_str()),
+            Some("explicit")
+        );
+        assert_eq!(
+            value.get("degraded_reason").and_then(|v| v.as_str()),
+            Some("memory_query_failed")
+        );
+        assert_eq!(
+            value.get("blocked_tools")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.len()),
+            Some(2)
+        );
     }
 
     #[test]

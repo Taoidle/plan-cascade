@@ -303,6 +303,10 @@ function SkillsTab() {
               {diagnostics?.selection_reason || t('skillPanel.none', { defaultValue: 'none' })}
             </div>
             <div>
+              {t('skillPanel.selectionOrigin', { defaultValue: 'Selection origin' })}:{' '}
+              {diagnostics?.selection_origin || t('skillPanel.none', { defaultValue: 'none' })}
+            </div>
+            <div>
               {t('skillPanel.selectedSkills', { defaultValue: 'Selected skills' })}:{' '}
               {diagnostics?.selected_skills?.length
                 ? diagnostics.selected_skills.join(', ')
@@ -669,6 +673,10 @@ function MemoryTab() {
             <div>
               {t('skillPanel.selectionReason', { defaultValue: 'Selection reason' })}:{' '}
               {diagnostics?.selection_reason || t('skillPanel.none', { defaultValue: 'none' })}
+            </div>
+            <div>
+              {t('skillPanel.selectionOrigin', { defaultValue: 'Selection origin' })}:{' '}
+              {diagnostics?.selection_origin || t('skillPanel.none', { defaultValue: 'none' })}
             </div>
             <div>
               {t('skillPanel.effectiveStatuses', { defaultValue: 'Effective statuses' })}:{' '}

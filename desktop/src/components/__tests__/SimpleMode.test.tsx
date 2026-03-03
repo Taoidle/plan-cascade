@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
+import type { WorkflowSession } from '../../types/workflowKernel';
 
 const storeHarness = vi.hoisted(() => {
   let executionState: Record<string, unknown> = {};
@@ -136,6 +137,10 @@ const mockInvoke = vi.fn();
 const mockShowToast = vi.fn();
 
 vi.mock('react-i18next', () => ({
+  initReactI18next: {
+    type: '3rdParty',
+    init: () => {},
+  },
   useTranslation: () => ({
     t: (key: string, opts?: { defaultValue?: string }) => opts?.defaultValue || key,
   }),
@@ -147,6 +152,10 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 vi.mock('../shared/Toast', () => ({
   useToast: () => ({ showToast: mockShowToast }),
+}));
+
+vi.mock('../shared/EffectiveContextSummary', () => ({
+  EffectiveContextSummary: () => <div data-testid="effective-context-summary" />,
 }));
 
 vi.mock('../SimpleMode/ChatTranscript', () => ({
@@ -343,7 +352,7 @@ vi.mock('../../store/agents', () => ({
 
 import { SimpleMode } from '../SimpleMode';
 
-function createKernelSession(activeMode: 'chat' | 'plan' | 'task' = 'chat'): any {
+function createKernelSession(activeMode: 'chat' | 'plan' | 'task' = 'chat'): WorkflowSession {
   return {
     sessionId: 'kernel-session-1',
     status: 'active',

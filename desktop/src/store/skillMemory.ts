@@ -9,6 +9,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import i18n from '../i18n';
+import { reportNonFatal } from '../lib/nonFatal';
 import type {
   SkillSummary,
   SkillDocument,
@@ -247,8 +248,8 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
       if (response.success && response.data) {
         set({ skillsOverview: response.data });
       }
-    } catch {
-      // Silently fail - overview is optional
+    } catch (error) {
+      reportNonFatal('skillMemory.loadSkillsOverview', error, { projectPath });
     }
   },
 
@@ -368,7 +369,8 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
     } catch (error) {
       try {
         await fallbackToClientFilter();
-      } catch {
+      } catch (fallbackError) {
+        reportNonFatal('skillMemory.searchSkillsFallback', fallbackError, { projectPath, query });
         set({
           skillsError: error instanceof Error ? error.message : String(error),
           skillsLoading: false,
@@ -805,8 +807,8 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         },
       );
       // Silent success — maintenance is non-critical
-    } catch {
-      // Silent failure — maintenance is non-critical
+    } catch (error) {
+      reportNonFatal('skillMemory.runMaintenance', error, { projectPath });
     }
   },
 

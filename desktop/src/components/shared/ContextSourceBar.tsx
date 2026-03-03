@@ -288,7 +288,7 @@ export function ContextSourceBar() {
           className={clsx(
             'px-2 py-1 text-xs font-medium rounded-md transition-colors inline-flex items-center gap-1',
             memoryEnabled
-              ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-700'
+              ? 'bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-700'
               : 'text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700',
           )}
           title={t('contextSources.memory', { defaultValue: 'Memory' })}
@@ -296,15 +296,13 @@ export function ContextSourceBar() {
           <BrainIcon className="w-3.5 h-3.5" />
           {t('contextSources.memory', { defaultValue: 'Memory' })}
           {memoryEnabled && memoryCount > 0 && (
-            <span className="ml-0.5 px-1 py-0 rounded-full bg-purple-200 dark:bg-purple-800 text-2xs">
-              {memoryCount}
-            </span>
+            <span className="ml-0.5 px-1 py-0 rounded-full bg-sky-200 dark:bg-sky-800 text-2xs">{memoryCount}</span>
           )}
           <span
             role="button"
             tabIndex={-1}
             onClick={handleMemoryChevron}
-            className="ml-0.5 hover:bg-purple-200/50 dark:hover:bg-purple-800/50 rounded"
+            className="ml-0.5 hover:bg-sky-200/50 dark:hover:bg-sky-800/50 rounded"
           >
             <ChevronUpIcon className="w-3 h-3" />
           </span>

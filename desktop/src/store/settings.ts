@@ -87,6 +87,7 @@ interface SettingsState {
   kbPickerServerSearch: boolean;
   kbIngestJobScopedProgress: boolean;
   simpleKernelSot: boolean;
+  simpleContextUnifiedStore: boolean;
   typedCardPipeline: boolean;
 
   // Sidebar settings
@@ -158,6 +159,7 @@ interface SettingsState {
   setKbPickerServerSearch: (enabled: boolean) => void;
   setKbIngestJobScopedProgress: (enabled: boolean) => void;
   setSimpleKernelSot: (enabled: boolean) => void;
+  setSimpleContextUnifiedStore: (enabled: boolean) => void;
   setTypedCardPipeline: (enabled: boolean) => void;
 
   // Sidebar actions
@@ -222,6 +224,7 @@ const defaultSettings = {
   kbPickerServerSearch: true,
   kbIngestJobScopedProgress: true,
   simpleKernelSot: true,
+  simpleContextUnifiedStore: false,
   typedCardPipeline: true,
 
   // Sidebar
@@ -415,6 +418,7 @@ export const useSettingsStore = create<SettingsState>()(
       setKbPickerServerSearch: (enabled: boolean) => set({ kbPickerServerSearch: enabled }),
       setKbIngestJobScopedProgress: (enabled: boolean) => set({ kbIngestJobScopedProgress: enabled }),
       setSimpleKernelSot: (enabled: boolean) => set({ simpleKernelSot: enabled }),
+      setSimpleContextUnifiedStore: (enabled: boolean) => set({ simpleContextUnifiedStore: enabled }),
       setTypedCardPipeline: (enabled: boolean) => set({ typedCardPipeline: enabled }),
 
       addPinnedDirectory: (path) =>

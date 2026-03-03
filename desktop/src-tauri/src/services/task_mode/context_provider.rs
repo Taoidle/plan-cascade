@@ -100,6 +100,18 @@ pub struct MemorySourceConfig {
     /// - `include_pending_review`: include pending_review for diagnostics
     #[serde(default)]
     pub review_mode: Option<String>,
+    /// Optional frontend-provided memory selection mode.
+    /// - `auto_exclude`: auto retrieval + excluded ids
+    /// - `only_selected`: exact include ids only
+    #[serde(default)]
+    pub selection_mode: Option<MemorySelectionMode>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemorySelectionMode {
+    AutoExclude,
+    OnlySelected,
 }
 
 fn env_flag_enabled(name: &str, default: bool) -> bool {

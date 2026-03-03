@@ -70,6 +70,7 @@ export interface ContextDiagnostics {
   memory_candidates_count: number;
   degraded_reason?: string | null;
   selection_reason: string;
+  selection_origin?: 'auto' | 'explicit' | 'mixed' | null;
 }
 
 export interface ContextEnvelope {

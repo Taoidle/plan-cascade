@@ -36,6 +36,7 @@ import { useContextSourcesStore } from './contextSources';
 import { useProjectsStore } from './projects';
 import { useSettingsStore } from './settings';
 import { ToolCallStreamFilter } from '../utils/toolCallFilter';
+import * as contextSelectionBridge from '../lib/contextSelectionBridge';
 
 const mockInvoke = vi.mocked(invoke);
 
@@ -2417,5 +2418,113 @@ describe('Execution Store - Auto-Background on start()', () => {
     expect(args?.contextSources?.knowledge?.selected_documents).toEqual([
       { collection_id: 'col-1', document_uid: 'doc-1' },
     ]);
+  });
+});
+
+describe('Execution Store - unified context assembly bridge', () => {
+  beforeEach(() => {
+    resetStore();
+    vi.clearAllMocks();
+    useSettingsStore.setState({
+      backend: 'openai',
+      provider: 'openai',
+      model: 'gpt-4o',
+      workspacePath: '/tmp/project',
+    });
+  });
+
+  it('uses resolveSessionScopedContext in start() standalone path', async () => {
+    const bridgeSpy = vi
+      .spyOn(contextSelectionBridge, 'resolveSessionScopedContext')
+      .mockReturnValue({ project_id: 'default' });
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === 'execute_standalone') {
+        return {
+          success: true,
+          data: {
+            response: 'ok',
+            usage: { input_tokens: 1, output_tokens: 1 },
+            iterations: 1,
+            success: true,
+            error: null,
+          },
+          error: null,
+        };
+      }
+      return { success: true, data: null, error: null };
+    });
+
+    await useExecutionStore.getState().start('hello', 'simple');
+
+    expect(bridgeSpy).toHaveBeenCalled();
+    expect(bridgeSpy.mock.calls.some(([, source]) => source === 'standalone')).toBe(true);
+  });
+
+  it('uses resolveSessionScopedContext in sendFollowUp() chat path', async () => {
+    const bridgeSpy = vi
+      .spyOn(contextSelectionBridge, 'resolveSessionScopedContext')
+      .mockReturnValue({ project_id: 'default' });
+    useSettingsStore.setState({ backend: 'claude-code', provider: 'anthropic', model: 'claude-sonnet-4-6-20260219' });
+    useExecutionStore.setState({
+      status: 'completed',
+      taskId: 'claude-session-1',
+      isChatSession: true,
+      streamingOutput: [],
+      streamLineCounter: 0,
+    });
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === 'send_message') {
+        return {
+          success: true,
+          data: { accepted: true, execution_id: 'exec-1' },
+          error: null,
+        };
+      }
+      return { success: true, data: null, error: null };
+    });
+
+    await useExecutionStore.getState().sendFollowUp('next step');
+
+    expect(bridgeSpy).toHaveBeenCalledWith('claude-session-1', 'claude');
+  });
+
+  it('uses resolveSessionScopedContext in regenerateResponse() standalone path', async () => {
+    const bridgeSpy = vi
+      .spyOn(contextSelectionBridge, 'resolveSessionScopedContext')
+      .mockReturnValue({ project_id: 'default' });
+    useExecutionStore.setState({
+      status: 'completed',
+      isChatSession: false,
+      taskId: null,
+      standaloneSessionId: 'standalone-session-1',
+      streamingOutput: [
+        { id: 1, content: 'original question', type: 'info', timestamp: 1 },
+        { id: 2, content: 'original answer', type: 'text', timestamp: 2 },
+      ],
+      streamLineCounter: 2,
+      standaloneTurns: [],
+      stories: [],
+    });
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === 'execute_standalone') {
+        return {
+          success: true,
+          data: {
+            response: 'regen',
+            usage: { input_tokens: 2, output_tokens: 2 },
+            iterations: 1,
+            success: true,
+            error: null,
+          },
+          error: null,
+        };
+      }
+      return { success: true, data: null, error: null };
+    });
+
+    await useExecutionStore.getState().regenerateResponse(1);
+
+    expect(bridgeSpy).toHaveBeenCalled();
+    expect(bridgeSpy.mock.calls.some(([, source]) => source === 'standalone')).toBe(true);
   });
 });

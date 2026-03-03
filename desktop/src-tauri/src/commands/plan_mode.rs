@@ -1085,6 +1085,7 @@ fn default_plan_context_sources() -> ContextSourceConfig {
             session_id: None,
             statuses: vec![],
             review_mode: None,
+            selection_mode: None,
         }),
         skills: Some(SkillsSourceConfig {
             enabled: true,

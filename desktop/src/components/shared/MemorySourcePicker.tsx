@@ -197,7 +197,7 @@ export function MemorySourcePicker() {
               className={clsx(
                 'px-2 py-0.5 rounded text-2xs font-medium transition-colors',
                 isSelected
-                  ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300'
+                  ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300'
                   : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400',
                 disabled && 'opacity-50 cursor-not-allowed',
               )}
@@ -217,7 +217,7 @@ export function MemorySourcePicker() {
           className={clsx(
             'px-2 py-0.5 rounded text-2xs font-medium transition-colors',
             memorySelectionMode === 'auto'
-              ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300'
+              ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300'
               : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400',
           )}
         >
@@ -228,7 +228,7 @@ export function MemorySourcePicker() {
           className={clsx(
             'px-2 py-0.5 rounded text-2xs font-medium transition-colors',
             memorySelectionMode === 'only_selected'
-              ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300'
+              ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300'
               : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400',
           )}
         >
@@ -251,7 +251,7 @@ export function MemorySourcePicker() {
               'w-full pl-6 pr-2 py-1 text-2xs rounded',
               'bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-600',
               'text-gray-700 dark:text-gray-300 placeholder-gray-400',
-              'focus:outline-none focus:ring-1 focus:ring-purple-400',
+              'focus:outline-none focus:ring-1 focus:ring-sky-400',
             )}
           />
         </div>
