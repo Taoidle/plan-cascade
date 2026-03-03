@@ -8,6 +8,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { PlusIcon, DownloadIcon, ReloadIcon, UploadIcon, InfoCircledIcon, Cross2Icon } from '@radix-ui/react-icons';
 import type {
   McpServer,
@@ -15,14 +16,30 @@ import type {
   HealthCheckResult,
   ConnectedServerInfo,
   McpExportPayload,
+  McpCatalogItem,
+  McpInstallResult,
+  McpInstallProgressEvent,
+  McpInstallLogEvent,
+  McpOauthEvent,
+  McpRuntimeInfo,
+  McpRuntimeRepairResult,
 } from '../../types/mcp';
 import { ServerCard } from './ServerCard';
 import { AddServerDialog } from './AddServerDialog';
 import { ImportDialog } from './ImportDialog';
+import { DiscoverTab } from './DiscoverTab';
+import { InstallCatalogDialog } from './InstallCatalogDialog';
 import { useToast } from '../shared/Toast';
 import { localTimestampForFilename, saveTextWithDialog } from '../../lib/exportUtils';
 
-type McpCommandAction = 'open-add' | 'open-import' | 'refresh' | 'test-enabled' | 'export';
+type McpCommandAction =
+  | 'open-add'
+  | 'open-import'
+  | 'open-discover'
+  | 'install-recommended'
+  | 'refresh'
+  | 'test-enabled'
+  | 'export';
 type McpEventStatus = 'success' | 'error' | 'info';
 
 interface McpEventRecord {
@@ -67,7 +84,13 @@ export function ServerRegistry() {
   const [editingServer, setEditingServer] = useState<McpServer | null>(null);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [eventLog, setEventLog] = useState<McpEventRecord[]>([]);
+  const [runtimeInventory, setRuntimeInventory] = useState<McpRuntimeInfo[]>([]);
+  const [runtimeLoading, setRuntimeLoading] = useState(false);
+  const [repairingRuntimes, setRepairingRuntimes] = useState<Set<string>>(new Set());
   const [selectedToolServerId, setSelectedToolServerId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'installed' | 'discover'>('installed');
+  const [selectedCatalogItem, setSelectedCatalogItem] = useState<McpCatalogItem | null>(null);
+  const [installRecommendedNonce, setInstallRecommendedNonce] = useState(0);
 
   const connectedServerIds = useMemo(() => new Set(Object.keys(connectedServers)), [connectedServers]);
   const selectedToolServer = selectedToolServerId ? connectedServers[selectedToolServerId] : null;
@@ -81,6 +104,23 @@ export function ServerRegistry() {
         .filter(([, count]) => count > 1)
         .map(([name]) => name),
     );
+  }, [servers]);
+  const installedCatalogItems = useMemo(() => {
+    const map: Record<string, { serverId: string; serverName: string; managed: boolean }[]> = {};
+    for (const server of servers) {
+      if (!server.catalog_item_id) {
+        continue;
+      }
+      if (!map[server.catalog_item_id]) {
+        map[server.catalog_item_id] = [];
+      }
+      map[server.catalog_item_id].push({
+        serverId: server.id,
+        serverName: server.name,
+        managed: !!server.managed_install,
+      });
+    }
+    return map;
   }, [servers]);
 
   const setServerError = useCallback((serverId: string, message: string | null) => {
@@ -120,9 +160,29 @@ export function ServerRegistry() {
     [],
   );
 
+  const handleCatalogEvent = useCallback(
+    (event: { action: 'catalog_refresh'; status: McpEventStatus; detail?: string }) => {
+      appendEvent(event.action, event.status, { detail: event.detail });
+    },
+    [appendEvent],
+  );
+
   const getEventActionLabel = useCallback(
     (action: string) => {
-      const actionKey = action === 'test_enabled' ? 'testEnabled' : action;
+      const actionKey =
+        action === 'test_enabled'
+          ? 'testEnabled'
+          : action === 'catalog_refresh'
+            ? 'catalogRefresh'
+            : action === 'install_progress'
+              ? 'installProgress'
+              : action === 'install_log'
+                ? 'installLog'
+                : action === 'oauth_state'
+                  ? 'oauthState'
+                  : action === 'runtime_repair'
+                    ? 'runtimeRepair'
+                    : action;
       return t(`mcp.eventActions.${actionKey}`, { defaultValue: action });
     },
     [t],
@@ -179,10 +239,102 @@ export function ServerRegistry() {
     }
   }, []);
 
+  const fetchRuntimeInventory = useCallback(
+    async (silent = false) => {
+      if (!silent) {
+        setRuntimeLoading(true);
+      }
+      try {
+        const response = await invoke<CommandResponse<McpRuntimeInfo[]>>('list_mcp_runtime_inventory');
+        if (response.success && response.data) {
+          setRuntimeInventory(response.data);
+        } else if (!silent) {
+          showToast(response.error || t('mcp.errors.fetchServers'), 'error');
+        }
+      } catch (err) {
+        if (!silent) {
+          showToast(err instanceof Error ? err.message : t('mcp.errors.fetchServers'), 'error');
+        }
+      } finally {
+        if (!silent) {
+          setRuntimeLoading(false);
+        }
+      }
+    },
+    [showToast, t],
+  );
+
   useEffect(() => {
     fetchServers();
     fetchConnectedServers();
-  }, [fetchServers, fetchConnectedServers]);
+    fetchRuntimeInventory();
+  }, [fetchConnectedServers, fetchRuntimeInventory, fetchServers]);
+
+  useEffect(() => {
+    let disposed = false;
+    let progressUnlisten: UnlistenFn | null = null;
+    let logUnlisten: UnlistenFn | null = null;
+    let oauthUnlisten: UnlistenFn | null = null;
+
+    const toJobSuffix = (jobId: string) => {
+      if (!jobId) return '';
+      return ` [job:${jobId.slice(0, 8)}]`;
+    };
+
+    const bindEvents = async () => {
+      progressUnlisten = await listen<McpInstallProgressEvent>('mcp:install-progress', (event) => {
+        if (disposed) return;
+        const payload = event.payload;
+        const status: McpEventStatus =
+          payload.status === 'success' ? 'success' : payload.status === 'failed' ? 'error' : 'info';
+        appendEvent('install_progress', status, {
+          serverId: payload.server_id || undefined,
+          detail: `${payload.phase} - ${payload.message} (${Math.round(payload.progress * 100)}%)${toJobSuffix(payload.job_id)}`,
+        });
+        if (
+          (payload.status === 'success' || payload.status === 'failed') &&
+          (payload.phase === 'COMMIT' || payload.phase === 'ROLLBACK')
+        ) {
+          void fetchRuntimeInventory(true);
+        }
+      });
+
+      logUnlisten = await listen<McpInstallLogEvent>('mcp:install-log', (event) => {
+        if (disposed) return;
+        const payload = event.payload;
+        if (payload.level === 'info') {
+          return;
+        }
+        appendEvent('install_log', payload.level === 'error' ? 'error' : 'info', {
+          detail: `[${payload.phase}/${payload.level}] ${payload.message}${toJobSuffix(payload.job_id)}`,
+        });
+      });
+
+      oauthUnlisten = await listen<McpOauthEvent>('mcp:oauth-state', (event) => {
+        if (disposed) return;
+        const payload = event.payload;
+        const state = payload.state.toLowerCase();
+        const status: McpEventStatus =
+          state.includes('error') || state.includes('failed') || state.includes('denied')
+            ? 'error'
+            : state.includes('success') || state.includes('authorized') || state.includes('connected')
+              ? 'success'
+              : 'info';
+        appendEvent('oauth_state', status, {
+          detail: `${payload.state}${payload.message ? ` - ${payload.message}` : ''}${toJobSuffix(payload.job_id)}`,
+        });
+      });
+    };
+
+    void bindEvents();
+
+    return () => {
+      disposed = true;
+      if (progressUnlisten) progressUnlisten();
+      if (logUnlisten) logUnlisten();
+      if (oauthUnlisten) oauthUnlisten();
+    };
+  }, [appendEvent, fetchRuntimeInventory]);
 
   useEffect(() => {
     if (selectedToolServerId && !connectedServers[selectedToolServerId]) {
@@ -200,6 +352,35 @@ export function ServerRegistry() {
       }
     },
     [],
+  );
+
+  const handleRepairRuntime = useCallback(
+    async (runtimeKind: string) => {
+      await withAction(runtimeKind, setRepairingRuntimes, async () => {
+        try {
+          const response = await invoke<CommandResponse<McpRuntimeRepairResult>>('repair_mcp_runtime', {
+            runtimeKind,
+          });
+          if (response.success && response.data) {
+            const isSuccess = response.data.status === 'repaired' || response.data.status === 'already_healthy';
+            appendEvent('runtime_repair', isSuccess ? 'success' : 'error', {
+              detail: `${runtimeKind}: ${response.data.message}`,
+            });
+            showToast(response.data.message, isSuccess ? 'success' : 'error');
+            await fetchRuntimeInventory(true);
+          } else {
+            const message = response.error || t('mcp.errors.fetchServers');
+            appendEvent('runtime_repair', 'error', { detail: `${runtimeKind}: ${message}` });
+            showToast(message, 'error');
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : t('mcp.errors.fetchServers');
+          appendEvent('runtime_repair', 'error', { detail: `${runtimeKind}: ${message}` });
+          showToast(message, 'error');
+        }
+      });
+    },
+    [appendEvent, fetchRuntimeInventory, showToast, t, withAction],
   );
 
   const handleTest = useCallback(
@@ -423,6 +604,21 @@ export function ServerRegistry() {
     showToast(t('common.done'), 'success');
   };
 
+  const handleCatalogInstalled = useCallback(
+    (result: McpInstallResult) => {
+      void fetchServers(true);
+      void fetchConnectedServers();
+      void fetchRuntimeInventory(true);
+      appendEvent('add', 'success', {
+        serverId: result.server_id || undefined,
+        detail: t('mcp.install.installSucceeded'),
+      });
+      showToast(t('mcp.install.installSucceeded'), 'success');
+      setSelectedCatalogItem(null);
+    },
+    [appendEvent, fetchConnectedServers, fetchRuntimeInventory, fetchServers, showToast, t],
+  );
+
   const handleExport = useCallback(async () => {
     try {
       const response = await invoke<CommandResponse<McpExportPayload>>('export_mcp_servers');
@@ -465,9 +661,17 @@ export function ServerRegistry() {
         case 'open-import':
           setImportDialogOpen(true);
           break;
+        case 'open-discover':
+          setActiveTab('discover');
+          break;
+        case 'install-recommended':
+          setActiveTab('discover');
+          setInstallRecommendedNonce((prev) => prev + 1);
+          break;
         case 'refresh':
           void fetchServers(true);
           void fetchConnectedServers();
+          void fetchRuntimeInventory(true);
           break;
         case 'test-enabled':
           void handleTestEnabled();
@@ -482,7 +686,7 @@ export function ServerRegistry() {
 
     window.addEventListener(MCP_COMMAND_EVENT, listener as EventListener);
     return () => window.removeEventListener(MCP_COMMAND_EVENT, listener as EventListener);
-  }, [fetchConnectedServers, fetchServers, handleExport, handleTestEnabled]);
+  }, [fetchConnectedServers, fetchRuntimeInventory, fetchServers, handleExport, handleTestEnabled]);
 
   return (
     <div className="h-full flex flex-col">
@@ -538,6 +742,21 @@ export function ServerRegistry() {
             </button>
 
             <button
+              onClick={() => setActiveTab('discover')}
+              className={clsx(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-md',
+                'bg-gray-100 dark:bg-gray-800',
+                'text-gray-700 dark:text-gray-300',
+                'hover:bg-gray-200 dark:hover:bg-gray-700',
+                'text-sm font-medium',
+                'transition-colors',
+              )}
+            >
+              <InfoCircledIcon className="w-4 h-4" />
+              <span>{t('mcp.discover.title')}</span>
+            </button>
+
+            <button
               onClick={() => setAddDialogOpen(true)}
               className={clsx(
                 'flex items-center gap-1.5 px-3 py-1.5 rounded-md',
@@ -556,7 +775,41 @@ export function ServerRegistry() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
-        {loading && servers.length === 0 ? (
+        <div className="mb-4 inline-flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setActiveTab('installed')}
+            className={clsx(
+              'px-3 py-1.5 text-xs font-medium',
+              activeTab === 'installed'
+                ? 'bg-primary-600 text-white'
+                : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300',
+            )}
+          >
+            {t('mcp.tabs.installed')}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('discover')}
+            className={clsx(
+              'px-3 py-1.5 text-xs font-medium border-l border-gray-200 dark:border-gray-700',
+              activeTab === 'discover'
+                ? 'bg-primary-600 text-white'
+                : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300',
+            )}
+          >
+            {t('mcp.tabs.discover')}
+          </button>
+        </div>
+
+        {activeTab === 'discover' ? (
+          <DiscoverTab
+            onInstallItem={(item) => setSelectedCatalogItem(item)}
+            installRecommendedNonce={installRecommendedNonce}
+            installedCatalogItems={installedCatalogItems}
+            onCatalogEvent={handleCatalogEvent}
+          />
+        ) : loading && servers.length === 0 ? (
           <div className="space-y-4">
             <ServerSkeleton />
             <ServerSkeleton />
@@ -705,6 +958,70 @@ export function ServerRegistry() {
                   )}
 
                   <div className="pt-2 mt-2 border-t border-gray-200 dark:border-gray-700">
+                    <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      {t('mcp.runtimeInventoryTitle')}
+                    </p>
+                    {runtimeLoading ? (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{t('mcp.loading')}</p>
+                    ) : runtimeInventory.length === 0 ? (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{t('mcp.runtimeInventoryEmpty')}</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {runtimeInventory.map((runtime) => (
+                          <div
+                            key={runtime.runtime}
+                            className="text-xs rounded border border-gray-200 dark:border-gray-700 p-2"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="font-medium text-gray-900 dark:text-white">{runtime.runtime}</p>
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={clsx(
+                                    'text-[11px]',
+                                    runtime.healthy
+                                      ? 'text-emerald-700 dark:text-emerald-300'
+                                      : 'text-red-700 dark:text-red-300',
+                                  )}
+                                >
+                                  {runtime.healthy ? t('mcp.runtimeHealthy') : t('mcp.runtimeUnhealthy')}
+                                </span>
+                                {!runtime.healthy && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRepairRuntime(runtime.runtime)}
+                                    disabled={repairingRuntimes.has(runtime.runtime)}
+                                    className={clsx(
+                                      'px-2 py-1 rounded text-[11px] font-medium',
+                                      'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
+                                      'hover:bg-amber-200 dark:hover:bg-amber-900/50 disabled:opacity-50',
+                                    )}
+                                  >
+                                    {repairingRuntimes.has(runtime.runtime)
+                                      ? t('mcp.repairingRuntime')
+                                      : t('mcp.repairRuntime')}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            <p className="text-gray-500 dark:text-gray-400">
+                              {runtime.version || t('mcp.status.unknown')}
+                              {runtime.source ? ` | ${t('mcp.runtimeSource')}: ${runtime.source}` : ''}
+                            </p>
+                            {runtime.path && (
+                              <p className="text-gray-500 dark:text-gray-400 break-all">
+                                {t('mcp.runtimePath')}: {runtime.path}
+                              </p>
+                            )}
+                            {runtime.last_error && !runtime.healthy && (
+                              <p className="text-red-700 dark:text-red-300 break-all">{runtime.last_error}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-2 mt-2 border-t border-gray-200 dark:border-gray-700">
                     <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{t('mcp.recentEvents')}</p>
                     {eventLog.length === 0 ? (
                       <p className="text-xs text-gray-500 dark:text-gray-400">{t('mcp.noRecentEvents')}</p>
@@ -805,6 +1122,17 @@ export function ServerRegistry() {
         open={importDialogOpen}
         onOpenChange={setImportDialogOpen}
         onImportComplete={handleImportComplete}
+      />
+
+      <InstallCatalogDialog
+        open={!!selectedCatalogItem}
+        item={selectedCatalogItem}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedCatalogItem(null);
+          }
+        }}
+        onInstalled={handleCatalogInstalled}
       />
     </div>
   );

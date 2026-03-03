@@ -1287,6 +1287,7 @@ async function requirementAnalysisPhase(set: SetFn, get: GetFn, runToken: number
     const interviewResult = specStore.compiledSpec ? JSON.stringify(specStore.compiledSpec) : null;
 
     const contextSources = (await import('./contextSources')).useContextSourcesStore.getState().buildConfig() ?? null;
+    const projectPath = useSettingsStore.getState().workspacePath || null;
     const result = await invoke<{
       success: boolean;
       data: RequirementAnalysisCardData | null;
@@ -1302,6 +1303,7 @@ async function requirementAnalysisPhase(set: SetFn, get: GetFn, runToken: number
       baseUrl: reqResolved.baseUrl || null,
       locale: i18n.language,
       contextSources,
+      projectPath,
     });
     if (!isRunActive(get, runToken)) return;
 
@@ -1376,6 +1378,7 @@ async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd, run
 
     const archContextSources =
       (await import('./contextSources')).useContextSourcesStore.getState().buildConfig() ?? null;
+    const projectPath = useSettingsStore.getState().workspacePath || null;
     const result = await invoke<{
       success: boolean;
       data: ArchitectureReviewCardData | null;
@@ -1390,6 +1393,7 @@ async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd, run
       baseUrl: archResolved.baseUrl || null,
       locale: i18n.language,
       contextSources: archContextSources,
+      projectPath,
     });
     if (!isRunActive(get, runToken)) return;
 

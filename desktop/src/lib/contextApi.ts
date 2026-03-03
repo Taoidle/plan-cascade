@@ -65,6 +65,8 @@ export interface ContextDiagnostics {
   blocked_tools: string[];
   effective_statuses: string[];
   selected_skills: string[];
+  effective_skill_ids: string[];
+  effective_memory_ids: string[];
   memory_candidates_count: number;
   degraded_reason?: string | null;
   selection_reason: string;
@@ -276,6 +278,7 @@ export async function assembleTurnContext(request: {
   session_id?: string;
   mode?: string;
   intent?: string;
+  phase?: string;
   conversation_history?: ContextConversationTurn[];
   context_sources?: ContextSourceConfig;
   manual_blocks?: Array<{
@@ -287,6 +290,7 @@ export async function assembleTurnContext(request: {
   input_token_budget?: number;
   reserved_output_tokens?: number;
   hard_limit?: number;
+  enforce_user_skill_selection?: boolean;
 }): Promise<CommandResponse<ContextAssemblyResponse>> {
   try {
     return await invoke<CommandResponse<ContextAssemblyResponse>>('assemble_turn_context', { request });

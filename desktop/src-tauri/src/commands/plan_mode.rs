@@ -26,7 +26,7 @@ use crate::services::plan_mode::types::{
 };
 use crate::services::skills::model::InjectionPhase;
 use crate::services::task_mode::context_provider::{
-    query_selected_context, ContextSourceConfig, MemorySourceConfig, SkillsSourceConfig,
+    ContextSourceConfig, MemorySourceConfig, SkillsSourceConfig,
 };
 use crate::services::workflow_kernel::{
     PlanClarificationSnapshot, WorkflowKernelState, WorkflowKernelUpdatedEvent,
@@ -239,6 +239,7 @@ pub async fn enter_plan_mode(
                     &app_state,
                     &knowledge_state,
                     project_path.as_deref(),
+                    Some(session_id.as_str()),
                     conversation_context.as_deref(),
                     context_sources.as_ref(),
                     &description,
@@ -417,6 +418,7 @@ pub async fn submit_plan_clarification(
                     &app_state,
                     &knowledge_state,
                     project_path.as_deref(),
+                    Some(session_id.as_str()),
                     conversation_context.as_deref(),
                     context_sources.as_ref(),
                     &description,
@@ -580,6 +582,7 @@ pub async fn generate_plan(
                 &app_state,
                 &knowledge_state,
                 project_path.as_deref(),
+                Some(session_id.as_str()),
                 conversation_context.as_deref(),
                 context_sources.as_ref(),
                 &description,
@@ -722,6 +725,7 @@ pub async fn approve_plan(
         &app_state,
         &knowledge_state,
         project_path.as_deref(),
+        Some(session_id.as_str()),
         conversation_context.as_deref(),
         context_sources.as_ref(),
         &task_description,
@@ -1085,6 +1089,7 @@ fn default_plan_context_sources() -> ContextSourceConfig {
         skills: Some(SkillsSourceConfig {
             enabled: true,
             selected_skill_ids: vec![],
+            selection_mode: crate::services::task_mode::context_provider::SkillSelectionMode::Auto,
         }),
     }
 }
@@ -1093,6 +1098,7 @@ async fn build_plan_conversation_context(
     app_state: &AppState,
     knowledge_state: &crate::commands::knowledge::KnowledgeState,
     project_path: Option<&str>,
+    session_id: Option<&str>,
     conversation_context: Option<&str>,
     context_sources: Option<&ContextSourceConfig>,
     query: &str,
@@ -1120,33 +1126,70 @@ async fn build_plan_conversation_context(
         .map(|k| k.enabled)
         .unwrap_or(false);
 
-    let enriched = query_selected_context(
-        &config,
-        knowledge_state,
+    let context_phase = match phase {
+        InjectionPhase::Planning => "planning",
+        InjectionPhase::Implementation => "implementation",
+        InjectionPhase::Retry => "implementation",
+        InjectionPhase::Always => "analysis",
+    };
+    let request = crate::commands::context_v2::PrepareTurnContextV2Request {
+        project_path: project_path.to_string(),
+        query: query.to_string(),
+        project_id: if config.project_id.trim().is_empty() {
+            None
+        } else {
+            Some(config.project_id.clone())
+        },
+        session_id: session_id.map(|id| id.to_string()),
+        mode: Some("plan".to_string()),
+        turn_id: None,
+        intent: None,
+        phase: Some(context_phase.to_string()),
+        conversation_history: Vec::new(),
+        context_sources: Some(config.clone()),
+        rules: Vec::new(),
+        manual_blocks: Vec::new(),
+        input_token_budget: None,
+        reserved_output_tokens: None,
+        hard_limit: None,
+        compaction_policy: None,
+        fault_injection: None,
+        enforce_user_skill_selection: true,
+    };
+    let assembled = crate::commands::context_v2::assemble_turn_context_internal(
+        request,
         app_state,
-        project_path,
-        query,
-        phase,
+        knowledge_state,
     )
     .await;
+    let slices = match assembled {
+        Ok(resp) => crate::commands::context_v2::split_assembly_into_slices(&resp),
+        Err(err) => {
+            tracing::warn!(
+                "[plan_mode] Context V2 assembly failed, using empty context: {}",
+                err
+            );
+            crate::commands::context_v2::ContextAssemblySlices::default()
+        }
+    };
     if knowledge_requested {
-        let knowledge_hit = !enriched.knowledge_block.is_empty();
+        let knowledge_hit = !slices.knowledge_block.is_empty();
         let _ = app_state
             .with_database(|db| observability::record_plan_knowledge(db, knowledge_hit))
             .await;
     }
 
-    if !enriched.knowledge_block.is_empty() {
+    if !slices.knowledge_block.is_empty() {
         sections.push(format!(
             "[context-source] knowledge:retrieved\n{}",
-            enriched.knowledge_block
+            slices.knowledge_block
         ));
     }
-    if !enriched.memory_block.is_empty() {
-        sections.push(enriched.memory_block);
+    if !slices.memory_block.is_empty() {
+        sections.push(slices.memory_block);
     }
-    if !enriched.skills_block.is_empty() {
-        sections.push(enriched.skills_block);
+    if !slices.skills_block.is_empty() {
+        sections.push(slices.skills_block);
     }
 
     sections.join("\n\n")

@@ -8,11 +8,16 @@ use tokio::sync::RwLock;
 
 use crate::models::response::CommandResponse;
 use crate::models::{
-    CreateMcpServerRequest, HealthCheckResult, ImportResult, McpServer, McpServerType,
-    UpdateMcpServerRequest,
+    CreateMcpServerRequest, HealthCheckResult, ImportResult, McpCatalogFilter,
+    McpCatalogListResponse, McpCatalogRefreshResult, McpInstallPreview, McpInstallRecord,
+    McpInstallRequest, McpInstallResult, McpRuntimeInfo, McpRuntimeKind, McpRuntimeRepairResult,
+    McpServer, McpServerType, UpdateMcpServerRequest,
 };
 use crate::services::llm::types::ToolDefinition;
 use crate::services::mcp::McpService;
+use crate::services::mcp_catalog::McpCatalogService;
+use crate::services::mcp_installer::McpInstallerService;
+use crate::services::mcp_runtime_manager::McpRuntimeManager;
 use crate::services::tools::mcp_manager::{ConnectedServerInfo, McpManager};
 use crate::services::tools::runtime_tools;
 use crate::services::tools::trait_def::ToolRegistry;
@@ -572,6 +577,184 @@ pub async fn list_mcp_tools(
 ) -> Result<CommandResponse<Vec<ToolDefinition>>, String> {
     let _ = state;
     Ok(CommandResponse::ok(runtime_tools::definitions()))
+}
+
+#[tauri::command]
+pub fn list_mcp_catalog(
+    filter: Option<McpCatalogFilter>,
+) -> Result<CommandResponse<McpCatalogListResponse>, String> {
+    let service = match McpCatalogService::new() {
+        Ok(s) => s,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+    match service.list_catalog(filter) {
+        Ok(data) => Ok(CommandResponse::ok(data)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+#[tauri::command]
+pub fn refresh_mcp_catalog(
+    force: Option<bool>,
+) -> Result<CommandResponse<McpCatalogRefreshResult>, String> {
+    let service = match McpCatalogService::new() {
+        Ok(s) => s,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+    match service.refresh_catalog(force.unwrap_or(false)) {
+        Ok(data) => Ok(CommandResponse::ok(data)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+#[tauri::command]
+pub fn preview_install_mcp_catalog_item(
+    item_id: String,
+    preferred_strategy: Option<String>,
+) -> Result<CommandResponse<McpInstallPreview>, String> {
+    let service = match McpInstallerService::new() {
+        Ok(s) => s,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+    match service.preview_install(&item_id, preferred_strategy.as_deref()) {
+        Ok(data) => Ok(CommandResponse::ok(data)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+#[tauri::command]
+pub async fn install_mcp_catalog_item(
+    request: McpInstallRequest,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, McpRuntimeState>,
+) -> Result<CommandResponse<McpInstallResult>, String> {
+    let installer = match McpInstallerService::new() {
+        Ok(s) => s,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+    let auto_connect = request.auto_connect.unwrap_or(true);
+    match installer
+        .install_catalog_item(request.clone(), Some(&app))
+        .await
+    {
+        Ok(mut result) => {
+            if auto_connect {
+                if let Some(server_id) = result.server_id.clone() {
+                    let service = match McpService::new() {
+                        Ok(s) => s,
+                        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+                    };
+                    if let Ok(Some(server)) = service.get_server(&server_id) {
+                        if let Ok(config) = McpManager::config_from_model(&server) {
+                            match state
+                                .manager
+                                .connect_server_with_registry_lock(&config, state.registry.clone())
+                                .await
+                            {
+                                Ok(_) => {
+                                    let _ = service.mark_server_connected(&server_id);
+                                    let registry = state.registry.read().await;
+                                    runtime_tools::replace_from_registry(&registry);
+                                }
+                                Err(e) => {
+                                    let _ = service.mark_server_connection_error(
+                                        &server_id,
+                                        &format!("auto_connect: {}", e),
+                                    );
+                                    let previous = result.diagnostics.take().unwrap_or_default();
+                                    result.diagnostics = Some(if previous.is_empty() {
+                                        e.to_string()
+                                    } else {
+                                        format!("{}; {}", previous, e)
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(CommandResponse::ok(result))
+        }
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+#[tauri::command]
+pub async fn retry_mcp_install(
+    job_id: String,
+    app: tauri::AppHandle,
+) -> Result<CommandResponse<McpInstallResult>, String> {
+    let installer = match McpInstallerService::new() {
+        Ok(s) => s,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+    match installer.retry_install(&job_id, Some(&app)).await {
+        Ok(result) => Ok(CommandResponse::ok(result)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+#[tauri::command]
+pub fn list_mcp_runtime_inventory() -> Result<CommandResponse<Vec<McpRuntimeInfo>>, String> {
+    let manager = match McpRuntimeManager::new() {
+        Ok(s) => s,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+    match manager.refresh_inventory() {
+        Ok(data) => Ok(CommandResponse::ok(data)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+#[tauri::command]
+pub async fn repair_mcp_runtime(
+    runtime_kind: String,
+) -> Result<CommandResponse<McpRuntimeRepairResult>, String> {
+    let manager = match McpRuntimeManager::new() {
+        Ok(s) => s,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+    let runtime = match parse_runtime_kind(&runtime_kind) {
+        Some(kind) => kind,
+        None => {
+            return Ok(CommandResponse::err(format!(
+                "Unsupported runtime kind: {}",
+                runtime_kind
+            )))
+        }
+    };
+    match manager.repair_runtime(runtime).await {
+        Ok(result) => Ok(CommandResponse::ok(result)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+#[tauri::command]
+pub fn get_mcp_install_record(
+    server_id: String,
+) -> Result<CommandResponse<McpInstallRecord>, String> {
+    let installer = match McpInstallerService::new() {
+        Ok(s) => s,
+        Err(e) => return Ok(CommandResponse::err(e.to_string())),
+    };
+    match installer.get_install_record(&server_id) {
+        Ok(Some(record)) => Ok(CommandResponse::ok(record)),
+        Ok(None) => Ok(CommandResponse::err(format!(
+            "MCP install record not found: {}",
+            server_id
+        ))),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+fn parse_runtime_kind(value: &str) -> Option<McpRuntimeKind> {
+    match value {
+        "node" => Some(McpRuntimeKind::Node),
+        "uv" => Some(McpRuntimeKind::Uv),
+        "python" => Some(McpRuntimeKind::Python),
+        "docker" => Some(McpRuntimeKind::Docker),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

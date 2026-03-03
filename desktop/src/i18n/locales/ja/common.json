@@ -233,6 +233,15 @@
     "importErrors": "エラー",
     "duplicateNameWarning": "重複したサーバー名が検出されました。実行時ツールは server id ごとに分離されます。",
     "diagnosticsTitle": "接続診断",
+    "runtimeInventoryTitle": "ランタイム在庫",
+    "runtimeInventoryEmpty": "ランタイム情報がありません",
+    "runtimeHealthy": "正常",
+    "runtimeUnhealthy": "異常",
+    "runtimeSource": "ソース",
+    "runtimePath": "パス",
+    "repairRuntime": "修復",
+    "repairingRuntime": "修復中...",
+    "loading": "読み込み中...",
     "show": "表示",
     "hide": "非表示",
     "noConnectedServers": "接続中の MCP サーバーはありません",
@@ -245,6 +254,55 @@
     "lastErrorMeta": "最終エラー={{value}}",
     "protocolMeta": "protocol={{value}}",
     "exportSuccess": "MCP 設定をエクスポートしました",
+    "tabs": {
+      "installed": "インストール済み",
+      "discover": "おすすめ"
+    },
+    "discover": {
+      "title": "おすすめ",
+      "searchPlaceholder": "MCP サーバー、ベンダー、タグを検索...",
+      "empty": "カタログ項目がありません",
+      "docs": "ドキュメント",
+      "install": "インストール",
+      "installAnother": "追加でインストール",
+      "installed": "インストール済み（{{count}}）",
+      "managedInstall": "管理対象",
+      "manualInstall": "手動",
+      "catalogSource": "カタログソース: {{source}}",
+      "fetchedAt": "取得日時: {{value}}",
+      "signatureValid": "署名: 検証済み",
+      "signatureInvalid": "署名: 無効（インストール無効）",
+      "refreshFallback": "カタログ更新は内蔵シードへフォールバックしました: {{reason}}",
+      "strategyCount": "{{count}} 件の戦略",
+      "source": {
+        "remote": "リモート署名カタログ",
+        "builtin": "内蔵シードカタログ"
+      },
+      "trust": {
+        "all": "すべて",
+        "official": "公式",
+        "verified": "検証済み",
+        "community": "コミュニティ"
+      }
+    },
+    "install": {
+      "title": "MCP サービスをインストール",
+      "stepStrategy": "1. 戦略を選択",
+      "stepEnvironment": "2. 環境チェック",
+      "stepSecrets": "3. シークレットとオプション",
+      "stepProgress": "4. 進行状況",
+      "aliasPlaceholder": "サーバー別名",
+      "missingRuntimes": "不足ランタイム",
+      "runtimeReady": "必要なランタイムは利用可能です",
+      "waiting": "インストール開始待ち",
+      "communityConfirm": "この MCP サーバーはコミュニティ管理であり、追加リスクがある可能性を理解しました。",
+      "installNow": "今すぐインストール",
+      "installing": "インストール中...",
+      "installSucceeded": "MCP サービスをインストールしました",
+      "installFailed": "インストールに失敗しました。診断を確認して再試行してください。",
+      "retry": "失敗したインストールを再試行",
+      "retrying": "再試行中..."
+    },
     "eventActions": {
       "add": "追加",
       "update": "更新",
@@ -255,7 +313,12 @@
       "delete": "削除",
       "test": "テスト",
       "toggle": "切り替え",
-      "testEnabled": "有効サーバーをテスト"
+      "catalogRefresh": "カタログ更新",
+      "testEnabled": "有効サーバーをテスト",
+      "installProgress": "インストール進捗",
+      "installLog": "インストールログ",
+      "oauthState": "OAuth 状態",
+      "runtimeRepair": "ランタイム修復"
     },
     "eventDetails": {
       "testMetrics": "latency={{latency}}ms tools={{tools}}",
@@ -276,7 +339,10 @@
       "disconnectServer": "MCP サーバーの切断に失敗しました",
       "deleteServer": "MCP サーバーの削除に失敗しました",
       "addServer": "MCP サーバーの追加に失敗しました",
-      "importServers": "MCP サーバーのインポートに失敗しました"
+      "importServers": "MCP サーバーのインポートに失敗しました",
+      "fetchCatalog": "MCP カタログの取得に失敗しました",
+      "previewInstall": "MCP インストールの事前チェックに失敗しました",
+      "installCatalog": "MCP カタログ項目のインストールに失敗しました"
     }
   },
 

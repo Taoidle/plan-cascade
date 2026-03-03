@@ -40,6 +40,33 @@ pub struct CheckpointRow {
     pub created_at: Option<String>,
 }
 
+/// Raw MCP catalog cache row.
+#[derive(Debug, Clone)]
+pub struct McpCatalogCacheRow {
+    pub source_id: String,
+    pub payload_json: String,
+    pub signature: Option<String>,
+    pub etag: Option<String>,
+    pub fetched_at: Option<String>,
+    pub expires_at: Option<String>,
+}
+
+/// Raw MCP installer job row.
+#[derive(Debug, Clone)]
+pub struct McpInstallJobRow {
+    pub job_id: String,
+    pub item_id: String,
+    pub server_id: Option<String>,
+    pub phase: String,
+    pub progress: f64,
+    pub status: String,
+    pub error_class: Option<String>,
+    pub error_message: Option<String>,
+    pub logs_json: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
 /// Type alias for the connection pool
 pub type DbPool = Pool<SqliteConnectionManager>;
 
@@ -226,6 +253,9 @@ impl Database {
                 last_connected_at TEXT,
                 retry_count INTEGER NOT NULL DEFAULT 0,
                 last_checked TEXT,
+                managed_install INTEGER NOT NULL DEFAULT 0,
+                catalog_item_id TEXT,
+                trust_level TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             )",
@@ -266,12 +296,98 @@ impl Database {
                 [],
             );
         }
+        if !Self::table_has_column(&conn, "mcp_servers", "managed_install") {
+            let _ = conn.execute(
+                "ALTER TABLE mcp_servers ADD COLUMN managed_install INTEGER NOT NULL DEFAULT 0",
+                [],
+            );
+        }
+        if !Self::table_has_column(&conn, "mcp_servers", "catalog_item_id") {
+            let _ = conn.execute(
+                "ALTER TABLE mcp_servers ADD COLUMN catalog_item_id TEXT",
+                [],
+            );
+        }
+        if !Self::table_has_column(&conn, "mcp_servers", "trust_level") {
+            let _ = conn.execute("ALTER TABLE mcp_servers ADD COLUMN trust_level TEXT", []);
+        }
 
         // Normalize legacy transport label.
         let _ = conn.execute(
             "UPDATE mcp_servers SET server_type = 'stream_http' WHERE server_type = 'sse'",
             [],
         );
+
+        // MCP catalog cache (signed payload + TTL metadata).
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS mcp_catalog_cache (
+                source_id TEXT PRIMARY KEY,
+                payload_json TEXT NOT NULL,
+                signature TEXT,
+                etag TEXT,
+                fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                expires_at TEXT
+            )",
+            [],
+        )?;
+
+        // MCP managed installation records.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS mcp_install_records (
+                server_id TEXT PRIMARY KEY,
+                catalog_item_id TEXT NOT NULL,
+                catalog_version TEXT,
+                strategy_id TEXT NOT NULL,
+                trust_level TEXT NOT NULL,
+                package_lock_json TEXT,
+                runtime_snapshot_json TEXT,
+                installed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (server_id) REFERENCES mcp_servers(id) ON DELETE CASCADE
+            )",
+            [],
+        )?;
+
+        // Runtime inventory collected by MCP runtime manager.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS mcp_runtime_inventory (
+                runtime_key TEXT PRIMARY KEY,
+                runtime_kind TEXT NOT NULL,
+                version TEXT,
+                executable_path TEXT,
+                source TEXT,
+                managed INTEGER NOT NULL DEFAULT 0,
+                health_status TEXT NOT NULL DEFAULT 'unknown',
+                last_error TEXT,
+                last_checked_at TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )",
+            [],
+        )?;
+
+        // Installer jobs for observability and retry.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS mcp_install_jobs (
+                job_id TEXT PRIMARY KEY,
+                item_id TEXT NOT NULL,
+                server_id TEXT,
+                phase TEXT NOT NULL,
+                progress REAL NOT NULL DEFAULT 0.0,
+                status TEXT NOT NULL,
+                error_class TEXT,
+                error_message TEXT,
+                logs_json TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mcp_install_jobs_status
+             ON mcp_install_jobs(status, updated_at DESC)",
+            [],
+        )?;
 
         // Create checkpoints table
         conn.execute(
@@ -1700,12 +1816,14 @@ impl Database {
                 id, name, server_type, command, args, env, url, headers,
                 has_env_secret, has_headers_secret, enabled, auto_connect,
                 status, last_error, last_connected_at, retry_count, last_checked,
+                managed_install, catalog_item_id, trust_level,
                 created_at, updated_at
              )
              VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
                 ?9, ?10, ?11, ?12,
                 ?13, ?14, ?15, ?16, ?17,
+                ?18, ?19, ?20,
                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
              )",
             params![
@@ -1731,6 +1849,13 @@ impl Database {
                 server.last_connected_at,
                 server.retry_count as i64,
                 server.last_checked,
+                server.managed_install as i32,
+                server.catalog_item_id,
+                server.trust_level.as_ref().map(|level| match level {
+                    crate::models::McpCatalogTrustLevel::Official => "official".to_string(),
+                    crate::models::McpCatalogTrustLevel::Verified => "verified".to_string(),
+                    crate::models::McpCatalogTrustLevel::Community => "community".to_string(),
+                }),
             ],
         )?;
 
@@ -1745,7 +1870,8 @@ impl Database {
             "SELECT id, name, server_type, command, args, env, url, headers,
                     has_env_secret, has_headers_secret, enabled, auto_connect, status,
                     last_error, last_connected_at, retry_count,
-                    last_checked, created_at, updated_at
+                    last_checked, managed_install, catalog_item_id, trust_level,
+                    created_at, updated_at
              FROM mcp_servers WHERE id = ?1",
             params![id],
             |row| Self::row_to_mcp_server(row),
@@ -1766,7 +1892,8 @@ impl Database {
             "SELECT id, name, server_type, command, args, env, url, headers,
                     has_env_secret, has_headers_secret, enabled, auto_connect, status,
                     last_error, last_connected_at, retry_count,
-                    last_checked, created_at, updated_at
+                    last_checked, managed_install, catalog_item_id, trust_level,
+                    created_at, updated_at
              FROM mcp_servers ORDER BY name ASC",
         )?;
 
@@ -1800,7 +1927,9 @@ impl Database {
             "UPDATE mcp_servers SET name = ?2, server_type = ?3, command = ?4, args = ?5, env = ?6,
              url = ?7, headers = ?8, has_env_secret = ?9, has_headers_secret = ?10, enabled = ?11,
              auto_connect = ?12, status = ?13, last_error = ?14, last_connected_at = ?15,
-             retry_count = ?16, last_checked = ?17, updated_at = CURRENT_TIMESTAMP
+             retry_count = ?16, last_checked = ?17,
+             managed_install = ?18, catalog_item_id = ?19, trust_level = ?20,
+             updated_at = CURRENT_TIMESTAMP
              WHERE id = ?1",
             params![
                 server.id,
@@ -1820,6 +1949,13 @@ impl Database {
                 server.last_connected_at,
                 server.retry_count as i64,
                 server.last_checked,
+                server.managed_install as i32,
+                server.catalog_item_id,
+                server.trust_level.as_ref().map(|level| match level {
+                    crate::models::McpCatalogTrustLevel::Official => "official".to_string(),
+                    crate::models::McpCatalogTrustLevel::Verified => "verified".to_string(),
+                    crate::models::McpCatalogTrustLevel::Community => "community".to_string(),
+                }),
             ],
         )?;
 
@@ -1924,7 +2060,8 @@ impl Database {
             "SELECT id, name, server_type, command, args, env, url, headers,
                     has_env_secret, has_headers_secret, enabled, auto_connect, status,
                     last_error, last_connected_at, retry_count,
-                    last_checked, created_at, updated_at
+                    last_checked, managed_install, catalog_item_id, trust_level,
+                    created_at, updated_at
              FROM mcp_servers WHERE name = ?1",
             params![name],
             |row| Self::row_to_mcp_server(row),
@@ -1958,8 +2095,11 @@ impl Database {
         let last_connected_at: Option<String> = row.get::<_, Option<String>>(14).unwrap_or(None);
         let retry_count: i64 = row.get::<_, i64>(15).unwrap_or(0);
         let last_checked: Option<String> = row.get(16)?;
-        let created_at: Option<String> = row.get(17)?;
-        let updated_at: Option<String> = row.get(18)?;
+        let managed_install: i32 = row.get::<_, i32>(17).unwrap_or(0);
+        let catalog_item_id: Option<String> = row.get::<_, Option<String>>(18).unwrap_or(None);
+        let trust_level_str: Option<String> = row.get::<_, Option<String>>(19).unwrap_or(None);
+        let created_at: Option<String> = row.get(20)?;
+        let updated_at: Option<String> = row.get(21)?;
 
         let server_type = match server_type_str.as_str() {
             "stream_http" | "sse" => crate::models::McpServerType::StreamHttp,
@@ -1982,6 +2122,13 @@ impl Database {
             }
         };
 
+        let trust_level = trust_level_str.as_deref().and_then(|value| match value {
+            "official" => Some(crate::models::McpCatalogTrustLevel::Official),
+            "verified" => Some(crate::models::McpCatalogTrustLevel::Verified),
+            "community" => Some(crate::models::McpCatalogTrustLevel::Community),
+            _ => None,
+        });
+
         Ok(crate::models::McpServer {
             id,
             name,
@@ -2000,9 +2147,315 @@ impl Database {
             last_connected_at,
             retry_count: retry_count.max(0) as u32,
             last_checked,
+            managed_install: managed_install != 0,
+            catalog_item_id,
+            trust_level,
             created_at,
             updated_at,
         })
+    }
+
+    /// Upsert cached MCP catalog payload.
+    pub fn upsert_mcp_catalog_cache(
+        &self,
+        source_id: &str,
+        payload_json: &str,
+        signature: Option<&str>,
+        etag: Option<&str>,
+        expires_at: Option<&str>,
+    ) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "INSERT INTO mcp_catalog_cache (source_id, payload_json, signature, etag, fetched_at, expires_at)
+             VALUES (?1, ?2, ?3, ?4, CURRENT_TIMESTAMP, ?5)
+             ON CONFLICT(source_id) DO UPDATE SET
+               payload_json = excluded.payload_json,
+               signature = excluded.signature,
+               etag = excluded.etag,
+               fetched_at = CURRENT_TIMESTAMP,
+               expires_at = excluded.expires_at",
+            params![source_id, payload_json, signature, etag, expires_at],
+        )?;
+        Ok(())
+    }
+
+    /// Read cached MCP catalog payload by source id.
+    pub fn get_mcp_catalog_cache(&self, source_id: &str) -> AppResult<Option<McpCatalogCacheRow>> {
+        let conn = self.get_connection()?;
+        let result = conn.query_row(
+            "SELECT source_id, payload_json, signature, etag, fetched_at, expires_at
+             FROM mcp_catalog_cache
+             WHERE source_id = ?1",
+            params![source_id],
+            |row| {
+                Ok(McpCatalogCacheRow {
+                    source_id: row.get(0)?,
+                    payload_json: row.get(1)?,
+                    signature: row.get(2)?,
+                    etag: row.get(3)?,
+                    fetched_at: row.get(4)?,
+                    expires_at: row.get(5)?,
+                })
+            },
+        );
+
+        match result {
+            Ok(row) => Ok(Some(row)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(AppError::database(e.to_string())),
+        }
+    }
+
+    /// Upsert runtime inventory row.
+    pub fn upsert_mcp_runtime_inventory(
+        &self,
+        runtime_key: &str,
+        runtime: &crate::models::McpRuntimeInfo,
+    ) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        let runtime_kind = match runtime.runtime {
+            crate::models::McpRuntimeKind::Node => "node",
+            crate::models::McpRuntimeKind::Uv => "uv",
+            crate::models::McpRuntimeKind::Python => "python",
+            crate::models::McpRuntimeKind::Docker => "docker",
+        };
+        let health_status = if runtime.healthy { "healthy" } else { "error" };
+        conn.execute(
+            "INSERT INTO mcp_runtime_inventory (
+                runtime_key, runtime_kind, version, executable_path, source, managed,
+                health_status, last_error, last_checked_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, CURRENT_TIMESTAMP)
+             ON CONFLICT(runtime_key) DO UPDATE SET
+                runtime_kind = excluded.runtime_kind,
+                version = excluded.version,
+                executable_path = excluded.executable_path,
+                source = excluded.source,
+                managed = excluded.managed,
+                health_status = excluded.health_status,
+                last_error = excluded.last_error,
+                last_checked_at = excluded.last_checked_at,
+                updated_at = CURRENT_TIMESTAMP",
+            params![
+                runtime_key,
+                runtime_kind,
+                runtime.version,
+                runtime.path,
+                runtime.source,
+                runtime.managed as i32,
+                health_status,
+                runtime.last_error,
+                runtime.last_checked,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// List runtime inventory.
+    pub fn list_mcp_runtime_inventory(&self) -> AppResult<Vec<crate::models::McpRuntimeInfo>> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT runtime_kind, version, executable_path, source, managed, health_status, last_error, last_checked_at
+             FROM mcp_runtime_inventory
+             ORDER BY runtime_kind ASC",
+        )?;
+        let rows = stmt
+            .query_map([], |row| {
+                let runtime_kind: String = row.get(0)?;
+                let runtime = match runtime_kind.as_str() {
+                    "node" => crate::models::McpRuntimeKind::Node,
+                    "uv" => crate::models::McpRuntimeKind::Uv,
+                    "python" => crate::models::McpRuntimeKind::Python,
+                    "docker" => crate::models::McpRuntimeKind::Docker,
+                    _ => crate::models::McpRuntimeKind::Node,
+                };
+                let health_status: String = row.get::<_, String>(5).unwrap_or_default();
+                Ok(crate::models::McpRuntimeInfo {
+                    runtime,
+                    version: row.get(1)?,
+                    path: row.get(2)?,
+                    source: row.get(3)?,
+                    managed: row.get::<_, i32>(4).unwrap_or(0) != 0,
+                    healthy: health_status == "healthy",
+                    last_error: row.get(6)?,
+                    last_checked: row.get(7)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    /// Upsert install job state.
+    #[allow(clippy::too_many_arguments)]
+    pub fn upsert_mcp_install_job(
+        &self,
+        job_id: &str,
+        item_id: &str,
+        server_id: Option<&str>,
+        phase: &str,
+        progress: f64,
+        status: &str,
+        error_class: Option<&str>,
+        error_message: Option<&str>,
+        logs_json: Option<&str>,
+    ) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "INSERT INTO mcp_install_jobs (
+                job_id, item_id, server_id, phase, progress, status, error_class, error_message, logs_json, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+             ON CONFLICT(job_id) DO UPDATE SET
+                item_id = excluded.item_id,
+                server_id = excluded.server_id,
+                phase = excluded.phase,
+                progress = excluded.progress,
+                status = excluded.status,
+                error_class = excluded.error_class,
+                error_message = excluded.error_message,
+                logs_json = excluded.logs_json,
+                updated_at = CURRENT_TIMESTAMP",
+            params![
+                job_id,
+                item_id,
+                server_id,
+                phase,
+                progress,
+                status,
+                error_class,
+                error_message,
+                logs_json,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Fetch install job row.
+    pub fn get_mcp_install_job(&self, job_id: &str) -> AppResult<Option<McpInstallJobRow>> {
+        let conn = self.get_connection()?;
+        let result = conn.query_row(
+            "SELECT job_id, item_id, server_id, phase, progress, status, error_class, error_message, logs_json, created_at, updated_at
+             FROM mcp_install_jobs
+             WHERE job_id = ?1",
+            params![job_id],
+            |row| {
+                Ok(McpInstallJobRow {
+                    job_id: row.get(0)?,
+                    item_id: row.get(1)?,
+                    server_id: row.get(2)?,
+                    phase: row.get(3)?,
+                    progress: row.get::<_, f64>(4).unwrap_or(0.0),
+                    status: row.get(5)?,
+                    error_class: row.get(6)?,
+                    error_message: row.get(7)?,
+                    logs_json: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
+                })
+            },
+        );
+
+        match result {
+            Ok(row) => Ok(Some(row)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(AppError::database(e.to_string())),
+        }
+    }
+
+    /// Upsert managed install metadata.
+    pub fn upsert_mcp_install_record(
+        &self,
+        record: &crate::models::McpInstallRecord,
+    ) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        let trust_level = match record.trust_level {
+            crate::models::McpCatalogTrustLevel::Official => "official",
+            crate::models::McpCatalogTrustLevel::Verified => "verified",
+            crate::models::McpCatalogTrustLevel::Community => "community",
+        };
+        let lock_json = match &record.package_lock_json {
+            Some(v) => Some(serde_json::to_string(v).unwrap_or_default()),
+            None => None,
+        };
+        let runtime_snapshot_json = match &record.runtime_snapshot_json {
+            Some(v) => Some(serde_json::to_string(v).unwrap_or_default()),
+            None => None,
+        };
+        conn.execute(
+            "INSERT INTO mcp_install_records (
+                server_id, catalog_item_id, catalog_version, strategy_id, trust_level,
+                package_lock_json, runtime_snapshot_json, installed_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+             ON CONFLICT(server_id) DO UPDATE SET
+                catalog_item_id = excluded.catalog_item_id,
+                catalog_version = excluded.catalog_version,
+                strategy_id = excluded.strategy_id,
+                trust_level = excluded.trust_level,
+                package_lock_json = excluded.package_lock_json,
+                runtime_snapshot_json = excluded.runtime_snapshot_json,
+                updated_at = CURRENT_TIMESTAMP",
+            params![
+                record.server_id,
+                record.catalog_item_id,
+                record.catalog_version,
+                record.strategy_id,
+                trust_level,
+                lock_json,
+                runtime_snapshot_json,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get managed install record by server id.
+    pub fn get_mcp_install_record(
+        &self,
+        server_id: &str,
+    ) -> AppResult<Option<crate::models::McpInstallRecord>> {
+        let conn = self.get_connection()?;
+        let result = conn.query_row(
+            "SELECT server_id, catalog_item_id, catalog_version, strategy_id, trust_level, package_lock_json, runtime_snapshot_json, installed_at, updated_at
+             FROM mcp_install_records WHERE server_id = ?1",
+            params![server_id],
+            |row| {
+                let trust_level_str: String = row.get(4)?;
+                let trust_level = match trust_level_str.as_str() {
+                    "official" => crate::models::McpCatalogTrustLevel::Official,
+                    "verified" => crate::models::McpCatalogTrustLevel::Verified,
+                    _ => crate::models::McpCatalogTrustLevel::Community,
+                };
+                let package_lock_json: Option<String> = row.get(5)?;
+                let runtime_snapshot_json: Option<String> = row.get(6)?;
+                Ok(crate::models::McpInstallRecord {
+                    server_id: row.get(0)?,
+                    catalog_item_id: row.get(1)?,
+                    catalog_version: row.get(2)?,
+                    strategy_id: row.get(3)?,
+                    trust_level,
+                    package_lock_json: package_lock_json
+                        .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok()),
+                    runtime_snapshot_json: runtime_snapshot_json
+                        .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok()),
+                    installed_at: row.get(7)?,
+                    updated_at: row.get(8)?,
+                })
+            },
+        );
+
+        match result {
+            Ok(record) => Ok(Some(record)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(AppError::database(e.to_string())),
+        }
+    }
+
+    /// Remove managed install record.
+    pub fn delete_mcp_install_record(&self, server_id: &str) -> AppResult<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "DELETE FROM mcp_install_records WHERE server_id = ?1",
+            params![server_id],
+        )?;
+        Ok(())
     }
 
     // ========================================================================

@@ -362,6 +362,15 @@
     "importErrors": "Errors",
     "duplicateNameWarning": "Duplicate server name detected. Runtime tools remain isolated by server id.",
     "diagnosticsTitle": "Connection Diagnostics",
+    "runtimeInventoryTitle": "Runtime Inventory",
+    "runtimeInventoryEmpty": "No runtime data",
+    "runtimeHealthy": "healthy",
+    "runtimeUnhealthy": "unhealthy",
+    "runtimeSource": "source",
+    "runtimePath": "path",
+    "repairRuntime": "Repair",
+    "repairingRuntime": "Repairing...",
+    "loading": "Loading...",
     "show": "Show",
     "hide": "Hide",
     "noConnectedServers": "No connected MCP servers",
@@ -374,6 +383,55 @@
     "lastErrorMeta": "last_error={{value}}",
     "protocolMeta": "protocol={{value}}",
     "exportSuccess": "MCP configuration exported",
+    "tabs": {
+      "installed": "Installed",
+      "discover": "Discover"
+    },
+    "discover": {
+      "title": "Discover",
+      "searchPlaceholder": "Search MCP servers, vendors, tags...",
+      "empty": "No catalog entries",
+      "docs": "Docs",
+      "install": "Install",
+      "installAnother": "Install Another",
+      "installed": "Installed ({{count}})",
+      "managedInstall": "Managed",
+      "manualInstall": "Manual",
+      "catalogSource": "Catalog source: {{source}}",
+      "fetchedAt": "Fetched: {{value}}",
+      "signatureValid": "Signature: verified",
+      "signatureInvalid": "Signature: invalid (installation disabled)",
+      "refreshFallback": "Catalog refresh fell back to builtin seed: {{reason}}",
+      "strategyCount": "{{count}} strategies",
+      "source": {
+        "remote": "Remote Signed Catalog",
+        "builtin": "Builtin Seed Catalog"
+      },
+      "trust": {
+        "all": "All",
+        "official": "Official",
+        "verified": "Verified",
+        "community": "Community"
+      }
+    },
+    "install": {
+      "title": "Install MCP Service",
+      "stepStrategy": "1. Choose strategy",
+      "stepEnvironment": "2. Environment checks",
+      "stepSecrets": "3. Secrets and options",
+      "stepProgress": "4. Install progress",
+      "aliasPlaceholder": "Server alias",
+      "missingRuntimes": "Missing runtimes",
+      "runtimeReady": "All required runtimes detected",
+      "waiting": "Waiting to start install",
+      "communityConfirm": "I understand this is a community-maintained MCP server and may carry additional risks.",
+      "installNow": "Install now",
+      "installing": "Installing...",
+      "installSucceeded": "MCP server installed",
+      "installFailed": "Installation failed. Review diagnostics and retry.",
+      "retry": "Retry failed install",
+      "retrying": "Retrying..."
+    },
     "eventActions": {
       "add": "Add",
       "update": "Update",
@@ -384,7 +442,12 @@
       "delete": "Delete",
       "test": "Test",
       "toggle": "Toggle",
-      "testEnabled": "Test Enabled"
+      "catalogRefresh": "Catalog Refresh",
+      "testEnabled": "Test Enabled",
+      "installProgress": "Install Progress",
+      "installLog": "Install Log",
+      "oauthState": "OAuth State",
+      "runtimeRepair": "Runtime Repair"
     },
     "eventDetails": {
       "testMetrics": "latency={{latency}}ms tools={{tools}}",
@@ -405,7 +468,10 @@
       "disconnectServer": "Failed to disconnect MCP server",
       "deleteServer": "Failed to delete MCP server",
       "addServer": "Failed to add MCP server",
-      "importServers": "Failed to import MCP servers"
+      "importServers": "Failed to import MCP servers",
+      "fetchCatalog": "Failed to fetch MCP catalog",
+      "previewInstall": "Failed to preview MCP install",
+      "installCatalog": "Failed to install MCP catalog item"
     }
   },
 
@@ -513,6 +579,10 @@
       "serverRegistryDesc": "Browse available MCP servers",
       "addServer": "Add MCP Server",
       "addServerDesc": "Configure a new MCP server",
+      "openDiscover": "Open MCP Discover",
+      "openDiscoverDesc": "Browse recommended MCP services and trust levels",
+      "installRecommended": "Install Recommended MCP",
+      "installRecommendedDesc": "Open Discover and install the top official MCP entry",
       "refreshServers": "Refresh Servers",
       "refreshServersDesc": "Reload MCP server connections",
       "importConfig": "Import MCP Config",

@@ -10,5 +10,7 @@ export { ServerRegistry } from './ServerRegistry';
 export { ServerCard } from './ServerCard';
 export { AddServerDialog } from './AddServerDialog';
 export { ImportDialog } from './ImportDialog';
+export { DiscoverTab } from './DiscoverTab';
+export { InstallCatalogDialog } from './InstallCatalogDialog';
 
 export default ServerRegistry;

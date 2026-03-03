@@ -743,6 +743,20 @@ impl OrchestratorService {
         self
     }
 
+    /// Inject a fixed selected-skill snapshot without registering skill hooks.
+    ///
+    /// This is used when frontend/user selection should be treated as authoritative
+    /// for both prompt skill injection and runtime tool policy filtering.
+    pub fn with_selected_skills(
+        mut self,
+        selected_skills: std::sync::Arc<
+            tokio::sync::RwLock<Vec<crate::services::skills::model::SkillMatch>>,
+        >,
+    ) -> Self {
+        self.selected_skills = Some(selected_skills);
+        self
+    }
+
     /// Register memory-related lifecycle hooks.
     ///
     /// Wires the ProjectMemoryStore into the agentic lifecycle so that:

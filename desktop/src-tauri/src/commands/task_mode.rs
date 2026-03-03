@@ -593,6 +593,112 @@ async fn sync_kernel_task_phase_by_linked_session_and_emit(
     emit_kernel_updates(app, kernel_state, &kernel_session_ids, source).await;
 }
 
+fn injection_phase_to_context_phase(phase: crate::services::skills::model::InjectionPhase) -> &'static str {
+    match phase {
+        crate::services::skills::model::InjectionPhase::Planning => "planning",
+        crate::services::skills::model::InjectionPhase::Implementation => "implementation",
+        crate::services::skills::model::InjectionPhase::Retry => "implementation",
+        crate::services::skills::model::InjectionPhase::Always => "analysis",
+    }
+}
+
+async fn assemble_enriched_context_v2(
+    app_state: &AppState,
+    knowledge_state: &crate::commands::knowledge::KnowledgeState,
+    project_path: &str,
+    query: &str,
+    phase: crate::services::skills::model::InjectionPhase,
+    context_sources: Option<&crate::services::task_mode::context_provider::ContextSourceConfig>,
+    mode: &str,
+    session_id: Option<&str>,
+    include_knowledge: bool,
+) -> crate::services::task_mode::context_provider::EnrichedContext {
+    let Some(mut config) = context_sources.cloned() else {
+        return crate::services::task_mode::context_provider::EnrichedContext::default();
+    };
+
+    if !include_knowledge {
+        if let Some(knowledge) = config.knowledge.as_mut() {
+            knowledge.enabled = false;
+        }
+    }
+
+    let request = crate::commands::context_v2::PrepareTurnContextV2Request {
+        project_path: project_path.to_string(),
+        query: query.to_string(),
+        project_id: if config.project_id.trim().is_empty() {
+            None
+        } else {
+            Some(config.project_id.clone())
+        },
+        session_id: session_id.map(|id| id.to_string()),
+        mode: Some(mode.to_string()),
+        turn_id: None,
+        intent: None,
+        phase: Some(injection_phase_to_context_phase(phase).to_string()),
+        conversation_history: Vec::new(),
+        context_sources: Some(config),
+        rules: Vec::new(),
+        manual_blocks: Vec::new(),
+        input_token_budget: None,
+        reserved_output_tokens: None,
+        hard_limit: None,
+        compaction_policy: None,
+        fault_injection: None,
+        enforce_user_skill_selection: true,
+    };
+
+    let assembly = match crate::commands::context_v2::assemble_turn_context_internal(
+        request,
+        app_state,
+        knowledge_state,
+    )
+    .await
+    {
+        Ok(resp) => resp,
+        Err(err) => {
+            tracing::warn!(
+                "[task_mode] Context V2 assembly failed, using empty context: {}",
+                err
+            );
+            return crate::services::task_mode::context_provider::EnrichedContext::default();
+        }
+    };
+
+    let slices = crate::commands::context_v2::split_assembly_into_slices(&assembly);
+    let selected_skills =
+        crate::services::task_mode::context_provider::hydrate_skill_matches_by_ids(
+            app_state,
+            project_path,
+            &assembly.diagnostics.effective_skill_ids,
+        )
+        .await;
+
+    let skill_expertise = if !selected_skills.is_empty() {
+        selected_skills
+            .iter()
+            .map(|m| format!("{} best practices", m.skill.name))
+            .collect::<Vec<_>>()
+    } else {
+        assembly
+            .diagnostics
+            .selected_skills
+            .iter()
+            .map(|name| format!("{} best practices", name))
+            .collect::<Vec<_>>()
+    };
+
+    crate::services::task_mode::context_provider::EnrichedContext {
+        knowledge_block: slices.knowledge_block,
+        memory_block: slices.memory_block,
+        skills_block: slices.skills_block,
+        skill_expertise,
+        selected_skills,
+        blocked_tools: assembly.diagnostics.blocked_tools,
+        skill_selection_reason: assembly.diagnostics.selection_reason,
+    }
+}
+
 // ============================================================================
 // Commands
 // ============================================================================
@@ -670,6 +776,8 @@ pub async fn generate_task_prd(
     conversation_history: Option<Vec<ConversationTurnInput>>,
     max_context_tokens: Option<usize>,
     context_sources: Option<crate::services::task_mode::context_provider::ContextSourceConfig>,
+    project_path: Option<String>,
+    projectPath: Option<String>,
     state: tauri::State<'_, TaskModeState>,
     app_state: tauri::State<'_, AppState>,
     knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
@@ -839,28 +947,38 @@ pub async fn generate_task_prd(
             };
 
             // Query domain knowledge for PRD generation (only if user enabled sources)
-            let project_path_str = std::env::current_dir()
-                .unwrap_or_else(|_| std::path::PathBuf::from("."))
-                .to_string_lossy()
+            let resolved_project_path = project_path.or(projectPath);
+            let project_path_str = resolved_project_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .unwrap_or(".")
                 .to_string();
-            let enriched = if let Some(ref cs) = context_sources {
-                crate::services::task_mode::context_provider::query_selected_context(
-                    cs,
-                    &knowledge_state,
-                    &app_state,
-                    &project_path_str,
-                    &description,
-                    crate::services::skills::model::InjectionPhase::Planning,
-                )
-                .await
-            } else {
-                crate::services::task_mode::context_provider::EnrichedContext::default()
-            };
+            let enriched = assemble_enriched_context_v2(
+                app_state.inner(),
+                knowledge_state.inner(),
+                &project_path_str,
+                &description,
+                crate::services::skills::model::InjectionPhase::Planning,
+                context_sources.as_ref(),
+                "task",
+                Some(session_id.as_str()),
+                true,
+            )
+            .await;
             let combined_context = crate::services::task_mode::context_provider::merge_enriched_context(
                 exploration_context_str.as_deref(),
                 &enriched.knowledge_block,
                 &enriched.memory_block,
             );
+            let combined_context = match (
+                combined_context,
+                enriched.skills_block.trim().is_empty(),
+            ) {
+                (Some(base), false) => Some(format!("{}\n\n{}", base, enriched.skills_block)),
+                (None, false) => Some(enriched.skills_block.clone()),
+                (base, true) => base,
+            };
 
             let prd = match prd_generator::generate_prd_with_llm(
                 llm_provider,
@@ -1683,6 +1801,8 @@ pub async fn approve_task_prd(
     global_default_agent: Option<String>,
     phase_configs: Option<HashMap<String, PhaseConfigInput>>,
     context_sources: Option<crate::services::task_mode::context_provider::ContextSourceConfig>,
+    project_path: Option<String>,
+    projectPath: Option<String>,
 ) -> Result<CommandResponse<bool>, String> {
     let task_description = {
         let sessions = state.sessions.read().await;
@@ -1826,36 +1946,30 @@ pub async fn approve_task_prd(
             };
 
             // Pre-compute domain context before tokio::spawn (needs Tauri State access)
-            // Only query sources the user explicitly enabled via context_sources
-            let project_path_str = std::env::current_dir()
-                .unwrap_or_else(|_| std::path::PathBuf::from("."))
-                .to_string_lossy()
+            // Only query sources the user explicitly enabled via context_sources.
+            let resolved_project_path = project_path.or(projectPath);
+            let project_path_str = resolved_project_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .unwrap_or(".")
                 .to_string();
-            let enriched_ctx = if let Some(ref cs) = context_sources {
-                if matches!(mode, StoryExecutionMode::Llm) {
-                    // LLM mode: skip knowledge pre-injection (handled by SearchKnowledge tool)
-                    crate::services::task_mode::context_provider::query_selected_context_without_knowledge(
-                        cs, &app_state, &project_path_str,
-                        &task_description, crate::services::skills::model::InjectionPhase::Implementation,
-                    ).await
-                } else {
-                    // CLI mode: full pre-injection including knowledge (no tools available)
-                    crate::services::task_mode::context_provider::query_selected_context(
-                        cs,
-                        &knowledge_state,
-                        &app_state,
-                        &project_path_str,
-                        &task_description,
-                        crate::services::skills::model::InjectionPhase::Implementation,
-                    )
-                    .await
-                }
-            } else {
-                crate::services::task_mode::context_provider::EnrichedContext::default()
-            };
+            let enriched_ctx = assemble_enriched_context_v2(
+                app_state.inner(),
+                knowledge_state.inner(),
+                &project_path_str,
+                &task_description,
+                crate::services::skills::model::InjectionPhase::Implementation,
+                context_sources.as_ref(),
+                "task",
+                Some(session_id.as_str()),
+                !matches!(mode, StoryExecutionMode::Llm),
+            )
+            .await;
             let knowledge_block = enriched_ctx.knowledge_block;
             let memory_block = enriched_ctx.memory_block;
             let skills_block = enriched_ctx.skills_block;
+            let selected_skill_matches = enriched_ctx.selected_skills;
 
             // Pre-compute knowledge tool params for LLM mode (needs Tauri State access)
             let knowledge_tool_params: Option<KnowledgeToolParams> = if matches!(
@@ -2020,9 +2134,7 @@ pub async fn approve_task_prd(
                     });
                 };
 
-                // Resolve project path from current working directory
-                let project_path =
-                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                let project_path = std::path::PathBuf::from(project_path_str.clone());
 
                 // Create story executor that delegates to the appropriate backend.
                 // In CLI mode, spawns external CLI tools. In LLM mode, uses OrchestratorService.
@@ -2034,6 +2146,7 @@ pub async fn approve_task_prd(
                     knowledge_block,
                     memory_block,
                     skills_block,
+                    selected_skill_matches,
                     knowledge_tool_params,
                 );
 
@@ -2902,6 +3015,8 @@ pub async fn run_requirement_analysis(
     baseUrl: Option<String>,
     locale: Option<String>,
     context_sources: Option<crate::services::task_mode::context_provider::ContextSourceConfig>,
+    project_path: Option<String>,
+    projectPath: Option<String>,
     app_state: tauri::State<'_, AppState>,
     state: tauri::State<'_, TaskModeState>,
     knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
@@ -2979,23 +3094,25 @@ pub async fn run_requirement_analysis(
     };
 
     // Query domain knowledge for requirement analysis (only if user enabled sources)
-    let project_path_str = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .to_string_lossy()
+    let project_path_str = project_path
+        .or(projectPath)
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .unwrap_or(".")
         .to_string();
-    let enriched = if let Some(ref cs) = context_sources {
-        crate::services::task_mode::context_provider::query_selected_context(
-            cs,
-            &knowledge_state,
-            &app_state,
-            &project_path_str,
-            &task_description,
-            crate::services::skills::model::InjectionPhase::Planning,
-        )
-        .await
-    } else {
-        crate::services::task_mode::context_provider::EnrichedContext::default()
-    };
+    let enriched = assemble_enriched_context_v2(
+        app_state.inner(),
+        knowledge_state.inner(),
+        &project_path_str,
+        &task_description,
+        crate::services::skills::model::InjectionPhase::Planning,
+        context_sources.as_ref(),
+        "task",
+        Some(session_id.as_str()),
+        true,
+    )
+    .await;
     let knowledge_block = &enriched.knowledge_block;
     let memory_block = &enriched.memory_block;
     let skills_block = &enriched.skills_block;
@@ -3151,6 +3268,8 @@ pub async fn run_architecture_review(
     baseUrl: Option<String>,
     locale: Option<String>,
     context_sources: Option<crate::services::task_mode::context_provider::ContextSourceConfig>,
+    project_path: Option<String>,
+    projectPath: Option<String>,
     app_state: tauri::State<'_, AppState>,
     state: tauri::State<'_, TaskModeState>,
     knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
@@ -3228,23 +3347,25 @@ pub async fn run_architecture_review(
     };
 
     // Query domain knowledge for architecture review (only if user enabled sources)
-    let project_path_str = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .to_string_lossy()
+    let project_path_str = project_path
+        .or(projectPath)
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .unwrap_or(".")
         .to_string();
-    let enriched = if let Some(ref cs) = context_sources {
-        crate::services::task_mode::context_provider::query_selected_context(
-            cs,
-            &knowledge_state,
-            &app_state,
-            &project_path_str,
-            &prd_json,
-            crate::services::skills::model::InjectionPhase::Planning,
-        )
-        .await
-    } else {
-        crate::services::task_mode::context_provider::EnrichedContext::default()
-    };
+    let enriched = assemble_enriched_context_v2(
+        app_state.inner(),
+        knowledge_state.inner(),
+        &project_path_str,
+        &prd_json,
+        crate::services::skills::model::InjectionPhase::Planning,
+        context_sources.as_ref(),
+        "task",
+        Some(session_id.as_str()),
+        true,
+    )
+    .await;
     let knowledge_block = &enriched.knowledge_block;
     let memory_block = &enriched.memory_block;
     let skills_block = &enriched.skills_block;
@@ -3461,7 +3582,7 @@ pub async fn prepare_design_doc_for_task(
     // 1. Resolve project path
     let base = match project_path {
         Some(ref p) if !p.trim().is_empty() => std::path::PathBuf::from(p),
-        _ => std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+        _ => std::path::PathBuf::from("."),
     };
 
     // 2. Serialize PRD to JSON and save as {base}/prd.json
@@ -3595,6 +3716,7 @@ fn build_story_executor(
     knowledge_block: String,
     memory_block: String,
     skills_block: String,
+    selected_skill_matches: Vec<crate::services::skills::model::SkillMatch>,
     knowledge_tool_params: Option<KnowledgeToolParams>,
 ) -> impl Fn(StoryExecutionContext) -> Pin<Box<dyn Future<Output = StoryExecutionOutcome> + Send>>
        + Send
@@ -3609,6 +3731,7 @@ fn build_story_executor(
         let knowledge_block = knowledge_block.clone();
         let memory_block = memory_block.clone();
         let skills_block = skills_block.clone();
+        let selected_skill_matches = selected_skill_matches.clone();
         let knowledge_tool_params = knowledge_tool_params.clone();
         Box::pin(async move {
             eprintln!(
@@ -3670,6 +3793,7 @@ fn build_story_executor(
                         &knowledge_block,
                         &memory_block,
                         &skills_block,
+                        selected_skill_matches.as_slice(),
                         knowledge_tool_params.as_ref(),
                         ctx.cancel_token.clone(),
                     )
@@ -3816,6 +3940,7 @@ async fn execute_story_via_llm(
     knowledge_block: &str,
     memory_block: &str,
     skills_block: &str,
+    selected_skill_matches: &[crate::services::skills::model::SkillMatch],
     knowledge_tool_params: Option<&KnowledgeToolParams>,
     cancel_token: tokio_util::sync::CancellationToken,
 ) -> StoryExecutionOutcome {
@@ -3878,6 +4003,13 @@ async fn execute_story_via_llm(
     let (search_provider, search_api_key) = resolve_search_provider_for_tools();
     let mut orchestrator =
         OrchestratorService::new(config).with_search_provider(&search_provider, search_api_key);
+
+    if !selected_skill_matches.is_empty() {
+        let selected_skills = std::sync::Arc::new(tokio::sync::RwLock::new(
+            selected_skill_matches.to_vec(),
+        ));
+        orchestrator = orchestrator.with_selected_skills(selected_skills);
+    }
 
     // Wire database pool for CodebaseSearch if available
     if let Some(pool) = db_pool {
@@ -4628,6 +4760,7 @@ mod tests {
                 "",
                 "",
                 "",
+                &[],
                 None,
                 token.clone(),
             ),

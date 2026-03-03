@@ -3,7 +3,7 @@
 //! Business logic for MCP server management.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::models::{
@@ -124,6 +124,52 @@ impl McpService {
         let _ = self.keyring.delete_api_key(&Self::headers_secret_key(id));
     }
 
+    fn cleanup_managed_install_assets(&self, id: &str) -> AppResult<()> {
+        let Some(record) = self.db.get_mcp_install_record(id)? else {
+            return Ok(());
+        };
+        let Some(lock) = record.package_lock_json else {
+            return Ok(());
+        };
+
+        let root = managed_root_path().ok_or_else(|| {
+            AppError::config("Cannot determine home directory for managed MCP cleanup")
+        })?;
+        if !root.exists() {
+            return Ok(());
+        }
+        let root = root.canonicalize().unwrap_or(root);
+        let mut seen = std::collections::HashSet::new();
+        for path in extract_managed_paths(&lock) {
+            let path_key = path.to_string_lossy().to_string();
+            if !seen.insert(path_key) {
+                continue;
+            }
+            if !path.exists() {
+                continue;
+            }
+            let canonical = match path.canonicalize() {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            if !canonical.starts_with(&root) {
+                tracing::warn!(
+                    server_id = %id,
+                    path = %canonical.display(),
+                    "Skip cleanup outside managed MCP root"
+                );
+                continue;
+            }
+
+            if canonical.is_dir() {
+                std::fs::remove_dir_all(&canonical)?;
+            } else {
+                std::fs::remove_file(&canonical)?;
+            }
+        }
+        Ok(())
+    }
+
     /// List all MCP servers.
     pub fn list_servers(&self) -> AppResult<Vec<McpServer>> {
         self.list_servers_with_secrets(false)
@@ -196,6 +242,9 @@ impl McpService {
             last_connected_at: None,
             retry_count: 0,
             last_checked: None,
+            managed_install: false,
+            catalog_item_id: None,
+            trust_level: None,
             created_at: None,
             updated_at: None,
         };
@@ -276,8 +325,26 @@ impl McpService {
 
     /// Remove an MCP server.
     pub fn remove_server(&self, id: &str) -> AppResult<()> {
-        self.db.delete_mcp_server(id)?;
+        let cleanup_result = self.cleanup_managed_install_assets(id);
+        let delete_result = self.db.delete_mcp_server(id);
         self.clear_sensitive(id);
+        if let Err(delete_error) = delete_result {
+            if let Err(cleanup_error) = cleanup_result {
+                return Err(AppError::database(format!(
+                    "Failed to cleanup managed assets ({}) and remove server ({})",
+                    cleanup_error, delete_error
+                )));
+            }
+            return Err(delete_error);
+        }
+        let _ = self.db.delete_mcp_install_record(id);
+        if let Err(cleanup_error) = cleanup_result {
+            tracing::warn!(
+                server_id = %id,
+                error = %cleanup_error,
+                "MCP server removed but managed asset cleanup was partial"
+            );
+        }
         Ok(())
     }
 
@@ -663,6 +730,43 @@ impl McpService {
     }
 }
 
+fn managed_root_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|home| home.join(".plan-cascade"))
+}
+
+fn extract_managed_paths(value: &serde_json::Value) -> Vec<PathBuf> {
+    const KEYS: [&str; 3] = ["wrapper_path", "tool_dir", "venv_dir"];
+    KEYS.iter()
+        .filter_map(|key| value.get(*key))
+        .filter_map(|raw| raw.as_str())
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute() || is_managed_relative(path))
+        .map(normalize_managed_path)
+        .collect()
+}
+
+fn is_managed_relative(path: &Path) -> bool {
+    use std::ffi::OsStr;
+    let first = path.components().next();
+    matches!(
+        first,
+        Some(std::path::Component::Normal(part))
+            if part == OsStr::new(".plan-cascade")
+                || part == OsStr::new("mcp-tools")
+                || part == OsStr::new("mcp-launchers")
+    )
+}
+
+fn normalize_managed_path(path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        path
+    } else if let Some(home) = dirs::home_dir() {
+        home.join(path)
+    } else {
+        path
+    }
+}
+
 enum ImportSingleResult {
     Added(String),
 }
@@ -670,6 +774,7 @@ enum ImportSingleResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_generate_id() {
@@ -677,5 +782,39 @@ mod tests {
         let id2 = McpService::generate_id();
         assert!(id1.starts_with("mcp-"));
         assert!(id2.starts_with("mcp-"));
+    }
+
+    #[test]
+    fn test_managed_relative_path_detection() {
+        assert!(is_managed_relative(Path::new(
+            ".plan-cascade/mcp-launchers/x.sh"
+        )));
+        assert!(is_managed_relative(Path::new("mcp-tools/node/pkg")));
+        assert!(is_managed_relative(Path::new("mcp-launchers/a.cmd")));
+        assert!(!is_managed_relative(Path::new("../outside")));
+        assert!(!is_managed_relative(Path::new("Downloads/something")));
+    }
+
+    #[test]
+    fn test_extract_managed_paths_filters_unknown_fields() {
+        let payload = json!({
+            "wrapper_path": "/tmp/mcp-wrapper.sh",
+            "tool_dir": "mcp-tools/node/test",
+            "venv_dir": "../escape",
+            "other_path": "/tmp/ignored"
+        });
+        let paths = extract_managed_paths(&payload);
+        let rendered: Vec<String> = paths
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        assert!(rendered
+            .iter()
+            .any(|value| value.contains("/tmp/mcp-wrapper.sh")));
+        assert!(rendered
+            .iter()
+            .any(|value| value.contains("mcp-tools/node/test")));
+        assert!(!rendered.iter().any(|value| value.contains("escape")));
+        assert!(!rendered.iter().any(|value| value.contains("ignored")));
     }
 }

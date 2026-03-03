@@ -9,6 +9,7 @@
 //! warning and return empty strings so that the LLM never sees error messages —
 //! it simply receives less context, preserving the original behavior.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -28,12 +29,13 @@ use crate::services::skills::config::load_skills_config;
 use crate::services::skills::discovery::discover_all_skills;
 use crate::services::skills::generator::SkillGeneratorStore;
 use crate::services::skills::index::build_index;
-use crate::services::skills::injector::inject_skill_summaries;
+use crate::services::skills::injector::{inject_skill_summaries, inject_skills};
 use crate::services::skills::model::{
     GeneratedSkillRecord, InjectionPhase, SelectionPolicy, SkillDocument, SkillIndex, SkillMatch,
     SkillSource,
 };
 use crate::services::skills::select::select_skills_for_session;
+use crate::services::tools::definitions::get_tool_definitions_from_registry;
 use crate::services::tools::system_prompt::build_memory_section;
 use crate::state::AppState;
 
@@ -159,6 +161,28 @@ pub struct SkillsSourceConfig {
     /// Empty = use automatic selection logic (backward-compatible).
     #[serde(default)]
     pub selected_skill_ids: Vec<String>,
+    /// Skill selection mode.
+    /// `auto` = use lexical/detection policy.
+    /// `explicit` = strictly respect `selected_skill_ids`.
+    #[serde(default)]
+    pub selection_mode: SkillSelectionMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillSelectionMode {
+    #[default]
+    Auto,
+    Explicit,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct EffectiveSkillPlan {
+    pub matches: Vec<SkillMatch>,
+    pub skills_block: String,
+    pub skill_expertise: Vec<String>,
+    pub blocked_tools: Vec<String>,
+    pub selection_reason: String,
 }
 
 /// Aggregated domain context from all sources.
@@ -168,6 +192,9 @@ pub struct EnrichedContext {
     pub memory_block: String,
     pub skills_block: String,
     pub skill_expertise: Vec<String>,
+    pub selected_skills: Vec<SkillMatch>,
+    pub blocked_tools: Vec<String>,
+    pub skill_selection_reason: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -302,18 +329,28 @@ pub async fn query_selected_context(
         String::new()
     };
 
-    let (skills_block, skill_expertise) = if config.skills.as_ref().map_or(false, |s| s.enabled) {
+    let (skills_block, skill_expertise, selected_skills, blocked_tools, skill_selection_reason) =
+        if config.skills.as_ref().map_or(false, |s| s.enabled) {
         let s = config.skills.as_ref().unwrap();
-        select_skills_for_task_filtered(
+        let effective = resolve_effective_skills(
             app_state,
             project_path,
             query,
             phase,
             &s.selected_skill_ids,
+            s.selection_mode,
+            true,
         )
-        .await
+        .await;
+        (
+            effective.skills_block,
+            effective.skill_expertise,
+            effective.matches,
+            effective.blocked_tools,
+            effective.selection_reason,
+        )
     } else {
-        (String::new(), vec![])
+        (String::new(), vec![], vec![], vec![], String::new())
     };
 
     EnrichedContext {
@@ -321,6 +358,9 @@ pub async fn query_selected_context(
         memory_block,
         skills_block,
         skill_expertise,
+        selected_skills,
+        blocked_tools,
+        skill_selection_reason,
     }
 }
 
@@ -361,18 +401,28 @@ pub async fn query_selected_context_without_knowledge(
         String::new()
     };
 
-    let (skills_block, skill_expertise) = if config.skills.as_ref().map_or(false, |s| s.enabled) {
+    let (skills_block, skill_expertise, selected_skills, blocked_tools, skill_selection_reason) =
+        if config.skills.as_ref().map_or(false, |s| s.enabled) {
         let s = config.skills.as_ref().unwrap();
-        select_skills_for_task_filtered(
+        let effective = resolve_effective_skills(
             app_state,
             project_path,
             query,
             phase,
             &s.selected_skill_ids,
+            s.selection_mode,
+            true,
         )
-        .await
+        .await;
+        (
+            effective.skills_block,
+            effective.skill_expertise,
+            effective.matches,
+            effective.blocked_tools,
+            effective.selection_reason,
+        )
     } else {
-        (String::new(), vec![])
+        (String::new(), vec![], vec![], vec![], String::new())
     };
 
     EnrichedContext {
@@ -380,6 +430,9 @@ pub async fn query_selected_context_without_knowledge(
         memory_block,
         skills_block,
         skill_expertise,
+        selected_skills,
+        blocked_tools,
+        skill_selection_reason,
     }
 }
 
@@ -579,30 +632,21 @@ pub async fn select_skill_matches_for_task_filtered(
     phase: InjectionPhase,
     selected_skill_ids: &[String],
 ) -> Vec<SkillMatch> {
-    let project_root = Path::new(project_path);
-    let index = match build_unified_skill_index_for_task(app_state, project_path).await {
-        Some(idx) => idx,
-        None => return vec![],
-    };
-
-    if selected_skill_ids.is_empty() {
-        let policy = SelectionPolicy::default();
-        return select_skills_for_session(&index, project_root, query, &phase, &policy);
-    }
-
-    // Filter to user-selected IDs
-    let id_set: std::collections::HashSet<&str> =
-        selected_skill_ids.iter().map(|s| s.as_str()).collect();
-    index
-        .skills()
-        .iter()
-        .filter(|doc| doc.enabled && id_set.contains(doc.id.as_str()))
-        .map(|doc| SkillMatch {
-            score: 1.0,
-            match_reason: crate::services::skills::model::MatchReason::UserForced,
-            skill: doc.to_summary(false),
-        })
-        .collect()
+    resolve_effective_skills(
+        app_state,
+        project_path,
+        query,
+        phase,
+        selected_skill_ids,
+        if selected_skill_ids.is_empty() {
+            SkillSelectionMode::Auto
+        } else {
+            SkillSelectionMode::Explicit
+        },
+        true,
+    )
+    .await
+    .matches
 }
 
 /// Select Skills with optional user-specified ID filtering.
@@ -616,27 +660,175 @@ pub async fn select_skills_for_task_filtered(
     phase: InjectionPhase,
     selected_skill_ids: &[String],
 ) -> (String, Vec<String>) {
-    let matches = select_skill_matches_for_task_filtered(
+    let effective = resolve_effective_skills(
         app_state,
         project_path,
         query,
         phase,
         selected_skill_ids,
+        if selected_skill_ids.is_empty() {
+            SkillSelectionMode::Auto
+        } else {
+            SkillSelectionMode::Explicit
+        },
+        true,
     )
     .await;
+    (effective.skills_block, effective.skill_expertise)
+}
 
-    if matches.is_empty() {
-        return (String::new(), vec![]);
+fn normalized_allowed_tools_from_skill_matches(matches: &[SkillMatch]) -> Option<HashSet<String>> {
+    let mut allowed = HashSet::<String>::new();
+    let mut has_allowlist = false;
+
+    for skill_match in matches {
+        if !skill_match.skill.enabled || skill_match.skill.allowed_tools.is_empty() {
+            continue;
+        }
+        has_allowlist = true;
+        for tool in &skill_match.skill.allowed_tools {
+            let normalized = tool.trim().to_ascii_lowercase();
+            if !normalized.is_empty() {
+                allowed.insert(normalized);
+            }
+        }
     }
 
-    let expertise: Vec<String> = matches
+    if !has_allowlist {
+        return None;
+    }
+
+    // Minimum safe exploration set.
+    for safe_tool in ["read", "ls", "glob", "grep", "cwd"] {
+        allowed.insert(safe_tool.to_string());
+    }
+    Some(allowed)
+}
+
+pub fn derive_blocked_tools_from_skill_policy(matches: &[SkillMatch]) -> Vec<String> {
+    let Some(allowed) = normalized_allowed_tools_from_skill_matches(matches) else {
+        return vec![];
+    };
+
+    let mut blocked = get_tool_definitions_from_registry()
+        .into_iter()
+        .filter_map(|tool| {
+            let normalized = tool.name.trim().to_ascii_lowercase();
+            if allowed.contains(&normalized) {
+                None
+            } else {
+                Some(tool.name)
+            }
+        })
+        .collect::<Vec<_>>();
+    blocked.sort();
+    blocked.dedup();
+    blocked
+}
+
+fn select_skill_matches_by_ids(index: &SkillIndex, selected_skill_ids: &[String]) -> Vec<SkillMatch> {
+    let id_set: HashSet<&str> = selected_skill_ids.iter().map(|s| s.as_str()).collect();
+    index
+        .skills()
         .iter()
-        .map(|m| format!("{} best practices", m.skill.name))
-        .collect();
+        .filter(|doc| doc.enabled && id_set.contains(doc.id.as_str()))
+        .map(|doc| SkillMatch {
+            score: 1.0,
+            match_reason: crate::services::skills::model::MatchReason::UserForced,
+            skill: doc.to_summary(false),
+        })
+        .collect()
+}
+
+pub async fn hydrate_skill_matches_by_ids(
+    app_state: &AppState,
+    project_path: &str,
+    skill_ids: &[String],
+) -> Vec<SkillMatch> {
+    if skill_ids.is_empty() {
+        return Vec::new();
+    }
+    let Some(index) = build_unified_skill_index_for_task(app_state, project_path).await else {
+        return Vec::new();
+    };
+    select_skill_matches_by_ids(&index, skill_ids)
+}
+
+fn build_skill_block_from_matches(
+    index: &SkillIndex,
+    matches: &[SkillMatch],
+    policy: &SelectionPolicy,
+) -> String {
+    if matches.is_empty() {
+        return String::new();
+    }
+
+    let docs = matches
+        .iter()
+        .filter_map(|m| index.skills().iter().find(|d| d.id == m.skill.id))
+        .collect::<Vec<_>>();
+
+    if docs.len() == matches.len() {
+        return inject_skills(matches, docs.as_slice(), policy);
+    }
+
+    // Fallback path for partial index misses.
+    inject_skill_summaries(matches, policy)
+}
+
+pub async fn resolve_effective_skills(
+    app_state: &AppState,
+    project_path: &str,
+    query: &str,
+    phase: InjectionPhase,
+    selected_skill_ids: &[String],
+    selection_mode: SkillSelectionMode,
+    enforce_user_selection: bool,
+) -> EffectiveSkillPlan {
+    let project_root = Path::new(project_path);
+    let index = match build_unified_skill_index_for_task(app_state, project_path).await {
+        Some(idx) => idx,
+        None => {
+            return EffectiveSkillPlan {
+                selection_reason: "skills_index_unavailable".to_string(),
+                ..EffectiveSkillPlan::default()
+            }
+        }
+    };
+
+    let force_user_selected = enforce_user_selection
+        && (selection_mode == SkillSelectionMode::Explicit || !selected_skill_ids.is_empty());
+
+    let matches = if force_user_selected {
+        select_skill_matches_by_ids(&index, selected_skill_ids)
+    } else {
+        let policy = SelectionPolicy::default();
+        select_skills_for_session(&index, project_root, query, &phase, &policy)
+    };
+
+    let selection_reason = if force_user_selected {
+        "skills_user_selected".to_string()
+    } else if matches.is_empty() {
+        "skills_no_match".to_string()
+    } else {
+        "skills_auto_match".to_string()
+    };
 
     let policy = SelectionPolicy::default();
-    let block = inject_skill_summaries(&matches, &policy);
-    (block, expertise)
+    let skills_block = build_skill_block_from_matches(&index, &matches, &policy);
+    let skill_expertise = matches
+        .iter()
+        .map(|m| format!("{} best practices", m.skill.name))
+        .collect::<Vec<_>>();
+    let blocked_tools = derive_blocked_tools_from_skill_policy(&matches);
+
+    EffectiveSkillPlan {
+        matches,
+        skills_block,
+        skill_expertise,
+        blocked_tools,
+        selection_reason,
+    }
 }
 
 pub async fn build_unified_skill_index_for_task(

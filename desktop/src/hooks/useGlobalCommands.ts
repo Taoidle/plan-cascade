@@ -67,7 +67,16 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
   const timelineStore = useTimelineStore();
 
   const dispatchMcpAction = useCallback(
-    (action: 'open-add' | 'open-import' | 'refresh' | 'test-enabled' | 'export') => {
+    (
+      action:
+        | 'open-add'
+        | 'open-import'
+        | 'open-discover'
+        | 'install-recommended'
+        | 'refresh'
+        | 'test-enabled'
+        | 'export',
+    ) => {
       if (typeof window === 'undefined') return;
       window.dispatchEvent(new CustomEvent('plan-cascade:mcp-command', { detail: { action } }));
     },
@@ -488,6 +497,34 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
         keywords: ['mcp', 'add', 'server', 'new'],
         priority: 85,
         contexts: ['expert', 'mcp'],
+      },
+      {
+        id: 'mcp-open-discover',
+        title: t('commands.mcp.openDiscover'),
+        description: t('commands.mcp.openDiscoverDesc'),
+        category: 'mcp' as CommandCategory,
+        icon: ViewVerticalIcon,
+        action: () => {
+          setMode('mcp');
+          dispatchMcpAction('open-discover');
+        },
+        keywords: ['mcp', 'discover', 'recommended', 'catalog'],
+        priority: 80,
+        contexts: ['expert', 'mcp', 'global'],
+      },
+      {
+        id: 'mcp-install-recommended',
+        title: t('commands.mcp.installRecommended'),
+        description: t('commands.mcp.installRecommendedDesc'),
+        category: 'mcp' as CommandCategory,
+        icon: RocketIcon,
+        action: () => {
+          setMode('mcp');
+          dispatchMcpAction('install-recommended');
+        },
+        keywords: ['mcp', 'install', 'recommended', 'catalog'],
+        priority: 78,
+        contexts: ['expert', 'mcp', 'global'],
       },
       {
         id: 'mcp-refresh-servers',

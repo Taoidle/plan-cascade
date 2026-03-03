@@ -378,6 +378,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
         conversationHistory: conversationHistory || [],
         maxContextTokens: maxContextTokens ?? null,
         contextSources,
+        projectPath: settingsStore.workspacePath || null,
       });
       if (result.success && result.data) {
         set({
@@ -418,6 +419,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
         globalDefaultAgent: defaultAgent || null,
         phaseConfigs,
         contextSources,
+        projectPath: settingsStore.workspacePath || null,
       });
       if (result.success) {
         set({

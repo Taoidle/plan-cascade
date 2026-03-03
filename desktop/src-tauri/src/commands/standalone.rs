@@ -50,9 +50,9 @@ impl StandaloneState {
     pub fn new() -> Self {
         Self {
             orchestrators: Arc::new(RwLock::new(HashMap::new())),
-            working_directory: Arc::new(RwLock::new(
-                std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            )),
+            // Keep startup deterministic: resolve project roots from explicit session/workspace
+            // inputs instead of process cwd.
+            working_directory: Arc::new(RwLock::new(PathBuf::from("."))),
             index_manager: Arc::new(RwLock::new(None)),
         }
     }
@@ -196,11 +196,31 @@ async fn wire_skill_hooks_if_enabled(
     project_path: &str,
     context_sources: Option<&crate::services::task_mode::context_provider::ContextSourceConfig>,
 ) -> OrchestratorService {
-    let hooks_enabled = context_sources
-        .and_then(|cfg| cfg.skills.as_ref().map(|skills| skills.enabled))
-        .unwrap_or(true);
+    let skills_cfg = context_sources.and_then(|cfg| cfg.skills.as_ref());
+    let hooks_enabled = skills_cfg.map(|skills| skills.enabled).unwrap_or(true);
     if !hooks_enabled {
         return orchestrator;
+    }
+
+    if let Some(skills) = skills_cfg {
+        let force_user_selected = matches!(
+            skills.selection_mode,
+            crate::services::task_mode::context_provider::SkillSelectionMode::Explicit
+        ) || !skills.selected_skill_ids.is_empty();
+        if force_user_selected {
+            let effective = crate::services::task_mode::context_provider::resolve_effective_skills(
+                app_state,
+                project_path,
+                "",
+                crate::services::skills::model::InjectionPhase::Implementation,
+                &skills.selected_skill_ids,
+                skills.selection_mode,
+                true,
+            )
+            .await;
+            let selected_skills = Arc::new(RwLock::new(effective.matches));
+            return orchestrator.with_selected_skills(selected_skills);
+        }
     }
 
     let Some(index) =
@@ -802,7 +822,7 @@ pub async fn check_provider_health(
         system_prompt: None,
         max_iterations: 1,
         max_total_tokens: 1000,
-        project_root: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        project_root: PathBuf::from("."),
         streaming: false,
         enable_compaction: false,
         analysis_artifacts_root: analysis_artifacts_root(),

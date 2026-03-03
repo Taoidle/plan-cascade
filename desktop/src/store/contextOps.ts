@@ -35,7 +35,7 @@ import {
 const DEFAULT_POLICY: ContextPolicy = {
   context_v2_pipeline: true,
   memory_v2_ranker: true,
-  context_inspector_ui: false,
+  context_inspector_ui: true,
   pinned_sources: [],
   excluded_sources: [],
   soft_threshold_ratio: 0.85,

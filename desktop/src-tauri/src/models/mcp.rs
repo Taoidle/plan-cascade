@@ -91,6 +91,15 @@ pub struct McpServer {
     pub retry_count: u32,
     /// Last time the server was checked
     pub last_checked: Option<String>,
+    /// Whether this server is installed/managed by MCP catalog installer
+    #[serde(default)]
+    pub managed_install: bool,
+    /// Catalog item identifier if managed install
+    #[serde(default)]
+    pub catalog_item_id: Option<String>,
+    /// Trust level inherited from catalog item
+    #[serde(default)]
+    pub trust_level: Option<McpCatalogTrustLevel>,
     /// When the server was created
     pub created_at: Option<String>,
     /// When the server was last updated
@@ -126,6 +135,9 @@ impl McpServer {
             last_connected_at: None,
             retry_count: 0,
             last_checked: None,
+            managed_install: false,
+            catalog_item_id: None,
+            trust_level: None,
             created_at: None,
             updated_at: None,
         }
@@ -151,6 +163,9 @@ impl McpServer {
             last_connected_at: None,
             retry_count: 0,
             last_checked: None,
+            managed_install: false,
+            catalog_item_id: None,
+            trust_level: None,
             created_at: None,
             updated_at: None,
         }
@@ -242,6 +257,256 @@ pub struct ImportResult {
     pub will_skip: Vec<String>,
     #[serde(default)]
     pub will_fail: Vec<String>,
+}
+
+/// Catalog trust level for a recommended MCP service.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
+pub enum McpCatalogTrustLevel {
+    Official,
+    Verified,
+    Community,
+}
+
+/// Supported runtime kinds for MCP install requirements.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum McpRuntimeKind {
+    Node,
+    Uv,
+    Python,
+    Docker,
+}
+
+/// Strategy kind used by the installer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpInstallStrategyKind {
+    UvTool,
+    PythonVenv,
+    NodeManagedPkg,
+    Docker,
+    StreamHttpApiKey,
+    StreamHttpApiKeyOptional,
+    OauthBridgeMcpRemote,
+    GoBinary,
+}
+
+/// Runtime requirement for an installation strategy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeRequirement {
+    pub runtime: McpRuntimeKind,
+    #[serde(default)]
+    pub min_version: Option<String>,
+    #[serde(default)]
+    pub optional: bool,
+}
+
+/// Verification contract executed after installation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpInstallVerification {
+    #[serde(default = "default_true")]
+    pub require_initialize: bool,
+    #[serde(default = "default_true")]
+    pub require_tools_list: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Strategy metadata for each catalog item.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpInstallStrategy {
+    pub id: String,
+    pub kind: McpInstallStrategyKind,
+    pub priority: u32,
+    #[serde(default)]
+    pub requirements: Vec<RuntimeRequirement>,
+    /// Strategy recipe is intentionally structured JSON DSL.
+    pub recipe: serde_json::Value,
+    pub verification: McpInstallVerification,
+}
+
+/// Secret requirement descriptor for UI forms.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpSecretSchemaField {
+    pub key: String,
+    pub label: String,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub secret_type: Option<String>,
+}
+
+/// Recommended MCP service catalog item.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpCatalogItem {
+    pub id: String,
+    pub name: String,
+    pub vendor: String,
+    pub trust_level: McpCatalogTrustLevel,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub docs_url: Option<String>,
+    #[serde(default)]
+    pub maintained_by: Option<String>,
+    #[serde(default)]
+    pub os_support: Vec<String>,
+    #[serde(default)]
+    pub strategies: Vec<McpInstallStrategy>,
+    #[serde(default)]
+    pub secrets_schema: Vec<McpSecretSchemaField>,
+}
+
+/// Filter options for MCP catalog listing.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct McpCatalogFilter {
+    #[serde(default)]
+    pub trust_levels: Vec<McpCatalogTrustLevel>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub query: Option<String>,
+}
+
+/// Response payload for listing catalog entries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpCatalogListResponse {
+    pub items: Vec<McpCatalogItem>,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub fetched_at: Option<String>,
+    #[serde(default)]
+    pub signature_valid: bool,
+}
+
+/// Refresh result for catalog updates.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpCatalogRefreshResult {
+    pub source: String,
+    pub fetched_at: String,
+    pub item_count: u32,
+    pub updated: bool,
+    #[serde(default)]
+    pub signature_valid: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// Preview for a selected install strategy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpInstallPreview {
+    pub item_id: String,
+    pub selected_strategy: String,
+    #[serde(default)]
+    pub missing_runtimes: Vec<McpRuntimeKind>,
+    #[serde(default)]
+    pub install_commands: Vec<String>,
+    #[serde(default)]
+    pub required_secrets: Vec<McpSecretSchemaField>,
+    #[serde(default)]
+    pub risk_flags: Vec<String>,
+}
+
+/// One-click install request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpInstallRequest {
+    pub item_id: String,
+    pub server_alias: String,
+    #[serde(default)]
+    pub selected_strategy: Option<String>,
+    #[serde(default)]
+    pub secrets: HashMap<String, String>,
+    #[serde(default)]
+    pub oauth_mode: Option<String>,
+    #[serde(default)]
+    pub auto_connect: Option<bool>,
+}
+
+/// Install status values.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpInstallStatus {
+    Running,
+    Success,
+    Failed,
+}
+
+/// Installer phases (state machine).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum McpInstallPhase {
+    Precheck,
+    Elevate,
+    InstallRuntime,
+    InstallPackage,
+    WriteConfig,
+    VerifyProtocol,
+    AutoConnect,
+    Commit,
+    Rollback,
+}
+
+/// Install command result summary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpInstallResult {
+    pub job_id: String,
+    #[serde(default)]
+    pub server_id: Option<String>,
+    pub phase: McpInstallPhase,
+    pub status: McpInstallStatus,
+    #[serde(default)]
+    pub diagnostics: Option<String>,
+}
+
+/// Runtime inventory row exposed to UI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpRuntimeInfo {
+    pub runtime: McpRuntimeKind,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub managed: bool,
+    #[serde(default)]
+    pub healthy: bool,
+    #[serde(default)]
+    pub last_error: Option<String>,
+    #[serde(default)]
+    pub last_checked: Option<String>,
+}
+
+/// Runtime repair command result.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpRuntimeRepairResult {
+    pub runtime: McpRuntimeKind,
+    pub status: String,
+    pub message: String,
+}
+
+/// Persisted managed-install metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpInstallRecord {
+    pub server_id: String,
+    pub catalog_item_id: String,
+    #[serde(default)]
+    pub catalog_version: Option<String>,
+    pub strategy_id: String,
+    pub trust_level: McpCatalogTrustLevel,
+    #[serde(default)]
+    pub package_lock_json: Option<serde_json::Value>,
+    #[serde(default)]
+    pub runtime_snapshot_json: Option<serde_json::Value>,
+    #[serde(default)]
+    pub installed_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
 }
 
 #[cfg(test)]

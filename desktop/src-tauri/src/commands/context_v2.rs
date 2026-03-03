@@ -30,14 +30,13 @@ use crate::services::memory::query_v2::{
 };
 use crate::services::memory::retrieval::MemorySearchIntent;
 use crate::services::memory::store::{MemoryCategory, MemoryEntry};
-use crate::services::skills::injector::inject_skill_summaries;
-use crate::services::skills::model::{InjectionPhase, SelectionPolicy, SkillMatch};
+use crate::services::skills::model::InjectionPhase;
 use crate::services::task_mode::context_provider::{
-    ensure_knowledge_initialized_public, query_selected_context, resolve_memory_statuses,
-    select_skill_matches_for_task_filtered, ContextSourceConfig, KnowledgeSourceConfig,
-    MemorySourceConfig, SkillsSourceConfig,
+    derive_blocked_tools_from_skill_policy as derive_blocked_tools_from_effective_skills,
+    ensure_knowledge_initialized_public, query_selected_context, resolve_effective_skills,
+    resolve_memory_statuses, ContextSourceConfig, KnowledgeSourceConfig, MemorySourceConfig,
+    SkillsSourceConfig,
 };
-use crate::services::tools::definitions::get_tool_definitions_from_registry;
 use crate::services::tools::system_prompt::build_memory_section;
 use crate::state::AppState;
 
@@ -201,6 +200,10 @@ pub struct ContextDiagnostics {
     #[serde(default)]
     pub selected_skills: Vec<String>,
     #[serde(default)]
+    pub effective_skill_ids: Vec<String>,
+    #[serde(default)]
+    pub effective_memory_ids: Vec<String>,
+    #[serde(default)]
     pub memory_candidates_count: usize,
     #[serde(default)]
     pub degraded_reason: Option<String>,
@@ -235,6 +238,13 @@ pub struct ContextAssemblyResponse {
     pub fallback_reason: Option<String>,
     #[serde(default)]
     pub diagnostics: ContextDiagnostics,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ContextAssemblySlices {
+    pub knowledge_block: String,
+    pub memory_block: String,
+    pub skills_block: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -278,6 +288,8 @@ pub struct PrepareTurnContextV2Request {
     #[serde(default)]
     pub intent: Option<String>,
     #[serde(default)]
+    pub phase: Option<String>,
+    #[serde(default)]
     pub conversation_history: Vec<ContextConversationTurn>,
     #[serde(default)]
     pub context_sources: Option<ContextSourceConfig>,
@@ -295,6 +307,8 @@ pub struct PrepareTurnContextV2Request {
     pub compaction_policy: Option<CompactionPolicy>,
     #[serde(default)]
     pub fault_injection: Option<ContextFaultInjection>,
+    #[serde(default = "default_true")]
+    pub enforce_user_skill_selection: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -320,7 +334,7 @@ impl Default for ContextPolicy {
         Self {
             context_v2_pipeline: true,
             memory_v2_ranker: true,
-            context_inspector_ui: false,
+            context_inspector_ui: true,
             pinned_sources: Vec::new(),
             excluded_sources: Vec::new(),
             soft_threshold_ratio: DEFAULT_SOFT_COMPACTION_RATIO,
@@ -525,46 +539,23 @@ fn parse_memory_intent(intent: Option<&str>) -> MemorySearchIntent {
     }
 }
 
-fn derive_blocked_tools_from_skill_policy(matches: &[SkillMatch]) -> Vec<String> {
-    let mut allowed = HashSet::<String>::new();
-    let mut has_allowlist = false;
-
-    for skill_match in matches {
-        if !skill_match.skill.enabled || skill_match.skill.allowed_tools.is_empty() {
-            continue;
-        }
-        has_allowlist = true;
-        for tool in &skill_match.skill.allowed_tools {
-            let normalized = tool.trim().to_ascii_lowercase();
-            if !normalized.is_empty() {
-                allowed.insert(normalized);
-            }
-        }
+fn parse_injection_phase(phase: Option<&str>) -> InjectionPhase {
+    match phase
+        .unwrap_or("always")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "planning" | "analysis" => InjectionPhase::Planning,
+        "implementation" | "executing" | "execution" => InjectionPhase::Implementation,
+        _ => InjectionPhase::Always,
     }
+}
 
-    if !has_allowlist {
-        return vec![];
-    }
-
-    // Keep the minimum safe exploration set aligned with runtime hard filter.
-    for safe_tool in ["read", "ls", "glob", "grep", "cwd"] {
-        allowed.insert(safe_tool.to_string());
-    }
-
-    let mut blocked = get_tool_definitions_from_registry()
-        .into_iter()
-        .filter_map(|tool| {
-            let normalized = tool.name.trim().to_ascii_lowercase();
-            if allowed.contains(&normalized) {
-                None
-            } else {
-                Some(tool.name)
-            }
-        })
-        .collect::<Vec<_>>();
-    blocked.sort();
-    blocked.dedup();
-    blocked
+fn derive_blocked_tools_from_skill_policy(
+    matches: &[crate::services::skills::model::SkillMatch],
+) -> Vec<String> {
+    derive_blocked_tools_from_effective_skills(matches)
 }
 
 fn now_string() -> String {
@@ -964,7 +955,7 @@ async fn build_legacy_fallback_prompt(
             app_state,
             &request.project_path,
             &request.query,
-            InjectionPhase::Always,
+            parse_injection_phase(request.phase.as_deref()),
         )
         .await;
         if !enriched.knowledge_block.is_empty() {
@@ -1098,8 +1089,8 @@ fn apply_budget_and_compaction(
 
 async fn prepare_turn_context_v2_internal(
     request: PrepareTurnContextV2Request,
-    app_state: State<'_, AppState>,
-    knowledge_state: State<'_, KnowledgeState>,
+    app_state: &AppState,
+    knowledge_state: &KnowledgeState,
 ) -> Result<CommandResponse<ContextEnvelope>, String> {
     let project_path = request.project_path.trim().to_string();
     if project_path.is_empty() {
@@ -1131,8 +1122,8 @@ async fn prepare_turn_context_v2_internal(
         .hard_limit
         .unwrap_or(input_budget + reserved_output_tokens)
         .max(input_budget + reserved_output_tokens);
-    let context_policy = load_context_policy(&app_state).await;
-    let rollout_config = load_context_rollout(&app_state).await;
+    let context_policy = load_context_policy(app_state).await;
+    let rollout_config = load_context_rollout(app_state).await;
     let rollout_assignment = assign_rollout_variant(
         &rollout_config,
         request.session_id.as_deref(),
@@ -1573,6 +1564,8 @@ async fn prepare_turn_context_v2_internal(
                 }
 
                 if !memory_entries.is_empty() {
+                    diagnostics.effective_memory_ids =
+                        memory_entries.iter().map(|entry| entry.id.clone()).collect();
                     let memory_block = build_memory_section(Some(&memory_entries));
                     if !memory_block.is_empty() {
                         if push_block(
@@ -1641,7 +1634,7 @@ async fn prepare_turn_context_v2_internal(
                     ));
                 } else {
                     let kcfg = config.knowledge.as_ref().unwrap();
-                    ensure_knowledge_initialized_public(&knowledge_state, &app_state).await;
+                    ensure_knowledge_initialized_public(knowledge_state, app_state).await;
                     match knowledge_state.get_pipeline().await {
                         Ok(pipeline) => {
                             let provider = KnowledgeContextProvider::new(pipeline);
@@ -1737,34 +1730,31 @@ async fn prepare_turn_context_v2_internal(
                 ));
             } else {
                 let scfg = config.skills.as_ref().unwrap();
-                let skill_matches = select_skill_matches_for_task_filtered(
-                    &app_state,
+                let effective = resolve_effective_skills(
+                    app_state,
                     &project_path,
                     &request.query,
-                    InjectionPhase::Always,
+                    parse_injection_phase(request.phase.as_deref()),
                     &scfg.selected_skill_ids,
+                    scfg.selection_mode,
+                    request.enforce_user_skill_selection,
                 )
                 .await;
-                let skills_block = if skill_matches.is_empty() {
-                    String::new()
-                } else {
-                    inject_skill_summaries(&skill_matches, &SelectionPolicy::default())
-                };
-                let skill_expertise = skill_matches
-                    .iter()
-                    .map(|m| format!("{} best practices", m.skill.name))
-                    .collect::<Vec<_>>();
-                diagnostics.selected_skills = skill_matches
+                let skills_block = effective.skills_block;
+                let skill_expertise = effective.skill_expertise;
+                diagnostics.selected_skills = effective
+                    .matches
                     .iter()
                     .map(|m| m.skill.name.clone())
                     .collect();
-                diagnostics.blocked_tools = derive_blocked_tools_from_skill_policy(&skill_matches);
+                diagnostics.effective_skill_ids = effective
+                    .matches
+                    .iter()
+                    .map(|m| m.skill.id.clone())
+                    .collect();
+                diagnostics.blocked_tools = effective.blocked_tools;
                 if !diagnostics.selected_skills.is_empty() {
-                    diagnostics.selection_reason = if scfg.selected_skill_ids.is_empty() {
-                        "skills_auto_match".to_string()
-                    } else {
-                        "skills_user_selected".to_string()
-                    };
+                    diagnostics.selection_reason = effective.selection_reason;
                 }
 
                 if !skills_block.is_empty() {
@@ -1856,7 +1846,7 @@ async fn prepare_turn_context_v2_internal(
 
     if fault_injection.compaction_quality_fail {
         persist_trace_events(
-            &app_state,
+            app_state,
             request.session_id.as_deref(),
             Some(&turn_id),
             &trace_events,
@@ -1898,7 +1888,7 @@ async fn prepare_turn_context_v2_internal(
     };
 
     persist_trace_events(
-        &app_state,
+        app_state,
         request.session_id.as_deref(),
         Some(&turn_id),
         &trace_events,
@@ -1908,11 +1898,62 @@ async fn prepare_turn_context_v2_internal(
     Ok(CommandResponse::ok(envelope))
 }
 
-#[tauri::command]
-pub async fn assemble_turn_context(
+fn infer_source_kind_from_id(source_id: &str) -> Option<ContextSourceKind> {
+    if source_id.starts_with("knowledge:") {
+        return Some(ContextSourceKind::Knowledge);
+    }
+    if source_id.starts_with("memory:") {
+        return Some(ContextSourceKind::Memory);
+    }
+    if source_id.starts_with("skills:") {
+        return Some(ContextSourceKind::Skills);
+    }
+    if source_id.starts_with("rules:") {
+        return Some(ContextSourceKind::Rules);
+    }
+    if source_id.starts_with("history:") {
+        return Some(ContextSourceKind::History);
+    }
+    if source_id.starts_with("manual:") {
+        return Some(ContextSourceKind::Manual);
+    }
+    None
+}
+
+pub fn split_assembly_into_slices(assembly: &ContextAssemblyResponse) -> ContextAssemblySlices {
+    let mut source_kind_by_id = HashMap::<&str, ContextSourceKind>::new();
+    for source in &assembly.sources {
+        source_kind_by_id.insert(source.id.as_str(), source.kind.clone());
+    }
+
+    let mut knowledge_blocks = Vec::new();
+    let mut memory_blocks = Vec::new();
+    let mut skills_blocks = Vec::new();
+
+    for block in &assembly.blocks {
+        let kind = source_kind_by_id
+            .get(block.source_id.as_str())
+            .cloned()
+            .or_else(|| infer_source_kind_from_id(&block.source_id));
+        match kind {
+            Some(ContextSourceKind::Knowledge) => knowledge_blocks.push(block.content.clone()),
+            Some(ContextSourceKind::Memory) => memory_blocks.push(block.content.clone()),
+            Some(ContextSourceKind::Skills) => skills_blocks.push(block.content.clone()),
+            _ => {}
+        }
+    }
+
+    ContextAssemblySlices {
+        knowledge_block: knowledge_blocks.join("\n\n"),
+        memory_block: memory_blocks.join("\n\n"),
+        skills_block: skills_blocks.join("\n\n"),
+    }
+}
+
+async fn assemble_turn_context_response_internal(
     request: PrepareTurnContextV2Request,
-    app_state: State<'_, AppState>,
-    knowledge_state: State<'_, KnowledgeState>,
+    app_state: &AppState,
+    knowledge_state: &KnowledgeState,
 ) -> Result<CommandResponse<ContextAssemblyResponse>, String> {
     let project_path = request.project_path.trim().to_string();
     let query = request.query.trim().to_string();
@@ -1924,11 +1965,9 @@ pub async fn assemble_turn_context(
     }
 
     let injected_source_kinds = infer_injected_source_kinds(&request);
-    let context_policy = load_context_policy(app_state.inner()).await;
+    let context_policy = load_context_policy(app_state).await;
     if !context_policy.context_v2_pipeline {
-        let fallback_prompt =
-            build_legacy_fallback_prompt(&request, app_state.inner(), knowledge_state.inner())
-                .await;
+        let fallback_prompt = build_legacy_fallback_prompt(&request, app_state, knowledge_state).await;
         return Ok(CommandResponse::ok(build_legacy_fallback_response(
             &request,
             fallback_prompt,
@@ -1940,8 +1979,8 @@ pub async fn assemble_turn_context(
 
     let primary_result = prepare_turn_context_v2_internal(
         request.clone(),
-        app_state.clone(),
-        knowledge_state.clone(),
+        app_state,
+        knowledge_state,
     )
     .await;
     if let Ok(primary) = &primary_result {
@@ -1961,8 +2000,7 @@ pub async fn assemble_turn_context(
             .or_else(|| Some("prepare_turn_context_v2 returned no envelope".to_string())),
         Err(err) => Some(format!("prepare_turn_context_v2 failed: {}", err)),
     };
-    let fallback_prompt =
-        build_legacy_fallback_prompt(&request, app_state.inner(), knowledge_state.inner()).await;
+    let fallback_prompt = build_legacy_fallback_prompt(&request, app_state, knowledge_state).await;
 
     Ok(CommandResponse::ok(build_legacy_fallback_response(
         &request,
@@ -1971,6 +2009,34 @@ pub async fn assemble_turn_context(
         fallback_reason,
         injected_source_kinds,
     )))
+}
+
+pub async fn assemble_turn_context_internal(
+    request: PrepareTurnContextV2Request,
+    app_state: &AppState,
+    knowledge_state: &KnowledgeState,
+) -> Result<ContextAssemblyResponse, String> {
+    let assembled = assemble_turn_context_response_internal(request, app_state, knowledge_state).await?;
+    if !assembled.success {
+        return Err(
+            assembled
+                .error
+                .unwrap_or_else(|| "assemble_turn_context failed".to_string()),
+        );
+    }
+    assembled
+        .data
+        .ok_or_else(|| "assemble_turn_context returned no data".to_string())
+}
+
+#[tauri::command]
+pub async fn assemble_turn_context(
+    request: PrepareTurnContextV2Request,
+    app_state: State<'_, AppState>,
+    knowledge_state: State<'_, KnowledgeState>,
+) -> Result<CommandResponse<ContextAssemblyResponse>, String> {
+    assemble_turn_context_response_internal(request, app_state.inner(), knowledge_state.inner())
+        .await
 }
 
 #[tauri::command]
@@ -1982,30 +2048,17 @@ pub async fn prepare_turn_context_v2(
     tracing::warn!(
         "prepare_turn_context_v2 is deprecated; routing request through assemble_turn_context"
     );
-    let assembled = assemble_turn_context(request, app_state, knowledge_state).await?;
-    if !assembled.success {
-        return Ok(CommandResponse::err(
-            assembled
-                .error
-                .unwrap_or_else(|| "assemble_turn_context failed".to_string()),
-        ));
-    }
-
-    match assembled.data {
-        Some(data) => Ok(CommandResponse::ok(ContextEnvelope {
-            request_meta: data.request_meta,
-            budget: data.budget,
-            sources: data.sources,
-            blocks: data.blocks,
-            compaction: data.compaction,
-            trace_id: data.trace_id,
-            assembled_prompt: data.assembled_prompt,
-            diagnostics: data.diagnostics,
-        })),
-        None => Ok(CommandResponse::err(
-            "assemble_turn_context returned no data".to_string(),
-        )),
-    }
+    let data = assemble_turn_context_internal(request, app_state.inner(), knowledge_state.inner()).await?;
+    Ok(CommandResponse::ok(ContextEnvelope {
+        request_meta: data.request_meta,
+        budget: data.budget,
+        sources: data.sources,
+        blocks: data.blocks,
+        compaction: data.compaction,
+        trace_id: data.trace_id,
+        assembled_prompt: data.assembled_prompt,
+        diagnostics: data.diagnostics,
+    }))
 }
 
 #[tauri::command]
@@ -2860,6 +2913,8 @@ pub async fn run_context_chaos_probe(
                 skills: Some(SkillsSourceConfig {
                     enabled: false,
                     selected_skill_ids: Vec::new(),
+                    selection_mode:
+                        crate::services::task_mode::context_provider::SkillSelectionMode::Auto,
                 }),
             };
 
@@ -2874,6 +2929,7 @@ pub async fn run_context_chaos_probe(
                 mode: Some("chaos_probe".to_string()),
                 turn_id: Some(format!("chaos:{}:{}:{}", run_id, scenario, i)),
                 intent: Some("qa".to_string()),
+                phase: Some("analysis".to_string()),
                 conversation_history: Vec::new(),
                 context_sources: Some(chaos_context_sources),
                 rules: Vec::new(),
@@ -2891,6 +2947,7 @@ pub async fn run_context_chaos_probe(
                 }),
                 compaction_policy: None,
                 fault_injection: Some(fault),
+                enforce_user_skill_selection: true,
             };
 
             let probe_result =
@@ -3037,6 +3094,7 @@ pub async fn list_context_chaos_runs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::skills::model::SkillMatch;
     use std::path::PathBuf;
 
     fn make_assemble_request() -> PrepareTurnContextV2Request {
@@ -3048,6 +3106,7 @@ mod tests {
             mode: Some("standalone".to_string()),
             turn_id: Some("turn-1".to_string()),
             intent: Some("qa".to_string()),
+            phase: Some("analysis".to_string()),
             conversation_history: Vec::new(),
             context_sources: None,
             rules: Vec::new(),
@@ -3057,6 +3116,7 @@ mod tests {
             hard_limit: Some(2048),
             compaction_policy: None,
             fault_injection: None,
+            enforce_user_skill_selection: true,
         }
     }
 
@@ -3337,5 +3397,157 @@ mod tests {
         assert!(!blocked.iter().any(|tool| tool.eq_ignore_ascii_case("Read")));
         assert!(!blocked.iter().any(|tool| tool.eq_ignore_ascii_case("Grep")));
         assert!(blocked.iter().any(|tool| tool.eq_ignore_ascii_case("Write")));
+    }
+
+    #[test]
+    fn split_assembly_into_slices_uses_source_kind_mapping() {
+        let response = ContextAssemblyResponse {
+            request_meta: ContextRequestMeta {
+                turn_id: "t-1".to_string(),
+                session_id: Some("s-1".to_string()),
+                mode: "task".to_string(),
+                query: "q".to_string(),
+                intent: None,
+            },
+            assembled_prompt: "prompt".to_string(),
+            trace_id: "trace-1".to_string(),
+            budget: ContextBudget {
+                input_token_budget: 1000,
+                reserved_output_tokens: 200,
+                hard_limit: 1200,
+                used_input_tokens: 120,
+                over_budget: false,
+            },
+            sources: vec![
+                ContextSourceRef {
+                    id: "knowledge:retrieved".to_string(),
+                    kind: ContextSourceKind::Knowledge,
+                    label: "Knowledge".to_string(),
+                    token_cost: 40,
+                    included: true,
+                    reason: "knowledge_included".to_string(),
+                },
+                ContextSourceRef {
+                    id: "memory:retrieved".to_string(),
+                    kind: ContextSourceKind::Memory,
+                    label: "Memory".to_string(),
+                    token_cost: 30,
+                    included: true,
+                    reason: "memory_included".to_string(),
+                },
+                ContextSourceRef {
+                    id: "skills:selected".to_string(),
+                    kind: ContextSourceKind::Skills,
+                    label: "Skills".to_string(),
+                    token_cost: 20,
+                    included: true,
+                    reason: "skills_included".to_string(),
+                },
+            ],
+            blocks: vec![
+                ContextBlock {
+                    source_id: "knowledge:retrieved".to_string(),
+                    title: "Knowledge".to_string(),
+                    content: "K".to_string(),
+                    token_cost: 40,
+                    priority: 80,
+                    reason: "knowledge_included".to_string(),
+                    anchor: false,
+                },
+                ContextBlock {
+                    source_id: "memory:retrieved".to_string(),
+                    title: "Memory".to_string(),
+                    content: "M".to_string(),
+                    token_cost: 30,
+                    priority: 70,
+                    reason: "memory_included".to_string(),
+                    anchor: false,
+                },
+                ContextBlock {
+                    source_id: "skills:selected".to_string(),
+                    title: "Skills".to_string(),
+                    content: "S".to_string(),
+                    token_cost: 20,
+                    priority: 60,
+                    reason: "skills_included".to_string(),
+                    anchor: false,
+                },
+            ],
+            compaction: CompactionReport {
+                triggered: false,
+                trigger_reason: "none".to_string(),
+                strategy: "none".to_string(),
+                before_tokens: 120,
+                after_tokens: 120,
+                compaction_tokens: 0,
+                net_saving: 0,
+                quality_score: 1.0,
+                compaction_actions: vec![],
+                quality_basis: json!({}),
+            },
+            injected_source_kinds: vec!["knowledge".to_string(), "memory".to_string(), "skills".to_string()],
+            fallback_used: false,
+            fallback_reason: None,
+            diagnostics: ContextDiagnostics::default(),
+        };
+
+        let slices = split_assembly_into_slices(&response);
+        assert_eq!(slices.knowledge_block, "K");
+        assert_eq!(slices.memory_block, "M");
+        assert_eq!(slices.skills_block, "S");
+    }
+
+    #[test]
+    fn split_assembly_into_slices_falls_back_to_source_id_prefix() {
+        let response = ContextAssemblyResponse {
+            request_meta: ContextRequestMeta {
+                turn_id: "t-1".to_string(),
+                session_id: None,
+                mode: "task".to_string(),
+                query: "q".to_string(),
+                intent: None,
+            },
+            assembled_prompt: "prompt".to_string(),
+            trace_id: "trace-1".to_string(),
+            budget: ContextBudget {
+                input_token_budget: 1000,
+                reserved_output_tokens: 200,
+                hard_limit: 1200,
+                used_input_tokens: 20,
+                over_budget: false,
+            },
+            // No matching source metadata for the block below.
+            sources: vec![],
+            blocks: vec![ContextBlock {
+                source_id: "skills:selected".to_string(),
+                title: "Skills".to_string(),
+                content: "Skill block".to_string(),
+                token_cost: 20,
+                priority: 60,
+                reason: "skills_included".to_string(),
+                anchor: false,
+            }],
+            compaction: CompactionReport {
+                triggered: false,
+                trigger_reason: "none".to_string(),
+                strategy: "none".to_string(),
+                before_tokens: 20,
+                after_tokens: 20,
+                compaction_tokens: 0,
+                net_saving: 0,
+                quality_score: 1.0,
+                compaction_actions: vec![],
+                quality_basis: json!({}),
+            },
+            injected_source_kinds: vec!["skills".to_string()],
+            fallback_used: false,
+            fallback_reason: None,
+            diagnostics: ContextDiagnostics::default(),
+        };
+
+        let slices = split_assembly_into_slices(&response);
+        assert_eq!(slices.skills_block, "Skill block");
+        assert!(slices.knowledge_block.is_empty());
+        assert!(slices.memory_block.is_empty());
     }
 }

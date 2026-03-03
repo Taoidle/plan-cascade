@@ -88,6 +88,7 @@ export interface ContextSourceConfig {
   skills?: {
     enabled: boolean;
     selected_skill_ids: string[];
+    selection_mode: 'auto' | 'explicit';
   };
 }
 
@@ -121,6 +122,7 @@ export interface ContextSourcesState {
   // === Skills State ===
   skillsEnabled: boolean;
   selectedSkillIds: string[];
+  skillSelectionMode: 'auto' | 'explicit';
   availableSkills: SkillSummary[];
   isLoadingSkills: boolean;
   skillPickerSearchQuery: string;
@@ -225,6 +227,7 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
   // === Skills State ===
   skillsEnabled: false,
   selectedSkillIds: [],
+  skillSelectionMode: 'auto',
   availableSkills: [],
   isLoadingSkills: false,
   skillPickerSearchQuery: '',
@@ -650,16 +653,20 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
   toggleSkills: (enabled) => {
     set({ skillsEnabled: enabled });
     if (!enabled) {
-      set({ selectedSkillIds: [] });
+      set({ selectedSkillIds: [], skillSelectionMode: 'auto' });
     }
   },
 
   toggleSkillItem: (skillId) => {
     const { selectedSkillIds } = get();
     if (selectedSkillIds.includes(skillId)) {
-      set({ selectedSkillIds: selectedSkillIds.filter((id) => id !== skillId) });
+      const nextSelected = selectedSkillIds.filter((id) => id !== skillId);
+      set({
+        selectedSkillIds: nextSelected,
+        skillSelectionMode: nextSelected.length > 0 ? 'explicit' : 'auto',
+      });
     } else {
-      set({ selectedSkillIds: [...selectedSkillIds, skillId] });
+      set({ selectedSkillIds: [...selectedSkillIds, skillId], skillSelectionMode: 'explicit' });
     }
   },
 
@@ -671,16 +678,23 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
         ? availableSkills.filter((s) => s.detected && s.enabled)
         : availableSkills.filter((s) => s.source.type === sourceType && s.enabled);
     const groupIds = groupSkills.map((s) => s.id);
+    if (groupIds.length === 0) {
+      return;
+    }
     const allSelected = groupIds.length > 0 && groupIds.every((id) => selectedSkillIds.includes(id));
 
     if (allSelected) {
       // Deselect all in group
       const groupIdSet = new Set(groupIds);
-      set({ selectedSkillIds: selectedSkillIds.filter((id) => !groupIdSet.has(id)) });
+      const nextSelected = selectedSkillIds.filter((id) => !groupIdSet.has(id));
+      set({
+        selectedSkillIds: nextSelected,
+        skillSelectionMode: nextSelected.length > 0 ? 'explicit' : 'auto',
+      });
     } else {
       // Select all in group
       const newIds = new Set([...selectedSkillIds, ...groupIds]);
-      set({ selectedSkillIds: [...newIds] });
+      set({ selectedSkillIds: [...newIds], skillSelectionMode: 'explicit' });
     }
   },
 
@@ -725,6 +739,7 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
       excludedMemoryIds,
       skillsEnabled,
       selectedSkillIds,
+      skillSelectionMode,
     } = get();
 
     const projectId = useProjectsStore.getState().selectedProject?.id ?? 'default';
@@ -757,6 +772,7 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
       config.skills = {
         enabled: true,
         selected_skill_ids: selectedSkillIds,
+        selection_mode: selectedSkillIds.length > 0 ? 'explicit' : skillSelectionMode,
       };
     }
 

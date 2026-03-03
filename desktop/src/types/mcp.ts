@@ -6,6 +6,17 @@
 
 /** Type of MCP server connection */
 export type McpServerType = 'stdio' | 'stream_http';
+export type McpCatalogTrustLevel = 'official' | 'verified' | 'community';
+export type McpRuntimeKind = 'node' | 'uv' | 'python' | 'docker';
+export type McpInstallStrategyKind =
+  | 'uv_tool'
+  | 'python_venv'
+  | 'node_managed_pkg'
+  | 'docker'
+  | 'stream_http_api_key'
+  | 'stream_http_api_key_optional'
+  | 'oauth_bridge_mcp_remote'
+  | 'go_binary';
 
 /** Status of an MCP server connection */
 export type McpServerStatus = 'connected' | 'disconnected' | 'unknown' | { error: string };
@@ -29,6 +40,9 @@ export interface McpServer {
   last_connected_at?: string | null;
   retry_count?: number;
   last_checked: string | null;
+  managed_install?: boolean;
+  catalog_item_id?: string | null;
+  trust_level?: McpCatalogTrustLevel | null;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -110,6 +124,151 @@ export interface McpToolDefinition {
 
 export interface McpExportPayload {
   mcpServers: Record<string, Record<string, unknown>>;
+}
+
+export interface RuntimeRequirement {
+  runtime: McpRuntimeKind;
+  min_version?: string | null;
+  optional?: boolean;
+}
+
+export interface McpInstallStrategy {
+  id: string;
+  kind: McpInstallStrategyKind;
+  priority: number;
+  requirements: RuntimeRequirement[];
+  recipe: Record<string, unknown>;
+}
+
+export interface McpSecretSchemaField {
+  key: string;
+  label: string;
+  required?: boolean;
+  secret_type?: string | null;
+}
+
+export interface McpCatalogItem {
+  id: string;
+  name: string;
+  vendor: string;
+  trust_level: McpCatalogTrustLevel;
+  tags: string[];
+  docs_url?: string | null;
+  maintained_by?: string | null;
+  os_support: string[];
+  strategies: McpInstallStrategy[];
+  secrets_schema: McpSecretSchemaField[];
+}
+
+export interface McpCatalogFilter {
+  trust_levels?: McpCatalogTrustLevel[];
+  tags?: string[];
+  query?: string;
+}
+
+export interface McpCatalogListResponse {
+  items: McpCatalogItem[];
+  source: string;
+  fetched_at?: string | null;
+  signature_valid: boolean;
+}
+
+export interface McpCatalogRefreshResult {
+  source: string;
+  fetched_at: string;
+  item_count: number;
+  updated: boolean;
+  signature_valid: boolean;
+  error?: string | null;
+}
+
+export interface McpInstallPreview {
+  item_id: string;
+  selected_strategy: string;
+  missing_runtimes: McpRuntimeKind[];
+  install_commands: string[];
+  required_secrets: McpSecretSchemaField[];
+  risk_flags: string[];
+}
+
+export interface McpInstallRequest {
+  item_id: string;
+  server_alias: string;
+  selected_strategy?: string;
+  secrets?: Record<string, string>;
+  oauth_mode?: string;
+  auto_connect?: boolean;
+}
+
+export type McpInstallStatus = 'running' | 'success' | 'failed';
+export type McpInstallPhase =
+  | 'PRECHECK'
+  | 'ELEVATE'
+  | 'INSTALL_RUNTIME'
+  | 'INSTALL_PACKAGE'
+  | 'WRITE_CONFIG'
+  | 'VERIFY_PROTOCOL'
+  | 'AUTO_CONNECT'
+  | 'COMMIT'
+  | 'ROLLBACK';
+
+export interface McpInstallResult {
+  job_id: string;
+  server_id?: string | null;
+  phase: McpInstallPhase;
+  status: McpInstallStatus;
+  diagnostics?: string | null;
+}
+
+export interface McpRuntimeInfo {
+  runtime: McpRuntimeKind;
+  version?: string | null;
+  path?: string | null;
+  source?: string | null;
+  managed?: boolean;
+  healthy?: boolean;
+  last_error?: string | null;
+  last_checked?: string | null;
+}
+
+export interface McpRuntimeRepairResult {
+  runtime: McpRuntimeKind;
+  status: string;
+  message: string;
+}
+
+export interface McpInstallRecord {
+  server_id: string;
+  catalog_item_id: string;
+  catalog_version?: string | null;
+  strategy_id: string;
+  trust_level: McpCatalogTrustLevel;
+  package_lock_json?: Record<string, unknown> | null;
+  runtime_snapshot_json?: Record<string, unknown> | null;
+  installed_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface McpInstallProgressEvent {
+  job_id: string;
+  phase: McpInstallPhase;
+  progress: number;
+  status: string;
+  message: string;
+  server_id?: string | null;
+}
+
+export interface McpInstallLogEvent {
+  job_id: string;
+  phase: McpInstallPhase;
+  level: 'info' | 'warn' | 'error' | string;
+  message: string;
+}
+
+export interface McpOauthEvent {
+  job_id: string;
+  state: string;
+  message?: string | null;
 }
 
 /** Generic command response from Tauri */

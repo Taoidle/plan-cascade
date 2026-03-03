@@ -41,6 +41,7 @@ function resetContextSourcesState() {
     isSearchingMemories: false,
     skillsEnabled: false,
     selectedSkillIds: [],
+    skillSelectionMode: 'auto',
     availableSkills: [],
     isLoadingSkills: false,
     skillPickerSearchQuery: '',
@@ -123,6 +124,51 @@ describe('useContextSourcesStore', () => {
     state = useContextSourcesStore.getState();
     expect(state.includedMemoryIds).toEqual([]);
     expect(state.selectedMemoryIds).toEqual([]);
+  });
+
+  it('reverts skill selection mode to auto when the last explicit skill is deselected', () => {
+    useContextSourcesStore.setState({
+      skillsEnabled: true,
+      selectedSkillIds: ['skill-1'],
+      skillSelectionMode: 'explicit',
+    });
+
+    useContextSourcesStore.getState().toggleSkillItem('skill-1');
+    const state = useContextSourcesStore.getState();
+
+    expect(state.selectedSkillIds).toEqual([]);
+    expect(state.skillSelectionMode).toBe('auto');
+    expect(state.buildConfig().skills?.selection_mode).toBe('auto');
+  });
+
+  it('keeps explicit mode when deselecting one skill but others remain selected', () => {
+    useContextSourcesStore.setState({
+      skillsEnabled: true,
+      selectedSkillIds: ['skill-1', 'skill-2'],
+      skillSelectionMode: 'explicit',
+    });
+
+    useContextSourcesStore.getState().toggleSkillItem('skill-1');
+    const state = useContextSourcesStore.getState();
+
+    expect(state.selectedSkillIds).toEqual(['skill-2']);
+    expect(state.skillSelectionMode).toBe('explicit');
+    expect(state.buildConfig().skills?.selection_mode).toBe('explicit');
+  });
+
+  it('does not switch skill mode when toggling an empty skill group', () => {
+    useContextSourcesStore.setState({
+      skillsEnabled: true,
+      selectedSkillIds: [],
+      skillSelectionMode: 'auto',
+      availableSkills: [],
+    });
+
+    useContextSourcesStore.getState().toggleSkillGroup('builtin');
+    const state = useContextSourcesStore.getState();
+
+    expect(state.selectedSkillIds).toEqual([]);
+    expect(state.skillSelectionMode).toBe('auto');
   });
 
   it('buildConfig uses selected project id when available', () => {
