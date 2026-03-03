@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 
-use super::WebhookChannel;
+use super::{localized_event_name, localized_label, LabelKey, WebhookChannel};
 use crate::services::proxy::ProxyConfig;
 use crate::services::webhook::types::*;
 
@@ -124,6 +124,7 @@ impl WebhookChannel for TelegramNotifyChannel {
     }
 
     fn format_message(&self, payload: &WebhookPayload, _template: Option<&str>) -> String {
+        let locale = payload.locale.as_deref();
         let emoji = match payload.event_type {
             WebhookEventType::TaskComplete => "\u{2705}",
             WebhookEventType::TaskFailed => "\u{274C}",
@@ -133,21 +134,31 @@ impl WebhookChannel for TelegramNotifyChannel {
             WebhookEventType::ProgressMilestone => "\u{1F4C8}",
         };
 
-        let event_name = Self::escape_markdown_v2(&format!("{}", payload.event_type));
+        let event_name =
+            Self::escape_markdown_v2(localized_event_name(&payload.event_type, locale));
 
         let mut lines = vec![format!("{} *{}*", emoji, event_name)];
         lines.push(String::new());
 
         if let Some(ref name) = payload.session_name {
-            lines.push(format!("*Session*: {}", Self::escape_markdown_v2(name)));
+            lines.push(format!(
+                "*{}*: {}",
+                Self::escape_markdown_v2(localized_label(locale, LabelKey::Session)),
+                Self::escape_markdown_v2(name)
+            ));
         }
 
         if let Some(ref path) = payload.project_path {
-            lines.push(format!("*Project*: {}", Self::escape_markdown_v2(path)));
+            lines.push(format!(
+                "*{}*: {}",
+                Self::escape_markdown_v2(localized_label(locale, LabelKey::Project)),
+                Self::escape_markdown_v2(path)
+            ));
         }
 
         lines.push(format!(
-            "*Summary*: {}",
+            "*{}*: {}",
+            Self::escape_markdown_v2(localized_label(locale, LabelKey::Summary)),
             Self::escape_markdown_v2(&payload.summary)
         ));
 
@@ -161,7 +172,8 @@ impl WebhookChannel for TelegramNotifyChannel {
                 format!("{}s", secs)
             };
             lines.push(format!(
-                "*Duration*: {}",
+                "*{}*: {}",
+                Self::escape_markdown_v2(localized_label(locale, LabelKey::Duration)),
                 Self::escape_markdown_v2(&duration_str)
             ));
         }

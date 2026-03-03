@@ -7,7 +7,9 @@
 
 use async_trait::async_trait;
 
-use super::{format_timestamp_for_display, WebhookChannel};
+use super::{
+    format_timestamp_for_display, localized_event_name, localized_label, LabelKey, WebhookChannel,
+};
 use crate::services::proxy::ProxyConfig;
 use crate::services::webhook::types::*;
 
@@ -76,60 +78,107 @@ impl FeishuChannel {
     }
 
     fn format_markdown_lines_lark(payload: &WebhookPayload) -> String {
+        let locale = payload.locale.as_deref();
         let mut markdown_lines = Vec::new();
         markdown_lines.push(format!(
-            "**Event**: {}",
-            Self::escape_lark_md(&payload.event_type.to_string())
+            "**{}**: {}",
+            localized_label(locale, LabelKey::Event),
+            Self::escape_lark_md(localized_event_name(&payload.event_type, locale))
         ));
         if let Some(ref name) = payload.session_name {
-            markdown_lines.push(format!("**Session**: {}", Self::escape_lark_md(name)));
+            markdown_lines.push(format!(
+                "**{}**: {}",
+                localized_label(locale, LabelKey::Session),
+                Self::escape_lark_md(name)
+            ));
         }
         if let Some(ref path) = payload.project_path {
-            markdown_lines.push(format!("**Project**: `{}`", Self::escape_inline_code(path)));
+            markdown_lines.push(format!(
+                "**{}**: `{}`",
+                localized_label(locale, LabelKey::Project),
+                Self::escape_inline_code(path)
+            ));
         }
         if let Some(ref source) = payload.remote_source {
-            markdown_lines.push(format!("**Source**: {}", Self::escape_lark_md(source)));
+            markdown_lines.push(format!(
+                "**{}**: {}",
+                localized_label(locale, LabelKey::Source),
+                Self::escape_lark_md(source)
+            ));
         }
         markdown_lines.push(format!(
-            "**Summary**: {}",
+            "**{}**: {}",
+            localized_label(locale, LabelKey::Summary),
             Self::escape_lark_md(&payload.summary)
         ));
         if let Some(ms) = payload.duration_ms {
             let secs = ms / 1000;
-            markdown_lines.push(format!("**Duration**: {}s", secs));
+            markdown_lines.push(format!(
+                "**{}**: {}s",
+                localized_label(locale, LabelKey::Duration),
+                secs
+            ));
         }
         markdown_lines.push(format!(
-            "**Time**: {}",
+            "**{}**: {}",
+            localized_label(locale, LabelKey::Time),
             Self::escape_lark_md(&format_timestamp_for_display(&payload.timestamp))
         ));
         markdown_lines.join("\n")
     }
 
     fn format_markdown_lines_trigger(payload: &WebhookPayload) -> String {
+        let locale = payload.locale.as_deref();
         let mut lines = Vec::new();
-        lines.push(format!("**Event**: {}", payload.event_type));
+        lines.push(format!(
+            "**{}**: {}",
+            localized_label(locale, LabelKey::Event),
+            localized_event_name(&payload.event_type, locale)
+        ));
         if let Some(ref name) = payload.session_name {
-            lines.push(format!("**Session**: {}", name));
+            lines.push(format!(
+                "**{}**: {}",
+                localized_label(locale, LabelKey::Session),
+                name
+            ));
         }
         if let Some(ref path) = payload.project_path {
-            lines.push(format!("**Project**: `{}`", path.replace('`', "\\`")));
+            lines.push(format!(
+                "**{}**: `{}`",
+                localized_label(locale, LabelKey::Project),
+                path.replace('`', "\\`")
+            ));
         }
         if let Some(ref source) = payload.remote_source {
-            lines.push(format!("**Source**: {}", source));
-        }
-        lines.push(format!("**Summary**: {}", payload.summary));
-        if let Some(ms) = payload.duration_ms {
-            lines.push(format!("**Duration**: {}s", ms / 1000));
+            lines.push(format!(
+                "**{}**: {}",
+                localized_label(locale, LabelKey::Source),
+                source
+            ));
         }
         lines.push(format!(
-            "**Time**: {}",
+            "**{}**: {}",
+            localized_label(locale, LabelKey::Summary),
+            payload.summary
+        ));
+        if let Some(ms) = payload.duration_ms {
+            lines.push(format!(
+                "**{}**: {}s",
+                localized_label(locale, LabelKey::Duration),
+                ms / 1000
+            ));
+        }
+        lines.push(format!(
+            "**{}**: {}",
+            localized_label(locale, LabelKey::Time),
             format_timestamp_for_display(&payload.timestamp)
         ));
         lines.join("\n")
     }
 
     fn build_custom_bot_body(payload: &WebhookPayload) -> serde_json::Value {
-        let title = payload.event_type.to_string();
+        let locale = payload.locale.as_deref();
+        let title = localized_event_name(&payload.event_type, locale);
         let markdown_content = Self::format_markdown_lines_lark(payload);
         serde_json::json!({
             "msg_type": "interactive",
@@ -154,16 +203,16 @@ impl FeishuChannel {
     }
 
     fn build_webhook_trigger_body(payload: &WebhookPayload) -> serde_json::Value {
+        let locale = payload.locale.as_deref();
+        let localized_event = localized_event_name(&payload.event_type, locale);
         let mut body = serde_json::Map::new();
         body.insert("msg_type".to_string(), serde_json::json!("text"));
         body.insert(
             "event_type".to_string(),
             serde_json::json!(payload.event_type.to_string()),
         );
-        body.insert(
-            "title".to_string(),
-            serde_json::json!(payload.event_type.to_string()),
-        );
+        body.insert("event_name".to_string(), serde_json::json!(localized_event));
+        body.insert("title".to_string(), serde_json::json!(localized_event));
         body.insert("summary".to_string(), serde_json::json!(payload.summary));
         body.insert("content".to_string(), serde_json::json!(payload.summary));
         body.insert(

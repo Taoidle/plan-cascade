@@ -4,7 +4,9 @@
 
 use async_trait::async_trait;
 
-use super::{format_timestamp_for_display, WebhookChannel};
+use super::{
+    format_timestamp_for_display, localized_event_name, localized_label, LabelKey, WebhookChannel,
+};
 use crate::services::proxy::ProxyConfig;
 use crate::services::webhook::types::*;
 
@@ -91,6 +93,7 @@ impl WebhookChannel for SlackChannel {
     }
 
     fn format_message(&self, payload: &WebhookPayload, _template: Option<&str>) -> String {
+        let locale = payload.locale.as_deref();
         let emoji = match payload.event_type {
             WebhookEventType::TaskComplete => "white_check_mark",
             WebhookEventType::TaskFailed => "x",
@@ -100,16 +103,32 @@ impl WebhookChannel for SlackChannel {
             WebhookEventType::ProgressMilestone => "chart_with_upwards_trend",
         };
 
-        let title = format!(":{}: {}", emoji, payload.event_type);
+        let title = format!(
+            ":{}: {}",
+            emoji,
+            localized_event_name(&payload.event_type, locale)
+        );
 
         let mut section_text = String::new();
         if let Some(ref name) = payload.session_name {
-            section_text.push_str(&format!("*Session*: {}\n", name));
+            section_text.push_str(&format!(
+                "*{}*: {}\n",
+                localized_label(locale, LabelKey::Session),
+                name
+            ));
         }
         if let Some(ref path) = payload.project_path {
-            section_text.push_str(&format!("*Project*: {}\n", path));
+            section_text.push_str(&format!(
+                "*{}*: {}\n",
+                localized_label(locale, LabelKey::Project),
+                path
+            ));
         }
-        section_text.push_str(&format!("*Summary*: {}", payload.summary));
+        section_text.push_str(&format!(
+            "*{}*: {}",
+            localized_label(locale, LabelKey::Summary),
+            payload.summary
+        ));
 
         let mut context_elements = Vec::new();
         if let Some(ms) = payload.duration_ms {
@@ -123,13 +142,18 @@ impl WebhookChannel for SlackChannel {
             };
             context_elements.push(serde_json::json!({
                 "type": "mrkdwn",
-                "text": format!("Duration: {}", duration_str)
+                "text": format!(
+                    "{}: {}",
+                    localized_label(locale, LabelKey::Duration),
+                    duration_str
+                )
             }));
         }
         context_elements.push(serde_json::json!({
             "type": "mrkdwn",
             "text": format!(
-                "Timestamp: {}",
+                "{}: {}",
+                localized_label(locale, LabelKey::Time),
                 format_timestamp_for_display(&payload.timestamp)
             )
         }));

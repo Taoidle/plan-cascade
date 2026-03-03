@@ -61,6 +61,9 @@ impl WebhookState {
     /// Lazily initialize the real webhook service (DB + keyring + proxy resolver).
     pub async fn get_or_init(&self, app_state: &AppState) -> Result<Arc<WebhookService>, String> {
         if let Some(service) = self.service.read().await.clone() {
+            if let Ok(config) = app_state.get_config().await {
+                service.set_locale(&config.language);
+            }
             return Ok(service);
         }
 
@@ -74,6 +77,9 @@ impl WebhookState {
         }
 
         let service = Arc::new(WebhookService::new_default(db, keyring));
+        if let Ok(config) = app_state.get_config().await {
+            service.set_locale(&config.language);
+        }
         let mut guard = self.service.write().await;
         if guard.is_none() {
             *guard = Some(service.clone());
@@ -81,10 +87,18 @@ impl WebhookState {
         Ok(guard.as_ref().cloned().unwrap_or(service))
     }
 
+    /// Update locale on an existing webhook service instance.
+    ///
+    /// Does not force service initialization when webhook is unused.
+    pub async fn set_locale_if_initialized(&self, locale: &str) {
+        if let Some(service) = self.service.read().await.clone() {
+            service.set_locale(locale);
+        }
+    }
+
     /// Start retry/cleanup worker once. Safe to call repeatedly.
     pub async fn start_worker_if_needed(&self, app_state: &AppState) -> Result<(), String> {
-        if self.worker_running.load(Ordering::SeqCst)
-            || self.worker_started.load(Ordering::SeqCst)
+        if self.worker_running.load(Ordering::SeqCst) || self.worker_started.load(Ordering::SeqCst)
         {
             return Ok(());
         }
@@ -862,15 +876,15 @@ mod tests {
             "https://discord.com/api/webhooks/x"
         )
         .is_ok());
+        assert!(
+            validate_channel_target(&WebhookChannelType::ServerChan, "http://sctapi.ftqq.com")
+                .is_err()
+        );
         assert!(validate_channel_target(
             &WebhookChannelType::ServerChan,
-            "http://sctapi.ftqq.com"
+            "https://sctapi.ftqq.com"
         )
-        .is_err());
-        assert!(
-            validate_channel_target(&WebhookChannelType::ServerChan, "https://sctapi.ftqq.com")
-                .is_ok()
-        );
+        .is_ok());
     }
 
     #[test]
@@ -930,14 +944,14 @@ mod tests {
     fn test_validate_channel_secret_requirements() {
         assert!(validate_channel_secret_on_create(&WebhookChannelType::Telegram, None).is_err());
         assert!(
-            validate_channel_secret_on_create(&WebhookChannelType::Telegram, Some("token"))
-                .is_ok()
+            validate_channel_secret_on_create(&WebhookChannelType::Telegram, Some("token")).is_ok()
         );
         assert!(validate_channel_secret_on_create(&WebhookChannelType::ServerChan, None).is_err());
-        assert!(
-            validate_channel_secret_on_create(&WebhookChannelType::ServerChan, Some("sctp123tX"))
-                .is_ok()
-        );
+        assert!(validate_channel_secret_on_create(
+            &WebhookChannelType::ServerChan,
+            Some("sctp123tX")
+        )
+        .is_ok());
 
         assert!(
             validate_channel_secret_on_update(&WebhookChannelType::Telegram, None, None).is_err()

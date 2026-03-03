@@ -115,6 +115,10 @@ pub struct TokenUsageSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebhookPayload {
     pub event_type: WebhookEventType,
+    /// Preferred locale tag for localized notification rendering
+    /// (for example: "en", "zh", "ja").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
     pub session_id: Option<String>,
     pub session_name: Option<String>,
     pub project_path: Option<String>,
@@ -133,6 +137,7 @@ impl Default for WebhookPayload {
     fn default() -> Self {
         Self {
             event_type: WebhookEventType::TaskComplete,
+            locale: None,
             session_id: None,
             session_name: None,
             project_path: None,
@@ -371,6 +376,7 @@ mod tests {
     fn test_webhook_payload_serialization() {
         let payload = WebhookPayload {
             event_type: WebhookEventType::TaskComplete,
+            locale: None,
             session_id: Some("session-123".to_string()),
             session_name: Some("My Session".to_string()),
             project_path: Some("/home/user/project".to_string()),
@@ -492,6 +498,7 @@ mod tests {
         assert!(payload.summary.is_empty());
         assert!(payload.session_id.is_none());
         assert!(!payload.timestamp.is_empty());
+        assert!(payload.locale.is_none());
         assert!(payload.remote_source.is_none());
     }
 

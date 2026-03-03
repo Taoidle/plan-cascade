@@ -8,6 +8,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use crate::commands::webhook::WebhookState;
 use crate::models::export::{SettingsImportResult, UnifiedSettingsExport};
 use crate::models::response::CommandResponse;
 use crate::models::settings::{AppConfig, SettingsUpdate};
@@ -78,10 +79,19 @@ pub async fn get_settings(
 #[tauri::command]
 pub async fn update_settings(
     state: State<'_, AppState>,
+    webhook_state: State<'_, WebhookState>,
     update: SettingsUpdate,
 ) -> Result<CommandResponse<AppConfig>, String> {
+    let should_sync_webhook_locale = update.language.is_some();
     match state.update_config(update).await {
-        Ok(config) => Ok(CommandResponse::ok(config)),
+        Ok(config) => {
+            if should_sync_webhook_locale {
+                webhook_state
+                    .set_locale_if_initialized(&config.language)
+                    .await;
+            }
+            Ok(CommandResponse::ok(config))
+        }
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
 }
@@ -144,6 +154,7 @@ pub async fn set_knowledge_feature_flags(
 #[tauri::command]
 pub async fn reset_all_settings(
     state: State<'_, AppState>,
+    webhook_state: State<'_, WebhookState>,
 ) -> Result<CommandResponse<bool>, String> {
     if let Err(e) = state
         .with_config_mut(|config_service| {
@@ -177,6 +188,12 @@ pub async fn reset_all_settings(
             "Failed to reset plugin settings: {}",
             e
         )));
+    }
+
+    if let Ok(config) = state.get_config().await {
+        webhook_state
+            .set_locale_if_initialized(&config.language)
+            .await;
     }
 
     Ok(CommandResponse::ok(true))

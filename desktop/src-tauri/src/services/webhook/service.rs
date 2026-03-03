@@ -38,6 +38,7 @@ pub struct WebhookService {
     channels: HashMap<WebhookChannelType, Box<dyn WebhookChannel>>,
     db: Arc<Database>,
     keyring: Arc<KeyringService>,
+    locale: RwLock<String>,
     persistence_failures: AtomicU64,
     last_persistence_error: RwLock<Option<String>>,
 }
@@ -93,6 +94,7 @@ impl WebhookService {
             channels,
             db,
             keyring,
+            locale: RwLock::new("en".to_string()),
             persistence_failures: AtomicU64::new(0),
             last_persistence_error: RwLock::new(None),
         }
@@ -128,6 +130,7 @@ impl WebhookService {
             self.hydrate_secret(&mut config);
 
             let mut effective_payload = payload.clone();
+            self.ensure_payload_locale(&mut effective_payload);
             if let Some(rendered_summary) =
                 self.try_render_summary(config.template.as_deref(), &effective_payload)
             {
@@ -209,8 +212,25 @@ impl WebhookService {
             .channels
             .get(&config.channel_type)
             .ok_or_else(|| WebhookError::ChannelNotFound(config.channel_type.to_string()))?;
+        let mut payload = WebhookPayload {
+            event_type: WebhookEventType::TaskComplete,
+            summary: "Test notification from Plan Cascade".to_string(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            ..Default::default()
+        };
+        self.ensure_payload_locale(&mut payload);
+        let send_result = channel.send(&payload, config).await?;
+        Ok(WebhookTestResult {
+            success: send_result.success,
+            latency_ms: Some(send_result.latency_ms),
+            error: send_result.error,
+        })
+    }
 
-        channel.test(config).await
+    pub fn set_locale(&self, locale: &str) {
+        if let Ok(mut guard) = self.locale.write() {
+            *guard = normalize_locale_tag(locale).to_string();
+        }
     }
 
     /// Query failed delivery queue size.
@@ -320,13 +340,11 @@ impl WebhookService {
         delivery.retryable = None;
         delivery.error_class = None;
 
-        self.send_once(
-            channel.as_ref(),
-            &config,
-            &delivery.payload.clone(),
-            &mut delivery,
-        )
-        .await;
+        let mut retry_payload = delivery.payload.clone();
+        self.ensure_payload_locale(&mut retry_payload);
+        self.send_once(channel.as_ref(), &config, &retry_payload, &mut delivery)
+            .await;
+        delivery.payload = retry_payload;
         self.update_delivery_status(&delivery)?;
 
         Ok(delivery)
@@ -453,6 +471,38 @@ impl WebhookService {
         if let Ok(mut guard) = self.last_persistence_error.write() {
             *guard = Some(crate::services::webhook::sanitize::sanitize_for_user(error));
         }
+    }
+
+    fn current_locale(&self) -> String {
+        self.locale
+            .read()
+            .ok()
+            .map(|value| value.clone())
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "en".to_string())
+    }
+
+    fn ensure_payload_locale(&self, payload: &mut WebhookPayload) {
+        let locale = payload
+            .locale
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(normalize_locale_tag)
+            .map(str::to_string)
+            .unwrap_or_else(|| self.current_locale());
+        payload.locale = Some(locale);
+    }
+}
+
+fn normalize_locale_tag(locale: &str) -> &'static str {
+    let normalized = locale.trim().to_ascii_lowercase();
+    if normalized.starts_with("zh") {
+        "zh"
+    } else if normalized.starts_with("ja") {
+        "ja"
+    } else {
+        "en"
     }
 }
 

@@ -7,7 +7,9 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 
-use super::{format_timestamp_for_display, WebhookChannel};
+use super::{
+    format_timestamp_for_display, localized_event_name, localized_label, LabelKey, WebhookChannel,
+};
 use crate::services::proxy::ProxyConfig;
 use crate::services::webhook::types::*;
 
@@ -140,9 +142,13 @@ impl WebhookChannel for ServerChanChannel {
     ) -> Result<WebhookSendResult, WebhookError> {
         let endpoint = Self::resolve_endpoint(config)?;
         let started = std::time::Instant::now();
+        let locale = payload.locale.as_deref();
 
         let mut form = HashMap::new();
-        form.insert("text", format!("{}", payload.event_type));
+        form.insert(
+            "text",
+            localized_event_name(&payload.event_type, locale).to_string(),
+        );
         form.insert(
             "desp",
             self.format_message(payload, config.template.as_deref()),
@@ -211,38 +217,49 @@ impl WebhookChannel for ServerChanChannel {
     }
 
     fn format_message(&self, payload: &WebhookPayload, _template: Option<&str>) -> String {
+        let locale = payload.locale.as_deref();
         let mut lines = Vec::new();
         lines.push(format!(
-            "**Event**: {}",
-            Self::escape_markdown(&payload.event_type.to_string())
+            "**{}**: {}",
+            localized_label(locale, LabelKey::Event),
+            Self::escape_markdown(localized_event_name(&payload.event_type, locale))
         ));
         if let Some(ref session_name) = payload.session_name {
             lines.push(format!(
-                "**Session**: {}",
+                "**{}**: {}",
+                localized_label(locale, LabelKey::Session),
                 Self::escape_markdown(session_name)
             ));
         }
         if let Some(ref project_path) = payload.project_path {
             lines.push(format!(
-                "**Project**: `{}`",
+                "**{}**: `{}`",
+                localized_label(locale, LabelKey::Project),
                 Self::escape_markdown(project_path)
             ));
         }
         if let Some(ref remote_source) = payload.remote_source {
             lines.push(format!(
-                "**Source**: {}",
+                "**{}**: {}",
+                localized_label(locale, LabelKey::Source),
                 Self::escape_markdown(remote_source)
             ));
         }
         lines.push(format!(
-            "**Summary**: {}",
+            "**{}**: {}",
+            localized_label(locale, LabelKey::Summary),
             Self::escape_markdown(&payload.summary)
         ));
         if let Some(ms) = payload.duration_ms {
-            lines.push(format!("**Duration**: {}s", ms / 1000));
+            lines.push(format!(
+                "**{}**: {}s",
+                localized_label(locale, LabelKey::Duration),
+                ms / 1000
+            ));
         }
         lines.push(format!(
-            "**Time**: {}",
+            "**{}**: {}",
+            localized_label(locale, LabelKey::Time),
             Self::escape_markdown(&format_timestamp_for_display(&payload.timestamp))
         ));
         lines.join("\n\n")

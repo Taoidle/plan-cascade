@@ -4,7 +4,7 @@
 
 use async_trait::async_trait;
 
-use super::WebhookChannel;
+use super::{localized_event_name, localized_label, LabelKey, WebhookChannel};
 use crate::services::proxy::ProxyConfig;
 use crate::services::webhook::types::*;
 
@@ -87,6 +87,8 @@ impl WebhookChannel for DiscordChannel {
     }
 
     fn format_message(&self, payload: &WebhookPayload, _template: Option<&str>) -> String {
+        let locale = payload.locale.as_deref();
+        let event_name = localized_event_name(&payload.event_type, locale);
         let color = match payload.event_type {
             WebhookEventType::TaskComplete => 0x2ECC71,
             WebhookEventType::TaskFailed => 0xE74C3C,
@@ -99,24 +101,24 @@ impl WebhookChannel for DiscordChannel {
         let mut fields = Vec::new();
         if let Some(session_name) = &payload.session_name {
             fields.push(serde_json::json!({
-                "name": "Session",
+                "name": localized_label(locale, LabelKey::Session),
                 "value": session_name,
                 "inline": true
             }));
         }
         if let Some(project_path) = &payload.project_path {
             fields.push(serde_json::json!({
-                "name": "Project",
+                "name": localized_label(locale, LabelKey::Project),
                 "value": project_path,
                 "inline": false
             }));
         }
 
         let body = serde_json::json!({
-            "content": format!("**{}**", payload.event_type),
+            "content": format!("**{}**", event_name),
             "embeds": [
                 {
-                    "title": format!("{}", payload.event_type),
+                    "title": event_name,
                     "description": payload.summary,
                     "color": color,
                     "fields": fields,

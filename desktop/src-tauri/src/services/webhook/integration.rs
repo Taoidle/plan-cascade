@@ -438,6 +438,7 @@ fn base_payload(
 ) -> WebhookPayload {
     WebhookPayload {
         event_type,
+        locale: None,
         session_id: Some(session_id.to_string()),
         session_name: session_name.map(|s| s.to_string()),
         project_path: project_path.map(|s| s.to_string()),
