@@ -174,37 +174,7 @@ describe('workflowOrchestrator task progress events', () => {
 
     expect(workflowState.phase).toBe('cancelled');
     expect(workflowState.isCancelling).toBe(false);
-    expect(taskState.sessionStatus).toBe('cancelled');
     expect(taskState.isCancelling).toBe(false);
-  });
-
-  it('syncRuntimeFromKernel hydrates runtime IDs/questions without overwriting orchestrator phase', () => {
-    useWorkflowOrchestratorStore.setState({
-      phase: 'reviewing_prd',
-      sessionId: null,
-      pendingQuestion: null,
-    } as unknown as ReturnType<typeof useWorkflowOrchestratorStore.getState>);
-
-    useWorkflowOrchestratorStore.getState().syncRuntimeFromKernel({
-      sessionId: 'task-session',
-      phase: 'executing',
-      pendingQuestion: {
-        questionId: 'q-1',
-        question: 'Need auth?',
-        hint: null,
-        required: true,
-        inputType: 'text',
-        options: [],
-        allowCustom: true,
-        questionNumber: 1,
-        totalQuestions: 2,
-      },
-    });
-
-    const state = useWorkflowOrchestratorStore.getState();
-    expect(state.phase).toBe('reviewing_prd');
-    expect(state.sessionId).toBe('task-session');
-    expect(state.pendingQuestion?.questionId).toBe('q-1');
   });
 
   it('injects one completion card with report data and synthesizes matching summary', async () => {

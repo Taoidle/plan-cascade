@@ -3,7 +3,6 @@ import type { TFunction } from 'i18next';
 import { buildConversationHistory } from '../../lib/contextBridge';
 import { useExecutionStore } from '../../store/execution';
 import { switchModeSafely } from '../../store/simpleWorkflowCoordinator';
-import type { StreamLine } from '../../store/execution/types';
 import type { HandoffContextBundle, WorkflowMode, WorkflowSession } from '../../types/workflowKernel';
 
 type ToastLevel = 'info' | 'success' | 'error';
@@ -24,7 +23,6 @@ interface UseWorkflowModeSwitchGuardParams {
   isPlanWorkflowActive: boolean;
   hasStructuredInterviewQuestion: boolean;
   hasPlanClarifyQuestion: boolean;
-  streamingOutput: StreamLine[];
   queuedChatMessagesLength: number;
   clearQueuedChatMessages: () => void;
   setWorkflowMode: (mode: WorkflowMode) => void;
@@ -109,7 +107,6 @@ export function useWorkflowModeSwitchGuard({
   isPlanWorkflowActive,
   hasStructuredInterviewQuestion,
   hasPlanClarifyQuestion,
-  streamingOutput,
   queuedChatMessagesLength,
   clearQueuedChatMessages,
   setWorkflowMode,
@@ -149,8 +146,10 @@ export function useWorkflowModeSwitchGuard({
     (newMode: WorkflowMode) => {
       if (newMode === workflowMode) return;
 
-      const hasChatHistory = streamingOutput.length > 0;
-      const hasPendingTaskContext = useExecutionStore.getState()._pendingTaskContext;
+      const executionSnapshot = useExecutionStore.getState();
+      const latestStreamingOutput = executionSnapshot.streamingOutput;
+      const hasChatHistory = latestStreamingOutput.length > 0;
+      const hasPendingTaskContext = executionSnapshot._pendingTaskContext;
 
       if (newMode === 'task' && hasChatHistory) {
         showToast(
@@ -180,7 +179,7 @@ export function useWorkflowModeSwitchGuard({
       }
 
       if (workflowMode === 'chat' && newMode === 'task' && hasChatHistory) {
-        const contextSummary = streamingOutput
+        const contextSummary = latestStreamingOutput
           .slice(-20)
           .map((line) => line.content)
           .join('\n');
@@ -228,7 +227,6 @@ export function useWorkflowModeSwitchGuard({
       queuedChatMessagesLength,
       setWorkflowMode,
       showToast,
-      streamingOutput,
       t,
       transitionWorkflowKernelMode,
       workflowMode,

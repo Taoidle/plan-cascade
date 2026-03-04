@@ -25,11 +25,11 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
   const updateConfig = useWorkflowOrchestratorStore((s) => s.updateConfig);
   const confirmConfig = useWorkflowOrchestratorStore((s) => s.confirmConfig);
   const overrideConfigNatural = useWorkflowOrchestratorStore((s) => s.overrideConfigNatural);
-  const phase = useWorkflowOrchestratorStore((s) => s.phase);
   const workflowSession = useWorkflowKernelStore((s) => s.session);
 
   const isKernelTaskActive = workflowSession?.status === 'active' && workflowSession.activeMode === 'task';
-  const isActive = interactive && phase === 'configuring' && isKernelTaskActive && !acted;
+  const kernelTaskPhase = workflowSession?.modeSnapshots.task?.phase ?? 'idle';
+  const isActive = interactive && kernelTaskPhase === 'configuring' && isKernelTaskActive && !acted;
 
   const handleConfirm = useCallback(async () => {
     if (!isActive || isSubmitting) return;

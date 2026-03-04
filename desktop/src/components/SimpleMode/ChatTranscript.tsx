@@ -1,4 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { MarkdownRenderer } from '../ClaudeCodeMode/MarkdownRenderer';
@@ -6,7 +7,6 @@ import { Collapsible } from './Collapsible';
 import { MessageActions, EditMode } from './MessageActions';
 import { useExecutionStore, type ExecutionStatus, type StreamLine } from '../../store/execution';
 import { useSettingsStore } from '../../store/settings';
-import { isUserTurnBoundary, normalizeTurnBoundaries } from '../../lib/conversationUtils';
 import {
   buildDisplayBlocks,
   ToolCallLine,
@@ -18,22 +18,38 @@ import {
 } from '../shared/StreamingOutput';
 import { WorkflowCardRenderer } from './WorkflowCards/WorkflowCardRenderer';
 import type { CardPayload } from '../../types/workflowCard';
+import { buildTurnViewModelsFromNormalized, type TurnViewModel } from './chatTranscriptModel';
+import { normalizeTurnBoundaries } from '../../lib/conversationUtils';
 
-interface RichTurn {
-  turnIndex: number;
-  userLine: StreamLine;
-  assistantLines: StreamLine[];
-}
+const VIRTUALIZATION_THRESHOLD_TURNS = 50;
+const VIRTUAL_OVERSCAN = 6;
+const ESTIMATED_TURN_HEIGHT = 180;
 
-export function ChatTranscript({
-  lines,
-  status,
-  scrollRef,
-}: {
+const EMPTY_LINES: StreamLine[] = [];
+
+interface ChatTranscriptProps {
   lines: StreamLine[];
   status: ExecutionStatus;
   scrollRef?: React.RefObject<HTMLDivElement | null>;
-}) {
+  forceFullRender?: boolean;
+}
+
+interface TurnRowProps {
+  turn: TurnViewModel;
+  userLine: StreamLine;
+  assistantLines: StreamLine[];
+  status: ExecutionStatus;
+  isLastTurn: boolean;
+  editingLineId: number | null;
+  isActionsDisabled: boolean;
+  isClaudeCodeBackend: boolean;
+  onEdit: (lineId: number, newContent: string) => void;
+  onEditStart: (lineId: number) => void;
+  onEditCancel: () => void;
+  onCopy: (content: string) => void;
+}
+
+export function ChatTranscript({ lines, status, scrollRef, forceFullRender = false }: ChatTranscriptProps) {
   const { t } = useTranslation('simpleMode');
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -47,59 +63,45 @@ export function ChatTranscript({
     },
     [scrollRef],
   );
+
   const [editingLineId, setEditingLineId] = useState<number | null>(null);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const isNearBottom = useRef(true);
+
   const normalizedLines = useMemo(() => normalizeTurnBoundaries(lines), [lines]);
+  const turns = useMemo(() => buildTurnViewModelsFromNormalized(normalizedLines), [normalizedLines]);
 
-  // Derive rich conversation turns from ALL lines (not just text)
-  const richTurns = useMemo((): RichTurn[] => {
-    const result: RichTurn[] = [];
-    let turnIndex = 0;
-    for (let i = 0; i < normalizedLines.length; i++) {
-      if (!isUserTurnBoundary(normalizedLines[i])) continue;
-
-      let endIndex = normalizedLines.length - 1;
-      for (let j = i + 1; j < normalizedLines.length; j++) {
-        if (isUserTurnBoundary(normalizedLines[j])) {
-          endIndex = j - 1;
-          break;
-        }
-      }
-
-      const assistantLines: StreamLine[] = [];
-      for (let j = i + 1; j <= endIndex; j++) {
-        assistantLines.push(normalizedLines[j]);
-      }
-
-      result.push({ turnIndex: turnIndex++, userLine: normalizedLines[i], assistantLines });
-    }
-    // Fallback for transcripts with assistant/system lines but no boundary marker.
-    if (result.length === 0 && normalizedLines.length > 0 && normalizedLines.some((l) => !isUserTurnBoundary(l))) {
-      const syntheticUserLine: StreamLine = {
-        id: -1,
-        content: t('chat.userLabel', { defaultValue: 'User' }),
-        type: 'info',
-        timestamp: normalizedLines[0].timestamp,
-        turnId: 1,
-        turnBoundary: 'user',
-      };
-      result.push({
-        turnIndex: 0,
-        userLine: syntheticUserLine,
-        assistantLines: normalizedLines.filter((l) => !isUserTurnBoundary(l)),
-      });
-    }
-    return result;
-  }, [normalizedLines, t]);
+  const syntheticUserLine = useMemo((): StreamLine | null => {
+    if (turns.length !== 1 || turns[0].userLineIndex >= 0 || normalizedLines.length === 0) return null;
+    return {
+      id: -1,
+      content: t('chat.userLabel', { defaultValue: 'User' }),
+      type: 'info',
+      timestamp: normalizedLines[0].timestamp,
+      turnId: 1,
+      turnBoundary: 'user',
+    };
+  }, [turns, normalizedLines, t]);
 
   const backend = useSettingsStore((s) => s.backend);
-  const isClaudeCodeBackendValue = backend === 'claude-code';
+  const isClaudeCodeBackend = backend === 'claude-code';
   const isActionsDisabled = status === 'running' || status === 'paused';
-  const lastTurnIndex = richTurns.length > 0 ? richTurns.length - 1 : -1;
+  const lastTurnIndex = turns.length > 0 ? turns.length - 1 : -1;
+
+  const isVirtualized = !forceFullRender && turns.length >= VIRTUALIZATION_THRESHOLD_TURNS;
+
+  const virtualizer = useVirtualizer({
+    count: turns.length,
+    getScrollElement: () => containerRef.current,
+    estimateSize: () => ESTIMATED_TURN_HEIGHT,
+    overscan: VIRTUAL_OVERSCAN,
+    enabled: isVirtualized,
+  });
 
   // Clear editing state when lines change
   useEffect(() => {
     if (editingLineId !== null) {
-      const lineStillExists = lines.some((l) => l.id === editingLineId);
+      const lineStillExists = lines.some((line) => line.id === editingLineId);
       if (!lineStillExists) setEditingLineId(null);
     }
   }, [lines, editingLineId]);
@@ -122,10 +124,6 @@ export function ChatTranscript({
     navigator.clipboard.writeText(content).catch(() => {});
   }, []);
 
-  // Sticky-bottom auto-scroll: only scroll if user is near the bottom
-  const isNearBottom = useRef(true);
-  const [showScrollBtn, setShowScrollBtn] = useState(false);
-
   const handleScroll = useCallback(() => {
     if (!containerRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
@@ -143,8 +141,14 @@ export function ChatTranscript({
     containerRef.current.scrollTop = containerRef.current.scrollHeight;
   }, [lines]);
 
+  useEffect(() => {
+    if (isVirtualized) {
+      virtualizer.measure();
+    }
+  }, [isVirtualized, virtualizer, lines]);
+
   const hasContent = normalizedLines.length > 0;
-  if (richTurns.length === 0 && !hasContent) {
+  if (turns.length === 0 && !hasContent) {
     return (
       <div className="h-full flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">
         {status === 'running'
@@ -154,68 +158,93 @@ export function ChatTranscript({
     );
   }
 
+  const resolveUserLine = (turn: TurnViewModel): StreamLine | null => {
+    if (turn.userLineIndex >= 0) {
+      return normalizedLines[turn.userLineIndex] ?? null;
+    }
+    return syntheticUserLine;
+  };
+
+  const resolveAssistantLines = (turn: TurnViewModel): StreamLine[] => {
+    if (turn.assistantEndIndex < turn.assistantStartIndex || turn.assistantStartIndex < 0) {
+      return EMPTY_LINES;
+    }
+    return normalizedLines.slice(turn.assistantStartIndex, turn.assistantEndIndex + 1);
+  };
+
   return (
     <div className="relative h-full">
-      <div ref={setRef} onScroll={handleScroll} className="h-full overflow-y-auto px-4 py-4 space-y-4">
-        {richTurns.map((turn) => {
-          const isLastTurn = turn.turnIndex === lastTurnIndex;
-
-          return (
-            <Fragment key={turn.userLine.id}>
-              {/* User message bubble */}
-              {editingLineId === turn.userLine.id ? (
-                <div className="flex justify-end">
-                  <EditMode
-                    content={turn.userLine.content}
-                    onSave={(newContent) => handleEdit(turn.userLine.id, newContent)}
-                    onCancel={handleEditCancel}
-                    isClaudeCodeBackend={isClaudeCodeBackendValue}
-                  />
-                </div>
-              ) : (
-                <div className="group relative flex justify-end">
-                  <div className="max-w-[82%] px-4 py-2 rounded-2xl rounded-br-sm bg-primary-600 text-white text-sm whitespace-pre-wrap">
-                    {turn.userLine.content}
+      <div
+        ref={setRef}
+        onScroll={handleScroll}
+        className="h-full overflow-y-auto px-4 py-4"
+        data-testid="chat-transcript-scroll"
+        data-render-mode={isVirtualized ? 'virtual' : 'full'}
+      >
+        {isVirtualized ? (
+          <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const turn = turns[virtualRow.index];
+              const userLine = resolveUserLine(turn);
+              if (!userLine) return null;
+              return (
+                <div
+                  key={`turn-${turn.userLineId}-${turn.turnIndex}`}
+                  ref={virtualizer.measureElement}
+                  data-index={virtualRow.index}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                >
+                  <div className="pb-4">
+                    <TurnRow
+                      turn={turn}
+                      userLine={userLine}
+                      assistantLines={resolveAssistantLines(turn)}
+                      status={status}
+                      isLastTurn={turn.turnIndex === lastTurnIndex}
+                      editingLineId={editingLineId}
+                      isActionsDisabled={isActionsDisabled}
+                      isClaudeCodeBackend={isClaudeCodeBackend}
+                      onEdit={handleEdit}
+                      onEditStart={handleEditStart}
+                      onEditCancel={handleEditCancel}
+                      onCopy={handleCopy}
+                    />
                   </div>
-                  <MessageActions
-                    line={turn.userLine}
-                    isUserMessage={true}
-                    isLastTurn={isLastTurn}
-                    isClaudeCodeBackend={isClaudeCodeBackendValue}
-                    disabled={isActionsDisabled}
-                    onEdit={handleEdit}
-                    onRegenerate={() => useExecutionStore.getState().regenerateResponse(turn.userLine.id)}
-                    onRollback={() => useExecutionStore.getState().rollbackToTurn(turn.userLine.id)}
-                    onCopy={handleCopy}
-                    onEditStart={handleEditStart}
-                    onEditCancel={handleEditCancel}
-                  />
                 </div>
-              )}
-
-              {/* Assistant response section */}
-              {turn.assistantLines.length > 0 ? (
-                <ChatAssistantSection
-                  lines={turn.assistantLines}
-                  isLastTurn={isLastTurn}
-                  userLineId={turn.userLine.id}
-                  disabled={isActionsDisabled}
-                  isClaudeCodeBackend={isClaudeCodeBackendValue}
+              );
+            })}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {turns.map((turn) => {
+              const userLine = resolveUserLine(turn);
+              if (!userLine) return null;
+              return (
+                <TurnRow
+                  key={`turn-${turn.userLineId}-${turn.turnIndex}`}
+                  turn={turn}
+                  userLine={userLine}
+                  assistantLines={resolveAssistantLines(turn)}
+                  status={status}
+                  isLastTurn={turn.turnIndex === lastTurnIndex}
+                  editingLineId={editingLineId}
+                  isActionsDisabled={isActionsDisabled}
+                  isClaudeCodeBackend={isClaudeCodeBackend}
                   onEdit={handleEdit}
+                  onEditStart={handleEditStart}
+                  onEditCancel={handleEditCancel}
                   onCopy={handleCopy}
-                  onFork={() => useExecutionStore.getState().forkSessionAtTurn(turn.userLine.id)}
                 />
-              ) : status === 'running' && isLastTurn ? (
-                <div className="flex justify-start">
-                  <div className="px-4 py-2 rounded-2xl rounded-bl-sm bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-sm italic flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-primary-400 animate-pulse" />
-                    {t('emptyChat.thinking', { defaultValue: 'Thinking...' })}
-                  </div>
-                </div>
-              ) : null}
-            </Fragment>
-          );
-        })}
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Scroll to bottom button */}
@@ -254,8 +283,79 @@ export function ChatTranscript({
   );
 }
 
+const TurnRow = memo(function TurnRow({
+  turn,
+  userLine,
+  assistantLines,
+  status,
+  isLastTurn,
+  editingLineId,
+  isActionsDisabled,
+  isClaudeCodeBackend,
+  onEdit,
+  onEditStart,
+  onEditCancel,
+  onCopy,
+}: TurnRowProps) {
+  const { t } = useTranslation('simpleMode');
+
+  return (
+    <>
+      {editingLineId === userLine.id ? (
+        <div className="flex justify-end">
+          <EditMode
+            content={userLine.content}
+            onSave={(newContent) => onEdit(userLine.id, newContent)}
+            onCancel={onEditCancel}
+            isClaudeCodeBackend={isClaudeCodeBackend}
+          />
+        </div>
+      ) : (
+        <div className="group relative flex justify-end">
+          <div className="max-w-[82%] px-4 py-2 rounded-2xl rounded-br-sm bg-primary-600 text-white text-sm whitespace-pre-wrap">
+            {userLine.content}
+          </div>
+          <MessageActions
+            line={userLine}
+            isUserMessage={true}
+            isLastTurn={isLastTurn}
+            isClaudeCodeBackend={isClaudeCodeBackend}
+            disabled={isActionsDisabled}
+            onEdit={onEdit}
+            onRegenerate={() => useExecutionStore.getState().regenerateResponse(userLine.id)}
+            onRollback={() => useExecutionStore.getState().rollbackToTurn(userLine.id)}
+            onCopy={onCopy}
+            onEditStart={onEditStart}
+            onEditCancel={onEditCancel}
+          />
+        </div>
+      )}
+
+      {assistantLines.length > 0 ? (
+        <ChatAssistantSection
+          lines={assistantLines}
+          isLastTurn={isLastTurn}
+          userLineId={userLine.id}
+          disabled={isActionsDisabled}
+          isClaudeCodeBackend={isClaudeCodeBackend}
+          onEdit={onEdit}
+          onCopy={onCopy}
+          onFork={() => useExecutionStore.getState().forkSessionAtTurn(userLine.id)}
+        />
+      ) : status === 'running' && turn.turnIndex >= 0 && isLastTurn ? (
+        <div className="flex justify-start">
+          <div className="px-4 py-2 rounded-2xl rounded-bl-sm bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-sm italic flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-primary-400 animate-pulse" />
+            {t('emptyChat.thinking', { defaultValue: 'Thinking...' })}
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+});
+
 /** Assistant response section: renders rich content (text, tools, sub-agents, thinking) within a chat bubble */
-function ChatAssistantSection({
+const ChatAssistantSection = memo(function ChatAssistantSection({
   lines,
   isLastTurn,
   userLineId,
@@ -275,45 +375,85 @@ function ChatAssistantSection({
   onFork: (userLineId: number) => void;
 }) {
   const showReasoning = useSettingsStore((s) => s.showReasoningOutput);
+  const cardPayloadCacheRef = useRef<Map<number, CardPayload | null>>(new Map());
 
-  // Separate thinking from other lines
-  const thinkingLines = useMemo(() => lines.filter((l) => l.type === 'thinking'), [lines]);
-  const contentLines = useMemo(() => lines.filter((l) => l.type !== 'thinking'), [lines]);
+  useEffect(() => {
+    const activeIds = new Set(lines.map((line) => line.id));
+    for (const id of cardPayloadCacheRef.current.keys()) {
+      if (!activeIds.has(id)) cardPayloadCacheRef.current.delete(id);
+    }
+  }, [lines]);
 
-  // Build display blocks for content (always grouped, like compact mode)
-  const blocks = useMemo(() => buildDisplayBlocks(contentLines, true), [contentLines]);
+  const lineStats = useMemo(() => {
+    const thinkingLines: StreamLine[] = [];
+    const contentLines: StreamLine[] = [];
+    const textParts: string[] = [];
+    let lastTextLine: StreamLine | null = null;
+    let hasRichContent = false;
 
-  // Collect text content for copy
-  const textContent = useMemo(
-    () =>
-      lines
-        .filter((l) => l.type === 'text')
-        .map((l) => l.content)
-        .join(''),
-    [lines],
-  );
+    for (const line of lines) {
+      if (line.type === 'thinking') {
+        thinkingLines.push(line);
+        continue;
+      }
 
-  // Find last text line for MessageActions
-  const lastTextLine = useMemo(() => [...lines].reverse().find((l) => l.type === 'text'), [lines]);
+      contentLines.push(line);
+      if (line.type === 'text') {
+        textParts.push(line.content);
+        lastTextLine = line;
+      }
 
-  // Check if there's rich content (tools, sub-agents, etc.)
-  const hasRichContent = contentLines.some(
-    (l) =>
-      l.type === 'tool' || l.type === 'tool_result' || l.type === 'sub_agent' || l.type === 'analysis' || l.subAgentId,
-  );
+      if (
+        line.type === 'tool' ||
+        line.type === 'tool_result' ||
+        line.type === 'sub_agent' ||
+        line.type === 'analysis' ||
+        Boolean(line.subAgentId)
+      ) {
+        hasRichContent = true;
+      }
+    }
+
+    return {
+      thinkingLines,
+      contentLines,
+      textContent: textParts.join(''),
+      lastTextLine,
+      hasRichContent,
+    };
+  }, [lines]);
+
+  const blocks = useMemo(() => buildDisplayBlocks(lineStats.contentLines, true), [lineStats.contentLines]);
+
+  const resolveCardPayload = useCallback((line: StreamLine): CardPayload | null => {
+    if (line.cardPayload) return line.cardPayload;
+
+    const cache = cardPayloadCacheRef.current;
+    if (cache.has(line.id)) {
+      return cache.get(line.id) ?? null;
+    }
+
+    let parsed: CardPayload | null = null;
+    try {
+      parsed = JSON.parse(line.content) as CardPayload;
+    } catch (error) {
+      console.warn('Failed to parse workflow card payload', error, { lineId: line.id });
+    }
+
+    cache.set(line.id, parsed);
+    return parsed;
+  }, []);
 
   return (
     <div className="group relative flex justify-start">
       <div
         className={clsx(
           'max-w-[88%] rounded-2xl rounded-bl-sm bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100',
-          hasRichContent ? 'px-3 py-2 space-y-2' : 'px-4 py-2',
+          lineStats.hasRichContent ? 'px-3 py-2 space-y-2' : 'px-4 py-2',
         )}
       >
-        {/* Thinking section (collapsed by default) */}
-        {showReasoning && thinkingLines.length > 0 && <ChatThinkingSection lines={thinkingLines} />}
+        {showReasoning && lineStats.thinkingLines.length > 0 && <ChatThinkingSection lines={lineStats.thinkingLines} />}
 
-        {/* Content blocks */}
         {blocks.map((block, idx) => {
           if (block.kind === 'sub_agent_group') {
             return (
@@ -337,17 +477,10 @@ function ChatAssistantSection({
               />
             );
           }
-          // Single line block
+
           const line = block.line;
           if (line.type === 'card') {
-            let payload: CardPayload | null = line.cardPayload ?? null;
-            try {
-              if (!payload) {
-                payload = JSON.parse(line.content) as CardPayload;
-              }
-            } catch (error) {
-              console.warn('Failed to parse workflow card payload', error, { lineId: line.id });
-            }
+            const payload = resolveCardPayload(line);
             if (!payload) {
               return (
                 <div
@@ -383,7 +516,6 @@ function ChatAssistantSection({
           if (line.type === 'analysis') {
             return <AnalysisLine key={line.id} content={line.content} compact />;
           }
-          // error, warning, success
           if (line.type === 'error' || line.type === 'warning' || line.type === 'success') {
             const toneClass =
               line.type === 'error'
@@ -401,10 +533,9 @@ function ChatAssistantSection({
         })}
       </div>
 
-      {/* MessageActions on the assistant section */}
-      {lastTextLine && (
+      {lineStats.lastTextLine && (
         <MessageActions
-          line={lastTextLine}
+          line={lineStats.lastTextLine}
           isUserMessage={false}
           isLastTurn={isLastTurn}
           isClaudeCodeBackend={isClaudeCodeBackend}
@@ -412,25 +543,25 @@ function ChatAssistantSection({
           onEdit={onEdit}
           onRegenerate={() => useExecutionStore.getState().regenerateResponse(userLineId)}
           onRollback={() => useExecutionStore.getState().rollbackToTurn(userLineId)}
-          onCopy={() => onCopy(textContent)}
+          onCopy={() => onCopy(lineStats.textContent)}
           onFork={() => onFork(userLineId)}
         />
       )}
     </div>
   );
-}
+});
 
 /** Collapsible thinking section for chat bubbles — collapsed by default */
 function ChatThinkingSection({ lines }: { lines: StreamLine[] }) {
   const [expanded, setExpanded] = useState(false);
-  const content = lines.map((l) => l.content).join('');
+  const content = lines.map((line) => line.content).join('');
 
   if (!content.trim()) return null;
 
   return (
     <div className="rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
       <button
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setExpanded((value) => !value)}
         className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400 hover:bg-gray-200/50 dark:hover:bg-gray-700/50 transition-colors"
       >
         <svg

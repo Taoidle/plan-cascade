@@ -2,6 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import type { WorkflowSession } from '../../types/workflowKernel';
+import {
+  blobToBase64,
+  captureElementToBlob,
+  localTimestampForFilename,
+  saveBinaryWithDialog,
+} from '../../lib/exportUtils';
 
 const storeHarness = vi.hoisted(() => {
   let executionState: Record<string, unknown> = {};
@@ -9,6 +15,8 @@ const storeHarness = vi.hoisted(() => {
   let workflowKernelState: Record<string, unknown> = {};
   let workflowOrchestratorState: Record<string, unknown> = {};
   let planOrchestratorState: Record<string, unknown> = {};
+  let taskModeState: Record<string, unknown> = {};
+  let planModeState: Record<string, unknown> = {};
   let toolPermissionState: Record<string, unknown> = {};
   let contextSourcesState: Record<string, unknown> = {};
 
@@ -61,6 +69,28 @@ const storeHarness = vi.hoisted(() => {
   };
   usePlanOrchestratorStore.getState = () => planOrchestratorState;
 
+  const useTaskModeStore = ((selector?: (state: Record<string, unknown>) => unknown) =>
+    selector ? selector(taskModeState) : taskModeState) as {
+    (selector?: (state: Record<string, unknown>) => unknown): unknown;
+    getState: () => Record<string, unknown>;
+    setState: (partial: Record<string, unknown>) => void;
+  };
+  useTaskModeStore.getState = () => taskModeState;
+  useTaskModeStore.setState = (partial) => {
+    taskModeState = { ...taskModeState, ...partial };
+  };
+
+  const usePlanModeStore = ((selector?: (state: Record<string, unknown>) => unknown) =>
+    selector ? selector(planModeState) : planModeState) as {
+    (selector?: (state: Record<string, unknown>) => unknown): unknown;
+    getState: () => Record<string, unknown>;
+    setState: (partial: Record<string, unknown>) => void;
+  };
+  usePlanModeStore.getState = () => planModeState;
+  usePlanModeStore.setState = (partial) => {
+    planModeState = { ...planModeState, ...partial };
+  };
+
   const useToolPermissionStore = ((selector?: (state: Record<string, unknown>) => unknown) =>
     selector ? selector(toolPermissionState) : toolPermissionState) as {
     (selector?: (state: Record<string, unknown>) => unknown): unknown;
@@ -99,6 +129,8 @@ const storeHarness = vi.hoisted(() => {
     useWorkflowKernelStore,
     useWorkflowOrchestratorStore,
     usePlanOrchestratorStore,
+    useTaskModeStore,
+    usePlanModeStore,
     useToolPermissionStore,
     useContextSourcesStore,
     useGitStore,
@@ -123,6 +155,14 @@ const storeHarness = vi.hoisted(() => {
     getPlanOrchestratorState: () => planOrchestratorState,
     setPlanOrchestratorState: (state: Record<string, unknown>) => {
       planOrchestratorState = state;
+    },
+    getTaskModeState: () => taskModeState,
+    setTaskModeState: (state: Record<string, unknown>) => {
+      taskModeState = state;
+    },
+    getPlanModeState: () => planModeState,
+    setPlanModeState: (state: Record<string, unknown>) => {
+      planModeState = state;
     },
     setToolPermissionState: (state: Record<string, unknown>) => {
       toolPermissionState = state;
@@ -159,8 +199,24 @@ vi.mock('../shared/EffectiveContextSummary', () => ({
 }));
 
 vi.mock('../SimpleMode/ChatTranscript', () => ({
-  ChatTranscript: ({ lines }: { lines: Array<unknown> }) => (
-    <div data-testid="chat-transcript">lines:{lines.length}</div>
+  ChatTranscript: ({
+    lines,
+    forceFullRender,
+    scrollRef,
+  }: {
+    lines: Array<unknown>;
+    forceFullRender?: boolean;
+    scrollRef?: { current: HTMLDivElement | null };
+  }) => (
+    <div
+      ref={(node) => {
+        if (scrollRef) scrollRef.current = node;
+      }}
+      data-testid="chat-transcript"
+      data-force-full-render={forceFullRender ? 'true' : 'false'}
+    >
+      lines:{lines.length}
+    </div>
   ),
 }));
 
@@ -245,10 +301,12 @@ vi.mock('../SimpleMode/ChatToolbar', () => ({
     workflowMode,
     onWorkflowModeChange,
     onToggleOutput,
+    onExportImage,
   }: {
     workflowMode: string;
     onWorkflowModeChange: (mode: 'chat' | 'plan' | 'task') => void;
     onToggleOutput: () => void;
+    onExportImage: () => void;
   }) => (
     <div data-testid="chat-toolbar">
       <div data-testid="toolbar-workflow-mode">{workflowMode}</div>
@@ -263,6 +321,9 @@ vi.mock('../SimpleMode/ChatToolbar', () => ({
       </button>
       <button data-testid="toggle-output" onClick={onToggleOutput}>
         toggle-output
+      </button>
+      <button data-testid="export-image" onClick={onExportImage}>
+        export-image
       </button>
     </div>
   ),
@@ -350,6 +411,14 @@ vi.mock('../../store/workflowOrchestrator', () => ({
 
 vi.mock('../../store/planOrchestrator', () => ({
   usePlanOrchestratorStore: storeHarness.usePlanOrchestratorStore,
+}));
+
+vi.mock('../../store/taskMode', () => ({
+  useTaskModeStore: storeHarness.useTaskModeStore,
+}));
+
+vi.mock('../../store/planMode', () => ({
+  usePlanModeStore: storeHarness.usePlanModeStore,
 }));
 
 vi.mock('../../store/toolPermission', () => ({
@@ -520,13 +589,16 @@ function resetStates() {
         ...storeHarness.getWorkflowOrchestratorState(),
         sessionId: 'task-session-1',
       });
+      storeHarness.setTaskModeState({
+        ...storeHarness.getTaskModeState(),
+        sessionId: 'task-session-1',
+      });
     }),
     submitInterviewAnswer: vi.fn(async () => undefined),
     skipInterviewQuestion: vi.fn(async () => undefined),
     overrideConfigNatural: vi.fn(),
     addPrdFeedback: vi.fn(),
     cancelWorkflow: vi.fn(async () => undefined),
-    syncRuntimeFromKernel: vi.fn(),
     isCancelling: false,
     resetWorkflow: vi.fn(),
   });
@@ -541,13 +613,26 @@ function resetStates() {
         ...storeHarness.getPlanOrchestratorState(),
         sessionId: 'plan-session-1',
       });
+      storeHarness.setPlanModeState({
+        ...storeHarness.getPlanModeState(),
+        sessionId: 'plan-session-1',
+      });
     }),
     submitClarification: vi.fn(async () => undefined),
     skipClarification: vi.fn(async () => undefined),
     cancelWorkflow: vi.fn(async () => undefined),
-    syncRuntimeFromKernel: vi.fn(),
     isCancelling: false,
     resetWorkflow: vi.fn(),
+  });
+
+  storeHarness.setTaskModeState({
+    sessionId: null,
+    isTaskMode: false,
+  });
+
+  storeHarness.setPlanModeState({
+    sessionId: null,
+    isPlanMode: false,
   });
 
   storeHarness.setToolPermissionState({
@@ -744,13 +829,6 @@ describe('SimpleMode', () => {
       expect(screen.getByTestId('toolbar-workflow-mode')).toHaveTextContent('task');
     });
     expect(screen.getByTestId('interview-input-panel')).toBeInTheDocument();
-    expect(storeHarness.getWorkflowOrchestratorState().syncRuntimeFromKernel).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sessionId: 'task-session-1',
-        interviewId: 'interview-1',
-        phase: 'interviewing',
-      }),
-    );
   });
 
   it('routes plan clarification submit from kernel pending clarification when orchestrator state is stale', async () => {
@@ -783,12 +861,6 @@ describe('SimpleMode', () => {
     await waitFor(() => {
       expect(screen.getByTestId('toolbar-workflow-mode')).toHaveTextContent('plan');
     });
-    expect(storeHarness.getPlanOrchestratorState().syncRuntimeFromKernel).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sessionId: 'plan-session-1',
-        phase: 'clarifying',
-      }),
-    );
 
     fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'Developers' } });
     fireEvent.click(screen.getByTestId('composer-submit'));
@@ -801,5 +873,46 @@ describe('SimpleMode', () => {
       });
     });
     expect(storeHarness.getExecutionState().sendFollowUp).not.toHaveBeenCalled();
+  });
+
+  it('forces full transcript render while exporting image', async () => {
+    const mockCapture = vi.mocked(captureElementToBlob);
+    const mockBlobToBase64 = vi.mocked(blobToBase64);
+    const mockSaveBinary = vi.mocked(saveBinaryWithDialog);
+    const mockTimestamp = vi.mocked(localTimestampForFilename);
+    const rafSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+
+    const captureResolver: { current: ((value: Blob) => void) | null } = { current: null };
+    mockCapture.mockImplementation(
+      () =>
+        new Promise<Blob>((resolve) => {
+          captureResolver.current = resolve;
+        }),
+    );
+    mockBlobToBase64.mockResolvedValue('base64-content');
+    mockSaveBinary.mockResolvedValue(true);
+    mockTimestamp.mockReturnValue('20260304-120000');
+
+    renderSimpleMode();
+    expect(screen.getByTestId('chat-transcript')).toHaveAttribute('data-force-full-render', 'false');
+
+    fireEvent.click(screen.getByTestId('export-image'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-transcript')).toHaveAttribute('data-force-full-render', 'true');
+    });
+    expect(mockCapture).toHaveBeenCalledTimes(1);
+
+    if (captureResolver.current) {
+      captureResolver.current(new Blob(['image'], { type: 'image/png' }));
+    }
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-transcript')).toHaveAttribute('data-force-full-render', 'false');
+    });
+
+    rafSpy.mockRestore();
   });
 });

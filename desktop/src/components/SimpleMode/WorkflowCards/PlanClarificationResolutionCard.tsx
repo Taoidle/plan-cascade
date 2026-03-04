@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { usePlanOrchestratorStore } from '../../../store/planOrchestrator';
+import { useWorkflowKernelStore } from '../../../store/workflowKernel';
 import type { PlanClarificationResolutionCardData } from '../../../types/planModeCard';
 
 export function PlanClarificationResolutionCard({
@@ -11,13 +12,15 @@ export function PlanClarificationResolutionCard({
   interactive: boolean;
 }) {
   const { t } = useTranslation('planMode');
-  const phase = usePlanOrchestratorStore((s) => s.phase);
   const retryClarification = usePlanOrchestratorStore((s) => s.retryClarification);
   const skipClarification = usePlanOrchestratorStore((s) => s.skipClarification);
   const cancelWorkflow = usePlanOrchestratorStore((s) => s.cancelWorkflow);
+  const workflowSession = useWorkflowKernelStore((s) => s.session);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const isInteractive = interactive && phase === 'clarification_error' && !isSubmitting;
+  const isKernelPlanActive = workflowSession?.status === 'active' && workflowSession.activeMode === 'plan';
+  const kernelPlanPhase = workflowSession?.modeSnapshots.plan?.phase ?? 'idle';
+  const isInteractive = interactive && isKernelPlanActive && kernelPlanPhase === 'clarification_error' && !isSubmitting;
 
   const runAction = async (action: () => Promise<void>) => {
     if (!isInteractive) return;

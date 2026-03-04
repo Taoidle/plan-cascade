@@ -20,10 +20,26 @@ vi.mock('react-i18next', () => ({
 vi.mock('../../../store/planOrchestrator', () => ({
   usePlanOrchestratorStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
-      phase: 'clarification_error',
       retryClarification: planOrchestratorHarness.retryClarification,
       skipClarification: planOrchestratorHarness.skipClarification,
       cancelWorkflow: planOrchestratorHarness.cancelWorkflow,
+    }),
+}));
+
+vi.mock('../../../store/workflowKernel', () => ({
+  useWorkflowKernelStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector({
+      session: {
+        status: 'active',
+        activeMode: 'plan',
+        modeSnapshots: {
+          chat: null,
+          plan: {
+            phase: 'clarification_error',
+          },
+          task: null,
+        },
+      },
     }),
 }));
 

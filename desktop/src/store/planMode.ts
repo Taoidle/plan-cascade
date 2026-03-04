@@ -55,7 +55,7 @@ export interface PlanModeState {
     contextSources?: ContextSourceConfig,
     conversationContext?: string,
     locale?: string,
-  ) => Promise<void>;
+  ) => Promise<PlanModeSession | null>;
   submitClarification: (
     answer: PlanClarifyAnswerCardData,
     provider?: string,
@@ -158,7 +158,7 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
           locale: locale || null,
         },
       });
-      if (get()._requestId !== requestId) return;
+      if (get()._requestId !== requestId) return null;
 
       if (result.success && result.data) {
         set({
@@ -169,12 +169,15 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
           currentQuestion: result.data.currentQuestion ?? null,
           isLoading: false,
         });
+        return result.data;
       } else {
         set({ isLoading: false, error: result.error || 'Failed to enter plan mode' });
+        return null;
       }
     } catch (e) {
-      if (get()._requestId !== requestId) return;
+      if (get()._requestId !== requestId) return null;
       set({ isLoading: false, error: String(e) });
+      return null;
     }
   },
 

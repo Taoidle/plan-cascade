@@ -23,6 +23,8 @@ import { useSettingsStore } from '../../store/settings';
 import { useWorkflowOrchestratorStore } from '../../store/workflowOrchestrator';
 import { usePlanOrchestratorStore } from '../../store/planOrchestrator';
 import { useWorkflowKernelStore } from '../../store/workflowKernel';
+import { useTaskModeStore } from '../../store/taskMode';
+import { usePlanModeStore } from '../../store/planMode';
 import { useGitStore } from '../../store/git';
 import { useFileChangesStore } from '../../store/fileChanges';
 import { useToolPermissionStore } from '../../store/toolPermission';
@@ -58,6 +60,7 @@ import { useSimpleInputRouting } from './useSimpleInputRouting';
 import { useQueuedChatMessages } from './useQueuedChatMessages';
 import { cancelActiveWorkflow, submitWorkflowInputWithTracking } from '../../store/simpleWorkflowCoordinator';
 import type { WorkflowMode } from '../../types/workflowKernel';
+import { selectKernelPlanRuntime, selectKernelTaskRuntime } from '../../store/workflowKernelSelectors';
 
 interface CommandResponse<T> {
   success: boolean;
@@ -80,45 +83,43 @@ export function SimpleModeShell() {
   const { t } = useTranslation('simpleMode');
   const { showToast } = useToast();
   const simpleController = useSimpleModeController();
-  const {
-    status,
-    isCancelling: executionIsCancelling,
-    connectionStatus,
-    isSubmitting,
-    apiError,
-    start,
-    sendFollowUp,
-    pause,
-    resume,
-    cancel,
-    reset,
-    initialize,
-    cleanup,
-    isAnalyzingStrategy,
-    clearStrategyAnalysis,
-    isChatSession,
-    streamingOutput,
-    analysisCoverage,
-    logs,
-    history,
-    clearHistory,
-    deleteHistory,
-    renameHistory,
-    restoreFromHistory,
-    sessionUsageTotals,
-    turnUsageTotals,
-    taskId,
-    standaloneSessionId,
-    attachments,
-    addAttachment,
-    removeAttachment,
-    clearAttachments,
-    backgroundSessions,
-    switchToSession,
-    removeBackgroundSession,
-    foregroundParentSessionId,
-    foregroundBgId,
-  } = useExecutionStore();
+  const status = useExecutionStore((s) => s.status);
+  const executionIsCancelling = useExecutionStore((s) => s.isCancelling);
+  const connectionStatus = useExecutionStore((s) => s.connectionStatus);
+  const isSubmitting = useExecutionStore((s) => s.isSubmitting);
+  const apiError = useExecutionStore((s) => s.apiError);
+  const start = useExecutionStore((s) => s.start);
+  const sendFollowUp = useExecutionStore((s) => s.sendFollowUp);
+  const pause = useExecutionStore((s) => s.pause);
+  const resume = useExecutionStore((s) => s.resume);
+  const cancel = useExecutionStore((s) => s.cancel);
+  const reset = useExecutionStore((s) => s.reset);
+  const initialize = useExecutionStore((s) => s.initialize);
+  const cleanup = useExecutionStore((s) => s.cleanup);
+  const isAnalyzingStrategy = useExecutionStore((s) => s.isAnalyzingStrategy);
+  const clearStrategyAnalysis = useExecutionStore((s) => s.clearStrategyAnalysis);
+  const isChatSession = useExecutionStore((s) => s.isChatSession);
+  const streamingOutput = useExecutionStore((s) => s.streamingOutput);
+  const analysisCoverage = useExecutionStore((s) => s.analysisCoverage);
+  const logs = useExecutionStore((s) => s.logs);
+  const history = useExecutionStore((s) => s.history);
+  const clearHistory = useExecutionStore((s) => s.clearHistory);
+  const deleteHistory = useExecutionStore((s) => s.deleteHistory);
+  const renameHistory = useExecutionStore((s) => s.renameHistory);
+  const restoreFromHistory = useExecutionStore((s) => s.restoreFromHistory);
+  const sessionUsageTotals = useExecutionStore((s) => s.sessionUsageTotals);
+  const turnUsageTotals = useExecutionStore((s) => s.turnUsageTotals);
+  const taskId = useExecutionStore((s) => s.taskId);
+  const standaloneSessionId = useExecutionStore((s) => s.standaloneSessionId);
+  const attachments = useExecutionStore((s) => s.attachments);
+  const addAttachment = useExecutionStore((s) => s.addAttachment);
+  const removeAttachment = useExecutionStore((s) => s.removeAttachment);
+  const clearAttachments = useExecutionStore((s) => s.clearAttachments);
+  const backgroundSessions = useExecutionStore((s) => s.backgroundSessions);
+  const switchToSession = useExecutionStore((s) => s.switchToSession);
+  const removeBackgroundSession = useExecutionStore((s) => s.removeBackgroundSession);
+  const foregroundParentSessionId = useExecutionStore((s) => s.foregroundParentSessionId);
+  const foregroundBgId = useExecutionStore((s) => s.foregroundBgId);
   const activeAgentName = useExecutionStore((s) => s.activeAgentName);
   const backend = useSettingsStore((s) => s.backend);
   const provider = useSettingsStore((s) => s.provider);
@@ -261,8 +262,6 @@ export function SimpleModeShell() {
   const cancelWorkflow = useWorkflowOrchestratorStore((s) => s.cancelWorkflow);
   const taskWorkflowCancelling = useWorkflowOrchestratorStore((s) => s.isCancelling);
   const resetWorkflow = useWorkflowOrchestratorStore((s) => s.resetWorkflow);
-  const interviewStorePhase = useWorkflowOrchestratorStore((s) => s.phase);
-  const syncTaskRuntimeFromKernel = useWorkflowOrchestratorStore((s) => s.syncRuntimeFromKernel);
 
   // Plan mode orchestrator
   const planIsBusy = usePlanOrchestratorStore((s) => s.isBusy);
@@ -272,15 +271,15 @@ export function SimpleModeShell() {
   const cancelPlanWorkflow = usePlanOrchestratorStore((s) => s.cancelWorkflow);
   const planWorkflowCancelling = usePlanOrchestratorStore((s) => s.isCancelling);
   const resetPlanWorkflow = usePlanOrchestratorStore((s) => s.resetWorkflow);
-  const syncPlanRuntimeFromKernel = usePlanOrchestratorStore((s) => s.syncRuntimeFromKernel);
-
-  const workflowKernelTaskPhase = workflowKernelSession?.modeSnapshots.task?.phase ?? 'idle';
-  const workflowKernelPlanPhase = workflowKernelSession?.modeSnapshots.plan?.phase ?? 'idle';
+  const kernelTaskRuntime = useMemo(() => selectKernelTaskRuntime(workflowKernelSession), [workflowKernelSession]);
+  const kernelPlanRuntime = useMemo(() => selectKernelPlanRuntime(workflowKernelSession), [workflowKernelSession]);
+  const workflowKernelTaskPhase = kernelTaskRuntime.phase;
+  const workflowKernelPlanPhase = kernelPlanRuntime.phase;
   const workflowKernelChatPhase = workflowKernelSession?.modeSnapshots.chat?.phase ?? 'ready';
   const workflowKernelPendingInterview = workflowKernelSession?.modeSnapshots.task?.pendingInterview ?? null;
   const workflowKernelPendingClarification = workflowKernelSession?.modeSnapshots.plan?.pendingClarification ?? null;
-  const workflowKernelLinkedTaskSessionId = workflowKernelSession?.linkedModeSessions?.task ?? null;
-  const workflowKernelLinkedPlanSessionId = workflowKernelSession?.linkedModeSessions?.plan ?? null;
+  const workflowKernelLinkedTaskSessionId = kernelTaskRuntime.linkedSessionId;
+  const workflowKernelLinkedPlanSessionId = kernelPlanRuntime.linkedSessionId;
 
   const kernelInterviewQuestion = useMemo<InterviewQuestionCardData | null>(() => {
     if (!workflowKernelPendingInterview) return null;
@@ -370,32 +369,32 @@ export function SimpleModeShell() {
     planPhase !== 'cancelled';
   const effectiveTaskPhaseForInput = taskInterviewingPhase ? 'interviewing' : workflowPhase;
   const effectivePlanPhaseForInput = planClarifyingPhase ? 'clarifying' : planPhase;
-  const isInterviewSubmitting =
-    taskInterviewingPhase && taskPendingQuestion === null && interviewStorePhase === 'interviewing';
+  const isInterviewSubmitting = taskInterviewingPhase && taskPendingQuestion === null;
 
   useEffect(() => {
-    syncTaskRuntimeFromKernel({
-      sessionId: workflowKernelLinkedTaskSessionId,
-      interviewId: workflowKernelPendingInterview?.interviewId ?? null,
-      pendingQuestion: kernelInterviewQuestion,
-      phase: workflowKernelTaskPhase,
-    });
-    syncPlanRuntimeFromKernel({
-      sessionId: workflowKernelLinkedPlanSessionId,
-      phase: workflowKernelPlanPhase,
-      pendingClarifyQuestion: kernelPlanClarifyQuestion,
-    });
-  }, [
-    syncTaskRuntimeFromKernel,
-    syncPlanRuntimeFromKernel,
-    workflowKernelLinkedTaskSessionId,
-    workflowKernelLinkedPlanSessionId,
-    workflowKernelPendingInterview?.interviewId,
-    workflowKernelTaskPhase,
-    workflowKernelPlanPhase,
-    kernelInterviewQuestion,
-    kernelPlanClarifyQuestion,
-  ]);
+    if (workflowKernelLinkedTaskSessionId) {
+      useTaskModeStore.setState((state) =>
+        state.sessionId === workflowKernelLinkedTaskSessionId
+          ? state
+          : {
+              ...state,
+              sessionId: workflowKernelLinkedTaskSessionId,
+              isTaskMode: true,
+            },
+      );
+    }
+    if (workflowKernelLinkedPlanSessionId) {
+      usePlanModeStore.setState((state) =>
+        state.sessionId === workflowKernelLinkedPlanSessionId
+          ? state
+          : {
+              ...state,
+              sessionId: workflowKernelLinkedPlanSessionId,
+              isPlanMode: true,
+            },
+      );
+    }
+  }, [workflowKernelLinkedTaskSessionId, workflowKernelLinkedPlanSessionId]);
 
   // Tool permission state
   const permissionRequest = useToolPermissionStore((s) => s.pendingRequest);
@@ -498,7 +497,6 @@ export function SimpleModeShell() {
     isPlanWorkflowActive: isPlanWorkflowActiveForSwitchGuard,
     hasStructuredInterviewQuestion,
     hasPlanClarifyQuestion,
-    streamingOutput,
     queuedChatMessagesLength: queuedChatMessages.length,
     clearQueuedChatMessages,
     setWorkflowMode,
@@ -728,8 +726,16 @@ export function SimpleModeShell() {
     const el = chatScrollRef.current;
     if (!el) return;
 
+    const previousScrollTop = el.scrollTop;
+    const waitForNextFrame = () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve());
+      });
+
     setIsCapturing(true);
     try {
+      await waitForNextFrame();
+      await waitForNextFrame();
       const isDark = document.documentElement.classList.contains('dark');
       const blob = await captureElementToBlob(el, 'png', {
         backgroundColor: isDark ? '#111827' : '#ffffff',
@@ -745,6 +751,11 @@ export function SimpleModeShell() {
       showToast(t('chatToolbar.exportImageFailed', { defaultValue: 'Failed to export image' }), 'error');
     } finally {
       setIsCapturing(false);
+      requestAnimationFrame(() => {
+        if (chatScrollRef.current) {
+          chatScrollRef.current.scrollTop = previousScrollTop;
+        }
+      });
     }
   }, [showToast, t]);
 
@@ -1048,7 +1059,12 @@ export function SimpleModeShell() {
             />
 
             <div className="flex-1 min-h-0">
-              <ChatTranscript lines={streamingOutput} status={status} scrollRef={chatScrollRef} />
+              <ChatTranscript
+                lines={streamingOutput}
+                status={status}
+                scrollRef={chatScrollRef}
+                forceFullRender={isCapturing}
+              />
             </div>
 
             <ChatToolbar

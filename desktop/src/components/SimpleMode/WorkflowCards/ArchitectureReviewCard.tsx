@@ -33,7 +33,6 @@ export function ArchitectureReviewCard({
   const [acted, setActed] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const approveArchitecture = useWorkflowOrchestratorStore((s) => s.approveArchitecture);
-  const phase = useWorkflowOrchestratorStore((s) => s.phase);
   const workflowSession = useWorkflowKernelStore((s) => s.session);
 
   const toggleMod = (index: number) => {
@@ -100,7 +99,9 @@ export function ArchitectureReviewCard({
   };
 
   const isKernelTaskActive = workflowSession?.status === 'active' && workflowSession.activeMode === 'task';
-  const isInteractive = interactive && phase === 'architecture_review' && isKernelTaskActive && !acted && !isSubmitting;
+  const kernelTaskPhase = workflowSession?.modeSnapshots.task?.phase ?? 'idle';
+  const isInteractive =
+    interactive && kernelTaskPhase === 'architecture_review' && isKernelTaskActive && !acted && !isSubmitting;
 
   return (
     <div className="rounded-lg border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-900/20 overflow-hidden">

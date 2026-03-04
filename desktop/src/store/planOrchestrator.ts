@@ -84,11 +84,6 @@ interface PlanOrchestratorState {
   proceedToPlanning: () => Promise<void>;
   approvePlan: (plan: PlanCardData) => Promise<void>;
   cancelWorkflow: () => Promise<void>;
-  syncRuntimeFromKernel: (runtime: {
-    sessionId?: string | null;
-    phase?: string | null;
-    pendingClarifyQuestion?: PlanClarifyQuestionCardData | null;
-  }) => void;
   resetWorkflow: () => void;
 }
 
@@ -270,7 +265,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
     const contextSources = buildPlanContextSources(null);
 
     // Enter plan mode (runs analysis)
-    await planStore.enterPlanMode(
+    const enteredSession = await planStore.enterPlanMode(
       description,
       settings.provider,
       settings.model,
@@ -282,14 +277,30 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
     );
     if (get()._runToken !== runToken) return;
 
-    const { analysis, sessionPhase, sessionId, error } = usePlanModeStore.getState();
+    const planStoreState = usePlanModeStore.getState();
+    const fallbackSession =
+      !enteredSession && planStoreState.sessionId
+        ? {
+            sessionId: planStoreState.sessionId,
+            phase: planStoreState.sessionPhase,
+            analysis: planStoreState.analysis,
+            currentQuestion: planStoreState.currentQuestion,
+          }
+        : null;
+    const activeSession = enteredSession ?? fallbackSession;
+    const { error } = planStoreState;
 
-    if (error) {
+    if (error || !activeSession) {
       if (get()._runToken !== runToken) return;
-      injectError(i18n.t('planMode:orchestrator.analysisFailed', 'Analysis Failed'), error);
+      injectError(
+        i18n.t('planMode:orchestrator.analysisFailed', 'Analysis Failed'),
+        error || 'Failed to enter plan mode',
+      );
       set({ isBusy: false, phase: 'failed' });
       return;
     }
+
+    const { analysis, phase: enteredPhase, sessionId, currentQuestion } = activeSession;
 
     if (get()._runToken !== runToken) return;
     set({ sessionId, analysis });
@@ -301,9 +312,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
     }
 
     // Proceed based on phase
-    if (sessionPhase === 'clarifying') {
-      const { currentQuestion } = usePlanModeStore.getState();
-
+    if (enteredPhase === 'clarifying') {
       if (get()._runToken !== runToken) return;
       set({ phase: 'clarifying', isBusy: false, pendingClarifyQuestion: currentQuestion ?? null });
 
@@ -502,7 +511,6 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
         currentBatch: number;
         totalBatches: number;
         stepStatuses?: Record<string, string>;
-        sessionPhase?: PlanModePhase;
         error?: string | null;
         isCancelling?: boolean;
       } = {
@@ -575,7 +583,6 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
         const hasFailedSteps = Object.values(mergedStepStatuses).some((status) => status === 'failed');
         const terminalPhase: PlanModePhase = hasFailedSteps ? 'failed' : 'completed';
 
-        planModePatch.sessionPhase = terminalPhase;
         planModePatch.isCancelling = false;
         usePlanModeStore.setState(planModePatch);
         set({
@@ -601,12 +608,11 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
             ? buildPlanCompletionCardDataFromReport(report, terminalPhase === 'completed')
             : buildPlanCompletionCardDataFallback(plan, mergedStepStatuses, terminalPhase === 'completed');
 
-          injectCard('plan_completion_card', completionData);
+          injectCard('plan_completion_card', completionData as unknown as Record<string, unknown>);
           set({ _completionCardInjectedRunToken: runToken });
         })();
       } else if (payload.eventType === 'execution_cancelled') {
         if (get()._runToken !== runToken) return;
-        planModePatch.sessionPhase = 'cancelled';
         planModePatch.isCancelling = false;
         usePlanModeStore.setState(planModePatch);
         set({ phase: 'cancelled', isBusy: false, isCancelling: false, _progressUnlisten: null });
@@ -686,9 +692,15 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
   },
 
   cancelWorkflow: async () => {
-    const { phase, _progressUnlisten, _runToken } = get();
+    const { phase, sessionId, _progressUnlisten, _runToken } = get();
+    const linkedSessionId = useWorkflowKernelStore.getState().session?.linkedModeSessions?.plan ?? null;
+    const effectiveSessionId = sessionId || linkedSessionId || usePlanModeStore.getState().sessionId || null;
+    if (!sessionId && effectiveSessionId) {
+      set({ sessionId: effectiveSessionId });
+      usePlanModeStore.setState({ sessionId: effectiveSessionId, isPlanMode: true });
+    }
 
-    if (phase === 'executing') {
+    if (phase === 'executing' && effectiveSessionId) {
       if (get().isCancelling) return;
       set({ isCancelling: true, isBusy: true });
       const planStore = usePlanModeStore.getState();
@@ -715,49 +727,6 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       buildPlanContextSources(null);
       set({ ...DEFAULT_STATE, _runToken: nextRunToken });
       injectInfo(i18n.t('planMode:orchestrator.cancelled', 'Plan mode cancelled.'));
-    }
-  },
-
-  syncRuntimeFromKernel: ({ sessionId, phase: _phase, pendingClarifyQuestion }) => {
-    const normalizedSessionId = sessionId?.trim() || null;
-
-    set((state) => {
-      const patch: Partial<PlanOrchestratorState> = {};
-
-      if (normalizedSessionId && normalizedSessionId !== state.sessionId) {
-        patch.sessionId = normalizedSessionId;
-      }
-      if (pendingClarifyQuestion !== undefined) {
-        const sameQuestion =
-          (state.pendingClarifyQuestion?.questionId ?? null) === (pendingClarifyQuestion?.questionId ?? null) &&
-          (state.pendingClarifyQuestion?.question ?? null) === (pendingClarifyQuestion?.question ?? null);
-        if (!sameQuestion) {
-          patch.pendingClarifyQuestion = pendingClarifyQuestion ?? null;
-        }
-      }
-
-      return Object.keys(patch).length > 0 ? patch : state;
-    });
-
-    const planModePatch: {
-      isPlanMode?: boolean;
-      sessionId?: string | null;
-      currentQuestion?: PlanClarifyQuestionCardData | null;
-    } = {};
-
-    if (normalizedSessionId) {
-      planModePatch.isPlanMode = true;
-      planModePatch.sessionId = normalizedSessionId;
-    }
-    if (pendingClarifyQuestion !== undefined) {
-      planModePatch.currentQuestion = pendingClarifyQuestion ?? null;
-    }
-
-    if (Object.keys(planModePatch).length > 0) {
-      usePlanModeStore.setState(planModePatch);
-    }
-    if (normalizedSessionId) {
-      buildPlanContextSources(normalizedSessionId);
     }
   },
 

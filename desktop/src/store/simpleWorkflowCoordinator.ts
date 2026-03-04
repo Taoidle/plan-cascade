@@ -167,7 +167,8 @@ export async function startModeWithCompensation({
   try {
     if (mode === 'task') {
       await startTaskWorkflow(prompt);
-      const taskModeSessionId = useWorkflowOrchestratorStore.getState().sessionId;
+      const taskModeSessionId =
+        useTaskModeStore.getState().sessionId || useWorkflowOrchestratorStore.getState().sessionId;
       if (!taskModeSessionId) {
         await compensateStartFailure(mode, 'mode_start_failed', transitionAndSubmitInput, cancelKernelOperation);
         return { ok: false, errorCode: 'mode_start_failed', session: kernelSession };
@@ -184,7 +185,7 @@ export async function startModeWithCompensation({
 
     if (mode === 'plan') {
       await startPlanWorkflow(prompt);
-      const planModeSessionId = usePlanOrchestratorStore.getState().sessionId;
+      const planModeSessionId = usePlanModeStore.getState().sessionId || usePlanOrchestratorStore.getState().sessionId;
       if (!planModeSessionId) {
         await compensateStartFailure(mode, 'mode_start_failed', transitionAndSubmitInput, cancelKernelOperation);
         return { ok: false, errorCode: 'mode_start_failed', session: kernelSession };

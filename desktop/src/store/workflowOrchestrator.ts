@@ -128,12 +128,6 @@ interface WorkflowOrchestratorState {
     selectedModifications: ArchitectureReviewCardData['prdModifications'],
   ) => Promise<void>;
   cancelWorkflow: () => Promise<void>;
-  syncRuntimeFromKernel: (runtime: {
-    sessionId?: string | null;
-    interviewId?: string | null;
-    pendingQuestion?: InterviewQuestionCardData | null;
-    phase?: string | null;
-  }) => void;
   resetWorkflow: () => void;
   clearConversationHistory: () => void;
 }
@@ -825,11 +819,17 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   submitInterviewAnswer: async (answer: string) => {
     const runToken = get()._runToken;
     const { pendingQuestion, interviewId } = get();
-    if (!interviewId) return;
+    const kernelPendingInterview =
+      useWorkflowKernelStore.getState().session?.modeSnapshots.task?.pendingInterview ?? null;
+    const resolvedInterviewId = interviewId || kernelPendingInterview?.interviewId || null;
+    if (!resolvedInterviewId) return;
+    if (!interviewId && resolvedInterviewId) {
+      set({ interviewId: resolvedInterviewId });
+    }
 
     // Inject answer card
     const answerData: InterviewAnswerCardData = {
-      questionId: pendingQuestion?.questionId ?? 'kernel-pending-question',
+      questionId: pendingQuestion?.questionId ?? kernelPendingInterview?.questionId ?? 'kernel-pending-question',
       answer,
       skipped: false,
     };
@@ -837,7 +837,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     set({ pendingQuestion: null });
 
     // Submit to backend
-    const updatedSession = await useSpecInterviewStore.getState().submitAnswer(answer, interviewId);
+    const updatedSession = await useSpecInterviewStore.getState().submitAnswer(answer, resolvedInterviewId);
     if (!isRunActive(get, runToken)) return;
 
     if (!updatedSession) {
@@ -914,10 +914,16 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   skipInterviewQuestion: async () => {
     const runToken = get()._runToken;
     const { pendingQuestion, interviewId } = get();
-    if (!interviewId) return;
+    const kernelPendingInterview =
+      useWorkflowKernelStore.getState().session?.modeSnapshots.task?.pendingInterview ?? null;
+    const resolvedInterviewId = interviewId || kernelPendingInterview?.interviewId || null;
+    if (!resolvedInterviewId) return;
+    if (!interviewId && resolvedInterviewId) {
+      set({ interviewId: resolvedInterviewId });
+    }
 
     const answerData: InterviewAnswerCardData = {
-      questionId: pendingQuestion?.questionId ?? 'kernel-pending-question',
+      questionId: pendingQuestion?.questionId ?? kernelPendingInterview?.questionId ?? 'kernel-pending-question',
       answer: '',
       skipped: true,
     };
@@ -925,7 +931,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     set({ pendingQuestion: null });
 
     // Submit skip (empty answer)
-    const updatedSession = await useSpecInterviewStore.getState().submitAnswer('', interviewId);
+    const updatedSession = await useSpecInterviewStore.getState().submitAnswer('', resolvedInterviewId);
     if (!isRunActive(get, runToken)) return;
 
     if (!updatedSession) {
@@ -1095,8 +1101,14 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   /** Cancel the current workflow */
   cancelWorkflow: async () => {
     const { phase, sessionId, _runToken } = get();
+    const linkedSessionId = useWorkflowKernelStore.getState().session?.linkedModeSessions?.task ?? null;
+    const effectiveSessionId = sessionId || linkedSessionId || useTaskModeStore.getState().sessionId || null;
+    if (!sessionId && effectiveSessionId) {
+      set({ sessionId: effectiveSessionId });
+      useTaskModeStore.setState({ sessionId: effectiveSessionId, isTaskMode: true });
+    }
 
-    if (phase === 'executing' && sessionId) {
+    if (phase === 'executing' && effectiveSessionId) {
       if (get().isCancelling) return;
       set({ isCancelling: true, error: null });
       await useTaskModeStore.getState().cancelExecution();
@@ -1138,47 +1150,6 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
     set({ phase: 'cancelled' });
     injectInfo(i18n.t('workflow.orchestrator.workflowCancelled', { ns: 'simpleMode' }), 'warning');
-  },
-
-  syncRuntimeFromKernel: ({ sessionId, interviewId, pendingQuestion, phase: _phase }) => {
-    const normalizedSessionId = sessionId?.trim() || null;
-    const normalizedInterviewId = interviewId?.trim() || null;
-
-    set((state) => {
-      const patch: Partial<WorkflowOrchestratorState> = {};
-
-      if (normalizedSessionId && normalizedSessionId !== state.sessionId) {
-        patch.sessionId = normalizedSessionId;
-      }
-      if (normalizedInterviewId && normalizedInterviewId !== state.interviewId) {
-        patch.interviewId = normalizedInterviewId;
-      }
-      if (pendingQuestion !== undefined) {
-        const sameQuestion =
-          (state.pendingQuestion?.questionId ?? null) === (pendingQuestion?.questionId ?? null) &&
-          (state.pendingQuestion?.question ?? null) === (pendingQuestion?.question ?? null);
-        if (!sameQuestion) {
-          patch.pendingQuestion = pendingQuestion ?? null;
-        }
-      }
-
-      return Object.keys(patch).length > 0 ? patch : state;
-    });
-
-    if (normalizedSessionId) {
-      useTaskModeStore.setState({
-        isTaskMode: true,
-        sessionId: normalizedSessionId,
-      });
-      useSpecInterviewStore.getState().setLinkedTaskSessionId(normalizedSessionId);
-    }
-
-    if (normalizedInterviewId) {
-      const specInterviewStore = useSpecInterviewStore.getState();
-      if (specInterviewStore.session?.id !== normalizedInterviewId) {
-        void specInterviewStore.fetchState(normalizedInterviewId);
-      }
-    }
   },
 
   /** Reset the orchestrator to idle state */
@@ -1708,14 +1679,6 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
         totalBatches: number;
         storyStatuses?: Record<string, string>;
         qualityGateResults?: typeof taskModeState.qualityGateResults;
-        sessionStatus?:
-          | 'initialized'
-          | 'generating_prd'
-          | 'reviewing_prd'
-          | 'executing'
-          | 'completed'
-          | 'failed'
-          | 'cancelled';
         isCancelling?: boolean;
         error?: string | null;
       } = {
@@ -1841,7 +1804,6 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
           const completedCount = Object.values(accumulatedStatuses).filter((s) => s === 'completed').length;
           const failedCount = Object.values(accumulatedStatuses).filter((s) => s === 'failed').length;
           const success = failedCount === 0;
-          taskModePatch.sessionStatus = success ? 'completed' : 'failed';
           taskModePatch.isCancelling = false;
           useTaskModeStore.setState(taskModePatch);
 
@@ -1886,7 +1848,6 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
         }
 
         case 'execution_cancelled': {
-          taskModePatch.sessionStatus = 'cancelled';
           taskModePatch.isCancelling = false;
           useTaskModeStore.setState(taskModePatch);
           set({ phase: 'cancelled', isCancelling: false });

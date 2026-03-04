@@ -128,7 +128,6 @@ describe('planOrchestrator event handling', () => {
     expect(orchestratorState.phase).toBe('cancelled');
     expect(orchestratorState.isBusy).toBe(false);
     expect(orchestratorState.isCancelling).toBe(false);
-    expect(planState.sessionPhase).toBe('cancelled');
     expect(planState.isCancelling).toBe(false);
   });
 
@@ -164,7 +163,7 @@ describe('planOrchestrator event handling', () => {
     const completionCards = extractPlanCompletionCards();
 
     expect(orchestratorState.phase).toBe('completed');
-    expect(planState.sessionPhase).toBe('completed');
+    expect(planState.stepStatuses['step-1']).toBe('completed');
     expect(completionCards).toHaveLength(1);
     expect(completionCards[0]?.data?.success).toBe(true);
   });
@@ -202,7 +201,7 @@ describe('planOrchestrator event handling', () => {
     const completionCards = extractPlanCompletionCards();
 
     expect(orchestratorState.phase).toBe('failed');
-    expect(planState.sessionPhase).toBe('failed');
+    expect(planState.stepStatuses['step-1']).toBe('failed');
     expect(completionCards).toHaveLength(1);
     expect(completionCards[0]?.data?.success).toBe(false);
   });
@@ -239,36 +238,6 @@ describe('planOrchestrator event handling', () => {
     await Promise.resolve();
 
     expect(extractPlanCompletionCards()).toHaveLength(1);
-  });
-
-  it('syncRuntimeFromKernel hydrates session/question without overwriting orchestrator phase', () => {
-    usePlanOrchestratorStore.setState({
-      phase: 'reviewing_plan',
-      sessionId: null,
-      pendingClarifyQuestion: null,
-    } as unknown as ReturnType<typeof usePlanOrchestratorStore.getState>);
-    usePlanModeStore.setState({
-      sessionPhase: 'reviewing_plan',
-    } as unknown as ReturnType<typeof usePlanModeStore.getState>);
-
-    usePlanOrchestratorStore.getState().syncRuntimeFromKernel({
-      sessionId: 'session-1',
-      phase: 'executing',
-      pendingClarifyQuestion: {
-        questionId: 'q-1',
-        question: 'Need timeline?',
-        hint: null,
-        inputType: 'text',
-        options: [],
-      },
-    });
-
-    const orchestratorState = usePlanOrchestratorStore.getState();
-    const planState = usePlanModeStore.getState();
-    expect(orchestratorState.phase).toBe('reviewing_plan');
-    expect(orchestratorState.sessionId).toBe('session-1');
-    expect(orchestratorState.pendingClarifyQuestion?.questionId).toBe('q-1');
-    expect(planState.sessionPhase).toBe('reviewing_plan');
   });
 });
 

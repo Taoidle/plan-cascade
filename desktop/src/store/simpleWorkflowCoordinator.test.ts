@@ -165,7 +165,7 @@ describe('simpleWorkflowCoordinator', () => {
 
     expect(result.ok).toBe(false);
     expect(result.errorCode).toBe('mode_session_link_failed');
-    expect(linkModeSession).toHaveBeenCalledWith('task', 'task-mode-session-2');
+    expect(linkModeSession).toHaveBeenCalledWith('task', 'task-runtime-2');
     expect(taskCancel).toHaveBeenCalledTimes(1);
     expect(taskExit).toHaveBeenCalledTimes(1);
     expect(cancelKernelOperation).toHaveBeenCalledWith('mode_session_link_failed');
