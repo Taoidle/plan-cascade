@@ -164,7 +164,6 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
   const [retryingStepId, setRetryingStepId] = useState<string | null>(null);
 
   const approvePlan = usePlanOrchestratorStore((s) => s.approvePlan);
-  const phase = usePlanOrchestratorStore((s) => s.phase);
   const stepStatuses = usePlanModeStore((s) => s.stepStatuses);
 
   const workflowSession = useWorkflowKernelStore((s) => s.session);
@@ -178,7 +177,8 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
   }, [data]);
 
   const isKernelPlanActive = workflowSession?.status === 'active' && workflowSession.activeMode === 'plan';
-  const isActive = interactive && phase === 'reviewing_plan' && isKernelPlanActive && !acted;
+  const kernelPlanPhase = workflowSession?.modeSnapshots.plan?.phase ?? 'idle';
+  const isActive = interactive && kernelPlanPhase === 'reviewing_plan' && isKernelPlanActive && !acted;
   const failedSteps = useMemo(
     () => workingPlan.steps.filter((step) => stepStatuses[step.id] === 'failed'),
     [workingPlan.steps, stepStatuses],

@@ -239,20 +239,45 @@ export async function cancelActiveWorkflow(params: {
   workflowMode: WorkflowMode;
   taskWorkflowCancelling: boolean;
   planWorkflowCancelling: boolean;
+  isTaskExecuting: boolean;
+  isPlanExecuting: boolean;
   cancelKernelOperation: (reason?: string) => Promise<WorkflowSession | null>;
   cancelTaskWorkflow: () => Promise<void>;
   cancelPlanWorkflow: () => Promise<void>;
 }): Promise<void> {
   if (params.taskWorkflowCancelling || params.planWorkflowCancelling) return;
-  await params.cancelKernelOperation('cancelled_by_user');
+
+  if (params.workflowMode === 'chat') {
+    await params.cancelKernelOperation('cancelled_by_user');
+    return;
+  }
 
   if (params.workflowMode === 'plan') {
-    await params.cancelPlanWorkflow();
+    try {
+      await params.cancelPlanWorkflow();
+    } catch (error) {
+      await params.cancelKernelOperation('runtime_cancel_failed');
+      throw error;
+    }
+    if (!params.isPlanExecuting) {
+      await params.cancelKernelOperation('cancelled_by_user');
+    }
     return;
   }
   if (params.workflowMode === 'task') {
-    await params.cancelTaskWorkflow();
+    try {
+      await params.cancelTaskWorkflow();
+    } catch (error) {
+      await params.cancelKernelOperation('runtime_cancel_failed');
+      throw error;
+    }
+    if (!params.isTaskExecuting) {
+      await params.cancelKernelOperation('cancelled_by_user');
+    }
+    return;
   }
+
+  await params.cancelKernelOperation('cancelled_by_user');
 }
 
 export async function submitWorkflowActionIntentViaCoordinator(

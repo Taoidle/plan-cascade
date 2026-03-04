@@ -683,6 +683,32 @@ describe('SimpleMode', () => {
     expect(storeHarness.getWorkflowKernelState().refreshSessionState).not.toHaveBeenCalled();
   });
 
+  it('uses kernel plan phase instead of plan orchestrator fallback phase', async () => {
+    const kernelSession = createKernelSession('plan');
+    kernelSession.modeSnapshots.plan = {
+      ...kernelSession.modeSnapshots.plan!,
+      phase: 'executing',
+    };
+    storeHarness.setWorkflowKernelState({
+      ...storeHarness.getWorkflowKernelState(),
+      session: kernelSession,
+    });
+    storeHarness.setPlanOrchestratorState({
+      ...storeHarness.getPlanOrchestratorState(),
+      phase: 'clarification_error',
+    });
+
+    renderSimpleMode();
+    await waitFor(() => {
+      expect(screen.getByTestId('toolbar-workflow-mode')).toHaveTextContent('plan');
+    });
+
+    fireEvent.click(screen.getByTestId('toggle-output'));
+    await waitFor(() => {
+      expect(screen.getByTestId('tabbed-right-panel')).toHaveAttribute('data-workflow-phase', 'executing');
+    });
+  });
+
   it('shows task interview input panel when kernel has pending interview even if orchestrator question is empty', async () => {
     const kernelSession = createKernelSession('task');
     kernelSession.linkedModeSessions.task = 'task-session-1';

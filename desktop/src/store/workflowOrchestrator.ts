@@ -16,9 +16,16 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import i18n from '../i18n';
 import { useExecutionStore } from './execution';
-import { useTaskModeStore, type TaskPrd, type StrategyAnalysis, type GateResult } from './taskMode';
+import {
+  useTaskModeStore,
+  type TaskPrd,
+  type StrategyAnalysis,
+  type GateResult,
+  type ExecutionReport,
+} from './taskMode';
 import { useSpecInterviewStore, type InterviewQuestion, type InterviewSession } from './specInterview';
 import { useSettingsStore } from './settings';
+import { useWorkflowKernelStore } from './workflowKernel';
 import { buildConversationHistory, synthesizePlanningTurn, synthesizeExecutionTurn } from '../lib/contextBridge';
 import { getNextTurnId } from '../lib/conversationUtils';
 import { deriveGateOverallStatus } from '../lib/gateStatus';
@@ -100,6 +107,9 @@ interface WorkflowOrchestratorState {
   /** Guards async continuations after cancel/reset */
   _runToken: number;
 
+  /** Prevent duplicate completion-card injection for a single run token */
+  _completionCardInjectedRunToken: number | null;
+
   // Actions
   startWorkflow: (description: string) => Promise<void>;
   confirmConfig: (overrides?: Partial<WorkflowConfig>) => Promise<void>;
@@ -162,6 +172,7 @@ const DEFAULT_STATE = {
   _unlistenFn: null as UnlistenFn | null,
   _conversationHistory: [] as CrossModeConversationTurn[],
   _runToken: 0,
+  _completionCardInjectedRunToken: null as number | null,
 };
 
 // ============================================================================
@@ -361,25 +372,53 @@ function recomputeBatches(stories: TaskPrd['stories'], maxParallel: number): Tas
   return batches;
 }
 
-function normalizeWorkflowPhase(phase: string | null | undefined): WorkflowPhase | null {
-  switch (phase) {
-    case 'idle':
-    case 'analyzing':
-    case 'configuring':
-    case 'interviewing':
-    case 'exploring':
-    case 'requirement_analysis':
-    case 'generating_prd':
-    case 'reviewing_prd':
-    case 'architecture_review':
-    case 'generating_design_doc':
-    case 'executing':
-    case 'completed':
-    case 'failed':
-    case 'cancelled':
-      return phase;
-    default:
-      return null;
+function buildCompletionReportDataFromReport(report: ExecutionReport): CompletionReportCardData {
+  return {
+    success: report.success,
+    totalStories: report.totalStories,
+    completed: report.storiesCompleted,
+    failed: report.storiesFailed,
+    duration: report.totalDurationMs,
+    agentAssignments: report.agentAssignments,
+  };
+}
+
+function buildCompletionReportDataFallback(params: {
+  totalStories: number;
+  completed: number;
+  failed: number;
+  success: boolean;
+}): CompletionReportCardData {
+  return {
+    success: params.success,
+    totalStories: params.totalStories,
+    completed: params.completed,
+    failed: params.failed,
+    duration: 0,
+    agentAssignments: {},
+  };
+}
+
+async function syncKernelTaskPhase(
+  phase: Extract<WorkflowPhase, 'requirement_analysis' | 'architecture_review' | 'generating_design_doc'>,
+  reasonCode: string,
+): Promise<void> {
+  const transitionAndSubmitInput = useWorkflowKernelStore.getState().transitionAndSubmitInput;
+  const session = useWorkflowKernelStore.getState().session;
+  if (!session || session.activeMode !== 'task') return;
+
+  try {
+    await transitionAndSubmitInput('task', {
+      type: 'system_phase_update',
+      content: `phase:${phase}`,
+      metadata: {
+        mode: 'task',
+        phase,
+        reasonCode,
+      },
+    });
+  } catch {
+    // best-effort kernel phase sync
   }
 }
 
@@ -1075,7 +1114,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
             defaultValue: 'Please retry cancellation.',
           }),
         );
-        return;
+        throw new Error(taskState.error);
       }
       injectInfo(
         i18n.t('workflow.orchestrator.cancelling', {
@@ -1101,10 +1140,9 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     injectInfo(i18n.t('workflow.orchestrator.workflowCancelled', { ns: 'simpleMode' }), 'warning');
   },
 
-  syncRuntimeFromKernel: ({ sessionId, interviewId, pendingQuestion, phase }) => {
+  syncRuntimeFromKernel: ({ sessionId, interviewId, pendingQuestion, phase: _phase }) => {
     const normalizedSessionId = sessionId?.trim() || null;
     const normalizedInterviewId = interviewId?.trim() || null;
-    const normalizedPhase = normalizeWorkflowPhase(phase);
 
     set((state) => {
       const patch: Partial<WorkflowOrchestratorState> = {};
@@ -1122,9 +1160,6 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         if (!sameQuestion) {
           patch.pendingQuestion = pendingQuestion ?? null;
         }
-      }
-      if (normalizedPhase && normalizedPhase !== state.phase) {
-        patch.phase = normalizedPhase;
       }
 
       return Object.keys(patch).length > 0 ? patch : state;
@@ -1250,6 +1285,7 @@ async function requirementAnalysisPhase(set: SetFn, get: GetFn, runToken: number
   if (config.flowLevel === 'quick') return;
 
   set({ phase: 'requirement_analysis' });
+  await syncKernelTaskPhase('requirement_analysis', 'requirement_analysis_started');
 
   const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
   if (!isRunActive(get, runToken)) return;
@@ -1347,6 +1383,7 @@ async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd, run
   }
 
   set({ phase: 'architecture_review', architectureReviewRound: architectureReviewRound + 1 });
+  await syncKernelTaskPhase('architecture_review', 'architecture_review_started');
 
   const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
   if (!isRunActive(get, runToken)) return;
@@ -1430,6 +1467,7 @@ async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd, run
 async function designDocAndExecutePhase(set: SetFn, get: GetFn, prd: TaskPrd, runToken: number) {
   if (!isRunActive(get, runToken)) return;
   set({ phase: 'generating_design_doc', editablePrd: prd });
+  await syncKernelTaskPhase('generating_design_doc', 'design_doc_generation_started');
   injectInfo(i18n.t('workflow.orchestrator.generatingDesignDoc', { ns: 'simpleMode' }), 'info');
 
   try {
@@ -1794,7 +1832,12 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
         }
 
         case 'execution_completed': {
-          const totalStories = Object.keys(accumulatedStatuses).length;
+          const fallbackTotalStories =
+            Object.keys(accumulatedStatuses).length ||
+            state.editablePrd?.stories.length ||
+            taskModeState.prd?.stories.length ||
+            0;
+          const totalStories = fallbackTotalStories;
           const completedCount = Object.values(accumulatedStatuses).filter((s) => s === 'completed').length;
           const failedCount = Object.values(accumulatedStatuses).filter((s) => s === 'failed').length;
           const success = failedCount === 0;
@@ -1802,38 +1845,43 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
           taskModePatch.isCancelling = false;
           useTaskModeStore.setState(taskModePatch);
 
-          injectCard('completion_report', {
-            success,
-            totalStories,
-            completed: completedCount,
-            failed: failedCount,
-            duration: 0,
-            agentAssignments: {},
-          } as CompletionReportCardData);
-
           set({ phase: success ? 'completed' : 'failed', isCancelling: false });
 
-          // Synthesize execution result into conversation history (Task → Chat writeback)
-          synthesizeExecutionTurn(completedCount, totalStories, success);
+          void (async () => {
+            let report: ExecutionReport | null = null;
+            try {
+              report = await Promise.race<ExecutionReport | null>([
+                (async () => {
+                  await useTaskModeStore.getState().fetchReport();
+                  const latestReport = useTaskModeStore.getState().report;
+                  return latestReport && latestReport.sessionId === payload.sessionId ? latestReport : null;
+                })(),
+                new Promise<null>((resolve) => {
+                  setTimeout(() => resolve(null), 1500);
+                }),
+              ]);
+            } catch {
+              report = null;
+            }
 
-          // Fetch full report for duration/agent data
-          useTaskModeStore
-            .getState()
-            .fetchReport()
-            .then(() => {
-              if (!isRunActive(get, runToken)) return;
-              const report = useTaskModeStore.getState().report;
-              if (report) {
-                injectCard('completion_report', {
-                  success: report.success,
-                  totalStories: report.totalStories,
-                  completed: report.storiesCompleted,
-                  failed: report.storiesFailed,
-                  duration: report.totalDurationMs,
-                  agentAssignments: report.agentAssignments,
-                } as CompletionReportCardData);
-              }
-            });
+            if (!isRunActive(get, runToken)) return;
+            if (get()._completionCardInjectedRunToken === runToken) return;
+
+            const completionData = report
+              ? buildCompletionReportDataFromReport(report)
+              : buildCompletionReportDataFallback({
+                  success,
+                  totalStories,
+                  completed: completedCount,
+                  failed: failedCount,
+                });
+
+            injectCard('completion_report', completionData);
+            set({ _completionCardInjectedRunToken: runToken });
+
+            // Synthesize execution result into conversation history (Task → Chat writeback)
+            synthesizeExecutionTurn(completionData.completed, completionData.totalStories, completionData.success);
+          })();
           break;
         }
 

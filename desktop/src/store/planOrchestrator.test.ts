@@ -43,6 +43,14 @@ function payload(base: Partial<PlanModeProgressPayload>): PlanModeProgressPayloa
   };
 }
 
+function extractPlanCompletionCards() {
+  return useExecutionStore
+    .getState()
+    .streamingOutput.filter((line) => line.type === 'card')
+    .map((line) => JSON.parse(line.content) as { cardType?: string; data?: Record<string, unknown> })
+    .filter((card) => card.cardType === 'plan_completion_card');
+}
+
 describe('planOrchestrator event handling', () => {
   let progressListener: ((event: { payload: PlanModeProgressPayload }) => void) | null = null;
   const unlisten = vi.fn();
@@ -122,6 +130,145 @@ describe('planOrchestrator event handling', () => {
     expect(orchestratorState.isCancelling).toBe(false);
     expect(planState.sessionPhase).toBe('cancelled');
     expect(planState.isCancelling).toBe(false);
+  });
+
+  it('keeps completed terminal phase when report fetch fails', async () => {
+    usePlanModeStore.setState({
+      fetchReport: vi.fn().mockRejectedValue(new Error('report fetch failed')),
+      report: null,
+    } as unknown as ReturnType<typeof usePlanModeStore.getState>);
+
+    await usePlanOrchestratorStore.getState().approvePlan(TEST_PLAN);
+    expect(progressListener).not.toBeNull();
+
+    progressListener!({
+      payload: payload({
+        eventType: 'step_completed',
+        stepId: 'step-1',
+        stepStatus: 'completed',
+      }),
+    });
+
+    progressListener!({
+      payload: payload({
+        eventType: 'execution_completed',
+        progressPct: 100,
+      }),
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const orchestratorState = usePlanOrchestratorStore.getState();
+    const planState = usePlanModeStore.getState();
+    const completionCards = extractPlanCompletionCards();
+
+    expect(orchestratorState.phase).toBe('completed');
+    expect(planState.sessionPhase).toBe('completed');
+    expect(completionCards).toHaveLength(1);
+    expect(completionCards[0]?.data?.success).toBe(true);
+  });
+
+  it('marks terminal phase as failed when any step failed even without report', async () => {
+    usePlanModeStore.setState({
+      fetchReport: vi.fn().mockResolvedValue(undefined),
+      report: null,
+    } as unknown as ReturnType<typeof usePlanModeStore.getState>);
+
+    await usePlanOrchestratorStore.getState().approvePlan(TEST_PLAN);
+    expect(progressListener).not.toBeNull();
+
+    progressListener!({
+      payload: payload({
+        eventType: 'step_failed',
+        stepId: 'step-1',
+        stepStatus: 'failed',
+        error: 'boom',
+      }),
+    });
+
+    progressListener!({
+      payload: payload({
+        eventType: 'execution_completed',
+        progressPct: 100,
+      }),
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const orchestratorState = usePlanOrchestratorStore.getState();
+    const planState = usePlanModeStore.getState();
+    const completionCards = extractPlanCompletionCards();
+
+    expect(orchestratorState.phase).toBe('failed');
+    expect(planState.sessionPhase).toBe('failed');
+    expect(completionCards).toHaveLength(1);
+    expect(completionCards[0]?.data?.success).toBe(false);
+  });
+
+  it('injects at most one plan completion card for the same run token', async () => {
+    usePlanModeStore.setState({
+      fetchReport: vi.fn().mockResolvedValue(undefined),
+      report: {
+        sessionId: 'session-1',
+        planTitle: 'Test Plan',
+        success: true,
+        totalSteps: 1,
+        stepsCompleted: 1,
+        stepsFailed: 0,
+        totalDurationMs: 1000,
+        stepSummaries: { 'step-1': 'done' },
+      },
+    } as unknown as ReturnType<typeof usePlanModeStore.getState>);
+
+    await usePlanOrchestratorStore.getState().approvePlan(TEST_PLAN);
+    expect(progressListener).not.toBeNull();
+
+    const completionEvent = {
+      payload: payload({
+        eventType: 'execution_completed',
+        progressPct: 100,
+      }),
+    };
+
+    progressListener!(completionEvent);
+    progressListener!(completionEvent);
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(extractPlanCompletionCards()).toHaveLength(1);
+  });
+
+  it('syncRuntimeFromKernel hydrates session/question without overwriting orchestrator phase', () => {
+    usePlanOrchestratorStore.setState({
+      phase: 'reviewing_plan',
+      sessionId: null,
+      pendingClarifyQuestion: null,
+    } as unknown as ReturnType<typeof usePlanOrchestratorStore.getState>);
+    usePlanModeStore.setState({
+      sessionPhase: 'reviewing_plan',
+    } as unknown as ReturnType<typeof usePlanModeStore.getState>);
+
+    usePlanOrchestratorStore.getState().syncRuntimeFromKernel({
+      sessionId: 'session-1',
+      phase: 'executing',
+      pendingClarifyQuestion: {
+        questionId: 'q-1',
+        question: 'Need timeline?',
+        hint: null,
+        inputType: 'text',
+        options: [],
+      },
+    });
+
+    const orchestratorState = usePlanOrchestratorStore.getState();
+    const planState = usePlanModeStore.getState();
+    expect(orchestratorState.phase).toBe('reviewing_plan');
+    expect(orchestratorState.sessionId).toBe('session-1');
+    expect(orchestratorState.pendingClarifyQuestion?.questionId).toBe('q-1');
+    expect(planState.sessionPhase).toBe('reviewing_plan');
   });
 });
 

@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkflowMode, WorkflowSession } from '../types/workflowKernel';
-import { startModeWithCompensation, submitWorkflowInputWithTracking } from './simpleWorkflowCoordinator';
+import {
+  cancelActiveWorkflow,
+  startModeWithCompensation,
+  submitWorkflowInputWithTracking,
+} from './simpleWorkflowCoordinator';
 import { useTaskModeStore } from './taskMode';
 import { usePlanModeStore } from './planMode';
 import { useWorkflowOrchestratorStore } from './workflowOrchestrator';
@@ -203,5 +207,88 @@ describe('simpleWorkflowCoordinator', () => {
       }),
       undefined,
     );
+  });
+
+  it('cancels task execution by runtime first and skips immediate kernel cancel in executing phase', async () => {
+    const callOrder: string[] = [];
+    const cancelTaskWorkflow = vi.fn().mockImplementation(async () => {
+      callOrder.push('runtime');
+    });
+    const cancelKernelOperation = vi.fn().mockImplementation(async () => {
+      callOrder.push('kernel');
+      return createKernelSession('task');
+    });
+
+    await cancelActiveWorkflow({
+      workflowMode: 'task',
+      taskWorkflowCancelling: false,
+      planWorkflowCancelling: false,
+      isTaskExecuting: true,
+      isPlanExecuting: false,
+      cancelKernelOperation,
+      cancelTaskWorkflow,
+      cancelPlanWorkflow: vi.fn(),
+    });
+
+    expect(callOrder).toEqual(['runtime']);
+    expect(cancelKernelOperation).not.toHaveBeenCalled();
+  });
+
+  it('cancels task and plan non-executing workflows in runtime-then-kernel order', async () => {
+    const taskOrder: string[] = [];
+    await cancelActiveWorkflow({
+      workflowMode: 'task',
+      taskWorkflowCancelling: false,
+      planWorkflowCancelling: false,
+      isTaskExecuting: false,
+      isPlanExecuting: false,
+      cancelKernelOperation: vi.fn().mockImplementation(async () => {
+        taskOrder.push('kernel');
+        return createKernelSession('task');
+      }),
+      cancelTaskWorkflow: vi.fn().mockImplementation(async () => {
+        taskOrder.push('runtime');
+      }),
+      cancelPlanWorkflow: vi.fn(),
+    });
+    expect(taskOrder).toEqual(['runtime', 'kernel']);
+
+    const planOrder: string[] = [];
+    await cancelActiveWorkflow({
+      workflowMode: 'plan',
+      taskWorkflowCancelling: false,
+      planWorkflowCancelling: false,
+      isTaskExecuting: false,
+      isPlanExecuting: false,
+      cancelKernelOperation: vi.fn().mockImplementation(async () => {
+        planOrder.push('kernel');
+        return createKernelSession('plan');
+      }),
+      cancelTaskWorkflow: vi.fn(),
+      cancelPlanWorkflow: vi.fn().mockImplementation(async () => {
+        planOrder.push('runtime');
+      }),
+    });
+    expect(planOrder).toEqual(['runtime', 'kernel']);
+  });
+
+  it('falls back to kernel cancellation with runtime_cancel_failed when runtime cancel fails', async () => {
+    const cancelKernelOperation = vi.fn().mockResolvedValue(createKernelSession('task'));
+    const cancelTaskWorkflow = vi.fn().mockRejectedValue(new Error('runtime cancel failed'));
+
+    await expect(
+      cancelActiveWorkflow({
+        workflowMode: 'task',
+        taskWorkflowCancelling: false,
+        planWorkflowCancelling: false,
+        isTaskExecuting: true,
+        isPlanExecuting: false,
+        cancelKernelOperation,
+        cancelTaskWorkflow,
+        cancelPlanWorkflow: vi.fn(),
+      }),
+    ).rejects.toThrow('runtime cancel failed');
+
+    expect(cancelKernelOperation).toHaveBeenCalledWith('runtime_cancel_failed');
   });
 });

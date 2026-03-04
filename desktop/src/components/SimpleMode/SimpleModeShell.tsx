@@ -269,7 +269,6 @@ export function SimpleModeShell() {
   const startPlanWorkflow = usePlanOrchestratorStore((s) => s.startPlanWorkflow);
   const submitPlanClarification = usePlanOrchestratorStore((s) => s.submitClarification);
   const skipPlanClarification = usePlanOrchestratorStore((s) => s.skipClarification);
-  const planOrchestratorPhase = usePlanOrchestratorStore((s) => s.phase);
   const cancelPlanWorkflow = usePlanOrchestratorStore((s) => s.cancelWorkflow);
   const planWorkflowCancelling = usePlanOrchestratorStore((s) => s.isCancelling);
   const resetPlanWorkflow = usePlanOrchestratorStore((s) => s.resetWorkflow);
@@ -343,7 +342,7 @@ export function SimpleModeShell() {
   const taskPendingQuestion = kernelInterviewQuestion;
   const planPendingQuestion = kernelPlanClarifyQuestion;
   const workflowPhase = workflowKernelTaskPhase;
-  const planPhase = planOrchestratorPhase === 'clarification_error' ? 'clarification_error' : workflowKernelPlanPhase;
+  const planPhase = workflowKernelPlanPhase;
   const chatPhase = workflowKernelChatPhase;
   const rightPanelPhase = workflowMode === 'task' ? workflowPhase : workflowMode === 'plan' ? planPhase : chatPhase;
   const taskInterviewingPhase = workflowMode === 'task' && workflowPhase === 'interviewing';
@@ -697,14 +696,21 @@ export function SimpleModeShell() {
   );
 
   const handleCancelStructuredWorkflow = useCallback(async () => {
-    await cancelActiveWorkflow({
-      workflowMode,
-      taskWorkflowCancelling,
-      planWorkflowCancelling,
-      cancelKernelOperation: cancelWorkflowKernelOperation,
-      cancelTaskWorkflow: cancelWorkflow,
-      cancelPlanWorkflow: cancelPlanWorkflow,
-    });
+    try {
+      await cancelActiveWorkflow({
+        workflowMode,
+        taskWorkflowCancelling,
+        planWorkflowCancelling,
+        isTaskExecuting: workflowKernelTaskPhase === 'executing',
+        isPlanExecuting: workflowKernelPlanPhase === 'executing',
+        cancelKernelOperation: cancelWorkflowKernelOperation,
+        cancelTaskWorkflow: cancelWorkflow,
+        cancelPlanWorkflow: cancelPlanWorkflow,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      showToast(message || t('workflow.cancelFailed', { defaultValue: 'Cancel failed' }), 'error');
+    }
   }, [
     cancelWorkflowKernelOperation,
     workflowMode,
@@ -712,6 +718,10 @@ export function SimpleModeShell() {
     cancelWorkflow,
     taskWorkflowCancelling,
     planWorkflowCancelling,
+    workflowKernelTaskPhase,
+    workflowKernelPlanPhase,
+    showToast,
+    t,
   ]);
 
   const handleExportImage = useCallback(async () => {

@@ -107,4 +107,71 @@ describe('workflowKernel store', () => {
       modeSessionId: 'task-session-1',
     });
   });
+
+  it('submits system_phase_update for task custom phases and applies returned snapshot', async () => {
+    const base = mockSession('kernel-2');
+    const taskSession: WorkflowSession = {
+      ...base,
+      activeMode: 'task',
+      modeSnapshots: {
+        chat: null,
+        plan: null,
+        task: {
+          phase: 'idle',
+          prdId: null,
+          currentStoryId: null,
+          interviewSessionId: null,
+          pendingInterview: null,
+          completedStories: 0,
+          failedStories: 0,
+        },
+      },
+    };
+    const updatedTaskSession: WorkflowSession = {
+      ...taskSession,
+      modeSnapshots: {
+        ...taskSession.modeSnapshots,
+        task: {
+          ...taskSession.modeSnapshots.task!,
+          phase: 'requirement_analysis',
+        },
+      },
+    };
+
+    useWorkflowKernelStore.setState({
+      sessionId: 'kernel-2',
+      activeMode: 'task',
+      session: taskSession,
+    });
+
+    mockInvoke.mockResolvedValueOnce({
+      success: true,
+      data: updatedTaskSession,
+      error: null,
+    });
+
+    const result = await useWorkflowKernelStore.getState().submitInput({
+      type: 'system_phase_update',
+      content: 'phase:requirement_analysis',
+      metadata: {
+        mode: 'task',
+        phase: 'requirement_analysis',
+        reasonCode: 'phase_sync_test',
+      },
+    });
+
+    expect(result?.modeSnapshots.task?.phase).toBe('requirement_analysis');
+    expect(mockInvoke).toHaveBeenCalledWith('workflow_submit_input', {
+      sessionId: 'kernel-2',
+      intent: {
+        type: 'system_phase_update',
+        content: 'phase:requirement_analysis',
+        metadata: {
+          mode: 'task',
+          phase: 'requirement_analysis',
+          reasonCode: 'phase_sync_test',
+        },
+      },
+    });
+  });
 });

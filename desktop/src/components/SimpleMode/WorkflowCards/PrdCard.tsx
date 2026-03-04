@@ -21,14 +21,14 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
   const [isEditing, setIsEditing] = useState(false);
   const [acted, setActed] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
-  const phase = useWorkflowOrchestratorStore((s) => s.phase);
   const approvePrd = useWorkflowOrchestratorStore((s) => s.approvePrd);
   const editablePrd = useWorkflowOrchestratorStore((s) => s.editablePrd);
   const updateEditableStory = useWorkflowOrchestratorStore((s) => s.updateEditableStory);
   const workflowSession = useWorkflowKernelStore((s) => s.session);
 
   const isKernelTaskActive = workflowSession?.status === 'active' && workflowSession.activeMode === 'task';
-  const isActive = interactive && phase === 'reviewing_prd' && isKernelTaskActive && !acted;
+  const kernelTaskPhase = workflowSession?.modeSnapshots.task?.phase ?? 'idle';
+  const isActive = interactive && kernelTaskPhase === 'reviewing_prd' && isKernelTaskActive && !acted;
 
   // When editing, read stories from the live editablePrd; otherwise use the snapshot card data
   const displayStories: PrdStoryData[] = isEditing && editablePrd ? editablePrd.stories : data.stories;

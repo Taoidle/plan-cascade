@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TaskPrd } from './taskMode';
 
 const listenMock = vi.fn();
 const invokeMock = vi.fn();
+const synthesizeExecutionTurnMock = vi.fn();
 
 vi.mock('@tauri-apps/api/event', () => ({
   listen: (...args: unknown[]) => listenMock(...args),
@@ -10,6 +11,12 @@ vi.mock('@tauri-apps/api/event', () => ({
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
+}));
+
+vi.mock('../lib/contextBridge', () => ({
+  buildConversationHistory: () => [],
+  synthesizePlanningTurn: vi.fn(),
+  synthesizeExecutionTurn: (...args: unknown[]) => synthesizeExecutionTurnMock(...args),
 }));
 
 import { useExecutionStore } from './execution';
@@ -59,6 +66,14 @@ function progressPayload(
     progressPct: 10,
     ...overrides,
   };
+}
+
+function extractCompletionReportCards() {
+  return useExecutionStore
+    .getState()
+    .streamingOutput.filter((line) => line.type === 'card')
+    .map((line) => JSON.parse(line.content) as { cardType?: string; data?: Record<string, unknown> })
+    .filter((card) => card.cardType === 'completion_report');
 }
 
 describe('workflowOrchestrator task progress events', () => {
@@ -118,6 +133,12 @@ describe('workflowOrchestrator task progress events', () => {
         implAgentOverride: null,
       },
     } as unknown as ReturnType<typeof useWorkflowOrchestratorStore.getState>);
+
+    synthesizeExecutionTurnMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('ignores task progress events from a different session', async () => {
@@ -155,5 +176,154 @@ describe('workflowOrchestrator task progress events', () => {
     expect(workflowState.isCancelling).toBe(false);
     expect(taskState.sessionStatus).toBe('cancelled');
     expect(taskState.isCancelling).toBe(false);
+  });
+
+  it('syncRuntimeFromKernel hydrates runtime IDs/questions without overwriting orchestrator phase', () => {
+    useWorkflowOrchestratorStore.setState({
+      phase: 'reviewing_prd',
+      sessionId: null,
+      pendingQuestion: null,
+    } as unknown as ReturnType<typeof useWorkflowOrchestratorStore.getState>);
+
+    useWorkflowOrchestratorStore.getState().syncRuntimeFromKernel({
+      sessionId: 'task-session',
+      phase: 'executing',
+      pendingQuestion: {
+        questionId: 'q-1',
+        question: 'Need auth?',
+        hint: null,
+        required: true,
+        inputType: 'text',
+        options: [],
+        allowCustom: true,
+        questionNumber: 1,
+        totalQuestions: 2,
+      },
+    });
+
+    const state = useWorkflowOrchestratorStore.getState();
+    expect(state.phase).toBe('reviewing_prd');
+    expect(state.sessionId).toBe('task-session');
+    expect(state.pendingQuestion?.questionId).toBe('q-1');
+  });
+
+  it('injects one completion card with report data and synthesizes matching summary', async () => {
+    const report = {
+      sessionId: 'task-session',
+      totalStories: 1,
+      storiesCompleted: 1,
+      storiesFailed: 0,
+      totalDurationMs: 1234,
+      agentAssignments: { 'story-1': 'impl-agent' },
+      success: true,
+    };
+    useTaskModeStore.setState({
+      report,
+      fetchReport: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ReturnType<typeof useTaskModeStore.getState>);
+
+    await useWorkflowOrchestratorStore.getState().approvePrd(TEST_PRD);
+    expect(progressListener).not.toBeNull();
+
+    progressListener!({
+      payload: progressPayload({
+        eventType: 'story_completed',
+        storyId: 'story-1',
+        storyStatus: 'completed',
+        progressPct: 80,
+      }),
+    });
+    progressListener!({
+      payload: progressPayload({
+        eventType: 'execution_completed',
+        storyId: null,
+        storyStatus: null,
+        progressPct: 100,
+      }),
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const completionCards = extractCompletionReportCards();
+    expect(completionCards).toHaveLength(1);
+    expect(completionCards[0]?.data).toEqual(
+      expect.objectContaining({
+        success: true,
+        totalStories: 1,
+        completed: 1,
+        failed: 0,
+        duration: 1234,
+      }),
+    );
+    expect(synthesizeExecutionTurnMock).toHaveBeenCalledWith(1, 1, true);
+  });
+
+  it('injects one fallback completion card on report timeout and does not append late report card', async () => {
+    vi.useFakeTimers();
+    useTaskModeStore.setState({
+      report: null,
+      fetchReport: vi.fn().mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            setTimeout(() => {
+              useTaskModeStore.setState({
+                report: {
+                  sessionId: 'task-session',
+                  totalStories: 1,
+                  storiesCompleted: 1,
+                  storiesFailed: 0,
+                  totalDurationMs: 9999,
+                  agentAssignments: { 'story-1': 'late-agent' },
+                  success: true,
+                },
+              } as unknown as ReturnType<typeof useTaskModeStore.getState>);
+              resolve();
+            }, 2000);
+          }),
+      ),
+    } as unknown as ReturnType<typeof useTaskModeStore.getState>);
+
+    await useWorkflowOrchestratorStore.getState().approvePrd(TEST_PRD);
+    expect(progressListener).not.toBeNull();
+
+    progressListener!({
+      payload: progressPayload({
+        eventType: 'story_completed',
+        storyId: 'story-1',
+        storyStatus: 'completed',
+        progressPct: 80,
+      }),
+    });
+    progressListener!({
+      payload: progressPayload({
+        eventType: 'execution_completed',
+        storyId: null,
+        storyStatus: null,
+        progressPct: 100,
+      }),
+    });
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await Promise.resolve();
+
+    let completionCards = extractCompletionReportCards();
+    expect(completionCards).toHaveLength(1);
+    expect(completionCards[0]?.data).toEqual(
+      expect.objectContaining({
+        success: true,
+        totalStories: 1,
+        completed: 1,
+        failed: 0,
+        duration: 0,
+      }),
+    );
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await Promise.resolve();
+
+    completionCards = extractCompletionReportCards();
+    expect(completionCards).toHaveLength(1);
+    expect(synthesizeExecutionTurnMock).toHaveBeenCalledTimes(1);
+    expect(synthesizeExecutionTurnMock).toHaveBeenCalledWith(1, 1, true);
   });
 });
