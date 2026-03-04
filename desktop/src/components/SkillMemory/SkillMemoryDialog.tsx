@@ -392,6 +392,7 @@ function MemoryTab() {
   const pendingMemoryCandidatesLoading = useSkillMemoryStore((s) => s.pendingMemoryCandidatesLoading);
   const loadPendingMemoryCandidates = useSkillMemoryStore((s) => s.loadPendingMemoryCandidates);
   const reviewPendingMemoryCandidates = useSkillMemoryStore((s) => s.reviewPendingMemoryCandidates);
+  const runMaintenance = useSkillMemoryStore((s) => s.runMaintenance);
 
   const [selectedMemory, setSelectedMemory] = useState<MemoryEntry | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -579,6 +580,16 @@ function MemoryTab() {
     },
     [workspacePath, reviewPendingMemoryCandidates],
   );
+
+  const handleRunMaintenance = useCallback(async () => {
+    if (!workspacePath) return;
+    await runMaintenance(workspacePath);
+    await Promise.all([
+      loadMemories(workspacePath),
+      loadMemoryStats(workspacePath),
+      loadPendingMemoryCandidates(workspacePath),
+    ]);
+  }, [workspacePath, runMaintenance, loadMemories, loadMemoryStats, loadPendingMemoryCandidates]);
 
   // If add form is open, show it
   if (showAddForm) {
@@ -773,6 +784,17 @@ function MemoryTab() {
               title={t('skillPanel.clearAll')}
             >
               <TrashIcon className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => void handleRunMaintenance()}
+              className={clsx(
+                'p-1 rounded-md transition-colors',
+                'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
+                'hover:bg-gray-100 dark:hover:bg-gray-800',
+              )}
+              title={t('skillPanel.runMaintenance', { defaultValue: 'Run maintenance' })}
+            >
+              <ReloadIcon className="w-3.5 h-3.5" />
             </button>
           </div>
         ) : (
@@ -1075,7 +1097,6 @@ export function SkillMemoryDialog() {
   const loadMemories = useSkillMemoryStore((s) => s.loadMemories);
   const loadMemoryStats = useSkillMemoryStore((s) => s.loadMemoryStats);
   const loadPendingMemoryCandidates = useSkillMemoryStore((s) => s.loadPendingMemoryCandidates);
-  const runMaintenance = useSkillMemoryStore((s) => s.runMaintenance);
 
   // Load data when dialog opens
   useEffect(() => {
@@ -1084,17 +1105,8 @@ export function SkillMemoryDialog() {
       loadMemories(workspacePath);
       loadMemoryStats(workspacePath);
       loadPendingMemoryCandidates(workspacePath);
-      runMaintenance(workspacePath);
     }
-  }, [
-    dialogOpen,
-    workspacePath,
-    loadSkills,
-    loadMemories,
-    loadMemoryStats,
-    loadPendingMemoryCandidates,
-    runMaintenance,
-  ]);
+  }, [dialogOpen, workspacePath, loadSkills, loadMemories, loadMemoryStats, loadPendingMemoryCandidates]);
 
   return (
     <Dialog.Root open={dialogOpen} onOpenChange={(open) => !open && closeDialog()}>

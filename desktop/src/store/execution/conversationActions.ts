@@ -1,9 +1,9 @@
 import { invoke } from '@tauri-apps/api/core';
 import { deriveConversationTurns, getNextTurnId, rebuildStandaloneTurns } from '../../lib/conversationUtils';
 import { reportNonFatal } from '../../lib/nonFatal';
-import { resolveSessionScopedContext } from '../../lib/contextSelectionBridge';
 import type { FileAttachmentData } from '../../types/attachment';
 import type { ContextSourceConfig } from '../../types/contextSources';
+import { useContextSourcesStore } from '../contextSources';
 import { useSettingsStore } from '../settings';
 import { useToolPermissionStore } from '../toolPermission';
 import {
@@ -40,6 +40,15 @@ interface BackendStandaloneExecutionResult {
   iterations: number;
   success: boolean;
   error?: string | null;
+}
+
+type SessionSource = 'claude' | 'standalone';
+
+function resolveSessionScopedContext(sessionId: string | null, source: SessionSource): ContextSourceConfig | null {
+  const scopedSessionId = sessionId?.trim() ? `${source}:${sessionId.trim()}` : null;
+  const store = useContextSourcesStore.getState();
+  store.setMemorySessionId(scopedSessionId);
+  return store.buildConfig() ?? null;
 }
 
 type ExecutionSetState = (

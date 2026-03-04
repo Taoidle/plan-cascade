@@ -2,7 +2,6 @@ import type { Ref } from 'react';
 import type { FileAttachmentData } from '../../types/attachment';
 import type { PlanClarifyQuestionCardData } from '../../types/planModeCard';
 import type { InterviewQuestionCardData } from '../../types/workflowCard';
-import { EffectiveContextSummary } from '../shared/EffectiveContextSummary';
 import { InputBox, type InputBoxHandle } from './InputBox';
 import { InterviewInputPanel } from './InterviewInputPanel';
 import type { QueuedChatMessage } from './queuePersistence';
@@ -78,8 +77,6 @@ export function SimpleInputComposer({
 }: SimpleInputComposerProps) {
   return (
     <div className="p-4 space-y-3">
-      <EffectiveContextSummary />
-
       {hasStructuredInterviewQuestion && taskPendingQuestion && (
         <InterviewInputPanel
           question={taskPendingQuestion}

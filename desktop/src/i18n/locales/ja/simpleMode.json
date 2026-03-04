@@ -98,6 +98,7 @@
   },
   "skillPanel": {
     "title": "スキルとメモリ",
+    "globalEnableHint": "グローバルのスキル有効/無効",
     "manageAll": "すべて管理...",
     "loading": "読み込み中...",
     "detectedSkills": "自動検出されたスキル",
@@ -119,6 +120,7 @@
     "searchMemories": "メモリを検索...",
     "filterAll": "すべて",
     "refresh": "インデックスを更新",
+    "runMaintenance": "メンテナンスを実行",
     "noSkillsFound": "スキルが見つかりません",
     "noSkillsFoundHint": "検索条件やフィルターを調整してください",
     "noMemoriesFound": "メモリが見つかりません",
@@ -767,8 +769,11 @@
   },
   "contextSources": {
     "knowledge": "ナレッジ",
+    "knowledgeSession": "ナレッジ（セッション）",
     "memory": "メモリ",
+    "memorySession": "メモリ（セッション）",
     "skills": "スキル",
+    "skillsSession": "スキル（セッション）",
     "knowledgePicker": {
       "title": "ナレッジソース",
       "loading": "読み込み中...",
@@ -779,6 +784,17 @@
     },
     "memoryPicker": {
       "title": "メモリソース",
+      "pendingReview": "レビュー待ちメモリ {{count}} 件",
+      "reviewNow": "レビュー",
+      "scopes": {
+        "global": "グローバル",
+        "project": "プロジェクト",
+        "session": "セッション"
+      },
+      "selectionModes": {
+        "auto": "自動 + 除外",
+        "onlySelected": "選択のみ"
+      },
       "searchPlaceholder": "メモリを検索...",
       "noMemories": "利用可能なメモリがありません",
       "noResults": "一致するメモリがありません",
@@ -791,7 +807,8 @@
       }
     },
     "skillsPicker": {
-      "title": "スキルソース",
+      "title": "セッションへのスキル注入",
+      "hint": "現在のセッションに注入するスキルを選択します。",
       "searchPlaceholder": "スキルを検索...",
       "noSkills": "利用可能なスキルがありません",
       "noResults": "一致するスキルがありません",

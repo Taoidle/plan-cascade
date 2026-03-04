@@ -66,10 +66,10 @@ pub async fn enter_plan_mode(
                     InjectionPhase::Planning,
                 )
                 .await;
-                let plan_context_ref = if plan_context.is_empty() {
+                let plan_context_ref = if plan_context.rendered_context.is_empty() {
                     None
                 } else {
-                    Some(plan_context.as_str())
+                    Some(plan_context.rendered_context.as_str())
                 };
 
                 match crate::services::plan_mode::analyzer::analyze_task(
@@ -249,10 +249,10 @@ pub async fn submit_plan_clarification(
                     InjectionPhase::Planning,
                 )
                 .await;
-                let plan_context_ref = if plan_context.is_empty() {
+                let plan_context_ref = if plan_context.rendered_context.is_empty() {
                     None
                 } else {
-                    Some(plan_context.as_str())
+                    Some(plan_context.rendered_context.as_str())
                 };
 
                 Ok(

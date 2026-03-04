@@ -1,65 +1,37 @@
 import { clsx } from 'clsx';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useSettingsStore } from '../../store/settings';
 import { useContextSourcesStore } from '../../store/contextSources';
-import { useContextSelectionStore } from '../../store/contextSelection';
 import { useContextOpsStore } from '../../store/contextOps';
 import { useSkillMemoryStore } from '../../store/skillMemory';
 
 export function EffectiveContextSummary({ className }: { className?: string }) {
   const { t } = useTranslation('simpleMode');
-  const unified = useSettingsStore((s) => s.simpleContextUnifiedStore);
   const openDialog = useSkillMemoryStore((s) => s.openDialog);
   const diagnostics = useContextOpsStore((s) => s.latestEnvelope?.diagnostics);
   const [expanded, setExpanded] = useState(false);
 
-  const legacyKnowledgeEnabled = useContextSourcesStore((s) => s.knowledgeEnabled);
-  const legacySelectedCollections = useContextSourcesStore((s) => s.selectedCollections);
-  const legacySelectedDocuments = useContextSourcesStore((s) => s.selectedDocuments);
-  const legacyMemoryEnabled = useContextSourcesStore((s) => s.memoryEnabled);
-  const legacySelectedMemoryScopes = useContextSourcesStore((s) => s.selectedMemoryScopes);
-  const legacyMemorySelectionMode = useContextSourcesStore((s) => s.memorySelectionMode);
-  const legacyExcludedMemoryIds = useContextSourcesStore((s) => s.excludedMemoryIds);
-  const legacyIncludedMemoryIds = useContextSourcesStore((s) => s.includedMemoryIds);
-  const legacySkillsEnabled = useContextSourcesStore((s) => s.skillsEnabled);
-  const legacySelectedSkillIds = useContextSourcesStore((s) => s.selectedSkillIds);
+  const knowledgeEnabled = useContextSourcesStore((s) => s.knowledgeEnabled);
+  const selectedCollections = useContextSourcesStore((s) => s.selectedCollections);
+  const selectedDocuments = useContextSourcesStore((s) => s.selectedDocuments);
+  const memoryEnabled = useContextSourcesStore((s) => s.memoryEnabled);
+  const selectedMemoryScopes = useContextSourcesStore((s) => s.selectedMemoryScopes);
+  const memorySelectionMode = useContextSourcesStore((s) => s.memorySelectionMode);
+  const excludedMemoryIds = useContextSourcesStore((s) => s.excludedMemoryIds);
+  const includedMemoryIds = useContextSourcesStore((s) => s.includedMemoryIds);
+  const skillsEnabled = useContextSourcesStore((s) => s.skillsEnabled);
+  const selectedSkillIds = useContextSourcesStore((s) => s.selectedSkillIds);
 
-  const unifiedKnowledge = useContextSelectionStore((s) => s.knowledge);
-  const unifiedMemory = useContextSelectionStore((s) => s.memory);
-  const unifiedSkills = useContextSelectionStore((s) => s.skills);
-
-  const sourceLabel = unified
-    ? t('contextSummary.source.unified', { defaultValue: 'unified' })
-    : t('contextSummary.source.legacy', { defaultValue: 'legacy' });
-
-  const knowledgeCount = unified
-    ? unifiedKnowledge.selectedCollections.length + unifiedKnowledge.selectedDocuments.length
-    : legacySelectedCollections.length + legacySelectedDocuments.length;
-
-  const memoryScopeCount = unified ? unifiedMemory.selectedScopes.length : legacySelectedMemoryScopes.length;
-  const memoryMode = unified
-    ? unifiedMemory.selectionMode
-    : legacyMemorySelectionMode === 'only_selected'
-      ? 'only_selected'
-      : 'auto_exclude';
+  const knowledgeCount = selectedCollections.length + selectedDocuments.length;
+  const memoryScopeCount = selectedMemoryScopes.length;
+  const memoryMode = memorySelectionMode === 'only_selected' ? 'only_selected' : 'auto_exclude';
   const memoryModeLabel =
     memoryMode === 'only_selected'
       ? t('contextSummary.memoryMode.only_selected', { defaultValue: 'only selected' })
       : t('contextSummary.memoryMode.auto_exclude', { defaultValue: 'auto exclude' });
-  const memoryItemCount = unified
-    ? memoryMode === 'only_selected'
-      ? unifiedMemory.includedMemoryIds.length
-      : unifiedMemory.excludedMemoryIds.length
-    : legacyMemorySelectionMode === 'only_selected'
-      ? legacyIncludedMemoryIds.length
-      : legacyExcludedMemoryIds.length;
+  const memoryItemCount = memorySelectionMode === 'only_selected' ? includedMemoryIds.length : excludedMemoryIds.length;
 
-  const skillsCount = unified ? unifiedSkills.selectedSkillIds.length : legacySelectedSkillIds.length;
-
-  const knowledgeEnabled = unified ? unifiedKnowledge.enabled : legacyKnowledgeEnabled;
-  const memoryEnabled = unified ? unifiedMemory.enabled : legacyMemoryEnabled;
-  const skillsEnabled = unified ? unifiedSkills.enabled : legacySkillsEnabled;
+  const skillsCount = selectedSkillIds.length;
 
   const chipClass =
     'inline-flex items-center gap-1 rounded-md border border-gray-200 dark:border-gray-700 px-2 py-1 text-2xs text-gray-600 dark:text-gray-300';
@@ -93,7 +65,6 @@ export function EffectiveContextSummary({ className }: { className?: string }) {
           {t('contextSummary.title', { defaultValue: 'Effective Context' })}
         </p>
         <div className="flex items-center gap-2">
-          <span className="text-2xs text-gray-400 dark:text-gray-500">{sourceLabel}</span>
           <button
             onClick={() => setExpanded(false)}
             className="text-2xs text-gray-500 dark:text-gray-400 hover:underline"

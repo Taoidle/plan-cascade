@@ -10,6 +10,7 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import i18n from '../i18n';
 import { reportNonFatal } from '../lib/nonFatal';
+import { useContextSourcesStore } from './contextSources';
 import type {
   SkillSummary,
   SkillDocument,
@@ -67,6 +68,10 @@ function memoryErrorWithTrace(message: string): string {
 function tSkillMemory(key: string, defaultValue: string): string {
   const translated = i18n.t(key, { ns: 'simpleMode', defaultValue });
   return typeof translated === 'string' && translated !== key ? translated : defaultValue;
+}
+
+function syncContextSelectedSkills(skills: SkillSummary[]): void {
+  useContextSourcesStore.getState().reconcileSelectedSkills(skills);
 }
 
 // ============================================================================
@@ -226,6 +231,7 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
       });
       if (response.success && response.data) {
         set({ skills: response.data, skillsLoading: false });
+        syncContextSelectedSkills(response.data);
       } else {
         set({
           skillsError: response.error || tSkillMemory('skillPanel.toasts.loadSkillsFailed', 'Failed to load skills'),
@@ -291,6 +297,8 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
           response.error || tSkillMemory('skillPanel.toasts.toggleSkillFailed', 'Failed to toggle skill'),
           'error',
         );
+      } else {
+        syncContextSelectedSkills(get().skills);
       }
     } catch (error) {
       set((state) => ({
@@ -317,6 +325,8 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
           response.error || tSkillMemory('skillPanel.toasts.toggleSkillFailed', 'Failed to toggle skill'),
           'error',
         );
+      } else {
+        syncContextSelectedSkills(get().skills);
       }
     } catch (error) {
       set((state) => ({
@@ -409,6 +419,7 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         set((state) => ({
           skills: state.skills.filter((s) => s.id !== id),
         }));
+        syncContextSelectedSkills(get().skills);
         get().showToast(tSkillMemory('skillPanel.toasts.skillDeleted', 'Skill deleted'), 'success');
       } else {
         get().showToast(

@@ -332,6 +332,14 @@ fn default_plan_context_sources() -> ContextSourceConfig {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct PlanContextBundle {
+    pub rendered_context: String,
+    pub effective_skill_ids: Vec<String>,
+    pub blocked_tools: Vec<String>,
+    pub selection_reason: String,
+}
+
 async fn build_plan_conversation_context(
     app_state: &AppState,
     knowledge_state: &crate::commands::knowledge::KnowledgeState,
@@ -341,7 +349,8 @@ async fn build_plan_conversation_context(
     context_sources: Option<&ContextSourceConfig>,
     query: &str,
     phase: InjectionPhase,
-) -> String {
+) -> PlanContextBundle {
+    let mut bundle = PlanContextBundle::default();
     let mut sections = Vec::new();
 
     if let Some(ctx) = conversation_context {
@@ -352,7 +361,8 @@ async fn build_plan_conversation_context(
     }
 
     let Some(project_path) = project_path.map(str::trim).filter(|p| !p.is_empty()) else {
-        return sections.join("\n\n");
+        bundle.rendered_context = sections.join("\n\n");
+        return bundle;
     };
 
     let config = context_sources
@@ -401,7 +411,12 @@ async fn build_plan_conversation_context(
     )
     .await;
     let slices = match assembled {
-        Ok(resp) => crate::commands::context_v2::split_assembly_into_slices(&resp),
+        Ok(resp) => {
+            bundle.effective_skill_ids = resp.diagnostics.effective_skill_ids.clone();
+            bundle.blocked_tools = resp.diagnostics.blocked_tools.clone();
+            bundle.selection_reason = resp.diagnostics.selection_reason.clone();
+            crate::commands::context_v2::split_assembly_into_slices(&resp)
+        }
         Err(err) => {
             tracing::warn!(
                 "[plan_mode] Context V2 assembly failed, using empty context: {}",
@@ -430,7 +445,8 @@ async fn build_plan_conversation_context(
         sections.push(slices.skills_block);
     }
 
-    sections.join("\n\n")
+    bundle.rendered_context = sections.join("\n\n");
+    bundle
 }
 
 // ============================================================================

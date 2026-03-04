@@ -71,10 +71,10 @@ pub async fn generate_plan(
                 InjectionPhase::Planning,
             )
             .await;
-            let plan_context_ref = if plan_context.is_empty() {
+            let plan_context_ref = if plan_context.rendered_context.is_empty() {
                 None
             } else {
-                Some(plan_context.as_str())
+                Some(plan_context.rendered_context.as_str())
             };
 
             match crate::services::plan_mode::planner::generate_plan(
@@ -207,7 +207,7 @@ pub async fn approve_plan(
     let sid = session_id.clone();
     let locale_tag = normalize_locale(locale.as_deref());
     let lang_instruction = locale_instruction(locale_tag).to_string();
-    let execution_context = build_plan_conversation_context(
+    let execution_context_bundle = build_plan_conversation_context(
         &app_state,
         &knowledge_state,
         project_path.as_deref(),
@@ -218,10 +218,10 @@ pub async fn approve_plan(
         InjectionPhase::Implementation,
     )
     .await;
-    let execution_context = if execution_context.is_empty() {
+    let execution_context = if execution_context_bundle.rendered_context.is_empty() {
         None
     } else {
-        Some(execution_context)
+        Some(execution_context_bundle.rendered_context)
     };
 
     let resolved_project_root = match project_path.as_deref().map(str::trim) {
@@ -229,6 +229,14 @@ pub async fn approve_plan(
         _ => standalone_state.working_directory.read().await.clone(),
     };
     let resolved_project_path = resolved_project_root.to_string_lossy().to_string();
+
+    let selected_skills =
+        crate::services::task_mode::context_provider::hydrate_skill_matches_by_ids(
+            app_state.inner(),
+            &resolved_project_path,
+            &execution_context_bundle.effective_skill_ids,
+        )
+        .await;
 
     let (index_store, embedding_service, embedding_manager, hnsw_index) = {
         let manager_guard = standalone_state.index_manager.read().await;
@@ -253,6 +261,7 @@ pub async fn approve_plan(
         hnsw_index,
         permission_gate: Some(permission_state.gate.clone()),
         search_provider: Some(resolve_search_provider_for_tools()),
+        selected_skills,
     };
 
     tokio::spawn(async move {

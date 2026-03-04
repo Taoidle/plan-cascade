@@ -8,6 +8,7 @@
 
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
+import { useContextSourcesStore } from './contextSources';
 import type { CrossModeConversationTurn } from '../types/crossModeContext';
 
 // ============================================================================
@@ -299,6 +300,8 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
       const result = await invoke<CommandResponse<TaskModeSession>>('enter_task_mode', { description });
       if (result.success && result.data) {
         const session = result.data;
+        const contextSourcesStore = useContextSourcesStore.getState();
+        contextSourcesStore.setMemorySessionId(session.sessionId);
         set({
           isTaskMode: true,
           sessionId: session.sessionId,
@@ -341,8 +344,9 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
           : finalProvider
             ? resolveProviderBaseUrl(finalProvider, { glmEndpoint, qwenEndpoint, minimaxEndpoint })
             : undefined;
-      const { buildConfig: buildContextConfig } = (await import('./contextSources')).useContextSourcesStore.getState();
-      const contextSources = buildContextConfig() ?? null;
+      const contextSourcesStore = useContextSourcesStore.getState();
+      contextSourcesStore.setMemorySessionId(sessionId);
+      const contextSources = contextSourcesStore.buildConfig() ?? null;
       const result = await invoke<CommandResponse<TaskPrd>>('generate_task_prd', {
         request: {
           sessionId,
@@ -384,8 +388,9 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
       const baseUrl = provider
         ? resolveProviderBaseUrl(provider, { glmEndpoint, qwenEndpoint, minimaxEndpoint })
         : undefined;
-      const { buildConfig: buildCtxConfig } = (await import('./contextSources')).useContextSourcesStore.getState();
-      const contextSources = buildCtxConfig() ?? null;
+      const contextSourcesStore = useContextSourcesStore.getState();
+      contextSourcesStore.setMemorySessionId(sessionId);
+      const contextSources = contextSourcesStore.buildConfig() ?? null;
       const result = await invoke<CommandResponse<boolean>>('approve_task_prd', {
         request: {
           sessionId,
@@ -498,6 +503,8 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
     try {
       const result = await invoke<CommandResponse<boolean>>('exit_task_mode', { sessionId });
       if (result.success) {
+        const contextSourcesStore = useContextSourcesStore.getState();
+        contextSourcesStore.setMemorySessionId(null);
         set({ ...DEFAULT_STATE });
       } else {
         set({ isLoading: false, error: result.error ?? 'Failed to exit task mode' });
@@ -508,6 +515,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
   },
 
   reset: () => {
+    useContextSourcesStore.getState().setMemorySessionId(null);
     set({ ...DEFAULT_STATE });
   },
 }));

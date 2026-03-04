@@ -127,6 +127,12 @@ function normalizePlanPhase(phase: string | null | undefined): PlanModePhase | n
   }
 }
 
+function buildPlanContextSources(sessionId?: string | null) {
+  const contextSourcesStore = useContextSourcesStore.getState();
+  contextSourcesStore.setMemorySessionId(sessionId?.trim() || null);
+  return contextSourcesStore.buildConfig();
+}
+
 // ============================================================================
 // Default State
 // ============================================================================
@@ -183,7 +189,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
     // Resolve provider base URL (handles multi-endpoint providers like Qwen, GLM, MiniMax)
     const baseUrl = settings.provider ? resolveProviderBaseUrl(settings.provider, settings) : undefined;
     const projectPath = settings.workspacePath || undefined;
-    const contextSources = useContextSourcesStore.getState().buildConfig();
+    const contextSources = buildPlanContextSources(null);
 
     // Enter plan mode (runs analysis)
     await planStore.enterPlanMode(
@@ -209,6 +215,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
 
     if (get()._runToken !== runToken) return;
     set({ sessionId, analysis });
+    buildPlanContextSources(sessionId);
 
     // Inject analysis card
     if (analysis) {
@@ -259,7 +266,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
     const planStore = usePlanModeStore.getState();
     const settings = useSettingsStore.getState();
     const projectPath = settings.workspacePath || undefined;
-    const contextSources = useContextSourcesStore.getState().buildConfig();
+    const contextSources = buildPlanContextSources(get().sessionId);
     const conversationHistory = buildConversationHistory();
     const contextStr =
       conversationHistory.length > 0
@@ -334,7 +341,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
         : undefined;
     const settings = useSettingsStore.getState();
     const projectPath = settings.workspacePath || undefined;
-    const contextSources = useContextSourcesStore.getState().buildConfig();
+    const contextSources = buildPlanContextSources(get().sessionId);
 
     const planStore = usePlanModeStore.getState();
     await planStore.generatePlan(
@@ -504,7 +511,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
     const planStore = usePlanModeStore.getState();
     const settings = useSettingsStore.getState();
     const projectPath = settings.workspacePath || undefined;
-    const contextSources = useContextSourcesStore.getState().buildConfig();
+    const contextSources = buildPlanContextSources(get().sessionId);
     const conversationHistory = buildConversationHistory();
     const contextStr =
       conversationHistory.length > 0
@@ -587,6 +594,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       }
 
       await planStore.exitPlanMode();
+      buildPlanContextSources(null);
       set({ ...DEFAULT_STATE, _runToken: nextRunToken });
       injectInfo(i18n.t('planMode:orchestrator.cancelled', 'Plan mode cancelled.'));
     }
@@ -638,11 +646,15 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
     if (Object.keys(planModePatch).length > 0) {
       usePlanModeStore.setState(planModePatch);
     }
+    if (normalizedSessionId) {
+      buildPlanContextSources(normalizedSessionId);
+    }
   },
 
   resetWorkflow: () => {
     const { _progressUnlisten } = get();
     if (_progressUnlisten) _progressUnlisten();
+    buildPlanContextSources(null);
     set((state) => ({ ...DEFAULT_STATE, _runToken: state._runToken + 1 }));
   },
 }));

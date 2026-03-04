@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { useSkillMemoryStore } from './skillMemory';
+import { useContextSourcesStore } from './contextSources';
 import type { SkillSummary, MemoryEntry } from '../types/skillMemory';
 
 // Mock invoke is already mocked in test setup
@@ -56,6 +57,12 @@ describe('useSkillMemoryStore', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useSkillMemoryStore.getState().reset();
+    useContextSourcesStore.setState({
+      skillsEnabled: true,
+      selectedSkillIds: [],
+      skillSelectionMode: 'auto',
+      availableSkills: [],
+    });
   });
 
   // ========================================================================
@@ -211,6 +218,25 @@ describe('useSkillMemoryStore', () => {
       expect(skill?.enabled).toBe(false);
     });
 
+    it('disabling a skill clears context selectedSkillIds ghost selection', async () => {
+      useSkillMemoryStore.setState({
+        skills: [createMockSkillSummary({ id: 'skill-1', enabled: true })],
+      });
+      useContextSourcesStore.setState({
+        skillsEnabled: true,
+        selectedSkillIds: ['skill-1'],
+        skillSelectionMode: 'explicit',
+      });
+
+      mockInvoke.mockResolvedValueOnce({ success: true, data: null, error: null });
+
+      await useSkillMemoryStore.getState().toggleSkill('skill-1', false);
+
+      const context = useContextSourcesStore.getState();
+      expect(context.selectedSkillIds).toEqual([]);
+      expect(context.skillSelectionMode).toBe('auto');
+    });
+
     it('should revert toggle on failure', async () => {
       useSkillMemoryStore.setState({
         skills: [createMockSkillSummary({ id: 'skill-1', enabled: true })],
@@ -228,6 +254,11 @@ describe('useSkillMemoryStore', () => {
       useSkillMemoryStore.setState({
         skills: [createMockSkillSummary({ id: 'skill-1' }), createMockSkillSummary({ id: 'skill-2' })],
       });
+      useContextSourcesStore.setState({
+        skillsEnabled: true,
+        selectedSkillIds: ['skill-1', 'skill-2'],
+        skillSelectionMode: 'explicit',
+      });
 
       mockInvoke.mockResolvedValueOnce({ success: true, data: null, error: null });
 
@@ -235,6 +266,8 @@ describe('useSkillMemoryStore', () => {
 
       expect(useSkillMemoryStore.getState().skills).toHaveLength(1);
       expect(useSkillMemoryStore.getState().skills[0].id).toBe('skill-2');
+      expect(useContextSourcesStore.getState().selectedSkillIds).toEqual(['skill-2']);
+      expect(useContextSourcesStore.getState().skillSelectionMode).toBe('explicit');
     });
   });
 

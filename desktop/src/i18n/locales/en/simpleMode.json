@@ -98,6 +98,7 @@
   },
   "skillPanel": {
     "title": "Skills & Memory",
+    "globalEnableHint": "Global skill enable/disable",
     "manageAll": "Manage All...",
     "loading": "Loading...",
     "detectedSkills": "Auto-Detected Skills",
@@ -119,6 +120,7 @@
     "searchMemories": "Search memories...",
     "filterAll": "All",
     "refresh": "Refresh index",
+    "runMaintenance": "Run maintenance",
     "noSkillsFound": "No skills found",
     "noSkillsFoundHint": "Try adjusting your search or filter",
     "noMemoriesFound": "No memories found",
@@ -776,8 +778,11 @@
   },
   "contextSources": {
     "knowledge": "Knowledge",
+    "knowledgeSession": "Knowledge (Session)",
     "memory": "Memory",
+    "memorySession": "Memory (Session)",
     "skills": "Skills",
+    "skillsSession": "Skills (Session)",
     "knowledgePicker": {
       "title": "Knowledge Sources",
       "loading": "Loading...",
@@ -788,6 +793,17 @@
     },
     "memoryPicker": {
       "title": "Memory Sources",
+      "pendingReview": "{{count}} pending review memories",
+      "reviewNow": "Review",
+      "scopes": {
+        "global": "Global",
+        "project": "Project",
+        "session": "Session"
+      },
+      "selectionModes": {
+        "auto": "Auto + Exclude",
+        "onlySelected": "Only Selected"
+      },
       "searchPlaceholder": "Search memories...",
       "noMemories": "No memories available",
       "noResults": "No matching memories",
@@ -800,7 +816,8 @@
       }
     },
     "skillsPicker": {
-      "title": "Skills Sources",
+      "title": "Session Skill Injection",
+      "hint": "Select skills injected into the current session.",
       "searchPlaceholder": "Search skills...",
       "noSkills": "No skills available",
       "noResults": "No matching skills",

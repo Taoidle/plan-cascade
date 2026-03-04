@@ -3,6 +3,7 @@ import { useContextSourcesStore } from './contextSources';
 import { useProjectsStore } from './projects';
 import { useSettingsStore } from './settings';
 import type { Project } from '../types/project';
+import type { SkillSummary } from '../types/skillMemory';
 
 const { mockRagListCollections, mockRagEnsureDocsCollection } = vi.hoisted(() => ({
   mockRagListCollections: vi.fn(),
@@ -47,6 +48,25 @@ function resetContextSourcesState() {
     skillPickerSearchQuery: '',
     _autoAssociatedScopes: {},
   });
+}
+
+function makeSkill(id: string, enabled = true): SkillSummary {
+  return {
+    id,
+    name: id,
+    description: '',
+    version: null,
+    tags: [],
+    allowed_tools: [],
+    source: { type: 'builtin' },
+    priority: 0,
+    enabled,
+    detected: false,
+    user_invocable: false,
+    has_hooks: false,
+    inject_into: ['always'],
+    path: `/skills/${id}.md`,
+  };
 }
 
 describe('useContextSourcesStore', () => {
@@ -156,6 +176,28 @@ describe('useContextSourcesStore', () => {
     expect(state.buildConfig().skills?.selection_mode).toBe('explicit');
   });
 
+  it('reconcileSelectedSkills removes disabled/missing ids and normalizes selection mode', () => {
+    useContextSourcesStore.setState({
+      skillsEnabled: true,
+      selectedSkillIds: ['skill-keep', 'skill-disabled', 'skill-missing'],
+      skillSelectionMode: 'explicit',
+    });
+
+    useContextSourcesStore
+      .getState()
+      .reconcileSelectedSkills([makeSkill('skill-keep', true), makeSkill('skill-disabled', false)]);
+
+    let state = useContextSourcesStore.getState();
+    expect(state.selectedSkillIds).toEqual(['skill-keep']);
+    expect(state.skillSelectionMode).toBe('explicit');
+
+    state.reconcileSelectedSkills([makeSkill('skill-disabled', false)]);
+    state = useContextSourcesStore.getState();
+    expect(state.selectedSkillIds).toEqual([]);
+    expect(state.skillSelectionMode).toBe('auto');
+    expect(state.buildConfig().skills?.selection_mode).toBe('auto');
+  });
+
   it('does not switch skill mode when toggling an empty skill group', () => {
     useContextSourcesStore.setState({
       skillsEnabled: true,
@@ -186,6 +228,21 @@ describe('useContextSourcesStore', () => {
 
     const config = useContextSourcesStore.getState().buildConfig();
     expect(config.project_id).toBe('project-123');
+  });
+
+  it('memory session scope is injected only when session id is bound', () => {
+    const store = useContextSourcesStore.getState();
+    expect(store.buildConfig().memory?.selected_scopes).toEqual(['global', 'project']);
+
+    store.setMemorySessionId('claude:task-1');
+    expect(useContextSourcesStore.getState().buildConfig().memory?.selected_scopes).toEqual([
+      'global',
+      'project',
+      'session',
+    ]);
+
+    useContextSourcesStore.getState().setMemorySessionId(null);
+    expect(useContextSourcesStore.getState().buildConfig().memory?.selected_scopes).toEqual(['global', 'project']);
   });
 
   it('autoAssociateForWorkspace does not auto-ensure docs when opt-in is disabled', async () => {

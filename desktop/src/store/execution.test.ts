@@ -36,7 +36,6 @@ import { useContextSourcesStore } from './contextSources';
 import { useProjectsStore } from './projects';
 import { useSettingsStore } from './settings';
 import { ToolCallStreamFilter } from '../utils/toolCallFilter';
-import * as contextSelectionBridge from '../lib/contextSelectionBridge';
 
 const mockInvoke = vi.mocked(invoke);
 
@@ -2421,10 +2420,11 @@ describe('Execution Store - Auto-Background on start()', () => {
   });
 });
 
-describe('Execution Store - unified context assembly bridge', () => {
+describe('Execution Store - session-scoped context binding', () => {
   beforeEach(() => {
     resetStore();
     vi.clearAllMocks();
+    useContextSourcesStore.setState({ memorySessionId: null });
     useSettingsStore.setState({
       backend: 'openai',
       provider: 'openai',
@@ -2433,10 +2433,7 @@ describe('Execution Store - unified context assembly bridge', () => {
     });
   });
 
-  it('uses resolveSessionScopedContext in start() standalone path', async () => {
-    const bridgeSpy = vi
-      .spyOn(contextSelectionBridge, 'resolveSessionScopedContext')
-      .mockReturnValue({ project_id: 'default' });
+  it('binds standalone session id into context sources in start() path', async () => {
     mockInvoke.mockImplementation(async (command: string) => {
       if (command === 'execute_standalone') {
         return {
@@ -2456,14 +2453,11 @@ describe('Execution Store - unified context assembly bridge', () => {
 
     await useExecutionStore.getState().start('hello', 'simple');
 
-    expect(bridgeSpy).toHaveBeenCalled();
-    expect(bridgeSpy.mock.calls.some(([, source]) => source === 'standalone')).toBe(true);
+    const boundSessionId = useContextSourcesStore.getState().memorySessionId;
+    expect(boundSessionId).toContain('standalone:');
   });
 
-  it('uses resolveSessionScopedContext in sendFollowUp() chat path', async () => {
-    const bridgeSpy = vi
-      .spyOn(contextSelectionBridge, 'resolveSessionScopedContext')
-      .mockReturnValue({ project_id: 'default' });
+  it('binds claude session id into context sources in sendFollowUp() path', async () => {
     useSettingsStore.setState({ backend: 'claude-code', provider: 'anthropic', model: 'claude-sonnet-4-6-20260219' });
     useExecutionStore.setState({
       status: 'completed',
@@ -2485,13 +2479,10 @@ describe('Execution Store - unified context assembly bridge', () => {
 
     await useExecutionStore.getState().sendFollowUp('next step');
 
-    expect(bridgeSpy).toHaveBeenCalledWith('claude-session-1', 'claude');
+    expect(useContextSourcesStore.getState().memorySessionId).toBe('claude:claude-session-1');
   });
 
-  it('uses resolveSessionScopedContext in regenerateResponse() standalone path', async () => {
-    const bridgeSpy = vi
-      .spyOn(contextSelectionBridge, 'resolveSessionScopedContext')
-      .mockReturnValue({ project_id: 'default' });
+  it('binds standalone session id into context sources in regenerateResponse() path', async () => {
     useExecutionStore.setState({
       status: 'completed',
       isChatSession: false,
@@ -2524,7 +2515,6 @@ describe('Execution Store - unified context assembly bridge', () => {
 
     await useExecutionStore.getState().regenerateResponse(1);
 
-    expect(bridgeSpy).toHaveBeenCalled();
-    expect(bridgeSpy.mock.calls.some(([, source]) => source === 'standalone')).toBe(true);
+    expect(useContextSourcesStore.getState().memorySessionId).toBe('standalone:standalone-session-1');
   });
 });

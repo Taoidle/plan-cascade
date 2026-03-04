@@ -11,11 +11,9 @@ import { invoke } from '@tauri-apps/api/core';
 import type { KnowledgeCollection, DocumentSummary, ScopedDocumentRef } from '../lib/knowledgeApi';
 import { ragListCollections, ragListDocuments, ragEnsureDocsCollection } from '../lib/knowledgeApi';
 import type { MemoryEntry, MemoryScope, MemoryStats, SkillSummary } from '../types/skillMemory';
-import type { ContextSourceConfig, LegacyContextSelectionInput, MemorySelectionMode } from '../types/contextSources';
+import type { ContextSourceConfig, MemorySelectionMode } from '../types/contextSources';
 import { useProjectsStore } from './projects';
 import { useSettingsStore } from './settings';
-import { useContextSelectionStore } from './contextSelection';
-import { buildContextSourceConfig } from '../lib/contextConfigBuilder';
 import { reportNonFatal } from '../lib/nonFatal';
 
 // ---------------------------------------------------------------------------
@@ -140,6 +138,7 @@ export interface ContextSourcesState {
   toggleSkillItem: (skillId: string) => void;
   toggleSkillGroup: (sourceType: string) => void;
   loadAvailableSkills: (projectPath: string) => Promise<void>;
+  reconcileSelectedSkills: (availableSkills: SkillSummary[]) => void;
   setSkillPickerSearchQuery: (query: string) => void;
 
   /** Build the config object for backend invocation. */
@@ -173,25 +172,6 @@ function autoAssociateScopeKey(workspacePath: string, projectId: string): string
 
 function toMemorySelectionModeV2(mode: 'auto' | 'only_selected'): MemorySelectionMode {
   return mode === 'only_selected' ? 'only_selected' : 'auto_exclude';
-}
-
-function toLegacySelectionInput(state: ContextSourcesState): LegacyContextSelectionInput {
-  return {
-    knowledgeEnabled: state.knowledgeEnabled,
-    selectedCollections: state.selectedCollections,
-    selectedDocuments: state.selectedDocuments,
-    memoryEnabled: state.memoryEnabled,
-    memorySelectionMode: state.memorySelectionMode,
-    selectedMemoryScopes: state.selectedMemoryScopes,
-    memorySessionId: state.memorySessionId,
-    selectedMemoryCategories: state.selectedMemoryCategories,
-    selectedMemoryIds: state.selectedMemoryIds,
-    includedMemoryIds: state.includedMemoryIds,
-    excludedMemoryIds: state.excludedMemoryIds,
-    skillsEnabled: state.skillsEnabled,
-    selectedSkillIds: state.selectedSkillIds,
-    skillSelectionMode: state.skillSelectionMode,
-  };
 }
 
 function buildLegacyConfigFromState(state: ContextSourcesState, projectId: string): ContextSourceConfig {
@@ -234,13 +214,16 @@ function buildLegacyConfigFromState(state: ContextSourcesState, projectId: strin
   return config;
 }
 
-function contextConfigSignature(config: ContextSourceConfig): string {
-  return JSON.stringify(config);
-}
-
-function syncUnifiedSelectionFromLegacy(state: ContextSourcesState): void {
-  if (!useSettingsStore.getState().simpleContextUnifiedStore) return;
-  useContextSelectionStore.getState().hydrateFromLegacy(toLegacySelectionInput(state), 'legacy');
+function reconcileSelectedSkillIds(
+  selectedSkillIds: string[],
+  availableSkills: SkillSummary[],
+): { selectedSkillIds: string[]; skillSelectionMode: 'auto' | 'explicit' } {
+  const enabledIdSet = new Set(availableSkills.filter((skill) => skill.enabled).map((skill) => skill.id));
+  const nextSelected = selectedSkillIds.filter((id) => enabledIdSet.has(id));
+  return {
+    selectedSkillIds: nextSelected,
+    skillSelectionMode: nextSelected.length > 0 ? 'explicit' : 'auto',
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -763,7 +746,11 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
         includeDisabled: false,
       });
       if (response.success && response.data) {
-        set({ availableSkills: response.data, isLoadingSkills: false });
+        set((state) => ({
+          availableSkills: response.data!,
+          isLoadingSkills: false,
+          ...reconcileSelectedSkillIds(state.selectedSkillIds, response.data!),
+        }));
       } else {
         set({ isLoadingSkills: false });
       }
@@ -771,6 +758,10 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
       reportNonFatal('contextSources.loadAvailableSkills', error, { projectPath });
       set({ isLoadingSkills: false });
     }
+  },
+
+  reconcileSelectedSkills: (availableSkills) => {
+    set((state) => reconcileSelectedSkillIds(state.selectedSkillIds, availableSkills));
   },
 
   setSkillPickerSearchQuery: (query) => {
@@ -783,35 +774,10 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
 
   buildConfig: () => {
     const state = get();
-
     const projectId = useProjectsStore.getState().selectedProject?.id ?? 'default';
-    if (useSettingsStore.getState().simpleContextUnifiedStore) {
-      syncUnifiedSelectionFromLegacy(state);
-      useContextSelectionStore.getState().recordBuild();
-      const unifiedSelection = useContextSelectionStore.getState().getEffectiveSelection();
-      const unifiedConfig = buildContextSourceConfig(unifiedSelection, projectId);
-      const legacyConfig = buildLegacyConfigFromState(state, projectId);
-
-      if (contextConfigSignature(unifiedConfig) !== contextConfigSignature(legacyConfig)) {
-        useContextSelectionStore.getState().recordMismatch();
-        reportNonFatal('contextSources.buildConfig.mismatch', new Error('legacy/unified mismatch'), {
-          projectId,
-          legacy: legacyConfig,
-          unified: unifiedConfig,
-        });
-      }
-
-      return unifiedConfig;
-    }
-
     return buildLegacyConfigFromState(state, projectId);
   },
 }));
-
-// Keep contextSelection as the SoT when unified mode is enabled.
-useContextSourcesStore.subscribe((state) => {
-  syncUnifiedSelectionFromLegacy(state);
-});
 
 export type { ContextSourceConfig } from '../types/contextSources';
 

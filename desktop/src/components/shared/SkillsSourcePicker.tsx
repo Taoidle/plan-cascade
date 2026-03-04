@@ -134,7 +134,10 @@ export function SkillsSourcePicker() {
   return (
     <div className="py-1">
       <div className="px-3 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 border-b border-gray-100 dark:border-gray-700">
-        {t('contextSources.skillsPicker.title', { defaultValue: 'Skills Sources' })}
+        {t('contextSources.skillsPicker.title', { defaultValue: 'Session Skill Injection' })}
+      </div>
+      <div className="px-3 py-1 text-2xs text-gray-400 dark:text-gray-500 border-b border-gray-100 dark:border-gray-700">
+        {t('contextSources.skillsPicker.hint', { defaultValue: 'Select skills injected into the current session.' })}
       </div>
 
       {/* Search input */}

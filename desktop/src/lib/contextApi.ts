@@ -234,6 +234,10 @@ function errorResponse<T>(error: unknown): CommandResponse<T> {
   };
 }
 
+/**
+ * @deprecated Use `assembleTurnContext` on all Simple/Task/Plan main paths.
+ * This mapper remains only for backward compatibility.
+ */
 export async function prepareTurnContextV2(request: {
   project_path: string;
   query: string;

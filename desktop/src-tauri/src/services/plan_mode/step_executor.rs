@@ -21,6 +21,7 @@ use crate::services::orchestrator::hnsw_index::HnswIndex;
 use crate::services::orchestrator::index_store::IndexStore;
 use crate::services::orchestrator::permission_gate::PermissionGate;
 use crate::services::orchestrator::{OrchestratorConfig, OrchestratorService};
+use crate::services::skills::model::SkillMatch;
 use crate::services::streaming::UnifiedStreamEvent;
 use crate::services::tools::definitions::get_tool_definitions_from_registry;
 use crate::utils::error::{AppError, AppResult};
@@ -63,6 +64,7 @@ pub struct StepExecutionRuntime {
     pub hnsw_index: Option<Arc<HnswIndex>>,
     pub permission_gate: Option<Arc<PermissionGate>>,
     pub search_provider: Option<(String, Option<String>)>,
+    pub selected_skills: Vec<SkillMatch>,
 }
 
 fn normalize_tool_name(name: &str) -> Option<&'static str> {
@@ -519,6 +521,10 @@ async fn execute_single_step(
         }
         if let Some(gate) = runtime.permission_gate.as_ref() {
             orchestrator = orchestrator.with_permission_gate(Arc::clone(gate));
+        }
+        if !runtime.selected_skills.is_empty() {
+            let selected_skills = Arc::new(RwLock::new(runtime.selected_skills.clone()));
+            orchestrator = orchestrator.with_selected_skills(selected_skills);
         }
 
         let cancel_bridge = orchestrator.cancellation_token();

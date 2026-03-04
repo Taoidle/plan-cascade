@@ -2,8 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { useContextOpsStore } from '../../store/contextOps';
-import { useContextSelectionStore } from '../../store/contextSelection';
-import { useSettingsStore } from '../../store/settings';
 
 type ContextOpsTab = 'inspector' | 'trace' | 'artifacts' | 'ops';
 
@@ -53,10 +51,6 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
   const [chaosProbability, setChaosProbability] = useState(0.15);
 
   const latestEnvelope = useContextOpsStore((s) => s.latestEnvelope);
-  const unifiedContextSelectionEnabled = useSettingsStore((s) => s.simpleContextUnifiedStore);
-  const selectionMismatchCount = useContextSelectionStore((s) => s.uiMeta.mismatchCount);
-  const selectionBuildCount = useContextSelectionStore((s) => s.uiMeta.buildCount);
-  const selectionDailyStats = useContextSelectionStore((s) => s.uiMeta.dailyStats);
   const selectedTraceId = useContextOpsStore((s) => s.selectedTraceId);
   const traces = useContextOpsStore((s) => s.traces);
   const policy = useContextOpsStore((s) => s.policy);
@@ -139,17 +133,6 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
   );
 
   const sourceRows = latestEnvelope?.sources ?? [];
-  const mismatchRate = selectionBuildCount > 0 ? (selectionMismatchCount / selectionBuildCount) * 100 : 0;
-  const now = new Date();
-  const sevenDaysAgo = new Date(now);
-  sevenDaysAgo.setDate(now.getDate() - 6);
-  const recentSevenDayStats = selectionDailyStats.filter((item) => {
-    const date = new Date(`${item.date}T00:00:00`);
-    return !Number.isNaN(date.getTime()) && date >= sevenDaysAgo && date <= now;
-  });
-  const sevenDayBuildCount = recentSevenDayStats.reduce((sum, item) => sum + item.buildCount, 0);
-  const sevenDayMismatchCount = recentSevenDayStats.reduce((sum, item) => sum + item.mismatchCount, 0);
-  const sevenDayMismatchRate = sevenDayBuildCount > 0 ? (sevenDayMismatchCount / sevenDayBuildCount) * 100 : 0;
 
   const inspectorContent = (
     <div className="space-y-3">
@@ -186,28 +169,8 @@ export function ContextOpsPanel({ projectPath, sessionId }: { projectPath: strin
               value={latestEnvelope.request_meta.mode}
             />
             <StatCard
-              label={t('rightPanel.contextOps.stats.selectionStore', { defaultValue: 'Selection Store' })}
-              value={unifiedContextSelectionEnabled ? 'unified' : 'legacy'}
-              tone={unifiedContextSelectionEnabled ? 'good' : 'warn'}
-            />
-            <StatCard
               label={t('rightPanel.contextOps.stats.selectionOrigin', { defaultValue: 'Selection Origin' })}
               value={latestEnvelope.diagnostics?.selection_origin || '-'}
-            />
-            <StatCard
-              label={t('rightPanel.contextOps.stats.selectionMismatch', { defaultValue: 'Selection Mismatch' })}
-              value={String(selectionMismatchCount)}
-              tone={selectionMismatchCount > 0 ? 'warn' : 'good'}
-            />
-            <StatCard
-              label={t('rightPanel.contextOps.stats.selectionMismatchRate', { defaultValue: 'Mismatch Rate' })}
-              value={`${mismatchRate.toFixed(2)}% (${selectionMismatchCount}/${selectionBuildCount})`}
-              tone={mismatchRate > 0.5 ? 'warn' : 'good'}
-            />
-            <StatCard
-              label={t('rightPanel.contextOps.stats.selectionMismatchRate7d', { defaultValue: 'Mismatch Rate (7d)' })}
-              value={`${sevenDayMismatchRate.toFixed(2)}% (${sevenDayMismatchCount}/${sevenDayBuildCount})`}
-              tone={sevenDayMismatchRate > 0.5 ? 'warn' : 'good'}
             />
           </div>
 

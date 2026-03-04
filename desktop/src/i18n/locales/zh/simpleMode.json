@@ -98,6 +98,7 @@
   },
   "skillPanel": {
     "title": "技能与记忆",
+    "globalEnableHint": "全局技能启用/禁用",
     "manageAll": "管理全部...",
     "loading": "加载中...",
     "detectedSkills": "自动检测的技能",
@@ -119,6 +120,7 @@
     "searchMemories": "搜索记忆...",
     "filterAll": "全部",
     "refresh": "刷新索引",
+    "runMaintenance": "执行维护",
     "noSkillsFound": "未找到技能",
     "noSkillsFoundHint": "请调整搜索条件或筛选器",
     "noMemoriesFound": "未找到记忆",
@@ -776,8 +778,11 @@
   },
   "contextSources": {
     "knowledge": "知识库",
+    "knowledgeSession": "知识库（会话）",
     "memory": "记忆",
+    "memorySession": "记忆（会话）",
     "skills": "技能",
+    "skillsSession": "技能（会话）",
     "knowledgePicker": {
       "title": "知识源",
       "loading": "加载中...",
@@ -788,6 +793,17 @@
     },
     "memoryPicker": {
       "title": "记忆源",
+      "pendingReview": "{{count}} 条待审核记忆",
+      "reviewNow": "审核",
+      "scopes": {
+        "global": "全局",
+        "project": "项目",
+        "session": "会话"
+      },
+      "selectionModes": {
+        "auto": "自动 + 排除",
+        "onlySelected": "仅选中"
+      },
       "searchPlaceholder": "搜索记忆...",
       "noMemories": "没有可用的记忆",
       "noResults": "没有匹配的记忆",
@@ -800,7 +816,8 @@
       }
     },
     "skillsPicker": {
-      "title": "技能源",
+      "title": "本会话技能注入",
+      "hint": "选择要注入到当前会话的技能。",
       "searchPlaceholder": "搜索技能...",
       "noSkills": "没有可用的技能",
       "noResults": "没有匹配的技能",

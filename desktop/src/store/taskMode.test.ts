@@ -200,6 +200,7 @@ describe('TaskModeStore', () => {
       expect(state.sessionStatus).toBe('initialized');
       expect(state.strategyAnalysis).toEqual(session.strategyAnalysis);
       expect(state.isLoading).toBe(false);
+      expect(useContextSourcesStore.getState().memorySessionId).toBe('session-123');
       expect(mockInvoke).toHaveBeenCalledWith('enter_task_mode', {
         description: 'Build feature X',
       });
@@ -227,6 +228,7 @@ describe('TaskModeStore', () => {
     it('should generate PRD and transition to reviewing_prd', async () => {
       // First enter task mode
       useTaskModeStore.setState({ sessionId: 'session-123', isTaskMode: true });
+      useContextSourcesStore.setState({ memorySessionId: null });
 
       const prd = mockPrd();
       mockInvoke.mockResolvedValueOnce({ success: true, data: prd, error: null });
@@ -237,6 +239,7 @@ describe('TaskModeStore', () => {
       expect(state.prd).toEqual(prd);
       expect(state.sessionStatus).toBe('reviewing_prd');
       expect(state.isLoading).toBe(false);
+      expect(useContextSourcesStore.getState().memorySessionId).toBe('session-123');
     });
 
     it('should set error if no active session', async () => {
@@ -468,6 +471,7 @@ describe('TaskModeStore', () => {
       expect(state.sessionId).toBeNull();
       expect(state.sessionStatus).toBe('idle');
       expect(state.prd).toBeNull();
+      expect(useContextSourcesStore.getState().memorySessionId).toBeNull();
     });
 
     it('should set error on failure', async () => {
@@ -506,6 +510,7 @@ describe('TaskModeStore', () => {
       expect(state.sessionStatus).toBe('idle');
       expect(state.prd).toBeNull();
       expect(state.error).toBeNull();
+      expect(useContextSourcesStore.getState().memorySessionId).toBeNull();
     });
   });
 });
