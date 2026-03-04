@@ -7,10 +7,10 @@
 import { useEffect, useState } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import { invoke } from '@tauri-apps/api/core';
 import * as Dialog from '@radix-ui/react-dialog';
-import { Cross2Icon, PlusIcon, TrashIcon } from '@radix-ui/react-icons';
-import type { McpServer, McpServerType, CommandResponse } from '../../types/mcp';
+import { Cross2Icon, EyeClosedIcon, EyeOpenIcon, PlusIcon, TrashIcon } from '@radix-ui/react-icons';
+import type { McpServer, McpServerType } from '../../types/mcp';
+import { mcpApi } from '../../lib/mcpApi';
 
 interface AddServerDialogProps {
   open: boolean;
@@ -30,6 +30,8 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded, onServerUpd
   const [autoConnect, setAutoConnect] = useState(true);
   const [envVars, setEnvVars] = useState<Array<{ key: string; value: string }>>([]);
   const [headerVars, setHeaderVars] = useState<Array<{ key: string; value: string }>>([]);
+  const [visibleEnvValues, setVisibleEnvValues] = useState<Set<number>>(new Set());
+  const [visibleHeaderValues, setVisibleHeaderValues] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,6 +46,8 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded, onServerUpd
     setAutoConnect(true);
     setEnvVars([]);
     setHeaderVars([]);
+    setVisibleEnvValues(new Set());
+    setVisibleHeaderValues(new Set());
     setError(null);
   };
 
@@ -96,7 +100,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded, onServerUpd
       });
 
       if (isEditMode && server) {
-        const response = await invoke<CommandResponse<McpServer>>('update_mcp_server', {
+        const response = await mcpApi.updateServer({
           id: server.id,
           name,
           serverType,
@@ -117,7 +121,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded, onServerUpd
           setError(response.error || t('mcp.errors.addServer'));
         }
       } else {
-        const response = await invoke<CommandResponse<McpServer>>('add_mcp_server', {
+        const response = await mcpApi.addServer({
           name,
           serverType,
           command: serverType === 'stdio' ? command : null,
@@ -152,10 +156,26 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded, onServerUpd
 
   const removeEnvVar = (index: number) => {
     setEnvVars(envVars.filter((_, i) => i !== index));
+    setVisibleEnvValues((prev) => {
+      const next = new Set<number>();
+      prev.forEach((entry) => {
+        if (entry < index) next.add(entry);
+        if (entry > index) next.add(entry - 1);
+      });
+      return next;
+    });
   };
 
   const removeHeaderVar = (index: number) => {
     setHeaderVars(headerVars.filter((_, i) => i !== index));
+    setVisibleHeaderValues((prev) => {
+      const next = new Set<number>();
+      prev.forEach((entry) => {
+        if (entry < index) next.add(entry);
+        if (entry > index) next.add(entry - 1);
+      });
+      return next;
+    });
   };
 
   const updateEnvVar = (index: number, field: 'key' | 'value', value: string) => {
@@ -168,6 +188,30 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded, onServerUpd
     const updated = [...headerVars];
     updated[index][field] = value;
     setHeaderVars(updated);
+  };
+
+  const toggleEnvVisibility = (index: number) => {
+    setVisibleEnvValues((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+  };
+
+  const toggleHeaderVisibility = (index: number) => {
+    setVisibleHeaderValues((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
   };
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -336,7 +380,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded, onServerUpd
                             )}
                           />
                           <input
-                            type="text"
+                            type={visibleEnvValues.has(i) ? 'text' : 'password'}
                             value={env.value}
                             onChange={(e) => updateEnvVar(i, 'value', e.target.value)}
                             placeholder={t('mcp.placeholders.envValue')}
@@ -347,6 +391,18 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded, onServerUpd
                               'border border-gray-200 dark:border-gray-700',
                             )}
                           />
+                          <button
+                            type="button"
+                            onClick={() => toggleEnvVisibility(i)}
+                            className="p-1.5 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
+                            title={visibleEnvValues.has(i) ? t('mcp.hide') : t('mcp.show')}
+                          >
+                            {visibleEnvValues.has(i) ? (
+                              <EyeClosedIcon className="w-3.5 h-3.5" />
+                            ) : (
+                              <EyeOpenIcon className="w-3.5 h-3.5" />
+                            )}
+                          </button>
                           <button
                             type="button"
                             onClick={() => removeEnvVar(i)}
@@ -411,7 +467,7 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded, onServerUpd
                             )}
                           />
                           <input
-                            type="text"
+                            type={visibleHeaderValues.has(i) ? 'text' : 'password'}
                             value={header.value}
                             onChange={(e) => updateHeaderVar(i, 'value', e.target.value)}
                             placeholder={t('mcp.placeholders.headerValue')}
@@ -422,6 +478,18 @@ export function AddServerDialog({ open, onOpenChange, onServerAdded, onServerUpd
                               'border border-gray-200 dark:border-gray-700',
                             )}
                           />
+                          <button
+                            type="button"
+                            onClick={() => toggleHeaderVisibility(i)}
+                            className="p-1.5 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
+                            title={visibleHeaderValues.has(i) ? t('mcp.hide') : t('mcp.show')}
+                          >
+                            {visibleHeaderValues.has(i) ? (
+                              <EyeClosedIcon className="w-3.5 h-3.5" />
+                            ) : (
+                              <EyeOpenIcon className="w-3.5 h-3.5" />
+                            )}
+                          </button>
                           <button
                             type="button"
                             onClick={() => removeHeaderVar(i)}

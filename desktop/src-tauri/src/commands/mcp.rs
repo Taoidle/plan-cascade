@@ -51,6 +51,15 @@ pub struct McpAutoConnectResult {
     pub failed: Vec<String>,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ConnectedMcpToolDetail {
+    pub qualified_name: String,
+    pub tool_name: String,
+    pub description: String,
+    pub input_schema: serde_json::Value,
+    pub is_parallel_safe: bool,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum McpExportSecretMode {
@@ -291,6 +300,16 @@ pub fn get_mcp_server_detail(
 pub fn export_mcp_servers(
     options: Option<McpExportOptions>,
 ) -> Result<CommandResponse<serde_json::Value>, String> {
+    let secret_mode = options
+        .as_ref()
+        .and_then(|o| o.secret_mode.clone())
+        .unwrap_or(McpExportSecretMode::Redacted);
+    if secret_mode == McpExportSecretMode::Include {
+        return Ok(CommandResponse::err(
+            "Plaintext MCP secret export is disabled; use redacted export".to_string(),
+        ));
+    }
+
     let service = match McpService::new() {
         Ok(s) => s,
         Err(e) => return Ok(CommandResponse::err(e.to_string())),
@@ -298,10 +317,6 @@ pub fn export_mcp_servers(
 
     match service.list_servers_with_secrets(true) {
         Ok(servers) => {
-            let secret_mode = options
-                .as_ref()
-                .and_then(|o| o.secret_mode.clone())
-                .unwrap_or(McpExportSecretMode::Redacted);
             let format_version = options
                 .as_ref()
                 .and_then(|o| o.format_version.as_deref())
@@ -401,13 +416,26 @@ pub fn toggle_mcp_server(id: String, enabled: bool) -> Result<CommandResponse<Mc
 #[tauri::command]
 pub fn import_from_claude_desktop(
     dry_run: Option<bool>,
+    conflict_policy: Option<String>,
 ) -> Result<CommandResponse<ImportResult>, String> {
     let service = match McpService::new() {
         Ok(s) => s,
         Err(e) => return Ok(CommandResponse::err(e.to_string())),
     };
 
-    match service.import_from_claude_desktop_with_options(dry_run.unwrap_or(false)) {
+    let policy = match conflict_policy.as_deref().unwrap_or("skip") {
+        "skip" => McpImportConflictPolicy::Skip,
+        "rename" => McpImportConflictPolicy::Rename,
+        "replace" => McpImportConflictPolicy::Replace,
+        other => {
+            return Ok(CommandResponse::err(format!(
+                "Unsupported conflict policy: {}",
+                other
+            )))
+        }
+    };
+
+    match service.import_from_claude_desktop_with_options(dry_run.unwrap_or(false), policy) {
         Ok(result) => Ok(CommandResponse::ok(result)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -426,6 +454,8 @@ pub fn import_mcp_from_file(
 
     let policy = match conflict_policy.as_deref().unwrap_or("skip") {
         "skip" => McpImportConflictPolicy::Skip,
+        "rename" => McpImportConflictPolicy::Rename,
+        "replace" => McpImportConflictPolicy::Replace,
         other => {
             return Ok(CommandResponse::err(format!(
                 "Unsupported conflict policy: {}",
@@ -565,6 +595,54 @@ pub async fn list_mcp_tools(
 ) -> Result<CommandResponse<Vec<ToolDefinition>>, String> {
     let _ = state;
     Ok(CommandResponse::ok(runtime_tools::definitions()))
+}
+
+fn collect_connected_tool_details(
+    info: &ConnectedServerInfo,
+    registry: &ToolRegistry,
+) -> Vec<ConnectedMcpToolDetail> {
+    let mut tools = Vec::new();
+    for qualified_name in &info.qualified_tool_names {
+        let Some(tool) = registry.get(qualified_name) else {
+            continue;
+        };
+        let tool_name = qualified_name
+            .splitn(3, ':')
+            .nth(2)
+            .unwrap_or(qualified_name.as_str())
+            .to_string();
+        tools.push(ConnectedMcpToolDetail {
+            qualified_name: qualified_name.clone(),
+            tool_name,
+            description: tool.description().to_string(),
+            input_schema: serde_json::to_value(tool.parameters_schema())
+                .unwrap_or_else(|_| serde_json::json!({})),
+            is_parallel_safe: tool.is_parallel_safe(),
+        });
+    }
+    tools
+}
+
+#[tauri::command]
+pub async fn get_connected_mcp_server_tools(
+    server_id: String,
+    state: tauri::State<'_, McpRuntimeState>,
+) -> Result<CommandResponse<Vec<ConnectedMcpToolDetail>>, String> {
+    let connected = state.manager.list_connected_servers().await;
+    let info = match connected.into_iter().find(|entry| entry.server_id == server_id) {
+        Some(value) => value,
+        None => {
+            return Ok(CommandResponse::err(format!(
+                "MCP server '{}' is not connected",
+                server_id
+            )))
+        }
+    };
+
+    let registry = state.registry.read().await;
+    let tools = collect_connected_tool_details(&info, &registry);
+
+    Ok(CommandResponse::ok(tools))
 }
 
 #[tauri::command]
@@ -858,7 +936,42 @@ pub(crate) async fn reconcile_and_connect_enabled_servers(
 mod tests {
     use super::*;
     use crate::models::McpServerStatus;
+    use crate::services::llm::types::ParameterSchema;
+    use crate::services::tools::executor::ToolResult;
+    use crate::services::tools::trait_def::{Tool, ToolExecutionContext};
+    use async_trait::async_trait;
+    use serde_json::Value;
     use std::collections::HashMap;
+    use std::sync::Arc;
+
+    struct TestTool {
+        name: String,
+        description: String,
+        parallel_safe: bool,
+    }
+
+    #[async_trait]
+    impl Tool for TestTool {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn description(&self) -> &str {
+            &self.description
+        }
+
+        fn parameters_schema(&self) -> ParameterSchema {
+            ParameterSchema::object(None, HashMap::new(), vec![])
+        }
+
+        fn is_parallel_safe(&self) -> bool {
+            self.parallel_safe
+        }
+
+        async fn execute(&self, _ctx: &ToolExecutionContext, _args: Value) -> ToolResult {
+            ToolResult::ok("ok")
+        }
+    }
 
     #[test]
     fn test_list_mcp_servers() {
@@ -1001,5 +1114,49 @@ mod tests {
     fn test_build_export_payload_invalid_format_version() {
         let payload = build_export_payload(vec![], McpExportSecretMode::Redacted, "9");
         assert!(payload.is_err());
+    }
+
+    #[test]
+    fn test_export_mcp_servers_rejects_include_mode() {
+        let result = export_mcp_servers(Some(McpExportOptions {
+            secret_mode: Some(McpExportSecretMode::Include),
+            format_version: Some("2".to_string()),
+        }))
+        .expect("command response");
+        assert!(!result.success);
+        assert!(result
+            .error
+            .unwrap_or_default()
+            .contains("disabled"));
+    }
+
+    #[test]
+    fn test_collect_connected_tool_details_returns_tool_metadata() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(TestTool {
+            name: "mcp:server-1:list_files".to_string(),
+            description: "List files in workspace".to_string(),
+            parallel_safe: true,
+        }));
+
+        let info = ConnectedServerInfo {
+            server_id: "server-1".to_string(),
+            server_name: "Server One".to_string(),
+            connection_state: "connected".to_string(),
+            tool_names: vec!["list_files".to_string()],
+            qualified_tool_names: vec!["mcp:server-1:list_files".to_string()],
+            protocol_version: "2025-03-26".to_string(),
+            connected_at: None,
+            last_error: None,
+            retry_count: 0,
+        };
+
+        let details = collect_connected_tool_details(&info, &registry);
+        assert_eq!(details.len(), 1);
+        assert_eq!(details[0].qualified_name, "mcp:server-1:list_files");
+        assert_eq!(details[0].tool_name, "list_files");
+        assert_eq!(details[0].description, "List files in workspace");
+        assert!(details[0].input_schema.is_object());
+        assert!(details[0].is_parallel_safe);
     }
 }

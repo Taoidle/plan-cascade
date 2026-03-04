@@ -2,11 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Cross2Icon, RocketIcon } from '@radix-ui/react-icons';
-import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useTranslation } from 'react-i18next';
 import type {
-  CommandResponse,
   McpCatalogItem,
   McpInstallPreview,
   McpInstallRequest,
@@ -15,12 +13,33 @@ import type {
   McpInstallLogEvent,
   McpOauthEvent,
 } from '../../types/mcp';
+import { mcpApi } from '../../lib/mcpApi';
 
 interface InstallCatalogDialogProps {
   open: boolean;
   item: McpCatalogItem | null;
   onOpenChange: (open: boolean) => void;
   onInstalled?: (result: McpInstallResult) => void;
+}
+
+export function shouldDisableInstallButton(options: {
+  installing: boolean;
+  hasItem: boolean;
+  previewLoading: boolean;
+  hasPreview: boolean;
+  previewError: string | null;
+  communityConfirmed: boolean;
+  hasMissingRequiredSecrets: boolean;
+}): boolean {
+  return (
+    options.installing ||
+    !options.hasItem ||
+    options.previewLoading ||
+    !options.hasPreview ||
+    !!options.previewError ||
+    !options.communityConfirmed ||
+    options.hasMissingRequiredSecrets
+  );
 }
 
 export function InstallCatalogDialog({ open, item, onOpenChange, onInstalled }: InstallCatalogDialogProps) {
@@ -30,6 +49,9 @@ export function InstallCatalogDialog({ open, item, onOpenChange, onInstalled }: 
   const [autoConnect, setAutoConnect] = useState(true);
   const [secrets, setSecrets] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<McpInstallPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewNonce, setPreviewNonce] = useState(0);
   const [installing, setInstalling] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [lastFailedJobId, setLastFailedJobId] = useState<string | null>(null);
@@ -54,6 +76,15 @@ export function InstallCatalogDialog({ open, item, onOpenChange, onInstalled }: 
   const hasMissingRequiredSecrets = missingRequiredSecrets.length > 0;
   const riskFlags = useMemo(() => new Set(preview?.risk_flags || []), [preview?.risk_flags]);
   const artifactPinned = !riskFlags.has('unpinned_artifact');
+  const installBlocked = shouldDisableInstallButton({
+    installing,
+    hasItem: !!item,
+    previewLoading,
+    hasPreview: !!preview,
+    previewError,
+    communityConfirmed,
+    hasMissingRequiredSecrets,
+  });
 
   useEffect(() => {
     installingRef.current = installing;
@@ -75,6 +106,9 @@ export function InstallCatalogDialog({ open, item, onOpenChange, onInstalled }: 
     setSecrets({});
     setProgress(null);
     setPreview(null);
+    setPreviewLoading(false);
+    setPreviewError(null);
+    setPreviewNonce(0);
     setLogs([]);
     setOauthState(null);
     setError(null);
@@ -82,31 +116,33 @@ export function InstallCatalogDialog({ open, item, onOpenChange, onInstalled }: 
   }, [item, open, strategyOptions]);
 
   useEffect(() => {
-    if (!open || !item || !strategy) return;
+    if (!open || !item) return;
     let cancelled = false;
     (async () => {
+      setPreviewLoading(true);
+      setPreviewError(null);
+      setPreview(null);
       try {
-        const response = await invoke<CommandResponse<McpInstallPreview>>('preview_install_mcp_catalog_item', {
-          itemId: item.id,
-          preferredStrategy: strategy,
-        });
-        if (!cancelled) {
-          if (response.success && response.data) {
-            setPreview(response.data);
-          } else {
-            setError(response.error || t('mcp.errors.previewInstall'));
-          }
+        const response = await mcpApi.previewCatalogInstall(item.id, strategy || undefined);
+        if (cancelled) return;
+        if (response.success && response.data) {
+          setPreview(response.data);
+        } else {
+          setPreviewError(response.error || t('mcp.errors.previewInstall'));
         }
       } catch (err) {
+        if (cancelled) return;
+        setPreviewError(err instanceof Error ? err.message : t('mcp.errors.previewInstall'));
+      } finally {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : t('mcp.errors.previewInstall'));
+          setPreviewLoading(false);
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [item, open, strategy, t]);
+  }, [item, open, strategy, t, previewNonce]);
 
   useEffect(() => {
     if (!open) return;
@@ -149,6 +185,15 @@ export function InstallCatalogDialog({ open, item, onOpenChange, onInstalled }: 
 
   const handleInstall = async () => {
     if (!item || !alias.trim()) return;
+    if (previewLoading || !preview || previewError) {
+      setError(
+        previewError ||
+          t('mcp.install.previewRequired', {
+            defaultValue: 'Preview must complete before install.',
+          }),
+      );
+      return;
+    }
     if (hasMissingRequiredSecrets) {
       setError(
         t('mcp.install.missingRequiredSecrets', {
@@ -176,7 +221,7 @@ export function InstallCatalogDialog({ open, item, onOpenChange, onInstalled }: 
         secrets,
         auto_connect: autoConnect,
       };
-      const response = await invoke<CommandResponse<McpInstallResult>>('install_mcp_catalog_item', { request });
+      const response = await mcpApi.installCatalogItem(request);
       if (response.success && response.data) {
         if (response.data.status === 'success') {
           onInstalled?.(response.data);
@@ -208,7 +253,7 @@ export function InstallCatalogDialog({ open, item, onOpenChange, onInstalled }: 
     setLogs([]);
     setOauthState(null);
     try {
-      const response = await invoke<CommandResponse<McpInstallResult>>('retry_mcp_install', { jobId: lastFailedJobId });
+      const response = await mcpApi.retryInstall(lastFailedJobId);
       if (response.success && response.data) {
         if (response.data.status === 'success') {
           onInstalled?.(response.data);
@@ -227,6 +272,10 @@ export function InstallCatalogDialog({ open, item, onOpenChange, onInstalled }: 
       setInstalling(false);
       installingRef.current = false;
     }
+  };
+
+  const handleRetryPreview = () => {
+    setPreviewNonce((prev) => prev + 1);
   };
 
   return (
@@ -270,66 +319,87 @@ export function InstallCatalogDialog({ open, item, onOpenChange, onInstalled }: 
 
             <section className="space-y-2">
               <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('mcp.install.stepEnvironment')}</h3>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                {t('mcp.install.artifactPinStatus', {
-                  defaultValue: 'Artifact pinning: {{status}}',
-                  status: artifactPinned
-                    ? t('mcp.install.pinned', { defaultValue: 'pinned' })
-                    : t('mcp.install.unpinned', { defaultValue: 'unpinned' }),
-                })}
-              </p>
-              {(preview?.risk_flags || []).length > 0 && (
-                <div className="space-y-1">
-                  {(preview?.risk_flags || []).map((flag) => {
-                    const colorClass =
-                      flag === 'unpinned_artifact' || flag === 'community_caution'
-                        ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-300'
-                        : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300';
-                    const label =
-                      flag === 'review_commands'
-                        ? t('mcp.install.riskReviewCommands', {
-                            defaultValue: 'Review install commands before continuing.',
-                          })
-                        : flag === 'community_caution'
-                          ? t('mcp.install.riskCommunityCaution', {
-                              defaultValue: 'Community-maintained entry. Validate source and permissions.',
-                            })
-                          : flag === 'community_item_confirmation_required'
-                            ? t('mcp.install.riskCommunityConfirm', {
-                                defaultValue: 'Extra confirmation required for community entries.',
+              {previewLoading && (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {t('mcp.install.validating', { defaultValue: 'Validating install preview...' })}
+                </p>
+              )}
+              {previewError && !previewLoading && (
+                <div className="space-y-2">
+                  <p className="text-xs text-red-700 dark:text-red-300">{previewError}</p>
+                  <button
+                    type="button"
+                    onClick={handleRetryPreview}
+                    className="px-2 py-1 rounded text-xs bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
+                  >
+                    {t('mcp.install.retryPreview', { defaultValue: 'Retry preview' })}
+                  </button>
+                </div>
+              )}
+              {preview && !previewLoading && !previewError && (
+                <>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {t('mcp.install.artifactPinStatus', {
+                      defaultValue: 'Artifact pinning: {{status}}',
+                      status: artifactPinned
+                        ? t('mcp.install.pinned', { defaultValue: 'pinned' })
+                        : t('mcp.install.unpinned', { defaultValue: 'unpinned' }),
+                    })}
+                  </p>
+                  {preview.risk_flags.length > 0 && (
+                    <div className="space-y-1">
+                      {preview.risk_flags.map((flag) => {
+                        const colorClass =
+                          flag === 'unpinned_artifact' || flag === 'community_caution'
+                            ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-300'
+                            : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300';
+                        const label =
+                          flag === 'review_commands'
+                            ? t('mcp.install.riskReviewCommands', {
+                                defaultValue: 'Review install commands before continuing.',
                               })
-                            : flag === 'unpinned_artifact'
-                              ? t('mcp.install.riskUnpinnedArtifact', {
-                                  defaultValue: 'Artifact is not pinned to a digest/version.',
+                            : flag === 'community_caution'
+                              ? t('mcp.install.riskCommunityCaution', {
+                                  defaultValue: 'Community-maintained entry. Validate source and permissions.',
                                 })
-                              : flag;
-                    return (
-                      <div key={flag} className={clsx('text-xs rounded-md border px-2 py-1.5', colorClass)}>
-                        {label}
-                      </div>
-                    );
-                  })}
-                </div>
+                              : flag === 'community_item_confirmation_required'
+                                ? t('mcp.install.riskCommunityConfirm', {
+                                    defaultValue: 'Extra confirmation required for community entries.',
+                                  })
+                                : flag === 'unpinned_artifact'
+                                  ? t('mcp.install.riskUnpinnedArtifact', {
+                                      defaultValue: 'Artifact is not pinned to a digest/version.',
+                                    })
+                                  : flag;
+                        return (
+                          <div key={flag} className={clsx('text-xs rounded-md border px-2 py-1.5', colorClass)}>
+                            {label}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {preview.missing_runtimes.length ? (
+                    <div className="text-xs rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 px-3 py-2">
+                      {t('mcp.install.missingRuntimes')}: {preview.missing_runtimes.join(', ')}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{t('mcp.install.runtimeReady')}</p>
+                  )}
+                  {preview.install_commands.length > 0 && (
+                    <div className="space-y-1">
+                      {preview.install_commands.slice(0, 3).map((cmd) => (
+                        <code
+                          key={cmd}
+                          className="block text-[11px] px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 break-all"
+                        >
+                          {cmd}
+                        </code>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
-              {preview?.missing_runtimes.length ? (
-                <div className="text-xs rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 px-3 py-2">
-                  {t('mcp.install.missingRuntimes')}: {preview.missing_runtimes.join(', ')}
-                </div>
-              ) : (
-                <p className="text-xs text-gray-500 dark:text-gray-400">{t('mcp.install.runtimeReady')}</p>
-              )}
-              {preview?.install_commands?.length ? (
-                <div className="space-y-1">
-                  {preview.install_commands.slice(0, 3).map((cmd) => (
-                    <code
-                      key={cmd}
-                      className="block text-[11px] px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 break-all"
-                    >
-                      {cmd}
-                    </code>
-                  ))}
-                </div>
-              ) : null}
             </section>
 
             <section className="space-y-2">
@@ -393,6 +463,18 @@ export function InstallCatalogDialog({ open, item, onOpenChange, onInstalled }: 
                   {progress.phase} - {progress.message} ({Math.round(progress.progress * 100)}%)
                   {activeJobId ? ` [${activeJobId.slice(0, 8)}]` : ''}
                 </p>
+              ) : installing ? (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {t('mcp.install.preparing', { defaultValue: 'Preparing installation...' })}
+                </p>
+              ) : previewLoading ? (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {t('mcp.install.validating', { defaultValue: 'Validating install preview...' })}
+                </p>
+              ) : error ? (
+                <p className="text-xs text-red-600 dark:text-red-300">
+                  {t('mcp.install.failedState', { defaultValue: 'Last run failed' })}
+                </p>
               ) : (
                 <p className="text-xs text-gray-500 dark:text-gray-400">{t('mcp.install.waiting')}</p>
               )}
@@ -445,7 +527,7 @@ export function InstallCatalogDialog({ open, item, onOpenChange, onInstalled }: 
             <button
               type="button"
               onClick={handleInstall}
-              disabled={installing || !item || !communityConfirmed || hasMissingRequiredSecrets}
+              disabled={installBlocked}
               className={clsx(
                 'inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm text-white',
                 'bg-primary-600 hover:bg-primary-700 disabled:opacity-50',

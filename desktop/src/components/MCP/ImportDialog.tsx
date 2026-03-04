@@ -7,11 +7,11 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Cross2Icon, DownloadIcon, CheckIcon, CrossCircledIcon } from '@radix-ui/react-icons';
-import type { ImportResult, CommandResponse } from '../../types/mcp';
+import type { ImportResult, McpImportConflictPolicy } from '../../types/mcp';
+import { mcpApi } from '../../lib/mcpApi';
 
 interface ImportDialogProps {
   open: boolean;
@@ -25,6 +25,7 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
   const [result, setResult] = useState<ImportResult | null>(null);
   const [resultIsDryRun, setResultIsDryRun] = useState(false);
   const [previewOnly, setPreviewOnly] = useState(false);
+  const [conflictPolicy, setConflictPolicy] = useState<McpImportConflictPolicy>('skip');
   const [error, setError] = useState<string | null>(null);
 
   const handleImport = async () => {
@@ -33,9 +34,7 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
     setResult(null);
 
     try {
-      const response = await invoke<CommandResponse<ImportResult>>('import_from_claude_desktop', {
-        dryRun: previewOnly,
-      });
+      const response = await mcpApi.importFromClaudeDesktop(previewOnly, conflictPolicy);
 
       if (response.success && response.data) {
         setResult(response.data);
@@ -66,10 +65,10 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
         return;
       }
 
-      const response = await invoke<CommandResponse<ImportResult>>('import_mcp_from_file', {
+      const response = await mcpApi.importFromFile({
         path: filePath,
         dryRun: previewOnly,
-        conflictPolicy: 'skip',
+        conflictPolicy,
       });
 
       if (response.success && response.data) {
@@ -195,6 +194,23 @@ export function ImportDialog({ open, onOpenChange, onImportComplete }: ImportDia
                   />
                   <span>{t('mcp.previewOnly')}</span>
                 </label>
+
+                <div className="mt-3 space-y-1">
+                  <label className="text-xs text-gray-600 dark:text-gray-400">{t('mcp.conflictPolicy.label')}</label>
+                  <select
+                    value={conflictPolicy}
+                    onChange={(e) => setConflictPolicy(e.target.value as McpImportConflictPolicy)}
+                    className={clsx(
+                      'w-full px-2 py-1.5 rounded-md text-xs',
+                      'bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700',
+                      'text-gray-900 dark:text-gray-100',
+                    )}
+                  >
+                    <option value="skip">{t('mcp.conflictPolicy.skip')}</option>
+                    <option value="rename">{t('mcp.conflictPolicy.rename')}</option>
+                    <option value="replace">{t('mcp.conflictPolicy.replace')}</option>
+                  </select>
+                </div>
               </>
             )}
 

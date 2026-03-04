@@ -1,15 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
-import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from 'react-i18next';
 import { ReloadIcon, RocketIcon, ExternalLinkIcon } from '@radix-ui/react-icons';
-import type {
-  CommandResponse,
-  McpCatalogItem,
-  McpCatalogListResponse,
-  McpCatalogRefreshResult,
-  McpCatalogTrustLevel,
-} from '../../types/mcp';
+import type { McpCatalogItem, McpCatalogListResponse, McpCatalogTrustLevel } from '../../types/mcp';
+import { mcpApi } from '../../lib/mcpApi';
 
 type CatalogEventStatus = 'success' | 'error' | 'info';
 
@@ -63,9 +57,7 @@ export function DiscoverTab({
       }
       try {
         if (force) {
-          const refresh = await invoke<CommandResponse<McpCatalogRefreshResult>>('refresh_mcp_catalog', {
-            force: true,
-          });
+          const refresh = await mcpApi.refreshCatalog(true);
           if (!refresh.success) {
             throw new Error(refresh.error || t('mcp.errors.fetchCatalog'));
           }
@@ -89,7 +81,7 @@ export function DiscoverTab({
             });
           }
         }
-        const response = await invoke<CommandResponse<McpCatalogListResponse>>('list_mcp_catalog');
+        const response = await mcpApi.listCatalog();
         if (response.success && response.data) {
           setItems(response.data.items);
           setCatalogMeta({

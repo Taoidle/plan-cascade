@@ -26,6 +26,8 @@ pub struct McpService {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum McpImportConflictPolicy {
     Skip,
+    Rename,
+    Replace,
 }
 
 const REDACTED_PLACEHOLDER: &str = "__REDACTED__";
@@ -125,6 +127,15 @@ impl McpService {
     fn clear_sensitive(&self, id: &str) {
         let _ = self.keyring.delete_api_key(&Self::env_secret_key(id));
         let _ = self.keyring.delete_api_key(&Self::headers_secret_key(id));
+    }
+
+    fn read_secret_map_from_keyring(&self, key: &str) -> HashMap<String, String> {
+        self.keyring
+            .get_api_key(key)
+            .ok()
+            .flatten()
+            .and_then(|raw| serde_json::from_str::<HashMap<String, String>>(&raw).ok())
+            .unwrap_or_default()
     }
 
     fn cleanup_managed_install_assets(&self, id: &str) -> AppResult<()> {
@@ -535,13 +546,14 @@ impl McpService {
 
     /// Import servers from Claude Desktop configuration.
     pub fn import_from_claude_desktop(&self) -> AppResult<ImportResult> {
-        self.import_from_claude_desktop_with_options(false)
+        self.import_from_claude_desktop_with_options(false, McpImportConflictPolicy::Skip)
     }
 
     /// Import servers from Claude Desktop configuration with options.
     pub fn import_from_claude_desktop_with_options(
         &self,
         dry_run: bool,
+        conflict_policy: McpImportConflictPolicy,
     ) -> AppResult<ImportResult> {
         let config_path = Self::get_claude_desktop_config_path();
 
@@ -559,7 +571,7 @@ impl McpService {
         }
 
         let content = std::fs::read_to_string(&config_path)?;
-        self.import_from_json_str(&content, dry_run, McpImportConflictPolicy::Skip)
+        self.import_from_json_str(&content, dry_run, conflict_policy)
     }
 
     /// Import servers from a JSON configuration file path.
@@ -646,9 +658,9 @@ impl McpService {
         match self.import_single_server(name, server_config, dry_run, conflict_policy) {
             Ok(ImportSingleResult::Added(server_name)) => {
                 result.added += 1;
-                result.servers.push(server_name);
+                result.servers.push(server_name.clone());
                 if dry_run {
-                    result.will_add.push(name.to_string());
+                    result.will_add.push(server_name);
                 }
             }
             Ok(ImportSingleResult::Skipped(reason)) => {
@@ -708,16 +720,9 @@ impl McpService {
         if name.is_empty() {
             return Err(AppError::validation("Server name is required".to_string()));
         }
-        if matches!(conflict_policy, McpImportConflictPolicy::Skip)
-            && self
-                .db
-                .get_mcp_server_by_name_case_insensitive(name)?
-                .is_some()
-        {
-            return Ok(ImportSingleResult::Skipped(format!(
-                "{}: duplicate_name",
-                name
-            )));
+        let existing = self.db.get_mcp_server_by_name_case_insensitive(name)?;
+        if matches!(conflict_policy, McpImportConflictPolicy::Skip) && existing.is_some() {
+            return Ok(ImportSingleResult::Skipped(format!("{}: duplicate_name", name)));
         }
 
         let command = config
@@ -735,41 +740,8 @@ impl McpService {
             })
             .unwrap_or_default();
 
-        let env: HashMap<String, String> = config
-            .get("env")
-            .and_then(|v| v.as_object())
-            .map(|obj| {
-                obj.iter()
-                    .filter_map(|(k, v)| {
-                        v.as_str().and_then(|s| {
-                            if s == REDACTED_PLACEHOLDER {
-                                None
-                            } else {
-                                Some((k.clone(), s.to_string()))
-                            }
-                        })
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let headers: HashMap<String, String> = config
-            .get("headers")
-            .and_then(|v| v.as_object())
-            .map(|obj| {
-                obj.iter()
-                    .filter_map(|(k, v)| {
-                        v.as_str().and_then(|s| {
-                            if s == REDACTED_PLACEHOLDER {
-                                None
-                            } else {
-                                Some((k.clone(), s.to_string()))
-                            }
-                        })
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        let (env, redacted_env_keys) = parse_secret_map(config.get("env"));
+        let (headers, redacted_header_keys) = parse_secret_map(config.get("headers"));
 
         let url = config
             .get("url")
@@ -788,8 +760,82 @@ impl McpService {
             ));
         };
 
+        let target_name = match conflict_policy {
+            McpImportConflictPolicy::Skip => name.to_string(),
+            McpImportConflictPolicy::Rename => {
+                if existing.is_some() {
+                    self.resolve_unique_import_name(name)?
+                } else {
+                    name.to_string()
+                }
+            }
+            McpImportConflictPolicy::Replace => name.to_string(),
+        };
+
+        if matches!(conflict_policy, McpImportConflictPolicy::Replace) {
+            if let Some(existing) = existing {
+                let mut merged_env = env;
+                let mut merged_headers = headers;
+
+                if (!redacted_env_keys.is_empty() || !redacted_header_keys.is_empty())
+                    && !dry_run
+                {
+                    let existing_with_secrets = self.get_server(&existing.id)?.ok_or_else(|| {
+                        AppError::not_found(format!(
+                            "Cannot load existing MCP server for replace: {}",
+                            existing.id
+                        ))
+                    })?;
+                    let existing_env = if existing_with_secrets.env.is_empty()
+                        && existing.has_env_secret
+                    {
+                        self.read_secret_map_from_keyring(&Self::env_secret_key(&existing.id))
+                    } else {
+                        existing_with_secrets.env.clone()
+                    };
+                    let existing_headers = if existing_with_secrets.headers.is_empty()
+                        && existing.has_headers_secret
+                    {
+                        self.read_secret_map_from_keyring(&Self::headers_secret_key(
+                            &existing.id,
+                        ))
+                    } else {
+                        existing_with_secrets.headers.clone()
+                    };
+                    for key in &redacted_env_keys {
+                        if let Some(value) = existing_env.get(key) {
+                            merged_env.insert(key.clone(), value.clone());
+                        }
+                    }
+                    for key in &redacted_header_keys {
+                        if let Some(value) = existing_headers.get(key) {
+                            merged_headers.insert(key.clone(), value.clone());
+                        }
+                    }
+                }
+
+                let update_request = UpdateMcpServerRequest {
+                    name: Some(target_name.clone()),
+                    server_type: Some(server_type.clone()),
+                    command: command.clone(),
+                    clear_command: !matches!(server_type, McpServerType::Stdio),
+                    args: Some(args.clone()),
+                    env: Some(merged_env),
+                    url: url.clone(),
+                    clear_url: !matches!(server_type, McpServerType::StreamHttp),
+                    headers: Some(merged_headers),
+                    enabled: None,
+                    auto_connect: None,
+                };
+                if !dry_run {
+                    self.update_server(&existing.id, update_request)?;
+                }
+                return Ok(ImportSingleResult::Added(target_name));
+            }
+        }
+
         let request = CreateMcpServerRequest {
-            name: name.to_string(),
+            name: target_name.clone(),
             server_type,
             command,
             args: Some(args),
@@ -802,7 +848,30 @@ impl McpService {
         if !dry_run {
             self.add_server(request)?;
         }
-        Ok(ImportSingleResult::Added(name.to_string()))
+        Ok(ImportSingleResult::Added(target_name))
+    }
+
+    fn resolve_unique_import_name(&self, base: &str) -> AppResult<String> {
+        if self
+            .db
+            .get_mcp_server_by_name_case_insensitive(base)?
+            .is_none()
+        {
+            return Ok(base.to_string());
+        }
+
+        let mut suffix = 2u32;
+        loop {
+            let candidate = format!("{} ({})", base, suffix);
+            if self
+                .db
+                .get_mcp_server_by_name_case_insensitive(&candidate)?
+                .is_none()
+            {
+                return Ok(candidate);
+            }
+            suffix += 1;
+        }
     }
 
     fn ensure_name_unique(&self, name: &str, ignore_id: Option<&str>) -> AppResult<()> {
@@ -861,11 +930,40 @@ enum ImportSingleResult {
     Skipped(String),
 }
 
+fn parse_secret_map(
+    value: Option<&serde_json::Value>,
+) -> (HashMap<String, String>, Vec<String>) {
+    let mut values = HashMap::new();
+    let mut redacted = Vec::new();
+
+    let Some(object) = value.and_then(|raw| raw.as_object()) else {
+        return (values, redacted);
+    };
+
+    for (key, raw) in object {
+        let Some(text) = raw.as_str() else {
+            continue;
+        };
+        if text == REDACTED_PLACEHOLDER {
+            redacted.push(key.clone());
+            continue;
+        }
+        values.insert(key.clone(), text.to_string());
+    }
+    (values, redacted)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
     use std::collections::{HashMap, HashSet};
+    use std::sync::{Mutex, OnceLock};
+
+    fn keyring_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
 
     #[test]
     fn test_generate_id() {
@@ -952,6 +1050,155 @@ mod tests {
             .errors
             .iter()
             .any(|entry| entry.starts_with("Broken:")));
+    }
+
+    #[test]
+    fn test_import_conflict_policy_rename_creates_unique_server_name() {
+        let _guard = keyring_test_guard();
+        let db = Database::new_in_memory().unwrap();
+        let service = McpService::with_database(db);
+        service
+            .add_server(CreateMcpServerRequest {
+                name: "Existing".to_string(),
+                server_type: McpServerType::Stdio,
+                command: Some("echo".to_string()),
+                args: Some(vec![]),
+                env: Some(HashMap::new()),
+                url: None,
+                headers: Some(HashMap::new()),
+                auto_connect: Some(true),
+            })
+            .unwrap();
+
+        let payload = json!({
+            "mcpServers": {
+                "Existing": { "command": "echo", "args": ["ok"] }
+            }
+        });
+        let content = serde_json::to_string(&payload).unwrap();
+
+        let result = service
+            .import_from_json_str(&content, false, McpImportConflictPolicy::Rename)
+            .unwrap();
+        assert_eq!(result.added, 1);
+        assert_eq!(result.skipped, 0);
+        assert!(result.servers.iter().any(|name| name == "Existing (2)"));
+
+        let names: Vec<String> = service
+            .list_servers()
+            .unwrap()
+            .into_iter()
+            .map(|server| server.name)
+            .collect();
+        assert!(names.iter().any(|name| name == "Existing"));
+        assert!(names.iter().any(|name| name == "Existing (2)"));
+    }
+
+    #[test]
+    fn test_import_conflict_policy_replace_overwrites_existing_server() {
+        let _guard = keyring_test_guard();
+        let db = Database::new_in_memory().unwrap();
+        let service = McpService::with_database(db);
+        let existing = service
+            .add_server(CreateMcpServerRequest {
+                name: "Existing".to_string(),
+                server_type: McpServerType::Stdio,
+                command: Some("old".to_string()),
+                args: Some(vec!["v1".to_string()]),
+                env: Some(HashMap::from([(
+                    "API_KEY".to_string(),
+                    "old-secret".to_string(),
+                )])),
+                url: None,
+                headers: Some(HashMap::new()),
+                auto_connect: Some(true),
+            })
+            .unwrap();
+
+        let payload = json!({
+            "mcpServers": {
+                "Existing": {
+                    "command": "new",
+                    "args": ["v2"],
+                    "env": {
+                        "API_KEY": "new-secret",
+                        "TOKEN": "token-v2"
+                    }
+                }
+            }
+        });
+        let content = serde_json::to_string(&payload).unwrap();
+
+        let result = service
+            .import_from_json_str(&content, false, McpImportConflictPolicy::Replace)
+            .unwrap();
+        assert_eq!(result.added, 1);
+        assert_eq!(result.skipped, 0);
+
+        let updated = service.get_server(&existing.id).unwrap().unwrap();
+        assert_eq!(updated.command.as_deref(), Some("new"));
+        assert_eq!(updated.args, vec!["v2".to_string()]);
+        assert_eq!(
+            updated.env.get("API_KEY").map(String::as_str),
+            Some("new-secret")
+        );
+        assert_eq!(
+            updated.env.get("TOKEN").map(String::as_str),
+            Some("token-v2")
+        );
+    }
+
+    #[test]
+    fn test_import_replace_redacted_keeps_existing_secret_values() {
+        let _guard = keyring_test_guard();
+        let db = Database::new_in_memory().unwrap();
+        let service = McpService::with_database(db);
+        let existing = service
+            .add_server(CreateMcpServerRequest {
+                name: "Existing".to_string(),
+                server_type: McpServerType::Stdio,
+                command: Some("old".to_string()),
+                args: Some(vec![]),
+                env: Some(HashMap::from([
+                    ("API_KEY".to_string(), "old-secret".to_string()),
+                    ("VISIBLE".to_string(), "old-value".to_string()),
+                ])),
+                url: None,
+                headers: Some(HashMap::new()),
+                auto_connect: Some(true),
+            })
+            .unwrap();
+
+        let payload = json!({
+            "mcpServers": {
+                "Existing": {
+                    "command": "new",
+                    "args": ["next"],
+                    "env": {
+                        "API_KEY": "__REDACTED__",
+                        "VISIBLE": "new-value"
+                    }
+                }
+            }
+        });
+        let content = serde_json::to_string(&payload).unwrap();
+
+        let result = service
+            .import_from_json_str(&content, false, McpImportConflictPolicy::Replace)
+            .unwrap();
+        assert_eq!(result.added, 1);
+        assert_eq!(result.failed, 0);
+
+        let updated = service.get_server(&existing.id).unwrap().unwrap();
+        assert_eq!(updated.command.as_deref(), Some("new"));
+        assert_eq!(
+            updated.env.get("API_KEY").map(String::as_str),
+            Some("old-secret")
+        );
+        assert_eq!(
+            updated.env.get("VISIBLE").map(String::as_str),
+            Some("new-value")
+        );
     }
 
     #[test]

@@ -122,6 +122,14 @@ export interface McpToolDefinition {
   input_schema: Record<string, unknown>;
 }
 
+export interface ConnectedMcpToolDetail {
+  qualified_name: string;
+  tool_name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+  is_parallel_safe: boolean;
+}
+
 export interface McpExportPayload {
   version?: string;
   exported_at?: string;
@@ -129,14 +137,14 @@ export interface McpExportPayload {
   mcpServers: Record<string, Record<string, unknown>>;
 }
 
-export type McpExportSecretMode = 'redacted' | 'include';
+export type McpExportSecretMode = 'redacted';
 
 export interface McpExportOptions {
   secret_mode?: McpExportSecretMode;
   format_version?: '1' | '2';
 }
 
-export type McpImportConflictPolicy = 'skip';
+export type McpImportConflictPolicy = 'skip' | 'rename' | 'replace';
 
 export interface RuntimeRequirement {
   runtime: McpRuntimeKind;
