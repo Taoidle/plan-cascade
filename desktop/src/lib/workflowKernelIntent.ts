@@ -1,4 +1,5 @@
 import type { UserInputIntent, UserInputIntentType, WorkflowMode } from '../types/workflowKernel';
+import { withWorkflowClientRequestMetadata } from './workflowClientRequest';
 
 const ACTION_INTENT_PROTOCOL = 'workflow_kernel_action_intent_v1';
 const ACTION_INTENT_VERSION = 1;
@@ -33,10 +34,8 @@ export function createWorkflowKernelActionIntent(spec: BaseKernelIntentSpec): Us
   const reasonCode = spec.reasonCode ? normalizeCode(spec.reasonCode, 'unknown_reason') : null;
   const content = spec.content?.trim() || `[${action}]`;
 
-  return {
-    type: spec.type,
-    content,
-    metadata: {
+  const metadata = withWorkflowClientRequestMetadata(
+    {
       ...(spec.metadata ?? {}),
       protocol: ACTION_INTENT_PROTOCOL,
       version: ACTION_INTENT_VERSION,
@@ -46,6 +45,14 @@ export function createWorkflowKernelActionIntent(spec: BaseKernelIntentSpec): Us
       ...(spec.phase ? { phase: spec.phase } : {}),
       ...(reasonCode ? { reasonCode } : {}),
     },
+    spec.mode,
+    action,
+  );
+
+  return {
+    type: spec.type,
+    content,
+    metadata,
   };
 }
 

@@ -56,6 +56,7 @@ import { useWorkflowModeSwitchGuard } from './useWorkflowModeSwitchGuard';
 import { useWorkflowKernelSessionBridge } from './useWorkflowKernelSessionBridge';
 import { useSimpleInputRouting } from './useSimpleInputRouting';
 import { useQueuedChatMessages } from './useQueuedChatMessages';
+import { cancelActiveWorkflow, submitWorkflowInputWithTracking } from '../../store/simpleWorkflowCoordinator';
 import type { WorkflowMode } from '../../types/workflowKernel';
 
 interface CommandResponse<T> {
@@ -268,6 +269,7 @@ export function SimpleModeShell() {
   const startPlanWorkflow = usePlanOrchestratorStore((s) => s.startPlanWorkflow);
   const submitPlanClarification = usePlanOrchestratorStore((s) => s.submitClarification);
   const skipPlanClarification = usePlanOrchestratorStore((s) => s.skipClarification);
+  const planOrchestratorPhase = usePlanOrchestratorStore((s) => s.phase);
   const cancelPlanWorkflow = usePlanOrchestratorStore((s) => s.cancelWorkflow);
   const planWorkflowCancelling = usePlanOrchestratorStore((s) => s.isCancelling);
   const resetPlanWorkflow = usePlanOrchestratorStore((s) => s.resetWorkflow);
@@ -341,7 +343,7 @@ export function SimpleModeShell() {
   const taskPendingQuestion = kernelInterviewQuestion;
   const planPendingQuestion = kernelPlanClarifyQuestion;
   const workflowPhase = workflowKernelTaskPhase;
-  const planPhase = workflowKernelPlanPhase;
+  const planPhase = planOrchestratorPhase === 'clarification_error' ? 'clarification_error' : workflowKernelPlanPhase;
   const chatPhase = workflowKernelChatPhase;
   const rightPanelPhase = workflowMode === 'task' ? workflowPhase : workflowMode === 'plan' ? planPhase : chatPhase;
   const taskInterviewingPhase = workflowMode === 'task' && workflowPhase === 'interviewing';
@@ -355,6 +357,18 @@ export function SimpleModeShell() {
       taskPendingQuestion.inputType === 'multi_select');
   const hasTextInterviewQuestion = taskInterviewingPhase && !!taskPendingQuestion && !hasStructuredInterviewQuestion;
   const hasPlanClarifyQuestion = planClarifyingPhase && !!planPendingQuestion;
+  const isTaskWorkflowActiveForSwitchGuard =
+    workflowMode === 'task' &&
+    workflowPhase !== 'idle' &&
+    workflowPhase !== 'completed' &&
+    workflowPhase !== 'failed' &&
+    workflowPhase !== 'cancelled';
+  const isPlanWorkflowActiveForSwitchGuard =
+    workflowMode === 'plan' &&
+    planPhase !== 'idle' &&
+    planPhase !== 'completed' &&
+    planPhase !== 'failed' &&
+    planPhase !== 'cancelled';
   const effectiveTaskPhaseForInput = taskInterviewingPhase ? 'interviewing' : workflowPhase;
   const effectivePlanPhaseForInput = planClarifyingPhase ? 'clarifying' : planPhase;
   const isInterviewSubmitting =
@@ -434,6 +448,7 @@ export function SimpleModeShell() {
     planPendingQuestion,
     hasStructuredInterviewQuestion,
     linkWorkflowKernelModeSession,
+    cancelWorkflowKernelOperation,
     transitionAndSubmitWorkflowKernelInput,
   });
 
@@ -469,18 +484,37 @@ export function SimpleModeShell() {
       t,
     });
 
-  const { modeSwitchConfirmOpen, handleWorkflowModeChange, handleConfirmModeSwitch, handleModeSwitchDialogOpenChange } =
-    useWorkflowModeSwitchGuard({
-      workflowMode,
-      isRunning,
-      streamingOutput,
-      queuedChatMessagesLength: queuedChatMessages.length,
-      clearQueuedChatMessages,
-      setWorkflowMode,
-      transitionWorkflowKernelMode,
-      showToast,
-      t,
-    });
+  const {
+    modeSwitchConfirmOpen,
+    modeSwitchBlockReason,
+    handleWorkflowModeChange,
+    handleConfirmModeSwitch,
+    handleModeSwitchDialogOpenChange,
+  } = useWorkflowModeSwitchGuard({
+    workflowMode,
+    isRunning,
+    workflowPhase,
+    planPhase,
+    isTaskWorkflowActive: isTaskWorkflowActiveForSwitchGuard,
+    isPlanWorkflowActive: isPlanWorkflowActiveForSwitchGuard,
+    hasStructuredInterviewQuestion,
+    hasPlanClarifyQuestion,
+    streamingOutput,
+    queuedChatMessagesLength: queuedChatMessages.length,
+    clearQueuedChatMessages,
+    setWorkflowMode,
+    transitionWorkflowKernelMode,
+    showToast,
+    t,
+  });
+  const modeSwitchLockReasonText = modeSwitchBlockReason
+    ? t(`workflow.modeSwitchLockReason.${modeSwitchBlockReason}`, {
+        defaultValue: t('workflow.modeSwitchConfirm', {
+          defaultValue:
+            'An execution is still running. Switching modes now may change your active workflow context. Continue?',
+        }),
+      })
+    : null;
 
   const handleComposerSubmit = useCallback(async () => {
     const prompt = description.trim();
@@ -509,18 +543,23 @@ export function SimpleModeShell() {
         (workflowMode === 'plan' && planPhase === 'executing'));
 
     if (queueableExecution) {
-      await transitionAndSubmitWorkflowKernelInput(workflowMode, {
-        type: 'follow_up_intent',
-        content: prompt,
-        metadata: {
-          mode: workflowMode,
-          queued: true,
-          source: 'simple_mode_follow_up_queue',
-          queueDepthBeforeEnqueue: queuedChatMessages.length,
-          phase: workflowMode === 'task' ? workflowPhase : workflowMode === 'plan' ? planPhase : null,
-          attachmentCount: attachments.length,
+      const submitted = await submitWorkflowInputWithTracking({
+        transitionAndSubmitInput: transitionAndSubmitWorkflowKernelInput,
+        targetMode: workflowMode,
+        intent: {
+          type: 'follow_up_intent',
+          content: prompt,
+          metadata: {
+            mode: workflowMode,
+            queued: true,
+            source: 'simple_mode_follow_up_queue',
+            queueDepthBeforeEnqueue: queuedChatMessages.length,
+            phase: workflowMode === 'task' ? workflowPhase : workflowMode === 'plan' ? planPhase : null,
+            attachmentCount: attachments.length,
+          },
         },
       });
+      if (!submitted) return;
       const queuedAttachments = [...attachments];
       queueChatMessage(prompt, submitAsFollowUp, workflowMode, queuedAttachments);
       if (queuedAttachments.length > 0) {
@@ -658,15 +697,14 @@ export function SimpleModeShell() {
   );
 
   const handleCancelStructuredWorkflow = useCallback(async () => {
-    if (taskWorkflowCancelling || planWorkflowCancelling) return;
-    await cancelWorkflowKernelOperation('cancelled_by_user');
-    if (workflowMode === 'plan') {
-      await cancelPlanWorkflow();
-      return;
-    }
-    if (workflowMode === 'task') {
-      await cancelWorkflow();
-    }
+    await cancelActiveWorkflow({
+      workflowMode,
+      taskWorkflowCancelling,
+      planWorkflowCancelling,
+      cancelKernelOperation: cancelWorkflowKernelOperation,
+      cancelTaskWorkflow: cancelWorkflow,
+      cancelPlanWorkflow: cancelPlanWorkflow,
+    });
   }, [
     cancelWorkflowKernelOperation,
     workflowMode,
@@ -1006,6 +1044,8 @@ export function SimpleModeShell() {
             <ChatToolbar
               workflowMode={workflowMode}
               onWorkflowModeChange={handleWorkflowModeChange}
+              modeSwitchLocked={!!modeSwitchBlockReason}
+              modeSwitchLockReason={modeSwitchLockReasonText}
               onFilePick={() => inputBoxRef.current?.pickFile()}
               isFilePickDisabled={inputBusy || isRunning || !!permissionRequest}
               executionStatus={status}
@@ -1113,6 +1153,7 @@ export function SimpleModeShell() {
         open={modeSwitchConfirmOpen}
         onOpenChange={handleModeSwitchDialogOpenChange}
         onConfirm={handleConfirmModeSwitch}
+        reason={modeSwitchLockReasonText}
       />
     </div>
   );

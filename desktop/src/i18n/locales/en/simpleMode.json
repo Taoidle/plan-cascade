@@ -343,6 +343,12 @@
     "cancelWorkflow": "Cancel workflow",
     "modeSwitchConfirmTitle": "Switch workflow mode?",
     "modeSwitchConfirm": "An execution is still running. Switching modes now may change your active workflow context. Continue?",
+    "modeSwitchLockReason": {
+      "running_execution": "Execution is running. Switch modes only after canceling or pausing the current run.",
+      "task_workflow_active": "Task workflow is active. Cancel it before switching modes.",
+      "plan_workflow_active": "Plan workflow is active. Cancel it before switching modes.",
+      "structured_question_pending": "A structured interview/clarification question is pending. Answer or skip it before switching modes."
+    },
     "modeSwitchFailed": "Failed to switch workflow mode. Please retry.",
     "clearQueuedMessages": "Cleared queued chat messages when leaving Chat mode.",
     "queueLimitReached": "Queue is full (max 3 messages).",
@@ -527,6 +533,7 @@
           "idle": "Idle",
           "analyzing": "Analyzing",
           "clarifying": "Clarifying",
+          "clarification_error": "Clarification Error",
           "planning": "Planning",
           "reviewing_plan": "Reviewing Plan",
           "executing": "Executing",
@@ -544,7 +551,9 @@
         "eventKind": {
           "session_opened": "Session opened",
           "mode_transitioned": "Mode transitioned",
+          "mode_session_linked": "Mode session linked",
           "input_submitted": "Input submitted",
+          "context_appended": "Context appended",
           "plan_edited": "Plan edited",
           "plan_execution_started": "Plan execution started",
           "plan_step_retried": "Plan step retried",
@@ -563,12 +572,17 @@
           "session_opened": "Session opened",
           "mode_transitioned": "Mode transitioned",
           "mode_transitioned_with_input": "Mode transitioned with input",
+          "mode_session_linked": "Mode session linked",
           "input_submitted": "Input submitted",
+          "context_appended": "Context appended",
           "plan_edited": "Plan edited",
           "plan_execution_started": "Plan execution started",
           "plan_step_retried": "Plan step retried",
           "operation_cancelled": "Operation cancelled",
           "session_recovered": "Session recovered",
+          "checkpoint_created": "Checkpoint created",
+          "mode_start_failed": "Mode start failed",
+          "mode_session_link_failed": "Mode session link failed",
           "unknown_reason": "Unknown reason"
         }
       }
@@ -658,9 +672,18 @@
     },
     "orchestrator": {
       "analyzingTask": "Analyzing task complexity...",
+      "strategyAnalysisFailed": "Strategy Analysis Failed",
+      "workflowFailed": "Workflow Failed",
       "startingInterview": "Starting requirements interview...",
+      "interviewFailed": "Interview Failed",
+      "interviewStartFailed": "Failed to start interview",
       "interviewComplete": "Interview complete! Compiling requirements...",
       "generatingPrd": "Generating PRD from task description...",
+      "configurationFailed": "Configuration Failed",
+      "interviewError": "Interview Error",
+      "submitAnswerFailed": "Failed to submit answer",
+      "specCompilationFailed": "Spec Compilation Failed",
+      "compileSpecFailed": "Failed to compile spec",
       "generatingDesignDoc": "Generating design document...",
       "designDocFailed": "Design doc generation failed (non-blocking), continuing...",
       "prdApproved": "PRD approved! Starting execution...",
@@ -670,6 +693,7 @@
       "cancelRetry": "Please retry cancellation.",
       "cancelling": "Cancelling workflow...",
       "configUpdated": "Config updated: {{details}}",
+      "configNoRecognizedOverrides": "No recognizable config overrides found in: {{input}}",
       "enhancingAnalysis": "Enhancing analysis with AI...",
       "exploringProject": "Exploring project structure and codebase...",
       "explorationFailed": "Project exploration failed (non-blocking), continuing...",
@@ -681,7 +705,11 @@
       "architectureApproved": "Architecture review accepted. Generating design document...",
       "architectureRevisionRequested": "Applying {{count}} architectural suggestions. Returning to PRD review...",
       "architectureApplyFailed": "Could not apply architecture suggestions automatically. Please edit PRD manually.",
-      "architectureReviewMaxRounds": "Architecture review limit reached (3 rounds). Proceeding with current PRD."
+      "architectureReviewMaxRounds": "Architecture review limit reached (3 rounds). Proceeding with current PRD.",
+      "executionFailed": "Execution Failed",
+      "executionError": "Execution Error",
+      "prdGenerationFailed": "PRD Generation Failed",
+      "prdMissingData": "No PRD data returned"
     }
   },
   "agentPanel": {

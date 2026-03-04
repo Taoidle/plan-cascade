@@ -22,6 +22,7 @@ import { useSettingsStore } from './settings';
 import { buildConversationHistory, synthesizePlanningTurn, synthesizeExecutionTurn } from '../lib/contextBridge';
 import { getNextTurnId } from '../lib/conversationUtils';
 import { deriveGateOverallStatus } from '../lib/gateStatus';
+import { parseWorkflowConfigNatural } from '../lib/workflowConfigNaturalParser';
 import type { CrossModeConversationTurn } from '../types/crossModeContext';
 import type {
   WorkflowPhase,
@@ -533,7 +534,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       if (taskModeState.error) {
         if (!isRunActive(get, runToken)) return;
         set({ phase: 'failed', error: taskModeState.error });
-        injectError('Strategy Analysis Failed', taskModeState.error);
+        injectError(i18n.t('workflow.orchestrator.strategyAnalysisFailed', { ns: 'simpleMode' }), taskModeState.error);
         return;
       }
 
@@ -610,7 +611,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       if (!isRunActive(get, runToken)) return;
       const msg = e instanceof Error ? e.message : String(e);
       set({ phase: 'failed', error: msg });
-      injectError('Workflow Failed', msg);
+      injectError(i18n.t('workflow.orchestrator.workflowFailed', { ns: 'simpleMode' }), msg);
     }
   },
 
@@ -691,7 +692,10 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         if (!session) {
           const interviewError = useSpecInterviewStore.getState().error;
           set({ phase: 'failed', error: interviewError || 'Failed to start interview' });
-          injectError('Interview Failed', interviewError || 'Failed to start interview');
+          injectError(
+            i18n.t('workflow.orchestrator.interviewFailed', { ns: 'simpleMode' }),
+            interviewError || i18n.t('workflow.orchestrator.interviewStartFailed', { ns: 'simpleMode' }),
+          );
           return;
         }
 
@@ -736,7 +740,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       if (!isRunActive(get, runToken)) return;
       const msg = e instanceof Error ? e.message : String(e);
       set({ phase: 'failed', error: msg });
-      injectError('Configuration Failed', msg);
+      injectError(i18n.t('workflow.orchestrator.configurationFailed', { ns: 'simpleMode' }), msg);
     }
   },
 
@@ -752,60 +756,28 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     const turnId = getNextTurnId(executionState.streamingOutput);
     executionState.appendStreamLine(text, 'info', undefined, undefined, { turnId, turnBoundary: 'user' });
 
-    const updates: Partial<WorkflowConfig> = {};
-    const lower = text.toLowerCase();
-
-    // Parse max parallel
-    const parallelMatch = lower.match(/(\d+)\s*parallel/);
-    if (parallelMatch) {
-      updates.maxParallel = Math.min(Math.max(parseInt(parallelMatch[1], 10), 1), 16);
-    }
-
-    // Parse TDD mode
-    if (lower.includes('tdd') || lower.includes('test-driven')) {
-      if (lower.includes('strict')) {
-        updates.tddMode = 'strict';
-      } else if (lower.includes('off') || lower.includes('disable') || lower.includes('no tdd')) {
-        updates.tddMode = 'off';
-      } else {
-        updates.tddMode = 'flexible';
-      }
-    }
-
-    // Parse flow level
-    if (lower.includes('quick') || lower.includes('fast')) {
-      updates.flowLevel = 'quick';
-    } else if (lower.includes('full') || lower.includes('thorough')) {
-      updates.flowLevel = 'full';
-    }
-
-    // Parse quality gates
-    if (lower.includes('no quality') || lower.includes('skip quality') || lower.includes('disable quality')) {
-      updates.qualityGatesEnabled = false;
-    }
-    if (lower.includes('enable quality')) {
-      updates.qualityGatesEnabled = true;
-    }
-
-    // Parse interview
-    if (lower.includes('interview') || lower.includes('spec')) {
-      if (lower.includes('skip') || lower.includes('no') || lower.includes('disable')) {
-        updates.specInterviewEnabled = false;
-      } else {
-        updates.specInterviewEnabled = true;
-      }
-    }
+    const { updates, matched, unmatched } = parseWorkflowConfigNatural(text, i18n.language);
 
     if (Object.keys(updates).length > 0) {
       set((state) => ({ config: { ...state.config, ...updates } }));
       injectInfo(
         i18n.t('workflow.orchestrator.configUpdated', {
           ns: 'simpleMode',
-          details: Object.entries(updates)
-            .map(([k, v]) => `${k}=${v}`)
-            .join(', '),
+          details: matched.join(', '),
         }),
         'success',
+      );
+      return;
+    }
+
+    if (unmatched.length > 0) {
+      injectInfo(
+        i18n.t('workflow.orchestrator.configNoRecognizedOverrides', {
+          ns: 'simpleMode',
+          defaultValue: 'No recognizable config overrides found in: {{input}}',
+          input: unmatched[0],
+        }),
+        'warning',
       );
     }
   },
@@ -832,7 +804,10 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     if (!updatedSession) {
       const error = useSpecInterviewStore.getState().error;
       set({ phase: 'failed', error: error || 'Failed to submit answer' });
-      injectError('Interview Error', error || 'Failed to submit answer');
+      injectError(
+        i18n.t('workflow.orchestrator.interviewError', { ns: 'simpleMode' }),
+        error || i18n.t('workflow.orchestrator.submitAnswerFailed', { ns: 'simpleMode' }),
+      );
       return;
     }
 
@@ -857,7 +832,10 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       } else {
         const error = useSpecInterviewStore.getState().error;
         set({ phase: 'failed', error: error || 'Failed to compile spec' });
-        injectError('Spec Compilation Failed', error || 'Failed to compile spec');
+        injectError(
+          i18n.t('workflow.orchestrator.specCompilationFailed', { ns: 'simpleMode' }),
+          error || i18n.t('workflow.orchestrator.compileSpecFailed', { ns: 'simpleMode' }),
+        );
       }
       return;
     }
@@ -933,7 +911,10 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       } else {
         const error = useSpecInterviewStore.getState().error;
         set({ phase: 'failed', error: error || 'Failed to compile spec' });
-        injectError('Spec Compilation Failed', error || 'Failed to compile spec');
+        injectError(
+          i18n.t('workflow.orchestrator.specCompilationFailed', { ns: 'simpleMode' }),
+          error || i18n.t('workflow.orchestrator.compileSpecFailed', { ns: 'simpleMode' }),
+        );
       }
       return;
     }
@@ -1574,12 +1555,12 @@ async function designDocAndExecutePhase(set: SetFn, get: GetFn, prd: TaskPrd, ru
     const taskModeError = useTaskModeStore.getState().error;
     if (taskModeError) {
       set({ phase: 'failed', error: taskModeError });
-      injectError('Execution Failed', taskModeError);
+      injectError(i18n.t('workflow.orchestrator.executionFailed', { ns: 'simpleMode' }), taskModeError);
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     set({ phase: 'failed', error: msg });
-    injectError('Execution Failed', msg);
+    injectError(i18n.t('workflow.orchestrator.executionFailed', { ns: 'simpleMode' }), msg);
   }
 }
 
@@ -1621,14 +1602,17 @@ async function generatePrdPhase(set: SetFn, get: GetFn, runToken: number) {
     const taskModeState = useTaskModeStore.getState();
     if (taskModeState.error) {
       set({ phase: 'failed', error: taskModeState.error });
-      injectError('PRD Generation Failed', taskModeState.error);
+      injectError(i18n.t('workflow.orchestrator.prdGenerationFailed', { ns: 'simpleMode' }), taskModeState.error);
       return;
     }
 
     const prd = taskModeState.prd;
     if (!prd) {
       set({ phase: 'failed', error: 'PRD generation returned empty result' });
-      injectError('PRD Generation Failed', 'No PRD data returned');
+      injectError(
+        i18n.t('workflow.orchestrator.prdGenerationFailed', { ns: 'simpleMode' }),
+        i18n.t('workflow.orchestrator.prdMissingData', { ns: 'simpleMode' }),
+      );
       return;
     }
 
@@ -1643,7 +1627,7 @@ async function generatePrdPhase(set: SetFn, get: GetFn, runToken: number) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     set({ phase: 'failed', error: msg });
-    injectError('PRD Generation Failed', msg);
+    injectError(i18n.t('workflow.orchestrator.prdGenerationFailed', { ns: 'simpleMode' }), msg);
   }
 }
 
@@ -1876,7 +1860,7 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
           useTaskModeStore.setState(taskModePatch);
           set({ isCancelling: false });
           if (payload.error) {
-            injectError('Execution Error', payload.error);
+            injectError(i18n.t('workflow.orchestrator.executionError', { ns: 'simpleMode' }), payload.error);
           }
           break;
         }

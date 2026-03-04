@@ -341,7 +341,14 @@
   },
   "workflow": {
     "cancelWorkflow": "ワークフローをキャンセル",
+    "modeSwitchConfirmTitle": "ワークフローモードを切り替えますか？",
     "modeSwitchConfirm": "実行がまだ進行中です。今モードを切り替えると、アクティブなワークフローコンテキストが変わる可能性があります。続行しますか？",
+    "modeSwitchLockReason": {
+      "running_execution": "実行中です。モード切替前に一時停止またはキャンセルしてください。",
+      "task_workflow_active": "Task ワークフローが進行中です。切替前にキャンセルしてください。",
+      "plan_workflow_active": "Plan ワークフローが進行中です。切替前にキャンセルしてください。",
+      "structured_question_pending": "構造化された質問（インタビュー/確認）が未回答です。先に回答またはスキップしてください。"
+    },
     "modeSwitchFailed": "ワークフローモードの切り替えに失敗しました。再試行してください。",
     "clearQueuedMessages": "チャットモードを離れたため、キューメッセージをクリアしました。",
     "queueLimitReached": "キューが上限です（最大3件）。",
@@ -518,6 +525,7 @@
           "idle": "待機",
           "analyzing": "分析中",
           "clarifying": "明確化中",
+          "clarification_error": "確認エラー",
           "planning": "計画中",
           "reviewing_plan": "プランレビュー中",
           "executing": "実行中",
@@ -535,7 +543,9 @@
         "eventKind": {
           "session_opened": "セッション開始",
           "mode_transitioned": "モード遷移",
+          "mode_session_linked": "モードセッション関連付け",
           "input_submitted": "入力送信",
+          "context_appended": "コンテキスト追加",
           "plan_edited": "プラン編集",
           "plan_execution_started": "プラン実行開始",
           "plan_step_retried": "ステップ再試行",
@@ -554,12 +564,17 @@
           "session_opened": "セッション開始",
           "mode_transitioned": "モード遷移",
           "mode_transitioned_with_input": "モード遷移と入力送信",
+          "mode_session_linked": "モードセッション関連付け",
           "input_submitted": "入力送信",
+          "context_appended": "コンテキスト追加",
           "plan_edited": "プラン編集",
           "plan_execution_started": "プラン実行開始",
           "plan_step_retried": "ステップ再試行",
           "operation_cancelled": "操作キャンセル",
           "session_recovered": "セッション復旧",
+          "checkpoint_created": "チェックポイント作成",
+          "mode_start_failed": "モード開始失敗",
+          "mode_session_link_failed": "モードセッション関連付け失敗",
           "unknown_reason": "不明な理由"
         }
       }
@@ -649,9 +664,18 @@
     },
     "orchestrator": {
       "analyzingTask": "タスクの複雑さを分析中...",
+      "strategyAnalysisFailed": "戦略分析に失敗しました",
+      "workflowFailed": "ワークフロー失敗",
       "startingInterview": "要件インタビューを開始...",
+      "interviewFailed": "インタビュー失敗",
+      "interviewStartFailed": "インタビュー開始に失敗しました",
       "interviewComplete": "インタビュー完了！要件をコンパイル中...",
       "generatingPrd": "タスク説明からPRDを生成中...",
+      "configurationFailed": "設定失敗",
+      "interviewError": "インタビューエラー",
+      "submitAnswerFailed": "回答の送信に失敗しました",
+      "specCompilationFailed": "仕様コンパイル失敗",
+      "compileSpecFailed": "仕様のコンパイルに失敗しました",
       "generatingDesignDoc": "設計ドキュメントを生成中...",
       "designDocFailed": "設計ドキュメント生成に失敗しました（非ブロッキング）、続行します...",
       "prdApproved": "PRDが承認されました！実行を開始...",
@@ -661,6 +685,7 @@
       "cancelRetry": "キャンセルを再試行してください。",
       "cancelling": "ワークフローをキャンセル中...",
       "configUpdated": "設定が更新されました：{{details}}",
+      "configNoRecognizedOverrides": "認識できる設定上書きが見つかりませんでした: {{input}}",
       "enhancingAnalysis": "AIで分析を強化中...",
       "exploringProject": "プロジェクト構造とコードベースを探索中...",
       "explorationFailed": "プロジェクト探索に失敗しました（非ブロッキング）、続行します...",
@@ -672,7 +697,11 @@
       "architectureApproved": "アーキテクチャレビューが承認されました。設計ドキュメントを生成中...",
       "architectureRevisionRequested": "{{count}} 件のアーキテクチャ提案を適用中。PRDレビューに戻ります...",
       "architectureApplyFailed": "アーキテクチャ提案を自動適用できませんでした。PRDを手動で編集してください。",
-      "architectureReviewMaxRounds": "アーキテクチャレビューの上限に達しました（3ラウンド）。現在のPRDで続行します。"
+      "architectureReviewMaxRounds": "アーキテクチャレビューの上限に達しました（3ラウンド）。現在のPRDで続行します。",
+      "executionFailed": "実行失敗",
+      "executionError": "実行エラー",
+      "prdGenerationFailed": "PRD 生成失敗",
+      "prdMissingData": "PRD データが返されませんでした"
     }
   },
   "agentPanel": {

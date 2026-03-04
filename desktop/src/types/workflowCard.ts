@@ -52,6 +52,7 @@ export type CardType =
   | 'plan_analysis_card'
   | 'plan_clarify_question'
   | 'plan_clarify_answer'
+  | 'plan_clarification_resolution'
   | 'plan_card'
   | 'plan_step_update'
   | 'plan_step_output'
@@ -93,6 +94,7 @@ export interface CardDataMap {
   plan_analysis_card: import('../types/planModeCard').PlanAnalysisCardData;
   plan_clarify_question: import('../types/planModeCard').PlanClarifyQuestionCardData;
   plan_clarify_answer: import('../types/planModeCard').PlanClarifyAnswerCardData;
+  plan_clarification_resolution: import('../types/planModeCard').PlanClarificationResolutionCardData;
   plan_card: import('../types/planModeCard').PlanCardData;
   plan_step_update: import('../types/planModeCard').PlanStepUpdateCardData;
   plan_step_output: import('../types/planModeCard').PlanStepOutputCardData;

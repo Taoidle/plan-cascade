@@ -13,7 +13,7 @@ import { Collapsible } from '../Collapsible';
 import { useWorkflowOrchestratorStore } from '../../../store/workflowOrchestrator';
 import type { TaskStory } from '../../../store/taskMode';
 import { useWorkflowKernelStore } from '../../../store/workflowKernel';
-import { submitWorkflowKernelActionIntent } from '../../../lib/workflowKernelIntent';
+import { submitWorkflowActionIntentViaCoordinator } from '../../../store/simpleWorkflowCoordinator';
 
 export function PrdCard({ data, interactive }: { data: PrdCardData; interactive: boolean }) {
   const { t } = useTranslation('simpleMode');
@@ -26,7 +26,6 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
   const editablePrd = useWorkflowOrchestratorStore((s) => s.editablePrd);
   const updateEditableStory = useWorkflowOrchestratorStore((s) => s.updateEditableStory);
   const workflowSession = useWorkflowKernelStore((s) => s.session);
-  const transitionAndSubmitWorkflowKernelInput = useWorkflowKernelStore((s) => s.transitionAndSubmitInput);
 
   const isKernelTaskActive = workflowSession?.status === 'active' && workflowSession.activeMode === 'task';
   const isActive = interactive && phase === 'reviewing_prd' && isKernelTaskActive && !acted;
@@ -52,8 +51,7 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
     setIsApproving(true);
     void (async () => {
       try {
-        await submitWorkflowKernelActionIntent({
-          transitionAndSubmitInput: transitionAndSubmitWorkflowKernelInput,
+        await submitWorkflowActionIntentViaCoordinator({
           mode: 'task',
           type: 'execution_control',
           source: 'prd_card',
@@ -74,15 +72,7 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
         setIsApproving(false);
       }
     })();
-  }, [
-    approvePrd,
-    data.batches.length,
-    data.stories.length,
-    editablePrd,
-    isActive,
-    isApproving,
-    transitionAndSubmitWorkflowKernelInput,
-  ]);
+  }, [approvePrd, data.batches.length, data.stories.length, editablePrd, isActive, isApproving]);
 
   // Group stories by batch
   const storyBatchMap = new Map<string, number>();

@@ -13,7 +13,12 @@ import type { PlanCardData, PlanStepData } from '../../../types/planModeCard';
 import { usePlanOrchestratorStore } from '../../../store/planOrchestrator';
 import { usePlanModeStore } from '../../../store/planMode';
 import { useWorkflowKernelStore } from '../../../store/workflowKernel';
-import { submitWorkflowKernelActionIntent } from '../../../lib/workflowKernelIntent';
+import {
+  applyPlanEditViaCoordinator,
+  executePlanViaCoordinator,
+  retryPlanStepViaCoordinator,
+  submitWorkflowActionIntentViaCoordinator,
+} from '../../../store/simpleWorkflowCoordinator';
 
 interface StepEditDraft {
   title: string;
@@ -163,10 +168,6 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
   const stepStatuses = usePlanModeStore((s) => s.stepStatuses);
 
   const workflowSession = useWorkflowKernelStore((s) => s.session);
-  const transitionAndSubmitWorkflowKernelInput = useWorkflowKernelStore((s) => s.transitionAndSubmitInput);
-  const applyWorkflowKernelPlanEdit = useWorkflowKernelStore((s) => s.applyPlanEdit);
-  const executeWorkflowKernelPlan = useWorkflowKernelStore((s) => s.executePlan);
-  const retryWorkflowKernelStep = useWorkflowKernelStore((s) => s.retryStep);
 
   useEffect(() => {
     setWorkingPlan(data);
@@ -268,8 +269,7 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
     cancelEditStep();
 
     try {
-      await submitWorkflowKernelActionIntent({
-        transitionAndSubmitInput: transitionAndSubmitWorkflowKernelInput,
+      await submitWorkflowActionIntentViaCoordinator({
         mode: 'plan',
         type: 'plan_edit_instruction',
         source: 'plan_card',
@@ -280,7 +280,7 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
           changedFields,
         },
       });
-      await applyWorkflowKernelPlanEdit({
+      await applyPlanEditViaCoordinator({
         type: 'update_step',
         targetStepId: editingStepId,
         payload: {
@@ -293,23 +293,14 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
     } catch {
       // Keep UI responsive even if kernel intent logging fails.
     }
-  }, [
-    applyWorkflowKernelPlanEdit,
-    cancelEditStep,
-    editingStepId,
-    isActive,
-    stepDraft,
-    transitionAndSubmitWorkflowKernelInput,
-    workingPlan.steps,
-  ]);
+  }, [cancelEditStep, editingStepId, isActive, stepDraft, workingPlan.steps]);
 
   const handleApprove = useCallback(async () => {
     if (!isActive || isSubmitting) return;
     setActed(true);
     setIsSubmitting(true);
     try {
-      await submitWorkflowKernelActionIntent({
-        transitionAndSubmitInput: transitionAndSubmitWorkflowKernelInput,
+      await submitWorkflowActionIntentViaCoordinator({
         mode: 'plan',
         type: 'plan_approval',
         source: 'plan_card',
@@ -321,7 +312,7 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
           edited: editSummary.length > 0,
         },
       });
-      await executeWorkflowKernelPlan();
+      await executePlanViaCoordinator();
     } catch {
       // Keep orchestration available even if kernel logging fails.
     }
@@ -331,23 +322,14 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
     } finally {
       setIsSubmitting(false);
     }
-  }, [
-    approvePlan,
-    editSummary.length,
-    executeWorkflowKernelPlan,
-    isActive,
-    isSubmitting,
-    transitionAndSubmitWorkflowKernelInput,
-    workingPlan,
-  ]);
+  }, [approvePlan, editSummary.length, isActive, isSubmitting, workingPlan]);
 
   const handleRetryStep = useCallback(
     async (stepId: string) => {
       if (!stepId || retryingStepId) return;
       setRetryingStepId(stepId);
       try {
-        await submitWorkflowKernelActionIntent({
-          transitionAndSubmitInput: transitionAndSubmitWorkflowKernelInput,
+        await submitWorkflowActionIntentViaCoordinator({
           mode: 'plan',
           type: 'execution_control',
           source: 'plan_card',
@@ -355,12 +337,12 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
           content: `retry_step:${stepId}`,
           metadata: { stepId },
         });
-        await retryWorkflowKernelStep(stepId);
+        await retryPlanStepViaCoordinator(stepId);
       } finally {
         setRetryingStepId(null);
       }
     },
-    [retryWorkflowKernelStep, retryingStepId, transitionAndSubmitWorkflowKernelInput],
+    [retryingStepId],
   );
 
   return (

@@ -13,7 +13,7 @@ import { useTranslation } from 'react-i18next';
 import type { ConfigCardData } from '../../../types/workflowCard';
 import { useWorkflowOrchestratorStore } from '../../../store/workflowOrchestrator';
 import { useWorkflowKernelStore } from '../../../store/workflowKernel';
-import { submitWorkflowKernelActionIntent } from '../../../lib/workflowKernelIntent';
+import { submitWorkflowActionIntentViaCoordinator } from '../../../store/simpleWorkflowCoordinator';
 
 export function ConfigCard({ data, interactive }: { data: ConfigCardData; interactive: boolean }) {
   const { t } = useTranslation('simpleMode');
@@ -27,7 +27,6 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
   const overrideConfigNatural = useWorkflowOrchestratorStore((s) => s.overrideConfigNatural);
   const phase = useWorkflowOrchestratorStore((s) => s.phase);
   const workflowSession = useWorkflowKernelStore((s) => s.session);
-  const transitionAndSubmitWorkflowKernelInput = useWorkflowKernelStore((s) => s.transitionAndSubmitInput);
 
   const isKernelTaskActive = workflowSession?.status === 'active' && workflowSession.activeMode === 'task';
   const isActive = interactive && phase === 'configuring' && isKernelTaskActive && !acted;
@@ -47,8 +46,7 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
       `specInterview=${localConfig.specInterviewEnabled}`,
     ].join(';');
     try {
-      await submitWorkflowKernelActionIntent({
-        transitionAndSubmitInput: transitionAndSubmitWorkflowKernelInput,
+      await submitWorkflowActionIntentViaCoordinator({
         mode: 'task',
         type: 'task_configuration',
         source: 'config_card_confirm',
@@ -72,7 +70,7 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
     } finally {
       setIsSubmitting(false);
     }
-  }, [confirmConfig, isActive, isSubmitting, layer, localConfig, transitionAndSubmitWorkflowKernelInput, updateConfig]);
+  }, [confirmConfig, isActive, isSubmitting, layer, localConfig, updateConfig]);
 
   const handleNlSubmit = useCallback(async () => {
     if (!isActive || isSubmitting) return;
@@ -80,8 +78,7 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
       setIsSubmitting(true);
       setActed(true);
       try {
-        await submitWorkflowKernelActionIntent({
-          transitionAndSubmitInput: transitionAndSubmitWorkflowKernelInput,
+        await submitWorkflowActionIntentViaCoordinator({
           mode: 'task',
           type: 'task_configuration',
           source: 'config_card_nl_override',
@@ -100,7 +97,7 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
       setNlOverride('');
       setLayer(1);
     }
-  }, [isActive, isSubmitting, nlOverride, overrideConfigNatural, transitionAndSubmitWorkflowKernelInput]);
+  }, [isActive, isSubmitting, nlOverride, overrideConfigNatural]);
 
   return (
     <div className="rounded-lg border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-900/20 overflow-hidden">

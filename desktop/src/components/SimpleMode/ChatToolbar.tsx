@@ -18,6 +18,8 @@ interface ChatToolbarProps {
   // Mode toggle
   workflowMode: WorkflowMode;
   onWorkflowModeChange: (mode: WorkflowMode) => void;
+  modeSwitchLocked?: boolean;
+  modeSwitchLockReason?: string | null;
   // File attach
   onFilePick: () => void;
   isFilePickDisabled: boolean;
@@ -46,6 +48,8 @@ interface ChatToolbarProps {
 export function ChatToolbar({
   workflowMode,
   onWorkflowModeChange,
+  modeSwitchLocked = false,
+  modeSwitchLockReason = null,
   onFilePick,
   isFilePickDisabled,
   executionStatus,
@@ -69,6 +73,8 @@ export function ChatToolbar({
 
   const isExecuting = executionStatus === 'running' || executionStatus === 'paused';
 
+  const modeSwitchTitle = modeSwitchLockReason || undefined;
+
   return (
     <div
       className={clsx(
@@ -82,34 +88,40 @@ export function ChatToolbar({
         <div className="flex items-center rounded-lg border border-gray-300 dark:border-gray-700 overflow-hidden">
           <button
             onClick={() => onWorkflowModeChange('chat')}
+            disabled={modeSwitchLocked && workflowMode !== 'chat'}
             className={clsx(
-              'px-3 py-1.5 text-xs font-medium transition-colors',
+              'px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed',
               workflowMode === 'chat'
                 ? 'bg-primary-600 text-white'
                 : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800',
             )}
+            title={modeSwitchTitle}
           >
             {t('workflowMode.chat', { defaultValue: 'Chat' })}
           </button>
           <button
             onClick={() => onWorkflowModeChange('plan')}
+            disabled={modeSwitchLocked && workflowMode !== 'plan'}
             className={clsx(
-              'px-3 py-1.5 text-xs font-medium transition-colors',
+              'px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed',
               workflowMode === 'plan'
                 ? 'bg-primary-600 text-white'
                 : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800',
             )}
+            title={modeSwitchTitle}
           >
             {t('workflowMode.plan', { defaultValue: 'Plan' })}
           </button>
           <button
             onClick={() => onWorkflowModeChange('task')}
+            disabled={modeSwitchLocked && workflowMode !== 'task'}
             className={clsx(
-              'px-3 py-1.5 text-xs font-medium transition-colors',
+              'px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed',
               workflowMode === 'task'
                 ? 'bg-primary-600 text-white'
                 : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800',
             )}
+            title={modeSwitchTitle}
           >
             {t('workflowMode.task', { defaultValue: 'Task' })}
           </button>

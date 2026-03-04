@@ -14,6 +14,7 @@ import { create } from 'zustand';
 import i18n from '../i18n';
 import { useExecutionStore } from './execution';
 import { usePlanModeStore } from './planMode';
+import { useWorkflowKernelStore } from './workflowKernel';
 import { useSettingsStore } from './settings';
 import { useContextSourcesStore } from './contextSources';
 import { buildConversationHistory } from '../lib/contextBridge';
@@ -25,6 +26,7 @@ import type {
   PlanCardData,
   PlanClarifyAnswerCardData,
   PlanClarifyQuestionCardData,
+  PlanClarificationResolutionCardData,
   PlanStepUpdateCardData,
   PlanStepOutputCardData,
   PlanCompletionCardData,
@@ -70,7 +72,11 @@ interface PlanOrchestratorState {
 
   // Actions
   startPlanWorkflow: (description: string) => Promise<void>;
-  submitClarification: (answer: PlanClarifyAnswerCardData) => Promise<void>;
+  submitClarification: (answer: PlanClarifyAnswerCardData) => Promise<{
+    ok: boolean;
+    errorCode?: string | null;
+  }>;
+  retryClarification: () => Promise<void>;
   skipClarification: () => Promise<void>;
   proceedToPlanning: () => Promise<void>;
   approvePlan: (plan: PlanCardData) => Promise<void>;
@@ -115,6 +121,7 @@ function normalizePlanPhase(phase: string | null | undefined): PlanModePhase | n
     case 'idle':
     case 'analyzing':
     case 'clarifying':
+    case 'clarification_error':
     case 'planning':
     case 'reviewing_plan':
     case 'executing':
@@ -131,6 +138,41 @@ function buildPlanContextSources(sessionId?: string | null) {
   const contextSourcesStore = useContextSourcesStore.getState();
   contextSourcesStore.setMemorySessionId(sessionId?.trim() || null);
   return contextSourcesStore.buildConfig();
+}
+
+async function syncKernelPlanPhase(phase: PlanModePhase, reasonCode?: string): Promise<void> {
+  const transitionAndSubmitInput = useWorkflowKernelStore.getState().transitionAndSubmitInput;
+  const session = useWorkflowKernelStore.getState().session;
+  if (!session || session.activeMode !== 'plan') return;
+
+  try {
+    await transitionAndSubmitInput('plan', {
+      type: 'system_phase_update',
+      content: `phase:${phase}`,
+      metadata: {
+        mode: 'plan',
+        phase,
+        reasonCode: reasonCode ?? null,
+      },
+    });
+  } catch {
+    // best effort kernel phase sync
+  }
+}
+
+function injectClarificationResolutionCard(reasonCode: string | null, message: string) {
+  injectCard(
+    'plan_clarification_resolution',
+    {
+      title: i18n.t('planMode:clarify.recoveryTitle', 'Clarification needs attention'),
+      message,
+      reasonCode,
+      canRetry: true,
+      canSkip: true,
+      canCancel: true,
+    } satisfies PlanClarificationResolutionCardData,
+    true,
+  );
 }
 
 // ============================================================================
@@ -242,11 +284,14 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       if (currentQuestion) {
         injectCard('plan_clarify_question', currentQuestion as unknown as Record<string, unknown>);
       } else {
-        injectInfo(
-          i18n.t('planMode:orchestrator.clarificationFailed', 'Clarification failed, proceeding to planning.'),
+        const message = i18n.t(
+          'planMode:orchestrator.clarificationFailed',
+          'Clarification failed. Please choose next action.',
         );
-        if (get()._runToken !== runToken) return;
-        await get().proceedToPlanning();
+        injectInfo(message);
+        injectClarificationResolutionCard('clarification_question_missing', message);
+        set({ phase: 'clarification_error', isBusy: false, pendingClarifyQuestion: null });
+        await syncKernelPlanPhase('clarification_error', 'clarification_question_missing');
       }
     } else {
       // Skip to planning
@@ -282,34 +327,61 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       contextStr,
       i18n.language,
     );
-    if (get()._runToken !== runToken) return;
+    if (get()._runToken !== runToken) return { ok: false, errorCode: 'stale_run_token' };
 
     if (!updatedSession) {
-      // Submission failed — fallback to planning
-      if (get()._runToken !== runToken) return;
-      injectInfo(i18n.t('planMode:orchestrator.clarificationFailed', 'Clarification failed, proceeding to planning.'));
-      set({ isBusy: false });
-      await get().proceedToPlanning();
-      return;
+      // Submission failed — enter clarification recovery state and wait for user decision.
+      if (get()._runToken !== runToken) return { ok: false, errorCode: 'stale_run_token' };
+      const message = i18n.t(
+        'planMode:orchestrator.clarificationFailed',
+        'Clarification failed. Please retry, skip, or cancel.',
+      );
+      injectInfo(message);
+      injectClarificationResolutionCard('clarification_submit_failed', message);
+      set({ phase: 'clarification_error', pendingClarifyQuestion: null, isBusy: false });
+      await syncKernelPlanPhase('clarification_error', 'clarification_submit_failed');
+      return { ok: false, errorCode: 'clarification_submit_failed' };
     }
 
     if (updatedSession.phase === 'planning') {
       // Clarification complete — transition to planning
       injectInfo(i18n.t('planMode:orchestrator.clarificationComplete', 'Clarification complete.'));
       set({ pendingClarifyQuestion: null, isBusy: false });
-      if (get()._runToken !== runToken) return;
+      if (get()._runToken !== runToken) return { ok: false, errorCode: 'stale_run_token' };
       await get().proceedToPlanning();
+      return { ok: true };
     } else if (updatedSession.currentQuestion) {
       // Next question available
-      if (get()._runToken !== runToken) return;
+      if (get()._runToken !== runToken) return { ok: false, errorCode: 'stale_run_token' };
       set({ pendingClarifyQuestion: updatedSession.currentQuestion, isBusy: false });
       injectCard('plan_clarify_question', updatedSession.currentQuestion as unknown as Record<string, unknown>);
+      return { ok: true };
     } else {
-      // No question and still clarifying — fallback to planning
-      if (get()._runToken !== runToken) return;
-      set({ pendingClarifyQuestion: null, isBusy: false });
-      await get().proceedToPlanning();
+      // No question and still clarifying — enter clarification recovery state.
+      if (get()._runToken !== runToken) return { ok: false, errorCode: 'stale_run_token' };
+      const message = i18n.t(
+        'planMode:orchestrator.clarificationFailed',
+        'Clarification failed. Please retry, skip, or cancel.',
+      );
+      set({ phase: 'clarification_error', pendingClarifyQuestion: null, isBusy: false });
+      injectInfo(message);
+      injectClarificationResolutionCard('clarification_question_missing', message);
+      await syncKernelPlanPhase('clarification_error', 'clarification_question_missing');
+      return { ok: false, errorCode: 'clarification_question_missing' };
     }
+  },
+
+  retryClarification: async () => {
+    const runToken = get()._runToken;
+    const description = get().taskDescription.trim();
+    if (!description) return;
+
+    injectInfo(i18n.t('planMode:orchestrator.retryClarification', 'Retrying clarification...'));
+    set({ phase: 'analyzing', isBusy: true, pendingClarifyQuestion: null });
+    await syncKernelPlanPhase('analyzing', 'clarification_retry');
+
+    if (get()._runToken !== runToken) return;
+    await get().startPlanWorkflow(description);
   },
 
   skipClarification: async () => {

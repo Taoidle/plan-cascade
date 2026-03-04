@@ -27,6 +27,7 @@ import { PlanStepOutputCard } from './PlanStepOutputCard';
 import { PlanCompletionCard } from './PlanCompletionCard';
 import { PlanClarifyQuestionCard } from './PlanClarifyQuestionCard';
 import { PlanClarifyAnswerCard } from './PlanClarifyAnswerCard';
+import { PlanClarificationResolutionCard } from './PlanClarificationResolutionCard';
 import type {
   PlanAnalysisCardData,
   PlanCardData,
@@ -35,6 +36,7 @@ import type {
   PlanCompletionCardData,
   PlanClarifyQuestionCardData,
   PlanClarifyAnswerCardData,
+  PlanClarificationResolutionCardData,
   PlanPersonaIndicatorData,
 } from '../../../types/planModeCard';
 import type {
@@ -110,6 +112,13 @@ export function WorkflowCardRenderer({ payload }: { payload: CardPayload }) {
       return <PlanClarifyQuestionCard data={payload.data as PlanClarifyQuestionCardData} />;
     case 'plan_clarify_answer':
       return <PlanClarifyAnswerCard data={payload.data as PlanClarifyAnswerCardData} />;
+    case 'plan_clarification_resolution':
+      return (
+        <PlanClarificationResolutionCard
+          data={payload.data as PlanClarificationResolutionCardData}
+          interactive={payload.interactive}
+        />
+      );
     case 'plan_persona_indicator':
       return (
         <PersonaIndicatorCard data={payload.data as PlanPersonaIndicatorData as unknown as PersonaIndicatorData} />

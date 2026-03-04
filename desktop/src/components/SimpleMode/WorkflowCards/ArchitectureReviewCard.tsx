@@ -11,7 +11,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useWorkflowOrchestratorStore } from '../../../store/workflowOrchestrator';
 import { useWorkflowKernelStore } from '../../../store/workflowKernel';
-import { submitWorkflowKernelActionIntent } from '../../../lib/workflowKernelIntent';
+import { submitWorkflowActionIntentViaCoordinator } from '../../../store/simpleWorkflowCoordinator';
 import type { ArchitectureReviewCardData } from '../../../types/workflowCard';
 
 const severityColors = {
@@ -35,7 +35,6 @@ export function ArchitectureReviewCard({
   const approveArchitecture = useWorkflowOrchestratorStore((s) => s.approveArchitecture);
   const phase = useWorkflowOrchestratorStore((s) => s.phase);
   const workflowSession = useWorkflowKernelStore((s) => s.session);
-  const transitionAndSubmitWorkflowKernelInput = useWorkflowKernelStore((s) => s.transitionAndSubmitInput);
 
   const toggleMod = (index: number) => {
     setSelectedMods((prev) => {
@@ -52,8 +51,7 @@ export function ArchitectureReviewCard({
     setIsSubmitting(true);
     try {
       try {
-        await submitWorkflowKernelActionIntent({
-          transitionAndSubmitInput: transitionAndSubmitWorkflowKernelInput,
+        await submitWorkflowActionIntentViaCoordinator({
           mode: 'task',
           type: 'execution_control',
           source: 'architecture_review_card',
@@ -81,8 +79,7 @@ export function ArchitectureReviewCard({
     const selected = data.prdModifications.filter((_, i) => selectedMods.has(i));
     try {
       try {
-        await submitWorkflowKernelActionIntent({
-          transitionAndSubmitInput: transitionAndSubmitWorkflowKernelInput,
+        await submitWorkflowActionIntentViaCoordinator({
           mode: 'task',
           type: 'execution_control',
           source: 'architecture_review_card',

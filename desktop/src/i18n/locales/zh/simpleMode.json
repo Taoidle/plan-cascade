@@ -343,6 +343,12 @@
     "cancelWorkflow": "取消工作流",
     "modeSwitchConfirmTitle": "切换工作流模式？",
     "modeSwitchConfirm": "当前执行仍在进行。立即切换模式可能改变当前工作流上下文，是否继续？",
+    "modeSwitchLockReason": {
+      "running_execution": "当前正在执行，请先暂停或取消后再切换模式。",
+      "task_workflow_active": "Task 工作流仍在进行，请先取消后再切换。",
+      "plan_workflow_active": "Plan 工作流仍在进行，请先取消后再切换。",
+      "structured_question_pending": "仍有结构化访谈/澄清问题待处理，请先回答或跳过。"
+    },
     "modeSwitchFailed": "切换工作流模式失败，请重试。",
     "clearQueuedMessages": "离开对话模式时已清空排队消息。",
     "queueLimitReached": "排队已满（最多 3 条消息）。",
@@ -527,6 +533,7 @@
           "idle": "空闲",
           "analyzing": "分析中",
           "clarifying": "澄清中",
+          "clarification_error": "澄清异常",
           "planning": "规划中",
           "reviewing_plan": "审查计划",
           "executing": "执行中",
@@ -544,7 +551,9 @@
         "eventKind": {
           "session_opened": "会话已创建",
           "mode_transitioned": "模式已切换",
+          "mode_session_linked": "模式会话已关联",
           "input_submitted": "输入已提交",
+          "context_appended": "上下文已追加",
           "plan_edited": "计划已编辑",
           "plan_execution_started": "计划执行已开始",
           "plan_step_retried": "步骤已重试",
@@ -563,12 +572,17 @@
           "session_opened": "会话已创建",
           "mode_transitioned": "模式已切换",
           "mode_transitioned_with_input": "模式切换并提交输入",
+          "mode_session_linked": "模式会话已关联",
           "input_submitted": "输入已提交",
+          "context_appended": "上下文已追加",
           "plan_edited": "计划已编辑",
           "plan_execution_started": "计划执行已开始",
           "plan_step_retried": "步骤已重试",
           "operation_cancelled": "操作已取消",
           "session_recovered": "会话已恢复",
+          "checkpoint_created": "检查点已创建",
+          "mode_start_failed": "模式启动失败",
+          "mode_session_link_failed": "模式会话关联失败",
           "unknown_reason": "未知原因"
         }
       }
@@ -658,9 +672,18 @@
     },
     "orchestrator": {
       "analyzingTask": "正在分析任务复杂度...",
+      "strategyAnalysisFailed": "策略分析失败",
+      "workflowFailed": "工作流失败",
       "startingInterview": "开始需求访谈...",
+      "interviewFailed": "访谈失败",
+      "interviewStartFailed": "启动访谈失败",
       "interviewComplete": "访谈完成！正在编译需求...",
       "generatingPrd": "正在从任务描述生成 PRD...",
+      "configurationFailed": "配置失败",
+      "interviewError": "访谈错误",
+      "submitAnswerFailed": "提交回答失败",
+      "specCompilationFailed": "规格编译失败",
+      "compileSpecFailed": "编译规格失败",
       "generatingDesignDoc": "正在生成设计文档...",
       "designDocFailed": "设计文档生成失败（非阻塞），继续执行...",
       "prdApproved": "PRD 已批准！开始执行...",
@@ -670,6 +693,7 @@
       "cancelRetry": "请重试取消操作。",
       "cancelling": "正在取消工作流...",
       "configUpdated": "配置已更新：{{details}}",
+      "configNoRecognizedOverrides": "未识别到可用配置项：{{input}}",
       "enhancingAnalysis": "正在使用AI增强分析...",
       "exploringProject": "正在探索项目结构和代码库...",
       "explorationFailed": "项目探索失败（非阻塞），继续执行...",
@@ -681,7 +705,11 @@
       "architectureApproved": "架构审查已通过。正在生成设计文档...",
       "architectureRevisionRequested": "正在应用 {{count}} 个架构建议。返回 PRD 审查...",
       "architectureApplyFailed": "无法自动应用架构建议。请手动编辑 PRD。",
-      "architectureReviewMaxRounds": "架构审查已达上限（3轮）。使用当前 PRD 继续。"
+      "architectureReviewMaxRounds": "架构审查已达上限（3轮）。使用当前 PRD 继续。",
+      "executionFailed": "执行失败",
+      "executionError": "执行错误",
+      "prdGenerationFailed": "PRD 生成失败",
+      "prdMissingData": "未返回 PRD 数据"
     }
   },
   "agentPanel": {

@@ -15,6 +15,7 @@ export type PlanModePhase =
   | 'idle'
   | 'analyzing'
   | 'clarifying'
+  | 'clarification_error'
   | 'planning'
   | 'reviewing_plan'
   | 'executing'
@@ -43,6 +44,7 @@ export type PlanModeCardType =
   | 'plan_analysis_card'
   | 'plan_clarify_question'
   | 'plan_clarify_answer'
+  | 'plan_clarification_resolution'
   | 'plan_card'
   | 'plan_step_update'
   | 'plan_step_output'
@@ -79,6 +81,16 @@ export interface PlanClarifyAnswerCardData {
   answer: string;
   skipped: boolean;
   questionText?: string;
+}
+
+/** Clarification recovery card data (Clarification error phase) */
+export interface PlanClarificationResolutionCardData {
+  title: string;
+  message: string;
+  reasonCode?: string | null;
+  canRetry: boolean;
+  canSkip: boolean;
+  canCancel: boolean;
 }
 
 /** Plan card data (Reviewing Plan phase) */
@@ -164,6 +176,7 @@ export interface PlanModeCardDataMap {
   plan_analysis_card: PlanAnalysisCardData;
   plan_clarify_question: PlanClarifyQuestionCardData;
   plan_clarify_answer: PlanClarifyAnswerCardData;
+  plan_clarification_resolution: PlanClarificationResolutionCardData;
   plan_card: PlanCardData;
   plan_step_update: PlanStepUpdateCardData;
   plan_step_output: PlanStepOutputCardData;

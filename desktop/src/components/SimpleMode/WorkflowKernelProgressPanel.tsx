@@ -21,6 +21,7 @@ const PLAN_PHASES = [
   'idle',
   'analyzing',
   'clarifying',
+  'clarification_error',
   'planning',
   'reviewing_plan',
   'executing',
@@ -45,6 +46,12 @@ const TASK_PHASES = [
   'cancelled',
 ];
 
+function humanizeSnakeCase(value: string): string {
+  const normalized = value.replace(/[_-]+/g, ' ').trim();
+  if (!normalized) return value;
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
 function getPhases(mode: WorkflowMode): string[] {
   if (mode === 'plan') return PLAN_PHASES;
   if (mode === 'task') return TASK_PHASES;
@@ -53,25 +60,25 @@ function getPhases(mode: WorkflowMode): string[] {
 
 function modeLabel(t: TFunction<'simpleMode'>, mode: string): string {
   return t(`workflow.progress.kernel.mode.${mode}`, {
-    defaultValue: mode,
+    defaultValue: humanizeSnakeCase(mode),
   });
 }
 
 function statusLabel(t: TFunction<'simpleMode'>, status: string): string {
   return t(`workflow.progress.kernel.status.${status}`, {
-    defaultValue: status,
+    defaultValue: humanizeSnakeCase(status),
   });
 }
 
 function phaseLabel(t: TFunction<'simpleMode'>, phase: string): string {
   return t(`workflow.progress.kernel.phase.${phase}`, {
-    defaultValue: phase,
+    defaultValue: humanizeSnakeCase(phase),
   });
 }
 
 function eventKindLabel(t: TFunction<'simpleMode'>, kind: string): string {
   return t(`workflow.progress.kernel.eventKind.${kind}`, {
-    defaultValue: kind,
+    defaultValue: humanizeSnakeCase(kind),
   });
 }
 
@@ -86,7 +93,7 @@ function normalizeReasonCode(value: string): string {
 
 function reasonCodeLabel(t: TFunction<'simpleMode'>, reasonCode: string, defaultValue?: string): string {
   return t(`workflow.progress.kernel.reasonCode.${reasonCode}`, {
-    defaultValue: defaultValue ?? reasonCode,
+    defaultValue: defaultValue ?? humanizeSnakeCase(reasonCode),
   });
 }
 

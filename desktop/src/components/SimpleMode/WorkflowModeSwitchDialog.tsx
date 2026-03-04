@@ -5,9 +5,10 @@ interface WorkflowModeSwitchDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
+  reason?: string | null;
 }
 
-export function WorkflowModeSwitchDialog({ open, onOpenChange, onConfirm }: WorkflowModeSwitchDialogProps) {
+export function WorkflowModeSwitchDialog({ open, onOpenChange, onConfirm, reason }: WorkflowModeSwitchDialogProps) {
   const { t } = useTranslation('simpleMode');
 
   return (
@@ -19,10 +20,11 @@ export function WorkflowModeSwitchDialog({ open, onOpenChange, onConfirm }: Work
             {t('workflow.modeSwitchConfirmTitle', { defaultValue: 'Switch workflow mode?' })}
           </Dialog.Title>
           <Dialog.Description className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-            {t('workflow.modeSwitchConfirm', {
-              defaultValue:
-                'An execution is still running. Switching modes now may change your active workflow context. Continue?',
-            })}
+            {reason ||
+              t('workflow.modeSwitchConfirm', {
+                defaultValue:
+                  'An execution is still running. Switching modes now may change your active workflow context. Continue?',
+              })}
           </Dialog.Description>
           <div className="mt-5 flex items-center justify-end gap-2">
             <button
