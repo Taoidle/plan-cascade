@@ -8,9 +8,7 @@
 
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { CrossModeConversationTurn } from '../types/crossModeContext';
-import { deriveGateOverallStatus } from '../lib/gateStatus';
 
 // ============================================================================
 // Types
@@ -161,20 +159,6 @@ interface CommandResponse<T> {
   error: string | null;
 }
 
-/** Tauri event payload for task mode progress — matches Rust TaskModeProgressEvent */
-interface TaskModeProgressPayload {
-  sessionId: string;
-  eventType: string;
-  currentBatch: number;
-  totalBatches: number;
-  storyId: string | null;
-  storyStatus: string | null;
-  agentName: string | null;
-  gateResults: GateResult[] | null;
-  error: string | null;
-  progressPct: number;
-}
-
 // ============================================================================
 // State Interface
 // ============================================================================
@@ -222,9 +206,6 @@ export interface TaskModeState {
   /** Error message */
   error: string | null;
 
-  /** Unlisten function for Tauri events */
-  _unlistenFn: UnlistenFn | null;
-
   // Actions
   /** Analyze task description for mode recommendation */
   analyzeForMode: (description: string) => Promise<void>;
@@ -262,12 +243,6 @@ export interface TaskModeState {
   /** Exit task mode */
   exitTaskMode: () => Promise<void>;
 
-  /** Subscribe to Tauri task-mode-progress events */
-  subscribeToEvents: () => Promise<void>;
-
-  /** Unsubscribe from events */
-  unsubscribeFromEvents: () => void;
-
   /** Reset store to initial state */
   reset: () => void;
 }
@@ -291,7 +266,6 @@ const DEFAULT_STATE = {
   isLoading: false,
   isCancelling: false,
   error: null,
-  _unlistenFn: null,
 };
 
 // ============================================================================
@@ -370,14 +344,17 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
       const { buildConfig: buildContextConfig } = (await import('./contextSources')).useContextSourcesStore.getState();
       const contextSources = buildContextConfig() ?? null;
       const result = await invoke<CommandResponse<TaskPrd>>('generate_task_prd', {
-        sessionId,
-        provider: finalProvider || null,
-        model: finalModel || null,
-        baseUrl: finalBaseUrl || null,
-        conversationHistory: conversationHistory || [],
-        maxContextTokens: maxContextTokens ?? null,
-        contextSources,
-        projectPath: settingsStore.workspacePath || null,
+        request: {
+          sessionId,
+          provider: finalProvider || null,
+          model: finalModel || null,
+          apiKey: null,
+          baseUrl: finalBaseUrl || null,
+          conversationHistory: conversationHistory || [],
+          maxContextTokens: maxContextTokens ?? null,
+          contextSources,
+          projectPath: settingsStore.workspacePath || null,
+        },
       });
       if (result.success && result.data) {
         set({
@@ -410,15 +387,19 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
       const { buildConfig: buildCtxConfig } = (await import('./contextSources')).useContextSourcesStore.getState();
       const contextSources = buildCtxConfig() ?? null;
       const result = await invoke<CommandResponse<boolean>>('approve_task_prd', {
-        sessionId,
-        prd,
-        provider: provider || null,
-        model: model || null,
-        baseUrl: baseUrl || null,
-        globalDefaultAgent: defaultAgent || null,
-        phaseConfigs,
-        contextSources,
-        projectPath: settingsStore.workspacePath || null,
+        request: {
+          sessionId,
+          prd,
+          provider: provider || null,
+          model: model || null,
+          baseUrl: baseUrl || null,
+          executionMode: null,
+          workflowConfig: null,
+          globalDefaultAgent: defaultAgent || null,
+          phaseConfigs,
+          contextSources,
+          projectPath: settingsStore.workspacePath || null,
+        },
       });
       if (result.success) {
         set({
@@ -517,7 +498,6 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
     try {
       const result = await invoke<CommandResponse<boolean>>('exit_task_mode', { sessionId });
       if (result.success) {
-        get().unsubscribeFromEvents();
         set({ ...DEFAULT_STATE });
       } else {
         set({ isLoading: false, error: result.error ?? 'Failed to exit task mode' });
@@ -527,69 +507,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
     }
   },
 
-  subscribeToEvents: async () => {
-    // Unsubscribe from any existing listener
-    get().unsubscribeFromEvents();
-
-    try {
-      const unlisten = await listen<TaskModeProgressPayload>('task-mode-progress', (event) => {
-        const payload = event.payload;
-        const { sessionId, storyStatuses: prevStatuses, qualityGateResults: prevQualityGateResults } = get();
-        // Only process events for our session
-        if (payload.sessionId !== sessionId) return;
-
-        const updates: Partial<TaskModeState> = {
-          currentBatch: payload.currentBatch,
-          totalBatches: payload.totalBatches,
-        };
-
-        // Accumulate story statuses from individual events
-        if (payload.storyId && payload.storyStatus) {
-          updates.storyStatuses = { ...prevStatuses, [payload.storyId]: payload.storyStatus };
-        }
-
-        if (payload.storyId && payload.gateResults && payload.gateResults.length > 0) {
-          updates.qualityGateResults = {
-            ...prevQualityGateResults,
-            [payload.storyId]: {
-              storyId: payload.storyId,
-              overallStatus: deriveGateOverallStatus(payload.gateResults),
-              gates: payload.gateResults,
-            },
-          };
-        }
-
-        // Determine session status from event type
-        if (payload.eventType === 'execution_completed') {
-          const allStatuses = updates.storyStatuses ?? prevStatuses;
-          const failedCount = Object.values(allStatuses).filter((s) => s === 'failed').length;
-          updates.sessionStatus = failedCount > 0 ? 'failed' : 'completed';
-          updates.isCancelling = false;
-        } else if (payload.eventType === 'execution_cancelled') {
-          updates.sessionStatus = 'cancelled';
-          updates.isCancelling = false;
-        } else if ((payload.eventType === 'story_failed' || payload.eventType === 'error') && payload.error) {
-          updates.error = payload.error;
-        }
-
-        set(updates);
-      });
-      set({ _unlistenFn: unlisten });
-    } catch {
-      // Event subscription failed - non-fatal
-    }
-  },
-
-  unsubscribeFromEvents: () => {
-    const { _unlistenFn } = get();
-    if (_unlistenFn) {
-      _unlistenFn();
-      set({ _unlistenFn: null });
-    }
-  },
-
   reset: () => {
-    get().unsubscribeFromEvents();
     set({ ...DEFAULT_STATE });
   },
 }));

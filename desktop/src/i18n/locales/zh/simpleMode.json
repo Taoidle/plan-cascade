@@ -1,6 +1,5 @@
 {
   "title": "简单模式",
-
   "input": {
     "placeholder": "描述你想要构建的内容...",
     "followUpPlaceholder": "输入消息...",
@@ -8,7 +7,6 @@
     "previewMarkdown": "预览 Markdown",
     "switchToEdit": "切换到编辑"
   },
-
   "history": {
     "title": "执行历史",
     "button": "历史",
@@ -19,7 +17,6 @@
     "completed": "已完成",
     "failed": "失败"
   },
-
   "progress": {
     "overallProgress": "总体进度",
     "batch": "批次 {{current}} / {{total}}",
@@ -27,7 +24,6 @@
     "executionLog": "执行日志",
     "retryAttempt": "第 {{count}} 次重试"
   },
-
   "result": {
     "completedSuccessfully": "执行成功",
     "executionFailed": "执行失败",
@@ -35,12 +31,10 @@
     "failedStories": "失败的故事 ({{count}})",
     "errorDetails": "错误详情"
   },
-
   "empty": {
     "title": "准备就绪",
     "description": "在上方描述你的任务，Plan Cascade 将自动分解任务、创建计划并逐步执行。"
   },
-
   "strategies": {
     "direct": "直接执行",
     "hybridAuto": "混合自动",
@@ -49,7 +43,6 @@
     "hybrid": "混合",
     "mega": "大型"
   },
-
   "messageActions": {
     "edit": "编辑",
     "regenerate": "重新生成",
@@ -62,7 +55,6 @@
     "fork": "分叉",
     "contextWarning": "会话将重新开始。之前的上下文将会丢失。"
   },
-
   "attachment": {
     "dropHere": "将文件拖放到此处",
     "pickFile": "选择文件",
@@ -70,7 +62,6 @@
     "unsupportedType": "不支持的文件类型",
     "removeFile": "移除文件"
   },
-
   "modelSwitcher": {
     "current": "当前模型",
     "switchTo": "切换到",
@@ -79,11 +70,9 @@
     "contextPreserved": "上下文已保留",
     "sessionRestart": "会话将使用新模型重新开始"
   },
-
   "projectSelector": {
     "openInFileManager": "在文件管理器中打开"
   },
-
   "sidebar": {
     "newTask": "新建任务",
     "addDirectory": "添加目录",
@@ -107,7 +96,6 @@
     "removeSession": "移除会话",
     "currentFork": "（当前）"
   },
-
   "skillPanel": {
     "title": "技能与记忆",
     "manageAll": "管理全部...",
@@ -240,7 +228,6 @@
       "sessionMemoryRequiresSession": "会话记忆需要一个活动会话"
     }
   },
-
   "pluginPanel": {
     "title": "插件",
     "manageAll": "管理全部...",
@@ -250,13 +237,11 @@
     "marketplace": "插件市场",
     "installFromUrl": "从 URL 安装"
   },
-
   "workflowMode": {
     "chat": "对话",
     "plan": "计划",
     "task": "任务"
   },
-
   "output": {
     "label": "输出",
     "toggleTitle": "切换详细输出面板",
@@ -287,7 +272,6 @@
     "readDepth": "读取深度",
     "testsRead": "测试已读"
   },
-
   "emptyChat": {
     "thinking": "思考中...",
     "startConversation": "在右侧输入框中开始对话。"
@@ -295,7 +279,6 @@
   "chat": {
     "scrollToBottom": "滚动到底部"
   },
-
   "permission": {
     "toolRequiresApproval": "工具需要审批：",
     "pending": "+{{count}} 个待审批",
@@ -321,7 +304,6 @@
     },
     "tooltip": "权限：{{level}} - {{description}}"
   },
-
   "actions": {
     "execute": "执行",
     "executeTitle": "开始执行",
@@ -341,7 +323,6 @@
     "refreshProjectsTitle": "刷新项目列表",
     "refreshAnalyticsTitle": "刷新分析数据"
   },
-
   "contextBridge": {
     "contextWillTransfer": "对话历史将传递到任务模式",
     "pendingTaskContext": "任务上下文待注入",
@@ -356,18 +337,22 @@
     "switchToChatWithTaskContext": "切换到对话模式，携带任务上下文",
     "contextReset": "已为新任务清除上下文"
   },
-
   "workflow": {
     "cancelWorkflow": "取消工作流",
+    "modeSwitchConfirmTitle": "切换工作流模式？",
     "modeSwitchConfirm": "当前执行仍在进行。立即切换模式可能改变当前工作流上下文，是否继续？",
     "modeSwitchFailed": "切换工作流模式失败，请重试。",
     "clearQueuedMessages": "离开对话模式时已清空排队消息。",
     "queueLimitReached": "排队已满（最多 3 条消息）。",
-    "queueAttachmentsNotSupported": "运行中排队暂不支持新附件消息。",
+    "queueAttachmentsNotSupported": "运行中支持附件排队；若附件无法入队，会提供可恢复提示。",
     "queue": {
       "title": "排队消息（{{count}}/{{max}}）",
       "recovered": "已恢复 {{count}} 条排队消息。",
+      "replayingAttachments": "已恢复 {{count}} 个排队附件。",
       "placeholder": "执行进行中，你的消息将进入队列...",
+      "attachmentCount": "{{count}} 个附件",
+      "attachmentsDropped": "{{count}} 个附件无法入队，消息已无附件排队；可在本次执行后重新附加并发送。",
+      "persistenceFailed": "排队消息无法写入本地存储。请保持窗口开启，或移除较大附件后重试。",
       "remove": "移除此排队消息",
       "removeShort": "移除"
     },
@@ -379,7 +364,6 @@
       "exceeded": "预计 token 已超预算，部分附件上下文可能被截断。",
       "estimating": "正在估算 token 预算..."
     },
-
     "strategy": {
       "title": "策略分析",
       "confidence": "{{pct}}% 置信度",
@@ -390,7 +374,6 @@
       "highRisk": "高风险 — 建议启用 TDD 模式和完整质量门禁",
       "manyStories": "预计 {{count}} 个故事 — 建议增加最大并行代理数"
     },
-
     "config": {
       "title": "配置",
       "customized": "已自定义",
@@ -422,7 +405,6 @@
       "backToForm": "返回表单",
       "applied": "已应用"
     },
-
     "designDoc": {
       "title": "设计文档",
       "summary": "从 PRD 推导的架构摘要",
@@ -446,7 +428,6 @@
       "alternatives": "备选方案",
       "savedTo": "已保存到 {{path}}"
     },
-
     "exploration": {
       "title": "项目探索",
       "techStack": "技术栈",
@@ -464,7 +445,6 @@
       "summaryUnavailable": "AI 摘要不可用，已使用确定性探索结果。",
       "summarySynthesized": "摘要由确定性探索数据合成生成。"
     },
-
     "persona": {
       "TechLead": "技术负责人",
       "SeniorEngineer": "高级工程师",
@@ -475,7 +455,6 @@
       "QaEngineer": "QA 工程师",
       "active": "{{name}} 正在工作..."
     },
-
     "requirementAnalysis": {
       "title": "需求分析",
       "keyRequirements": "关键需求",
@@ -483,7 +462,6 @@
       "scope": "建议范围",
       "fullAnalysis": "完整分析"
     },
-
     "architectureReview": {
       "title": "架构审查",
       "concerns": "架构关注点",
@@ -494,11 +472,9 @@
       "requestChanges": "应用选中项并修改 PRD",
       "approved": "已批准"
     },
-
     "common": {
       "processing": "处理中..."
     },
-
     "progress": {
       "title": "工作流进度",
       "phaseAnalyze": "分析",
@@ -595,7 +571,6 @@
         }
       }
     },
-
     "interview": {
       "questionTitle": "访谈问题",
       "questionNumber": "{{current}}/{{total}}",
@@ -617,7 +592,6 @@
       "backToOptions": "返回选项",
       "generating": "正在生成下一个问题..."
     },
-
     "prd": {
       "title": "PRD",
       "storiesAndBatches": "{{stories}} 个故事 / {{batches}} 个批次",
@@ -633,7 +607,6 @@
       "priorityMedium": "中",
       "priorityLow": "低"
     },
-
     "execution": {
       "batchStarted": "批次开始",
       "storyStarted": "故事开始",
@@ -642,13 +615,11 @@
       "batchComplete": "批次完成",
       "batchLabel": "批次 {{current}}/{{total}}"
     },
-
     "gates": {
       "qualityGate": "质量门禁: {{title}}",
       "passed": "通过",
       "failed": "失败"
     },
-
     "report": {
       "executionComplete": "执行完成",
       "executionFailed": "执行失败",
@@ -658,7 +629,6 @@
       "duration": "耗时",
       "agentAssignments": "代理分配"
     },
-
     "input": {
       "taskPlaceholder": "描述一个任务（实现 / 分析 / 重构）...",
       "configuringPlaceholder": "输入配置（如\"6个并行，启用TDD\"）或点击上方的继续按钮...",
@@ -667,7 +637,6 @@
       "waitingPlaceholder": "等待响应中...",
       "planPlaceholder": "描述一个要分解执行的任务（写作、研究等）..."
     },
-
     "fileChange": {
       "newFile": "新文件",
       "modified": "已修改",
@@ -679,14 +648,12 @@
       "linesChanged": "+{{added}} -{{removed}}",
       "moreLines": "... 还有 {{count}} 行"
     },
-
     "turnSummary": {
       "title": "本轮变更",
       "files": "{{count}} 个文件",
       "viewAll": "查看所有变更",
       "revertAll": "全部还原"
     },
-
     "orchestrator": {
       "analyzingTask": "正在分析任务复杂度...",
       "startingInterview": "开始需求访谈...",
@@ -715,7 +682,6 @@
       "architectureReviewMaxRounds": "架构审查已达上限（3轮）。使用当前 PRD 继续。"
     }
   },
-
   "agentPanel": {
     "title": "智能体",
     "manageAll": "管理全部...",
@@ -726,7 +692,6 @@
     "newAgent": "新建智能体",
     "deleteConfirm": "确定删除此智能体？"
   },
-
   "agentDialog": {
     "title": "管理智能体",
     "searchPlaceholder": "搜索智能体...",
@@ -748,7 +713,6 @@
     "selectOrCreate": "选择或创建智能体",
     "unsupportedBackend": "Claude Code 后端不支持智能体系统提示词"
   },
-
   "promptPanel": {
     "title": "提示词",
     "manageAll": "管理全部...",
@@ -756,7 +720,6 @@
     "noPrompts": "暂无提示词",
     "insert": "插入"
   },
-
   "promptDialog": {
     "title": "管理提示词",
     "searchPlaceholder": "搜索提示词...",
@@ -778,13 +741,11 @@
     "duplicate": "复制为自定义",
     "selectOrCreate": "选择或创建提示词"
   },
-
   "promptPalette": {
     "title": "/ 提示词",
     "back": "返回",
     "insertPrompt": "插入提示词"
   },
-
   "export": {
     "markdown": "Markdown (.md)",
     "conversationTranscript": "对话记录",
@@ -813,7 +774,6 @@
     "pngExported": "PNG 已导出。",
     "jpgExported": "JPG 已导出。"
   },
-
   "contextSources": {
     "knowledge": "知识库",
     "memory": "记忆",
@@ -854,7 +814,6 @@
       }
     }
   },
-
   "chatToolbar": {
     "attachFile": "附加文件",
     "toggleOutput": "输出",
@@ -966,5 +925,29 @@
     "collapseSidebar": "收起侧边栏",
     "expandPanel": "展开面板",
     "collapsePanel": "收起面板"
+  },
+  "contextSummary": {
+    "title": "生效上下文",
+    "why": "为何",
+    "off": "关闭",
+    "show": "显示生效上下文",
+    "hide": "隐藏",
+    "knowledgeCount": "已选 {{count}} 项",
+    "skillsCount": "已选 {{count}} 项",
+    "source": {
+      "legacy": "旧版",
+      "unified": "统一"
+    },
+    "memoryMode": {
+      "auto_exclude": "自动排除",
+      "only_selected": "仅选中"
+    },
+    "memoryDetail": "{{mode}} · {{scopeCount}} 个作用域 · {{itemCount}} 条记忆",
+    "origin": "来源：{{origin}}",
+    "originValues": {
+      "auto": "自动",
+      "explicit": "显式",
+      "mixed": "混合"
+    }
   }
 }

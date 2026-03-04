@@ -68,6 +68,16 @@ export type StreamLineType =
   | 'code'
   | 'card';
 
+export interface StreamLineAppendOptions {
+  /**
+   * Logical conversation turn id. A new user turn should increment this value.
+   * Useful for robust grouping in transcript renderers.
+   */
+  turnId?: number;
+  /** Marks this line as a user turn boundary. */
+  turnBoundary?: 'user' | 'assistant';
+}
+
 export interface StreamLine {
   id: number;
   content: string;
@@ -79,6 +89,8 @@ export interface StreamLine {
   subAgentId?: string;
   /** Sub-agent nesting depth (0 = root) */
   subAgentDepth?: number;
+  turnId?: number;
+  turnBoundary?: 'user' | 'assistant';
 }
 
 export interface HistoryConversationLine {
@@ -86,6 +98,8 @@ export interface HistoryConversationLine {
   content: string;
   subAgentId?: string;
   subAgentDepth?: number;
+  turnId?: number;
+  turnBoundary?: 'user' | 'assistant';
 }
 
 export interface AnalysisCoverageSnapshot {
@@ -470,7 +484,13 @@ export interface ExecutionState {
   clearStrategyAnalysis: () => void;
 
   /** Append a streaming output line */
-  appendStreamLine: (content: string, type: StreamLineType, subAgentId?: string, subAgentDepth?: number) => void;
+  appendStreamLine: (
+    content: string,
+    type: StreamLineType,
+    subAgentId?: string,
+    subAgentDepth?: number,
+    options?: StreamLineAppendOptions,
+  ) => void;
 
   /** Append a structured workflow card line */
   appendCard: (payload: CardPayload, subAgentId?: string, subAgentDepth?: number) => void;

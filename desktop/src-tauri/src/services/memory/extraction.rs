@@ -380,7 +380,9 @@ pub async fn run_session_extraction(
             },
         );
         match tokio::time::timeout(Duration::from_secs(LLM_TIMEOUT_SECS), summarize_call).await {
-            Ok(Ok(resp)) => resp.content.unwrap_or_else(|| conversation_content.to_string()),
+            Ok(Ok(resp)) => resp
+                .content
+                .unwrap_or_else(|| conversation_content.to_string()),
             Ok(Err(_)) | Err(_) => conversation_content.to_string(),
         }
     } else {

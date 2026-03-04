@@ -31,7 +31,12 @@ const DEFAULT_SESSION_SCOPE_TTL_DAYS: i64 = 14;
 fn env_flag_enabled(name: &str, default: bool) -> bool {
     std::env::var(name)
         .ok()
-        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
         .unwrap_or(default)
 }
 

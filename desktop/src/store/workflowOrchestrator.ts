@@ -20,6 +20,7 @@ import { useTaskModeStore, type TaskPrd, type StrategyAnalysis, type GateResult 
 import { useSpecInterviewStore, type InterviewQuestion, type InterviewSession } from './specInterview';
 import { useSettingsStore } from './settings';
 import { buildConversationHistory, synthesizePlanningTurn, synthesizeExecutionTurn } from '../lib/contextBridge';
+import { getNextTurnId } from '../lib/conversationUtils';
 import { deriveGateOverallStatus } from '../lib/gateStatus';
 import type { CrossModeConversationTurn } from '../types/crossModeContext';
 import type {
@@ -511,7 +512,9 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   startWorkflow: async (description: string) => {
     const runToken = get()._runToken + 1;
     // Add user message as 'info' StreamLine so it appears as a chat bubble in ChatTranscript
-    useExecutionStore.getState().appendStreamLine(description, 'info');
+    const executionState = useExecutionStore.getState();
+    const turnId = getNextTurnId(executionState.streamingOutput);
+    executionState.appendStreamLine(description, 'info', undefined, undefined, { turnId, turnBoundary: 'user' });
 
     set({ phase: 'analyzing', taskDescription: description, error: null, isCancelling: false, _runToken: runToken });
     injectInfo(i18n.t('workflow.orchestrator.analyzingTask', { ns: 'simpleMode' }), 'info');
@@ -745,7 +748,9 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   /** Parse natural language config override */
   overrideConfigNatural: (text: string) => {
     // Add user message as 'info' StreamLine so it appears as a chat bubble
-    useExecutionStore.getState().appendStreamLine(text, 'info');
+    const executionState = useExecutionStore.getState();
+    const turnId = getNextTurnId(executionState.streamingOutput);
+    executionState.appendStreamLine(text, 'info', undefined, undefined, { turnId, turnBoundary: 'user' });
 
     const updates: Partial<WorkflowConfig> = {};
     const lower = text.toLowerCase();
@@ -1002,7 +1007,9 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   /** Add feedback to editable PRD (during reviewing_prd phase) */
   addPrdFeedback: (_feedback: string) => {
     // Add user message as 'info' StreamLine so it appears as a chat bubble
-    useExecutionStore.getState().appendStreamLine(_feedback, 'info');
+    const executionState = useExecutionStore.getState();
+    const turnId = getNextTurnId(executionState.streamingOutput);
+    executionState.appendStreamLine(_feedback, 'info', undefined, undefined, { turnId, turnBoundary: 'user' });
 
     // In the future, this could use LLM to apply NL edits to the PRD.
     // For now, inject as info message.
@@ -1222,15 +1229,17 @@ async function explorePhase(set: SetFn, get: GetFn, runToken: number) {
       data: ExplorationCardData | null;
       error: string | null;
     }>('explore_project', {
-      sessionId,
-      flowLevel: config.flowLevel,
-      taskDescription,
-      provider: explorationResolved.provider || null,
-      model: explorationResolved.model || null,
-      apiKey: null,
-      baseUrl: explorationResolved.baseUrl || null,
-      locale: i18n.language,
-      contextSources: (await import('./contextSources')).useContextSourcesStore.getState().buildConfig() ?? null,
+      request: {
+        sessionId,
+        flowLevel: config.flowLevel,
+        taskDescription,
+        provider: explorationResolved.provider || null,
+        model: explorationResolved.model || null,
+        apiKey: null,
+        baseUrl: explorationResolved.baseUrl || null,
+        locale: i18n.language,
+        contextSources: (await import('./contextSources')).useContextSourcesStore.getState().buildConfig() ?? null,
+      },
     });
     if (!isRunActive(get, runToken)) return;
 
@@ -1294,17 +1303,19 @@ async function requirementAnalysisPhase(set: SetFn, get: GetFn, runToken: number
       data: RequirementAnalysisCardData | null;
       error: string | null;
     }>('run_requirement_analysis', {
-      sessionId: get().sessionId || '',
-      taskDescription,
-      interviewResult,
-      explorationContext,
-      provider: reqResolved.provider || null,
-      model: reqResolved.model || null,
-      apiKey: null,
-      baseUrl: reqResolved.baseUrl || null,
-      locale: i18n.language,
-      contextSources,
-      projectPath,
+      request: {
+        sessionId: get().sessionId || '',
+        taskDescription,
+        interviewResult,
+        explorationContext,
+        provider: reqResolved.provider || null,
+        model: reqResolved.model || null,
+        apiKey: null,
+        baseUrl: reqResolved.baseUrl || null,
+        locale: i18n.language,
+        contextSources,
+        projectPath,
+      },
     });
     if (!isRunActive(get, runToken)) return;
 
@@ -1385,16 +1396,18 @@ async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd, run
       data: ArchitectureReviewCardData | null;
       error: string | null;
     }>('run_architecture_review', {
-      sessionId: get().sessionId || '',
-      prdJson: JSON.stringify(prd),
-      explorationContext,
-      provider: archResolved.provider || null,
-      model: archResolved.model || null,
-      apiKey: null,
-      baseUrl: archResolved.baseUrl || null,
-      locale: i18n.language,
-      contextSources: archContextSources,
-      projectPath,
+      request: {
+        sessionId: get().sessionId || '',
+        prdJson: JSON.stringify(prd),
+        explorationContext,
+        provider: archResolved.provider || null,
+        model: archResolved.model || null,
+        apiKey: null,
+        baseUrl: archResolved.baseUrl || null,
+        locale: i18n.language,
+        contextSources: archContextSources,
+        projectPath,
+      },
     });
     if (!isRunActive(get, runToken)) return;
 

@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { deriveConversationTurns, rebuildStandaloneTurns, buildPromptWithAttachments } from './conversationUtils';
+import {
+  deriveConversationTurns,
+  rebuildStandaloneTurns,
+  buildPromptWithAttachments,
+  getNextTurnId,
+  normalizeTurnBoundaries,
+} from './conversationUtils';
 import type { StreamLine } from '../store/execution';
 import type { FileAttachmentData } from '../types/attachment';
 
@@ -33,9 +39,22 @@ describe('deriveConversationTurns', () => {
     expect(deriveConversationTurns([])).toEqual([]);
   });
 
-  it('returns empty array when no info lines exist', () => {
+  it('returns empty array when no user boundary lines exist', () => {
     const lines: StreamLine[] = [makeLine('text', 'some assistant text'), makeLine('text', 'more text')];
     expect(deriveConversationTurns(lines)).toEqual([]);
+  });
+
+  it('derives turns from explicit turnBoundary metadata', () => {
+    const lines: StreamLine[] = [
+      { ...makeLine('info', 'First question'), turnBoundary: 'user', turnId: 1 },
+      { ...makeLine('text', 'First answer') },
+      { ...makeLine('info', 'Second question'), turnBoundary: 'user', turnId: 2 },
+      { ...makeLine('text', 'Second answer') },
+    ];
+    const turns = deriveConversationTurns(lines);
+    expect(turns).toHaveLength(2);
+    expect(turns[0].userContent).toBe('First question');
+    expect(turns[1].userContent).toBe('Second question');
   });
 
   it('derives a single turn correctly', () => {
@@ -122,7 +141,7 @@ describe('rebuildStandaloneTurns', () => {
     expect(rebuildStandaloneTurns([])).toEqual([]);
   });
 
-  it('returns empty array when no info lines exist', () => {
+  it('returns empty array when no user boundary lines exist', () => {
     const lines: StreamLine[] = [makeLine('text', 'orphan text')];
     expect(rebuildStandaloneTurns(lines)).toEqual([]);
   });
@@ -180,6 +199,29 @@ describe('rebuildStandaloneTurns', () => {
     const turns = rebuildStandaloneTurns(lines);
     expect(turns).toHaveLength(1);
     expect(turns[0].assistant).toBe('AB');
+  });
+});
+
+describe('turn boundary helpers', () => {
+  beforeEach(resetLineCounter);
+
+  it('normalizes legacy info lines to explicit user turn boundaries', () => {
+    const legacy: StreamLine[] = [makeLine('info', 'Q1'), makeLine('text', 'A1'), makeLine('info', 'Q2')];
+    const normalized = normalizeTurnBoundaries(legacy);
+    expect(normalized[0].turnBoundary).toBe('user');
+    expect(normalized[0].turnId).toBe(1);
+    expect(normalized[1].turnId).toBe(1);
+    expect(normalized[2].turnBoundary).toBe('user');
+    expect(normalized[2].turnId).toBe(2);
+  });
+
+  it('computes next turn id from explicit user boundaries', () => {
+    const lines: StreamLine[] = [
+      { ...makeLine('info', 'Q1'), turnBoundary: 'user', turnId: 1 },
+      makeLine('text', 'A1'),
+      { ...makeLine('info', 'Q2'), turnBoundary: 'user', turnId: 2 },
+    ];
+    expect(getNextTurnId(lines)).toBe(3);
   });
 });
 

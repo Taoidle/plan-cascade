@@ -17,6 +17,7 @@ import { usePlanModeStore } from './planMode';
 import { useSettingsStore } from './settings';
 import { useContextSourcesStore } from './contextSources';
 import { buildConversationHistory } from '../lib/contextBridge';
+import { getNextTurnId } from '../lib/conversationUtils';
 import type { CardPayload } from '../types/workflowCard';
 import type {
   PlanModePhase,
@@ -159,7 +160,9 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
     set({ isBusy: true, isCancelling: false, taskDescription: description, phase: 'analyzing', _runToken: runToken });
 
     // Add user message to chat transcript so it appears as a chat bubble
-    useExecutionStore.getState().appendStreamLine(description, 'info');
+    const executionState = useExecutionStore.getState();
+    const turnId = getNextTurnId(executionState.streamingOutput);
+    executionState.appendStreamLine(description, 'info', undefined, undefined, { turnId, turnBoundary: 'user' });
 
     // Inject persona indicator
     injectCard('plan_persona_indicator', {

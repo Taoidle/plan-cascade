@@ -1,4 +1,5 @@
 import { useSettingsStore } from '../settings';
+import { normalizeTurnBoundaries, rebuildStandaloneTurns } from '../../lib/conversationUtils';
 import type {
   ExecutionState,
   ExecutionHistoryItem,
@@ -135,6 +136,8 @@ export function createHistoryActions(deps: HistoryActionDeps): HistoryActions {
               content: line.content,
               ...(line.subAgentId ? { subAgentId: line.subAgentId } : {}),
               ...(line.subAgentDepth != null ? { subAgentDepth: line.subAgentDepth } : {}),
+              ...(line.turnId != null ? { turnId: line.turnId } : {}),
+              ...(line.turnBoundary ? { turnBoundary: line.turnBoundary } : {}),
             }))
           : undefined;
       const conversationContent =
@@ -274,6 +277,8 @@ export function createHistoryActions(deps: HistoryActionDeps): HistoryActions {
             timestamp: item.startedAt,
             ...(line.subAgentId ? { subAgentId: line.subAgentId } : {}),
             ...(line.subAgentDepth != null ? { subAgentDepth: line.subAgentDepth } : {}),
+            ...(line.turnId != null ? { turnId: line.turnId } : {}),
+            ...(line.turnBoundary ? { turnBoundary: line.turnBoundary } : {}),
           });
         }
       } else if (item.conversationContent) {
@@ -301,39 +306,16 @@ export function createHistoryActions(deps: HistoryActionDeps): HistoryActions {
         return;
       }
 
+      const normalizedLines = normalizeTurnBoundaries(lines);
+
       const restoredSessionId = item.sessionId || null;
       const claudePrefix = 'claude:';
       const standalonePrefix = 'standalone:';
       const isClaudeSession = restoredSessionId !== null && restoredSessionId.startsWith(claudePrefix);
       const isStandaloneSession = restoredSessionId !== null && restoredSessionId.startsWith(standalonePrefix);
-
-      const restoredStandaloneTurns: StandaloneTurn[] = [];
-      if (isStandaloneSession) {
-        let pendingUser: string | null = null;
-        let assistantSegments: string[] = [];
-        for (const line of lines) {
-          if (line.type === 'info') {
-            if (pendingUser && assistantSegments.join('').trim().length > 0) {
-              restoredStandaloneTurns.push({
-                user: pendingUser,
-                assistant: assistantSegments.join(''),
-                createdAt: line.timestamp,
-              });
-            }
-            pendingUser = line.content;
-            assistantSegments = [];
-          } else if (line.type === 'text' && pendingUser) {
-            assistantSegments.push(line.content);
-          }
-        }
-        if (pendingUser && assistantSegments.join('').trim().length > 0) {
-          restoredStandaloneTurns.push({
-            user: pendingUser,
-            assistant: assistantSegments.join(''),
-            createdAt: Date.now(),
-          });
-        }
-      }
+      const restoredStandaloneTurns: StandaloneTurn[] = isStandaloneSession
+        ? rebuildStandaloneTurns(normalizedLines)
+        : [];
 
       const currentState = get();
       let bgSessions = currentState.backgroundSessions;
@@ -370,7 +352,7 @@ export function createHistoryActions(deps: HistoryActionDeps): HistoryActions {
         foregroundOriginHistoryId: historyId,
         foregroundOriginSessionId: item.sessionId || null,
         foregroundDirty: false,
-        streamingOutput: lines,
+        streamingOutput: normalizedLines,
         streamLineCounter: counter,
         isChatSession: isClaudeSession,
         taskId: isClaudeSession ? restoredSessionId!.slice(claudePrefix.length) : null,

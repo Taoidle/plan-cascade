@@ -1,4 +1,5 @@
 import { reportNonFatal } from '../../lib/nonFatal';
+import { normalizeTurnBoundaries } from '../../lib/conversationUtils';
 import { ToolCallStreamFilter } from '../../utils/toolCallFilter';
 import { useSettingsStore } from '../settings';
 import type { ExecutionState, ExecutionStatus, SessionSnapshot } from './types';
@@ -113,7 +114,7 @@ function fromPersistedSessionSnapshot(snapshot: PersistedSessionSnapshot): Sessi
     id: snapshot.id,
     taskDescription: snapshot.taskDescription,
     status: normalizeRestoredStatus(snapshot.status),
-    streamingOutput: [...snapshot.streamingOutput],
+    streamingOutput: normalizeTurnBoundaries([...snapshot.streamingOutput]),
     streamLineCounter: snapshot.streamLineCounter,
     currentTurnStartLineId: snapshot.currentTurnStartLineId,
     taskId: null,
@@ -225,7 +226,7 @@ export function createSessionPersistenceController(options: SessionPersistenceOp
             activeSessionId: parsed.activeSessionId || null,
             taskDescription: fg.taskDescription,
             status: normalizeRestoredStatus(fg.status),
-            streamingOutput: [...fg.streamingOutput],
+            streamingOutput: normalizeTurnBoundaries([...fg.streamingOutput]),
             streamLineCounter: fg.streamLineCounter,
             currentTurnStartLineId: fg.currentTurnStartLineId,
             taskId: null,

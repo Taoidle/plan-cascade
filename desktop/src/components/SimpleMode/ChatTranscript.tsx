@@ -6,6 +6,7 @@ import { Collapsible } from './Collapsible';
 import { MessageActions, EditMode } from './MessageActions';
 import { useExecutionStore, type ExecutionStatus, type StreamLine } from '../../store/execution';
 import { useSettingsStore } from '../../store/settings';
+import { isUserTurnBoundary, normalizeTurnBoundaries } from '../../lib/conversationUtils';
 import {
   buildDisplayBlocks,
   ToolCallLine,
@@ -47,17 +48,18 @@ export function ChatTranscript({
     [scrollRef],
   );
   const [editingLineId, setEditingLineId] = useState<number | null>(null);
+  const normalizedLines = useMemo(() => normalizeTurnBoundaries(lines), [lines]);
 
   // Derive rich conversation turns from ALL lines (not just text)
   const richTurns = useMemo((): RichTurn[] => {
     const result: RichTurn[] = [];
     let turnIndex = 0;
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].type !== 'info') continue;
+    for (let i = 0; i < normalizedLines.length; i++) {
+      if (!isUserTurnBoundary(normalizedLines[i])) continue;
 
-      let endIndex = lines.length - 1;
-      for (let j = i + 1; j < lines.length; j++) {
-        if (lines[j].type === 'info') {
+      let endIndex = normalizedLines.length - 1;
+      for (let j = i + 1; j < normalizedLines.length; j++) {
+        if (isUserTurnBoundary(normalizedLines[j])) {
           endIndex = j - 1;
           break;
         }
@@ -65,27 +67,29 @@ export function ChatTranscript({
 
       const assistantLines: StreamLine[] = [];
       for (let j = i + 1; j <= endIndex; j++) {
-        assistantLines.push(lines[j]);
+        assistantLines.push(normalizedLines[j]);
       }
 
-      result.push({ turnIndex: turnIndex++, userLine: lines[i], assistantLines });
+      result.push({ turnIndex: turnIndex++, userLine: normalizedLines[i], assistantLines });
     }
-    // Fallback: if no info lines but content exists, synthesize a turn so the panel isn't empty
-    if (result.length === 0 && lines.length > 0 && lines.some((l) => l.type !== 'info')) {
+    // Fallback for transcripts with assistant/system lines but no boundary marker.
+    if (result.length === 0 && normalizedLines.length > 0 && normalizedLines.some((l) => !isUserTurnBoundary(l))) {
       const syntheticUserLine: StreamLine = {
         id: -1,
-        content: '(continued)',
+        content: t('chat.userLabel', { defaultValue: 'User' }),
         type: 'info',
-        timestamp: lines[0].timestamp,
+        timestamp: normalizedLines[0].timestamp,
+        turnId: 1,
+        turnBoundary: 'user',
       };
       result.push({
         turnIndex: 0,
         userLine: syntheticUserLine,
-        assistantLines: lines.filter((l) => l.type !== 'info'),
+        assistantLines: normalizedLines.filter((l) => !isUserTurnBoundary(l)),
       });
     }
     return result;
-  }, [lines]);
+  }, [normalizedLines, t]);
 
   const backend = useSettingsStore((s) => s.backend);
   const isClaudeCodeBackendValue = backend === 'claude-code';
@@ -139,7 +143,7 @@ export function ChatTranscript({
     containerRef.current.scrollTop = containerRef.current.scrollHeight;
   }, [lines]);
 
-  const hasContent = lines.length > 0 && lines.some((l) => l.type !== 'info');
+  const hasContent = normalizedLines.length > 0;
   if (richTurns.length === 0 && !hasContent) {
     return (
       <div className="h-full flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">

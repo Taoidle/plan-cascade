@@ -8,14 +8,12 @@
 
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
   PlanModePhase,
   PlanModeSession,
   PlanAnalysisCardData,
   PlanCardData,
   PlanExecutionReport,
-  PlanModeProgressPayload,
   PlanExecutionStatusResponse,
   AdapterInfo,
   StepOutputData,
@@ -45,7 +43,6 @@ export interface PlanModeState {
   isLoading: boolean;
   isCancelling: boolean;
   error: string | null;
-  _unlistenFn: UnlistenFn | null;
   _requestId: number;
 
   // Actions
@@ -96,8 +93,6 @@ export interface PlanModeState {
   fetchStepOutput: (stepId: string) => Promise<StepOutputData | null>;
   exitPlanMode: () => Promise<void>;
   fetchAdapters: () => Promise<void>;
-  subscribeToEvents: () => Promise<void>;
-  unsubscribeFromEvents: () => void;
   reset: () => void;
 }
 
@@ -120,7 +115,6 @@ const DEFAULT_STATE = {
   isLoading: false,
   isCancelling: false,
   error: null,
-  _unlistenFn: null,
   _requestId: 0,
 };
 
@@ -153,14 +147,16 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
       }
 
       const result = await invoke<CommandResponse<PlanModeSession>>('enter_plan_mode', {
-        description,
-        provider: provider || null,
-        model: model || null,
-        baseUrl: finalBaseUrl || null,
-        projectPath: projectPath || null,
-        contextSources: contextSources || null,
-        conversationContext: conversationContext || null,
-        locale: locale || null,
+        request: {
+          description,
+          provider: provider || null,
+          model: model || null,
+          baseUrl: finalBaseUrl || null,
+          projectPath: projectPath || null,
+          contextSources: contextSources || null,
+          conversationContext: conversationContext || null,
+          locale: locale || null,
+        },
       });
       if (get()._requestId !== requestId) return;
 
@@ -205,15 +201,17 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
       const finalBaseUrl = baseUrl || resolveProviderBaseUrl(finalProvider, settingsStore);
 
       const result = await invoke<CommandResponse<PlanModeSession>>('submit_plan_clarification', {
-        sessionId,
-        answer,
-        provider: finalProvider || null,
-        model: finalModel || null,
-        baseUrl: finalBaseUrl || null,
-        projectPath: projectPath || null,
-        contextSources: contextSources || null,
-        conversationContext: conversationContext || null,
-        locale: locale || null,
+        request: {
+          sessionId,
+          answer,
+          provider: finalProvider || null,
+          model: finalModel || null,
+          baseUrl: finalBaseUrl || null,
+          projectPath: projectPath || null,
+          contextSources: contextSources || null,
+          conversationContext: conversationContext || null,
+          locale: locale || null,
+        },
       });
       if (get()._requestId !== requestId) return null;
       if (result.success && result.data) {
@@ -265,14 +263,16 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
       const finalBaseUrl = baseUrl || resolveProviderBaseUrl(finalProvider, settingsStore);
 
       const result = await invoke<CommandResponse<PlanCardData>>('generate_plan', {
-        sessionId,
-        provider: finalProvider || null,
-        model: finalModel || null,
-        baseUrl: finalBaseUrl || null,
-        projectPath: projectPath || null,
-        contextSources: contextSources || null,
-        conversationContext: conversationContext || null,
-        locale: locale || null,
+        request: {
+          sessionId,
+          provider: finalProvider || null,
+          model: finalModel || null,
+          baseUrl: finalBaseUrl || null,
+          projectPath: projectPath || null,
+          contextSources: contextSources || null,
+          conversationContext: conversationContext || null,
+          locale: locale || null,
+        },
       });
       if (get()._requestId !== requestId) return;
 
@@ -305,15 +305,17 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
       const finalBaseUrl = baseUrl || resolveProviderBaseUrl(finalProvider, settingsStore);
 
       const result = await invoke<CommandResponse<boolean>>('approve_plan', {
-        sessionId,
-        plan,
-        provider: finalProvider || null,
-        model: finalModel || null,
-        baseUrl: finalBaseUrl || null,
-        projectPath: projectPath || null,
-        contextSources: contextSources || null,
-        conversationContext: conversationContext || null,
-        locale: locale || null,
+        request: {
+          sessionId,
+          plan,
+          provider: finalProvider || null,
+          model: finalModel || null,
+          baseUrl: finalBaseUrl || null,
+          projectPath: projectPath || null,
+          contextSources: contextSources || null,
+          conversationContext: conversationContext || null,
+          locale: locale || null,
+        },
       });
       if (get()._requestId !== requestId) return;
 
@@ -421,13 +423,9 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
   },
 
   exitPlanMode: async () => {
-    const { sessionId, _unlistenFn } = get();
+    const { sessionId } = get();
     const nextRequestId = get()._requestId + 1;
     set({ _requestId: nextRequestId });
-
-    if (_unlistenFn) {
-      _unlistenFn();
-    }
 
     if (sessionId) {
       try {
@@ -451,55 +449,7 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
     }
   },
 
-  subscribeToEvents: async () => {
-    const unlisten = await listen<PlanModeProgressPayload>('plan-mode-progress', (event) => {
-      const payload = event.payload;
-      const { sessionId } = get();
-
-      // Only process events for our session
-      if (payload.sessionId !== sessionId) return;
-
-      const updates: Partial<PlanModeState> = {
-        currentBatch: payload.currentBatch,
-        totalBatches: payload.totalBatches,
-      };
-
-      // Accumulate step statuses
-      if (payload.stepId && payload.stepStatus) {
-        const prevStatuses = get().stepStatuses;
-        updates.stepStatuses = { ...prevStatuses, [payload.stepId]: payload.stepStatus };
-      }
-
-      // Determine session phase from event type
-      if (payload.eventType === 'execution_completed') {
-        const allStatuses = { ...get().stepStatuses, ...updates.stepStatuses };
-        const failedCount = Object.values(allStatuses).filter((s) => s === 'failed').length;
-        updates.sessionPhase = failedCount > 0 ? 'failed' : 'completed';
-        updates.isCancelling = false;
-      } else if (payload.eventType === 'execution_cancelled') {
-        updates.sessionPhase = 'cancelled';
-        updates.isCancelling = false;
-      } else if (payload.eventType === 'step_failed' && payload.error) {
-        updates.error = payload.error;
-      }
-
-      set(updates);
-    });
-
-    set({ _unlistenFn: unlisten });
-  },
-
-  unsubscribeFromEvents: () => {
-    const { _unlistenFn } = get();
-    if (_unlistenFn) {
-      _unlistenFn();
-      set({ _unlistenFn: null });
-    }
-  },
-
   reset: () => {
-    const { _unlistenFn } = get();
-    if (_unlistenFn) _unlistenFn();
     set((state) => ({ ...DEFAULT_STATE, _requestId: state._requestId + 1 }));
   },
 }));

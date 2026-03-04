@@ -1,4 +1,5 @@
 import { clsx } from 'clsx';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '../../store/settings';
 import { useContextSourcesStore } from '../../store/contextSources';
@@ -11,54 +12,73 @@ export function EffectiveContextSummary({ className }: { className?: string }) {
   const unified = useSettingsStore((s) => s.simpleContextUnifiedStore);
   const openDialog = useSkillMemoryStore((s) => s.openDialog);
   const diagnostics = useContextOpsStore((s) => s.latestEnvelope?.diagnostics);
+  const [expanded, setExpanded] = useState(false);
 
-  const legacy = useContextSourcesStore((s) => ({
-    knowledgeEnabled: s.knowledgeEnabled,
-    selectedCollections: s.selectedCollections,
-    selectedDocuments: s.selectedDocuments,
-    memoryEnabled: s.memoryEnabled,
-    selectedMemoryScopes: s.selectedMemoryScopes,
-    memorySelectionMode: s.memorySelectionMode,
-    excludedMemoryIds: s.excludedMemoryIds,
-    includedMemoryIds: s.includedMemoryIds,
-    skillsEnabled: s.skillsEnabled,
-    selectedSkillIds: s.selectedSkillIds,
-  }));
+  const legacyKnowledgeEnabled = useContextSourcesStore((s) => s.knowledgeEnabled);
+  const legacySelectedCollections = useContextSourcesStore((s) => s.selectedCollections);
+  const legacySelectedDocuments = useContextSourcesStore((s) => s.selectedDocuments);
+  const legacyMemoryEnabled = useContextSourcesStore((s) => s.memoryEnabled);
+  const legacySelectedMemoryScopes = useContextSourcesStore((s) => s.selectedMemoryScopes);
+  const legacyMemorySelectionMode = useContextSourcesStore((s) => s.memorySelectionMode);
+  const legacyExcludedMemoryIds = useContextSourcesStore((s) => s.excludedMemoryIds);
+  const legacyIncludedMemoryIds = useContextSourcesStore((s) => s.includedMemoryIds);
+  const legacySkillsEnabled = useContextSourcesStore((s) => s.skillsEnabled);
+  const legacySelectedSkillIds = useContextSourcesStore((s) => s.selectedSkillIds);
 
-  const unifiedSelection = useContextSelectionStore((s) => ({
-    knowledge: s.knowledge,
-    memory: s.memory,
-    skills: s.skills,
-  }));
+  const unifiedKnowledge = useContextSelectionStore((s) => s.knowledge);
+  const unifiedMemory = useContextSelectionStore((s) => s.memory);
+  const unifiedSkills = useContextSelectionStore((s) => s.skills);
 
-  const sourceLabel = unified ? 'unified' : 'legacy';
+  const sourceLabel = unified
+    ? t('contextSummary.source.unified', { defaultValue: 'unified' })
+    : t('contextSummary.source.legacy', { defaultValue: 'legacy' });
 
   const knowledgeCount = unified
-    ? unifiedSelection.knowledge.selectedCollections.length + unifiedSelection.knowledge.selectedDocuments.length
-    : legacy.selectedCollections.length + legacy.selectedDocuments.length;
+    ? unifiedKnowledge.selectedCollections.length + unifiedKnowledge.selectedDocuments.length
+    : legacySelectedCollections.length + legacySelectedDocuments.length;
 
-  const memoryScopeCount = unified ? unifiedSelection.memory.selectedScopes.length : legacy.selectedMemoryScopes.length;
+  const memoryScopeCount = unified ? unifiedMemory.selectedScopes.length : legacySelectedMemoryScopes.length;
   const memoryMode = unified
-    ? unifiedSelection.memory.selectionMode
-    : legacy.memorySelectionMode === 'only_selected'
+    ? unifiedMemory.selectionMode
+    : legacyMemorySelectionMode === 'only_selected'
       ? 'only_selected'
       : 'auto_exclude';
+  const memoryModeLabel =
+    memoryMode === 'only_selected'
+      ? t('contextSummary.memoryMode.only_selected', { defaultValue: 'only selected' })
+      : t('contextSummary.memoryMode.auto_exclude', { defaultValue: 'auto exclude' });
   const memoryItemCount = unified
     ? memoryMode === 'only_selected'
-      ? unifiedSelection.memory.includedMemoryIds.length
-      : unifiedSelection.memory.excludedMemoryIds.length
-    : legacy.memorySelectionMode === 'only_selected'
-      ? legacy.includedMemoryIds.length
-      : legacy.excludedMemoryIds.length;
+      ? unifiedMemory.includedMemoryIds.length
+      : unifiedMemory.excludedMemoryIds.length
+    : legacyMemorySelectionMode === 'only_selected'
+      ? legacyIncludedMemoryIds.length
+      : legacyExcludedMemoryIds.length;
 
-  const skillsCount = unified ? unifiedSelection.skills.selectedSkillIds.length : legacy.selectedSkillIds.length;
+  const skillsCount = unified ? unifiedSkills.selectedSkillIds.length : legacySelectedSkillIds.length;
 
-  const knowledgeEnabled = unified ? unifiedSelection.knowledge.enabled : legacy.knowledgeEnabled;
-  const memoryEnabled = unified ? unifiedSelection.memory.enabled : legacy.memoryEnabled;
-  const skillsEnabled = unified ? unifiedSelection.skills.enabled : legacy.skillsEnabled;
+  const knowledgeEnabled = unified ? unifiedKnowledge.enabled : legacyKnowledgeEnabled;
+  const memoryEnabled = unified ? unifiedMemory.enabled : legacyMemoryEnabled;
+  const skillsEnabled = unified ? unifiedSkills.enabled : legacySkillsEnabled;
 
   const chipClass =
     'inline-flex items-center gap-1 rounded-md border border-gray-200 dark:border-gray-700 px-2 py-1 text-2xs text-gray-600 dark:text-gray-300';
+
+  if (!expanded) {
+    return (
+      <div
+        className={clsx('flex items-center justify-end', className)}
+        data-testid="effective-context-summary-collapsed"
+      >
+        <button
+          onClick={() => setExpanded(true)}
+          className="text-2xs text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
+        >
+          {t('contextSummary.show', { defaultValue: 'Show effective context' })}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -74,6 +94,12 @@ export function EffectiveContextSummary({ className }: { className?: string }) {
         </p>
         <div className="flex items-center gap-2">
           <span className="text-2xs text-gray-400 dark:text-gray-500">{sourceLabel}</span>
+          <button
+            onClick={() => setExpanded(false)}
+            className="text-2xs text-gray-500 dark:text-gray-400 hover:underline"
+          >
+            {t('contextSummary.hide', { defaultValue: 'Hide' })}
+          </button>
           <button
             onClick={() => openDialog('skills')}
             className="text-2xs text-primary-600 dark:text-primary-400 hover:underline"
@@ -96,7 +122,12 @@ export function EffectiveContextSummary({ className }: { className?: string }) {
         <span className={chipClass}>
           M:{' '}
           {memoryEnabled
-            ? `${memoryMode} · ${memoryScopeCount} scopes · ${memoryItemCount} items`
+            ? t('contextSummary.memoryDetail', {
+                defaultValue: '{{mode}} · {{scopeCount}} scopes · {{itemCount}} items',
+                mode: memoryModeLabel,
+                scopeCount: memoryScopeCount,
+                itemCount: memoryItemCount,
+              })
             : t('contextSummary.off', { defaultValue: 'off' })}
         </span>
         <span className={chipClass}>
@@ -108,7 +139,16 @@ export function EffectiveContextSummary({ className }: { className?: string }) {
               })
             : t('contextSummary.off', { defaultValue: 'off' })}
         </span>
-        {diagnostics?.selection_origin && <span className={chipClass}>origin: {diagnostics.selection_origin}</span>}
+        {diagnostics?.selection_origin && (
+          <span className={chipClass}>
+            {t('contextSummary.origin', {
+              defaultValue: 'origin: {{origin}}',
+              origin: t(`contextSummary.originValues.${diagnostics.selection_origin}`, {
+                defaultValue: diagnostics.selection_origin,
+              }),
+            })}
+          </span>
+        )}
       </div>
     </div>
   );

@@ -14,7 +14,7 @@ import type { FileAttachmentData } from '../types/attachment';
 
 /**
  * A derived conversation turn from the flat StreamLine array.
- * Groups lines by 'info' (user message) boundaries.
+ * Groups lines by explicit user turn boundaries.
  */
 export interface ConversationTurn {
   turnIndex: number;
@@ -44,49 +44,125 @@ export interface StandaloneTurn {
 // ============================================================================
 
 /**
+ * Check whether a line marks a user turn boundary.
+ *
+ * New protocol relies on explicit turn metadata instead of inferring from
+ * `type: "info"` content semantics.
+ */
+export function isUserTurnBoundary(line: Pick<StreamLine, 'turnBoundary'>): boolean {
+  return line.turnBoundary === 'user';
+}
+
+/**
+ * Normalize legacy lines to explicit turn metadata.
+ *
+ * For modern lines this is a no-op. For old persisted history where user
+ * messages were encoded only as `type: "info"`, this promotes those lines to
+ * `turnBoundary: "user"` once so downstream logic can stay boundary-based.
+ */
+export function normalizeTurnBoundaries(lines: StreamLine[]): StreamLine[] {
+  if (lines.length === 0) return lines;
+
+  const hasExplicitBoundary = lines.some((line) => line.turnBoundary === 'user');
+  const hasLegacyInfo = lines.some((line) => line.type === 'info');
+
+  if (!hasExplicitBoundary && !hasLegacyInfo) return lines;
+
+  let changed = false;
+  const normalized = lines.map((line) => ({ ...line }));
+
+  if (!hasExplicitBoundary) {
+    let turnId = 0;
+    for (const line of normalized) {
+      if (line.type === 'info') {
+        turnId += 1;
+        if (line.turnBoundary !== 'user') {
+          line.turnBoundary = 'user';
+          changed = true;
+        }
+        if (line.turnId !== turnId) {
+          line.turnId = turnId;
+          changed = true;
+        }
+      } else if (turnId > 0 && line.turnId == null) {
+        line.turnId = turnId;
+        changed = true;
+      }
+    }
+    return changed ? normalized : lines;
+  }
+
+  let fallbackTurnId = 0;
+  for (const line of normalized) {
+    if (line.turnBoundary === 'user') {
+      const nextTurnId = line.turnId ?? Math.max(fallbackTurnId + 1, 1);
+      if (line.turnId !== nextTurnId) {
+        line.turnId = nextTurnId;
+        changed = true;
+      }
+      fallbackTurnId = nextTurnId;
+    } else if (fallbackTurnId > 0 && line.turnId == null) {
+      line.turnId = fallbackTurnId;
+      changed = true;
+    }
+  }
+
+  return changed ? normalized : lines;
+}
+
+/**
+ * Compute the next user turn id for a newly appended user message.
+ */
+export function getNextTurnId(lines: StreamLine[]): number {
+  const normalized = normalizeTurnBoundaries(lines);
+  let maxTurnId = 0;
+  for (const line of normalized) {
+    if (!isUserTurnBoundary(line)) continue;
+    if (typeof line.turnId === 'number' && Number.isFinite(line.turnId)) {
+      maxTurnId = Math.max(maxTurnId, line.turnId);
+    }
+  }
+  return maxTurnId + 1;
+}
+
+/**
  * Derive conversation turns from a flat StreamLine array.
  *
- * Groups lines by 'info' (user message) boundaries. Each 'info' line starts
- * a new turn, and all subsequent assistant-relevant lines until the next 'info' line
- * form the assistant response.
+ * Groups lines by explicit user boundaries. Legacy history is normalized first
+ * so callers do not need to infer turns from line type.
  */
 export function deriveConversationTurns(lines: StreamLine[]): ConversationTurn[] {
+  const normalizedLines = normalizeTurnBoundaries(lines);
   const turns: ConversationTurn[] = [];
   let turnIndex = 0;
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.type !== 'info') continue;
+  for (let i = 0; i < normalizedLines.length; i++) {
+    const line = normalizedLines[i];
+    if (!isUserTurnBoundary(line)) continue;
 
-    // Find the end of this turn (next info line or end of array)
-    let endIndex = lines.length - 1;
-    for (let j = i + 1; j < lines.length; j++) {
-      if (lines[j].type === 'info') {
+    // Find the end of this turn (next user boundary line or end of array)
+    let endIndex = normalizedLines.length - 1;
+    for (let j = i + 1; j < normalizedLines.length; j++) {
+      if (isUserTurnBoundary(normalizedLines[j])) {
         endIndex = j - 1;
         break;
       }
     }
 
-    // Concatenate assistant text from assistant-relevant lines.
+    // Concatenate assistant text from text stream lines only.
     const assistantSegments: string[] = [];
     const assistantStartIndex = i + 1;
 
     for (let j = assistantStartIndex; j <= endIndex; j++) {
-      const current = lines[j];
-      if (current.type === 'text') {
-        assistantSegments.push(current.content);
-      } else if (current.type === 'tool') {
-        assistantSegments.push(`[tool] ${current.content}`);
-      } else if (current.type === 'tool_result') {
-        assistantSegments.push(`[tool_result] ${current.content}`);
-      }
+      const current = normalizedLines[j];
+      if (current.type === 'text') assistantSegments.push(current.content);
     }
 
     turns.push({
       turnIndex,
       userLineId: line.id,
       userContent: line.content,
-      assistantStartIndex: assistantStartIndex < lines.length ? assistantStartIndex : i,
+      assistantStartIndex: assistantStartIndex < normalizedLines.length ? assistantStartIndex : i,
       assistantEndIndex: endIndex >= assistantStartIndex ? endIndex : i,
       assistantText: assistantSegments.join(''),
     });
@@ -104,12 +180,13 @@ export function deriveConversationTurns(lines: StreamLine[]): ConversationTurn[]
  * Turns with empty assistant text are skipped.
  */
 export function rebuildStandaloneTurns(lines: StreamLine[]): StandaloneTurn[] {
+  const normalizedLines = normalizeTurnBoundaries(lines);
   const restoredTurns: StandaloneTurn[] = [];
   let pendingUser: string | null = null;
   let assistantSegments: string[] = [];
 
-  for (const line of lines) {
-    if (line.type === 'info') {
+  for (const line of normalizedLines) {
+    if (isUserTurnBoundary(line)) {
       if (pendingUser && assistantSegments.join('').trim().length > 0) {
         restoredTurns.push({
           user: pendingUser,
@@ -119,14 +196,8 @@ export function rebuildStandaloneTurns(lines: StreamLine[]): StandaloneTurn[] {
       }
       pendingUser = line.content;
       assistantSegments = [];
-    } else if (pendingUser && (line.type === 'text' || line.type === 'tool' || line.type === 'tool_result')) {
-      if (line.type === 'text') {
-        assistantSegments.push(line.content);
-      } else if (line.type === 'tool') {
-        assistantSegments.push(`[tool] ${line.content}`);
-      } else {
-        assistantSegments.push(`[tool_result] ${line.content}`);
-      }
+    } else if (pendingUser && line.type === 'text') {
+      assistantSegments.push(line.content);
     }
   }
 

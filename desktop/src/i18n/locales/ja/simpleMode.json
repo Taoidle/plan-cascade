@@ -1,6 +1,5 @@
 {
   "title": "シンプルモード",
-
   "input": {
     "placeholder": "作りたいものを説明してください...",
     "followUpPlaceholder": "メッセージを入力...",
@@ -8,7 +7,6 @@
     "previewMarkdown": "Markdownプレビュー",
     "switchToEdit": "編集に切替"
   },
-
   "history": {
     "title": "実行履歴",
     "button": "履歴",
@@ -19,7 +17,6 @@
     "completed": "完了",
     "failed": "失敗"
   },
-
   "progress": {
     "overallProgress": "全体の進捗",
     "batch": "バッチ {{current}} / {{total}}",
@@ -27,7 +24,6 @@
     "executionLog": "実行ログ",
     "retryAttempt": "リトライ {{count}} 回目"
   },
-
   "result": {
     "completedSuccessfully": "正常に完了しました",
     "executionFailed": "実行に失敗しました",
@@ -35,12 +31,10 @@
     "failedStories": "失敗したストーリー ({{count}})",
     "errorDetails": "エラー詳細"
   },
-
   "empty": {
     "title": "準備完了",
     "description": "上のボックスにタスクを入力すると、Plan Cascade が自動的にタスクを分解し、計画を作成して段階的に実行します。"
   },
-
   "strategies": {
     "direct": "直接実行",
     "hybridAuto": "ハイブリッド自動",
@@ -49,7 +43,6 @@
     "hybrid": "ハイブリッド",
     "mega": "メガ"
   },
-
   "messageActions": {
     "edit": "編集",
     "regenerate": "再生成",
@@ -62,7 +55,6 @@
     "fork": "フォーク",
     "contextWarning": "セッションが再開されます。以前のコンテキストは失われます。"
   },
-
   "attachment": {
     "dropHere": "ファイルをここにドロップ",
     "pickFile": "ファイルを選択",
@@ -70,7 +62,6 @@
     "unsupportedType": "サポートされていないファイル形式",
     "removeFile": "ファイルを削除"
   },
-
   "modelSwitcher": {
     "current": "現在のモデル",
     "switchTo": "切り替え",
@@ -79,11 +70,9 @@
     "contextPreserved": "コンテキストは保持されます",
     "sessionRestart": "新しいモデルでセッションが再開されます"
   },
-
   "projectSelector": {
     "openInFileManager": "ファイルマネージャーで開く"
   },
-
   "sidebar": {
     "newTask": "新規タスク",
     "addDirectory": "ディレクトリ追加",
@@ -107,7 +96,6 @@
     "removeSession": "セッションを削除",
     "currentFork": "（現在）"
   },
-
   "skillPanel": {
     "title": "スキルとメモリ",
     "manageAll": "すべて管理...",
@@ -240,7 +228,6 @@
       "sessionMemoryRequiresSession": "セッションメモリには有効なセッションが必要です"
     }
   },
-
   "pluginPanel": {
     "title": "プラグイン",
     "manageAll": "すべて管理...",
@@ -250,13 +237,11 @@
     "marketplace": "マーケットプレイス",
     "installFromUrl": "URLからインストール"
   },
-
   "workflowMode": {
     "chat": "チャット",
     "plan": "プラン",
     "task": "タスク"
   },
-
   "output": {
     "label": "出力",
     "toggleTitle": "詳細出力パネルの切替",
@@ -287,7 +272,6 @@
     "readDepth": "読取深度",
     "testsRead": "テスト読込"
   },
-
   "emptyChat": {
     "thinking": "考え中...",
     "startConversation": "右の入力ボックスで会話を始めてください。"
@@ -295,7 +279,6 @@
   "chat": {
     "scrollToBottom": "最下部へスクロール"
   },
-
   "permission": {
     "toolRequiresApproval": "ツールの承認が必要です：",
     "pending": "+{{count}} 件保留中",
@@ -321,7 +304,6 @@
     },
     "tooltip": "権限：{{level}} - {{description}}"
   },
-
   "actions": {
     "execute": "実行",
     "executeTitle": "実行を開始",
@@ -341,7 +323,6 @@
     "refreshProjectsTitle": "プロジェクト一覧を更新",
     "refreshAnalyticsTitle": "分析データを更新"
   },
-
   "contextBridge": {
     "contextWillTransfer": "チャット履歴がタスクに転送されます",
     "pendingTaskContext": "タスクコンテキストが注入待ち",
@@ -356,22 +337,24 @@
     "switchToChatWithTaskContext": "タスクコンテキスト付きでチャットモードに切り替え",
     "contextReset": "新しいタスクのためにコンテキストをクリアしました"
   },
-
   "workflow": {
     "cancelWorkflow": "ワークフローをキャンセル",
     "modeSwitchConfirm": "実行がまだ進行中です。今モードを切り替えると、アクティブなワークフローコンテキストが変わる可能性があります。続行しますか？",
     "modeSwitchFailed": "ワークフローモードの切り替えに失敗しました。再試行してください。",
     "clearQueuedMessages": "チャットモードを離れたため、キューメッセージをクリアしました。",
     "queueLimitReached": "キューが上限です（最大3件）。",
-    "queueAttachmentsNotSupported": "新しい添付ファイル付きのキューメッセージはまだサポートされていません。",
+    "queueAttachmentsNotSupported": "実行中の添付ファイル付きキューをサポートします。保存できない場合は復旧ヒントを表示します。",
     "queue": {
       "title": "キューメッセージ ({{count}}/{{max}})",
       "recovered": "{{count}} 件のキューメッセージを復元しました。",
+      "replayingAttachments": "{{count}} 件のキュー添付を復元しました。",
       "placeholder": "実行中です。メッセージはキューに入ります...",
+      "attachmentCount": "添付 {{count}} 件",
+      "attachmentsDropped": "{{count}} 件の添付をキューに保存できませんでした。添付なしでキューし、実行後に再添付してください。",
+      "persistenceFailed": "キューメッセージをローカルに保存できませんでした。ウィンドウを開いたままにするか、大きな添付を外して再試行してください。",
       "remove": "キューメッセージを削除",
       "removeShort": "削除"
     },
-
     "strategy": {
       "title": "戦略分析",
       "confidence": "{{pct}}% 信頼度",
@@ -382,7 +365,6 @@
       "highRisk": "高リスク — TDDモードと完全な品質ゲートの有効化を推奨",
       "manyStories": "推定 {{count}} ストーリー — 最大並列エージェント数の増加を推奨"
     },
-
     "config": {
       "title": "設定",
       "customized": "カスタム済み",
@@ -414,7 +396,6 @@
       "backToForm": "フォームに戻る",
       "applied": "適用済み"
     },
-
     "designDoc": {
       "title": "設計ドキュメント",
       "summary": "PRDから推論されたアーキテクチャ概要",
@@ -438,7 +419,6 @@
       "alternatives": "代替案",
       "savedTo": "保存先: {{path}}"
     },
-
     "exploration": {
       "title": "プロジェクト探索",
       "techStack": "技術スタック",
@@ -456,7 +436,6 @@
       "summaryUnavailable": "AIサマリーが利用できないため、確定的探索結果を使用します。",
       "summarySynthesized": "サマリーは確定的探索データから合成されました。"
     },
-
     "persona": {
       "TechLead": "テックリード",
       "SeniorEngineer": "シニアエンジニア",
@@ -467,7 +446,6 @@
       "QaEngineer": "QAエンジニア",
       "active": "{{name}} が作業中..."
     },
-
     "requirementAnalysis": {
       "title": "要件分析",
       "keyRequirements": "主要要件",
@@ -475,7 +453,6 @@
       "scope": "推奨スコープ",
       "fullAnalysis": "完全分析"
     },
-
     "architectureReview": {
       "title": "アーキテクチャレビュー",
       "concerns": "アーキテクチャの懸念事項",
@@ -486,11 +463,9 @@
       "requestChanges": "選択した項目を適用してPRDを修正",
       "approved": "承認済み"
     },
-
     "common": {
       "processing": "処理中..."
     },
-
     "progress": {
       "title": "ワークフロー進捗",
       "phaseAnalyze": "分析",
@@ -587,7 +562,6 @@
         }
       }
     },
-
     "interview": {
       "questionTitle": "インタビュー質問",
       "questionNumber": "{{current}}/{{total}}",
@@ -609,7 +583,6 @@
       "backToOptions": "選択肢に戻る",
       "generating": "次の質問を生成中..."
     },
-
     "prd": {
       "title": "PRD",
       "storiesAndBatches": "{{stories}} ストーリー / {{batches}} バッチ",
@@ -625,7 +598,6 @@
       "priorityMedium": "中",
       "priorityLow": "低"
     },
-
     "execution": {
       "batchStarted": "バッチ開始",
       "storyStarted": "ストーリー開始",
@@ -634,13 +606,11 @@
       "batchComplete": "バッチ完了",
       "batchLabel": "バッチ {{current}}/{{total}}"
     },
-
     "gates": {
       "qualityGate": "品質ゲート: {{title}}",
       "passed": "合格",
       "failed": "不合格"
     },
-
     "report": {
       "executionComplete": "実行完了",
       "executionFailed": "実行失敗",
@@ -650,7 +620,6 @@
       "duration": "所要時間",
       "agentAssignments": "エージェント割り当て"
     },
-
     "input": {
       "taskPlaceholder": "タスクを説明してください（実装 / 分析 / リファクタリング）...",
       "configuringPlaceholder": "設定を入力（例：「6並列、TDD有効」）するか、上のカードで続行をクリック...",
@@ -659,7 +628,6 @@
       "waitingPlaceholder": "応答を待っています...",
       "planPlaceholder": "分解して実行するタスクを説明してください（ライティング、リサーチなど）..."
     },
-
     "fileChange": {
       "newFile": "新規ファイル",
       "modified": "変更済み",
@@ -671,14 +639,12 @@
       "linesChanged": "+{{added}} -{{removed}}",
       "moreLines": "... 他 {{count}} 行"
     },
-
     "turnSummary": {
       "title": "ターン変更",
       "files": "{{count}} ファイル",
       "viewAll": "すべての変更を表示",
       "revertAll": "すべて元に戻す"
     },
-
     "orchestrator": {
       "analyzingTask": "タスクの複雑さを分析中...",
       "startingInterview": "要件インタビューを開始...",
@@ -707,7 +673,6 @@
       "architectureReviewMaxRounds": "アーキテクチャレビューの上限に達しました（3ラウンド）。現在のPRDで続行します。"
     }
   },
-
   "agentPanel": {
     "title": "エージェント",
     "manageAll": "すべて管理...",
@@ -718,7 +683,6 @@
     "newAgent": "新規エージェント",
     "deleteConfirm": "このエージェントを削除しますか？"
   },
-
   "agentDialog": {
     "title": "エージェント管理",
     "searchPlaceholder": "エージェントを検索...",
@@ -740,7 +704,6 @@
     "selectOrCreate": "エージェントを選択または作成",
     "unsupportedBackend": "Claude Code バックエンドではエージェントのシステムプロンプトはサポートされていません"
   },
-
   "promptPanel": {
     "title": "プロンプト",
     "manageAll": "すべて管理...",
@@ -748,7 +711,6 @@
     "noPrompts": "プロンプトがありません",
     "insert": "挿入"
   },
-
   "promptDialog": {
     "title": "プロンプト管理",
     "searchPlaceholder": "プロンプトを検索...",
@@ -770,13 +732,11 @@
     "duplicate": "カスタムとして複製",
     "selectOrCreate": "プロンプトを選択または作成"
   },
-
   "promptPalette": {
     "title": "/ プロンプト",
     "back": "戻る",
     "insertPrompt": "プロンプトを挿入"
   },
-
   "export": {
     "markdown": "Markdown (.md)",
     "conversationTranscript": "会話記録",
@@ -805,7 +765,6 @@
     "pngExported": "PNGをエクスポートしました。",
     "jpgExported": "JPGをエクスポートしました。"
   },
-
   "contextSources": {
     "knowledge": "ナレッジ",
     "memory": "メモリ",
@@ -846,7 +805,6 @@
       }
     }
   },
-
   "chatToolbar": {
     "attachFile": "ファイルを添付",
     "toggleOutput": "出力",
@@ -958,5 +916,29 @@
     "collapseSidebar": "サイドバーを折りたたむ",
     "expandPanel": "パネルを展開",
     "collapsePanel": "パネルを折りたたむ"
+  },
+  "contextSummary": {
+    "title": "有効コンテキスト",
+    "why": "理由",
+    "off": "オフ",
+    "show": "有効コンテキストを表示",
+    "hide": "非表示",
+    "knowledgeCount": "{{count}} 件選択",
+    "skillsCount": "{{count}} 件選択",
+    "source": {
+      "legacy": "legacy",
+      "unified": "unified"
+    },
+    "memoryMode": {
+      "auto_exclude": "auto exclude",
+      "only_selected": "only selected"
+    },
+    "memoryDetail": "{{mode}} · {{scopeCount}} scopes · {{itemCount}} items",
+    "origin": "origin: {{origin}}",
+    "originValues": {
+      "auto": "auto",
+      "explicit": "explicit",
+      "mixed": "mixed"
+    }
   }
 }

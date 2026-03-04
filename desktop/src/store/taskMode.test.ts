@@ -13,18 +13,6 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }));
 
-type EventCallback = (event: { payload: unknown }) => void;
-const eventHandlers: Record<string, EventCallback> = {};
-
-vi.mock('@tauri-apps/api/event', () => ({
-  listen: vi.fn().mockImplementation((eventName: string, handler: EventCallback) => {
-    eventHandlers[eventName] = handler;
-    return Promise.resolve(() => {
-      delete eventHandlers[eventName];
-    });
-  }),
-}));
-
 // Import after mocks
 import { useTaskModeStore } from './taskMode';
 import type { StrategyAnalysis, TaskModeSession, TaskPrd, TaskExecutionStatus, ExecutionReport } from './taskMode';
@@ -52,16 +40,6 @@ function resetStore() {
     },
   });
   vi.clearAllMocks();
-  // Clear event handlers
-  Object.keys(eventHandlers).forEach((k) => delete eventHandlers[k]);
-}
-
-function emitEvent(eventName: string, payload: unknown) {
-  const handler = eventHandlers[eventName];
-  if (!handler) {
-    throw new Error(`No listener for "${eventName}"`);
-  }
-  handler({ payload });
 }
 
 function mockAnalysis(mode: 'chat' | 'task' = 'task'): StrategyAnalysis {
@@ -303,17 +281,19 @@ describe('TaskModeStore', () => {
       const args = (
         call?.[1] as
           | {
-              contextSources?: {
-                project_id?: string;
-                knowledge?: {
-                  enabled?: boolean;
-                  selected_collections?: string[];
-                  selected_documents?: Array<{ collection_id: string; document_uid: string }>;
+              request?: {
+                contextSources?: {
+                  project_id?: string;
+                  knowledge?: {
+                    enabled?: boolean;
+                    selected_collections?: string[];
+                    selected_documents?: Array<{ collection_id: string; document_uid: string }>;
+                  };
                 };
               };
             }
           | undefined
-      )?.contextSources;
+      )?.request?.contextSources;
       expect(args?.project_id).toBe('proj-kb');
       expect(args?.knowledge?.enabled).toBe(true);
       expect(args?.knowledge?.selected_collections).toEqual(['col-1']);
@@ -372,10 +352,12 @@ describe('TaskModeStore', () => {
         (
           call?.[1] as
             | {
-                globalDefaultAgent?: string | null;
+                request?: {
+                  globalDefaultAgent?: string | null;
+                };
               }
             | undefined
-        )?.globalDefaultAgent,
+        )?.request?.globalDefaultAgent,
       ).toBe('codex');
     });
   });
@@ -499,105 +481,6 @@ describe('TaskModeStore', () => {
       await useTaskModeStore.getState().exitTaskMode();
 
       expect(useTaskModeStore.getState().error).toBe('Invalid session');
-    });
-  });
-
-  // =========================================================================
-  // Event Subscription
-  // =========================================================================
-  describe('event subscription', () => {
-    it('should subscribe to task-mode-progress events', async () => {
-      useTaskModeStore.setState({ sessionId: 'session-123' });
-
-      await useTaskModeStore.getState().subscribeToEvents();
-
-      expect(eventHandlers['task-mode-progress']).toBeDefined();
-    });
-
-    it('should update store on event payload', async () => {
-      useTaskModeStore.setState({ sessionId: 'session-123' });
-
-      await useTaskModeStore.getState().subscribeToEvents();
-
-      emitEvent('task-mode-progress', {
-        sessionId: 'session-123',
-        eventType: 'story_completed',
-        currentBatch: 2,
-        totalBatches: 3,
-        storyId: 'story-001',
-        storyStatus: 'completed',
-        agentName: 'frontend-agent',
-        gateResults: null,
-        error: null,
-        progressPct: 66,
-      });
-
-      const state = useTaskModeStore.getState();
-      expect(state.currentBatch).toBe(2);
-      expect(state.totalBatches).toBe(3);
-      expect(state.storyStatuses['story-001']).toBe('completed');
-    });
-
-    it('should map gateResults into story qualityGateResults', async () => {
-      useTaskModeStore.setState({ sessionId: 'session-123' });
-      await useTaskModeStore.getState().subscribeToEvents();
-
-      emitEvent('task-mode-progress', {
-        sessionId: 'session-123',
-        eventType: 'story_completed',
-        currentBatch: 1,
-        totalBatches: 2,
-        storyId: 'story-qa',
-        storyStatus: 'completed',
-        agentName: 'qa-agent',
-        gateResults: [
-          {
-            gateId: 'tests',
-            gateName: 'Tests',
-            phase: 'validation',
-            status: 'passed',
-            message: 'All tests passed',
-          },
-        ],
-        error: null,
-        progressPct: 50,
-      });
-
-      const state = useTaskModeStore.getState();
-      expect(state.qualityGateResults['story-qa']).toBeDefined();
-      expect(state.qualityGateResults['story-qa'].overallStatus).toBe('passed');
-      expect(state.qualityGateResults['story-qa'].gates).toHaveLength(1);
-    });
-
-    it('should ignore events for different session', async () => {
-      useTaskModeStore.setState({ sessionId: 'session-123', currentBatch: 0 });
-
-      await useTaskModeStore.getState().subscribeToEvents();
-
-      emitEvent('task-mode-progress', {
-        sessionId: 'other-session',
-        eventType: 'story_started',
-        currentBatch: 5,
-        totalBatches: 10,
-        storyId: 'story-001',
-        storyStatus: 'running',
-        agentName: 'backend-agent',
-        gateResults: null,
-        error: null,
-        progressPct: 10,
-      });
-
-      expect(useTaskModeStore.getState().currentBatch).toBe(0);
-    });
-
-    it('should unsubscribe from events', async () => {
-      useTaskModeStore.setState({ sessionId: 'session-123' });
-
-      await useTaskModeStore.getState().subscribeToEvents();
-      expect(eventHandlers['task-mode-progress']).toBeDefined();
-
-      useTaskModeStore.getState().unsubscribeFromEvents();
-      expect(eventHandlers['task-mode-progress']).toBeUndefined();
     });
   });
 

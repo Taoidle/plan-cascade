@@ -570,8 +570,10 @@ impl SelectionOrigin {
 }
 
 fn infer_memory_selection_origin(config: &MemorySourceConfig) -> SelectionOrigin {
-    if matches!(config.selection_mode, Some(MemorySelectionMode::OnlySelected))
-        || !config.selected_memory_ids.is_empty()
+    if matches!(
+        config.selection_mode,
+        Some(MemorySelectionMode::OnlySelected)
+    ) || !config.selected_memory_ids.is_empty()
     {
         SelectionOrigin::Explicit
     } else {
@@ -580,7 +582,9 @@ fn infer_memory_selection_origin(config: &MemorySourceConfig) -> SelectionOrigin
 }
 
 fn infer_skill_selection_origin(config: &SkillsSourceConfig) -> SelectionOrigin {
-    if config.selection_mode == SkillSelectionMode::Explicit || !config.selected_skill_ids.is_empty() {
+    if config.selection_mode == SkillSelectionMode::Explicit
+        || !config.selected_skill_ids.is_empty()
+    {
         SelectionOrigin::Explicit
     } else {
         SelectionOrigin::Auto
@@ -591,7 +595,9 @@ fn merge_selection_origins(origins: &[SelectionOrigin]) -> Option<String> {
     if origins.is_empty() {
         return None;
     }
-    let has_auto = origins.iter().any(|origin| *origin == SelectionOrigin::Auto);
+    let has_auto = origins
+        .iter()
+        .any(|origin| *origin == SelectionOrigin::Auto);
     let has_explicit = origins
         .iter()
         .any(|origin| *origin == SelectionOrigin::Explicit);
@@ -1374,13 +1380,12 @@ async fn prepare_turn_context_v2_internal(
 
     // 4) Explicit memory command (chat/plan/task only; standalone handles this upstream).
     if mode != "standalone" {
-        let command_kind = crate::services::memory::detect_memory_command(&request.query).map(|cmd| {
-            match cmd {
+        let command_kind =
+            crate::services::memory::detect_memory_command(&request.query).map(|cmd| match cmd {
                 crate::services::memory::MemoryCommand::Remember { .. } => "remember",
                 crate::services::memory::MemoryCommand::Forget { .. } => "forget",
                 crate::services::memory::MemoryCommand::Query { .. } => "query",
-            }
-        });
+            });
         if let Some(command_kind) = command_kind {
             match app_state.get_memory_store_arc().await {
                 Ok(memory_store) => {
@@ -1522,8 +1527,10 @@ async fn prepare_turn_context_v2_internal(
                         };
                         let statuses: Vec<MemoryStatusV2> =
                             resolve_memory_statuses(&mcfg.statuses, mcfg.review_mode.as_deref());
-                        diagnostics.effective_statuses =
-                            statuses.iter().map(|status| status.as_str().to_string()).collect();
+                        diagnostics.effective_statuses = statuses
+                            .iter()
+                            .map(|status| status.as_str().to_string())
+                            .collect();
                         diagnostics.selection_reason = if !mcfg.statuses.is_empty() {
                             "memory_statuses_explicit".to_string()
                         } else {
@@ -1608,15 +1615,18 @@ async fn prepare_turn_context_v2_internal(
                                         "degraded_reason": "memory_query_failed",
                                     })),
                                 ));
-                                diagnostics.degraded_reason = Some("memory_query_failed".to_string());
+                                diagnostics.degraded_reason =
+                                    Some("memory_query_failed".to_string());
                             }
                         }
                     }
                 }
 
                 if !memory_entries.is_empty() {
-                    diagnostics.effective_memory_ids =
-                        memory_entries.iter().map(|entry| entry.id.clone()).collect();
+                    diagnostics.effective_memory_ids = memory_entries
+                        .iter()
+                        .map(|entry| entry.id.clone())
+                        .collect();
                     let memory_block = build_memory_section(Some(&memory_entries));
                     if !memory_block.is_empty() {
                         if push_block(
@@ -2021,7 +2031,8 @@ async fn assemble_turn_context_response_internal(
     let injected_source_kinds = infer_injected_source_kinds(&request);
     let context_policy = load_context_policy(app_state).await;
     if !context_policy.context_v2_pipeline {
-        let fallback_prompt = build_legacy_fallback_prompt(&request, app_state, knowledge_state).await;
+        let fallback_prompt =
+            build_legacy_fallback_prompt(&request, app_state, knowledge_state).await;
         return Ok(CommandResponse::ok(build_legacy_fallback_response(
             &request,
             fallback_prompt,
@@ -2031,12 +2042,8 @@ async fn assemble_turn_context_response_internal(
         )));
     }
 
-    let primary_result = prepare_turn_context_v2_internal(
-        request.clone(),
-        app_state,
-        knowledge_state,
-    )
-    .await;
+    let primary_result =
+        prepare_turn_context_v2_internal(request.clone(), app_state, knowledge_state).await;
     if let Ok(primary) = &primary_result {
         if primary.success {
             if let Some(envelope) = primary.data.clone() {
@@ -2070,13 +2077,12 @@ pub async fn assemble_turn_context_internal(
     app_state: &AppState,
     knowledge_state: &KnowledgeState,
 ) -> Result<ContextAssemblyResponse, String> {
-    let assembled = assemble_turn_context_response_internal(request, app_state, knowledge_state).await?;
+    let assembled =
+        assemble_turn_context_response_internal(request, app_state, knowledge_state).await?;
     if !assembled.success {
-        return Err(
-            assembled
-                .error
-                .unwrap_or_else(|| "assemble_turn_context failed".to_string()),
-        );
+        return Err(assembled
+            .error
+            .unwrap_or_else(|| "assemble_turn_context failed".to_string()));
     }
     assembled
         .data
@@ -2102,7 +2108,8 @@ pub async fn prepare_turn_context_v2(
     tracing::warn!(
         "prepare_turn_context_v2 is deprecated; routing request through assemble_turn_context"
     );
-    let data = assemble_turn_context_internal(request, app_state.inner(), knowledge_state.inner()).await?;
+    let data =
+        assemble_turn_context_internal(request, app_state.inner(), knowledge_state.inner()).await?;
     Ok(CommandResponse::ok(ContextEnvelope {
         request_meta: data.request_meta,
         budget: data.budget,
@@ -3451,7 +3458,9 @@ mod tests {
         assert!(!blocked.is_empty());
         assert!(!blocked.iter().any(|tool| tool.eq_ignore_ascii_case("Read")));
         assert!(!blocked.iter().any(|tool| tool.eq_ignore_ascii_case("Grep")));
-        assert!(blocked.iter().any(|tool| tool.eq_ignore_ascii_case("Write")));
+        assert!(blocked
+            .iter()
+            .any(|tool| tool.eq_ignore_ascii_case("Write")));
     }
 
     #[test]
@@ -3524,7 +3533,8 @@ mod tests {
             Some("memory_query_failed")
         );
         assert_eq!(
-            value.get("blocked_tools")
+            value
+                .get("blocked_tools")
                 .and_then(|v| v.as_array())
                 .map(|arr| arr.len()),
             Some(2)
@@ -3617,7 +3627,11 @@ mod tests {
                 compaction_actions: vec![],
                 quality_basis: json!({}),
             },
-            injected_source_kinds: vec!["knowledge".to_string(), "memory".to_string(), "skills".to_string()],
+            injected_source_kinds: vec![
+                "knowledge".to_string(),
+                "memory".to_string(),
+                "skills".to_string(),
+            ],
             fallback_used: false,
             fallback_reason: None,
             diagnostics: ContextDiagnostics::default(),

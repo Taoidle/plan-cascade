@@ -20,6 +20,7 @@ import {
   updateBackgroundSessionByTaskId,
 } from './sessionRouting';
 import { inferInjectedSourceKinds } from './contextAssembly';
+import { getNextTurnId } from '../../lib/conversationUtils';
 import type { ExecutionState, ExecutionStatus, StandaloneTurn, StreamLine, StreamLineType } from './types';
 
 interface CommandResponse<T> {
@@ -195,7 +196,8 @@ export function createStartAction(
     get().addLog(`Starting execution in ${mode} mode...`);
     get().addLog(`Task: ${description}`);
     if (mode === 'simple' && !isClaudeBackend) {
-      get().appendStreamLine(description, 'info');
+      const turnId = getNextTurnId(get().streamingOutput);
+      get().appendStreamLine(description, 'info', undefined, undefined, { turnId, turnBoundary: 'user' });
     }
 
     try {
@@ -247,7 +249,8 @@ export function createStartAction(
           return;
         }
 
-        get().appendStreamLine(description, 'info');
+        const turnId = getNextTurnId(get().streamingOutput);
+        get().appendStreamLine(description, 'info', undefined, undefined, { turnId, turnBoundary: 'user' });
 
         const claudeContextSources = resolveSessionScopedContext(sessionId, 'claude');
         const assembledPrompt = await buildClaudePromptWithContextEnvelope({

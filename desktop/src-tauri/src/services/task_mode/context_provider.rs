@@ -343,27 +343,27 @@ pub async fn query_selected_context(
 
     let (skills_block, skill_expertise, selected_skills, blocked_tools, skill_selection_reason) =
         if config.skills.as_ref().map_or(false, |s| s.enabled) {
-        let s = config.skills.as_ref().unwrap();
-        let effective = resolve_effective_skills(
-            app_state,
-            project_path,
-            query,
-            phase,
-            &s.selected_skill_ids,
-            s.selection_mode,
-            true,
-        )
-        .await;
-        (
-            effective.skills_block,
-            effective.skill_expertise,
-            effective.matches,
-            effective.blocked_tools,
-            effective.selection_reason,
-        )
-    } else {
-        (String::new(), vec![], vec![], vec![], String::new())
-    };
+            let s = config.skills.as_ref().unwrap();
+            let effective = resolve_effective_skills(
+                app_state,
+                project_path,
+                query,
+                phase,
+                &s.selected_skill_ids,
+                s.selection_mode,
+                true,
+            )
+            .await;
+            (
+                effective.skills_block,
+                effective.skill_expertise,
+                effective.matches,
+                effective.blocked_tools,
+                effective.selection_reason,
+            )
+        } else {
+            (String::new(), vec![], vec![], vec![], String::new())
+        };
 
     EnrichedContext {
         knowledge_block,
@@ -415,27 +415,27 @@ pub async fn query_selected_context_without_knowledge(
 
     let (skills_block, skill_expertise, selected_skills, blocked_tools, skill_selection_reason) =
         if config.skills.as_ref().map_or(false, |s| s.enabled) {
-        let s = config.skills.as_ref().unwrap();
-        let effective = resolve_effective_skills(
-            app_state,
-            project_path,
-            query,
-            phase,
-            &s.selected_skill_ids,
-            s.selection_mode,
-            true,
-        )
-        .await;
-        (
-            effective.skills_block,
-            effective.skill_expertise,
-            effective.matches,
-            effective.blocked_tools,
-            effective.selection_reason,
-        )
-    } else {
-        (String::new(), vec![], vec![], vec![], String::new())
-    };
+            let s = config.skills.as_ref().unwrap();
+            let effective = resolve_effective_skills(
+                app_state,
+                project_path,
+                query,
+                phase,
+                &s.selected_skill_ids,
+                s.selection_mode,
+                true,
+            )
+            .await;
+            (
+                effective.skills_block,
+                effective.skill_expertise,
+                effective.matches,
+                effective.blocked_tools,
+                effective.selection_reason,
+            )
+        } else {
+            (String::new(), vec![], vec![], vec![], String::new())
+        };
 
     EnrichedContext {
         knowledge_block: String::new(), // Knowledge handled via SearchKnowledge tool
@@ -738,7 +738,10 @@ pub fn derive_blocked_tools_from_skill_policy(matches: &[SkillMatch]) -> Vec<Str
     blocked
 }
 
-fn select_skill_matches_by_ids(index: &SkillIndex, selected_skill_ids: &[String]) -> Vec<SkillMatch> {
+fn select_skill_matches_by_ids(
+    index: &SkillIndex,
+    selected_skill_ids: &[String],
+) -> Vec<SkillMatch> {
     let id_set: HashSet<&str> = selected_skill_ids.iter().map(|s| s.as_str()).collect();
     index
         .skills()

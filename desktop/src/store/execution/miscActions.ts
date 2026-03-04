@@ -208,12 +208,19 @@ export function createMiscActions(deps: MiscActionDeps): MiscActions {
       });
     },
 
-    appendStreamLine: (content, type, subAgentId, subAgentDepth) => {
+    appendStreamLine: (content, type, subAgentId, subAgentDepth, options) => {
       set((state) => {
         const lines = state.streamingOutput;
         const last = lines.length > 0 ? lines[lines.length - 1] : null;
+        const targetTurnId = options?.turnId;
 
-        if ((type === 'text' || type === 'thinking') && last && last.type === type && last.subAgentId === subAgentId) {
+        if (
+          (type === 'text' || type === 'thinking') &&
+          last &&
+          last.type === type &&
+          last.subAgentId === subAgentId &&
+          (targetTurnId === undefined || last.turnId === targetTurnId)
+        ) {
           const updated = { ...last, content: last.content + content };
           const newLines = lines.slice();
           newLines[newLines.length - 1] = updated;
@@ -234,6 +241,8 @@ export function createMiscActions(deps: MiscActionDeps): MiscActions {
               timestamp: Date.now(),
               subAgentId,
               subAgentDepth,
+              turnId: targetTurnId,
+              turnBoundary: options?.turnBoundary,
             },
           ],
           streamLineCounter: counter,

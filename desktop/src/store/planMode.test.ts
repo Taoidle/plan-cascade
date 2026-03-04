@@ -1,13 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockInvoke = vi.fn();
+const mockResolveProviderBaseUrl = vi.fn((..._args: unknown[]) => 'https://resolved-base-url');
+const mockSettingsState = {
+  provider: 'anthropic',
+  model: 'claude-sonnet-4-20250514',
+};
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }));
 
-vi.mock('@tauri-apps/api/event', () => ({
-  listen: vi.fn().mockResolvedValue(() => {}),
+vi.mock('./settings', () => ({
+  useSettingsStore: {
+    getState: () => mockSettingsState,
+  },
+}));
+
+vi.mock('../lib/providers', () => ({
+  resolveProviderBaseUrl: (provider: string, settings: unknown) => mockResolveProviderBaseUrl(provider, settings),
 }));
 
 import { usePlanModeStore } from './planMode';
@@ -16,6 +27,121 @@ describe('planMode store', () => {
   beforeEach(() => {
     usePlanModeStore.getState().reset();
     vi.clearAllMocks();
+  });
+
+  it('enters plan mode and stores session snapshot', async () => {
+    mockInvoke.mockResolvedValueOnce({
+      success: true,
+      data: {
+        sessionId: 'plan-session-1',
+        phase: 'analyzing',
+        analysis: { complexity: 'medium' },
+        currentQuestion: null,
+      },
+      error: null,
+    });
+
+    await usePlanModeStore
+      .getState()
+      .enterPlanMode(
+        'Build auth flow',
+        'openai',
+        'gpt-4o',
+        'https://api.example.com',
+        '/tmp/project',
+        undefined,
+        'ctx',
+      );
+
+    const state = usePlanModeStore.getState();
+    expect(state.isPlanMode).toBe(true);
+    expect(state.sessionId).toBe('plan-session-1');
+    expect(state.sessionPhase).toBe('analyzing');
+    expect(state.isLoading).toBe(false);
+    expect(mockInvoke).toHaveBeenCalledWith('enter_plan_mode', {
+      request: {
+        description: 'Build auth flow',
+        provider: 'openai',
+        model: 'gpt-4o',
+        baseUrl: 'https://api.example.com',
+        projectPath: '/tmp/project',
+        contextSources: null,
+        conversationContext: 'ctx',
+        locale: null,
+      },
+    });
+  });
+
+  it('generates plan and transitions to reviewing_plan', async () => {
+    usePlanModeStore.setState({ sessionId: 'plan-session-1' });
+    mockInvoke.mockResolvedValueOnce({
+      success: true,
+      data: {
+        title: 'Execution Plan',
+        description: 'Do work',
+        steps: [],
+        batches: [],
+      },
+      error: null,
+    });
+
+    await usePlanModeStore.getState().generatePlan('openai', 'gpt-4o', 'https://api.example.com');
+
+    const state = usePlanModeStore.getState();
+    expect(state.sessionPhase).toBe('reviewing_plan');
+    expect(state.plan?.title).toBe('Execution Plan');
+    expect(state.isLoading).toBe(false);
+    expect(mockInvoke).toHaveBeenCalledWith('generate_plan', {
+      request: {
+        sessionId: 'plan-session-1',
+        provider: 'openai',
+        model: 'gpt-4o',
+        baseUrl: 'https://api.example.com',
+        projectPath: null,
+        contextSources: null,
+        conversationContext: null,
+        locale: null,
+      },
+    });
+  });
+
+  it('stores error when approve_plan fails', async () => {
+    usePlanModeStore.setState({ sessionId: 'plan-session-1' });
+    mockInvoke.mockResolvedValueOnce({
+      success: false,
+      data: null,
+      error: 'Approve failed',
+    });
+
+    await usePlanModeStore.getState().approvePlan({
+      title: 'Execution Plan',
+      domain: 'frontend',
+      adapterName: 'default',
+      description: 'Do work',
+      steps: [],
+      batches: [],
+      editable: false,
+    });
+
+    const state = usePlanModeStore.getState();
+    expect(state.sessionPhase).not.toBe('executing');
+    expect(state.isLoading).toBe(false);
+    expect(state.error).toBe('Approve failed');
+  });
+
+  it('resets cancelling state when cancel_plan_execution fails', async () => {
+    usePlanModeStore.setState({ sessionId: 'plan-session-1' });
+    mockInvoke.mockResolvedValueOnce({
+      success: false,
+      data: null,
+      error: 'Cannot cancel',
+    });
+
+    await usePlanModeStore.getState().cancelExecution();
+
+    const state = usePlanModeStore.getState();
+    expect(state.isCancelling).toBe(false);
+    expect(state.error).toBe('Cannot cancel');
   });
 
   it('fetches step output via get_step_output', async () => {

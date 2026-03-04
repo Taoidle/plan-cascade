@@ -37,16 +37,9 @@ import {
 } from '../../lib/exportUtils';
 import { useToast } from '../shared/Toast';
 import { useContextSourcesStore } from '../../store/contextSources';
-import { buildConversationHistory } from '../../lib/contextBridge';
 import { ChatTranscript } from './ChatTranscript';
 import type { PlanClarifyQuestionCardData } from '../../types/planModeCard';
 import type { InterviewQuestionCardData } from '../../types/workflowCard';
-import {
-  clearPersistedSimpleChatQueue,
-  loadPersistedSimpleChatQueue,
-  persistSimpleChatQueue,
-  type QueuedChatMessage,
-} from './queuePersistence';
 import {
   DEFAULT_PROMPT_TOKEN_BUDGET,
   estimatePromptTokensFallback,
@@ -58,8 +51,13 @@ import { useSimpleModeController } from './useSimpleModeController';
 import { SimplePanelLayout } from './SimplePanelLayout';
 import { SimpleInputSection } from './SimpleInputSection';
 import { SimpleInputComposer } from './SimpleInputComposer';
+import { WorkflowModeSwitchDialog } from './WorkflowModeSwitchDialog';
+import { useWorkflowModeSwitchGuard } from './useWorkflowModeSwitchGuard';
+import { useWorkflowKernelSessionBridge } from './useWorkflowKernelSessionBridge';
+import { useSimpleInputRouting } from './useSimpleInputRouting';
+import { useQueuedChatMessages } from './useQueuedChatMessages';
+import type { WorkflowMode } from '../../types/workflowKernel';
 
-type WorkflowMode = 'chat' | 'plan' | 'task';
 interface CommandResponse<T> {
   success: boolean;
   data: T | null;
@@ -68,15 +66,10 @@ interface CommandResponse<T> {
 
 const MAX_QUEUED_CHAT_MESSAGES = 3;
 const TOKEN_ESTIMATE_DEBOUNCE_MS = 180;
-const WORKFLOW_KERNEL_SESSION_STORAGE_PREFIX = 'simple_mode_workflow_kernel_session_v2:';
 const RIGHT_PANEL_WIDTH_STORAGE_PREFIX = 'simple_mode_right_panel_width_v1:';
 const DEFAULT_RIGHT_PANEL_WIDTH = 620;
 const MIN_RIGHT_PANEL_WIDTH = 420;
 const MAX_RIGHT_PANEL_WIDTH = 960;
-
-function workflowKernelSessionStorageKey(workspacePath: string | null): string {
-  return `${WORKFLOW_KERNEL_SESSION_STORAGE_PREFIX}${workspacePath || '__default_workspace__'}`;
-}
 
 function rightPanelWidthStorageKey(workspacePath: string | null): string {
   return `${RIGHT_PANEL_WIDTH_STORAGE_PREFIX}${workspacePath || '__default_workspace__'}`;
@@ -118,6 +111,7 @@ export function SimpleModeShell() {
     attachments,
     addAttachment,
     removeAttachment,
+    clearAttachments,
     backgroundSessions,
     switchToSession,
     removeBackgroundSession,
@@ -141,7 +135,6 @@ export function SimpleModeShell() {
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>('output');
   const [workflowMode, setWorkflowMode] = useState<WorkflowMode>('chat');
   const [supportsPointerHover, setSupportsPointerHover] = useState(false);
-  const [queuedChatMessages, setQueuedChatMessages] = useState<QueuedChatMessage[]>([]);
   const [tokenEstimate, setTokenEstimate] = useState<PromptTokenEstimateResult | null>(null);
   const [isEstimatingTokenBudget, setIsEstimatingTokenBudget] = useState(false);
   const [promptTokenBudget, setPromptTokenBudget] = useState(DEFAULT_PROMPT_TOKEN_BUDGET);
@@ -154,9 +147,6 @@ export function SimpleModeShell() {
   const leftHoverTimerRef = useRef<number | null>(null);
   const rightHoverTimerRef = useRef<number | null>(null);
   const rightPanelResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  const queueIdRef = useRef(0);
-  const queueDispatchInFlightRef = useRef(false);
-  const hasHydratedQueueRef = useRef(false);
 
   const workflowKernelSessionId = useWorkflowKernelStore((s) => s.sessionId);
   const workflowKernelSession = useWorkflowKernelStore((s) => s.session);
@@ -167,106 +157,18 @@ export function SimpleModeShell() {
   const linkWorkflowKernelModeSession = useWorkflowKernelStore((s) => s.linkModeSession);
   const cancelWorkflowKernelOperation = useWorkflowKernelStore((s) => s.cancelOperation);
   const resetWorkflowKernel = useWorkflowKernelStore((s) => s.reset);
-  const kernelBootstrapInFlightRef = useRef(false);
 
   const isRunning = simpleController.isRunning;
 
-  const persistWorkflowKernelSessionId = useCallback(
-    (sessionId: string) => {
-      if (typeof localStorage === 'undefined') return;
-      localStorage.setItem(workflowKernelSessionStorageKey(workspacePath), sessionId);
-    },
-    [workspacePath],
-  );
-
-  const clearPersistedWorkflowKernelSessionId = useCallback(() => {
-    if (typeof localStorage === 'undefined') return;
-    localStorage.removeItem(workflowKernelSessionStorageKey(workspacePath));
-  }, [workspacePath]);
-
-  // Handle workflow mode changes with context inheritance notifications
-  const handleWorkflowModeChange = useCallback(
-    (newMode: WorkflowMode) => {
-      if (newMode === workflowMode) return;
-      if (isRunning) {
-        const canConfirm = typeof window !== 'undefined' && typeof window.confirm === 'function';
-        const confirmed = !canConfirm
-          ? true
-          : window.confirm(
-              t('workflow.modeSwitchConfirm', {
-                defaultValue:
-                  'An execution is still running. Switching modes now may change your active workflow context. Continue?',
-              }),
-            );
-        if (!confirmed) return;
-      }
-
-      // Check for context inheritance
-      const hasChatHistory = streamingOutput.length > 0;
-      const hasPendingTaskContext = useExecutionStore.getState()._pendingTaskContext;
-
-      // Show notification about context inheritance
-      if (newMode === 'task' && hasChatHistory) {
-        showToast(
-          t('contextBridge.switchToTaskWithContext', { defaultValue: 'Switching to Task mode with chat context' }),
-          'info',
-        );
-      } else if (newMode === 'plan' && hasChatHistory) {
-        showToast(
-          t('contextBridge.switchToPlanWithContext', { defaultValue: 'Switching to Plan mode with chat context' }),
-          'info',
-        );
-      } else if (newMode === 'chat' && hasPendingTaskContext) {
-        showToast(
-          t('contextBridge.switchToChatWithTaskContext', { defaultValue: 'Switching to Chat mode with task context' }),
-          'info',
-        );
-      }
-
-      if (newMode !== workflowMode && queuedChatMessages.length > 0) {
-        setQueuedChatMessages([]);
-        showToast(
-          t('workflow.clearQueuedMessages', {
-            defaultValue: 'Cleared queued follow-up messages when switching workflow mode.',
-          }),
-          'info',
-        );
-      }
-
-      const conversationContext = buildConversationHistory().map((turn) => ({
-        user: turn.user,
-        assistant: turn.assistant,
-      }));
-
-      void (async () => {
-        const transitioned = await transitionWorkflowKernelMode(newMode, {
-          conversationContext,
-          artifactRefs: [],
-          contextSources: ['simple_mode'],
-          metadata: {
-            sourceMode: workflowMode,
-            targetMode: newMode,
-            hasChatHistory,
-            hasPendingTaskContext: !!hasPendingTaskContext,
-            switchedAt: new Date().toISOString(),
-          },
-        });
-
-        if (!transitioned) {
-          showToast(
-            t('workflow.modeSwitchFailed', {
-              defaultValue: 'Failed to switch workflow mode. Please retry.',
-            }),
-            'error',
-          );
-          return;
-        }
-
-        setWorkflowMode(transitioned.activeMode);
-      })();
-    },
-    [workflowMode, isRunning, streamingOutput, queuedChatMessages.length, showToast, t, transitionWorkflowKernelMode],
-  );
+  const { clearPersistedWorkflowKernelSessionId } = useWorkflowKernelSessionBridge({
+    workspacePath,
+    workflowMode,
+    workflowKernelSessionId,
+    workflowKernelSessionActiveMode: workflowKernelSession?.activeMode ?? null,
+    setWorkflowMode,
+    openWorkflowKernelSession,
+    recoverWorkflowKernelSession,
+  });
 
   useEffect(() => {
     initialize();
@@ -274,45 +176,6 @@ export function SimpleModeShell() {
       cleanup();
     };
   }, [initialize, cleanup]);
-
-  useEffect(() => {
-    if (workflowKernelSessionId) return;
-    if (kernelBootstrapInFlightRef.current) return;
-
-    kernelBootstrapInFlightRef.current = true;
-    const bootstrap = async () => {
-      if (typeof localStorage !== 'undefined') {
-        const persistedSessionId = localStorage.getItem(workflowKernelSessionStorageKey(workspacePath));
-        if (persistedSessionId) {
-          const recovered = await recoverWorkflowKernelSession(persistedSessionId);
-          if (recovered?.session?.sessionId) {
-            kernelBootstrapInFlightRef.current = false;
-            return;
-          }
-          localStorage.removeItem(workflowKernelSessionStorageKey(workspacePath));
-        }
-      }
-
-      await openWorkflowKernelSession('chat', {
-        conversationContext: [],
-        artifactRefs: [],
-        contextSources: ['simple_mode'],
-        metadata: {
-          entry: 'simple_mode_mount',
-        },
-      });
-      kernelBootstrapInFlightRef.current = false;
-    };
-
-    void bootstrap().finally(() => {
-      kernelBootstrapInFlightRef.current = false;
-    });
-  }, [workflowKernelSessionId, workspacePath, openWorkflowKernelSession, recoverWorkflowKernelSession]);
-
-  useEffect(() => {
-    if (!workflowKernelSessionId) return;
-    persistWorkflowKernelSessionId(workflowKernelSessionId);
-  }, [workflowKernelSessionId, persistWorkflowKernelSessionId]);
 
   useEffect(() => {
     if (typeof localStorage === 'undefined') return;
@@ -329,12 +192,6 @@ export function SimpleModeShell() {
   }, [workspacePath, rightPanelWidth]);
 
   useEffect(() => {
-    const activeMode = workflowKernelSession?.activeMode;
-    if (!activeMode || activeMode === workflowMode) return;
-    setWorkflowMode(activeMode);
-  }, [workflowKernelSession?.activeMode, workflowMode]);
-
-  useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
     const media = window.matchMedia('(hover: hover) and (pointer: fine)');
     const handleChange = () => setSupportsPointerHover(media.matches);
@@ -342,36 +199,6 @@ export function SimpleModeShell() {
     media.addEventListener('change', handleChange);
     return () => media.removeEventListener('change', handleChange);
   }, []);
-
-  useEffect(() => {
-    if (hasHydratedQueueRef.current) return;
-    hasHydratedQueueRef.current = true;
-
-    if (typeof localStorage === 'undefined') return;
-    const restored = loadPersistedSimpleChatQueue(localStorage, workspacePath, MAX_QUEUED_CHAT_MESSAGES);
-    if (restored.length === 0) return;
-
-    setQueuedChatMessages(restored);
-    queueIdRef.current = restored.length;
-    showToast(
-      t('workflow.queue.recovered', {
-        count: restored.length,
-        defaultValue: `Recovered ${restored.length} queued chat message(s).`,
-      }),
-      'info',
-    );
-  }, [workspacePath, showToast, t]);
-
-  useEffect(() => {
-    if (!hasHydratedQueueRef.current || typeof localStorage === 'undefined') return;
-
-    if (queuedChatMessages.length === 0) {
-      clearPersistedSimpleChatQueue(localStorage);
-      return;
-    }
-
-    persistSimpleChatQueue(localStorage, queuedChatMessages, workspacePath);
-  }, [queuedChatMessages, workspacePath]);
 
   // Handle navigation requests coming from chat cards.
   useEffect(() => {
@@ -576,261 +403,84 @@ export function SimpleModeShell() {
     void setPermissionLevel(permissionSessionId, permissionLevel);
   }, [permissionSessionId, permissionLevel, setPermissionLevel]);
 
-  const handleStart = useCallback(
-    async (inputPrompt?: string) => {
-      const prompt = (inputPrompt ?? description).trim();
-      if (!prompt || isSubmitting || isAnalyzingStrategy) return;
-      if (inputPrompt === undefined) {
-        setDescription('');
-      }
+  const {
+    handleStart,
+    handleFollowUp,
+    handleStructuredInterviewSubmit,
+    handleSkipInterviewQuestion,
+    handleSkipPlanClarifyQuestion,
+    handleSkipPlanClarification,
+  } = useSimpleInputRouting({
+    description,
+    setDescription,
+    workflowMode,
+    workflowPhase,
+    planPhase,
+    isSubmitting,
+    isAnalyzingStrategy,
+    start,
+    sendFollowUp,
+    startWorkflow,
+    startPlanWorkflow,
+    overrideConfigNatural,
+    addPrdFeedback,
+    submitPlanClarification,
+    submitInterviewAnswer,
+    skipInterviewQuestion,
+    skipPlanClarification,
+    taskInterviewingPhase,
+    taskPendingQuestion,
+    planClarifyingPhase,
+    planPendingQuestion,
+    hasStructuredInterviewQuestion,
+    linkWorkflowKernelModeSession,
+    transitionAndSubmitWorkflowKernelInput,
+  });
 
-      const conversationContext = buildConversationHistory().map((turn) => ({
-        user: turn.user,
-        assistant: turn.assistant,
-      }));
-      await transitionAndSubmitWorkflowKernelInput(
-        workflowMode,
-        {
-          type: 'mode_entry_prompt',
-          content: prompt,
-          metadata: {
-            mode: workflowMode,
-            source: inputPrompt === undefined ? 'composer' : 'queue_or_external',
-          },
-        },
-        {
-          conversationContext,
-          artifactRefs: [],
-          contextSources: ['simple_mode'],
-          metadata: {
-            source: 'start',
-            mode: workflowMode,
-          },
-        },
-      );
-
-      if (workflowMode === 'task') {
-        // Route Task mode through the workflow orchestrator
-        await startWorkflow(prompt);
-        const taskModeSessionId = useWorkflowOrchestratorStore.getState().sessionId;
-        if (taskModeSessionId) {
-          await linkWorkflowKernelModeSession('task', taskModeSessionId);
-        }
-        return;
-      }
-
-      if (workflowMode === 'plan') {
-        // Route Plan mode through the plan orchestrator
-        await startPlanWorkflow(prompt);
-        const planModeSessionId = usePlanOrchestratorStore.getState().sessionId;
-        if (planModeSessionId) {
-          await linkWorkflowKernelModeSession('plan', planModeSessionId);
-        }
-        return;
-      }
-
-      await start(prompt, 'simple');
-    },
-    [
-      description,
+  const { queuedChatMessages, queueChatMessage, removeQueuedChatMessage, clearQueuedChatMessages } =
+    useQueuedChatMessages({
+      workspacePath,
+      workflowMode,
+      maxQueuedChatMessages: MAX_QUEUED_CHAT_MESSAGES,
+      isRunning,
+      isSubmitting,
       isAnalyzingStrategy,
-      isSubmitting,
-      start,
-      startWorkflow,
-      startPlanWorkflow,
-      linkWorkflowKernelModeSession,
-      transitionAndSubmitWorkflowKernelInput,
+      permissionRequest,
+      isTaskWorkflowBusy:
+        workflowMode === 'task' &&
+        (effectiveTaskPhaseForInput === 'analyzing' ||
+          effectiveTaskPhaseForInput === 'exploring' ||
+          effectiveTaskPhaseForInput === 'requirement_analysis' ||
+          effectiveTaskPhaseForInput === 'generating_prd' ||
+          effectiveTaskPhaseForInput === 'generating_design_doc' ||
+          effectiveTaskPhaseForInput === 'executing'),
+      isPlanWorkflowBusy:
+        workflowMode === 'plan' &&
+        (planIsBusy ||
+          effectivePlanPhaseForInput === 'analyzing' ||
+          effectivePlanPhaseForInput === 'planning' ||
+          effectivePlanPhaseForInput === 'executing'),
+      attachments,
+      addAttachment,
+      clearAttachments,
+      handleFollowUp,
+      handleStart,
+      showToast,
+      t,
+    });
+
+  const { modeSwitchConfirmOpen, handleWorkflowModeChange, handleConfirmModeSwitch, handleModeSwitchDialogOpenChange } =
+    useWorkflowModeSwitchGuard({
       workflowMode,
-    ],
-  );
-
-  const handleFollowUp = useCallback(
-    async (inputPrompt?: string) => {
-      const prompt = (inputPrompt ?? description).trim();
-      if (!prompt || isSubmitting) return;
-      if (inputPrompt === undefined) {
-        setDescription('');
-      }
-
-      // Route through orchestrator for task-specific interactive phases.
-      if (workflowMode === 'task') {
-        if (workflowPhase === 'configuring') {
-          await transitionAndSubmitWorkflowKernelInput(workflowMode, {
-            type: 'task_configuration',
-            content: prompt,
-            metadata: { mode: workflowMode, phase: workflowPhase },
-          });
-          overrideConfigNatural(prompt);
-          return;
-        }
-        if (workflowPhase === 'reviewing_prd') {
-          await transitionAndSubmitWorkflowKernelInput(workflowMode, {
-            type: 'task_prd_feedback',
-            content: prompt,
-            metadata: { mode: workflowMode, phase: workflowPhase },
-          });
-          addPrdFeedback(prompt);
-          return;
-        }
-        if (taskInterviewingPhase && taskPendingQuestion && !hasStructuredInterviewQuestion) {
-          await transitionAndSubmitWorkflowKernelInput(workflowMode, {
-            type: 'task_interview_answer',
-            content: prompt,
-            metadata: {
-              mode: workflowMode,
-              phase: workflowPhase,
-              questionId: taskPendingQuestion.questionId,
-            },
-          });
-          await submitInterviewAnswer(prompt);
-          return;
-        }
-      }
-
-      // Route plan clarification through plan orchestrator
-      if (planClarifyingPhase && planPendingQuestion) {
-        await transitionAndSubmitWorkflowKernelInput(workflowMode, {
-          type: 'plan_clarification',
-          content: prompt,
-          metadata: {
-            mode: workflowMode,
-            phase: planPhase,
-            questionId: planPendingQuestion.questionId,
-          },
-        });
-        await submitPlanClarification({
-          questionId: planPendingQuestion.questionId,
-          answer: prompt,
-          skipped: false,
-        });
-        return;
-      }
-
-      await transitionAndSubmitWorkflowKernelInput(workflowMode, {
-        type: 'chat_message',
-        content: prompt,
-        metadata: {
-          mode: workflowMode,
-        },
-      });
-      await sendFollowUp(prompt);
-    },
-    [
-      description,
-      isSubmitting,
-      sendFollowUp,
-      workflowMode,
-      workflowPhase,
-      taskInterviewingPhase,
-      taskPendingQuestion,
-      planPhase,
-      planClarifyingPhase,
-      planPendingQuestion,
-      hasStructuredInterviewQuestion,
-      overrideConfigNatural,
-      addPrdFeedback,
-      submitPlanClarification,
-      submitInterviewAnswer,
-      transitionAndSubmitWorkflowKernelInput,
-    ],
-  );
-
-  const handleStructuredInterviewSubmit = useCallback(
-    async (answer: string) => {
-      const normalized = answer.trim();
-      if (!normalized) return;
-      const questionId = taskPendingQuestion?.questionId;
-      await transitionAndSubmitWorkflowKernelInput('task', {
-        type: 'task_interview_answer',
-        content: normalized,
-        metadata: {
-          mode: 'task',
-          phase: workflowPhase,
-          source: 'structured_interview_panel',
-          questionId: questionId ?? null,
-        },
-      });
-      await submitInterviewAnswer(normalized);
-    },
-    [taskPendingQuestion?.questionId, submitInterviewAnswer, transitionAndSubmitWorkflowKernelInput, workflowPhase],
-  );
-
-  const handleSkipInterviewQuestion = useCallback(async () => {
-    const questionId = taskPendingQuestion?.questionId;
-    await transitionAndSubmitWorkflowKernelInput('task', {
-      type: 'task_interview_answer',
-      content: '[skip]',
-      metadata: {
-        mode: 'task',
-        phase: workflowPhase,
-        source: 'interview_skip',
-        questionId: questionId ?? null,
-        skipped: true,
-      },
+      isRunning,
+      streamingOutput,
+      queuedChatMessagesLength: queuedChatMessages.length,
+      clearQueuedChatMessages,
+      setWorkflowMode,
+      transitionWorkflowKernelMode,
+      showToast,
+      t,
     });
-    await skipInterviewQuestion();
-  }, [taskPendingQuestion?.questionId, skipInterviewQuestion, transitionAndSubmitWorkflowKernelInput, workflowPhase]);
-
-  const handleSkipPlanClarifyQuestion = useCallback(async () => {
-    const questionId = planPendingQuestion?.questionId;
-    await transitionAndSubmitWorkflowKernelInput('plan', {
-      type: 'plan_clarification',
-      content: '[skip]',
-      metadata: {
-        mode: 'plan',
-        phase: planPhase,
-        source: 'plan_clarify_skip_question',
-        questionId: questionId ?? null,
-        skipped: true,
-      },
-    });
-    if (!planPendingQuestion) return;
-    await submitPlanClarification({
-      questionId: planPendingQuestion.questionId,
-      answer: '',
-      skipped: true,
-    });
-  }, [planPendingQuestion, planPhase, submitPlanClarification, transitionAndSubmitWorkflowKernelInput]);
-
-  const handleSkipPlanClarification = useCallback(async () => {
-    await transitionAndSubmitWorkflowKernelInput('plan', {
-      type: 'plan_clarification',
-      content: '[skip_all]',
-      metadata: {
-        mode: 'plan',
-        phase: planPhase,
-        source: 'plan_clarify_skip_all',
-        questionId: planPendingQuestion?.questionId ?? null,
-        skippedAll: true,
-      },
-    });
-    await skipPlanClarification();
-  }, [planPendingQuestion?.questionId, planPhase, skipPlanClarification, transitionAndSubmitWorkflowKernelInput]);
-
-  const removeQueuedChatMessage = useCallback((id: string) => {
-    setQueuedChatMessages((prev) => prev.filter((msg) => msg.id !== id));
-  }, []);
-
-  const queueChatMessage = useCallback(
-    (prompt: string, submitAsFollowUp: boolean, mode: WorkflowMode) => {
-      setQueuedChatMessages((prev) => {
-        if (prev.length >= MAX_QUEUED_CHAT_MESSAGES) {
-          showToast(
-            t('workflow.queueLimitReached', {
-              max: MAX_QUEUED_CHAT_MESSAGES,
-              defaultValue: `Queue is full (max ${MAX_QUEUED_CHAT_MESSAGES} messages).`,
-            }),
-            'info',
-          );
-          return prev;
-        }
-
-        const nextId = `queued-${Date.now()}-${queueIdRef.current++}`;
-        return [...prev, { id: nextId, prompt, submitAsFollowUp, mode, attempts: 0 }];
-      });
-    },
-    [showToast, t],
-  );
 
   const handleComposerSubmit = useCallback(async () => {
     const prompt = description.trim();
@@ -859,15 +509,6 @@ export function SimpleModeShell() {
         (workflowMode === 'plan' && planPhase === 'executing'));
 
     if (queueableExecution) {
-      if (attachments.length > 0) {
-        showToast(
-          t('workflow.queueAttachmentsNotSupported', {
-            defaultValue: 'Queued chat messages with new attachments are not supported yet.',
-          }),
-          'info',
-        );
-        return;
-      }
       await transitionAndSubmitWorkflowKernelInput(workflowMode, {
         type: 'follow_up_intent',
         content: prompt,
@@ -877,9 +518,14 @@ export function SimpleModeShell() {
           source: 'simple_mode_follow_up_queue',
           queueDepthBeforeEnqueue: queuedChatMessages.length,
           phase: workflowMode === 'task' ? workflowPhase : workflowMode === 'plan' ? planPhase : null,
+          attachmentCount: attachments.length,
         },
       });
-      queueChatMessage(prompt, submitAsFollowUp, workflowMode);
+      const queuedAttachments = [...attachments];
+      queueChatMessage(prompt, submitAsFollowUp, workflowMode, queuedAttachments);
+      if (queuedAttachments.length > 0) {
+        clearAttachments();
+      }
       setDescription('');
       return;
     }
@@ -903,9 +549,8 @@ export function SimpleModeShell() {
     hasStructuredInterviewQuestion,
     transitionAndSubmitWorkflowKernelInput,
     queuedChatMessages.length,
-    attachments.length,
-    showToast,
-    t,
+    attachments,
+    clearAttachments,
     queueChatMessage,
     handleFollowUp,
     handleStart,
@@ -921,7 +566,7 @@ export function SimpleModeShell() {
     reset();
     clearStrategyAnalysis();
     setDescription('');
-    setQueuedChatMessages([]);
+    clearQueuedChatMessages();
     void openWorkflowKernelSession('chat', {
       conversationContext: [],
       artifactRefs: [],
@@ -943,6 +588,7 @@ export function SimpleModeShell() {
     resetWorkflowKernel,
     openWorkflowKernelSession,
     streamingOutput,
+    clearQueuedChatMessages,
     showToast,
     t,
   ]);
@@ -957,7 +603,7 @@ export function SimpleModeShell() {
       setRightPanelOpen(false);
       setWorkflowMode('chat');
       setDescription('');
-      setQueuedChatMessages([]);
+      clearQueuedChatMessages();
       void openWorkflowKernelSession('chat', {
         conversationContext: [],
         artifactRefs: [],
@@ -975,6 +621,7 @@ export function SimpleModeShell() {
       resetPlanWorkflow,
       resetWorkflowKernel,
       openWorkflowKernelSession,
+      clearQueuedChatMessages,
     ],
   );
 
@@ -988,7 +635,7 @@ export function SimpleModeShell() {
       switchToSession(sessionId);
       setWorkflowMode('chat');
       setDescription('');
-      setQueuedChatMessages([]);
+      clearQueuedChatMessages();
       void openWorkflowKernelSession('chat', {
         conversationContext: [],
         artifactRefs: [],
@@ -1006,6 +653,7 @@ export function SimpleModeShell() {
       resetWorkflowKernel,
       openWorkflowKernelSession,
       switchToSession,
+      clearQueuedChatMessages,
     ],
   );
 
@@ -1236,84 +884,6 @@ export function SimpleModeShell() {
   );
 
   useEffect(() => {
-    if (queuedChatMessages.length === 0) return;
-    if (
-      isRunning ||
-      isSubmitting ||
-      isAnalyzingStrategy ||
-      permissionRequest ||
-      isTaskWorkflowBusy ||
-      isPlanWorkflowBusy
-    ) {
-      return;
-    }
-    if (queueDispatchInFlightRef.current) return;
-
-    const [nextMessage] = queuedChatMessages;
-    if (!nextMessage) return;
-    if (nextMessage.mode !== workflowMode) return;
-
-    queueDispatchInFlightRef.current = true;
-    setQueuedChatMessages((prev) => prev.slice(1));
-    const run = nextMessage.submitAsFollowUp ? handleFollowUp(nextMessage.prompt) : handleStart(nextMessage.prompt);
-    void Promise.resolve(run)
-      .then(() => {
-        showToast(
-          t('workflow.queue.consumed', {
-            defaultValue: 'Queued follow-up consumed.',
-          }),
-          'success',
-        );
-      })
-      .catch((error) => {
-        const retryCount = nextMessage.attempts + 1;
-        if (retryCount <= 2) {
-          setQueuedChatMessages((prev) => [
-            {
-              ...nextMessage,
-              attempts: retryCount,
-            },
-            ...prev,
-          ]);
-          showToast(
-            t('workflow.queue.retrying', {
-              attempt: retryCount,
-              defaultValue: `Queued follow-up failed, retrying (${retryCount}/2).`,
-            }),
-            'info',
-          );
-          return;
-        }
-
-        showToast(
-          t('workflow.queue.failed', {
-            defaultValue: 'Queued follow-up failed and was dropped.',
-          }),
-          'error',
-        );
-        if (error) {
-          console.error('[simple-mode] queued follow-up failed', error);
-        }
-      })
-      .finally(() => {
-        queueDispatchInFlightRef.current = false;
-      });
-  }, [
-    queuedChatMessages,
-    workflowMode,
-    isRunning,
-    isSubmitting,
-    isAnalyzingStrategy,
-    permissionRequest,
-    isTaskWorkflowBusy,
-    isPlanWorkflowBusy,
-    handleFollowUp,
-    handleStart,
-    showToast,
-    t,
-  ]);
-
-  useEffect(() => {
     let cancelled = false;
     void (async () => {
       const budget = await resolvePromptTokenBudget({
@@ -1537,6 +1107,12 @@ export function SimpleModeShell() {
         sessionUsage={sessionUsageTotals}
         tokenEstimate={tokenEstimate}
         isEstimatingTokenBudget={isEstimatingTokenBudget}
+      />
+
+      <WorkflowModeSwitchDialog
+        open={modeSwitchConfirmOpen}
+        onOpenChange={handleModeSwitchDialogOpenChange}
+        onConfirm={handleConfirmModeSwitch}
       />
     </div>
   );

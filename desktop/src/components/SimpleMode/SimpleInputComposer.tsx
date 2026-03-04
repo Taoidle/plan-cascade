@@ -255,6 +255,14 @@ export function SimpleInputComposer({
                   {message.mode}
                 </span>
                 <span className="text-xs text-gray-700 dark:text-gray-200 truncate flex-1">{message.prompt}</span>
+                {message.attachments.length > 0 && (
+                  <span className="text-2xs px-1 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 shrink-0">
+                    {t('workflow.queue.attachmentCount', {
+                      count: message.attachments.length,
+                      defaultValue: `${message.attachments.length} attachment(s)`,
+                    })}
+                  </span>
+                )}
                 {message.attempts > 0 && (
                   <span className="text-2xs text-amber-600 dark:text-amber-300 shrink-0">
                     {t('workflow.queue.retryCount', {

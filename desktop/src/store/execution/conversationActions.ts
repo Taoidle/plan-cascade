@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { deriveConversationTurns, rebuildStandaloneTurns } from '../../lib/conversationUtils';
+import { deriveConversationTurns, getNextTurnId, rebuildStandaloneTurns } from '../../lib/conversationUtils';
 import { reportNonFatal } from '../../lib/nonFatal';
 import { resolveSessionScopedContext } from '../../lib/contextSelectionBridge';
 import type { FileAttachmentData } from '../../types/attachment';
@@ -125,7 +125,8 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
         return;
       }
 
-      get().appendStreamLine(prompt, 'info');
+      const turnId = getNextTurnId(get().streamingOutput);
+      get().appendStreamLine(prompt, 'info', undefined, undefined, { turnId, turnBoundary: 'user' });
       get().toolCallFilter.reset();
 
       set({
@@ -603,6 +604,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
 
       const truncatedLines = lines.slice(0, userLineIndex);
       const newInfoId = (truncatedLines.length > 0 ? truncatedLines[truncatedLines.length - 1].id : 0) + 1;
+      const nextTurnId = getNextTurnId(truncatedLines);
       const linesWithEditedMessage: StreamLine[] = [
         ...truncatedLines,
         {
@@ -610,6 +612,8 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
           content: newContent,
           type: 'info' as StreamLineType,
           timestamp: Date.now(),
+          turnId: nextTurnId,
+          turnBoundary: 'user',
         },
       ];
 

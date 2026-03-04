@@ -4591,10 +4591,14 @@ mod skill_tool_policy_tests {
         let allowed = OrchestratorService::normalized_allowed_tools_from_skill_matches(&matches)
             .expect("allowlist should be enabled");
         let tools = vec![make_tool("Write"), make_tool("Read"), make_tool("Bash")];
-        let (filtered, blocked) = OrchestratorService::apply_skill_allowed_tool_filter(&tools, &allowed);
+        let (filtered, blocked) =
+            OrchestratorService::apply_skill_allowed_tool_filter(&tools, &allowed);
 
         let filtered_names: Vec<String> = filtered.into_iter().map(|tool| tool.name).collect();
-        assert_eq!(filtered_names, vec!["Write".to_string(), "Read".to_string()]);
+        assert_eq!(
+            filtered_names,
+            vec!["Write".to_string(), "Read".to_string()]
+        );
         assert_eq!(blocked, vec!["Bash".to_string()]);
     }
 }

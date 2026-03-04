@@ -115,7 +115,14 @@ export function WorkflowCardRenderer({ payload }: { payload: CardPayload }) {
         <PersonaIndicatorCard data={payload.data as PlanPersonaIndicatorData as unknown as PersonaIndicatorData} />
       );
     default:
-      return null;
+      return (
+        <div className="px-3 py-2 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20">
+          <p className="text-xs font-semibold text-amber-800 dark:text-amber-200">Unknown workflow card</p>
+          <p className="text-2xs mt-1 text-amber-700 dark:text-amber-300 break-all">
+            type: <code>{payload.cardType}</code> | id: <code>{payload.cardId}</code>
+          </p>
+        </div>
+      );
   }
 }
 

@@ -522,9 +522,10 @@ impl KeyringService {
         let mut rotated_key = vec![0u8; KEY_SIZE];
         OsRng.fill_bytes(&mut rotated_key);
 
-        if let Err(rotate_err) =
-            SecureStore::write_key_file_atomic(&current_store.key_path, &SecureStore::encode_key_bytes(&rotated_key))
-        {
+        if let Err(rotate_err) = SecureStore::write_key_file_atomic(
+            &current_store.key_path,
+            &SecureStore::encode_key_bytes(&rotated_key),
+        ) {
             return Err(AppError::keyring(format!(
                 "Failed to rotate encryption key: {}",
                 rotate_err
@@ -534,7 +535,10 @@ impl KeyringService {
         let rotated_store = match ensure_plan_cascade_dir().and_then(|dir| SecureStore::new(&dir)) {
             Ok(store) => store,
             Err(e) => {
-                let _ = SecureStore::write_key_file_atomic(&current_store.key_path, &previous_key_bytes);
+                let _ = SecureStore::write_key_file_atomic(
+                    &current_store.key_path,
+                    &previous_key_bytes,
+                );
                 return Err(AppError::keyring(format!(
                     "Failed to initialize rotated key store: {}",
                     e
@@ -542,9 +546,12 @@ impl KeyringService {
             }
         };
 
-        if let Err(e) = rotated_store.save_plaintext_map_with_cipher(&plaintext, &rotated_store.cipher) {
+        if let Err(e) =
+            rotated_store.save_plaintext_map_with_cipher(&plaintext, &rotated_store.cipher)
+        {
             tracing::error!(error = %e, "Failed to persist secrets after key rotation; attempting rollback");
-            let _ = SecureStore::write_key_file_atomic(&current_store.key_path, &previous_key_bytes);
+            let _ =
+                SecureStore::write_key_file_atomic(&current_store.key_path, &previous_key_bytes);
             if let Ok(restored) = ensure_plan_cascade_dir().and_then(|dir| SecureStore::new(&dir)) {
                 self.inner = Some(restored);
             }

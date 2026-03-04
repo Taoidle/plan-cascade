@@ -1,106 +1,106 @@
 {
-  "title": "Task Mode",
+  "title": "任务模式",
 
   "switcher": {
-    "suggested": "Task Mode suggested",
-    "confidence": "Confidence: {{confidence}}%",
+    "suggested": "建议使用任务模式",
+    "confidence": "置信度：{{confidence}}%",
     "reason": "{{reasoning}}",
-    "accept": "Enter Task Mode",
-    "dismiss": "Dismiss",
-    "chatMode": "Chat Mode",
-    "taskMode": "Task Mode",
-    "analyzing": "Analyzing task..."
+    "accept": "进入任务模式",
+    "dismiss": "忽略",
+    "chatMode": "聊天模式",
+    "taskMode": "任务模式",
+    "analyzing": "正在分析任务..."
   },
 
   "panel": {
-    "title": "Task Mode",
+    "title": "任务模式",
     "phase": {
-      "initialized": "Ready",
-      "generatingPrd": "Generating PRD...",
-      "reviewingPrd": "Review PRD",
-      "executing": "Executing",
-      "completed": "Completed",
-      "failed": "Failed",
-      "cancelled": "Cancelled"
+      "initialized": "就绪",
+      "generatingPrd": "正在生成 PRD...",
+      "reviewingPrd": "审核 PRD",
+      "executing": "执行中",
+      "completed": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消"
     },
     "prd": {
-      "title": "PRD: {{title}}",
-      "description": "Review and approve the generated PRD before execution begins.",
-      "stories": "Stories ({{count}})",
-      "noStories": "No stories generated yet.",
-      "priority": "Priority",
-      "dependencies": "Dependencies",
-      "acceptanceCriteria": "Acceptance Criteria",
-      "noDependencies": "None",
-      "approve": "Approve & Execute",
-      "regenerate": "Regenerate",
-      "generate": "Generate PRD",
-      "editStory": "Edit Story"
+      "title": "产品需求文档（PRD）：{{title}}",
+      "description": "请在执行开始前审核并批准生成的 PRD。",
+      "stories": "用户故事（{{count}}）",
+      "noStories": "尚未生成用户故事。",
+      "priority": "优先级",
+      "dependencies": "依赖",
+      "acceptanceCriteria": "验收标准",
+      "noDependencies": "无",
+      "approve": "批准并执行",
+      "regenerate": "重新生成",
+      "generate": "生成 PRD",
+      "editStory": "编辑故事"
     },
     "execution": {
-      "title": "Execution Progress",
-      "batch": "Batch {{current}} of {{total}}",
-      "storiesCompleted": "{{completed}} / {{total}} stories completed",
-      "storiesFailed": "{{count}} failed",
-      "cancel": "Cancel Execution",
-      "cancelling": "Cancelling..."
+      "title": "执行进度",
+      "batch": "批次 {{current}} / {{total}}",
+      "storiesCompleted": "已完成 {{completed}} / {{total}} 个故事",
+      "storiesFailed": "{{count}} 个失败",
+      "cancel": "取消执行",
+      "cancelling": "正在取消..."
     },
     "storyStatus": {
-      "pending": "Pending",
-      "running": "Running",
-      "completed": "Completed",
-      "failed": "Failed"
+      "pending": "待执行",
+      "running": "执行中",
+      "completed": "已完成",
+      "failed": "失败"
     },
     "report": {
-      "title": "Execution Report",
-      "totalStories": "Total Stories",
-      "completed": "Completed",
-      "failed": "Failed",
-      "duration": "Duration",
-      "success": "Success",
+      "title": "执行报告",
+      "totalStories": "故事总数",
+      "completed": "已完成",
+      "failed": "失败",
+      "duration": "耗时",
+      "success": "成功",
       "durationValue": "{{seconds}}s",
-      "exitTaskMode": "Exit Task Mode",
-      "viewReport": "View Report"
+      "exitTaskMode": "退出任务模式",
+      "viewReport": "查看报告"
     },
-    "exit": "Exit Task Mode",
-    "error": "Error: {{message}}"
+    "exit": "退出任务模式",
+    "error": "错误：{{message}}"
   },
 
   "qualityGates": {
-    "title": "Quality Gates",
+    "title": "质量门禁",
     "phase": {
-      "preValidation": "Pre-Validation",
-      "validation": "Validation",
-      "postValidation": "Post-Validation"
+      "preValidation": "预校验",
+      "validation": "校验",
+      "postValidation": "后校验"
     },
     "gate": {
-      "format": "Format",
-      "typeCheck": "TypeCheck",
-      "test": "Test",
-      "lint": "Lint",
-      "aiVerify": "AI Verify",
-      "codeReview": "Code Review",
-      "dor": "Definition of Ready",
-      "dod": "Definition of Done"
+      "format": "格式化",
+      "typeCheck": "类型检查",
+      "test": "测试",
+      "lint": "代码风格检查",
+      "aiVerify": "AI 校验",
+      "codeReview": "代码审查",
+      "dor": "就绪定义（DoR）",
+      "dod": "完成定义（DoD）"
     },
     "status": {
-      "pending": "Pending",
-      "running": "Running",
-      "passed": "Passed",
-      "failed": "Failed",
-      "skipped": "Skipped"
+      "pending": "待执行",
+      "running": "执行中",
+      "passed": "通过",
+      "failed": "失败",
+      "skipped": "跳过"
     },
     "codeReview": {
-      "title": "Code Review Scores",
-      "totalScore": "Total: {{score}} / 100",
+      "title": "代码审查评分",
+      "totalScore": "总分：{{score}} / 100",
       "dimensions": {
-        "codeQuality": "Code Quality",
-        "namingClarity": "Naming & Clarity",
-        "complexity": "Complexity",
-        "patternAdherence": "Pattern Adherence",
-        "security": "Security"
+        "codeQuality": "代码质量",
+        "namingClarity": "命名与清晰度",
+        "complexity": "复杂度",
+        "patternAdherence": "模式一致性",
+        "security": "安全性"
       }
     },
-    "noResults": "No quality gate results available."
+    "noResults": "暂无质量门禁结果。"
   }
 }

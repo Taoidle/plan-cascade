@@ -1,6 +1,5 @@
 {
   "title": "Simple Mode",
-
   "input": {
     "placeholder": "Describe what you want to build...",
     "followUpPlaceholder": "Type a message...",
@@ -8,7 +7,6 @@
     "previewMarkdown": "Preview markdown",
     "switchToEdit": "Switch to edit"
   },
-
   "history": {
     "title": "Execution History",
     "button": "History",
@@ -19,7 +17,6 @@
     "completed": "completed",
     "failed": "failed"
   },
-
   "progress": {
     "overallProgress": "Overall Progress",
     "batch": "Batch {{current}} of {{total}}",
@@ -27,7 +24,6 @@
     "executionLog": "Execution Log",
     "retryAttempt": "Retry attempt {{count}}"
   },
-
   "result": {
     "completedSuccessfully": "Completed Successfully",
     "executionFailed": "Execution Failed",
@@ -35,12 +31,10 @@
     "failedStories": "Failed Stories ({{count}})",
     "errorDetails": "Error Details"
   },
-
   "empty": {
     "title": "Ready to build",
     "description": "Describe your task above and Plan Cascade will automatically break it down, create a plan, and execute it step by step."
   },
-
   "strategies": {
     "direct": "Direct Execution",
     "hybridAuto": "Hybrid Auto",
@@ -49,7 +43,6 @@
     "hybrid": "Hybrid",
     "mega": "Mega"
   },
-
   "messageActions": {
     "edit": "Edit",
     "regenerate": "Regenerate",
@@ -62,7 +55,6 @@
     "fork": "Fork",
     "contextWarning": "Session will restart. Previous context will be lost."
   },
-
   "attachment": {
     "dropHere": "Drop files here",
     "pickFile": "Pick a file",
@@ -70,7 +62,6 @@
     "unsupportedType": "Unsupported file type",
     "removeFile": "Remove file"
   },
-
   "modelSwitcher": {
     "current": "Current model",
     "switchTo": "Switch to",
@@ -79,11 +70,9 @@
     "contextPreserved": "Context preserved",
     "sessionRestart": "Session will restart with the new model"
   },
-
   "projectSelector": {
     "openInFileManager": "Open in file manager"
   },
-
   "sidebar": {
     "newTask": "New Task",
     "addDirectory": "Add Directory",
@@ -107,7 +96,6 @@
     "removeSession": "Remove session",
     "currentFork": "(current)"
   },
-
   "skillPanel": {
     "title": "Skills & Memory",
     "manageAll": "Manage All...",
@@ -240,7 +228,6 @@
       "sessionMemoryRequiresSession": "Session memory requires an active session"
     }
   },
-
   "pluginPanel": {
     "title": "Plugins",
     "manageAll": "Manage All...",
@@ -250,13 +237,11 @@
     "marketplace": "Marketplace",
     "installFromUrl": "Install from URL"
   },
-
   "workflowMode": {
     "chat": "Chat",
     "plan": "Plan",
     "task": "Task"
   },
-
   "output": {
     "label": "Output",
     "toggleTitle": "Toggle detailed output panel",
@@ -287,7 +272,6 @@
     "readDepth": "Read Depth",
     "testsRead": "Tests Read"
   },
-
   "emptyChat": {
     "thinking": "Thinking...",
     "startConversation": "Start a conversation on the right input box."
@@ -295,7 +279,6 @@
   "chat": {
     "scrollToBottom": "Scroll to bottom"
   },
-
   "permission": {
     "toolRequiresApproval": "Tool requires approval:",
     "pending": "+{{count}} pending",
@@ -321,7 +304,6 @@
     },
     "tooltip": "Permission: {{level}} - {{description}}"
   },
-
   "actions": {
     "execute": "Execute",
     "executeTitle": "Start execution",
@@ -341,7 +323,6 @@
     "refreshProjectsTitle": "Refresh project list",
     "refreshAnalyticsTitle": "Refresh analytics data"
   },
-
   "contextBridge": {
     "contextWillTransfer": "Chat history will transfer to Task",
     "pendingTaskContext": "Task context ready to inject",
@@ -356,18 +337,22 @@
     "switchToChatWithTaskContext": "Switching to Chat mode with task context",
     "contextReset": "Context cleared for new task"
   },
-
   "workflow": {
     "cancelWorkflow": "Cancel workflow",
+    "modeSwitchConfirmTitle": "Switch workflow mode?",
     "modeSwitchConfirm": "An execution is still running. Switching modes now may change your active workflow context. Continue?",
     "modeSwitchFailed": "Failed to switch workflow mode. Please retry.",
     "clearQueuedMessages": "Cleared queued chat messages when leaving Chat mode.",
     "queueLimitReached": "Queue is full (max 3 messages).",
-    "queueAttachmentsNotSupported": "Queued chat messages with new attachments are not supported yet.",
+    "queueAttachmentsNotSupported": "Queued attachments are supported. If an attachment cannot be queued, you will see a recovery tip.",
     "queue": {
       "title": "Queued messages ({{count}}/{{max}})",
       "recovered": "Recovered {{count}} queued chat message(s).",
+      "replayingAttachments": "Restored {{count}} queued attachment(s).",
       "placeholder": "Execution in progress. Your message will be queued...",
+      "attachmentCount": "{{count}} attachment(s)",
+      "attachmentsDropped": "{{count}} attachment(s) could not be queued. Message queued without them; reattach after this run.",
+      "persistenceFailed": "Queued messages could not be persisted locally. Keep this window open, or remove large attachments and retry.",
       "remove": "Remove queued message",
       "removeShort": "Remove"
     },
@@ -379,7 +364,6 @@
       "exceeded": "Estimated tokens exceed budget. Some attachment context may be truncated.",
       "estimating": "Estimating token budget..."
     },
-
     "strategy": {
       "title": "Strategy Analysis",
       "confidence": "{{pct}}% confidence",
@@ -390,7 +374,6 @@
       "highRisk": "High risk — consider enabling TDD mode and full quality gates",
       "manyStories": "{{count}} estimated stories — consider increasing max parallel agents"
     },
-
     "config": {
       "title": "Configuration",
       "customized": "customized",
@@ -422,7 +405,6 @@
       "backToForm": "Back to form",
       "applied": "Applied"
     },
-
     "designDoc": {
       "title": "Design Document",
       "summary": "Architecture summary derived from PRD",
@@ -446,7 +428,6 @@
       "alternatives": "Alternatives",
       "savedTo": "Saved to {{path}}"
     },
-
     "exploration": {
       "title": "Project Exploration",
       "techStack": "Tech Stack",
@@ -464,7 +445,6 @@
       "summaryUnavailable": "AI summary unavailable, using deterministic exploration results.",
       "summarySynthesized": "Summary synthesized from deterministic exploration data."
     },
-
     "persona": {
       "TechLead": "Tech Lead",
       "SeniorEngineer": "Senior Engineer",
@@ -475,7 +455,6 @@
       "QaEngineer": "QA Engineer",
       "active": "{{name}} is working..."
     },
-
     "requirementAnalysis": {
       "title": "Requirement Analysis",
       "keyRequirements": "Key Requirements",
@@ -483,7 +462,6 @@
       "scope": "Suggested Scope",
       "fullAnalysis": "Full Analysis"
     },
-
     "architectureReview": {
       "title": "Architecture Review",
       "concerns": "Architectural Concerns",
@@ -494,11 +472,9 @@
       "requestChanges": "Apply Selected & Revise PRD",
       "approved": "Approved"
     },
-
     "common": {
       "processing": "Processing..."
     },
-
     "progress": {
       "title": "Workflow Progress",
       "phaseAnalyze": "Analyze",
@@ -595,7 +571,6 @@
         }
       }
     },
-
     "interview": {
       "questionTitle": "Interview Question",
       "questionNumber": "{{current}}/{{total}}",
@@ -617,7 +592,6 @@
       "backToOptions": "Back to options",
       "generating": "Generating next question..."
     },
-
     "prd": {
       "title": "PRD",
       "storiesAndBatches": "{{stories}} stories / {{batches}} batches",
@@ -633,7 +607,6 @@
       "priorityMedium": "Medium",
       "priorityLow": "Low"
     },
-
     "execution": {
       "batchStarted": "Batch Started",
       "storyStarted": "Story Started",
@@ -642,13 +615,11 @@
       "batchComplete": "Batch Complete",
       "batchLabel": "Batch {{current}}/{{total}}"
     },
-
     "gates": {
       "qualityGate": "Quality Gate: {{title}}",
       "passed": "passed",
       "failed": "failed"
     },
-
     "report": {
       "executionComplete": "Execution Complete",
       "executionFailed": "Execution Failed",
@@ -658,7 +629,6 @@
       "duration": "Duration",
       "agentAssignments": "Agent Assignments"
     },
-
     "input": {
       "taskPlaceholder": "Describe a task (implementation / analysis / refactor)...",
       "configuringPlaceholder": "Type config overrides (e.g. \"6 parallel, enable TDD\") or click Continue above...",
@@ -667,7 +637,6 @@
       "waitingPlaceholder": "Waiting for response...",
       "planPlaceholder": "Describe a task to decompose and execute (writing, research, etc.)..."
     },
-
     "fileChange": {
       "newFile": "New File",
       "modified": "Modified",
@@ -679,14 +648,12 @@
       "linesChanged": "+{{added}} -{{removed}}",
       "moreLines": "... +{{count}} more lines"
     },
-
     "turnSummary": {
       "title": "Turn Changes",
       "files": "{{count}} files",
       "viewAll": "View All Changes",
       "revertAll": "Revert All"
     },
-
     "orchestrator": {
       "analyzingTask": "Analyzing task complexity...",
       "startingInterview": "Starting requirements interview...",
@@ -715,7 +682,6 @@
       "architectureReviewMaxRounds": "Architecture review limit reached (3 rounds). Proceeding with current PRD."
     }
   },
-
   "agentPanel": {
     "title": "Agents",
     "manageAll": "Manage All...",
@@ -726,7 +692,6 @@
     "newAgent": "New Agent",
     "deleteConfirm": "Delete this agent?"
   },
-
   "agentDialog": {
     "title": "Manage Agents",
     "searchPlaceholder": "Search agents...",
@@ -748,7 +713,6 @@
     "selectOrCreate": "Select or create an agent",
     "unsupportedBackend": "Agent system prompts are not supported with Claude Code backend"
   },
-
   "promptPanel": {
     "title": "Prompts",
     "manageAll": "Manage All...",
@@ -756,7 +720,6 @@
     "noPrompts": "No prompts yet",
     "insert": "Insert"
   },
-
   "promptDialog": {
     "title": "Manage Prompts",
     "searchPlaceholder": "Search prompts...",
@@ -778,13 +741,11 @@
     "duplicate": "Duplicate as Custom",
     "selectOrCreate": "Select or create a prompt"
   },
-
   "promptPalette": {
     "title": "/ Prompts",
     "back": "Back",
     "insertPrompt": "Insert Prompt"
   },
-
   "export": {
     "markdown": "Markdown (.md)",
     "conversationTranscript": "Conversation transcript",
@@ -813,7 +774,6 @@
     "pngExported": "PNG exported.",
     "jpgExported": "JPG exported."
   },
-
   "contextSources": {
     "knowledge": "Knowledge",
     "memory": "Memory",
@@ -854,7 +814,6 @@
       }
     }
   },
-
   "chatToolbar": {
     "attachFile": "Attach file",
     "toggleOutput": "Output",
@@ -966,5 +925,29 @@
     "collapseSidebar": "Collapse sidebar",
     "expandPanel": "Expand panel",
     "collapsePanel": "Collapse panel"
+  },
+  "contextSummary": {
+    "title": "Effective Context",
+    "why": "Why",
+    "off": "off",
+    "show": "Show effective context",
+    "hide": "Hide",
+    "knowledgeCount": "{{count}} selected",
+    "skillsCount": "{{count}} selected",
+    "source": {
+      "legacy": "legacy",
+      "unified": "unified"
+    },
+    "memoryMode": {
+      "auto_exclude": "auto exclude",
+      "only_selected": "only selected"
+    },
+    "memoryDetail": "{{mode}} · {{scopeCount}} scopes · {{itemCount}} items",
+    "origin": "origin: {{origin}}",
+    "originValues": {
+      "auto": "auto",
+      "explicit": "explicit",
+      "mixed": "mixed"
+    }
   }
 }

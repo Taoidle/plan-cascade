@@ -8,8 +8,8 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
-use crate::commands::mcp::McpRuntimeState;
 use crate::commands::mcp::reconcile_and_connect_enabled_servers;
+use crate::commands::mcp::McpRuntimeState;
 use crate::commands::plugins::PluginState;
 use crate::commands::remote::RemoteState;
 use crate::commands::spec_interview::SpecInterviewState;

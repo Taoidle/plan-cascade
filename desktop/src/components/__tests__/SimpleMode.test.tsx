@@ -268,6 +268,28 @@ vi.mock('../SimpleMode/ChatToolbar', () => ({
   ),
 }));
 
+vi.mock('../SimpleMode/WorkflowModeSwitchDialog', () => ({
+  WorkflowModeSwitchDialog: ({
+    open,
+    onOpenChange,
+    onConfirm,
+  }: {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    onConfirm: () => void;
+  }) =>
+    open ? (
+      <div data-testid="mode-switch-dialog">
+        <button data-testid="mode-switch-confirm" onClick={onConfirm}>
+          confirm-mode-switch
+        </button>
+        <button data-testid="mode-switch-cancel" onClick={() => onOpenChange(false)}>
+          cancel-mode-switch
+        </button>
+      </div>
+    ) : null,
+}));
+
 vi.mock('../../lib/fileChangeCardBridge', () => ({
   createFileChangeCardBridge: () => ({
     startListening: async () => () => {},
@@ -432,6 +454,7 @@ function resetStates() {
     attachments: [],
     addAttachment: vi.fn(),
     removeAttachment: vi.fn(),
+    clearAttachments: vi.fn(),
     backgroundSessions: {},
     switchToSession: vi.fn(),
     removeBackgroundSession: vi.fn(),
@@ -603,6 +626,23 @@ describe('SimpleMode', () => {
     await waitFor(() => {
       expect(storeHarness.getPlanOrchestratorState().startPlanWorkflow).toHaveBeenCalledWith('Plan migration rollout');
       expect(storeHarness.getWorkflowKernelState().linkModeSession).toHaveBeenCalledWith('plan', 'plan-session-1');
+    });
+  });
+
+  it('requires confirmation to switch workflow mode while execution is running', async () => {
+    storeHarness.setExecutionState({
+      ...storeHarness.getExecutionState(),
+      status: 'running',
+    });
+    renderSimpleMode();
+
+    fireEvent.click(screen.getByTestId('mode-task'));
+    expect(screen.getByTestId('toolbar-workflow-mode')).toHaveTextContent('chat');
+    expect(screen.getByTestId('mode-switch-dialog')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('mode-switch-confirm'));
+    await waitFor(() => {
+      expect(screen.getByTestId('toolbar-workflow-mode')).toHaveTextContent('task');
     });
   });
 
