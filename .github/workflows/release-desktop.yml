@@ -34,8 +34,49 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Sync vendored openai-api-rs
-        run: ./scripts/vendor-openai-api-rs-sync.sh
+      - name: Prepare vendored openai-api-rs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ROOT_DIR="$GITHUB_WORKSPACE"
+          META_FILE="$ROOT_DIR/desktop/src-tauri/vendor-patches/openai-api-rs/UPSTREAM.md"
+          VENDOR_DIR="$ROOT_DIR/desktop/src-tauri/vendor/openai-api-rs"
+          PATCH_DIR="$ROOT_DIR/desktop/src-tauri/vendor-patches/openai-api-rs"
+
+          if [[ ! -f "$META_FILE" ]]; then
+            echo "::error::Vendor metadata file not found: $META_FILE"
+            exit 1
+          fi
+
+          UPSTREAM_REPO="$(awk -F': ' '$1 == "upstream_repo" { print $2; exit }' "$META_FILE")"
+          UPSTREAM_REF="$(awk -F': ' '$1 == "upstream_ref" { print $2; exit }' "$META_FILE")"
+
+          if [[ -z "${UPSTREAM_REPO}" || -z "${UPSTREAM_REF}" ]]; then
+            echo "::error::upstream_repo/upstream_ref is empty in $META_FILE"
+            exit 1
+          fi
+
+          TMP_DIR="$(mktemp -d)"
+          trap 'rm -rf "$TMP_DIR"' EXIT
+
+          git clone --filter=blob:none "$UPSTREAM_REPO" "$TMP_DIR/upstream"
+          git -C "$TMP_DIR/upstream" checkout --quiet "$UPSTREAM_REF"
+
+          shopt -s nullglob
+          patches=("$PATCH_DIR"/*.patch)
+          shopt -u nullglob
+          for patch_file in "${patches[@]}"; do
+            echo "Applying patch: $(basename "$patch_file")"
+            git -C "$TMP_DIR/upstream" apply --whitespace=nowarn "$patch_file"
+          done
+
+          rm -rf "$VENDOR_DIR"
+          mkdir -p "$VENDOR_DIR"
+          cp -a "$TMP_DIR/upstream/." "$VENDOR_DIR/"
+          rm -rf "$VENDOR_DIR/.git"
+
+          test -f "$VENDOR_DIR/Cargo.toml"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -54,6 +95,28 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Validate macOS signing secrets
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for key in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [[ -z "${!key:-}" ]]; then
+              missing+=("$key")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing required macOS signing/notarization secrets: ${missing[*]}"
+            exit 1
+          fi
+
       - name: Cache Cargo registry
         uses: actions/cache@v4
         with:
@@ -62,7 +125,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('desktop/src-tauri/Cargo.lock', 'desktop/src-tauri/vendor/openai-api-rs/**') }}
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('desktop/src-tauri/Cargo.lock', 'desktop/src-tauri/vendor-patches/openai-api-rs/**') }}
           restore-keys: |
             ${{ runner.os }}-cargo-release-
             ${{ runner.os }}-cargo-
@@ -85,6 +148,12 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           projectPath: desktop
           args: --target ${{ matrix.target }}
