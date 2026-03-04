@@ -4,6 +4,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { SimpleInputComposer } from './SimpleInputComposer';
 import type { InputBoxHandle } from './InputBox';
 import type { SimpleInputComposerProps } from './SimpleInputComposer';
+import type { QueuedChatMessage } from './queuePersistence';
 
 vi.mock('../shared/EffectiveContextSummary', () => ({
   EffectiveContextSummary: () => <div data-testid="effective-summary" />,
@@ -59,7 +60,29 @@ function makeProps(overrides?: Partial<SimpleInputComposerProps>): SimpleInputCo
     onClearAgent: vi.fn(),
     queuedChatMessages: [],
     onRemoveQueuedChatMessage: vi.fn(),
+    onMoveQueuedChatMessage: vi.fn(),
+    onSetQueuedChatMessagePriority: vi.fn(),
+    onRetryQueuedChatMessage: vi.fn(),
+    onClearQueuedChatMessages: vi.fn(),
     maxQueuedChatMessages: 3,
+    ...overrides,
+  };
+}
+
+function createQueuedMessage(overrides?: Partial<QueuedChatMessage>): QueuedChatMessage {
+  return {
+    id: 'q1',
+    sessionId: 'session-1',
+    prompt: 'queued prompt',
+    submitAsFollowUp: true,
+    mode: 'chat',
+    attempts: 0,
+    attachments: [],
+    priority: 'normal',
+    status: 'pending',
+    enqueueSeq: 0,
+    createdAt: new Date('2026-01-01T00:00:00.000Z').toISOString(),
+    lastError: null,
     ...overrides,
   };
 }
@@ -68,9 +91,7 @@ describe('SimpleInputComposer', () => {
   it('renders queued messages and removes one on click', () => {
     const onRemoveQueuedChatMessage = vi.fn();
     const props = makeProps({
-      queuedChatMessages: [
-        { id: 'q1', prompt: 'queued prompt', submitAsFollowUp: true, mode: 'chat', attempts: 0, attachments: [] },
-      ],
+      queuedChatMessages: [createQueuedMessage()],
       onRemoveQueuedChatMessage,
     });
 
@@ -79,6 +100,58 @@ describe('SimpleInputComposer', () => {
     expect(screen.getByText('queued prompt')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Remove'));
     expect(onRemoveQueuedChatMessage).toHaveBeenCalledWith('q1');
+  });
+
+  it('wires queue control actions to callbacks', () => {
+    const onMoveQueuedChatMessage = vi.fn();
+    const onSetQueuedChatMessagePriority = vi.fn();
+    const onRetryQueuedChatMessage = vi.fn();
+    const onClearQueuedChatMessages = vi.fn();
+
+    const props = makeProps({
+      queuedChatMessages: [createQueuedMessage({ status: 'blocked', lastError: 'switch failed' })],
+      onMoveQueuedChatMessage,
+      onSetQueuedChatMessagePriority,
+      onRetryQueuedChatMessage,
+      onClearQueuedChatMessages,
+    });
+
+    render(<SimpleInputComposer {...props} />);
+
+    fireEvent.click(screen.getByTitle('Move to top'));
+    expect(onMoveQueuedChatMessage).toHaveBeenCalledWith('q1', 'top');
+
+    fireEvent.click(screen.getByTitle('Move to bottom'));
+    expect(onMoveQueuedChatMessage).toHaveBeenCalledWith('q1', 'bottom');
+
+    fireEvent.click(screen.getByTitle('high'));
+    expect(onSetQueuedChatMessagePriority).toHaveBeenCalledWith('q1', 'high');
+
+    fireEvent.click(screen.getByTitle('Retry'));
+    expect(onRetryQueuedChatMessage).toHaveBeenCalledWith('q1');
+
+    fireEvent.click(screen.getByText('Clear All'));
+    expect(onClearQueuedChatMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders queue operation labels from i18n keys', () => {
+    const tSpy = vi.fn((key: string) => key);
+    const props = makeProps({
+      t: tSpy,
+      queuedChatMessages: [createQueuedMessage()],
+    });
+
+    render(<SimpleInputComposer {...props} />);
+
+    expect(screen.getByText('workflow.queue.clearAll')).toBeInTheDocument();
+    expect(tSpy).toHaveBeenCalledWith(
+      'workflow.queue.clearAll',
+      expect.objectContaining({ defaultValue: 'Clear All' }),
+    );
+    expect(tSpy).toHaveBeenCalledWith(
+      'workflow.queue.moveTop',
+      expect.objectContaining({ defaultValue: 'Move to top' }),
+    );
   });
 
   it('shows plan clarify skip-all and calls handler', () => {

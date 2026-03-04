@@ -11,7 +11,8 @@ use crate::utils::error::{AppError, AppResult};
 
 use super::adapter::DomainAdapter;
 use super::types::{
-    calculate_plan_batches, ClarificationAnswer, Plan, PlanStep, StepPriority, TaskDomain,
+    calculate_plan_batches_with_parallel, ClarificationAnswer, Plan, PlanExecutionConfig,
+    PlanStep, StepPriority, TaskDomain,
 };
 
 /// Generate a plan by decomposing the task into steps.
@@ -121,7 +122,15 @@ fn parse_plan(text: &str, domain: &TaskDomain, adapter_name: &str) -> AppResult<
         return Err(AppError::Internal("Plan has no steps".to_string()));
     }
 
-    let batches = calculate_plan_batches(&steps);
+    let max_parallel = parsed
+        .get("executionConfig")
+        .and_then(|v| v.get("maxParallel"))
+        .and_then(|v| v.as_u64())
+        .map(|value| value as usize)
+        .unwrap_or(4)
+        .clamp(1, 8);
+    let execution_config = PlanExecutionConfig { max_parallel };
+    let batches = calculate_plan_batches_with_parallel(&steps, execution_config.max_parallel);
 
     Ok(Plan {
         title,
@@ -130,6 +139,7 @@ fn parse_plan(text: &str, domain: &TaskDomain, adapter_name: &str) -> AppResult<
         adapter_name: adapter_name.to_string(),
         steps,
         batches,
+        execution_config,
     })
 }
 

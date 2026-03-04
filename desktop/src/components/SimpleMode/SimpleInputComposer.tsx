@@ -4,7 +4,7 @@ import type { PlanClarifyQuestionCardData } from '../../types/planModeCard';
 import type { InterviewQuestionCardData } from '../../types/workflowCard';
 import { InputBox, type InputBoxHandle } from './InputBox';
 import { InterviewInputPanel } from './InterviewInputPanel';
-import type { QueuedChatMessage } from './queuePersistence';
+import type { QueuePriority, QueuedChatMessage } from './queuePersistence';
 
 export interface SimpleInputComposerProps {
   t: (key: string, opts?: { defaultValue?: string; [key: string]: unknown }) => string;
@@ -38,6 +38,10 @@ export interface SimpleInputComposerProps {
   onClearAgent: () => void;
   queuedChatMessages: QueuedChatMessage[];
   onRemoveQueuedChatMessage: (id: string) => void;
+  onMoveQueuedChatMessage: (id: string, direction: 'up' | 'down' | 'top' | 'bottom') => void;
+  onSetQueuedChatMessagePriority: (id: string, priority: QueuePriority) => void;
+  onRetryQueuedChatMessage: (id: string) => void;
+  onClearQueuedChatMessages: () => void;
   maxQueuedChatMessages: number;
 }
 
@@ -73,6 +77,10 @@ export function SimpleInputComposer({
   onClearAgent,
   queuedChatMessages,
   onRemoveQueuedChatMessage,
+  onMoveQueuedChatMessage,
+  onSetQueuedChatMessagePriority,
+  onRetryQueuedChatMessage,
+  onClearQueuedChatMessages,
   maxQueuedChatMessages,
 }: SimpleInputComposerProps) {
   return (
@@ -234,13 +242,21 @@ export function SimpleInputComposer({
 
       {queuedChatMessages.length > 0 && (
         <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 px-3 py-2">
-          <p className="text-xs font-medium text-gray-600 dark:text-gray-300">
-            {t('workflow.queue.title', {
-              count: queuedChatMessages.length,
-              max: maxQueuedChatMessages,
-              defaultValue: `Queued messages (${queuedChatMessages.length}/${maxQueuedChatMessages})`,
-            })}
-          </p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-medium text-gray-600 dark:text-gray-300">
+              {t('workflow.queue.title', {
+                count: queuedChatMessages.length,
+                max: maxQueuedChatMessages,
+                defaultValue: `Queued messages (${queuedChatMessages.length}/${maxQueuedChatMessages})`,
+              })}
+            </p>
+            <button
+              onClick={onClearQueuedChatMessages}
+              className="text-2xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+            >
+              {t('workflow.queue.clearAll', { defaultValue: 'Clear All' })}
+            </button>
+          </div>
           <div className="mt-2 space-y-1">
             {queuedChatMessages.map((message, index) => (
               <div
@@ -249,7 +265,13 @@ export function SimpleInputComposer({
               >
                 <span className="text-2xs text-gray-500 dark:text-gray-400 shrink-0">#{index + 1}</span>
                 <span className="text-2xs px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-300 shrink-0">
-                  {message.mode}
+                  {t(`workflowMode.${message.mode}`, { defaultValue: message.mode })}
+                </span>
+                <span className="text-2xs px-1 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 shrink-0">
+                  {t(`workflow.queue.priority.${message.priority}`, { defaultValue: message.priority })}
+                </span>
+                <span className="text-2xs px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 shrink-0">
+                  {t(`workflow.queue.status.${message.status}`, { defaultValue: message.status })}
                 </span>
                 <span className="text-xs text-gray-700 dark:text-gray-200 truncate flex-1">{message.prompt}</span>
                 {message.attachments.length > 0 && (
@@ -268,6 +290,77 @@ export function SimpleInputComposer({
                     })}
                   </span>
                 )}
+                {message.lastError && (message.status === 'failed' || message.status === 'blocked') && (
+                  <span
+                    className="text-2xs text-rose-600 dark:text-rose-300 truncate max-w-44 shrink-0"
+                    title={message.lastError}
+                  >
+                    {t('workflow.queue.blockedReason', {
+                      reason: message.lastError,
+                      defaultValue: `reason: ${message.lastError}`,
+                    })}
+                  </span>
+                )}
+                <div className="shrink-0 flex items-center gap-1">
+                  <button
+                    onClick={() => onMoveQueuedChatMessage(message.id, 'top')}
+                    className="text-2xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                    title={t('workflow.queue.moveTop', { defaultValue: 'Move to top' })}
+                  >
+                    ⇡
+                  </button>
+                  <button
+                    onClick={() => onMoveQueuedChatMessage(message.id, 'up')}
+                    className="text-2xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                    title={t('workflow.queue.moveUp', { defaultValue: 'Move up' })}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    onClick={() => onMoveQueuedChatMessage(message.id, 'down')}
+                    className="text-2xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                    title={t('workflow.queue.moveDown', { defaultValue: 'Move down' })}
+                  >
+                    ↓
+                  </button>
+                  <button
+                    onClick={() => onMoveQueuedChatMessage(message.id, 'bottom')}
+                    className="text-2xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                    title={t('workflow.queue.moveBottom', { defaultValue: 'Move to bottom' })}
+                  >
+                    ⇣
+                  </button>
+                  <button
+                    onClick={() => onSetQueuedChatMessagePriority(message.id, 'high')}
+                    className="text-2xs text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 transition-colors"
+                    title={t('workflow.queue.priority.high', { defaultValue: 'high' })}
+                  >
+                    H
+                  </button>
+                  <button
+                    onClick={() => onSetQueuedChatMessagePriority(message.id, 'normal')}
+                    className="text-2xs text-sky-600 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300 transition-colors"
+                    title={t('workflow.queue.priority.normal', { defaultValue: 'normal' })}
+                  >
+                    N
+                  </button>
+                  <button
+                    onClick={() => onSetQueuedChatMessagePriority(message.id, 'low')}
+                    className="text-2xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                    title={t('workflow.queue.priority.low', { defaultValue: 'low' })}
+                  >
+                    L
+                  </button>
+                  {(message.status === 'failed' || message.status === 'blocked') && (
+                    <button
+                      onClick={() => onRetryQueuedChatMessage(message.id)}
+                      className="text-2xs text-amber-600 hover:text-amber-700 dark:text-amber-300 dark:hover:text-amber-200 transition-colors"
+                      title={t('workflow.queue.retryNow', { defaultValue: 'Retry' })}
+                    >
+                      {t('workflow.queue.retryNowShort', { defaultValue: 'Retry' })}
+                    </button>
+                  )}
+                </div>
                 <button
                   onClick={() => onRemoveQueuedChatMessage(message.id)}
                   className="text-2xs text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 transition-colors"

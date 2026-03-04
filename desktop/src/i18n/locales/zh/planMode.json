@@ -17,7 +17,65 @@
     "completionCriteria": "完成标准",
     "deps": "依赖",
     "expectedOutput": "预期输出",
-    "approveAndExecute": "批准并执行"
+    "approveAndExecute": "批准并执行",
+    "editStep": "编辑步骤",
+    "editStepFor": "编辑步骤 {{id}}",
+    "stepTitle": "步骤标题",
+    "stepDescription": "步骤描述",
+    "dependenciesCsv": "依赖（逗号分隔 ID）",
+    "removeStep": "删除步骤",
+    "clearDependencies": "清空依赖",
+    "priority": {
+      "high": "高",
+      "medium": "中",
+      "low": "低"
+    },
+    "reorder": {
+      "up": "上移",
+      "down": "下移"
+    },
+    "retryStep": "重试 {{id}}",
+    "retryingStep": "正在重试 {{id}}...",
+    "addStep": {
+      "action": "新增步骤",
+      "idPlaceholder": "step-id",
+      "titlePlaceholder": "步骤标题",
+      "descriptionPlaceholder": "步骤描述"
+    },
+    "parallelism": {
+      "label": "并行 {{count}}",
+      "inputLabel": "最大并行度",
+      "apply": "应用并行度"
+    },
+    "validation": {
+      "blockTitle": "计划校验未通过，已阻止执行",
+      "duplicateStepId": "步骤 ID 重复：{{stepId}}",
+      "missingDependency": "步骤 {{stepId}} 依赖了不存在的步骤 {{dependencyId}}",
+      "selfDependency": "步骤 {{stepId}} 不能依赖自身",
+      "cycleDependency": "检测到依赖环，位置接近 {{stepId}}",
+      "parallelOutOfRange": "并行度必须在 {{min}} 到 {{max}} 之间",
+      "generic": "计划校验失败",
+      "fixSuggestion": "请先修复以上问题，再执行计划。"
+    },
+    "editSummary": {
+      "title": "计划编辑摘要",
+      "batchRecomputed": "已重新计算执行批次。",
+      "field": {
+        "title": "标题",
+        "description": "描述",
+        "priority": "优先级",
+        "dependencies": "依赖"
+      },
+      "operation": {
+        "add_step": "新增步骤",
+        "update_step": "更新步骤",
+        "remove_step": "删除步骤",
+        "reorder_step": "重排步骤",
+        "set_dependency": "设置依赖",
+        "clear_dependency": "清除依赖",
+        "set_parallelism": "设置并行度"
+      }
+    }
   },
 
   "execution": {

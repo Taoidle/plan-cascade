@@ -17,7 +17,65 @@
     "completionCriteria": "Completion Criteria",
     "deps": "deps",
     "expectedOutput": "Expected output",
-    "approveAndExecute": "Approve & Execute"
+    "approveAndExecute": "Approve & Execute",
+    "editStep": "Edit Step",
+    "editStepFor": "Edit Step {{id}}",
+    "stepTitle": "Step title",
+    "stepDescription": "Step description",
+    "dependenciesCsv": "Dependencies (comma-separated IDs)",
+    "removeStep": "Remove Step",
+    "clearDependencies": "Clear Dependencies",
+    "priority": {
+      "high": "high",
+      "medium": "medium",
+      "low": "low"
+    },
+    "reorder": {
+      "up": "Move Up",
+      "down": "Move Down"
+    },
+    "retryStep": "Retry {{id}}",
+    "retryingStep": "Retrying {{id}}...",
+    "addStep": {
+      "action": "Add Step",
+      "idPlaceholder": "step-id",
+      "titlePlaceholder": "Step title",
+      "descriptionPlaceholder": "Step description"
+    },
+    "parallelism": {
+      "label": "parallel {{count}}",
+      "inputLabel": "Max parallel",
+      "apply": "Apply Parallelism"
+    },
+    "validation": {
+      "blockTitle": "Execution blocked by plan validation",
+      "duplicateStepId": "Duplicate step id: {{stepId}}",
+      "missingDependency": "Step {{stepId}} depends on missing step {{dependencyId}}",
+      "selfDependency": "Step {{stepId}} cannot depend on itself",
+      "cycleDependency": "Dependency cycle detected near {{stepId}}",
+      "parallelOutOfRange": "Parallelism must be between {{min}} and {{max}}",
+      "generic": "Plan validation failed",
+      "fixSuggestion": "Fix the issues above before execution."
+    },
+    "editSummary": {
+      "title": "Plan Edit Summary",
+      "batchRecomputed": "Execution batches recomputed.",
+      "field": {
+        "title": "title",
+        "description": "description",
+        "priority": "priority",
+        "dependencies": "dependencies"
+      },
+      "operation": {
+        "add_step": "Add Step",
+        "update_step": "Update Step",
+        "remove_step": "Remove Step",
+        "reorder_step": "Reorder Step",
+        "set_dependency": "Set Dependency",
+        "clear_dependency": "Clear Dependency",
+        "set_parallelism": "Set Parallelism"
+      }
+    }
   },
 
   "execution": {

@@ -101,7 +101,12 @@ export interface PlanCardData {
   adapterName: string;
   steps: PlanStepData[];
   batches: PlanBatchData[];
+  executionConfig?: PlanExecutionConfigData;
   editable: boolean;
+}
+
+export interface PlanExecutionConfigData {
+  maxParallel: number;
 }
 
 /** Plan step data */

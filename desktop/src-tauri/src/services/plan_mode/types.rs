@@ -186,6 +186,28 @@ pub struct Plan {
     pub steps: Vec<PlanStep>,
     /// Execution batches (calculated from step dependencies)
     pub batches: Vec<PlanBatch>,
+    /// Execution-level settings configurable during plan editing.
+    #[serde(default)]
+    pub execution_config: PlanExecutionConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanExecutionConfig {
+    /// Maximum number of parallel step executions.
+    pub max_parallel: usize,
+}
+
+impl Default for PlanExecutionConfig {
+    fn default() -> Self {
+        Self { max_parallel: 4 }
+    }
+}
+
+impl PlanExecutionConfig {
+    pub fn normalized_max_parallel(&self) -> usize {
+        self.max_parallel.clamp(1, 8)
+    }
 }
 
 // ============================================================================
@@ -545,6 +567,15 @@ pub struct PlanExecutionReport {
 
 /// Calculate execution batches from steps using topological sort (Kahn's algorithm).
 pub fn calculate_plan_batches(steps: &[PlanStep]) -> Vec<PlanBatch> {
+    calculate_plan_batches_with_parallel(steps, 4)
+}
+
+/// Calculate execution batches from steps using topological sort and max parallel cap per batch.
+pub fn calculate_plan_batches_with_parallel(
+    steps: &[PlanStep],
+    max_parallel: usize,
+) -> Vec<PlanBatch> {
+    let chunk_size = max_parallel.clamp(1, 8);
     let step_ids: HashMap<&str, usize> = steps
         .iter()
         .enumerate()
@@ -580,11 +611,19 @@ pub fn calculate_plan_batches(steps: &[PlanStep]) -> Vec<PlanBatch> {
             .collect();
 
         if batch_ids.is_empty() {
-            // Circular dependency — add all remaining as a single batch
-            batch_ids = remaining.keys().map(|&id| id.to_string()).collect();
-            for id in &batch_ids {
+            // Circular dependency — add all remaining as chunks
+            let mut leftovers: Vec<String> = remaining.keys().map(|&id| id.to_string()).collect();
+            leftovers.sort();
+            for id in &leftovers {
                 remaining.remove(id.as_str());
             }
+            for chunk in leftovers.chunks(chunk_size) {
+                batches.push(PlanBatch {
+                    index: batches.len(),
+                    step_ids: chunk.to_vec(),
+                });
+            }
+            continue;
         } else {
             // Remove batch from remaining and update in-degrees
             for id in &batch_ids {
@@ -600,10 +639,12 @@ pub fn calculate_plan_batches(steps: &[PlanStep]) -> Vec<PlanBatch> {
         }
 
         batch_ids.sort();
-        batches.push(PlanBatch {
-            index: batches.len(),
-            step_ids: batch_ids,
-        });
+        for chunk in batch_ids.chunks(chunk_size) {
+            batches.push(PlanBatch {
+                index: batches.len(),
+                step_ids: chunk.to_vec(),
+            });
+        }
     }
 
     batches

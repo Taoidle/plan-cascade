@@ -18,8 +18,6 @@ function createBaseParams() {
     isPlanWorkflowActive: false,
     hasStructuredInterviewQuestion: false,
     hasPlanClarifyQuestion: false,
-    queuedChatMessagesLength: 0,
-    clearQueuedChatMessages: vi.fn(),
     setWorkflowMode: vi.fn(),
     transitionWorkflowKernelMode: vi.fn(),
     showToast: vi.fn(),

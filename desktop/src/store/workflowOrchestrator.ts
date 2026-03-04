@@ -31,6 +31,7 @@ import { getNextTurnId } from '../lib/conversationUtils';
 import { deriveGateOverallStatus } from '../lib/gateStatus';
 import { parseWorkflowConfigNatural } from '../lib/workflowConfigNaturalParser';
 import type { CrossModeConversationTurn } from '../types/crossModeContext';
+import { applyArchitectureModifications } from './workflowOrchestrator/architectureModifications';
 import type {
   WorkflowPhase,
   WorkflowConfig,
@@ -319,53 +320,6 @@ function normalizeExplorationCardData(data: ExplorationCardData): ExplorationCar
   };
 }
 
-function uniqueDeps(dependencies: string[]): string[] {
-  return [...new Set(dependencies.filter((d) => d.trim().length > 0))];
-}
-
-function nextGeneratedStoryId(stories: TaskPrd['stories']): string {
-  const used = new Set(stories.map((s) => s.id));
-  let idx = stories.length + 1;
-  while (used.has(`S${String(idx).padStart(3, '0')}`)) idx += 1;
-  return `S${String(idx).padStart(3, '0')}`;
-}
-
-function recomputeBatches(stories: TaskPrd['stories'], maxParallel: number): TaskPrd['batches'] {
-  const remaining = new Set(stories.map((s) => s.id));
-  const inDegree = new Map<string, number>();
-  const dependents = new Map<string, string[]>();
-  const validIds = new Set(stories.map((s) => s.id));
-
-  for (const story of stories) {
-    const deps = story.dependencies.filter((dep) => validIds.has(dep));
-    inDegree.set(story.id, deps.length);
-    for (const dep of deps) {
-      dependents.set(dep, [...(dependents.get(dep) ?? []), story.id]);
-    }
-  }
-
-  const batches: TaskPrd['batches'] = [];
-  while (remaining.size > 0) {
-    const ready = [...remaining].filter((id) => (inDegree.get(id) ?? 0) === 0).sort();
-    if (ready.length === 0) {
-      throw new Error('Dependency cycle detected while applying architecture modifications');
-    }
-    const chunkSize = Math.max(1, maxParallel);
-    for (let i = 0; i < ready.length; i += chunkSize) {
-      const chunk = ready.slice(i, i + chunkSize);
-      batches.push({ index: batches.length, storyIds: chunk });
-    }
-    for (const id of ready) {
-      remaining.delete(id);
-      const deps = dependents.get(id) ?? [];
-      for (const dep of deps) {
-        inDegree.set(dep, Math.max(0, (inDegree.get(dep) ?? 0) - 1));
-      }
-    }
-  }
-  return batches;
-}
-
 function buildCompletionReportDataFromReport(report: ExecutionReport): CompletionReportCardData {
   return {
     success: report.success,
@@ -414,122 +368,6 @@ async function syncKernelTaskPhase(
   } catch {
     // best-effort kernel phase sync
   }
-}
-
-function applyArchitectureModifications(
-  prd: TaskPrd,
-  modifications: ArchitectureReviewCardData['prdModifications'],
-  maxParallel: number,
-): TaskPrd {
-  const nextPrd: TaskPrd = {
-    ...prd,
-    stories: prd.stories.map((s) => ({
-      ...s,
-      dependencies: [...s.dependencies],
-      acceptanceCriteria: [...s.acceptanceCriteria],
-    })),
-    batches: [...prd.batches],
-  };
-
-  const storyMap = new Map(nextPrd.stories.map((s) => [s.id, s]));
-
-  for (const mod of modifications) {
-    const targetId = mod.targetStoryId || null;
-    switch (mod.type) {
-      case 'update_story': {
-        if (!targetId) break;
-        const story = storyMap.get(targetId);
-        if (!story) break;
-        const payload = mod.payload || {};
-        story.title = payload.title ?? story.title;
-        story.description = payload.description ?? story.description;
-        story.priority = payload.priority ?? story.priority;
-        if (payload.dependencies) story.dependencies = uniqueDeps(payload.dependencies);
-        if (payload.acceptanceCriteria) story.acceptanceCriteria = [...payload.acceptanceCriteria];
-        break;
-      }
-      case 'add_story': {
-        const payloadStory = mod.payload?.story;
-        const nextId = payloadStory?.id?.trim() || nextGeneratedStoryId(nextPrd.stories);
-        const normalizedId = storyMap.has(nextId) ? nextGeneratedStoryId(nextPrd.stories) : nextId;
-        const newStory = {
-          id: normalizedId,
-          title: payloadStory?.title ?? mod.payload?.title ?? 'New Story',
-          description: payloadStory?.description ?? mod.payload?.description ?? mod.reason,
-          priority: payloadStory?.priority ?? mod.payload?.priority ?? 'medium',
-          dependencies: uniqueDeps(payloadStory?.dependencies ?? mod.payload?.dependencies ?? []),
-          acceptanceCriteria: [...(payloadStory?.acceptanceCriteria ?? mod.payload?.acceptanceCriteria ?? [])],
-        };
-        nextPrd.stories.push(newStory);
-        storyMap.set(newStory.id, newStory);
-        break;
-      }
-      case 'remove_story': {
-        if (!targetId) break;
-        nextPrd.stories = nextPrd.stories.filter((s) => s.id !== targetId);
-        for (const story of nextPrd.stories) {
-          story.dependencies = story.dependencies.filter((dep) => dep !== targetId);
-        }
-        storyMap.delete(targetId);
-        break;
-      }
-      case 'split_story': {
-        if (!targetId) break;
-        const target = storyMap.get(targetId);
-        const splitStories = mod.payload?.stories ?? [];
-        if (!target || splitStories.length < 2) break;
-        const idx = nextPrd.stories.findIndex((s) => s.id === targetId);
-        if (idx < 0) break;
-        const createdIds: string[] = [];
-        const created = splitStories.map((item, splitIndex) => {
-          const candidate = item.id?.trim() || `${targetId}-${splitIndex + 1}`;
-          const id = storyMap.has(candidate) ? `${targetId}-${splitIndex + 1}-${Date.now()}` : candidate;
-          createdIds.push(id);
-          const deps =
-            item.dependencies.length > 0
-              ? item.dependencies
-              : splitIndex === 0
-                ? target.dependencies
-                : [createdIds[splitIndex - 1]];
-          const story = {
-            id,
-            title: item.title,
-            description: item.description,
-            priority: item.priority || target.priority,
-            dependencies: uniqueDeps(deps),
-            acceptanceCriteria: [...(item.acceptanceCriteria ?? [])],
-          };
-          storyMap.set(id, story);
-          return story;
-        });
-        nextPrd.stories.splice(idx, 1, ...created);
-        storyMap.delete(targetId);
-        for (const story of nextPrd.stories) {
-          if (story.id === targetId) continue;
-          if (story.dependencies.includes(targetId)) {
-            const remapped = mod.payload?.dependencyRemap?.[story.id] ?? [createdIds[createdIds.length - 1]];
-            story.dependencies = uniqueDeps(story.dependencies.flatMap((dep) => (dep === targetId ? remapped : [dep])));
-          }
-        }
-        break;
-      }
-      case 'merge_story': {
-        if (!targetId) break;
-        const story = storyMap.get(targetId);
-        if (!story) break;
-        const payload = mod.payload || {};
-        story.title = payload.title ?? story.title;
-        story.description = payload.description ?? story.description;
-        story.priority = payload.priority ?? story.priority;
-        if (payload.dependencies) story.dependencies = uniqueDeps(payload.dependencies);
-        if (payload.acceptanceCriteria) story.acceptanceCriteria = [...payload.acceptanceCriteria];
-        break;
-      }
-    }
-  }
-
-  nextPrd.batches = recomputeBatches(nextPrd.stories, maxParallel);
-  return nextPrd;
 }
 
 // ============================================================================

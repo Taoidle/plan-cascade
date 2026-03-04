@@ -377,6 +377,13 @@ vi.mock('../../lib/contextBridge', () => ({
 vi.mock('../SimpleMode/queuePersistence', () => ({
   clearPersistedSimpleChatQueue: vi.fn(),
   loadPersistedSimpleChatQueue: vi.fn(() => []),
+  loadPersistedSimpleChatQueueWithMeta: vi.fn(() => ({
+    queue: [],
+    sourceVersion: null,
+    sourceKey: null,
+    migratedFromVersion: null,
+    crossSessionCount: 0,
+  })),
   persistSimpleChatQueue: vi.fn(),
 }));
 

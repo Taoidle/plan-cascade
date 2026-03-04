@@ -58,7 +58,12 @@ import { useWorkflowModeSwitchGuard } from './useWorkflowModeSwitchGuard';
 import { useWorkflowKernelSessionBridge } from './useWorkflowKernelSessionBridge';
 import { useSimpleInputRouting } from './useSimpleInputRouting';
 import { useQueuedChatMessages } from './useQueuedChatMessages';
-import { cancelActiveWorkflow, submitWorkflowInputWithTracking } from '../../store/simpleWorkflowCoordinator';
+import { buildConversationHistory } from '../../lib/contextBridge';
+import {
+  cancelActiveWorkflow,
+  submitWorkflowInputWithTracking,
+  switchModeSafely,
+} from '../../store/simpleWorkflowCoordinator';
 import type { WorkflowMode } from '../../types/workflowKernel';
 import { selectKernelPlanRuntime, selectKernelTaskRuntime } from '../../store/workflowKernelSelectors';
 
@@ -68,7 +73,7 @@ interface CommandResponse<T> {
   error: string | null;
 }
 
-const MAX_QUEUED_CHAT_MESSAGES = 3;
+const MAX_QUEUED_CHAT_MESSAGES = 20;
 const TOKEN_ESTIMATE_DEBOUNCE_MS = 180;
 const RIGHT_PANEL_WIDTH_STORAGE_PREFIX = 'simple_mode_right_panel_width_v1:';
 const DEFAULT_RIGHT_PANEL_WIDTH = 620;
@@ -450,37 +455,75 @@ export function SimpleModeShell() {
     transitionAndSubmitWorkflowKernelInput,
   });
 
-  const { queuedChatMessages, queueChatMessage, removeQueuedChatMessage, clearQueuedChatMessages } =
-    useQueuedChatMessages({
-      workspacePath,
-      workflowMode,
-      maxQueuedChatMessages: MAX_QUEUED_CHAT_MESSAGES,
-      isRunning,
-      isSubmitting,
-      isAnalyzingStrategy,
-      permissionRequest,
-      isTaskWorkflowBusy:
-        workflowMode === 'task' &&
-        (effectiveTaskPhaseForInput === 'analyzing' ||
-          effectiveTaskPhaseForInput === 'exploring' ||
-          effectiveTaskPhaseForInput === 'requirement_analysis' ||
-          effectiveTaskPhaseForInput === 'generating_prd' ||
-          effectiveTaskPhaseForInput === 'generating_design_doc' ||
-          effectiveTaskPhaseForInput === 'executing'),
-      isPlanWorkflowBusy:
-        workflowMode === 'plan' &&
-        (planIsBusy ||
-          effectivePlanPhaseForInput === 'analyzing' ||
-          effectivePlanPhaseForInput === 'planning' ||
-          effectivePlanPhaseForInput === 'executing'),
-      attachments,
-      addAttachment,
-      clearAttachments,
-      handleFollowUp,
-      handleStart,
-      showToast,
-      t,
-    });
+  const queueSessionId = workflowKernelSession?.sessionId ?? workflowKernelSessionId;
+  const switchWorkflowModeForQueue = useCallback(
+    async (targetMode: WorkflowMode): Promise<boolean> => {
+      if (targetMode === workflowMode) return true;
+      const conversationContext = buildConversationHistory().map((turn) => ({
+        user: turn.user,
+        assistant: turn.assistant,
+      }));
+      const transitioned = await switchModeSafely({
+        targetMode,
+        handoff: {
+          conversationContext,
+          artifactRefs: [],
+          contextSources: ['simple_mode'],
+          metadata: {
+            source: 'queued_message_dispatch',
+            sourceMode: workflowMode,
+            targetMode,
+          },
+        },
+        transitionWorkflowKernelMode,
+      });
+      if (!transitioned) return false;
+      setWorkflowMode(targetMode);
+      return true;
+    },
+    [workflowMode, transitionWorkflowKernelMode],
+  );
+
+  const {
+    queuedChatMessages,
+    queueChatMessage,
+    removeQueuedChatMessage,
+    clearQueuedChatMessages,
+    moveQueuedChatMessage,
+    setQueuedChatMessagePriority,
+    retryQueuedChatMessage,
+  } = useQueuedChatMessages({
+    workspacePath,
+    sessionId: queueSessionId ?? '',
+    workflowMode,
+    maxQueuedChatMessages: MAX_QUEUED_CHAT_MESSAGES,
+    isRunning,
+    isSubmitting,
+    isAnalyzingStrategy,
+    permissionRequest,
+    isTaskWorkflowBusy:
+      workflowMode === 'task' &&
+      (effectiveTaskPhaseForInput === 'analyzing' ||
+        effectiveTaskPhaseForInput === 'exploring' ||
+        effectiveTaskPhaseForInput === 'requirement_analysis' ||
+        effectiveTaskPhaseForInput === 'generating_prd' ||
+        effectiveTaskPhaseForInput === 'generating_design_doc' ||
+        effectiveTaskPhaseForInput === 'executing'),
+    isPlanWorkflowBusy:
+      workflowMode === 'plan' &&
+      (planIsBusy ||
+        effectivePlanPhaseForInput === 'analyzing' ||
+        effectivePlanPhaseForInput === 'planning' ||
+        effectivePlanPhaseForInput === 'executing'),
+    attachments,
+    addAttachment,
+    clearAttachments,
+    handleFollowUp,
+    handleStart,
+    switchWorkflowModeForQueue,
+    showToast,
+    t,
+  });
 
   const {
     modeSwitchConfirmOpen,
@@ -497,8 +540,6 @@ export function SimpleModeShell() {
     isPlanWorkflowActive: isPlanWorkflowActiveForSwitchGuard,
     hasStructuredInterviewQuestion,
     hasPlanClarifyQuestion,
-    queuedChatMessagesLength: queuedChatMessages.length,
-    clearQueuedChatMessages,
     setWorkflowMode,
     transitionWorkflowKernelMode,
     showToast,
@@ -602,7 +643,6 @@ export function SimpleModeShell() {
     reset();
     clearStrategyAnalysis();
     setDescription('');
-    clearQueuedChatMessages();
     void openWorkflowKernelSession('chat', {
       conversationContext: [],
       artifactRefs: [],
@@ -624,7 +664,6 @@ export function SimpleModeShell() {
     resetWorkflowKernel,
     openWorkflowKernelSession,
     streamingOutput,
-    clearQueuedChatMessages,
     showToast,
     t,
   ]);
@@ -639,7 +678,6 @@ export function SimpleModeShell() {
       setRightPanelOpen(false);
       setWorkflowMode('chat');
       setDescription('');
-      clearQueuedChatMessages();
       void openWorkflowKernelSession('chat', {
         conversationContext: [],
         artifactRefs: [],
@@ -657,7 +695,6 @@ export function SimpleModeShell() {
       resetPlanWorkflow,
       resetWorkflowKernel,
       openWorkflowKernelSession,
-      clearQueuedChatMessages,
     ],
   );
 
@@ -671,7 +708,6 @@ export function SimpleModeShell() {
       switchToSession(sessionId);
       setWorkflowMode('chat');
       setDescription('');
-      clearQueuedChatMessages();
       void openWorkflowKernelSession('chat', {
         conversationContext: [],
         artifactRefs: [],
@@ -689,7 +725,6 @@ export function SimpleModeShell() {
       resetWorkflowKernel,
       openWorkflowKernelSession,
       switchToSession,
-      clearQueuedChatMessages,
     ],
   );
 
@@ -1131,6 +1166,10 @@ export function SimpleModeShell() {
                 onClearAgent={handleClearActiveAgent}
                 queuedChatMessages={queuedChatMessages}
                 onRemoveQueuedChatMessage={removeQueuedChatMessage}
+                onMoveQueuedChatMessage={moveQueuedChatMessage}
+                onSetQueuedChatMessagePriority={setQueuedChatMessagePriority}
+                onRetryQueuedChatMessage={retryQueuedChatMessage}
+                onClearQueuedChatMessages={clearQueuedChatMessages}
                 maxQueuedChatMessages={MAX_QUEUED_CHAT_MESSAGES}
               />
             </SimpleInputSection>

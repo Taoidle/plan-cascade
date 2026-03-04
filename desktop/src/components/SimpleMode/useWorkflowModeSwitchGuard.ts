@@ -23,8 +23,6 @@ interface UseWorkflowModeSwitchGuardParams {
   isPlanWorkflowActive: boolean;
   hasStructuredInterviewQuestion: boolean;
   hasPlanClarifyQuestion: boolean;
-  queuedChatMessagesLength: number;
-  clearQueuedChatMessages: () => void;
   setWorkflowMode: (mode: WorkflowMode) => void;
   transitionWorkflowKernelMode: (
     targetMode: WorkflowMode,
@@ -107,8 +105,6 @@ export function useWorkflowModeSwitchGuard({
   isPlanWorkflowActive,
   hasStructuredInterviewQuestion,
   hasPlanClarifyQuestion,
-  queuedChatMessagesLength,
-  clearQueuedChatMessages,
   setWorkflowMode,
   transitionWorkflowKernelMode,
   showToast,
@@ -168,16 +164,6 @@ export function useWorkflowModeSwitchGuard({
         );
       }
 
-      if (queuedChatMessagesLength > 0) {
-        clearQueuedChatMessages();
-        showToast(
-          t('workflow.clearQueuedMessages', {
-            defaultValue: 'Cleared queued follow-up messages when switching workflow mode.',
-          }),
-          'info',
-        );
-      }
-
       if (workflowMode === 'chat' && newMode === 'task' && hasChatHistory) {
         const contextSummary = latestStreamingOutput
           .slice(-20)
@@ -222,15 +208,7 @@ export function useWorkflowModeSwitchGuard({
         setWorkflowMode(transitioned.activeMode);
       })();
     },
-    [
-      clearQueuedChatMessages,
-      queuedChatMessagesLength,
-      setWorkflowMode,
-      showToast,
-      t,
-      transitionWorkflowKernelMode,
-      workflowMode,
-    ],
+    [setWorkflowMode, showToast, t, transitionWorkflowKernelMode, workflowMode],
   );
 
   const handleWorkflowModeChange = useCallback(

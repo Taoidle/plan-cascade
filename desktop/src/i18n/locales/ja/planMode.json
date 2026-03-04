@@ -17,7 +17,65 @@
     "completionCriteria": "完了基準",
     "deps": "依存",
     "expectedOutput": "期待される出力",
-    "approveAndExecute": "承認して実行"
+    "approveAndExecute": "承認して実行",
+    "editStep": "ステップを編集",
+    "editStepFor": "ステップ {{id}} を編集",
+    "stepTitle": "ステップタイトル",
+    "stepDescription": "ステップ説明",
+    "dependenciesCsv": "依存関係（IDをカンマ区切り）",
+    "removeStep": "ステップを削除",
+    "clearDependencies": "依存関係をクリア",
+    "priority": {
+      "high": "高",
+      "medium": "中",
+      "low": "低"
+    },
+    "reorder": {
+      "up": "上へ移動",
+      "down": "下へ移動"
+    },
+    "retryStep": "{{id}} を再試行",
+    "retryingStep": "{{id}} を再試行中...",
+    "addStep": {
+      "action": "ステップを追加",
+      "idPlaceholder": "step-id",
+      "titlePlaceholder": "ステップタイトル",
+      "descriptionPlaceholder": "ステップ説明"
+    },
+    "parallelism": {
+      "label": "並列 {{count}}",
+      "inputLabel": "最大並列数",
+      "apply": "並列数を適用"
+    },
+    "validation": {
+      "blockTitle": "プラン検証エラーのため実行を停止しました",
+      "duplicateStepId": "重複したステップ ID: {{stepId}}",
+      "missingDependency": "ステップ {{stepId}} は存在しないステップ {{dependencyId}} に依存しています",
+      "selfDependency": "ステップ {{stepId}} は自分自身に依存できません",
+      "cycleDependency": "{{stepId}} 付近で依存サイクルを検出しました",
+      "parallelOutOfRange": "並列数は {{min}} から {{max}} の範囲で指定してください",
+      "generic": "プラン検証に失敗しました",
+      "fixSuggestion": "上記の問題を修正してから実行してください。"
+    },
+    "editSummary": {
+      "title": "プラン編集サマリー",
+      "batchRecomputed": "実行バッチを再計算しました。",
+      "field": {
+        "title": "タイトル",
+        "description": "説明",
+        "priority": "優先度",
+        "dependencies": "依存関係"
+      },
+      "operation": {
+        "add_step": "ステップ追加",
+        "update_step": "ステップ更新",
+        "remove_step": "ステップ削除",
+        "reorder_step": "ステップ並べ替え",
+        "set_dependency": "依存関係設定",
+        "clear_dependency": "依存関係クリア",
+        "set_parallelism": "並列数設定"
+      }
+    }
   },
 
   "execution": {
