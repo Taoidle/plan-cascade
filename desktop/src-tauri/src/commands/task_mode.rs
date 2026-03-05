@@ -360,6 +360,42 @@ pub struct RunArchitectureReviewRequest {
     pub project_path: Option<String>,
 }
 
+/// Request payload for `apply_task_prd_feedback`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApplyTaskPrdFeedbackRequest {
+    pub session_id: String,
+    pub feedback: String,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub api_key: Option<String>,
+    pub base_url: Option<String>,
+    pub conversation_history: Option<Vec<ConversationTurnInput>>,
+    pub max_context_tokens: Option<usize>,
+    pub locale: Option<String>,
+    pub context_sources: Option<crate::services::task_mode::context_provider::ContextSourceConfig>,
+    pub project_path: Option<String>,
+}
+
+/// Structured summary for PRD feedback application.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrdFeedbackApplySummary {
+    pub added_story_ids: Vec<String>,
+    pub removed_story_ids: Vec<String>,
+    pub updated_story_ids: Vec<String>,
+    pub batch_changes: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+/// Response payload for `apply_task_prd_feedback`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrdFeedbackApplyResult {
+    pub prd: TaskPrd,
+    pub summary: PrdFeedbackApplySummary,
+}
+
 /// Current task execution status for the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -919,7 +955,7 @@ pub use execution_commands::{
     approve_task_prd, cancel_task_execution, cancel_task_operation, get_task_execution_report,
     get_task_execution_status,
 };
-pub use generation_commands::{explore_project, generate_task_prd};
+pub use generation_commands::{apply_task_prd_feedback, explore_project, generate_task_prd};
 pub use session_lifecycle_commands::{enter_task_mode, exit_task_mode};
 
 /// Resolve an LLM provider from frontend parameters and OS keyring.

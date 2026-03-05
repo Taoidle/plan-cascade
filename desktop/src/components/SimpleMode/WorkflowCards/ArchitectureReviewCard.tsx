@@ -13,6 +13,7 @@ import { useWorkflowOrchestratorStore } from '../../../store/workflowOrchestrato
 import { useWorkflowKernelStore } from '../../../store/workflowKernel';
 import { submitWorkflowActionIntentViaCoordinator } from '../../../store/simpleWorkflowCoordinator';
 import type { ArchitectureReviewCardData } from '../../../types/workflowCard';
+import { reportInteractiveActionFailure } from '../../../lib/workflowObservability';
 
 const severityColors = {
   high: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800',
@@ -30,8 +31,8 @@ export function ArchitectureReviewCard({
   const { t } = useTranslation('simpleMode');
   const [expanded, setExpanded] = useState(false);
   const [selectedMods, setSelectedMods] = useState<Set<number>>(() => new Set(data.prdModifications.map((_, i) => i)));
-  const [acted, setActed] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const approveArchitecture = useWorkflowOrchestratorStore((s) => s.approveArchitecture);
   const workflowSession = useWorkflowKernelStore((s) => s.session);
 
@@ -45,9 +46,9 @@ export function ArchitectureReviewCard({
   };
 
   const handleAccept = async () => {
-    if (acted || isSubmitting) return;
-    setActed(true);
+    if (isSubmitting) return;
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
       try {
         await submitWorkflowActionIntentViaCoordinator({
@@ -65,16 +66,27 @@ export function ArchitectureReviewCard({
       } catch {
         // Keep orchestration available even if kernel logging fails.
       }
-      await approveArchitecture?.(true, []);
+      const result = await approveArchitecture?.(true, []);
+      if (result && !result.ok) {
+        const message = result.message || 'Failed to approve architecture review';
+        setSubmitError(message);
+        await reportInteractiveActionFailure({
+          card: 'architecture_review_card',
+          action: 'approve_architecture_review',
+          errorCode: result.errorCode || 'architecture_approve_failed',
+          message,
+          session: workflowSession,
+        });
+      }
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleRevise = async () => {
-    if (acted || isSubmitting) return;
-    setActed(true);
+    if (isSubmitting) return;
     setIsSubmitting(true);
+    setSubmitError(null);
     const selected = data.prdModifications.filter((_, i) => selectedMods.has(i));
     try {
       try {
@@ -92,7 +104,18 @@ export function ArchitectureReviewCard({
       } catch {
         // Keep orchestration available even if kernel logging fails.
       }
-      await approveArchitecture?.(false, selected);
+      const result = await approveArchitecture?.(false, selected);
+      if (result && !result.ok) {
+        const message = result.message || 'Failed to apply architecture feedback';
+        setSubmitError(message);
+        await reportInteractiveActionFailure({
+          card: 'architecture_review_card',
+          action: 'request_architecture_changes',
+          errorCode: result.errorCode || 'architecture_apply_failed',
+          message,
+          session: workflowSession,
+        });
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -100,8 +123,7 @@ export function ArchitectureReviewCard({
 
   const isKernelTaskActive = workflowSession?.status === 'active' && workflowSession.activeMode === 'task';
   const kernelTaskPhase = workflowSession?.modeSnapshots.task?.phase ?? 'idle';
-  const isInteractive =
-    interactive && kernelTaskPhase === 'architecture_review' && isKernelTaskActive && !acted && !isSubmitting;
+  const isInteractive = interactive && kernelTaskPhase === 'architecture_review' && isKernelTaskActive && !isSubmitting;
 
   return (
     <div className="rounded-lg border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-900/20 overflow-hidden">
@@ -241,6 +263,7 @@ export function ArchitectureReviewCard({
                   : t('workflow.architectureReview.requestChanges')}
               </button>
             )}
+            {submitError && <span className="text-2xs text-rose-600 dark:text-rose-300">{submitError}</span>}
           </div>
         )}
       </div>

@@ -1,9 +1,12 @@
 import { useCallback } from 'react';
 import { buildConversationHistory } from '../../lib/contextBridge';
+import { reportInteractiveActionFailure } from '../../lib/workflowObservability';
 import { startModeWithCompensation, submitWorkflowInputWithTracking } from '../../store/simpleWorkflowCoordinator';
+import { useWorkflowKernelStore } from '../../store/workflowKernel';
 import type { PlanClarifyQuestionCardData } from '../../types/planModeCard';
 import type { InterviewQuestionCardData } from '../../types/workflowCard';
 import type { HandoffContextBundle, UserInputIntent, WorkflowMode, WorkflowSession } from '../../types/workflowKernel';
+import type { ActionResult } from '../../types/actionResult';
 
 interface UseSimpleInputRoutingParams {
   description: string;
@@ -18,7 +21,7 @@ interface UseSimpleInputRoutingParams {
   startWorkflow: (description: string) => Promise<{ modeSessionId: string | null }>;
   startPlanWorkflow: (description: string) => Promise<{ modeSessionId: string | null }>;
   overrideConfigNatural: (text: string) => void;
-  addPrdFeedback: (feedback: string) => void;
+  addPrdFeedback: (feedback: string) => Promise<ActionResult>;
   submitPlanClarification: (answer: {
     questionId: string;
     answer: string;
@@ -164,7 +167,16 @@ export function useSimpleInputRouting({
             },
           });
           if (!submitted) return;
-          addPrdFeedback(prompt);
+          const result = await addPrdFeedback(prompt);
+          if (!result.ok) {
+            await reportInteractiveActionFailure({
+              card: 'input_router',
+              action: 'add_prd_feedback',
+              errorCode: result.errorCode || 'prd_feedback_apply_failed',
+              message: result.message || 'Failed to apply PRD feedback',
+              session: useWorkflowKernelStore.getState().session,
+            });
+          }
           return;
         }
         if (taskInterviewingPhase && taskPendingQuestion && !hasStructuredInterviewQuestion) {

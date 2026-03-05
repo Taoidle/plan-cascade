@@ -308,6 +308,39 @@ describe('TaskModeStore', () => {
     });
   });
 
+  describe('applyPrdFeedback', () => {
+    it('applies PRD feedback successfully', async () => {
+      await enterSession();
+      const updatedPrd = mockPrd();
+      updatedPrd.title = 'PRD: Updated';
+      mockInvoke.mockResolvedValueOnce({
+        success: true,
+        data: {
+          prd: updatedPrd,
+          summary: {
+            addedStoryIds: ['story-003'],
+            removedStoryIds: [],
+            updatedStoryIds: ['story-002'],
+            batchChanges: ['batch_count:2->3'],
+            warnings: [],
+          },
+        },
+        error: null,
+      });
+
+      const result = await useTaskModeStore.getState().applyPrdFeedback('Split story-002');
+
+      expect(result?.prd.title).toBe('PRD: Updated');
+      expect(result?.summary.updatedStoryIds).toEqual(['story-002']);
+    });
+
+    it('fails when no active session exists', async () => {
+      const result = await useTaskModeStore.getState().applyPrdFeedback('Need update');
+      expect(result).toBeNull();
+      expect(useTaskModeStore.getState().error).toBe('No active session');
+    });
+  });
+
   describe('refreshStatus', () => {
     it('returns latest execution status', async () => {
       await enterSession();

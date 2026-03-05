@@ -22,6 +22,7 @@ import { buildConversationHistory } from '../lib/contextBridge';
 import { getNextTurnId } from '../lib/conversationUtils';
 import { createWorkflowKernelActionIntent } from '../lib/workflowKernelIntent';
 import type { CardPayload } from '../types/workflowCard';
+import { failResult, okResult, type ActionResult } from '../types/actionResult';
 import type {
   PlanModePhase,
   PlanAnalysisCardData,
@@ -91,7 +92,7 @@ interface PlanOrchestratorState {
   retryClarification: () => Promise<void>;
   skipClarification: () => Promise<void>;
   proceedToPlanning: () => Promise<void>;
-  approvePlan: (plan: PlanCardData) => Promise<void>;
+  approvePlan: (plan: PlanCardData) => Promise<ActionResult>;
   retryStep: (stepId: string) => Promise<void>;
   cancelWorkflow: () => Promise<void>;
   resetWorkflow: () => void;
@@ -412,11 +413,11 @@ async function startPlanExecutionWithProgress({
   invokeExecution,
   get,
   set,
-}: PlanExecutionStartParams): Promise<boolean> {
+}: PlanExecutionStartParams): Promise<ActionResult> {
   const unlisten = await subscribePlanProgressEvents(runToken, plan, get, set);
   if (get()._runToken !== runToken) {
     unlisten();
-    return false;
+    return failResult('stale_run_token', 'Execution start cancelled due to stale run token');
   }
   set({ _progressUnlisten: unlisten });
 
@@ -426,13 +427,14 @@ async function startPlanExecutionWithProgress({
     stopProgressSubscription(get, set, unlisten);
     set({ phase: rollbackPhase, isBusy: false, isCancelling: false });
     await syncKernelPlanPhase(rollbackPhase, rollbackReasonCode);
-    injectError(startErrorTitle, error instanceof Error ? error.message : String(error));
-    return false;
+    const message = error instanceof Error ? error.message : String(error);
+    injectError(startErrorTitle, message);
+    return failResult(rollbackReasonCode ?? 'execution_start_failed', message);
   }
 
   if (get()._runToken !== runToken) {
     stopProgressSubscription(get, set, unlisten);
-    return false;
+    return failResult('stale_run_token', 'Execution start cancelled due to stale run token');
   }
 
   const latestError = usePlanModeStore.getState().error;
@@ -441,10 +443,10 @@ async function startPlanExecutionWithProgress({
     set({ phase: rollbackPhase, isBusy: false, isCancelling: false });
     await syncKernelPlanPhase(rollbackPhase, rollbackReasonCode);
     injectError(startErrorTitle, latestError);
-    return false;
+    return failResult(rollbackReasonCode ?? 'execution_start_failed', latestError);
   }
 
-  return true;
+  return okResult();
 }
 
 // ============================================================================
@@ -782,7 +784,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
     const effectiveSessionId = resolvePlanSessionId(get, set);
     if (!effectiveSessionId) {
       injectError(i18n.t('planMode:orchestrator.approveFailed', 'Failed to start plan execution'), 'No active session');
-      return;
+      return failResult('missing_session', 'No active session');
     }
     set({ phase: 'executing', isBusy: true, isCancelling: false, _completionCardInjectedRunToken: null });
 
@@ -803,7 +805,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       conversationHistory.length > 0
         ? conversationHistory.map((t) => `user: ${t.user}\nassistant: ${t.assistant}`).join('\n')
         : undefined;
-    await startPlanExecutionWithProgress({
+    return startPlanExecutionWithProgress({
       runToken,
       plan,
       rollbackPhase: 'reviewing_plan',

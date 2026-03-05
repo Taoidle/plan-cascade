@@ -13,6 +13,7 @@ import type { PlanBatchData, PlanCardData, PlanStepData } from '../../../types/p
 import type { PlanEditOperation } from '../../../types/workflowKernel';
 import { usePlanOrchestratorStore } from '../../../store/planOrchestrator';
 import { useWorkflowKernelStore } from '../../../store/workflowKernel';
+import { reportInteractiveActionFailure } from '../../../lib/workflowObservability';
 import {
   applyPlanEditViaCoordinator,
   submitWorkflowActionIntentViaCoordinator,
@@ -320,8 +321,8 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
   const [stepDraft, setStepDraft] = useState<StepEditDraft | null>(null);
   const [addStepDraft, setAddStepDraft] = useState<AddStepDraft>(() => buildAddDraft(data.steps));
   const [parallelDraft, setParallelDraft] = useState<number>(getPlanMaxParallel(data));
-  const [acted, setActed] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [retryingStepId, setRetryingStepId] = useState<string | null>(null);
 
   const approvePlan = usePlanOrchestratorStore((s) => s.approvePlan);
@@ -338,12 +339,12 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
     setStepDraft(null);
     setAddStepDraft(buildAddDraft(normalized.steps));
     setParallelDraft(getPlanMaxParallel(normalized));
-    setActed(false);
+    setSubmitError(null);
   }, [data]);
 
   const isKernelPlanActive = workflowSession?.status === 'active' && workflowSession.activeMode === 'plan';
   const kernelPlanPhase = workflowSession?.modeSnapshots.plan?.phase ?? 'idle';
-  const isActive = interactive && kernelPlanPhase === 'reviewing_plan' && isKernelPlanActive && !acted;
+  const isActive = interactive && kernelPlanPhase === 'reviewing_plan' && isKernelPlanActive;
 
   const failedSteps = useMemo(
     () => workingPlan.steps.filter((step) => stepStatuses[step.id] === 'failed'),
@@ -744,8 +745,8 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
     if (!isActive || isSubmitting) return;
     if (validationIssues.length > 0) return;
 
-    setActed(true);
     setIsSubmitting(true);
+    setSubmitError(null);
 
     try {
       await submitWorkflowActionIntentViaCoordinator({
@@ -766,11 +767,22 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
     }
 
     try {
-      await approvePlan(workingPlan);
+      const result = await approvePlan(workingPlan);
+      if (!result.ok) {
+        const message = result.message || 'Failed to start plan execution';
+        setSubmitError(message);
+        await reportInteractiveActionFailure({
+          card: 'plan_card',
+          action: 'approve_plan',
+          errorCode: result.errorCode || 'approve_plan_failed',
+          message,
+          session: workflowSession,
+        });
+      }
     } finally {
       setIsSubmitting(false);
     }
-  }, [approvePlan, editSummary.length, isActive, isSubmitting, validationIssues.length, workingPlan]);
+  }, [approvePlan, editSummary.length, isActive, isSubmitting, validationIssues.length, workingPlan, workflowSession]);
 
   const handleRetryStep = useCallback(
     async (stepId: string) => {
@@ -1088,6 +1100,7 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
               {t('plan.approveAndExecute', 'Approve & Execute')}
             </button>
           )}
+          {submitError && <div className="w-full text-2xs text-rose-600 dark:text-rose-300">{submitError}</div>}
         </div>
       )}
     </div>

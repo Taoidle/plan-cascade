@@ -16,6 +16,7 @@ import { StreamingOutput, ErrorState } from '../shared';
 import type { StreamLine } from '../../store/execution';
 import type { AnalysisCoverageSnapshot } from '../../store/execution';
 import { useContextOpsStore } from '../../store/contextOps';
+import { useWorkflowObservabilityStore } from '../../store/workflowObservability';
 
 export type RightPanelTab = 'output' | 'git' | 'context';
 
@@ -47,12 +48,23 @@ export function TabbedRightPanel({
   const { t } = useTranslation('simpleMode');
   const contextInspectorEnabled = useContextOpsStore((s) => s.policy.context_inspector_ui);
   const refreshPolicy = useContextOpsStore((s) => s.refreshPolicy);
+  const observabilitySnapshot = useWorkflowObservabilityStore((s) => s.snapshot);
+  const refreshObservability = useWorkflowObservabilityStore((s) => s.refreshSnapshot);
   const showContextTab = contextInspectorEnabled;
   const effectiveActiveTab: RightPanelTab = !showContextTab && activeTab === 'context' ? 'output' : activeTab;
 
   useEffect(() => {
     void refreshPolicy();
   }, [refreshPolicy]);
+
+  useEffect(() => {
+    if (effectiveActiveTab !== 'output') return;
+    void refreshObservability();
+    const timer = window.setInterval(() => {
+      void refreshObservability();
+    }, 12000);
+    return () => window.clearInterval(timer);
+  }, [effectiveActiveTab, refreshObservability, workflowMode, workflowPhase]);
 
   const allTabs: { id: RightPanelTab; label: string }[] = [
     { id: 'output', label: t('rightPanel.outputTab', { defaultValue: 'Output' }) },
@@ -98,6 +110,7 @@ export function TabbedRightPanel({
             <div className="shrink-0 space-y-2 p-2 max-h-[42%] overflow-y-auto border-b border-gray-200 dark:border-gray-700">
               <WorkflowKernelProgressPanel workflowMode={workflowMode} workflowPhase={workflowPhase} />
               {workflowMode !== 'task' && analysisCoverage && <AnalysisCoveragePanel coverage={analysisCoverage} />}
+              <WorkflowFailureSummaryPanel snapshot={observabilitySnapshot} />
               <ErrorState maxErrors={8} />
             </div>
             <div className="min-h-0 flex-1 flex flex-col">
@@ -111,6 +124,59 @@ export function TabbedRightPanel({
           <ContextOpsPanel projectPath={workspacePath} sessionId={contextSessionId} />
         )}
       </div>
+    </div>
+  );
+}
+
+function WorkflowFailureSummaryPanel({
+  snapshot,
+}: {
+  snapshot: ReturnType<typeof useWorkflowObservabilityStore.getState>['snapshot'];
+}) {
+  const { t } = useTranslation('simpleMode');
+  if (!snapshot) return null;
+  const latestFailure = snapshot.latestFailure;
+  const breakdownPreview = snapshot.interactiveActionFailBreakdown.slice(0, 3);
+
+  return (
+    <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800">
+      <p className="text-sm font-medium text-rose-700 dark:text-rose-300">
+        {t('rightPanel.workflowFailures.title', { defaultValue: 'Workflow Reliability' })}
+      </p>
+      <div className="mt-1 text-xs text-rose-700/90 dark:text-rose-300/90">
+        link rehydrate {snapshot.metrics.workflowLinkRehydrateSuccess}/{snapshot.metrics.workflowLinkRehydrateTotal} |
+        action failures {snapshot.metrics.interactiveActionFailTotal} | prd feedback{' '}
+        {snapshot.metrics.prdFeedbackApplySuccess}/{snapshot.metrics.prdFeedbackApplyTotal}
+      </div>
+      {latestFailure ? (
+        <details className="mt-2 rounded border border-rose-200 dark:border-rose-800 bg-white/70 dark:bg-gray-950/40">
+          <summary className="cursor-pointer list-none px-2 py-1.5 text-xs font-medium text-rose-700 dark:text-rose-300">
+            latest: {latestFailure.action}
+            {latestFailure.errorCode ? ` (${latestFailure.errorCode})` : ''}
+          </summary>
+          <div className="px-2 pb-2 text-2xs text-rose-700/90 dark:text-rose-300/90 space-y-1">
+            {latestFailure.message && <div>{latestFailure.message}</div>}
+            <div>
+              mode {latestFailure.mode ?? '-'} | before {latestFailure.phaseBefore ?? '-'} | after{' '}
+              {latestFailure.phaseAfter ?? '-'}
+            </div>
+            <div>{latestFailure.timestamp}</div>
+          </div>
+        </details>
+      ) : (
+        <div className="mt-2 text-2xs text-rose-700/80 dark:text-rose-300/80">
+          {t('rightPanel.workflowFailures.none', { defaultValue: 'No recent workflow failures.' })}
+        </div>
+      )}
+      {breakdownPreview.length > 0 && (
+        <div className="mt-2 text-2xs text-rose-700/90 dark:text-rose-300/90 space-y-0.5">
+          {breakdownPreview.map((item) => (
+            <div key={`${item.card}-${item.action}-${item.errorCode}`}>
+              {item.card}/{item.action}/{item.errorCode}: {item.total}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

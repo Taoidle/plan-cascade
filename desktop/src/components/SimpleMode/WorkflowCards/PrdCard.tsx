@@ -14,13 +14,14 @@ import { useWorkflowOrchestratorStore } from '../../../store/workflowOrchestrato
 import type { TaskStory } from '../../../store/taskMode';
 import { useWorkflowKernelStore } from '../../../store/workflowKernel';
 import { submitWorkflowActionIntentViaCoordinator } from '../../../store/simpleWorkflowCoordinator';
+import { reportInteractiveActionFailure } from '../../../lib/workflowObservability';
 
 export function PrdCard({ data, interactive }: { data: PrdCardData; interactive: boolean }) {
   const { t } = useTranslation('simpleMode');
   const [expandedStories, setExpandedStories] = useState<Set<string>>(new Set());
   const [isEditing, setIsEditing] = useState(false);
-  const [acted, setActed] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const approvePrd = useWorkflowOrchestratorStore((s) => s.approvePrd);
   const editablePrd = useWorkflowOrchestratorStore((s) => s.editablePrd);
   const updateEditableStory = useWorkflowOrchestratorStore((s) => s.updateEditableStory);
@@ -28,7 +29,7 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
 
   const isKernelTaskActive = workflowSession?.status === 'active' && workflowSession.activeMode === 'task';
   const kernelTaskPhase = workflowSession?.modeSnapshots.task?.phase ?? 'idle';
-  const isActive = interactive && kernelTaskPhase === 'reviewing_prd' && isKernelTaskActive && !acted;
+  const isActive = interactive && kernelTaskPhase === 'reviewing_prd' && isKernelTaskActive;
 
   // When editing, read stories from the live editablePrd; otherwise use the snapshot card data
   const displayStories: PrdStoryData[] = isEditing && editablePrd ? editablePrd.stories : data.stories;
@@ -47,8 +48,8 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
 
   const handleApprove = useCallback(() => {
     if (!isActive || isApproving) return;
-    setActed(true);
     setIsApproving(true);
+    setSubmitError(null);
     void (async () => {
       try {
         await submitWorkflowActionIntentViaCoordinator({
@@ -67,12 +68,23 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
         // Keep orchestration available even if kernel logging fails.
       }
       try {
-        await approvePrd();
+        const result = await approvePrd();
+        if (!result.ok) {
+          const message = result.message || 'Failed to approve PRD';
+          setSubmitError(message);
+          await reportInteractiveActionFailure({
+            card: 'prd_card',
+            action: 'approve_prd',
+            errorCode: result.errorCode || 'approve_prd_failed',
+            message,
+            session: workflowSession,
+          });
+        }
       } finally {
         setIsApproving(false);
       }
     })();
-  }, [approvePrd, data.batches.length, data.stories.length, editablePrd, isActive, isApproving]);
+  }, [approvePrd, data.batches.length, data.stories.length, editablePrd, isActive, isApproving, workflowSession]);
 
   // Group stories by batch
   const storyBatchMap = new Map<string, number>();
@@ -170,6 +182,7 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
           >
             {isEditing ? t('workflow.prd.doneEditing') : t('workflow.prd.edit')}
           </button>
+          {submitError && <span className="text-2xs text-rose-600 dark:text-rose-300">{submitError}</span>}
         </div>
       )}
     </div>

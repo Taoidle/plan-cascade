@@ -7,7 +7,7 @@ const planOrchestratorHarness = vi.hoisted(() => ({
   state: {
     phase: 'reviewing_plan',
     stepStatuses: {} as Record<string, string>,
-    approvePlan: vi.fn().mockResolvedValue(undefined),
+    approvePlan: vi.fn().mockResolvedValue({ ok: true }),
     retryStep: vi.fn().mockResolvedValue(undefined),
   },
 }));
@@ -295,5 +295,48 @@ describe('PlanCard interactive gating', () => {
     await waitFor(() => {
       expect(planOrchestratorHarness.state.retryStep).toHaveBeenCalledWith('step-1');
     });
+  });
+
+  it('keeps approve button available when approve action fails', async () => {
+    const user = userEvent.setup();
+    kernelHarness.session = createPlanKernelSession('reviewing_plan');
+    planOrchestratorHarness.state.approvePlan.mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'plan_approval_failed',
+      message: 'backend rejected',
+    });
+
+    render(
+      <PlanCard
+        interactive
+        data={{
+          title: 'Plan',
+          description: 'desc',
+          domain: 'general',
+          adapterName: 'default',
+          editable: true,
+          steps: [
+            {
+              id: 'step-1',
+              title: 'Step 1',
+              description: 'desc',
+              priority: 'medium',
+              dependencies: [],
+              completionCriteria: ['done'],
+              expectedOutput: 'result',
+            },
+          ],
+          batches: [{ index: 0, stepIds: ['step-1'] }],
+        }}
+      />,
+    );
+
+    const approveButton = screen.getByText('plan.approveAndExecute');
+    await user.click(approveButton);
+
+    await waitFor(() => {
+      expect(screen.getByText('backend rejected')).toBeInTheDocument();
+    });
+    expect(approveButton).toBeEnabled();
   });
 });

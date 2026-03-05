@@ -1,11 +1,12 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { WorkflowSession } from '../../../types/workflowKernel';
 
 const orchestratorHarness = vi.hoisted(() => ({
   state: {
     phase: 'reviewing_prd',
-    approvePrd: vi.fn().mockResolvedValue(undefined),
+    approvePrd: vi.fn().mockResolvedValue({ ok: true }),
     editablePrd: null,
     updateEditableStory: vi.fn(),
   },
@@ -135,5 +136,45 @@ describe('PrdCard interactive gating', () => {
     );
 
     expect(screen.queryByText('workflow.prd.approveAndExecute')).toBeNull();
+  });
+
+  it('keeps approve action retryable when approval fails', async () => {
+    const user = userEvent.setup();
+    kernelHarness.session = createTaskKernelSession('reviewing_prd');
+    orchestratorHarness.state.approvePrd.mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'execution_start_failed',
+      message: 'cannot execute',
+    });
+
+    render(
+      <PrdCard
+        interactive
+        data={{
+          title: 'PRD',
+          description: 'desc',
+          stories: [
+            {
+              id: 'story-1',
+              title: 'Story 1',
+              description: 'desc',
+              priority: 'high',
+              dependencies: [],
+              acceptanceCriteria: ['done'],
+            },
+          ],
+          batches: [{ index: 0, storyIds: ['story-1'] }],
+          isEditable: true,
+        }}
+      />,
+    );
+
+    const approveButton = screen.getByText('workflow.prd.approveAndExecute');
+    await user.click(approveButton);
+
+    await waitFor(() => {
+      expect(screen.getByText('cannot execute')).toBeInTheDocument();
+    });
+    expect(approveButton).toBeEnabled();
   });
 });

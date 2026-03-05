@@ -228,6 +228,7 @@ fn main() {
             plan_cascade_desktop::commands::task_mode::session_lifecycle_commands::enter_task_mode,
             plan_cascade_desktop::commands::task_mode::generation_commands::explore_project,
             plan_cascade_desktop::commands::task_mode::generation_commands::generate_task_prd,
+            plan_cascade_desktop::commands::task_mode::generation_commands::apply_task_prd_feedback,
             plan_cascade_desktop::commands::task_mode::execution_commands::approve_task_prd,
             plan_cascade_desktop::commands::task_mode::execution_commands::get_task_execution_status,
             plan_cascade_desktop::commands::task_mode::execution_commands::cancel_task_execution,
@@ -262,8 +263,10 @@ fn main() {
             plan_cascade_desktop::commands::workflow::workflow_cancel_operation,
             plan_cascade_desktop::commands::workflow::workflow_append_context_items,
             plan_cascade_desktop::commands::workflow::workflow_get_session_state,
+            plan_cascade_desktop::commands::workflow::workflow_get_observability_snapshot,
             plan_cascade_desktop::commands::workflow::workflow_recover_session,
             plan_cascade_desktop::commands::workflow::workflow_link_mode_session,
+            plan_cascade_desktop::commands::workflow::workflow_record_interactive_action_failure,
             // Spec Interview commands
             plan_cascade_desktop::commands::spec_interview::start_spec_interview,
             plan_cascade_desktop::commands::spec_interview::submit_interview_answer,

@@ -8,6 +8,9 @@ use crate::services::plan_mode::types::{
 };
 use crate::services::spec_interview::interview::InterviewSession;
 use crate::services::workflow_kernel::{
+    observability::{
+        self, WorkflowFailureRecordInput, WorkflowObservabilitySnapshot,
+    },
     HandoffContextBundle, PlanClarificationSnapshot, PlanEditOperation, PlanSnapshotRehydrate,
     TaskInterviewSnapshot, TaskSnapshotRehydrate, UserInputIntent, WorkflowKernelState,
     WorkflowKernelUpdatedEvent, WorkflowMode, WorkflowSession, WorkflowSessionState,
@@ -15,6 +18,7 @@ use crate::services::workflow_kernel::{
 };
 use crate::{commands::plan_mode::PlanModeState, commands::spec_interview::SpecInterviewState};
 use crate::{commands::task_mode::TaskModeState, state::AppState};
+use serde::Deserialize;
 use serde_json::json;
 use tauri::Emitter;
 
@@ -42,6 +46,22 @@ fn emit_kernel_update(
     .map_err(|err| format!("Failed to emit workflow kernel update: {err}"))
 }
 
+fn workflow_mode_label(mode: WorkflowMode) -> &'static str {
+    match mode {
+        WorkflowMode::Chat => "chat",
+        WorkflowMode::Plan => "plan",
+        WorkflowMode::Task => "task",
+    }
+}
+
+fn session_phase_for_mode(session: &WorkflowSession, mode: WorkflowMode) -> Option<String> {
+    match mode {
+        WorkflowMode::Chat => session.mode_snapshots.chat.as_ref().map(|chat| chat.phase.clone()),
+        WorkflowMode::Plan => session.mode_snapshots.plan.as_ref().map(|plan| plan.phase.clone()),
+        WorkflowMode::Task => session.mode_snapshots.task.as_ref().map(|task| task.phase.clone()),
+    }
+}
+
 async fn emit_kernel_update_for_session(
     app: &tauri::AppHandle,
     state: &WorkflowKernelState,
@@ -50,6 +70,131 @@ async fn emit_kernel_update_for_session(
 ) -> Result<(), String> {
     let session_state = state.get_session_state(session_id).await?;
     emit_kernel_update(app, session_state, source)
+}
+
+async fn link_mode_session_and_rehydrate(
+    session_id: &str,
+    mode: WorkflowMode,
+    mode_session_id: &str,
+    state: &WorkflowKernelState,
+    plan_mode_state: &PlanModeState,
+    task_mode_state: &TaskModeState,
+    interview_context: Option<(&SpecInterviewState, &AppState)>,
+) -> Result<WorkflowSession, String> {
+    let linked_session = state
+        .link_mode_session(session_id, mode, mode_session_id)
+        .await?;
+
+    match mode {
+        WorkflowMode::Plan => {
+            let plan_session = plan_mode_state
+                .get_or_load_session_snapshot(mode_session_id)
+                .await
+                .map_err(|error| {
+                    format!(
+                        "Failed to load linked plan session '{}': {}",
+                        mode_session_id, error
+                    )
+                })?
+                .ok_or_else(|| {
+                    format!(
+                        "Linked plan session '{}' not found for rehydrate",
+                        mode_session_id
+                    )
+                })?;
+            let snapshot = map_plan_session_to_rehydrate(&plan_session);
+            state
+                .sync_plan_snapshot_by_linked_session(
+                    mode_session_id,
+                    snapshot.phase.clone(),
+                    snapshot.pending_clarification.clone(),
+                    snapshot.running_step_id.clone(),
+                    None,
+                )
+                .await
+                .map_err(|error| {
+                    format!(
+                        "Failed to sync linked plan snapshot '{}': {}",
+                        mode_session_id, error
+                    )
+                })?;
+        }
+        WorkflowMode::Task => {
+            let task_session = task_mode_state
+                .get_or_load_session_snapshot(mode_session_id)
+                .await
+                .map_err(|error| {
+                    format!(
+                        "Failed to load linked task session '{}': {}",
+                        mode_session_id, error
+                    )
+                })?
+                .ok_or_else(|| {
+                    format!(
+                        "Linked task session '{}' not found for rehydrate",
+                        mode_session_id
+                    )
+                })?;
+
+            let interview_session_id = linked_session
+                .mode_snapshots
+                .task
+                .as_ref()
+                .and_then(|task| task.interview_session_id.clone());
+            let pending_interview = if let (Some((spec_interview_state, app_state)), Some(interview_id)) =
+                (interview_context, interview_session_id.as_ref())
+            {
+                spec_interview_state
+                    .get_session_snapshot(interview_id, app_state)
+                    .await
+                    .as_ref()
+                    .and_then(map_task_interview_snapshot)
+            } else {
+                None
+            };
+            let snapshot = map_task_session_to_rehydrate(
+                &task_session,
+                interview_session_id.clone(),
+                pending_interview.clone(),
+            );
+            state
+                .sync_task_snapshot_by_linked_session(
+                    mode_session_id,
+                    snapshot.phase.clone(),
+                    snapshot.current_story_id.clone(),
+                    snapshot.completed_stories,
+                    snapshot.failed_stories,
+                    map_task_status_to_kernel_status(&task_session.status),
+                )
+                .await
+                .map_err(|error| {
+                    format!(
+                        "Failed to sync linked task snapshot '{}': {}",
+                        mode_session_id, error
+                    )
+                })?;
+
+            if snapshot.interview_session_id.is_some() || snapshot.pending_interview.is_some() {
+                state
+                    .sync_task_interview_snapshot_by_linked_session(
+                        mode_session_id,
+                        snapshot.interview_session_id,
+                        snapshot.phase,
+                        snapshot.pending_interview,
+                    )
+                    .await
+                    .map_err(|error| {
+                        format!(
+                            "Failed to sync linked task interview snapshot '{}': {}",
+                            mode_session_id, error
+                        )
+                    })?;
+            }
+        }
+        WorkflowMode::Chat => {}
+    }
+
+    Ok(linked_session)
 }
 
 fn plan_phase_to_kernel_phase(phase: PlanModePhase) -> &'static str {
@@ -207,6 +352,24 @@ fn mark_task_session_interrupted(session: &mut crate::commands::task_mode::TaskM
         progress.current_phase = "failed".to_string();
     }
     true
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowInteractiveActionFailureRecordRequest {
+    pub card: String,
+    pub action: String,
+    pub error_code: String,
+    pub message: Option<String>,
+    pub mode: Option<String>,
+    pub kernel_session_id: Option<String>,
+    pub mode_session_id: Option<String>,
+    pub phase_before: Option<String>,
+    pub phase_after: Option<String>,
+}
+
+fn normalize_optional_value(value: Option<String>) -> Option<String> {
+    value.map(|item| item.trim().to_string()).filter(|item| !item.is_empty())
 }
 
 #[tauri::command]
@@ -407,6 +570,60 @@ pub async fn workflow_get_session_state(
     let result = state.get_session_state(&session_id).await;
     Ok(match result {
         Ok(session_state) => CommandResponse::ok(session_state),
+        Err(error) => CommandResponse::err(error),
+    })
+}
+
+#[tauri::command]
+pub async fn workflow_get_observability_snapshot(
+    app_state: tauri::State<'_, AppState>,
+) -> Result<CommandResponse<WorkflowObservabilitySnapshot>, String> {
+    let snapshot = app_state
+        .with_database(observability::read_metrics_snapshot)
+        .await
+        .map_err(|error| error.to_string());
+    Ok(match snapshot {
+        Ok(snapshot) => CommandResponse::ok(snapshot),
+        Err(error) => CommandResponse::err(error),
+    })
+}
+
+#[tauri::command]
+pub async fn workflow_record_interactive_action_failure(
+    request: WorkflowInteractiveActionFailureRecordRequest,
+    app_state: tauri::State<'_, AppState>,
+) -> Result<CommandResponse<bool>, String> {
+    let record = WorkflowFailureRecordInput {
+        action: request.action.trim().to_string(),
+        card: Some(request.card.trim().to_string()),
+        mode: normalize_optional_value(request.mode),
+        kernel_session_id: normalize_optional_value(request.kernel_session_id),
+        mode_session_id: normalize_optional_value(request.mode_session_id),
+        phase_before: normalize_optional_value(request.phase_before),
+        phase_after: normalize_optional_value(request.phase_after),
+        error_code: Some(request.error_code.trim().to_string()),
+        message: normalize_optional_value(request.message),
+        timestamp: None,
+    };
+
+    tracing::warn!(
+        event = "interactive_action_failure",
+        kernelSessionId = %record.kernel_session_id.clone().unwrap_or_default(),
+        modeSessionId = %record.mode_session_id.clone().unwrap_or_default(),
+        mode = %record.mode.clone().unwrap_or_default(),
+        phase_before = %record.phase_before.clone().unwrap_or_default(),
+        phase_after = %record.phase_after.clone().unwrap_or_default(),
+        action = %record.action,
+        errorCode = %record.error_code.clone().unwrap_or_default(),
+        card = %record.card.clone().unwrap_or_default(),
+    );
+
+    let persisted = app_state
+        .with_database(|db| observability::record_interactive_action_failure(db, &record))
+        .await
+        .map_err(|error| error.to_string());
+    Ok(match persisted {
+        Ok(_) => CommandResponse::ok(true),
         Err(error) => CommandResponse::err(error),
     })
 }
@@ -631,13 +848,69 @@ pub async fn workflow_link_mode_session(
     mode: WorkflowMode,
     mode_session_id: String,
     state: tauri::State<'_, WorkflowKernelState>,
+    plan_mode_state: tauri::State<'_, PlanModeState>,
+    task_mode_state: tauri::State<'_, TaskModeState>,
+    spec_interview_state: tauri::State<'_, SpecInterviewState>,
+    app_state: tauri::State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<CommandResponse<WorkflowSession>, String> {
-    let result = state
-        .link_mode_session(&session_id, mode, &mode_session_id)
-        .await;
+    let normalized_mode_session_id = mode_session_id.trim().to_string();
+    let phase_before = state
+        .get_session(&session_id)
+        .await
+        .ok()
+        .and_then(|session| session_phase_for_mode(&session, mode));
+    tracing::info!(
+        event = "workflow_link_rehydrate_start",
+        kernelSessionId = %session_id,
+        modeSessionId = %normalized_mode_session_id,
+        mode = workflow_mode_label(mode),
+        phase_before = %phase_before.clone().unwrap_or_default(),
+        action = "workflow_link_mode_session"
+    );
+
+    let result = link_mode_session_and_rehydrate(
+        &session_id,
+        mode,
+        &normalized_mode_session_id,
+        state.inner(),
+        plan_mode_state.inner(),
+        task_mode_state.inner(),
+        Some((spec_interview_state.inner(), app_state.inner())),
+    )
+    .await;
     Ok(match result {
         Ok(session) => {
+            let phase_after = state
+                .get_session(&session_id)
+                .await
+                .ok()
+                .and_then(|kernel_session| session_phase_for_mode(&kernel_session, mode));
+            let record = WorkflowFailureRecordInput {
+                action: "workflow_link_mode_session".to_string(),
+                card: None,
+                mode: Some(workflow_mode_label(mode).to_string()),
+                kernel_session_id: Some(session_id.clone()),
+                mode_session_id: Some(normalized_mode_session_id.clone()),
+                phase_before: phase_before.clone(),
+                phase_after: phase_after.clone(),
+                error_code: None,
+                message: None,
+                timestamp: None,
+            };
+            let _ = app_state
+                .with_database(|db| observability::record_link_rehydrate(db, &record, true))
+                .await;
+            tracing::info!(
+                event = "workflow_link_rehydrate_success",
+                kernelSessionId = %session_id,
+                modeSessionId = %normalized_mode_session_id,
+                mode = workflow_mode_label(mode),
+                phase_before = %record.phase_before.clone().unwrap_or_default(),
+                phase_after = %phase_after.unwrap_or_default(),
+                action = "workflow_link_mode_session",
+                errorCode = ""
+            );
             let _ = emit_kernel_update_for_session(
                 &app,
                 state.inner(),
@@ -647,7 +920,40 @@ pub async fn workflow_link_mode_session(
             .await;
             CommandResponse::ok(session)
         }
-        Err(error) => CommandResponse::err(error),
+        Err(error) => {
+            let phase_after = state
+                .get_session(&session_id)
+                .await
+                .ok()
+                .and_then(|kernel_session| session_phase_for_mode(&kernel_session, mode));
+            let error_message = error;
+            let record = WorkflowFailureRecordInput {
+                action: "workflow_link_mode_session".to_string(),
+                card: None,
+                mode: Some(workflow_mode_label(mode).to_string()),
+                kernel_session_id: Some(session_id.clone()),
+                mode_session_id: Some(normalized_mode_session_id.clone()),
+                phase_before: phase_before.clone(),
+                phase_after: phase_after.clone(),
+                error_code: Some("mode_session_link_failed".to_string()),
+                message: Some(error_message.clone()),
+                timestamp: None,
+            };
+            let _ = app_state
+                .with_database(|db| observability::record_link_rehydrate(db, &record, false))
+                .await;
+            tracing::warn!(
+                event = "workflow_link_rehydrate_failure",
+                kernelSessionId = %session_id,
+                modeSessionId = %normalized_mode_session_id,
+                mode = workflow_mode_label(mode),
+                phase_before = %record.phase_before.clone().unwrap_or_default(),
+                phase_after = %phase_after.unwrap_or_default(),
+                action = "workflow_link_mode_session",
+                errorCode = "mode_session_link_failed",
+            );
+            CommandResponse::err(error_message)
+        }
     })
 }
 
@@ -760,5 +1066,95 @@ mod tests {
             session.progress.as_ref().map(|progress| progress.current_phase.as_str()),
             Some("executing")
         );
+    }
+
+    #[tokio::test]
+    async fn link_mode_session_and_rehydrate_plan_syncs_kernel_phase() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let kernel = WorkflowKernelState::new_with_storage_dir(temp_dir.path().join("kernel"));
+        let plan_state = PlanModeState::new_with_storage_dir(temp_dir.path().join("plan"));
+        let task_state = TaskModeState::new_with_storage_dir(temp_dir.path().join("task"));
+
+        let session = kernel
+            .open_session(Some(WorkflowMode::Plan), None)
+            .await
+            .expect("open kernel session");
+        let session_id = session.session_id;
+
+        let mut plan_session = sample_plan_session(PlanModePhase::ReviewingPlan);
+        plan_session.session_id = "plan-session-link-test".to_string();
+        plan_state
+            .store_session_snapshot(plan_session)
+            .await
+            .expect("store plan session");
+
+        link_mode_session_and_rehydrate(
+            &session_id,
+            WorkflowMode::Plan,
+            "plan-session-link-test",
+            &kernel,
+            &plan_state,
+            &task_state,
+            None,
+        )
+        .await
+        .expect("link and rehydrate plan session");
+
+        let state = kernel
+            .get_session_state(&session_id)
+            .await
+            .expect("load kernel state");
+        let plan_phase = state
+            .session
+            .mode_snapshots
+            .plan
+            .as_ref()
+            .map(|snapshot| snapshot.phase.as_str());
+        assert_eq!(plan_phase, Some("reviewing_plan"));
+    }
+
+    #[tokio::test]
+    async fn link_mode_session_and_rehydrate_task_syncs_kernel_phase() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let kernel = WorkflowKernelState::new_with_storage_dir(temp_dir.path().join("kernel"));
+        let plan_state = PlanModeState::new_with_storage_dir(temp_dir.path().join("plan"));
+        let task_state = TaskModeState::new_with_storage_dir(temp_dir.path().join("task"));
+
+        let session = kernel
+            .open_session(Some(WorkflowMode::Task), None)
+            .await
+            .expect("open kernel session");
+        let session_id = session.session_id;
+
+        let mut task_session = sample_task_session(TaskModeStatus::ReviewingPrd);
+        task_session.session_id = "task-session-link-test".to_string();
+        task_state
+            .store_session_snapshot(task_session)
+            .await
+            .expect("store task session");
+
+        link_mode_session_and_rehydrate(
+            &session_id,
+            WorkflowMode::Task,
+            "task-session-link-test",
+            &kernel,
+            &plan_state,
+            &task_state,
+            None,
+        )
+        .await
+        .expect("link and rehydrate task session");
+
+        let state = kernel
+            .get_session_state(&session_id)
+            .await
+            .expect("load kernel state");
+        let task_phase = state
+            .session
+            .mode_snapshots
+            .task
+            .as_ref()
+            .map(|snapshot| snapshot.phase.as_str());
+        assert_eq!(task_phase, Some("reviewing_prd"));
     }
 }

@@ -23,6 +23,7 @@ import {
   type GateResult,
   type ExecutionReport,
   type StoryQualityGateResults,
+  type PrdFeedbackApplySummary,
 } from './taskMode';
 import { useSpecInterviewStore, type InterviewQuestion, type InterviewSession } from './specInterview';
 import { useSettingsStore } from './settings';
@@ -32,6 +33,7 @@ import { buildConversationHistory, synthesizePlanningTurn, synthesizeExecutionTu
 import { getNextTurnId } from '../lib/conversationUtils';
 import { deriveGateOverallStatus } from '../lib/gateStatus';
 import { parseWorkflowConfigNatural } from '../lib/workflowConfigNaturalParser';
+import { failResult, okResult, type ActionResult } from '../types/actionResult';
 import type { CrossModeConversationTurn } from '../types/crossModeContext';
 import { applyArchitectureModifications } from './workflowOrchestrator/architectureModifications';
 import type {
@@ -130,21 +132,21 @@ interface WorkflowOrchestratorState {
 
   // Actions
   startWorkflow: (description: string) => Promise<{ modeSessionId: string | null }>;
-  confirmConfig: (overrides?: Partial<WorkflowConfig>) => Promise<void>;
+  confirmConfig: (overrides?: Partial<WorkflowConfig>) => Promise<ActionResult>;
   updateConfig: (updates: Partial<WorkflowConfig>) => void;
   overrideConfigNatural: (text: string) => void;
   submitInterviewAnswer: (answer: string) => Promise<void>;
   skipInterviewQuestion: () => Promise<void>;
-  approvePrd: (editedPrd?: TaskPrd) => Promise<void>;
+  approvePrd: (editedPrd?: TaskPrd) => Promise<ActionResult>;
   updateEditableStory: (
     storyId: string,
     updates: Partial<{ title: string; description: string; priority: string; acceptanceCriteria: string[] }>,
   ) => void;
-  addPrdFeedback: (feedback: string) => void;
+  addPrdFeedback: (feedback: string) => Promise<ActionResult>;
   approveArchitecture: (
     acceptAsIs: boolean,
     selectedModifications: ArchitectureReviewCardData['prdModifications'],
-  ) => Promise<void>;
+  ) => Promise<ActionResult>;
   cancelWorkflow: () => Promise<void>;
   resetWorkflow: () => void;
   clearConversationHistory: () => void;
@@ -369,6 +371,29 @@ function buildCompletionReportDataFallback(params: {
   };
 }
 
+function buildPrdFeedbackSummaryMessage(summary: PrdFeedbackApplySummary): string {
+  const segments: string[] = [];
+  if (summary.addedStoryIds.length > 0) {
+    segments.push(`Added: ${summary.addedStoryIds.join(', ')}`);
+  }
+  if (summary.updatedStoryIds.length > 0) {
+    segments.push(`Updated: ${summary.updatedStoryIds.join(', ')}`);
+  }
+  if (summary.removedStoryIds.length > 0) {
+    segments.push(`Removed: ${summary.removedStoryIds.join(', ')}`);
+  }
+  if (summary.batchChanges.length > 0) {
+    segments.push(`Batch changes: ${summary.batchChanges.join(' | ')}`);
+  }
+  if (summary.warnings.length > 0) {
+    segments.push(`Warnings: ${summary.warnings.join(' | ')}`);
+  }
+  if (segments.length === 0) {
+    return 'PRD updated without structural changes.';
+  }
+  return segments.join('\n');
+}
+
 async function syncKernelTaskPhase(
   phase: Extract<WorkflowPhase, 'requirement_analysis' | 'architecture_review' | 'generating_design_doc'>,
   reasonCode: string,
@@ -542,21 +567,29 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     const state = get();
     const runToken = state._runToken;
     const config = overrides ? { ...state.config, ...overrides } : state.config;
-    if (!isRunActive(get, runToken)) return;
+    if (!isRunActive(get, runToken)) {
+      return failResult('stale_run_token', 'Configuration request was superseded');
+    }
     set({ config, phase: 'exploring' });
 
     try {
       // Always explore first (exploration provides context for interview BA)
       await explorePhase(set, get, runToken);
-      if (!isRunActive(get, runToken)) return;
+      if (!isRunActive(get, runToken)) {
+        return failResult('stale_run_token', 'Configuration request was superseded');
+      }
 
       if (config.specInterviewEnabled) {
         // Start interview flow (BA now has exploration context)
-        if (!isRunActive(get, runToken)) return;
+        if (!isRunActive(get, runToken)) {
+          return failResult('stale_run_token', 'Configuration request was superseded');
+        }
         set({ phase: 'interviewing' });
 
         const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
-        if (!isRunActive(get, runToken)) return;
+        if (!isRunActive(get, runToken)) {
+          return failResult('stale_run_token', 'Configuration request was superseded');
+        }
         const interviewResolved = resolvePhaseAgent('plan_interview');
 
         injectCard('persona_indicator', {
@@ -596,12 +629,16 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         let session: InterviewSession | null = null;
         for (let attempt = 0; attempt < maxRetries; attempt++) {
           session = await useSpecInterviewStore.getState().startInterview(interviewConfig);
-          if (!isRunActive(get, runToken)) return;
+          if (!isRunActive(get, runToken)) {
+            return failResult('stale_run_token', 'Configuration request was superseded');
+          }
           if (session) break;
           const interviewError = useSpecInterviewStore.getState().error || '';
           if (interviewError.includes('not initialized') && attempt < maxRetries - 1) {
             await new Promise((r) => setTimeout(r, baseDelay * Math.pow(2, attempt)));
-            if (!isRunActive(get, runToken)) return;
+            if (!isRunActive(get, runToken)) {
+              return failResult('stale_run_token', 'Configuration request was superseded');
+            }
             useSpecInterviewStore.getState().clearError();
             continue;
           }
@@ -615,16 +652,20 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
             i18n.t('workflow.orchestrator.interviewFailed', { ns: 'simpleMode' }),
             interviewError || i18n.t('workflow.orchestrator.interviewStartFailed', { ns: 'simpleMode' }),
           );
-          return;
+          return failResult('interview_start_failed', interviewError || 'Failed to start interview');
         }
 
-        if (!isRunActive(get, runToken)) return;
+        if (!isRunActive(get, runToken)) {
+          return failResult('stale_run_token', 'Configuration request was superseded');
+        }
         set({ interviewId: session.id });
 
         let interviewSession = session;
         if (!interviewSession.current_question && interviewSession.status !== 'finalized') {
           const recovered = await useSpecInterviewStore.getState().fetchState(interviewSession.id);
-          if (!isRunActive(get, runToken)) return;
+          if (!isRunActive(get, runToken)) {
+            return failResult('stale_run_token', 'Configuration request was superseded');
+          }
           if (recovered) interviewSession = recovered;
         }
 
@@ -646,21 +687,36 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
             'warning',
           );
           await requirementAnalysisPhase(set, get, runToken);
-          if (!isRunActive(get, runToken)) return;
+          if (!isRunActive(get, runToken)) {
+            return failResult('stale_run_token', 'Configuration request was superseded');
+          }
           await generatePrdPhase(set, get, runToken);
         }
       } else {
         // Skip interview, run requirement analysis then generate PRD
         await requirementAnalysisPhase(set, get, runToken);
-        if (!isRunActive(get, runToken)) return;
+        if (!isRunActive(get, runToken)) {
+          return failResult('stale_run_token', 'Configuration request was superseded');
+        }
         await generatePrdPhase(set, get, runToken);
       }
     } catch (e) {
-      if (!isRunActive(get, runToken)) return;
+      if (!isRunActive(get, runToken)) {
+        return failResult('stale_run_token', 'Configuration request was superseded');
+      }
       const msg = e instanceof Error ? e.message : String(e);
       set({ phase: 'failed', error: msg });
       injectError(i18n.t('workflow.orchestrator.configurationFailed', { ns: 'simpleMode' }), msg);
+      return failResult('config_confirm_failed', msg);
     }
+
+    if (!isRunActive(get, runToken)) {
+      return failResult('stale_run_token', 'Configuration request was superseded');
+    }
+    if (get().phase === 'failed') {
+      return failResult('config_confirm_failed', get().error || 'Configuration failed');
+    }
+    return okResult();
   },
 
   /** Update workflow config without advancing phase */
@@ -898,8 +954,9 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     const runToken = state._runToken;
     const prd = editedPrd || state.editablePrd;
     if (!prd) {
-      set({ error: 'No PRD to approve' });
-      return;
+      const message = 'No PRD to approve';
+      set({ error: message });
+      return failResult('missing_prd', message);
     }
 
     set({ editablePrd: prd });
@@ -909,23 +966,73 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       await architectureReviewPhase(set, get, prd, runToken);
       // Architecture review is interactive — user clicks Accept/Revise in the card.
       // The continuation happens in approveArchitecture() action.
-      return;
+      if (get().phase === 'failed') {
+        return failResult('architecture_review_failed', get().error || 'Architecture review failed');
+      }
+      return okResult();
     }
 
     // Quick flow: skip architecture review, go straight to design doc + execution
     await designDocAndExecutePhase(set, get, prd, runToken);
+    if (get().phase === 'failed') {
+      return failResult('execution_start_failed', get().error || 'Task execution could not be started');
+    }
+    return okResult();
   },
 
   /** Add feedback to editable PRD (during reviewing_prd phase) */
-  addPrdFeedback: (_feedback: string) => {
+  addPrdFeedback: async (_feedback: string) => {
     // Add user message as 'info' StreamLine so it appears as a chat bubble
     const executionState = useExecutionStore.getState();
     const turnId = getNextTurnId(executionState.streamingOutput);
     executionState.appendStreamLine(_feedback, 'info', undefined, undefined, { turnId, turnBoundary: 'user' });
+    const normalizedFeedback = _feedback.trim();
+    if (!normalizedFeedback) {
+      return failResult('empty_feedback', 'Feedback cannot be empty');
+    }
 
-    // In the future, this could use LLM to apply NL edits to the PRD.
-    // For now, inject as info message.
-    injectInfo(i18n.t('workflow.orchestrator.prdFeedbackNoted', { ns: 'simpleMode', feedback: _feedback }), 'info');
+    const { sessionId, phase } = get();
+    const effectiveSessionId = sessionId || resolveTaskSessionId(get, set);
+    if (!effectiveSessionId) {
+      const message = 'No active task session';
+      set({ error: message });
+      return failResult('missing_session', message);
+    }
+    if (phase !== 'reviewing_prd') {
+      return failResult('invalid_phase', `Cannot apply PRD feedback in phase '${phase}'`);
+    }
+
+    const { resolvePhaseAgent } = await import('../lib/phaseAgentResolver');
+    const prdResolved = resolvePhaseAgent('plan_prd');
+    const history = get()._conversationHistory || [];
+    const settings = useSettingsStore.getState();
+    const maxContextTokens = settings.maxTotalTokens ?? 200_000;
+    const result = await useTaskModeStore
+      .getState()
+      .applyPrdFeedback(
+        normalizedFeedback,
+        history,
+        maxContextTokens,
+        prdResolved.provider || undefined,
+        prdResolved.model || undefined,
+        prdResolved.baseUrl,
+        effectiveSessionId,
+      );
+    if (!result) {
+      const message = useTaskModeStore.getState().error || 'Failed to apply PRD feedback';
+      set({ error: message });
+      injectError(
+        i18n.t('workflow.orchestrator.prdGenerationFailed', { ns: 'simpleMode' }),
+        message,
+        i18n.t('workflow.orchestrator.prdMissingData', { ns: 'simpleMode' }),
+      );
+      return failResult('prd_feedback_apply_failed', message);
+    }
+
+    set({ editablePrd: result.prd, phase: 'reviewing_prd', error: null });
+    injectCard('prd_card', toPrdCardData(result.prd), true);
+    injectInfo(buildPrdFeedbackSummaryMessage(result.summary), 'info');
+    return okResult();
   },
 
   /** Approve or request changes to the architecture review */
@@ -935,7 +1042,9 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   ) => {
     const runToken = get()._runToken;
     const { phase, editablePrd, config } = get();
-    if (phase !== 'architecture_review') return;
+    if (phase !== 'architecture_review') {
+      return failResult('invalid_phase', `Cannot approve architecture in phase '${phase}'`);
+    }
 
     if (acceptAsIs || selectedModifications.length === 0) {
       // Accept architecture as-is — proceed to design doc + execution
@@ -948,11 +1057,19 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       );
 
       const prd = editablePrd;
-      if (!prd) return;
+      if (!prd) {
+        return failResult('missing_prd', 'No PRD to execute after architecture approval');
+      }
 
       await designDocAndExecutePhase(set, get, prd, runToken);
+      if (get().phase === 'failed') {
+        return failResult('execution_start_failed', get().error || 'Task execution could not be started');
+      }
+      return okResult();
     } else {
-      if (!editablePrd) return;
+      if (!editablePrd) {
+        return failResult('missing_prd', 'No PRD available for architecture revision');
+      }
 
       injectInfo(
         i18n.t('workflow.orchestrator.architectureRevisionRequested', {
@@ -967,6 +1084,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         const patchedPrd = applyArchitectureModifications(editablePrd, selectedModifications, config.maxParallel);
         set({ phase: 'reviewing_prd', editablePrd: patchedPrd });
         injectCard('prd_card', toPrdCardData(patchedPrd), true);
+        return okResult();
       } catch (e) {
         injectInfo(
           i18n.t('workflow.orchestrator.architectureApplyFailed', {
@@ -979,7 +1097,9 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         injectCard('prd_card', toPrdCardData(editablePrd), true);
         if (e instanceof Error) {
           set({ error: e.message });
+          return failResult('architecture_apply_failed', e.message);
         }
+        return failResult('architecture_apply_failed', 'Failed to apply architecture modifications');
       }
     }
   },

@@ -7,6 +7,8 @@ import { usePlanModeStore } from './planMode';
 import { useWorkflowOrchestratorStore } from './workflowOrchestrator';
 import { usePlanOrchestratorStore } from './planOrchestrator';
 import { useWorkflowKernelStore } from './workflowKernel';
+import { useExecutionStore } from './execution';
+import { useWorkflowObservabilityStore } from './workflowObservability';
 import { selectKernelPlanRuntime, selectKernelTaskRuntime } from './workflowKernelSelectors';
 
 export interface SubmitWorkflowInputParams {
@@ -41,6 +43,42 @@ export interface StartModeResult {
   ok: boolean;
   errorCode: 'kernel_submit_failed' | 'mode_start_failed' | 'mode_session_link_failed' | null;
   session: WorkflowSession | null;
+}
+
+function injectModeSyncWarning(mode: WorkflowMode): void {
+  useExecutionStore.getState().appendCard({
+    cardType: 'workflow_info',
+    cardId: `mode-sync-warning-${mode}-${Date.now()}`,
+    data: {
+      message: `Kernel state sync for ${mode} mode may be delayed. Retrying snapshot refresh...`,
+      level: 'warning',
+    },
+    interactive: false,
+  });
+}
+
+async function refreshKernelStateWithRetry(mode: WorkflowMode): Promise<void> {
+  const kernelStore = useWorkflowKernelStore.getState();
+  const first = await kernelStore.refreshSessionState();
+  if (first) return;
+  injectModeSyncWarning(mode);
+  const second = await kernelStore.refreshSessionState();
+  if (!second) {
+    const session = kernelStore.session;
+    const modeRuntime = mode === 'plan' ? selectKernelPlanRuntime(session) : selectKernelTaskRuntime(session);
+    void useWorkflowObservabilityStore.getState().recordInteractiveActionFailure({
+      card: 'mode_sync',
+      action: 'refresh_session_state',
+      errorCode: 'kernel_sync_retry_exhausted',
+      message: `Kernel state sync retry exhausted for ${mode} mode`,
+      mode,
+      kernelSessionId: session?.sessionId ?? null,
+      modeSessionId: modeRuntime.linkedSessionId ?? null,
+      phaseBefore: modeRuntime.phase ?? null,
+      phaseAfter: modeRuntime.phase ?? null,
+    });
+    injectModeSyncWarning(mode);
+  }
 }
 
 export async function submitWorkflowInputWithTracking({
@@ -189,6 +227,8 @@ export async function startModeWithCompensation({
         return { ok: false, errorCode: 'mode_session_link_failed', session: kernelSession };
       }
 
+      await refreshKernelStateWithRetry('task');
+
       return { ok: true, errorCode: null, session: linked };
     }
 
@@ -210,6 +250,8 @@ export async function startModeWithCompensation({
         );
         return { ok: false, errorCode: 'mode_session_link_failed', session: kernelSession };
       }
+
+      await refreshKernelStateWithRetry('plan');
 
       return { ok: true, errorCode: null, session: linked };
     }

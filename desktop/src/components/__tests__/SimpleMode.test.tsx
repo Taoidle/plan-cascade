@@ -868,8 +868,8 @@ describe('SimpleMode', () => {
       expect(screen.getByTestId('toolbar-workflow-mode')).toHaveTextContent('plan');
     });
 
-    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'Developers' } });
-    fireEvent.click(screen.getByTestId('composer-submit'));
+    fireEvent.change(screen.getByPlaceholderText('Type your answer...'), { target: { value: 'Developers' } });
+    fireEvent.click(screen.getByText('Submit'));
 
     await waitFor(() => {
       expect(storeHarness.getPlanOrchestratorState().submitClarification).toHaveBeenCalledWith({

@@ -57,7 +57,7 @@ function createBaseParams() {
     startWorkflow: vi.fn().mockResolvedValue({ modeSessionId: 'task-session-1' }),
     startPlanWorkflow: vi.fn().mockResolvedValue({ modeSessionId: 'plan-session-1' }),
     overrideConfigNatural: vi.fn(),
-    addPrdFeedback: vi.fn(),
+    addPrdFeedback: vi.fn().mockResolvedValue({ ok: true, errorCode: null, message: null }),
     submitPlanClarification: vi.fn().mockResolvedValue({ ok: true }),
     submitInterviewAnswer: vi.fn().mockResolvedValue(undefined),
     skipInterviewQuestion: vi.fn().mockResolvedValue(undefined),
@@ -178,5 +178,20 @@ describe('useSimpleInputRouting', () => {
         startTaskWorkflow: params.startWorkflow,
       }),
     );
+  });
+
+  it('routes reviewing_prd follow-up to PRD feedback apply action', async () => {
+    const params = createBaseParams();
+    params.workflowMode = 'task';
+    params.workflowPhase = 'reviewing_prd';
+
+    const { result } = renderHook(() => useSimpleInputRouting(params));
+
+    await act(async () => {
+      await result.current.handleFollowUp('Please split story-003');
+    });
+
+    expect(params.addPrdFeedback).toHaveBeenCalledWith('Please split story-003');
+    expect(params.sendFollowUp).not.toHaveBeenCalled();
   });
 });

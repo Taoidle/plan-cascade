@@ -14,14 +14,15 @@ import type { ConfigCardData } from '../../../types/workflowCard';
 import { useWorkflowOrchestratorStore } from '../../../store/workflowOrchestrator';
 import { useWorkflowKernelStore } from '../../../store/workflowKernel';
 import { submitWorkflowActionIntentViaCoordinator } from '../../../store/simpleWorkflowCoordinator';
+import { reportInteractiveActionFailure } from '../../../lib/workflowObservability';
 
 export function ConfigCard({ data, interactive }: { data: ConfigCardData; interactive: boolean }) {
   const { t } = useTranslation('simpleMode');
   const [layer, setLayer] = useState<1 | 2 | 3>(1);
   const [localConfig, setLocalConfig] = useState(data);
   const [nlOverride, setNlOverride] = useState('');
-  const [acted, setActed] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const updateConfig = useWorkflowOrchestratorStore((s) => s.updateConfig);
   const confirmConfig = useWorkflowOrchestratorStore((s) => s.confirmConfig);
   const overrideConfigNatural = useWorkflowOrchestratorStore((s) => s.overrideConfigNatural);
@@ -29,12 +30,12 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
 
   const isKernelTaskActive = workflowSession?.status === 'active' && workflowSession.activeMode === 'task';
   const kernelTaskPhase = workflowSession?.modeSnapshots.task?.phase ?? 'idle';
-  const isActive = interactive && kernelTaskPhase === 'configuring' && isKernelTaskActive && !acted;
+  const isActive = interactive && kernelTaskPhase === 'configuring' && isKernelTaskActive;
 
   const handleConfirm = useCallback(async () => {
     if (!isActive || isSubmitting) return;
     setIsSubmitting(true);
-    setActed(true);
+    setSubmitError(null);
     if (layer === 2) {
       updateConfig(localConfig);
     }
@@ -65,18 +66,30 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
       // Keep orchestration available even if kernel logging fails.
     }
     try {
+      const result = await confirmConfig();
+      if (!result.ok) {
+        const message = result.message || 'Failed to confirm workflow configuration';
+        setSubmitError(message);
+        await reportInteractiveActionFailure({
+          card: 'config_card',
+          action: layer === 2 ? 'confirm_custom_config' : 'confirm_default_config',
+          errorCode: result.errorCode || 'config_confirm_failed',
+          message,
+          session: workflowSession,
+        });
+        return;
+      }
       setLayer(1);
-      await confirmConfig();
     } finally {
       setIsSubmitting(false);
     }
-  }, [confirmConfig, isActive, isSubmitting, layer, localConfig, updateConfig]);
+  }, [confirmConfig, isActive, isSubmitting, layer, localConfig, updateConfig, workflowSession]);
 
   const handleNlSubmit = useCallback(async () => {
     if (!isActive || isSubmitting) return;
     if (nlOverride.trim()) {
       setIsSubmitting(true);
-      setActed(true);
+      setSubmitError(null);
       try {
         await submitWorkflowActionIntentViaCoordinator({
           mode: 'task',
@@ -108,7 +121,7 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
         </span>
         <div className="flex items-center gap-1.5">
           {(data.isOverridden ||
-            (acted &&
+            (kernelTaskPhase !== 'configuring' &&
               (localConfig.flowLevel !== data.flowLevel ||
                 localConfig.tddMode !== data.tddMode ||
                 localConfig.maxParallel !== data.maxParallel ||
@@ -118,7 +131,7 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
               {t('workflow.config.customized')}
             </span>
           )}
-          {!isActive && acted && (
+          {!isActive && kernelTaskPhase !== 'configuring' && (
             <span className="text-2xs px-1.5 py-0.5 rounded bg-green-200 dark:bg-green-800 text-green-600 dark:text-green-400">
               {t('workflow.config.applied')}
             </span>
@@ -162,6 +175,7 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
               <button onClick={() => setLayer(2)} className="text-xs text-sky-600 dark:text-sky-400 hover:underline">
                 {t('workflow.config.customize')}
               </button>
+              {submitError && <span className="text-2xs text-rose-600 dark:text-rose-300">{submitError}</span>}
             </div>
           )}
         </div>

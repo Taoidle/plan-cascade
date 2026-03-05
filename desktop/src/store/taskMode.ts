@@ -110,6 +110,19 @@ export interface TaskPrd {
   batches: ExecutionBatch[];
 }
 
+export interface PrdFeedbackApplySummary {
+  addedStoryIds: string[];
+  removedStoryIds: string[];
+  updatedStoryIds: string[];
+  batchChanges: string[];
+  warnings: string[];
+}
+
+export interface PrdFeedbackApplyResult {
+  prd: TaskPrd;
+  summary: PrdFeedbackApplySummary;
+}
+
 /** Task mode session from Rust backend */
 export interface TaskModeSession {
   sessionId: string;
@@ -234,6 +247,15 @@ export interface TaskModeState {
     sessionId?: string | null,
   ) => Promise<TaskPrd | null>;
   approvePrd: (prd: TaskPrd, sessionId?: string | null) => Promise<boolean>;
+  applyPrdFeedback: (
+    feedback: string,
+    conversationHistory?: CrossModeConversationTurn[],
+    maxContextTokens?: number,
+    overrideProvider?: string,
+    overrideModel?: string,
+    overrideBaseUrl?: string,
+    sessionId?: string | null,
+  ) => Promise<PrdFeedbackApplyResult | null>;
   refreshStatus: (sessionId?: string | null) => Promise<TaskExecutionStatus | null>;
   cancelExecution: (sessionId?: string | null) => Promise<boolean>;
   cancelOperation: (sessionId?: string | null) => Promise<boolean>;
@@ -416,6 +438,70 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
       if (get()._requestId !== requestId) return false;
       set({ isLoading: false, error: String(e) });
       return false;
+    }
+  },
+
+  applyPrdFeedback: async (
+    feedback: string,
+    conversationHistory?: CrossModeConversationTurn[],
+    maxContextTokens?: number,
+    overrideProvider?: string,
+    overrideModel?: string,
+    overrideBaseUrl?: string,
+    sessionId?: string | null,
+  ) => {
+    const resolvedSessionId = resolveSessionId(sessionId);
+    const normalizedFeedback = feedback.trim();
+    if (!resolvedSessionId) {
+      set({ error: 'No active session' });
+      return null;
+    }
+    if (!normalizedFeedback) {
+      set({ error: 'Feedback cannot be empty' });
+      return null;
+    }
+
+    const requestId = get()._requestId + 1;
+    set({ isLoading: true, error: null, _requestId: requestId });
+
+    try {
+      const { finalProvider, finalModel, finalBaseUrl, settingsStore } = await resolveRequestLlm(
+        overrideProvider,
+        overrideModel,
+        overrideBaseUrl,
+      );
+
+      const contextSourcesStore = useContextSourcesStore.getState();
+      contextSourcesStore.setMemorySessionId(resolvedSessionId);
+      const contextSources = contextSourcesStore.buildConfig() ?? null;
+
+      const result = await invoke<CommandResponse<PrdFeedbackApplyResult>>('apply_task_prd_feedback', {
+        request: {
+          sessionId: resolvedSessionId,
+          feedback: normalizedFeedback,
+          provider: finalProvider || null,
+          model: finalModel || null,
+          apiKey: null,
+          baseUrl: finalBaseUrl || null,
+          conversationHistory: conversationHistory || [],
+          maxContextTokens: maxContextTokens ?? null,
+          locale: null,
+          contextSources,
+          projectPath: settingsStore.workspacePath || null,
+        },
+      });
+      if (get()._requestId !== requestId) return null;
+      if (!result.success || !result.data) {
+        set({ isLoading: false, error: result.error ?? 'PRD feedback apply failed' });
+        return null;
+      }
+
+      set({ isLoading: false, error: null });
+      return result.data;
+    } catch (e) {
+      if (get()._requestId !== requestId) return null;
+      set({ isLoading: false, error: String(e) });
+      return null;
     }
   },
 
