@@ -17,6 +17,7 @@ import { usePlanModeStore } from './planMode';
 import { useWorkflowKernelStore } from './workflowKernel';
 import { useSettingsStore } from './settings';
 import { useContextSourcesStore } from './contextSources';
+import { selectKernelPlanRuntime } from './workflowKernelSelectors';
 import { buildConversationHistory } from '../lib/contextBridge';
 import { getNextTurnId } from '../lib/conversationUtils';
 import type { CardPayload } from '../types/workflowCard';
@@ -170,6 +171,31 @@ function buildPlanContextSources(sessionId?: string | null) {
   return contextSourcesStore.buildConfig();
 }
 
+function normalizeKernelPlanPhase(phase: string | null | undefined): PlanModePhase {
+  switch ((phase ?? '').toLowerCase()) {
+    case 'analyzing':
+      return 'analyzing';
+    case 'clarifying':
+      return 'clarifying';
+    case 'clarification_error':
+      return 'clarification_error';
+    case 'planning':
+      return 'planning';
+    case 'reviewing_plan':
+      return 'reviewing_plan';
+    case 'executing':
+      return 'executing';
+    case 'completed':
+      return 'completed';
+    case 'failed':
+      return 'failed';
+    case 'cancelled':
+      return 'cancelled';
+    default:
+      return 'idle';
+  }
+}
+
 async function syncKernelPlanPhase(phase: PlanModePhase, reasonCode?: string): Promise<void> {
   const transitionAndSubmitInput = useWorkflowKernelStore.getState().transitionAndSubmitInput;
   const session = useWorkflowKernelStore.getState().session;
@@ -278,13 +304,34 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
     if (get()._runToken !== runToken) return;
 
     const planStoreState = usePlanModeStore.getState();
+    const kernelSession = useWorkflowKernelStore.getState().session;
+    const kernelPlanRuntime = selectKernelPlanRuntime(kernelSession);
+    const kernelPendingClarification = kernelPlanRuntime.pendingClarification;
+    const fallbackQuestion =
+      planStoreState.currentQuestion ??
+      (kernelPendingClarification
+        ? ({
+            questionId: kernelPendingClarification.questionId,
+            question: kernelPendingClarification.question,
+            hint: kernelPendingClarification.hint,
+            inputType:
+              kernelPendingClarification.inputType === 'single_select' ||
+              kernelPendingClarification.inputType === 'boolean' ||
+              kernelPendingClarification.inputType === 'textarea'
+                ? kernelPendingClarification.inputType
+                : 'text',
+            options: kernelPendingClarification.options ?? [],
+          } satisfies PlanClarifyQuestionCardData)
+        : null);
+    const fallbackSessionId = planStoreState.sessionId ?? kernelPlanRuntime.linkedSessionId;
+    const fallbackPhase = fallbackQuestion ? 'clarifying' : normalizeKernelPlanPhase(kernelPlanRuntime.phase);
     const fallbackSession =
-      !enteredSession && planStoreState.sessionId
+      !enteredSession && fallbackSessionId
         ? {
-            sessionId: planStoreState.sessionId,
-            phase: planStoreState.sessionPhase,
+            sessionId: fallbackSessionId,
+            phase: fallbackPhase,
             analysis: planStoreState.analysis,
-            currentQuestion: planStoreState.currentQuestion,
+            currentQuestion: fallbackQuestion,
           }
         : null;
     const activeSession = enteredSession ?? fallbackSession;
@@ -693,11 +740,11 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
 
   cancelWorkflow: async () => {
     const { phase, sessionId, _progressUnlisten, _runToken } = get();
-    const linkedSessionId = useWorkflowKernelStore.getState().session?.linkedModeSessions?.plan ?? null;
+    const linkedSessionId = selectKernelPlanRuntime(useWorkflowKernelStore.getState().session).linkedSessionId;
     const effectiveSessionId = sessionId || linkedSessionId || usePlanModeStore.getState().sessionId || null;
     if (!sessionId && effectiveSessionId) {
       set({ sessionId: effectiveSessionId });
-      usePlanModeStore.setState({ sessionId: effectiveSessionId, isPlanMode: true });
+      usePlanModeStore.setState({ sessionId: effectiveSessionId });
     }
 
     if (phase === 'executing' && effectiveSessionId) {

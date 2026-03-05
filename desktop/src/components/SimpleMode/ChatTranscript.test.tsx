@@ -75,4 +75,33 @@ describe('ChatTranscript render mode', () => {
 
     expect(screen.getByTestId('chat-transcript-scroll')).toHaveAttribute('data-render-mode', 'full');
   });
+
+  it('does not use JSON fallback for legacy card lines without cardPayload', () => {
+    const lines: StreamLine[] = [
+      {
+        id: 1,
+        content: 'user message',
+        type: 'info',
+        timestamp: 1,
+        turnId: 1,
+        turnBoundary: 'user',
+      },
+      {
+        id: 2,
+        content: JSON.stringify({
+          cardType: 'workflow_info',
+          cardId: 'legacy-card-1',
+          interactive: false,
+          data: { message: 'legacy card' },
+        }),
+        type: 'card',
+        timestamp: 2,
+        turnId: 1,
+      } as unknown as StreamLine,
+    ];
+
+    render(<ChatTranscript lines={lines} status="idle" />);
+
+    expect(screen.getByText('Invalid workflow card payload')).toBeInTheDocument();
+  });
 });

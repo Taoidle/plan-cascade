@@ -1172,14 +1172,35 @@ impl Database {
                 seq INTEGER NOT NULL,
                 line_type TEXT NOT NULL,
                 content TEXT NOT NULL,
+                card_payload_json TEXT,
                 sub_agent_id TEXT,
                 sub_agent_depth INTEGER,
+                turn_id INTEGER,
+                turn_boundary TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 UNIQUE(history_id, seq),
                 FOREIGN KEY(history_id) REFERENCES execution_history_sessions(id) ON DELETE CASCADE
             )",
             [],
         )?;
+        if !Self::table_has_column(&conn, "execution_history_turns", "card_payload_json") {
+            let _ = conn.execute(
+                "ALTER TABLE execution_history_turns ADD COLUMN card_payload_json TEXT",
+                [],
+            );
+        }
+        if !Self::table_has_column(&conn, "execution_history_turns", "turn_id") {
+            let _ = conn.execute(
+                "ALTER TABLE execution_history_turns ADD COLUMN turn_id INTEGER",
+                [],
+            );
+        }
+        if !Self::table_has_column(&conn, "execution_history_turns", "turn_boundary") {
+            let _ = conn.execute(
+                "ALTER TABLE execution_history_turns ADD COLUMN turn_boundary TEXT",
+                [],
+            );
+        }
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_execution_history_turns_history_seq
              ON execution_history_turns(history_id, seq)",

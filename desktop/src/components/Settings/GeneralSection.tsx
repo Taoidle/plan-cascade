@@ -37,8 +37,6 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
     setKbPickerServerSearch,
     kbIngestJobScopedProgress,
     setKbIngestJobScopedProgress,
-    typedCardPipeline,
-    setTypedCardPipeline,
   } = useSettingsStore();
   const { triggerWizard, startTour } = useOnboardingStore();
   const [contextPolicy, setContextPolicyState] = useState<ContextPolicy | null>(null);
@@ -294,40 +292,6 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
             </div>
             <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               {t('general.knowledgeBase.kbIngestJobScopedProgressDescription')}
-            </div>
-          </div>
-        </label>
-      </section>
-
-      {/* Simple Workflow Rollout Flags */}
-      <section className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-          {t('general.simpleWorkflow.title', { defaultValue: 'Simple Workflow Rollout' })}
-        </h3>
-        <label
-          className={clsx(
-            'flex items-start gap-4 p-4 rounded-lg border cursor-pointer',
-            'transition-colors',
-            'border-gray-200 dark:border-gray-700',
-            'hover:bg-gray-50 dark:hover:bg-gray-800',
-          )}
-        >
-          <input
-            type="checkbox"
-            checked={typedCardPipeline}
-            onChange={(e) => setTypedCardPipeline(e.target.checked)}
-            className="mt-1 text-primary-600"
-          />
-          <div>
-            <div className="font-medium text-gray-900 dark:text-white text-sm">
-              {t('general.simpleWorkflow.typedCardPipeline', {
-                defaultValue: 'TYPED_CARD_PIPELINE (Structured card payload path)',
-              })}
-            </div>
-            <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              {t('general.simpleWorkflow.typedCardPipelineDescription', {
-                defaultValue: 'Render workflow cards from typed payloads first, with JSON fallback for legacy history.',
-              })}
             </div>
           </div>
         </label>

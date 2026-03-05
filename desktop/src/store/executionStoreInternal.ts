@@ -48,6 +48,7 @@ import type {
   ExecutionResult,
   ExecutionState,
   ExecutionStatus,
+  NonCardStreamLineType,
   QualityGateResult,
   SessionSnapshot,
   StandaloneTurn,
@@ -56,7 +57,6 @@ import type {
   StrategyOptionInfo,
   Story,
   StreamLine,
-  StreamLineType,
 } from './execution/types';
 
 export * from './execution/types';
@@ -464,7 +464,7 @@ function collectAssistantTextSince(lines: StreamLine[], minExclusiveLineId: numb
 }
 
 function appendTextWithTypewriter(
-  append: (content: string, type: StreamLineType) => void,
+  append: (content: string, type: NonCardStreamLineType) => void,
   content: string,
   chunkSize = 28,
   delayMs = 14,

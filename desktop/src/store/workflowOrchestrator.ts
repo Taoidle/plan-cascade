@@ -26,6 +26,7 @@ import {
 import { useSpecInterviewStore, type InterviewQuestion, type InterviewSession } from './specInterview';
 import { useSettingsStore } from './settings';
 import { useWorkflowKernelStore } from './workflowKernel';
+import { selectKernelTaskRuntime } from './workflowKernelSelectors';
 import { buildConversationHistory, synthesizePlanningTurn, synthesizeExecutionTurn } from '../lib/contextBridge';
 import { getNextTurnId } from '../lib/conversationUtils';
 import { deriveGateOverallStatus } from '../lib/gateStatus';
@@ -657,8 +658,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   submitInterviewAnswer: async (answer: string) => {
     const runToken = get()._runToken;
     const { pendingQuestion, interviewId } = get();
-    const kernelPendingInterview =
-      useWorkflowKernelStore.getState().session?.modeSnapshots.task?.pendingInterview ?? null;
+    const kernelPendingInterview = selectKernelTaskRuntime(useWorkflowKernelStore.getState().session).pendingInterview;
     const resolvedInterviewId = interviewId || kernelPendingInterview?.interviewId || null;
     if (!resolvedInterviewId) return;
     if (!interviewId && resolvedInterviewId) {
@@ -752,8 +752,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   skipInterviewQuestion: async () => {
     const runToken = get()._runToken;
     const { pendingQuestion, interviewId } = get();
-    const kernelPendingInterview =
-      useWorkflowKernelStore.getState().session?.modeSnapshots.task?.pendingInterview ?? null;
+    const kernelPendingInterview = selectKernelTaskRuntime(useWorkflowKernelStore.getState().session).pendingInterview;
     const resolvedInterviewId = interviewId || kernelPendingInterview?.interviewId || null;
     if (!resolvedInterviewId) return;
     if (!interviewId && resolvedInterviewId) {
@@ -939,11 +938,11 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   /** Cancel the current workflow */
   cancelWorkflow: async () => {
     const { phase, sessionId, _runToken } = get();
-    const linkedSessionId = useWorkflowKernelStore.getState().session?.linkedModeSessions?.task ?? null;
+    const linkedSessionId = selectKernelTaskRuntime(useWorkflowKernelStore.getState().session).linkedSessionId;
     const effectiveSessionId = sessionId || linkedSessionId || useTaskModeStore.getState().sessionId || null;
     if (!sessionId && effectiveSessionId) {
       set({ sessionId: effectiveSessionId });
-      useTaskModeStore.setState({ sessionId: effectiveSessionId, isTaskMode: true });
+      useTaskModeStore.setState({ sessionId: effectiveSessionId });
     }
 
     if (phase === 'executing' && effectiveSessionId) {

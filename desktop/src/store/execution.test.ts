@@ -102,8 +102,7 @@ describe('Execution Store - Background Session State', () => {
   });
 
   describe('appendCard typed pipeline', () => {
-    it('stores typed cardPayload when TYPED_CARD_PIPELINE is enabled', () => {
-      useSettingsStore.setState({ typedCardPipeline: true });
+    it('always stores typed cardPayload', () => {
       const payload = {
         cardType: 'workflow_info',
         cardId: 'card-1',
@@ -118,24 +117,6 @@ describe('Execution Store - Background Session State', () => {
       expect(lastLine?.type).toBe('card');
       expect(lastLine?.content).toBe(JSON.stringify(payload));
       expect(lastLine?.cardPayload).toEqual(payload);
-    });
-
-    it('falls back to JSON-only card when TYPED_CARD_PIPELINE is disabled', () => {
-      useSettingsStore.setState({ typedCardPipeline: false });
-      const payload = {
-        cardType: 'workflow_info',
-        cardId: 'card-legacy',
-        data: { message: 'legacy path' },
-        interactive: false,
-      } as const;
-
-      useExecutionStore.getState().appendCard(payload as never);
-      const lines = useExecutionStore.getState().streamingOutput;
-      const lastLine = lines[lines.length - 1];
-
-      expect(lastLine?.type).toBe('card');
-      expect(lastLine?.content).toBe(JSON.stringify(payload));
-      expect(lastLine?.cardPayload).toBeUndefined();
     });
   });
 
@@ -1029,6 +1010,78 @@ describe('Execution Store - Background Session State', () => {
       expect(settings.backend).toBe('glm');
       expect(settings.provider).toBe('glm');
       expect(settings.model).toBe('glm-4.5');
+    });
+  });
+
+  describe('history card payload migration', () => {
+    it('drops legacy card lines without typed payload when restoring history', () => {
+      const itemId = 'history-legacy-card';
+      useExecutionStore.setState({
+        history: [
+          {
+            id: itemId,
+            taskDescription: 'Legacy card history',
+            strategy: null,
+            status: 'completed',
+            startedAt: Date.now() - 10_000,
+            duration: 5000,
+            completedStories: 1,
+            totalStories: 1,
+            success: true,
+            conversationLines: [
+              { type: 'card', content: '{"cardType":"workflow_info"}' },
+              { type: 'text', content: 'plain text survives' },
+            ],
+          },
+        ],
+      });
+
+      useExecutionStore.getState().restoreFromHistory(itemId);
+
+      const state = useExecutionStore.getState();
+      expect(state.streamingOutput.some((line) => line.type === 'card')).toBe(false);
+      expect(state.streamingOutput.some((line) => line.type === 'text' && line.content === 'plain text survives')).toBe(
+        true,
+      );
+
+      const sanitized = state.history.find((item) => item.id === itemId);
+      expect(sanitized?.conversationLines).toEqual([{ type: 'text', content: 'plain text survives' }]);
+    });
+
+    it('restores typed card lines from history conversationLines', () => {
+      const itemId = 'history-typed-card';
+      const cardPayload = {
+        cardType: 'workflow_info',
+        cardId: 'card-restore-1',
+        interactive: false,
+        data: { message: 'typed card', level: 'info' },
+      } as const;
+
+      useExecutionStore.setState({
+        history: [
+          {
+            id: itemId,
+            taskDescription: 'Typed card history',
+            strategy: null,
+            status: 'completed',
+            startedAt: Date.now() - 10_000,
+            duration: 5000,
+            completedStories: 1,
+            totalStories: 1,
+            success: true,
+            conversationLines: [
+              { type: 'card', content: JSON.stringify(cardPayload), cardPayload },
+              { type: 'text', content: 'tail text' },
+            ],
+          },
+        ],
+      });
+
+      useExecutionStore.getState().restoreFromHistory(itemId);
+
+      const cardLine = useExecutionStore.getState().streamingOutput.find((line) => line.type === 'card');
+      expect(cardLine).toBeDefined();
+      expect(cardLine?.cardPayload).toEqual(cardPayload);
     });
   });
 

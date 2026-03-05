@@ -54,9 +54,7 @@ describe('planMode store', () => {
       );
 
     const state = usePlanModeStore.getState();
-    expect(state.isPlanMode).toBe(true);
     expect(state.sessionId).toBe('plan-session-1');
-    expect(state.sessionPhase).toBe('analyzing');
     expect(state.isLoading).toBe(false);
     expect(mockInvoke).toHaveBeenCalledWith('enter_plan_mode', {
       request: {
@@ -72,7 +70,7 @@ describe('planMode store', () => {
     });
   });
 
-  it('generates plan and transitions to reviewing_plan', async () => {
+  it('generates plan and stores it', async () => {
     usePlanModeStore.setState({ sessionId: 'plan-session-1' });
     mockInvoke.mockResolvedValueOnce({
       success: true,
@@ -88,7 +86,6 @@ describe('planMode store', () => {
     await usePlanModeStore.getState().generatePlan('openai', 'gpt-4o', 'https://api.example.com');
 
     const state = usePlanModeStore.getState();
-    expect(state.sessionPhase).toBe('reviewing_plan');
     expect(state.plan?.title).toBe('Execution Plan');
     expect(state.isLoading).toBe(false);
     expect(mockInvoke).toHaveBeenCalledWith('generate_plan', {
@@ -124,7 +121,6 @@ describe('planMode store', () => {
     });
 
     const state = usePlanModeStore.getState();
-    expect(state.sessionPhase).not.toBe('executing');
     expect(state.isLoading).toBe(false);
     expect(state.error).toBe('Approve failed');
   });

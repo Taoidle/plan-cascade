@@ -72,7 +72,7 @@ describe('settings store migration', () => {
     expect(state.phaseConfigs.implementation.fallbackChain).toEqual(['codex', 'claude-code']);
 
     const persisted = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-    expect(persisted.version).toBe(2);
+    expect(persisted.version).toBe(3);
   });
 
   it('does not keep forcing values after migration has completed', async () => {

@@ -6,7 +6,7 @@ import {
   getNextTurnId,
   normalizeTurnBoundaries,
 } from './conversationUtils';
-import type { StreamLine } from '../store/execution';
+import type { NonCardStreamLineType, StreamLine } from '../store/execution';
 import type { FileAttachmentData } from '../types/attachment';
 
 // ============================================================================
@@ -14,7 +14,7 @@ import type { FileAttachmentData } from '../types/attachment';
 // ============================================================================
 
 let lineIdCounter = 0;
-function makeLine(type: StreamLine['type'], content: string, timestamp?: number): StreamLine {
+function makeLine(type: NonCardStreamLineType, content: string, timestamp?: number): StreamLine {
   lineIdCounter += 1;
   return {
     id: lineIdCounter,

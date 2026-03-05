@@ -1,4 +1,4 @@
-import type { ExecutionState, ExecutionStatus, SessionSnapshot, StreamLine, StreamLineType } from './types';
+import type { ExecutionState, ExecutionStatus, NonCardStreamLineType, SessionSnapshot, StreamLine } from './types';
 
 /**
  * Find a background session by its taskId (which corresponds to the
@@ -43,7 +43,7 @@ export function appendToBackgroundSession(
   state: ExecutionState,
   sessionId: string,
   content: string,
-  type: StreamLineType,
+  type: NonCardStreamLineType,
 ): Partial<ExecutionState> {
   return updateBackgroundSessionByTaskId(state, sessionId, (snapshot) => {
     const lines = snapshot.streamingOutput;

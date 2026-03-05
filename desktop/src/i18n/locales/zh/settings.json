@@ -60,12 +60,6 @@
       "kbIngestJobScopedProgressDescription": "开启后，上传进度会按 job/project/collection 隔离，避免跨集合串扰。"
     },
 
-    "simpleWorkflow": {
-      "title": "Simple 工作流灰度",
-      "typedCardPipeline": "TYPED_CARD_PIPELINE（类型化 Card 渲染链路）",
-      "typedCardPipelineDescription": "优先使用类型化 payload 渲染工作流卡片，并保留历史 JSON 兼容回放。"
-    },
-
     "contextInspector": {
       "title": "上下文观测",
       "enable": "启用 Context Inspector 标签页",

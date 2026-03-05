@@ -101,9 +101,7 @@ describe('workflowOrchestrator task progress events', () => {
     useWorkflowOrchestratorStore.getState().resetWorkflow();
 
     useTaskModeStore.setState({
-      isTaskMode: true,
       sessionId: 'task-session',
-      sessionStatus: 'reviewing_prd',
       currentBatch: 0,
       totalBatches: 0,
       storyStatuses: {},

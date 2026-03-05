@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { StreamLine } from '../../store/execution';
+import type { NonCardStreamLineType, StreamLine } from '../../store/execution';
 import { buildTurnViewModels } from './chatTranscriptModel';
 
-function line(partial: Partial<StreamLine>): StreamLine {
+function line(partial: Partial<StreamLine> & { type?: NonCardStreamLineType }): StreamLine {
   return {
     id: partial.id ?? 1,
     content: partial.content ?? '',
@@ -12,7 +12,6 @@ function line(partial: Partial<StreamLine>): StreamLine {
     subAgentDepth: partial.subAgentDepth,
     turnId: partial.turnId,
     turnBoundary: partial.turnBoundary,
-    cardPayload: partial.cardPayload,
   };
 }
 

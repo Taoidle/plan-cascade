@@ -114,13 +114,11 @@ describe('TaskModeStore', () => {
   // Initial State
   // =========================================================================
   describe('initial state', () => {
-    it('should start with idle status and no session', () => {
+    it('should start with default state and no session', () => {
       const state = useTaskModeStore.getState();
-      expect(state.isTaskMode).toBe(false);
       expect(state.sessionId).toBeNull();
       expect(state.strategyAnalysis).toBeNull();
       expect(state.suggestionDismissed).toBe(false);
-      expect(state.sessionStatus).toBe('idle');
       expect(state.prd).toBeNull();
       expect(state.currentBatch).toBe(0);
       expect(state.totalBatches).toBe(0);
@@ -195,9 +193,7 @@ describe('TaskModeStore', () => {
       await useTaskModeStore.getState().enterTaskMode('Build feature X');
 
       const state = useTaskModeStore.getState();
-      expect(state.isTaskMode).toBe(true);
       expect(state.sessionId).toBe('session-123');
-      expect(state.sessionStatus).toBe('initialized');
       expect(state.strategyAnalysis).toEqual(session.strategyAnalysis);
       expect(state.isLoading).toBe(false);
       expect(useContextSourcesStore.getState().memorySessionId).toBe('session-123');
@@ -216,7 +212,6 @@ describe('TaskModeStore', () => {
       await useTaskModeStore.getState().enterTaskMode('test');
 
       const state = useTaskModeStore.getState();
-      expect(state.isTaskMode).toBe(false);
       expect(state.error).toBe('Already in task mode');
     });
   });
@@ -225,9 +220,9 @@ describe('TaskModeStore', () => {
   // generatePrd
   // =========================================================================
   describe('generatePrd', () => {
-    it('should generate PRD and transition to reviewing_prd', async () => {
+    it('should generate PRD and store it', async () => {
       // First enter task mode
-      useTaskModeStore.setState({ sessionId: 'session-123', isTaskMode: true });
+      useTaskModeStore.setState({ sessionId: 'session-123' });
       useContextSourcesStore.setState({ memorySessionId: null });
 
       const prd = mockPrd();
@@ -237,7 +232,6 @@ describe('TaskModeStore', () => {
 
       const state = useTaskModeStore.getState();
       expect(state.prd).toEqual(prd);
-      expect(state.sessionStatus).toBe('reviewing_prd');
       expect(state.isLoading).toBe(false);
       expect(useContextSourcesStore.getState().memorySessionId).toBe('session-123');
     });
@@ -274,7 +268,7 @@ describe('TaskModeStore', () => {
         selectedCollections: ['col-1'],
         selectedDocuments: [{ collection_id: 'col-1', document_uid: 'doc-1' }],
       });
-      useTaskModeStore.setState({ sessionId: 'session-123', isTaskMode: true });
+      useTaskModeStore.setState({ sessionId: 'session-123' });
       mockInvoke.mockResolvedValueOnce({ success: true, data: mockPrd(), error: null });
 
       await useTaskModeStore.getState().generatePrd(undefined, undefined, 'openai', 'gpt-test', 'http://localhost');
@@ -308,8 +302,8 @@ describe('TaskModeStore', () => {
   // approvePrd
   // =========================================================================
   describe('approvePrd', () => {
-    it('should approve PRD and transition to executing', async () => {
-      useTaskModeStore.setState({ sessionId: 'session-123', isTaskMode: true });
+    it('should approve PRD and keep editable PRD state', async () => {
+      useTaskModeStore.setState({ sessionId: 'session-123' });
 
       const prd = mockPrd();
       mockInvoke.mockResolvedValueOnce({ success: true, data: true, error: null });
@@ -318,7 +312,6 @@ describe('TaskModeStore', () => {
 
       const state = useTaskModeStore.getState();
       expect(state.prd).toEqual(prd);
-      expect(state.sessionStatus).toBe('executing');
       expect(state.isLoading).toBe(false);
     });
 
@@ -343,7 +336,7 @@ describe('TaskModeStore', () => {
     });
 
     it('passes globalDefaultAgent to approve_task_prd payload', async () => {
-      useTaskModeStore.setState({ sessionId: 'session-123', isTaskMode: true });
+      useTaskModeStore.setState({ sessionId: 'session-123' });
       useSettingsStore.setState({ defaultAgent: 'codex' });
       mockInvoke.mockResolvedValueOnce({ success: true, data: true, error: null });
 
@@ -386,7 +379,6 @@ describe('TaskModeStore', () => {
       await useTaskModeStore.getState().refreshStatus();
 
       const state = useTaskModeStore.getState();
-      expect(state.sessionStatus).toBe('executing');
       expect(state.currentBatch).toBe(1);
       expect(state.totalBatches).toBe(3);
       expect(state.storyStatuses).toEqual({
@@ -406,12 +398,11 @@ describe('TaskModeStore', () => {
   // =========================================================================
   describe('cancelExecution', () => {
     it('should request cancel and wait for event confirmation', async () => {
-      useTaskModeStore.setState({ sessionId: 'session-123', sessionStatus: 'executing' });
+      useTaskModeStore.setState({ sessionId: 'session-123' });
       mockInvoke.mockResolvedValueOnce({ success: true, data: true, error: null });
 
       await useTaskModeStore.getState().cancelExecution();
 
-      expect(useTaskModeStore.getState().sessionStatus).toBe('executing');
       expect(useTaskModeStore.getState().isCancelling).toBe(true);
       expect(useTaskModeStore.getState().isLoading).toBe(false);
     });
@@ -427,7 +418,7 @@ describe('TaskModeStore', () => {
   // =========================================================================
   describe('fetchReport', () => {
     it('should fetch and store execution report', async () => {
-      useTaskModeStore.setState({ sessionId: 'session-123', sessionStatus: 'completed' });
+      useTaskModeStore.setState({ sessionId: 'session-123' });
 
       const report: ExecutionReport = {
         sessionId: 'session-123',
@@ -458,18 +449,14 @@ describe('TaskModeStore', () => {
   describe('exitTaskMode', () => {
     it('should reset state on successful exit', async () => {
       useTaskModeStore.setState({
-        isTaskMode: true,
         sessionId: 'session-123',
-        sessionStatus: 'completed',
       });
       mockInvoke.mockResolvedValueOnce({ success: true, data: true, error: null });
 
       await useTaskModeStore.getState().exitTaskMode();
 
       const state = useTaskModeStore.getState();
-      expect(state.isTaskMode).toBe(false);
       expect(state.sessionId).toBeNull();
-      expect(state.sessionStatus).toBe('idle');
       expect(state.prd).toBeNull();
       expect(useContextSourcesStore.getState().memorySessionId).toBeNull();
     });
@@ -494,9 +481,7 @@ describe('TaskModeStore', () => {
   describe('reset', () => {
     it('should reset all state to defaults', () => {
       useTaskModeStore.setState({
-        isTaskMode: true,
         sessionId: 'session-123',
-        sessionStatus: 'executing',
         prd: mockPrd(),
         currentBatch: 2,
         error: 'old error',
@@ -505,9 +490,7 @@ describe('TaskModeStore', () => {
       useTaskModeStore.getState().reset();
 
       const state = useTaskModeStore.getState();
-      expect(state.isTaskMode).toBe(false);
       expect(state.sessionId).toBeNull();
-      expect(state.sessionStatus).toBe('idle');
       expect(state.prd).toBeNull();
       expect(state.error).toBeNull();
       expect(useContextSourcesStore.getState().memorySessionId).toBeNull();

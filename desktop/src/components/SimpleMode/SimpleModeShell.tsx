@@ -65,7 +65,12 @@ import {
   switchModeSafely,
 } from '../../store/simpleWorkflowCoordinator';
 import type { WorkflowMode } from '../../types/workflowKernel';
-import { selectKernelPlanRuntime, selectKernelTaskRuntime } from '../../store/workflowKernelSelectors';
+import {
+  isKernelRuntimeBusy,
+  selectKernelChatRuntime,
+  selectKernelPlanRuntime,
+  selectKernelTaskRuntime,
+} from '../../store/workflowKernelSelectors';
 
 interface CommandResponse<T> {
   success: boolean;
@@ -276,13 +281,14 @@ export function SimpleModeShell() {
   const cancelPlanWorkflow = usePlanOrchestratorStore((s) => s.cancelWorkflow);
   const planWorkflowCancelling = usePlanOrchestratorStore((s) => s.isCancelling);
   const resetPlanWorkflow = usePlanOrchestratorStore((s) => s.resetWorkflow);
+  const kernelChatRuntime = useMemo(() => selectKernelChatRuntime(workflowKernelSession), [workflowKernelSession]);
   const kernelTaskRuntime = useMemo(() => selectKernelTaskRuntime(workflowKernelSession), [workflowKernelSession]);
   const kernelPlanRuntime = useMemo(() => selectKernelPlanRuntime(workflowKernelSession), [workflowKernelSession]);
   const workflowKernelTaskPhase = kernelTaskRuntime.phase;
   const workflowKernelPlanPhase = kernelPlanRuntime.phase;
-  const workflowKernelChatPhase = workflowKernelSession?.modeSnapshots.chat?.phase ?? 'ready';
-  const workflowKernelPendingInterview = workflowKernelSession?.modeSnapshots.task?.pendingInterview ?? null;
-  const workflowKernelPendingClarification = workflowKernelSession?.modeSnapshots.plan?.pendingClarification ?? null;
+  const workflowKernelChatPhase = kernelChatRuntime.phase;
+  const workflowKernelPendingInterview = kernelTaskRuntime.pendingInterview;
+  const workflowKernelPendingClarification = kernelPlanRuntime.pendingClarification;
   const workflowKernelLinkedTaskSessionId = kernelTaskRuntime.linkedSessionId;
   const workflowKernelLinkedPlanSessionId = kernelPlanRuntime.linkedSessionId;
 
@@ -360,18 +366,8 @@ export function SimpleModeShell() {
       taskPendingQuestion.inputType === 'multi_select');
   const hasTextInterviewQuestion = taskInterviewingPhase && !!taskPendingQuestion && !hasStructuredInterviewQuestion;
   const hasPlanClarifyQuestion = planClarifyingPhase && !!planPendingQuestion;
-  const isTaskWorkflowActiveForSwitchGuard =
-    workflowMode === 'task' &&
-    workflowPhase !== 'idle' &&
-    workflowPhase !== 'completed' &&
-    workflowPhase !== 'failed' &&
-    workflowPhase !== 'cancelled';
-  const isPlanWorkflowActiveForSwitchGuard =
-    workflowMode === 'plan' &&
-    planPhase !== 'idle' &&
-    planPhase !== 'completed' &&
-    planPhase !== 'failed' &&
-    planPhase !== 'cancelled';
+  const isTaskWorkflowActiveForSwitchGuard = workflowMode === 'task' && isKernelRuntimeBusy(kernelTaskRuntime);
+  const isPlanWorkflowActiveForSwitchGuard = workflowMode === 'plan' && isKernelRuntimeBusy(kernelPlanRuntime);
   const effectiveTaskPhaseForInput = taskInterviewingPhase ? 'interviewing' : workflowPhase;
   const effectivePlanPhaseForInput = planClarifyingPhase ? 'clarifying' : planPhase;
   const isInterviewSubmitting = taskInterviewingPhase && taskPendingQuestion === null;
@@ -384,7 +380,6 @@ export function SimpleModeShell() {
           : {
               ...state,
               sessionId: workflowKernelLinkedTaskSessionId,
-              isTaskMode: true,
             },
       );
     }
@@ -395,7 +390,6 @@ export function SimpleModeShell() {
           : {
               ...state,
               sessionId: workflowKernelLinkedPlanSessionId,
-              isPlanMode: true,
             },
       );
     }

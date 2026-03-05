@@ -132,7 +132,7 @@ pub async fn approve_plan(
 ) -> Result<CommandResponse<bool>, String> {
     let ApprovePlanRequest {
         session_id,
-        plan,
+        mut plan,
         provider,
         model,
         base_url,
@@ -141,6 +141,13 @@ pub async fn approve_plan(
         conversation_context,
         locale,
     } = request;
+
+    let max_parallel = plan.execution_config.normalized_max_parallel();
+    plan.execution_config.max_parallel = max_parallel;
+    plan.batches = crate::services::plan_mode::types::calculate_plan_batches_with_parallel(
+        &plan.steps,
+        max_parallel,
+    );
 
     // Validate
     let (adapter_name, task_description) = {
@@ -265,7 +272,8 @@ pub async fn approve_plan(
     };
 
     tokio::spawn(async move {
-        let config = crate::services::plan_mode::step_executor::StepExecutionConfig::default();
+        let mut config = crate::services::plan_mode::step_executor::StepExecutionConfig::default();
+        config.max_parallel = max_parallel;
 
         let mut plan_mut = plan;
         let app_for_execute = app_handle.clone();

@@ -165,9 +165,6 @@ interface CommandResponse<T> {
 // ============================================================================
 
 export interface TaskModeState {
-  /** Whether we are in task mode */
-  isTaskMode: boolean;
-
   /** Current session ID */
   sessionId: string | null;
 
@@ -176,9 +173,6 @@ export interface TaskModeState {
 
   /** Whether strategy analysis has been dismissed */
   suggestionDismissed: boolean;
-
-  /** Current session status */
-  sessionStatus: TaskModeSessionStatus | 'idle';
 
   /** Generated/approved PRD */
   prd: TaskPrd | null;
@@ -253,11 +247,9 @@ export interface TaskModeState {
 // ============================================================================
 
 const DEFAULT_STATE = {
-  isTaskMode: false,
   sessionId: null,
   strategyAnalysis: null,
   suggestionDismissed: false,
-  sessionStatus: 'idle' as const,
   prd: null,
   currentBatch: 0,
   totalBatches: 0,
@@ -303,9 +295,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
         const contextSourcesStore = useContextSourcesStore.getState();
         contextSourcesStore.setMemorySessionId(session.sessionId);
         set({
-          isTaskMode: true,
           sessionId: session.sessionId,
-          sessionStatus: session.status as TaskModeSessionStatus,
           strategyAnalysis: session.strategyAnalysis,
           prd: session.prd,
           isLoading: false,
@@ -330,7 +320,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
       set({ error: 'No active session' });
       return;
     }
-    set({ isLoading: true, error: null, sessionStatus: 'generating_prd' });
+    set({ isLoading: true, error: null });
     try {
       // Read provider/model + endpoint settings from settings store
       const settingsStore = (await import('./settings')).useSettingsStore.getState();
@@ -363,7 +353,6 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
       if (result.success && result.data) {
         set({
           prd: result.data,
-          sessionStatus: 'reviewing_prd',
           isLoading: false,
         });
       } else {
@@ -409,7 +398,6 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
       if (result.success) {
         set({
           prd,
-          sessionStatus: 'executing',
           isLoading: false,
         });
       } else {
@@ -428,7 +416,6 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
       if (result.success && result.data) {
         const status = result.data;
         set({
-          sessionStatus: status.status as TaskModeSessionStatus,
           currentBatch: status.currentBatch,
           totalBatches: status.totalBatches,
           storyStatuses: status.storyStatuses,

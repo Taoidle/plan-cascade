@@ -71,9 +71,7 @@ describe('planOrchestrator event handling', () => {
     usePlanOrchestratorStore.getState().resetWorkflow();
 
     usePlanModeStore.setState({
-      isPlanMode: true,
       sessionId: 'session-1',
-      sessionPhase: 'reviewing_plan',
       currentBatch: 0,
       totalBatches: 0,
       stepStatuses: {},
@@ -260,7 +258,6 @@ describe('planOrchestrator clarification recovery', () => {
     const enterPlanMode = vi.fn().mockImplementation(async () => {
       usePlanModeStore.setState({
         sessionId: 'plan-session-1',
-        sessionPhase: 'clarifying',
         analysis: {
           domain: 'general',
           complexity: 2,
@@ -316,7 +313,6 @@ describe('planOrchestrator clarification recovery', () => {
       skipClarification,
       generatePlan,
       sessionId: 'plan-session-2',
-      sessionPhase: 'clarifying',
       plan: null,
       error: null,
     } as unknown as ReturnType<typeof usePlanModeStore.getState>);

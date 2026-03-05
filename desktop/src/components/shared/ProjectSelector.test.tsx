@@ -37,6 +37,11 @@ vi.mock('react-i18next', () => ({
 // Mock @tauri-apps/plugin-shell
 vi.mock('@tauri-apps/plugin-shell', () => ({
   open: mockShellOpen,
+  Command: {
+    create: vi.fn().mockReturnValue({
+      execute: mockShellOpen,
+    }),
+  },
 }));
 
 // Mock @tauri-apps/plugin-dialog

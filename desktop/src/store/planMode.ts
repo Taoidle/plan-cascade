@@ -9,7 +9,6 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import type {
-  PlanModePhase,
   PlanModeSession,
   PlanAnalysisCardData,
   PlanCardData,
@@ -29,9 +28,7 @@ import type { ContextSourceConfig } from './contextSources';
 
 export interface PlanModeState {
   // State
-  isPlanMode: boolean;
   sessionId: string | null;
-  sessionPhase: PlanModePhase;
   analysis: PlanAnalysisCardData | null;
   currentQuestion: PlanClarifyQuestionCardData | null;
   plan: PlanCardData | null;
@@ -101,9 +98,7 @@ export interface PlanModeState {
 // ============================================================================
 
 const DEFAULT_STATE = {
-  isPlanMode: false,
   sessionId: null,
-  sessionPhase: 'idle' as PlanModePhase,
   analysis: null,
   currentQuestion: null as PlanClarifyQuestionCardData | null,
   plan: null,
@@ -162,9 +157,7 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
 
       if (result.success && result.data) {
         set({
-          isPlanMode: true,
           sessionId: result.data.sessionId,
-          sessionPhase: result.data.phase,
           analysis: result.data.analysis,
           currentQuestion: result.data.currentQuestion ?? null,
           isLoading: false,
@@ -219,7 +212,6 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
       if (get()._requestId !== requestId) return null;
       if (result.success && result.data) {
         set({
-          sessionPhase: result.data.phase,
           currentQuestion: result.data.currentQuestion ?? null,
         });
         return result.data;
@@ -243,9 +235,7 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
         sessionId,
       });
       if (get()._requestId !== requestId) return;
-      if (result.success && result.data) {
-        set({ sessionPhase: result.data.phase });
-      }
+      if (result.success && result.data) return;
     } catch (e) {
       if (get()._requestId !== requestId) return;
       set({ error: String(e) });
@@ -282,7 +272,6 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
       if (result.success && result.data) {
         set({
           plan: result.data,
-          sessionPhase: 'reviewing_plan',
           isLoading: false,
         });
       } else {
@@ -323,7 +312,7 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
       if (get()._requestId !== requestId) return;
 
       if (result.success) {
-        set({ sessionPhase: 'executing', isLoading: false });
+        set({ isLoading: false });
       } else {
         set({ isLoading: false, error: result.error || 'Failed to approve plan' });
       }
@@ -343,7 +332,6 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
       });
       if (result.success && result.data) {
         set({
-          sessionPhase: result.data.phase,
           totalBatches: result.data.totalBatches,
         });
       }

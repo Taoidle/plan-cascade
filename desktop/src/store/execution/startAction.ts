@@ -21,7 +21,7 @@ import {
 } from './sessionRouting';
 import { inferInjectedSourceKinds } from './contextAssembly';
 import { getNextTurnId } from '../../lib/conversationUtils';
-import type { ExecutionState, ExecutionStatus, StandaloneTurn, StreamLine, StreamLineType } from './types';
+import type { ExecutionState, ExecutionStatus, NonCardStreamLineType, StandaloneTurn, StreamLine } from './types';
 
 interface CommandResponse<T> {
   success: boolean;
@@ -107,7 +107,7 @@ interface StartActionDeps {
   collectAssistantTextSince: (lines: StreamLine[], minExclusiveLineId: number) => string;
   hasAssistantTextLineSince: (lines: StreamLine[], minExclusiveLineId: number) => boolean;
   appendTextWithTypewriter: (
-    append: (chunk: string, type: StreamLineType) => void,
+    append: (chunk: string, type: NonCardStreamLineType) => void,
     text: string,
     chunkSize?: number,
     delayMs?: number,

@@ -375,14 +375,6 @@ const ChatAssistantSection = memo(function ChatAssistantSection({
   onFork: (userLineId: number) => void;
 }) {
   const showReasoning = useSettingsStore((s) => s.showReasoningOutput);
-  const cardPayloadCacheRef = useRef<Map<number, CardPayload | null>>(new Map());
-
-  useEffect(() => {
-    const activeIds = new Set(lines.map((line) => line.id));
-    for (const id of cardPayloadCacheRef.current.keys()) {
-      if (!activeIds.has(id)) cardPayloadCacheRef.current.delete(id);
-    }
-  }, [lines]);
 
   const lineStats = useMemo(() => {
     const thinkingLines: StreamLine[] = [];
@@ -425,25 +417,6 @@ const ChatAssistantSection = memo(function ChatAssistantSection({
 
   const blocks = useMemo(() => buildDisplayBlocks(lineStats.contentLines, true), [lineStats.contentLines]);
 
-  const resolveCardPayload = useCallback((line: StreamLine): CardPayload | null => {
-    if (line.cardPayload) return line.cardPayload;
-
-    const cache = cardPayloadCacheRef.current;
-    if (cache.has(line.id)) {
-      return cache.get(line.id) ?? null;
-    }
-
-    let parsed: CardPayload | null = null;
-    try {
-      parsed = JSON.parse(line.content) as CardPayload;
-    } catch (error) {
-      console.warn('Failed to parse workflow card payload', error, { lineId: line.id });
-    }
-
-    cache.set(line.id, parsed);
-    return parsed;
-  }, []);
-
   return (
     <div className="group relative flex justify-start">
       <div
@@ -480,7 +453,7 @@ const ChatAssistantSection = memo(function ChatAssistantSection({
 
           const line = block.line;
           if (line.type === 'card') {
-            const payload = resolveCardPayload(line);
+            const payload = (line as { cardPayload?: unknown }).cardPayload as CardPayload | undefined;
             if (!payload) {
               return (
                 <div

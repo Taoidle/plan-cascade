@@ -68,6 +68,8 @@ export type StreamLineType =
   | 'code'
   | 'card';
 
+export type NonCardStreamLineType = Exclude<StreamLineType, 'card'>;
+
 export interface StreamLineAppendOptions {
   /**
    * Logical conversation turn id. A new user turn should increment this value.
@@ -78,13 +80,10 @@ export interface StreamLineAppendOptions {
   turnBoundary?: 'user' | 'assistant';
 }
 
-export interface StreamLine {
+interface StreamLineBase {
   id: number;
   content: string;
-  type: StreamLineType;
   timestamp: number;
-  /** Structured workflow card payload (v2 path). */
-  cardPayload?: CardPayload;
   /** Sub-agent ID if this line originated from a sub-agent */
   subAgentId?: string;
   /** Sub-agent nesting depth (0 = root) */
@@ -93,9 +92,24 @@ export interface StreamLine {
   turnBoundary?: 'user' | 'assistant';
 }
 
+export type StreamLine = StreamLineBase &
+  (
+    | {
+        type: NonCardStreamLineType;
+        cardPayload?: never;
+      }
+    | {
+        type: 'card';
+        /** Structured workflow card payload. Required for card lines. */
+        cardPayload: CardPayload;
+      }
+  );
+
 export interface HistoryConversationLine {
   type: StreamLineType;
   content: string;
+  /** Structured workflow card payload (required at runtime for card restore). */
+  cardPayload?: CardPayload;
   subAgentId?: string;
   subAgentDepth?: number;
   turnId?: number;
@@ -486,7 +500,7 @@ export interface ExecutionState {
   /** Append a streaming output line */
   appendStreamLine: (
     content: string,
-    type: StreamLineType,
+    type: NonCardStreamLineType,
     subAgentId?: string,
     subAgentDepth?: number,
     options?: StreamLineAppendOptions,

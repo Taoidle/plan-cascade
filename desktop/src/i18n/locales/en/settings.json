@@ -60,12 +60,6 @@
       "kbIngestJobScopedProgressDescription": "When enabled, upload progress is isolated by job/project/collection to avoid cross-collection progress interference."
     },
 
-    "simpleWorkflow": {
-      "title": "Simple Workflow Rollout",
-      "typedCardPipeline": "TYPED_CARD_PIPELINE (Structured card payload path)",
-      "typedCardPipelineDescription": "Render workflow cards from typed payloads first, with JSON fallback for legacy history."
-    },
-
     "contextInspector": {
       "title": "Context Observability",
       "enable": "Enable Context Inspector tab",

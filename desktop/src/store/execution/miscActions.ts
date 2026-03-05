@@ -254,7 +254,6 @@ export function createMiscActions(deps: MiscActionDeps): MiscActions {
     appendCard: (payload, subAgentId, subAgentDepth) => {
       set((state) => {
         const counter = state.streamLineCounter + 1;
-        const typedCardPipelineEnabled = useSettingsStore.getState().typedCardPipeline;
         return {
           streamingOutput: [
             ...state.streamingOutput,
@@ -263,7 +262,7 @@ export function createMiscActions(deps: MiscActionDeps): MiscActions {
               content: JSON.stringify(payload),
               type: 'card' as const,
               timestamp: Date.now(),
-              ...(typedCardPipelineEnabled ? { cardPayload: payload } : {}),
+              cardPayload: payload,
               subAgentId,
               subAgentDepth,
             },

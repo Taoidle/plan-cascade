@@ -86,7 +86,6 @@ interface SettingsState {
   kbQueryRunsV2: boolean;
   kbPickerServerSearch: boolean;
   kbIngestJobScopedProgress: boolean;
-  typedCardPipeline: boolean;
 
   // Sidebar settings
   pinnedDirectories: string[];
@@ -156,7 +155,6 @@ interface SettingsState {
   setKbQueryRunsV2: (enabled: boolean) => void;
   setKbPickerServerSearch: (enabled: boolean) => void;
   setKbIngestJobScopedProgress: (enabled: boolean) => void;
-  setTypedCardPipeline: (enabled: boolean) => void;
 
   // Sidebar actions
   addPinnedDirectory: (path: string) => void;
@@ -219,7 +217,6 @@ const defaultSettings = {
   kbQueryRunsV2: true,
   kbPickerServerSearch: true,
   kbIngestJobScopedProgress: true,
-  typedCardPipeline: true,
 
   // Sidebar
   pinnedDirectories: [] as string[],
@@ -289,6 +286,7 @@ function applyV2ForcedDefaults(state: Partial<SettingsState>): Partial<SettingsS
 function applyV3ForcedDefaults(state: Partial<SettingsState>): Partial<SettingsState> {
   const nextState = applyV2ForcedDefaults(state);
   delete (nextState as Record<string, unknown>).simpleKernelSot;
+  delete (nextState as Record<string, unknown>).typedCardPipeline;
   return nextState;
 }
 
@@ -417,7 +415,6 @@ export const useSettingsStore = create<SettingsState>()(
       setKbQueryRunsV2: (enabled: boolean) => set({ kbQueryRunsV2: enabled }),
       setKbPickerServerSearch: (enabled: boolean) => set({ kbPickerServerSearch: enabled }),
       setKbIngestJobScopedProgress: (enabled: boolean) => set({ kbIngestJobScopedProgress: enabled }),
-      setTypedCardPipeline: (enabled: boolean) => set({ typedCardPipeline: enabled }),
 
       addPinnedDirectory: (path) =>
         set((state) => {
@@ -455,6 +452,7 @@ export const useSettingsStore = create<SettingsState>()(
         }
         const nextState = { ...state } as Record<string, unknown>;
         delete nextState.simpleKernelSot;
+        delete nextState.typedCardPipeline;
         return nextState as Partial<SettingsState>;
       },
       partialize: (state) => {
@@ -463,6 +461,7 @@ export const useSettingsStore = create<SettingsState>()(
       merge: (persisted, current) => {
         const merged = { ...current, ...(persisted as object) };
         delete (merged as Record<string, unknown>).simpleKernelSot;
+        delete (merged as Record<string, unknown>).typedCardPipeline;
         const mergedState = merged as SettingsState;
         // API keys are not persisted in frontend state.
         mergedState.apiKey = '';

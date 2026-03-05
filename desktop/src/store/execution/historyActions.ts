@@ -4,6 +4,7 @@ import type {
   ExecutionState,
   ExecutionHistoryItem,
   HistoryConversationLine,
+  NonCardStreamLineType,
   SessionSnapshot,
   StandaloneTurn,
   StreamLine,
@@ -17,6 +18,94 @@ interface HistoryActions {
   deleteHistory: (historyId: string) => void;
   renameHistory: (historyId: string, title: string) => void;
   restoreFromHistory: (historyId: string) => void;
+}
+
+const CARD_LINE_PREFIX = '[Card] ';
+
+function sanitizeConversationContent(content?: string): { content?: string; changed: boolean } {
+  if (!content || content.length === 0) return { content, changed: false };
+  const filtered = content
+    .split('\n')
+    .filter((line) => !line.startsWith(CARD_LINE_PREFIX))
+    .join('\n');
+  if (filtered === content) return { content, changed: false };
+  return { content: filtered.length > 0 ? filtered : undefined, changed: true };
+}
+
+function sanitizeConversationLines(lines?: HistoryConversationLine[]): {
+  lines?: HistoryConversationLine[];
+  changed: boolean;
+} {
+  if (!lines || lines.length === 0) return { lines, changed: false };
+
+  const sanitized: HistoryConversationLine[] = [];
+  let changed = false;
+
+  for (const line of lines) {
+    if (line.type === 'card') {
+      if (!line.cardPayload) {
+        changed = true;
+        continue;
+      }
+      const normalizedContent = line.content?.trim().length > 0 ? line.content : JSON.stringify(line.cardPayload);
+      if (normalizedContent !== line.content) changed = true;
+      sanitized.push({
+        type: 'card',
+        content: normalizedContent,
+        cardPayload: line.cardPayload,
+        ...(line.subAgentId ? { subAgentId: line.subAgentId } : {}),
+        ...(line.subAgentDepth != null ? { subAgentDepth: line.subAgentDepth } : {}),
+        ...(line.turnId != null ? { turnId: line.turnId } : {}),
+        ...(line.turnBoundary ? { turnBoundary: line.turnBoundary } : {}),
+      });
+      continue;
+    }
+
+    if ((line as { cardPayload?: unknown }).cardPayload !== undefined) changed = true;
+    sanitized.push({
+      type: line.type,
+      content: line.content,
+      ...(line.subAgentId ? { subAgentId: line.subAgentId } : {}),
+      ...(line.subAgentDepth != null ? { subAgentDepth: line.subAgentDepth } : {}),
+      ...(line.turnId != null ? { turnId: line.turnId } : {}),
+      ...(line.turnBoundary ? { turnBoundary: line.turnBoundary } : {}),
+    });
+  }
+
+  if (sanitized.length !== lines.length) changed = true;
+  return { lines: sanitized.length > 0 ? sanitized : undefined, changed };
+}
+
+function sanitizeHistoryItem(item: ExecutionHistoryItem): { item: ExecutionHistoryItem; changed: boolean } {
+  const { lines: conversationLines, changed: linesChanged } = sanitizeConversationLines(item.conversationLines);
+  const { content: conversationContent, changed: contentChanged } = sanitizeConversationContent(
+    item.conversationContent,
+  );
+  if (!linesChanged && !contentChanged) return { item, changed: false };
+  return {
+    item: {
+      ...item,
+      conversationLines,
+      conversationContent,
+    },
+    changed: true,
+  };
+}
+
+function sanitizeHistoryItems(items: ExecutionHistoryItem[]): {
+  items: ExecutionHistoryItem[];
+  changedItems: ExecutionHistoryItem[];
+} {
+  const sanitizedItems: ExecutionHistoryItem[] = [];
+  const changedItems: ExecutionHistoryItem[] = [];
+
+  for (const item of items) {
+    const sanitized = sanitizeHistoryItem(item);
+    sanitizedItems.push(sanitized.item);
+    if (sanitized.changed) changedItems.push(sanitized.item);
+  }
+
+  return { items: sanitizedItems, changedItems };
 }
 
 type ExecutionSetState = (
@@ -82,12 +171,18 @@ export function createHistoryActions(deps: HistoryActionDeps): HistoryActions {
 
         if (!migrated) {
           const legacy = loadLegacyHistoryFromLocalStorage();
-          if (legacy.length > 0) {
-            const imported = await importHistoryToSQLite(legacy);
+          const { items: sanitizedLegacy, changedItems: changedLegacy } = sanitizeHistoryItems(legacy);
+          if (sanitizedLegacy.length > 0) {
+            const imported = await importHistoryToSQLite(sanitizedLegacy);
             if (imported) {
               markHistoryMigrationDone();
             } else {
-              set({ history: legacy });
+              set({ history: sanitizedLegacy });
+              if (changedLegacy.length > 0) {
+                for (const changedItem of changedLegacy) {
+                  void upsertHistoryToSQLite(changedItem);
+                }
+              }
               return;
             }
           } else {
@@ -97,13 +192,25 @@ export function createHistoryActions(deps: HistoryActionDeps): HistoryActions {
 
         const finalHistory = (await listHistoryFromSQLite(maxHistoryItems)) ?? dbHistory;
         if (finalHistory) {
-          set({ history: finalHistory });
+          const { items: sanitizedHistory, changedItems } = sanitizeHistoryItems(finalHistory);
+          set({ history: sanitizedHistory });
+          if (changedItems.length > 0) {
+            for (const item of changedItems) {
+              void upsertHistoryToSQLite(item);
+            }
+          }
           return;
         }
 
         const legacyFallback = loadLegacyHistoryFromLocalStorage();
-        if (legacyFallback.length > 0) {
-          set({ history: legacyFallback });
+        const { items: sanitizedFallback, changedItems } = sanitizeHistoryItems(legacyFallback);
+        if (sanitizedFallback.length > 0) {
+          set({ history: sanitizedFallback });
+          if (changedItems.length > 0) {
+            for (const item of changedItems) {
+              void upsertHistoryToSQLite(item);
+            }
+          }
         }
       })();
     },
@@ -134,6 +241,7 @@ export function createHistoryActions(deps: HistoryActionDeps): HistoryActions {
           ? state.streamingOutput.map((line) => ({
               type: line.type,
               content: line.content,
+              ...(line.type === 'card' ? { cardPayload: line.cardPayload } : {}),
               ...(line.subAgentId ? { subAgentId: line.subAgentId } : {}),
               ...(line.subAgentDepth != null ? { subAgentDepth: line.subAgentDepth } : {}),
               ...(line.turnId != null ? { turnId: line.turnId } : {}),
@@ -249,8 +357,16 @@ export function createHistoryActions(deps: HistoryActionDeps): HistoryActions {
     restoreFromHistory: (historyId: string) => {
       const item = get().history.find((h) => h.id === historyId);
       if (!item) return;
+      const sanitized = sanitizeHistoryItem(item);
+      const targetItem = sanitized.item;
+      if (sanitized.changed) {
+        set((state) => ({
+          history: state.history.map((entry) => (entry.id === historyId ? targetItem : entry)),
+        }));
+        void upsertHistoryToSQLite(targetItem);
+      }
 
-      const PREFIX_TO_TYPE: Record<string, StreamLineType> = {
+      const PREFIX_TO_TYPE: Record<string, NonCardStreamLineType> = {
         '[Assistant] ': 'text',
         '[User] ': 'info',
         '[Error] ': 'error',
@@ -267,23 +383,43 @@ export function createHistoryActions(deps: HistoryActionDeps): HistoryActions {
       const lines: StreamLine[] = [];
       let counter = 0;
 
-      if (item.conversationLines && item.conversationLines.length > 0) {
-        for (const line of item.conversationLines) {
+      if (targetItem.conversationLines && targetItem.conversationLines.length > 0) {
+        for (const line of targetItem.conversationLines) {
+          if (line.type === 'card') {
+            if (!line.cardPayload) continue;
+            counter++;
+            lines.push({
+              id: counter,
+              content: line.content || JSON.stringify(line.cardPayload),
+              type: 'card',
+              cardPayload: line.cardPayload,
+              timestamp: targetItem.startedAt,
+              ...(line.subAgentId ? { subAgentId: line.subAgentId } : {}),
+              ...(line.subAgentDepth != null ? { subAgentDepth: line.subAgentDepth } : {}),
+              ...(line.turnId != null ? { turnId: line.turnId } : {}),
+              ...(line.turnBoundary ? { turnBoundary: line.turnBoundary } : {}),
+            });
+            continue;
+          }
+
           counter++;
           lines.push({
             id: counter,
             content: line.content,
             type: line.type,
-            timestamp: item.startedAt,
+            timestamp: targetItem.startedAt,
             ...(line.subAgentId ? { subAgentId: line.subAgentId } : {}),
             ...(line.subAgentDepth != null ? { subAgentDepth: line.subAgentDepth } : {}),
             ...(line.turnId != null ? { turnId: line.turnId } : {}),
             ...(line.turnBoundary ? { turnBoundary: line.turnBoundary } : {}),
           });
         }
-      } else if (item.conversationContent) {
-        for (const raw of item.conversationContent.split('\n')) {
-          let type: StreamLineType = 'text';
+      } else if (targetItem.conversationContent) {
+        for (const raw of targetItem.conversationContent.split('\n')) {
+          if (raw.startsWith(CARD_LINE_PREFIX)) {
+            continue;
+          }
+          let type: NonCardStreamLineType = 'text';
           let content = raw;
 
           for (const [prefix, lineType] of Object.entries(PREFIX_TO_TYPE)) {
@@ -299,16 +435,18 @@ export function createHistoryActions(deps: HistoryActionDeps): HistoryActions {
             id: counter,
             content,
             type,
-            timestamp: item.startedAt,
+            timestamp: targetItem.startedAt,
           });
         }
       } else {
         return;
       }
 
+      if (lines.length === 0) return;
+
       const normalizedLines = normalizeTurnBoundaries(lines);
 
-      const restoredSessionId = item.sessionId || null;
+      const restoredSessionId = targetItem.sessionId || null;
       const claudePrefix = 'claude:';
       const standalonePrefix = 'standalone:';
       const isClaudeSession = restoredSessionId !== null && restoredSessionId.startsWith(claudePrefix);
@@ -350,7 +488,7 @@ export function createHistoryActions(deps: HistoryActionDeps): HistoryActions {
         foregroundParentSessionId: null,
         foregroundBgId: null,
         foregroundOriginHistoryId: historyId,
-        foregroundOriginSessionId: item.sessionId || null,
+        foregroundOriginSessionId: targetItem.sessionId || null,
         foregroundDirty: false,
         streamingOutput: normalizedLines,
         streamLineCounter: counter,
@@ -360,13 +498,13 @@ export function createHistoryActions(deps: HistoryActionDeps): HistoryActions {
         standaloneTurns: isStandaloneSession
           ? trimStandaloneTurns(restoredStandaloneTurns, getStandaloneContextTurnsLimit())
           : [],
-        taskDescription: item.title || item.taskDescription,
+        taskDescription: targetItem.title || targetItem.taskDescription,
       });
 
       restoreSessionLlmSettings({
-        llmBackend: item.llmBackend,
-        llmProvider: item.llmProvider,
-        llmModel: item.llmModel,
+        llmBackend: targetItem.llmBackend,
+        llmProvider: targetItem.llmProvider,
+        llmModel: targetItem.llmModel,
       });
     },
   };

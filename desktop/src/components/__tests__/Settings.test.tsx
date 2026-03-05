@@ -50,10 +50,6 @@ vi.mock('react-i18next', () => ({
         'general.knowledgeBase.kbPickerServerSearchDescription': 'Search unexpanded collections',
         'general.knowledgeBase.kbIngestJobScopedProgress': 'Use job-scoped ingest progress events',
         'general.knowledgeBase.kbIngestJobScopedProgressDescription': 'Isolate upload progress by job',
-        'general.simpleWorkflow.title': 'Simple Workflow Rollout',
-        'general.simpleWorkflow.typedCardPipeline': 'TYPED_CARD_PIPELINE (Structured card payload path)',
-        'general.simpleWorkflow.typedCardPipelineDescription':
-          'Render workflow cards from typed payloads first, with JSON fallback for legacy history.',
         'general.contextInspector.title': 'Context Observability',
         'general.contextInspector.enable': 'Enable Context Inspector tab',
         'general.contextInspector.description':
@@ -157,7 +153,6 @@ const mockSetKnowledgeAutoEnsureDocsCollection = vi.fn();
 const mockSetKbQueryRunsV2 = vi.fn();
 const mockSetKbPickerServerSearch = vi.fn();
 const mockSetKbIngestJobScopedProgress = vi.fn();
-const mockSetTypedCardPipeline = vi.fn();
 
 const mockSettingsState = {
   backend: 'claude-code' as string,
@@ -177,7 +172,6 @@ const mockSettingsState = {
   kbQueryRunsV2: true,
   kbPickerServerSearch: true,
   kbIngestJobScopedProgress: true,
-  typedCardPipeline: true,
   agents: [
     { name: 'claude-code', enabled: true, command: 'claude', isDefault: true },
     { name: 'aider', enabled: false, command: 'aider', isDefault: false },
@@ -204,7 +198,6 @@ const mockSettingsState = {
   setKbQueryRunsV2: mockSetKbQueryRunsV2,
   setKbPickerServerSearch: mockSetKbPickerServerSearch,
   setKbIngestJobScopedProgress: mockSetKbIngestJobScopedProgress,
-  setTypedCardPipeline: mockSetTypedCardPipeline,
 };
 
 vi.mock('../../store/settings', () => ({

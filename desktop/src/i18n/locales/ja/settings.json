@@ -60,12 +60,6 @@
       "kbIngestJobScopedProgressDescription": "有効時、アップロード進捗を job/project/collection ごとに分離し、コレクション間の進捗干渉を防ぎます。"
     },
 
-    "simpleWorkflow": {
-      "title": "Simple ワークフローのロールアウト",
-      "typedCardPipeline": "TYPED_CARD_PIPELINE（型付きカード経路）",
-      "typedCardPipelineDescription": "ワークフローカードは型付き payload を優先し、履歴 JSON の互換フォールバックを維持します。"
-    },
-
     "contextInspector": {
       "title": "コンテキスト観測",
       "enable": "Context Inspector タブを有効化",

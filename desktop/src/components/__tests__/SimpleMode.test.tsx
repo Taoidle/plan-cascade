@@ -634,12 +634,10 @@ function resetStates() {
 
   storeHarness.setTaskModeState({
     sessionId: null,
-    isTaskMode: false,
   });
 
   storeHarness.setPlanModeState({
     sessionId: null,
-    isPlanMode: false,
   });
 
   storeHarness.setToolPermissionState({

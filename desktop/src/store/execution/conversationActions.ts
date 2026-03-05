@@ -15,7 +15,7 @@ import {
 import { ensurePromptContent, extractPluginInvocationsFromPrompt } from './messageDispatch';
 import { createStandaloneExecutionId, createStandaloneSessionId } from './sessionLifecycle';
 import { clearPendingDeltas } from './streamDeltas';
-import type { ExecutionState, StandaloneTurn, StreamLine, StreamLineType } from './types';
+import type { ExecutionState, NonCardStreamLineType, StandaloneTurn, StreamLine } from './types';
 
 interface CommandResponse<T> {
   success: boolean;
@@ -97,7 +97,7 @@ interface ConversationActionDeps {
   collectAssistantTextSince: (lines: StreamLine[], minExclusiveLineId: number) => string;
   hasAssistantTextLineSince: (lines: StreamLine[], minExclusiveLineId: number) => boolean;
   appendTextWithTypewriter: (
-    append: (chunk: string, type: StreamLineType) => void,
+    append: (chunk: string, type: NonCardStreamLineType) => void,
     text: string,
     chunkSize?: number,
     delayMs?: number,
@@ -354,7 +354,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
             {
               id: (truncatedLines.length > 0 ? truncatedLines[truncatedLines.length - 1].id : 0) + 1,
               content: 'Regenerating response. Previous context will be lost.',
-              type: 'warning' as StreamLineType,
+              type: 'warning',
               timestamp: Date.now(),
             },
           ],
@@ -619,7 +619,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
         {
           id: newInfoId,
           content: newContent,
-          type: 'info' as StreamLineType,
+          type: 'info',
           timestamp: Date.now(),
           turnId: nextTurnId,
           turnBoundary: 'user',
@@ -647,7 +647,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
             {
               id: newInfoId + 1,
               content: 'Regenerating response. Previous context will be lost.',
-              type: 'warning' as StreamLineType,
+              type: 'warning',
               timestamp: Date.now(),
             },
           ],
