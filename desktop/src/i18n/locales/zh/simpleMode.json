@@ -353,6 +353,9 @@
     "clearQueuedMessages": "离开对话模式时已清空排队消息。",
     "queueLimitReached": "排队已满（最多 {{max}} 条消息）。",
     "queueAttachmentsNotSupported": "运行中支持附件排队；若附件无法入队，会提供可恢复提示。",
+    "recovered": {
+      "interruptedByRestart": "执行因应用重启被中断。请基于恢复后的状态手动重试。"
+    },
     "queue": {
       "title": "排队消息（{{count}}/{{max}}）",
       "recovered": "已恢复 {{count}} 条排队消息。",
@@ -616,6 +619,7 @@
           "checkpoint_created": "检查点已创建",
           "mode_start_failed": "模式启动失败",
           "mode_session_link_failed": "模式会话关联失败",
+          "interrupted_by_restart": "因重启中断",
           "unknown_reason": "未知原因"
         }
       }

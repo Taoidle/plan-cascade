@@ -32,6 +32,7 @@ interface UseSimpleInputRoutingParams {
   planClarifyingPhase: boolean;
   planPendingQuestion: PlanClarifyQuestionCardData | null;
   hasStructuredInterviewQuestion: boolean;
+  hasStructuredPlanClarifyQuestion: boolean;
   linkWorkflowKernelModeSession: (mode: WorkflowMode, modeSessionId: string) => Promise<WorkflowSession | null>;
   cancelWorkflowKernelOperation: (reason?: string) => Promise<WorkflowSession | null>;
   transitionAndSubmitWorkflowKernelInput: (
@@ -45,6 +46,7 @@ interface UseSimpleInputRoutingResult {
   handleStart: (inputPrompt?: string) => Promise<void>;
   handleFollowUp: (inputPrompt?: string) => Promise<void>;
   handleStructuredInterviewSubmit: (answer: string) => Promise<void>;
+  handleStructuredPlanClarifySubmit: (answer: string) => Promise<void>;
   handleSkipInterviewQuestion: () => Promise<void>;
   handleSkipPlanClarifyQuestion: () => Promise<void>;
   handleSkipPlanClarification: () => Promise<void>;
@@ -73,6 +75,7 @@ export function useSimpleInputRouting({
   planClarifyingPhase,
   planPendingQuestion,
   hasStructuredInterviewQuestion,
+  hasStructuredPlanClarifyQuestion,
   linkWorkflowKernelModeSession,
   cancelWorkflowKernelOperation,
   transitionAndSubmitWorkflowKernelInput,
@@ -184,7 +187,7 @@ export function useSimpleInputRouting({
         }
       }
 
-      if (planClarifyingPhase && planPendingQuestion) {
+      if (planClarifyingPhase && planPendingQuestion && !hasStructuredPlanClarifyQuestion) {
         const submitted = await submitWorkflowInputWithTracking({
           transitionAndSubmitInput: transitionAndSubmitWorkflowKernelInput,
           targetMode: workflowMode,
@@ -230,6 +233,7 @@ export function useSimpleInputRouting({
       planClarifyingPhase,
       planPendingQuestion,
       planPhase,
+      hasStructuredPlanClarifyQuestion,
       sendFollowUp,
       setDescription,
       submitInterviewAnswer,
@@ -240,6 +244,34 @@ export function useSimpleInputRouting({
       workflowMode,
       workflowPhase,
     ],
+  );
+
+  const handleStructuredPlanClarifySubmit = useCallback(
+    async (answer: string) => {
+      const normalized = answer.trim();
+      if (!normalized || !planPendingQuestion) return;
+      const submitted = await submitWorkflowInputWithTracking({
+        transitionAndSubmitInput: transitionAndSubmitWorkflowKernelInput,
+        targetMode: 'plan',
+        intent: {
+          type: 'plan_clarification',
+          content: normalized,
+          metadata: {
+            mode: 'plan',
+            phase: planPhase,
+            source: 'structured_plan_clarify_panel',
+            questionId: planPendingQuestion.questionId,
+          },
+        },
+      });
+      if (!submitted) return;
+      await submitPlanClarification({
+        questionId: planPendingQuestion.questionId,
+        answer: normalized,
+        skipped: false,
+      });
+    },
+    [planPendingQuestion, planPhase, submitPlanClarification, transitionAndSubmitWorkflowKernelInput],
   );
 
   const handleStructuredInterviewSubmit = useCallback(
@@ -338,6 +370,7 @@ export function useSimpleInputRouting({
     handleStart,
     handleFollowUp,
     handleStructuredInterviewSubmit,
+    handleStructuredPlanClarifySubmit,
     handleSkipInterviewQuestion,
     handleSkipPlanClarifyQuestion,
     handleSkipPlanClarification,

@@ -15,6 +15,7 @@ use crate::services::workflow_kernel::{
 };
 use crate::{commands::plan_mode::PlanModeState, commands::spec_interview::SpecInterviewState};
 use crate::{commands::task_mode::TaskModeState, state::AppState};
+use serde_json::json;
 use tauri::Emitter;
 
 fn build_kernel_update(
@@ -179,6 +180,33 @@ fn map_task_session_to_rehydrate(
         interview_session_id,
         pending_interview,
     }
+}
+
+fn mark_plan_session_interrupted(session: &mut PlanModeSession) -> bool {
+    if session.phase != PlanModePhase::Executing {
+        return false;
+    }
+
+    session.phase = PlanModePhase::Failed;
+    session.step_states.insert(
+        "_error".to_string(),
+        StepExecutionState::Failed {
+            reason: "interrupted_by_restart".to_string(),
+        },
+    );
+    true
+}
+
+fn mark_task_session_interrupted(session: &mut crate::commands::task_mode::TaskModeSession) -> bool {
+    if session.status != crate::commands::task_mode::TaskModeStatus::Executing {
+        return false;
+    }
+
+    session.status = crate::commands::task_mode::TaskModeStatus::Failed;
+    if let Some(progress) = session.progress.as_mut() {
+        progress.current_phase = "failed".to_string();
+    }
+    true
 }
 
 #[tauri::command]
@@ -401,21 +429,70 @@ pub async fn workflow_recover_session(
     };
 
     let mut plan_snapshot: Option<PlanSnapshotRehydrate> = None;
+    let mut plan_interrupted = false;
+    let mut recovery_warnings: Vec<String> = Vec::new();
     if let Some(plan_session_id) = recovered_session
         .linked_mode_sessions
         .get(&WorkflowMode::Plan)
     {
-        if let Some(plan_session) = plan_mode_state.get_session_snapshot(plan_session_id).await {
-            plan_snapshot = Some(map_plan_session_to_rehydrate(&plan_session));
+        let loaded_plan_session = match plan_mode_state
+            .get_or_load_session_snapshot(plan_session_id)
+            .await
+        {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                recovery_warnings.push(error);
+                None
+            }
+        };
+
+        if let Some(mut plan_session) = loaded_plan_session {
+            if mark_plan_session_interrupted(&mut plan_session) {
+                plan_interrupted = true;
+                if let Err(error) = plan_mode_state.store_session_snapshot(plan_session.clone()).await {
+                    recovery_warnings.push(format!(
+                        "Failed to persist interrupted plan session '{}': {}",
+                        plan_session_id, error
+                    ));
+                }
+            }
+
+            let snapshot = map_plan_session_to_rehydrate(&plan_session);
+            let _ = state
+                .sync_plan_snapshot_by_linked_session(
+                    plan_session_id,
+                    snapshot.phase.clone(),
+                    snapshot.pending_clarification.clone(),
+                    snapshot.running_step_id.clone(),
+                    if plan_interrupted {
+                        Some(WorkflowStatus::Failed)
+                    } else {
+                        None
+                    },
+                )
+                .await;
+            plan_snapshot = Some(snapshot);
         }
     }
 
     let mut task_snapshot: Option<TaskSnapshotRehydrate> = None;
+    let mut task_interrupted = false;
     if let Some(task_session_id) = recovered_session
         .linked_mode_sessions
         .get(&WorkflowMode::Task)
     {
-        if let Some(task_session) = task_mode_state.get_session_snapshot(task_session_id).await {
+        let loaded_task_session = match task_mode_state
+            .get_or_load_session_snapshot(task_session_id)
+            .await
+        {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                recovery_warnings.push(error);
+                None
+            }
+        };
+
+        if let Some(mut task_session) = loaded_task_session {
             let persisted_interview_id = recovered_session
                 .mode_snapshots
                 .task
@@ -432,24 +509,77 @@ pub async fn workflow_recover_session(
             let pending_interview = interview_session
                 .as_ref()
                 .and_then(map_task_interview_snapshot);
-            task_snapshot = Some(map_task_session_to_rehydrate(
+            if mark_task_session_interrupted(&mut task_session) {
+                task_interrupted = true;
+                if let Err(error) = task_mode_state.store_session_snapshot(task_session.clone()).await {
+                    recovery_warnings.push(format!(
+                        "Failed to persist interrupted task session '{}': {}",
+                        task_session_id, error
+                    ));
+                }
+            }
+
+            let snapshot = map_task_session_to_rehydrate(
                 &task_session,
                 persisted_interview_id,
                 pending_interview,
-            ));
-            if let Some(next_status) = map_task_status_to_kernel_status(&task_session.status) {
-                let _ = state
-                    .sync_task_snapshot_by_linked_session(
-                        task_session_id,
-                        None,
-                        None,
-                        None,
-                        None,
-                        Some(next_status),
-                    )
-                    .await;
-            }
+            );
+            let next_status = if task_interrupted {
+                Some(WorkflowStatus::Failed)
+            } else {
+                map_task_status_to_kernel_status(&task_session.status)
+            };
+            let _ = state
+                .sync_task_snapshot_by_linked_session(
+                    task_session_id,
+                    snapshot.phase.clone(),
+                    snapshot.current_story_id.clone(),
+                    snapshot.completed_stories,
+                    snapshot.failed_stories,
+                    next_status,
+                )
+                .await;
+            task_snapshot = Some(snapshot);
         }
+    }
+
+    if plan_interrupted {
+        let _ = state
+            .submit_input(
+                &session_id,
+                UserInputIntent {
+                    intent_type: crate::services::workflow_kernel::UserInputIntentType::SystemPhaseUpdate,
+                    content: "phase:failed".to_string(),
+                    metadata: json!({
+                        "mode": "plan",
+                        "phase": "failed",
+                        "reasonCode": "interrupted_by_restart"
+                    }),
+                },
+            )
+            .await;
+    }
+    if task_interrupted {
+        let _ = state
+            .submit_input(
+                &session_id,
+                UserInputIntent {
+                    intent_type: crate::services::workflow_kernel::UserInputIntentType::SystemPhaseUpdate,
+                    content: "phase:failed".to_string(),
+                    metadata: json!({
+                        "mode": "task",
+                        "phase": "failed",
+                        "reasonCode": "interrupted_by_restart"
+                    }),
+                },
+            )
+            .await;
+    }
+    if !recovery_warnings.is_empty() {
+        eprintln!(
+            "[workflow_recover_session] recovered with warnings: {}",
+            recovery_warnings.join(" | ")
+        );
     }
 
     let rehydrate_result = state
@@ -519,4 +649,116 @@ pub async fn workflow_link_mode_session(
         }
         Err(error) => CommandResponse::err(error),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::task_mode::TaskModeStatus;
+    use crate::services::plan_mode::types::{PlanExecutionProgress, PlanModeSession};
+    use crate::services::task_mode::batch_executor::BatchExecutionProgress;
+    use std::collections::HashMap;
+
+    fn sample_plan_session(phase: PlanModePhase) -> PlanModeSession {
+        PlanModeSession {
+            session_id: "plan-session-1".to_string(),
+            description: "sample".to_string(),
+            phase,
+            analysis: None,
+            clarifications: Vec::new(),
+            current_question: None,
+            plan: None,
+            step_outputs: HashMap::new(),
+            step_states: HashMap::new(),
+            progress: Some(PlanExecutionProgress {
+                current_batch: 0,
+                total_batches: 1,
+                steps_completed: 0,
+                steps_failed: 0,
+                total_steps: 2,
+                progress_pct: 0.0,
+            }),
+            created_at: "2026-03-05T00:00:00Z".to_string(),
+        }
+    }
+
+    fn sample_task_session(status: TaskModeStatus) -> crate::commands::task_mode::TaskModeSession {
+        crate::commands::task_mode::TaskModeSession {
+            session_id: "task-session-1".to_string(),
+            description: "sample".to_string(),
+            status,
+            strategy_analysis: None,
+            prd: None,
+            exploration_result: None,
+            progress: Some(BatchExecutionProgress {
+                current_batch: 1,
+                total_batches: 1,
+                stories_completed: 1,
+                stories_failed: 0,
+                total_stories: 3,
+                current_phase: "executing".to_string(),
+                story_statuses: HashMap::from([
+                    ("S001".to_string(), "completed".to_string()),
+                    ("S002".to_string(), "running".to_string()),
+                    ("S003".to_string(), "pending".to_string()),
+                ]),
+            }),
+            created_at: "2026-03-05T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn mark_plan_session_interrupted_sets_failed_reason() {
+        let mut session = sample_plan_session(PlanModePhase::Executing);
+
+        let changed = mark_plan_session_interrupted(&mut session);
+
+        assert!(changed);
+        assert_eq!(session.phase, PlanModePhase::Failed);
+        match session.step_states.get("_error") {
+            Some(StepExecutionState::Failed { reason }) => {
+                assert_eq!(reason, "interrupted_by_restart");
+            }
+            _ => panic!("expected _error step with interrupted_by_restart reason"),
+        }
+    }
+
+    #[test]
+    fn mark_plan_session_interrupted_is_noop_for_non_executing() {
+        let mut session = sample_plan_session(PlanModePhase::ReviewingPlan);
+
+        let changed = mark_plan_session_interrupted(&mut session);
+
+        assert!(!changed);
+        assert_eq!(session.phase, PlanModePhase::ReviewingPlan);
+        assert!(session.step_states.is_empty());
+    }
+
+    #[test]
+    fn mark_task_session_interrupted_sets_failed_phase() {
+        let mut session = sample_task_session(TaskModeStatus::Executing);
+
+        let changed = mark_task_session_interrupted(&mut session);
+
+        assert!(changed);
+        assert_eq!(session.status, TaskModeStatus::Failed);
+        assert_eq!(
+            session.progress.as_ref().map(|progress| progress.current_phase.as_str()),
+            Some("failed")
+        );
+    }
+
+    #[test]
+    fn mark_task_session_interrupted_is_noop_for_non_executing() {
+        let mut session = sample_task_session(TaskModeStatus::ReviewingPrd);
+
+        let changed = mark_task_session_interrupted(&mut session);
+
+        assert!(!changed);
+        assert_eq!(session.status, TaskModeStatus::ReviewingPrd);
+        assert_eq!(
+            session.progress.as_ref().map(|progress| progress.current_phase.as_str()),
+            Some("executing")
+        );
+    }
 }

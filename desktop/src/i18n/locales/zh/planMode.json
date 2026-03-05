@@ -118,7 +118,14 @@
     "skipQuestion": "跳过",
     "skipAll": "全部跳过",
     "generatingQuestion": "正在生成澄清问题...",
-    "inputPlaceholder": "输入您的答案..."
+    "inputPlaceholder": "输入您的答案...",
+    "submitStructured": "提交",
+    "booleanYes": "是",
+    "booleanNo": "否",
+    "shortcutHint": "Ctrl/Cmd + Enter",
+    "validation": {
+      "emptyAnswer": "请先填写答案。"
+    }
   },
 
   "orchestrator": {

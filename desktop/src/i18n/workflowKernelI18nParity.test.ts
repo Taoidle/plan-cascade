@@ -25,6 +25,7 @@ const REQUIRED_REASON_CODES = [
   'mode_transitioned_with_input',
   'mode_start_failed',
   'mode_session_link_failed',
+  'interrupted_by_restart',
   'unknown_reason',
 ] as const;
 

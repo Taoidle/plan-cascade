@@ -67,6 +67,7 @@ function createBaseParams() {
     planClarifyingPhase: false,
     planPendingQuestion: null as PlanClarifyQuestionCardData | null,
     hasStructuredInterviewQuestion: false,
+    hasStructuredPlanClarifyQuestion: false,
     linkWorkflowKernelModeSession: vi.fn().mockResolvedValue(createWorkflowSession('task')),
     cancelWorkflowKernelOperation: vi.fn().mockResolvedValue(createWorkflowSession('task')),
     transitionAndSubmitWorkflowKernelInput: vi.fn().mockResolvedValue(createWorkflowSession('task')) as unknown as (
@@ -124,6 +125,33 @@ describe('useSimpleInputRouting', () => {
     expect(params.submitPlanClarification).toHaveBeenCalledWith({
       questionId: 'clarify-1',
       answer: '补充细节',
+      skipped: false,
+    });
+  });
+
+  it('submits structured plan clarification via dedicated handler', async () => {
+    const params = createBaseParams();
+    params.workflowMode = 'plan';
+    params.planPhase = 'clarifying';
+    params.planClarifyingPhase = true;
+    params.hasStructuredPlanClarifyQuestion = true;
+    params.planPendingQuestion = {
+      questionId: 'clarify-structured-1',
+      question: 'Choose execution strategy',
+      hint: null,
+      inputType: 'single_select',
+      options: ['strict', 'fast'],
+    };
+
+    const { result } = renderHook(() => useSimpleInputRouting(params));
+
+    await act(async () => {
+      await result.current.handleStructuredPlanClarifySubmit('strict');
+    });
+
+    expect(params.submitPlanClarification).toHaveBeenCalledWith({
+      questionId: 'clarify-structured-1',
+      answer: 'strict',
       skipped: false,
     });
   });

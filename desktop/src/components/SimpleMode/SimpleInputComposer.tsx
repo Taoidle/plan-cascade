@@ -4,6 +4,7 @@ import type { PlanClarifyQuestionCardData } from '../../types/planModeCard';
 import type { InterviewQuestionCardData } from '../../types/workflowCard';
 import { InputBox, type InputBoxHandle } from './InputBox';
 import { InterviewInputPanel } from './InterviewInputPanel';
+import { PlanClarifyInputPanel } from './PlanClarifyInputPanel';
 import type { QueuePriority, QueuedChatMessage } from './queuePersistence';
 
 export interface SimpleInputComposerProps {
@@ -14,11 +15,12 @@ export interface SimpleInputComposerProps {
   taskInterviewingPhase: boolean;
   planClarifyingPhase: boolean;
   hasStructuredInterviewQuestion: boolean;
+  hasStructuredPlanClarifyQuestion: boolean;
   hasTextInterviewQuestion: boolean;
-  hasPlanClarifyQuestion: boolean;
   taskPendingQuestion: InterviewQuestionCardData | null;
   planPendingQuestion: PlanClarifyQuestionCardData | null;
   onStructuredInterviewSubmit: (answer: string) => void | Promise<void>;
+  onStructuredPlanClarifySubmit: (answer: string) => void | Promise<void>;
   onSkipInterviewQuestion: () => void | Promise<void>;
   onSkipPlanClarifyQuestion: () => void | Promise<void>;
   onSkipPlanClarification: () => void | Promise<void>;
@@ -53,11 +55,12 @@ export function SimpleInputComposer({
   taskInterviewingPhase,
   planClarifyingPhase,
   hasStructuredInterviewQuestion,
+  hasStructuredPlanClarifyQuestion,
   hasTextInterviewQuestion,
-  hasPlanClarifyQuestion,
   taskPendingQuestion,
   planPendingQuestion,
   onStructuredInterviewSubmit,
+  onStructuredPlanClarifySubmit,
   onSkipInterviewQuestion,
   onSkipPlanClarifyQuestion,
   onSkipPlanClarification,
@@ -122,40 +125,14 @@ export function SimpleInputComposer({
         </div>
       )}
 
-      {hasPlanClarifyQuestion && planPendingQuestion && (
-        <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-900/20 px-3 py-2">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-xs font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
-                {t('planMode:clarify.title', { defaultValue: 'Clarification Needed' })}
-              </p>
-              <p className="mt-1 text-sm font-medium text-amber-800 dark:text-amber-200">
-                {planPendingQuestion.question}
-              </p>
-              {planPendingQuestion.hint && (
-                <p className="mt-1 text-xs text-amber-700/80 dark:text-amber-300/80">{planPendingQuestion.hint}</p>
-              )}
-            </div>
-            <div className="shrink-0 flex items-center gap-1">
-              <button
-                onClick={() => {
-                  void onSkipPlanClarifyQuestion();
-                }}
-                className="px-2 py-1 rounded text-xs text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-800/50 transition-colors"
-              >
-                {t('planMode:clarify.skipQuestion', { defaultValue: 'Skip' })}
-              </button>
-              <button
-                onClick={() => {
-                  void onSkipPlanClarification();
-                }}
-                className="px-2 py-1 rounded text-xs text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-800/50 transition-colors"
-              >
-                {t('planMode:clarify.skipAll', { defaultValue: 'Skip All' })}
-              </button>
-            </div>
-          </div>
-        </div>
+      {hasStructuredPlanClarifyQuestion && planPendingQuestion && (
+        <PlanClarifyInputPanel
+          question={planPendingQuestion}
+          onSubmit={onStructuredPlanClarifySubmit}
+          onSkipQuestion={onSkipPlanClarifyQuestion}
+          onSkipAll={onSkipPlanClarification}
+          loading={inputLoading}
+        />
       )}
 
       {taskInterviewingPhase && !taskPendingQuestion && (
@@ -212,23 +189,21 @@ export function SimpleInputComposer({
                   ? t('workflow.input.interviewPlaceholder', {
                       defaultValue: 'Type your answer to the interview question...',
                     })
-                  : planClarifyingPhase && planPendingQuestion
-                    ? t('planMode:clarify.inputPlaceholder', { defaultValue: 'Type your clarification...' })
-                    : workflowMode === 'task'
-                      ? t('workflow.input.taskPlaceholder', {
-                          defaultValue: 'Describe a task (implementation / analysis / refactor)...',
+                  : workflowMode === 'task'
+                    ? t('workflow.input.taskPlaceholder', {
+                        defaultValue: 'Describe a task (implementation / analysis / refactor)...',
+                      })
+                    : workflowMode === 'plan'
+                      ? t('workflow.input.planPlaceholder', {
+                          defaultValue: 'Describe a task to decompose and execute (writing, research, etc.)...',
                         })
-                      : workflowMode === 'plan'
-                        ? t('workflow.input.planPlaceholder', {
-                            defaultValue: 'Describe a task to decompose and execute (writing, research, etc.)...',
+                      : isRunning
+                        ? t('workflow.queue.placeholder', {
+                            defaultValue: 'Execution in progress. Your message will be queued...',
                           })
-                        : isRunning
-                          ? t('workflow.queue.placeholder', {
-                              defaultValue: 'Execution in progress. Your message will be queued...',
-                            })
-                          : t('input.followUpPlaceholder', {
-                              defaultValue: 'Type a normal chat message...',
-                            })
+                        : t('input.followUpPlaceholder', {
+                            defaultValue: 'Type a normal chat message...',
+                          })
         }
         isLoading={inputLoading}
         allowSubmitWhileLoading={canQueueWhileRunning}

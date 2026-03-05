@@ -42,7 +42,6 @@ vi.mock('../../../store/workflowKernel', () => ({
 
 vi.mock('../../../store/simpleWorkflowCoordinator', () => ({
   applyPlanEditViaCoordinator: vi.fn().mockResolvedValue(undefined),
-  executePlanViaCoordinator: vi.fn().mockResolvedValue(undefined),
   retryPlanStepViaCoordinator: vi.fn().mockResolvedValue(undefined),
   submitWorkflowActionIntentViaCoordinator: vi.fn().mockResolvedValue(undefined),
 }));

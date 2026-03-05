@@ -99,6 +99,8 @@ pub async fn generate_plan(
                     session.phase = PlanModePhase::ReviewingPlan;
                         session.clone()
                     };
+                    persist_plan_session_best_effort(&state, &updated_session, "generate_plan.reviewing_plan")
+                        .await;
 
                     sync_kernel_plan_snapshot_and_emit(
                         &app_handle,
@@ -192,6 +194,7 @@ pub async fn approve_plan(
         session.phase = PlanModePhase::Executing;
         session.clone()
     };
+    persist_plan_session_best_effort(&state, &executing_session_snapshot, "approve_plan.executing").await;
 
     sync_kernel_plan_snapshot_and_emit(
         &app_handle,
@@ -211,6 +214,7 @@ pub async fn approve_plan(
     // Spawn execution as background task
     let sessions_arc = state.sessions.clone();
     let tokens_arc = state.cancellation_tokens.clone();
+    let state_for_persist = state.inner().clone();
     let sid = session_id.clone();
     let locale_tag = normalize_locale(locale.as_deref());
     let lang_instruction = locale_instruction(locale_tag).to_string();
@@ -333,6 +337,7 @@ pub async fn approve_plan(
         drop(sessions);
 
         if let Some(updated_session) = updated_session_snapshot {
+            persist_plan_session_best_effort(&state_for_persist, &updated_session, "approve_plan.completed").await;
             let kernel_state = app_handle.state::<WorkflowKernelState>();
             sync_kernel_plan_snapshot_and_emit(
                 &app_handle,
@@ -469,6 +474,12 @@ pub async fn retry_plan_step(
             .insert(normalized_step_id.clone(), StepExecutionState::Running);
         session.clone()
     };
+    persist_plan_session_best_effort(
+        &state,
+        &executing_session_snapshot,
+        "retry_plan_step.executing",
+    )
+    .await;
 
     sync_kernel_plan_snapshot_and_emit(
         &app_handle,
@@ -486,6 +497,7 @@ pub async fn retry_plan_step(
 
     let sessions_arc = state.sessions.clone();
     let tokens_arc = state.cancellation_tokens.clone();
+    let state_for_persist = state.inner().clone();
     let sid = session_id.clone();
     let retry_step_id = normalized_step_id.clone();
     let locale_tag = normalize_locale(locale.as_deref());
@@ -604,6 +616,7 @@ pub async fn retry_plan_step(
         drop(sessions);
 
         if let Some(updated_session) = updated_session_snapshot {
+            persist_plan_session_best_effort(&state_for_persist, &updated_session, "retry_plan_step.completed").await;
             let kernel_state = app_handle.state::<WorkflowKernelState>();
             sync_kernel_plan_snapshot_and_emit(
                 &app_handle,

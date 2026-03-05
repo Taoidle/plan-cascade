@@ -192,6 +192,7 @@ pub async fn exit_plan_mode(
         let mut sessions = state.sessions.write().await;
         sessions.remove(&session_id).is_some()
     };
+    let _ = state.delete_persisted_session(&session_id).await;
     if !removed_session {
         return Ok(CommandResponse::err("No active plan mode session"));
     }

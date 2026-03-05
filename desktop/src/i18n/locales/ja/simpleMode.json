@@ -353,6 +353,9 @@
     "clearQueuedMessages": "チャットモードを離れたため、キューメッセージをクリアしました。",
     "queueLimitReached": "キューが上限です（最大 {{max}} 件）。",
     "queueAttachmentsNotSupported": "実行中の添付ファイル付きキューをサポートします。保存できない場合は復旧ヒントを表示します。",
+    "recovered": {
+      "interruptedByRestart": "アプリ再起動により実行が中断されました。復旧した状態から手動で再試行してください。"
+    },
     "queue": {
       "title": "キューメッセージ ({{count}}/{{max}})",
       "recovered": "{{count}} 件のキューメッセージを復元しました。",
@@ -616,6 +619,7 @@
           "checkpoint_created": "チェックポイント作成",
           "mode_start_failed": "モード開始失敗",
           "mode_session_link_failed": "モードセッション関連付け失敗",
+          "interrupted_by_restart": "再起動により中断",
           "unknown_reason": "不明な理由"
         }
       }

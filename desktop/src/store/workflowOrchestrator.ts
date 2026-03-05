@@ -392,6 +392,26 @@ async function syncKernelTaskPhase(
   }
 }
 
+function resolveTaskSessionId(
+  get: () => WorkflowOrchestratorState,
+  set: (
+    partial:
+      | Partial<WorkflowOrchestratorState>
+      | ((state: WorkflowOrchestratorState) => Partial<WorkflowOrchestratorState>),
+  ) => void,
+): string | null {
+  const localSessionId = get().sessionId?.trim() ?? '';
+  if (localSessionId.length > 0) return localSessionId;
+
+  const linkedSessionId =
+    selectKernelTaskRuntime(useWorkflowKernelStore.getState().session).linkedSessionId?.trim() ?? '';
+  if (linkedSessionId.length > 0) {
+    set({ sessionId: linkedSessionId });
+    return linkedSessionId;
+  }
+  return null;
+}
+
 // ============================================================================
 // Store
 // ============================================================================
@@ -967,8 +987,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   /** Cancel the current workflow */
   cancelWorkflow: async () => {
     const { phase, sessionId, _runToken } = get();
-    const linkedSessionId = selectKernelTaskRuntime(useWorkflowKernelStore.getState().session).linkedSessionId;
-    const effectiveSessionId = sessionId || linkedSessionId || null;
+    const effectiveSessionId = resolveTaskSessionId(get, set);
     if (!sessionId && effectiveSessionId) {
       set({ sessionId: effectiveSessionId });
     }
@@ -1056,7 +1075,19 @@ type GetFn = () => WorkflowOrchestratorState;
  */
 async function explorePhase(set: SetFn, get: GetFn, runToken: number) {
   if (!isRunActive(get, runToken)) return;
-  const { config, taskDescription, sessionId } = get();
+  const { config, taskDescription } = get();
+  const effectiveSessionId = resolveTaskSessionId(get, set);
+  if (!effectiveSessionId) {
+    set({ phase: 'failed', error: 'No active task session' });
+    injectError(
+      i18n.t('workflow.orchestrator.explorationFailed', { ns: 'simpleMode' }),
+      i18n.t('workflow.orchestrator.sessionMissing', {
+        ns: 'simpleMode',
+        defaultValue: 'No active task session found.',
+      }),
+    );
+    return;
+  }
 
   // Quick flow: skip exploration entirely
   if (config.flowLevel === 'quick') return;
@@ -1082,7 +1113,7 @@ async function explorePhase(set: SetFn, get: GetFn, runToken: number) {
       error: string | null;
     }>('explore_project', {
       request: {
-        sessionId,
+        sessionId: effectiveSessionId,
         flowLevel: config.flowLevel,
         taskDescription,
         provider: explorationResolved.provider || null,
@@ -1116,6 +1147,18 @@ async function explorePhase(set: SetFn, get: GetFn, runToken: number) {
 async function requirementAnalysisPhase(set: SetFn, get: GetFn, runToken: number) {
   if (!isRunActive(get, runToken)) return;
   const { config, taskDescription, explorationResult } = get();
+  const effectiveSessionId = resolveTaskSessionId(get, set);
+  if (!effectiveSessionId) {
+    set({ phase: 'failed', error: 'No active task session' });
+    injectError(
+      i18n.t('workflow.orchestrator.requirementAnalysisFailed', { ns: 'simpleMode' }),
+      i18n.t('workflow.orchestrator.sessionMissing', {
+        ns: 'simpleMode',
+        defaultValue: 'No active task session found.',
+      }),
+    );
+    return;
+  }
 
   // Skip for quick flow
   if (config.flowLevel === 'quick') return;
@@ -1157,7 +1200,7 @@ async function requirementAnalysisPhase(set: SetFn, get: GetFn, runToken: number
       error: string | null;
     }>('run_requirement_analysis', {
       request: {
-        sessionId: get().sessionId || '',
+        sessionId: effectiveSessionId,
         taskDescription,
         interviewResult,
         explorationContext,
@@ -1205,6 +1248,18 @@ async function requirementAnalysisPhase(set: SetFn, get: GetFn, runToken: number
 async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd, runToken: number) {
   if (!isRunActive(get, runToken)) return;
   const { architectureReviewRound, explorationResult } = get();
+  const effectiveSessionId = resolveTaskSessionId(get, set);
+  if (!effectiveSessionId) {
+    set({ phase: 'failed', error: 'No active task session' });
+    injectError(
+      i18n.t('workflow.orchestrator.architectureReviewFailed', { ns: 'simpleMode' }),
+      i18n.t('workflow.orchestrator.sessionMissing', {
+        ns: 'simpleMode',
+        defaultValue: 'No active task session found.',
+      }),
+    );
+    return;
+  }
 
   // Max 3 rounds to prevent infinite loops
   if (architectureReviewRound >= 3) {
@@ -1251,7 +1306,7 @@ async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd, run
       error: string | null;
     }>('run_architecture_review', {
       request: {
-        sessionId: get().sessionId || '',
+        sessionId: effectiveSessionId,
         prdJson: JSON.stringify(prd),
         explorationContext,
         provider: archResolved.provider || null,
@@ -1302,6 +1357,18 @@ async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd, run
  */
 async function designDocAndExecutePhase(set: SetFn, get: GetFn, prd: TaskPrd, runToken: number) {
   if (!isRunActive(get, runToken)) return;
+  const effectiveSessionId = resolveTaskSessionId(get, set);
+  if (!effectiveSessionId) {
+    set({ phase: 'failed', error: 'No active task session' });
+    injectError(
+      i18n.t('workflow.orchestrator.executionFailed', { ns: 'simpleMode' }),
+      i18n.t('workflow.orchestrator.sessionMissing', {
+        ns: 'simpleMode',
+        defaultValue: 'No active task session found.',
+      }),
+    );
+    return;
+  }
   set({ phase: 'generating_design_doc', editablePrd: prd });
   await syncKernelTaskPhase('generating_design_doc', 'design_doc_generation_started');
   injectInfo(i18n.t('workflow.orchestrator.generatingDesignDoc', { ns: 'simpleMode' }), 'info');
@@ -1355,7 +1422,7 @@ async function designDocAndExecutePhase(set: SetFn, get: GetFn, prd: TaskPrd, ru
         generation_info: unknown;
       };
       error?: string;
-    }>('prepare_design_doc_for_task', { sessionId: get().sessionId, prd, projectPath });
+    }>('prepare_design_doc_for_task', { sessionId: effectiveSessionId, prd, projectPath });
     if (!isRunActive(get, runToken)) return;
     if (designResult.success && designResult.data) {
       const doc = designResult.data.design_doc;
@@ -1423,7 +1490,7 @@ async function designDocAndExecutePhase(set: SetFn, get: GetFn, prd: TaskPrd, ru
   try {
     await subscribeToProgressEvents(set, get, runToken);
     if (!isRunActive(get, runToken)) return;
-    const approved = await useTaskModeStore.getState().approvePrd(prd, get().sessionId);
+    const approved = await useTaskModeStore.getState().approvePrd(prd, effectiveSessionId);
     if (!isRunActive(get, runToken)) return;
 
     const taskModeError = useTaskModeStore.getState().error;
@@ -1444,6 +1511,18 @@ async function designDocAndExecutePhase(set: SetFn, get: GetFn, prd: TaskPrd, ru
  */
 async function generatePrdPhase(set: SetFn, get: GetFn, runToken: number) {
   if (!isRunActive(get, runToken)) return;
+  const effectiveSessionId = resolveTaskSessionId(get, set);
+  if (!effectiveSessionId) {
+    set({ phase: 'failed', error: 'No active task session' });
+    injectError(
+      i18n.t('workflow.orchestrator.prdGenerationFailed', { ns: 'simpleMode' }),
+      i18n.t('workflow.orchestrator.sessionMissing', {
+        ns: 'simpleMode',
+        defaultValue: 'No active task session found.',
+      }),
+    );
+    return;
+  }
   set({ phase: 'generating_prd' });
 
   const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
@@ -1471,7 +1550,7 @@ async function generatePrdPhase(set: SetFn, get: GetFn, runToken: number) {
         prdResolved.provider || undefined,
         prdResolved.model || undefined,
         prdResolved.baseUrl,
-        get().sessionId,
+        effectiveSessionId,
       );
     if (!isRunActive(get, runToken)) return;
 

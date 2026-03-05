@@ -779,6 +779,7 @@ impl WorkflowKernelState {
         phase: Option<String>,
         pending_clarification: Option<PlanClarificationSnapshot>,
         running_step_id: Option<String>,
+        status: Option<WorkflowStatus>,
     ) -> Result<Vec<String>, String> {
         let linked_kernel_sessions = self
             .kernel_sessions_linked_to_mode_session(WorkflowMode::Plan, plan_session_id)
@@ -810,6 +811,9 @@ impl WorkflowKernelState {
                         plan.running_step_id = None;
                     }
                     plan.pending_clarification = pending_clarification.clone();
+                    if let Some(next_status) = status {
+                        session.status = next_status;
+                    }
                     session.updated_at = now_rfc3339();
                 }
             }

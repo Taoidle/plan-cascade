@@ -14,6 +14,19 @@ vi.mock('./InterviewInputPanel', () => ({
   InterviewInputPanel: () => <div data-testid="interview-input-panel" />,
 }));
 
+vi.mock('./PlanClarifyInputPanel', () => ({
+  PlanClarifyInputPanel: (props: { onSubmit: (answer: string) => void; onSkipAll: () => void }) => (
+    <div>
+      <button data-testid="plan-clarify-panel" onClick={() => props.onSubmit('structured answer')}>
+        plan panel
+      </button>
+      <button data-testid="plan-clarify-skip-all" onClick={props.onSkipAll}>
+        plan skip all
+      </button>
+    </div>
+  ),
+}));
+
 vi.mock('./InputBox', () => ({
   InputBox: forwardRef(function MockInputBox(props: { placeholder?: string; onSubmit: () => void }, _ref) {
     return (
@@ -36,11 +49,12 @@ function makeProps(overrides?: Partial<SimpleInputComposerProps>): SimpleInputCo
     taskInterviewingPhase: false,
     planClarifyingPhase: false,
     hasStructuredInterviewQuestion: false,
+    hasStructuredPlanClarifyQuestion: false,
     hasTextInterviewQuestion: false,
-    hasPlanClarifyQuestion: false,
     taskPendingQuestion: null,
     planPendingQuestion: null,
     onStructuredInterviewSubmit: vi.fn(),
+    onStructuredPlanClarifySubmit: vi.fn(),
     onSkipInterviewQuestion: vi.fn(),
     onSkipPlanClarifyQuestion: vi.fn(),
     onSkipPlanClarification: vi.fn(),
@@ -159,7 +173,7 @@ describe('SimpleInputComposer', () => {
     const props = makeProps({
       workflowMode: 'plan',
       planClarifyingPhase: true,
-      hasPlanClarifyQuestion: true,
+      hasStructuredPlanClarifyQuestion: true,
       planPendingQuestion: {
         questionId: 'clarify-1',
         question: 'Need more details?',
@@ -171,7 +185,29 @@ describe('SimpleInputComposer', () => {
 
     render(<SimpleInputComposer {...props} />);
 
-    fireEvent.click(screen.getByText('Skip All'));
+    fireEvent.click(screen.getByTestId('plan-clarify-skip-all'));
     expect(onSkipPlanClarification).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders structured plan clarify panel and routes submit', () => {
+    const onStructuredPlanClarifySubmit = vi.fn();
+    const props = makeProps({
+      workflowMode: 'plan',
+      planClarifyingPhase: true,
+      hasStructuredPlanClarifyQuestion: true,
+      planPendingQuestion: {
+        questionId: 'clarify-2',
+        question: 'Choose one',
+        hint: null,
+        inputType: 'single_select',
+        options: ['A', 'B'],
+      },
+      onStructuredPlanClarifySubmit,
+    });
+
+    render(<SimpleInputComposer {...props} />);
+
+    fireEvent.click(screen.getByTestId('plan-clarify-panel'));
+    expect(onStructuredPlanClarifySubmit).toHaveBeenCalledWith('structured answer');
   });
 });

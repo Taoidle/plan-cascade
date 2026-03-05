@@ -202,6 +202,19 @@ function normalizeKernelPlanPhase(phase: string | null | undefined): PlanModePha
   }
 }
 
+function resolvePlanSessionId(get: PlanOrchestratorGet, set: PlanOrchestratorSet): string | null {
+  const localSessionId = get().sessionId?.trim() ?? '';
+  if (localSessionId.length > 0) return localSessionId;
+
+  const linkedSessionId =
+    selectKernelPlanRuntime(useWorkflowKernelStore.getState().session).linkedSessionId?.trim() ?? '';
+  if (linkedSessionId.length > 0) {
+    set({ sessionId: linkedSessionId });
+    return linkedSessionId;
+  }
+  return null;
+}
+
 async function syncKernelPlanPhase(phase: PlanModePhase, reasonCode?: string): Promise<void> {
   const transitionAndSubmitInput = useWorkflowKernelStore.getState().transitionAndSubmitInput;
   const session = useWorkflowKernelStore.getState().session;
@@ -383,6 +396,7 @@ interface PlanExecutionStartParams {
   runToken: number;
   plan: PlanCardData;
   rollbackPhase: PlanModePhase;
+  rollbackReasonCode?: string;
   startErrorTitle: string;
   invokeExecution: () => Promise<void>;
   get: PlanOrchestratorGet;
@@ -393,6 +407,7 @@ async function startPlanExecutionWithProgress({
   runToken,
   plan,
   rollbackPhase,
+  rollbackReasonCode,
   startErrorTitle,
   invokeExecution,
   get,
@@ -410,6 +425,7 @@ async function startPlanExecutionWithProgress({
   } catch (error) {
     stopProgressSubscription(get, set, unlisten);
     set({ phase: rollbackPhase, isBusy: false, isCancelling: false });
+    await syncKernelPlanPhase(rollbackPhase, rollbackReasonCode);
     injectError(startErrorTitle, error instanceof Error ? error.message : String(error));
     return false;
   }
@@ -423,6 +439,7 @@ async function startPlanExecutionWithProgress({
   if (latestError) {
     stopProgressSubscription(get, set, unlisten);
     set({ phase: rollbackPhase, isBusy: false, isCancelling: false });
+    await syncKernelPlanPhase(rollbackPhase, rollbackReasonCode);
     injectError(startErrorTitle, latestError);
     return false;
   }
@@ -599,6 +616,13 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
 
   submitClarification: async (answer: PlanClarifyAnswerCardData) => {
     const runToken = get()._runToken;
+    const effectiveSessionId = resolvePlanSessionId(get, set);
+    if (!effectiveSessionId) {
+      injectError(i18n.t('planMode:orchestrator.clarificationFailed', 'Clarification failed.'), 'No active session');
+      set({ isBusy: false, pendingClarifyQuestion: null });
+      return { ok: false, errorCode: 'missing_session' };
+    }
+
     // Inject answer card immediately
     injectCard('plan_clarify_answer', answer as unknown as Record<string, unknown>);
 
@@ -608,7 +632,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
     const planStore = usePlanModeStore.getState();
     const settings = useSettingsStore.getState();
     const projectPath = settings.workspacePath || undefined;
-    const contextSources = buildPlanContextSources(get().sessionId);
+    const contextSources = buildPlanContextSources(effectiveSessionId);
     const conversationHistory = buildConversationHistory();
     const contextStr =
       conversationHistory.length > 0
@@ -623,7 +647,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       contextSources,
       contextStr,
       i18n.language,
-      get().sessionId,
+      effectiveSessionId,
     );
     if (get()._runToken !== runToken) return { ok: false, errorCode: 'stale_run_token' };
 
@@ -684,16 +708,27 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
 
   skipClarification: async () => {
     const runToken = get()._runToken;
+    const effectiveSessionId = resolvePlanSessionId(get, set);
+    if (!effectiveSessionId) {
+      injectError(i18n.t('planMode:orchestrator.clarificationFailed', 'Clarification failed.'), 'No active session');
+      return;
+    }
     set({ pendingClarifyQuestion: null });
     injectInfo(i18n.t('planMode:orchestrator.clarificationSkipped', 'Clarification skipped.'));
     const planStore = usePlanModeStore.getState();
-    await planStore.skipClarification(get().sessionId);
+    await planStore.skipClarification(effectiveSessionId);
     if (get()._runToken !== runToken) return;
     await get().proceedToPlanning();
   },
 
   proceedToPlanning: async () => {
     const runToken = get()._runToken;
+    const effectiveSessionId = resolvePlanSessionId(get, set);
+    if (!effectiveSessionId) {
+      injectError(i18n.t('planMode:orchestrator.planFailed', 'Plan Generation Failed'), 'No active session');
+      set({ isBusy: false, phase: 'failed' });
+      return;
+    }
     set({ phase: 'planning', isBusy: true });
 
     injectCard('plan_persona_indicator', {
@@ -711,7 +746,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
         : undefined;
     const settings = useSettingsStore.getState();
     const projectPath = settings.workspacePath || undefined;
-    const contextSources = buildPlanContextSources(get().sessionId);
+    const contextSources = buildPlanContextSources(effectiveSessionId);
 
     const planStore = usePlanModeStore.getState();
     const generatedPlan = await planStore.generatePlan(
@@ -722,7 +757,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       contextSources,
       contextStr,
       i18n.language,
-      get().sessionId,
+      effectiveSessionId,
     );
     if (get()._runToken !== runToken) return;
 
@@ -744,6 +779,11 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
 
   approvePlan: async (plan: PlanCardData) => {
     const runToken = get()._runToken;
+    const effectiveSessionId = resolvePlanSessionId(get, set);
+    if (!effectiveSessionId) {
+      injectError(i18n.t('planMode:orchestrator.approveFailed', 'Failed to start plan execution'), 'No active session');
+      return;
+    }
     set({ phase: 'executing', isBusy: true, isCancelling: false, _completionCardInjectedRunToken: null });
 
     injectInfo(i18n.t('planMode:orchestrator.planApproved', 'Plan approved! Starting execution...'));
@@ -757,7 +797,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
     const planStore = usePlanModeStore.getState();
     const settings = useSettingsStore.getState();
     const projectPath = settings.workspacePath || undefined;
-    const contextSources = buildPlanContextSources(get().sessionId);
+    const contextSources = buildPlanContextSources(effectiveSessionId);
     const conversationHistory = buildConversationHistory();
     const contextStr =
       conversationHistory.length > 0
@@ -767,6 +807,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       runToken,
       plan,
       rollbackPhase: 'reviewing_plan',
+      rollbackReasonCode: 'plan_approval_failed',
       startErrorTitle: i18n.t('planMode:orchestrator.approveFailed', 'Failed to start plan execution'),
       invokeExecution: () =>
         (async () => {
@@ -779,7 +820,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
             contextSources,
             contextStr,
             i18n.language,
-            get().sessionId,
+            effectiveSessionId,
           );
           if (!ok) {
             throw new Error(usePlanModeStore.getState().error || 'Failed to approve plan');
@@ -802,7 +843,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
     }
 
     const previousPhase = get().phase;
-    const effectiveSessionId = get().sessionId;
+    const effectiveSessionId = resolvePlanSessionId(get, set);
     if (!effectiveSessionId) {
       injectError(i18n.t('planMode:orchestrator.retryFailed', 'Failed to retry plan step'), 'No active session found');
       return;
@@ -858,6 +899,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       runToken,
       plan,
       rollbackPhase: previousPhase === 'executing' ? 'failed' : previousPhase,
+      rollbackReasonCode: 'plan_retry_failed',
       startErrorTitle: i18n.t('planMode:orchestrator.retryFailed', 'Failed to retry plan step'),
       invokeExecution: () =>
         (async () => {
@@ -883,8 +925,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
 
   cancelWorkflow: async () => {
     const { phase, sessionId, _progressUnlisten, _runToken } = get();
-    const linkedSessionId = selectKernelPlanRuntime(useWorkflowKernelStore.getState().session).linkedSessionId;
-    const effectiveSessionId = sessionId || linkedSessionId || null;
+    const effectiveSessionId = resolvePlanSessionId(get, set);
     if (!sessionId && effectiveSessionId) {
       set({ sessionId: effectiveSessionId });
     }

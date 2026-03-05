@@ -76,6 +76,8 @@ pub async fn enter_plan_mode(
                         let mut sessions = state.sessions.write().await;
                         sessions.insert(session.session_id.clone(), session.clone());
                     }
+                    persist_plan_session_best_effort(&state, &session, "enter_plan_mode.provider_resolution_failed")
+                        .await;
 
                     sync_kernel_plan_snapshot_and_emit(
                         &app_handle,
@@ -171,6 +173,7 @@ pub async fn enter_plan_mode(
                 let mut sessions = state.sessions.write().await;
                 sessions.insert(session.session_id.clone(), session.clone());
             }
+            persist_plan_session_best_effort(&state, &session, "enter_plan_mode.completed").await;
 
             sync_kernel_plan_snapshot_and_emit(
                 &app_handle,
@@ -335,6 +338,7 @@ pub async fn submit_plan_clarification(
 
     let updated_session = session.clone();
     drop(sessions);
+    persist_plan_session_best_effort(&state, &updated_session, "submit_plan_clarification").await;
 
     sync_kernel_plan_snapshot_and_emit(
         &app_handle,
@@ -363,6 +367,7 @@ pub async fn skip_plan_clarification(
     session.phase = PlanModePhase::Planning;
     let result = session.clone();
     drop(sessions);
+    persist_plan_session_best_effort(&state, &result, "skip_plan_clarification").await;
 
     sync_kernel_plan_snapshot_and_emit(
         &app_handle,

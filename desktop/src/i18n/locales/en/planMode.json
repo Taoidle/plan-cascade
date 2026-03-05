@@ -118,7 +118,14 @@
     "skipQuestion": "Skip",
     "skipAll": "Skip All",
     "generatingQuestion": "Generating clarification question...",
-    "inputPlaceholder": "Type your answer..."
+    "inputPlaceholder": "Type your answer...",
+    "submitStructured": "Submit",
+    "booleanYes": "Yes",
+    "booleanNo": "No",
+    "shortcutHint": "Ctrl/Cmd + Enter",
+    "validation": {
+      "emptyAnswer": "Please provide an answer."
+    }
   },
 
   "orchestrator": {

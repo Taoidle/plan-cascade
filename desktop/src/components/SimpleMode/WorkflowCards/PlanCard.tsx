@@ -15,7 +15,6 @@ import { usePlanOrchestratorStore } from '../../../store/planOrchestrator';
 import { useWorkflowKernelStore } from '../../../store/workflowKernel';
 import {
   applyPlanEditViaCoordinator,
-  executePlanViaCoordinator,
   submitWorkflowActionIntentViaCoordinator,
 } from '../../../store/simpleWorkflowCoordinator';
 import {
@@ -762,7 +761,6 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
           maxParallel: getPlanMaxParallel(workingPlan),
         },
       });
-      await executePlanViaCoordinator();
     } catch {
       // Keep orchestration available even if kernel logging fails.
     }

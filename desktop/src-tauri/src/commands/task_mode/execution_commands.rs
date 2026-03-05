@@ -96,6 +96,12 @@ pub async fn approve_task_prd(
                 updated_session = Some(session.clone());
                 drop(sessions);
                 if let Some(snapshot) = updated_session.as_ref() {
+                    persist_task_session_best_effort(
+                        &state,
+                        snapshot,
+                        "approve_task_prd.status_executing",
+                    )
+                    .await;
                     sync_kernel_task_snapshot_and_emit(
                         &app,
                         kernel_state.inner(),
@@ -125,6 +131,7 @@ pub async fn approve_task_prd(
             let results_arc = state.execution_results.clone();
             let tokens_arc = state.cancellation_tokens.clone();
             let kernel_state_handle = kernel_state.inner().clone();
+            let state_for_persist = state.inner().clone();
             let sid = session_id.clone();
             let app_handle = app.clone();
             let stories_for_exec = stories.clone();
@@ -408,6 +415,12 @@ pub async fn approve_task_prd(
                 }
                 drop(sessions);
                 if let Some(snapshot) = kernel_snapshot.as_ref() {
+                    persist_task_session_best_effort(
+                        &state_for_persist,
+                        snapshot,
+                        "approve_task_prd.execution_terminal",
+                    )
+                    .await;
                     sync_kernel_task_snapshot_and_emit(
                         &app_handle,
                         &kernel_state_handle,

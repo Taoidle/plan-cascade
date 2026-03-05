@@ -7,6 +7,7 @@
 //! - execution status/cancel/report
 
 use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -33,6 +34,7 @@ use crate::services::workflow_kernel::{
     WORKFLOW_KERNEL_UPDATED_CHANNEL,
 };
 use crate::state::AppState;
+use crate::utils::paths::ensure_plan_cascade_dir;
 use tauri::{Emitter, Manager};
 
 // ============================================================================
@@ -40,20 +42,38 @@ use tauri::{Emitter, Manager};
 // ============================================================================
 
 /// Managed state for Plan Mode.
+#[derive(Clone)]
 pub struct PlanModeState {
     sessions: Arc<RwLock<HashMap<String, PlanModeSession>>>,
     cancellation_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
     operation_cancellation_tokens: Arc<RwLock<HashMap<String, (String, CancellationToken)>>>,
     adapter_registry: Arc<RwLock<AdapterRegistry>>,
+    storage_root: Arc<PathBuf>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlanModeSessionRecordV1 {
+    version: u32,
+    session: PlanModeSession,
+}
+
+const PLAN_MODE_SESSION_RECORD_VERSION: u32 = 1;
 
 impl PlanModeState {
     pub fn new() -> Self {
+        Self::new_with_storage_dir(resolve_plan_mode_storage_root())
+    }
+
+    pub fn new_with_storage_dir(storage_root: PathBuf) -> Self {
+        let sessions_dir = storage_root.join("sessions");
+        let _ = fs::create_dir_all(&sessions_dir);
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             cancellation_tokens: Arc::new(RwLock::new(HashMap::new())),
             operation_cancellation_tokens: Arc::new(RwLock::new(HashMap::new())),
             adapter_registry: Arc::new(RwLock::new(AdapterRegistry::with_builtins())),
+            storage_root: Arc::new(storage_root),
         }
     }
 
@@ -61,6 +81,95 @@ impl PlanModeState {
         let sessions = self.sessions.read().await;
         sessions.get(session_id).cloned()
     }
+
+    pub async fn get_or_load_session_snapshot(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<PlanModeSession>, String> {
+        if let Some(snapshot) = self.get_session_snapshot(session_id).await {
+            return Ok(Some(snapshot));
+        }
+
+        match self.read_persisted_session(session_id).await {
+            Ok(Some(snapshot)) => {
+                {
+                    let mut sessions = self.sessions.write().await;
+                    sessions.insert(session_id.to_string(), snapshot.clone());
+                }
+                Ok(Some(snapshot))
+            }
+            Ok(None) => Ok(None),
+            Err(error) => {
+                let _ = self.delete_persisted_session(session_id).await;
+                Err(error)
+            }
+        }
+    }
+
+    pub async fn persist_session_snapshot(&self, session: &PlanModeSession) -> Result<(), String> {
+        let record = PlanModeSessionRecordV1 {
+            version: PLAN_MODE_SESSION_RECORD_VERSION,
+            session: session.clone(),
+        };
+        let encoded =
+            serde_json::to_vec_pretty(&record).map_err(|e| format!("Failed to encode plan mode session: {e}"))?;
+        fs::write(self.session_file_path(&session.session_id), encoded)
+            .map_err(|e| format!("Failed to persist plan mode session '{}': {e}", session.session_id))
+    }
+
+    pub async fn store_session_snapshot(&self, session: PlanModeSession) -> Result<(), String> {
+        {
+            let mut sessions = self.sessions.write().await;
+            sessions.insert(session.session_id.clone(), session.clone());
+        }
+        self.persist_session_snapshot(&session).await
+    }
+
+    pub async fn delete_persisted_session(&self, session_id: &str) -> Result<(), String> {
+        let path = self.session_file_path(session_id);
+        if !path.exists() {
+            return Ok(());
+        }
+        fs::remove_file(path)
+            .map_err(|e| format!("Failed to delete persisted plan mode session '{session_id}': {e}"))
+    }
+
+    async fn read_persisted_session(&self, session_id: &str) -> Result<Option<PlanModeSession>, String> {
+        let path = self.session_file_path(session_id);
+        if !path.exists() {
+            return Ok(None);
+        }
+
+        let raw = fs::read(&path)
+            .map_err(|e| format!("Failed to read persisted plan mode session '{session_id}': {e}"))?;
+        let record: PlanModeSessionRecordV1 = serde_json::from_slice(&raw)
+            .map_err(|e| format!("Persisted plan mode session '{session_id}' is corrupted: {e}"))?;
+        if record.version != PLAN_MODE_SESSION_RECORD_VERSION {
+            return Err(format!(
+                "Unsupported plan mode session record version {} for '{}'",
+                record.version, session_id
+            ));
+        }
+        Ok(Some(record.session))
+    }
+
+    fn session_file_path(&self, session_id: &str) -> PathBuf {
+        self.storage_root
+            .join("sessions")
+            .join(format!("{session_id}.json"))
+    }
+}
+
+fn resolve_plan_mode_storage_root() -> PathBuf {
+    if let Ok(root) = ensure_plan_cascade_dir() {
+        let path = root.join("plan-mode");
+        let _ = fs::create_dir_all(&path);
+        return path;
+    }
+
+    let fallback = std::env::temp_dir().join("plan-cascade-plan-mode");
+    let _ = fs::create_dir_all(&fallback);
+    fallback
 }
 
 const PLAN_OPERATION_CANCELLED_ERROR: &str = "Operation cancelled";
@@ -94,6 +203,19 @@ async fn clear_plan_operation_token(state: &PlanModeState, session_id: &str, ope
         .unwrap_or(false);
     if should_remove {
         tokens.remove(session_id);
+    }
+}
+
+pub(crate) async fn persist_plan_session_best_effort(
+    state: &PlanModeState,
+    session: &PlanModeSession,
+    source: &str,
+) {
+    if let Err(error) = state.persist_session_snapshot(session).await {
+        eprintln!(
+            "[plan_mode] failed to persist session '{}' at {}: {}",
+            session.session_id, source, error
+        );
     }
 }
 
@@ -181,7 +303,7 @@ async fn sync_kernel_plan_snapshot_and_emit(
         }
     });
     let kernel_session_ids = kernel_state
-        .sync_plan_snapshot_by_linked_session(&session.session_id, phase, pending, running_step_id)
+        .sync_plan_snapshot_by_linked_session(&session.session_id, phase, pending, running_step_id, None)
         .await
         .unwrap_or_default();
     emit_kernel_updates(app, kernel_state, &kernel_session_ids, source).await;
@@ -515,10 +637,7 @@ pub(crate) fn locale_instruction(locale_tag: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ApprovePlanRequest, EnterPlanModeRequest, GeneratePlanRequest, RetryPlanStepRequest,
-        SubmitPlanClarificationRequest,
-    };
+    use super::*;
 
     #[test]
     fn enter_plan_mode_request_accepts_camel_case_only() {
@@ -651,5 +770,78 @@ mod tests {
             "step_id": "step-2",
         }));
         assert!(legacy.is_err(), "legacy snake_case keys must be rejected");
+    }
+
+    fn sample_plan_mode_session(session_id: &str) -> PlanModeSession {
+        PlanModeSession {
+            session_id: session_id.to_string(),
+            description: "sample".to_string(),
+            phase: PlanModePhase::ReviewingPlan,
+            analysis: None,
+            clarifications: Vec::new(),
+            current_question: None,
+            plan: None,
+            step_outputs: HashMap::new(),
+            step_states: HashMap::new(),
+            progress: None,
+            created_at: "2026-03-05T00:00:00Z".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn plan_mode_session_persistence_roundtrip() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let state = PlanModeState::new_with_storage_dir(temp_dir.path().to_path_buf());
+
+        let snapshot = sample_plan_mode_session("plan-session-roundtrip");
+        state
+            .store_session_snapshot(snapshot.clone())
+            .await
+            .expect("persist snapshot");
+
+        let restored = state
+            .get_or_load_session_snapshot("plan-session-roundtrip")
+            .await
+            .expect("load snapshot")
+            .expect("snapshot should exist");
+        assert_eq!(restored.session_id, snapshot.session_id);
+        assert_eq!(restored.phase, snapshot.phase);
+    }
+
+    #[tokio::test]
+    async fn plan_mode_session_corruption_is_reported_and_cleaned_up() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let state = PlanModeState::new_with_storage_dir(temp_dir.path().to_path_buf());
+        let session_id = "plan-session-corrupted";
+        let path = state.session_file_path(session_id);
+        std::fs::write(&path, b"{not json").expect("write corrupted file");
+
+        let result = state.get_or_load_session_snapshot(session_id).await;
+        assert!(result.is_err(), "corrupted record should return error");
+        assert!(
+            !path.exists(),
+            "corrupted persisted record should be removed after failed decode"
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_mode_exit_cleanup_deletes_persisted_file() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let state = PlanModeState::new_with_storage_dir(temp_dir.path().to_path_buf());
+        let session_id = "plan-session-cleanup";
+        let snapshot = sample_plan_mode_session(session_id);
+        state
+            .store_session_snapshot(snapshot)
+            .await
+            .expect("persist snapshot");
+
+        state
+            .delete_persisted_session(session_id)
+            .await
+            .expect("delete snapshot");
+        assert!(
+            !state.session_file_path(session_id).exists(),
+            "persisted plan session should be removed"
+        );
     }
 }

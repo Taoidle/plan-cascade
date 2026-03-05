@@ -69,6 +69,7 @@ describe('planOrchestrator event handling', () => {
     useExecutionStore.getState().reset();
     usePlanModeStore.getState().reset();
     usePlanOrchestratorStore.getState().resetWorkflow();
+    useWorkflowKernelStore.getState().reset();
 
     usePlanModeStore.setState({
       error: null,
@@ -320,6 +321,50 @@ describe('planOrchestrator event handling', () => {
 
     expect(usePlanOrchestratorStore.getState().stepStatuses['step-1']).toBe('failed');
     expect(usePlanOrchestratorStore.getState().phase).toBe('failed');
+  });
+
+  it('falls back to kernel linked session and rolls back to reviewing_plan when approve fails', async () => {
+    const approvePlan = vi.fn().mockResolvedValue(false);
+    usePlanModeStore.setState({
+      approvePlan,
+      error: 'backend approve failed',
+    } as unknown as ReturnType<typeof usePlanModeStore.getState>);
+    usePlanOrchestratorStore.setState({
+      sessionId: null,
+      phase: 'reviewing_plan',
+      editablePlan: TEST_PLAN,
+      _runToken: 12,
+    } as unknown as ReturnType<typeof usePlanOrchestratorStore.getState>);
+    useWorkflowKernelStore.setState({
+      sessionId: 'kernel-plan-1',
+      session: {
+        ...createKernelPlanSession(),
+        modeSnapshots: {
+          ...createKernelPlanSession().modeSnapshots,
+          plan: {
+            ...createKernelPlanSession().modeSnapshots.plan,
+            phase: 'reviewing_plan',
+          },
+        },
+        linkedModeSessions: { plan: 'linked-plan-1' },
+      },
+    } as unknown as ReturnType<typeof useWorkflowKernelStore.getState>);
+
+    await usePlanOrchestratorStore.getState().approvePlan(TEST_PLAN);
+
+    expect(approvePlan).toHaveBeenCalledWith(
+      TEST_PLAN,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      expect.anything(),
+      undefined,
+      expect.any(String),
+      'linked-plan-1',
+    );
+    expect(usePlanOrchestratorStore.getState().sessionId).toBe('linked-plan-1');
+    expect(usePlanOrchestratorStore.getState().phase).toBe('reviewing_plan');
   });
 });
 

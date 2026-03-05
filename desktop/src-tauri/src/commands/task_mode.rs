@@ -6,7 +6,9 @@
 //! - execution status/cancel/report
 
 use std::collections::HashMap;
+use std::fs;
 use std::future::Future;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -36,6 +38,7 @@ use crate::services::workflow_kernel::{
 
 use crate::state::AppState;
 use crate::storage::{ConfigService, KeyringService};
+use crate::utils::paths::ensure_plan_cascade_dir;
 use tauri::Emitter;
 
 // ============================================================================
@@ -504,6 +507,7 @@ pub struct ArchitectureReviewResult {
 // ============================================================================
 
 /// Managed Tauri state for task mode.
+#[derive(Clone)]
 pub struct TaskModeState {
     sessions: Arc<RwLock<HashMap<String, TaskModeSession>>>,
     /// Cancellation tokens keyed by executing session id.
@@ -512,16 +516,33 @@ pub struct TaskModeState {
     operation_cancellation_tokens: Arc<RwLock<HashMap<String, (String, CancellationToken)>>>,
     /// Final execution results keyed by session id.
     execution_results: Arc<RwLock<HashMap<String, BatchExecutionResult>>>,
+    storage_root: Arc<PathBuf>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskModeSessionRecordV1 {
+    version: u32,
+    session: TaskModeSession,
+}
+
+const TASK_MODE_SESSION_RECORD_VERSION: u32 = 1;
 
 impl TaskModeState {
     /// Create a new empty state.
     pub fn new() -> Self {
+        Self::new_with_storage_dir(resolve_task_mode_storage_root())
+    }
+
+    pub fn new_with_storage_dir(storage_root: PathBuf) -> Self {
+        let sessions_dir = storage_root.join("sessions");
+        let _ = fs::create_dir_all(&sessions_dir);
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             cancellation_tokens: Arc::new(RwLock::new(HashMap::new())),
             operation_cancellation_tokens: Arc::new(RwLock::new(HashMap::new())),
             execution_results: Arc::new(RwLock::new(HashMap::new())),
+            storage_root: Arc::new(storage_root),
         }
     }
 
@@ -529,6 +550,95 @@ impl TaskModeState {
         let sessions = self.sessions.read().await;
         sessions.get(session_id).cloned()
     }
+
+    pub async fn get_or_load_session_snapshot(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<TaskModeSession>, String> {
+        if let Some(snapshot) = self.get_session_snapshot(session_id).await {
+            return Ok(Some(snapshot));
+        }
+
+        match self.read_persisted_session(session_id).await {
+            Ok(Some(snapshot)) => {
+                {
+                    let mut sessions = self.sessions.write().await;
+                    sessions.insert(session_id.to_string(), snapshot.clone());
+                }
+                Ok(Some(snapshot))
+            }
+            Ok(None) => Ok(None),
+            Err(error) => {
+                let _ = self.delete_persisted_session(session_id).await;
+                Err(error)
+            }
+        }
+    }
+
+    pub async fn persist_session_snapshot(&self, session: &TaskModeSession) -> Result<(), String> {
+        let record = TaskModeSessionRecordV1 {
+            version: TASK_MODE_SESSION_RECORD_VERSION,
+            session: session.clone(),
+        };
+        let encoded =
+            serde_json::to_vec_pretty(&record).map_err(|e| format!("Failed to encode task mode session: {e}"))?;
+        fs::write(self.session_file_path(&session.session_id), encoded)
+            .map_err(|e| format!("Failed to persist task mode session '{}': {e}", session.session_id))
+    }
+
+    pub async fn store_session_snapshot(&self, session: TaskModeSession) -> Result<(), String> {
+        {
+            let mut sessions = self.sessions.write().await;
+            sessions.insert(session.session_id.clone(), session.clone());
+        }
+        self.persist_session_snapshot(&session).await
+    }
+
+    pub async fn delete_persisted_session(&self, session_id: &str) -> Result<(), String> {
+        let path = self.session_file_path(session_id);
+        if !path.exists() {
+            return Ok(());
+        }
+        fs::remove_file(path)
+            .map_err(|e| format!("Failed to delete persisted task mode session '{session_id}': {e}"))
+    }
+
+    async fn read_persisted_session(&self, session_id: &str) -> Result<Option<TaskModeSession>, String> {
+        let path = self.session_file_path(session_id);
+        if !path.exists() {
+            return Ok(None);
+        }
+
+        let raw = fs::read(&path)
+            .map_err(|e| format!("Failed to read persisted task mode session '{session_id}': {e}"))?;
+        let record: TaskModeSessionRecordV1 = serde_json::from_slice(&raw)
+            .map_err(|e| format!("Persisted task mode session '{session_id}' is corrupted: {e}"))?;
+        if record.version != TASK_MODE_SESSION_RECORD_VERSION {
+            return Err(format!(
+                "Unsupported task mode session record version {} for '{}'",
+                record.version, session_id
+            ));
+        }
+        Ok(Some(record.session))
+    }
+
+    fn session_file_path(&self, session_id: &str) -> PathBuf {
+        self.storage_root
+            .join("sessions")
+            .join(format!("{session_id}.json"))
+    }
+}
+
+fn resolve_task_mode_storage_root() -> PathBuf {
+    if let Ok(root) = ensure_plan_cascade_dir() {
+        let path = root.join("task-mode");
+        let _ = fs::create_dir_all(&path);
+        return path;
+    }
+
+    let fallback = std::env::temp_dir().join("plan-cascade-task-mode");
+    let _ = fs::create_dir_all(&fallback);
+    fallback
 }
 
 const TASK_OPERATION_CANCELLED_ERROR: &str = "Operation cancelled";
@@ -562,6 +672,19 @@ async fn clear_task_operation_token(state: &TaskModeState, session_id: &str, ope
         .unwrap_or(false);
     if should_remove {
         tokens.remove(session_id);
+    }
+}
+
+pub(crate) async fn persist_task_session_best_effort(
+    state: &TaskModeState,
+    session: &TaskModeSession,
+    source: &str,
+) {
+    if let Err(error) = state.persist_session_snapshot(session).await {
+        eprintln!(
+            "[task_mode] failed to persist session '{}' at {}: {}",
+            session.session_id, source, error
+        );
     }
 }
 
@@ -2137,6 +2260,76 @@ mod tests {
         assert!(json.contains("\"sessionId\""));
         assert!(json.contains("\"strategyAnalysis\""));
         assert!(json.contains("\"createdAt\""));
+    }
+
+    fn sample_task_mode_session(session_id: &str) -> TaskModeSession {
+        TaskModeSession {
+            session_id: session_id.to_string(),
+            description: "sample".to_string(),
+            status: TaskModeStatus::ReviewingPrd,
+            strategy_analysis: None,
+            prd: None,
+            exploration_result: None,
+            progress: None,
+            created_at: "2026-03-05T00:00:00Z".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn task_mode_session_persistence_roundtrip() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let state = TaskModeState::new_with_storage_dir(temp_dir.path().to_path_buf());
+        let snapshot = sample_task_mode_session("task-session-roundtrip");
+
+        state
+            .store_session_snapshot(snapshot.clone())
+            .await
+            .expect("persist snapshot");
+
+        let restored = state
+            .get_or_load_session_snapshot("task-session-roundtrip")
+            .await
+            .expect("load snapshot")
+            .expect("snapshot should exist");
+        assert_eq!(restored.session_id, snapshot.session_id);
+        assert_eq!(restored.status, snapshot.status);
+    }
+
+    #[tokio::test]
+    async fn task_mode_session_corruption_is_reported_and_cleaned_up() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let state = TaskModeState::new_with_storage_dir(temp_dir.path().to_path_buf());
+        let session_id = "task-session-corrupted";
+        let path = state.session_file_path(session_id);
+        std::fs::write(&path, b"{not json").expect("write corrupted file");
+
+        let result = state.get_or_load_session_snapshot(session_id).await;
+        assert!(result.is_err(), "corrupted record should return error");
+        assert!(
+            !path.exists(),
+            "corrupted persisted record should be removed after failed decode"
+        );
+    }
+
+    #[tokio::test]
+    async fn task_mode_exit_cleanup_deletes_persisted_file() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let state = TaskModeState::new_with_storage_dir(temp_dir.path().to_path_buf());
+        let session_id = "task-session-cleanup";
+        let snapshot = sample_task_mode_session(session_id);
+        state
+            .store_session_snapshot(snapshot)
+            .await
+            .expect("persist snapshot");
+
+        state
+            .delete_persisted_session(session_id)
+            .await
+            .expect("delete snapshot");
+        assert!(
+            !state.session_file_path(session_id).exists(),
+            "persisted task session should be removed"
+        );
     }
 
     #[test]

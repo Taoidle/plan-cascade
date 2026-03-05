@@ -118,7 +118,14 @@
     "skipQuestion": "スキップ",
     "skipAll": "全てスキップ",
     "generatingQuestion": "確認質問を生成中...",
-    "inputPlaceholder": "回答を入力..."
+    "inputPlaceholder": "回答を入力...",
+    "submitStructured": "送信",
+    "booleanYes": "はい",
+    "booleanNo": "いいえ",
+    "shortcutHint": "Ctrl/Cmd + Enter",
+    "validation": {
+      "emptyAnswer": "回答を入力してください。"
+    }
   },
 
   "orchestrator": {

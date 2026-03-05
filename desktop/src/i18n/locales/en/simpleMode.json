@@ -353,6 +353,9 @@
     "clearQueuedMessages": "Cleared queued chat messages when leaving Chat mode.",
     "queueLimitReached": "Queue is full (max {{max}} messages).",
     "queueAttachmentsNotSupported": "Queued attachments are supported. If an attachment cannot be queued, you will see a recovery tip.",
+    "recovered": {
+      "interruptedByRestart": "Execution was interrupted by app restart. Please retry from the recovered state."
+    },
     "queue": {
       "title": "Queued messages ({{count}}/{{max}})",
       "recovered": "Recovered {{count}} queued chat message(s).",
@@ -616,6 +619,7 @@
           "checkpoint_created": "Checkpoint created",
           "mode_start_failed": "Mode start failed",
           "mode_session_link_failed": "Mode session link failed",
+          "interrupted_by_restart": "Interrupted by restart",
           "unknown_reason": "Unknown reason"
         }
       }

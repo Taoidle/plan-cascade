@@ -34,6 +34,7 @@ pub async fn enter_task_mode(
         let mut sessions = state.sessions.write().await;
         sessions.insert(session.session_id.clone(), session.clone());
     }
+    persist_task_session_best_effort(&state, &session, "enter_task_mode").await;
 
     sync_kernel_task_snapshot_and_emit(
         &app_handle,
@@ -57,6 +58,7 @@ pub async fn exit_task_mode(
         let mut sessions = state.sessions.write().await;
         sessions.remove(&session_id).is_some()
     };
+    let _ = state.delete_persisted_session(&session_id).await;
     if !removed {
         return Ok(CommandResponse::err(
             "Invalid session ID or no active session",

@@ -22,6 +22,7 @@ vi.mock('../lib/contextBridge', () => ({
 import { useExecutionStore } from './execution';
 import { useTaskModeStore } from './taskMode';
 import { useWorkflowOrchestratorStore } from './workflowOrchestrator';
+import { useWorkflowKernelStore } from './workflowKernel';
 
 const TEST_PRD: TaskPrd = {
   title: 'Test PRD',
@@ -99,6 +100,7 @@ describe('workflowOrchestrator task progress events', () => {
     useExecutionStore.getState().reset();
     useTaskModeStore.getState().reset();
     useWorkflowOrchestratorStore.getState().resetWorkflow();
+    useWorkflowKernelStore.getState().reset();
 
     useTaskModeStore.setState({
       sessionId: 'task-session',
@@ -293,5 +295,68 @@ describe('workflowOrchestrator task progress events', () => {
     expect(completionCards).toHaveLength(1);
     expect(synthesizeExecutionTurnMock).toHaveBeenCalledTimes(1);
     expect(synthesizeExecutionTurnMock).toHaveBeenCalledWith(1, 1, true);
+  });
+
+  it('uses kernel linked task session id when local session id is missing', async () => {
+    const approvePrd = vi.fn().mockResolvedValue(true);
+    useTaskModeStore.setState({
+      approvePrd,
+    } as unknown as ReturnType<typeof useTaskModeStore.getState>);
+    useWorkflowOrchestratorStore.setState({
+      sessionId: null,
+      phase: 'reviewing_prd',
+      editablePrd: TEST_PRD,
+      _runToken: 5,
+      config: {
+        flowLevel: 'quick',
+        tddMode: 'off',
+        maxParallel: 4,
+        qualityGatesEnabled: true,
+        specInterviewEnabled: false,
+        skipVerification: false,
+        skipReview: false,
+        globalAgentOverride: null,
+        implAgentOverride: null,
+      },
+    } as unknown as ReturnType<typeof useWorkflowOrchestratorStore.getState>);
+    useWorkflowKernelStore.setState({
+      sessionId: 'kernel-task-1',
+      session: {
+        sessionId: 'kernel-task-1',
+        status: 'active',
+        activeMode: 'task',
+        modeSnapshots: {
+          chat: null,
+          plan: null,
+          task: {
+            phase: 'reviewing_prd',
+            prdId: null,
+            currentStoryId: null,
+            interviewSessionId: null,
+            pendingInterview: null,
+            completedStories: 0,
+            failedStories: 0,
+          },
+        },
+        handoffContext: {
+          conversationContext: [],
+          artifactRefs: [],
+          contextSources: ['simple_mode'],
+          metadata: {},
+        },
+        linkedModeSessions: {
+          task: 'linked-task-session',
+        },
+        lastError: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastCheckpointId: null,
+      },
+    } as unknown as ReturnType<typeof useWorkflowKernelStore.getState>);
+
+    await useWorkflowOrchestratorStore.getState().approvePrd(TEST_PRD);
+
+    expect(approvePrd).toHaveBeenCalledWith(TEST_PRD, 'linked-task-session');
+    expect(useWorkflowOrchestratorStore.getState().sessionId).toBe('linked-task-session');
   });
 });

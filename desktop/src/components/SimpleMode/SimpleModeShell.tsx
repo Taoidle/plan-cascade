@@ -361,6 +361,7 @@ export function SimpleModeShell() {
       taskPendingQuestion.inputType === 'single_select' ||
       taskPendingQuestion.inputType === 'multi_select');
   const hasTextInterviewQuestion = taskInterviewingPhase && !!taskPendingQuestion && !hasStructuredInterviewQuestion;
+  const hasStructuredPlanClarifyQuestion = planClarifyingPhase && !!planPendingQuestion;
   const hasPlanClarifyQuestion = planClarifyingPhase && !!planPendingQuestion;
   const isTaskWorkflowActiveForSwitchGuard = workflowMode === 'task' && isKernelRuntimeBusy(kernelTaskRuntime);
   const isPlanWorkflowActiveForSwitchGuard = workflowMode === 'plan' && isKernelRuntimeBusy(kernelPlanRuntime);
@@ -391,6 +392,7 @@ export function SimpleModeShell() {
     handleStart,
     handleFollowUp,
     handleStructuredInterviewSubmit,
+    handleStructuredPlanClarifySubmit,
     handleSkipInterviewQuestion,
     handleSkipPlanClarifyQuestion,
     handleSkipPlanClarification,
@@ -417,6 +419,7 @@ export function SimpleModeShell() {
     planClarifyingPhase,
     planPendingQuestion,
     hasStructuredInterviewQuestion,
+    hasStructuredPlanClarifyQuestion,
     linkWorkflowKernelModeSession,
     cancelWorkflowKernelOperation,
     transitionAndSubmitWorkflowKernelInput,
@@ -543,6 +546,7 @@ export function SimpleModeShell() {
       !taskWorkflowCancelling &&
       !planWorkflowCancelling &&
       !hasStructuredInterviewQuestion &&
+      !hasStructuredPlanClarifyQuestion &&
       ((workflowMode === 'chat' && isRunning) ||
         (workflowMode === 'task' && workflowPhase === 'executing') ||
         (workflowMode === 'plan' && planPhase === 'executing'));
@@ -591,6 +595,7 @@ export function SimpleModeShell() {
     taskWorkflowCancelling,
     planWorkflowCancelling,
     hasStructuredInterviewQuestion,
+    hasStructuredPlanClarifyQuestion,
     transitionAndSubmitWorkflowKernelInput,
     queuedChatMessages.length,
     attachments,
@@ -801,6 +806,7 @@ export function SimpleModeShell() {
     !isAnalyzingStrategy &&
     !isStructuredWorkflowCancelling &&
     !hasStructuredInterviewQuestion &&
+    !hasStructuredPlanClarifyQuestion &&
     ((workflowMode === 'chat' && isRunning) ||
       (workflowMode === 'task' && isTaskWorkflowActive && effectiveTaskPhaseForInput === 'executing') ||
       (workflowMode === 'plan' && isPlanWorkflowActive && effectivePlanPhaseForInput === 'executing'));
@@ -814,6 +820,7 @@ export function SimpleModeShell() {
     (inputBusy && !canQueueWhileRunning) ||
     isStructuredWorkflowCancelling ||
     hasStructuredInterviewQuestion ||
+    hasStructuredPlanClarifyQuestion ||
     (!canQueueWhileRunning && workflowMode !== 'chat' && isRunning);
   const inputLoading = inputBusy && !canQueueWhileRunning;
   const handleClearActiveAgent = useCallback(() => {
@@ -1109,11 +1116,12 @@ export function SimpleModeShell() {
                 taskInterviewingPhase={taskInterviewingPhase}
                 planClarifyingPhase={planClarifyingPhase}
                 hasStructuredInterviewQuestion={hasStructuredInterviewQuestion}
+                hasStructuredPlanClarifyQuestion={hasStructuredPlanClarifyQuestion}
                 hasTextInterviewQuestion={hasTextInterviewQuestion}
-                hasPlanClarifyQuestion={hasPlanClarifyQuestion}
                 taskPendingQuestion={taskPendingQuestion}
                 planPendingQuestion={planPendingQuestion}
                 onStructuredInterviewSubmit={handleStructuredInterviewSubmit}
+                onStructuredPlanClarifySubmit={handleStructuredPlanClarifySubmit}
                 onSkipInterviewQuestion={handleSkipInterviewQuestion}
                 onSkipPlanClarifyQuestion={handleSkipPlanClarifyQuestion}
                 onSkipPlanClarification={handleSkipPlanClarification}

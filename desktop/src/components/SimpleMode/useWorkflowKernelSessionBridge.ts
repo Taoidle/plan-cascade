@@ -5,6 +5,8 @@ import type {
   WorkflowSession,
   WorkflowSessionState,
 } from '../../types/workflowKernel';
+import i18n from '../../i18n';
+import { useExecutionStore } from '../../store/execution';
 
 const WORKFLOW_KERNEL_SESSION_STORAGE_PREFIX = 'simple_mode_workflow_kernel_session_v2:';
 
@@ -39,6 +41,7 @@ export function useWorkflowKernelSessionBridge({
   recoverWorkflowKernelSession,
 }: UseWorkflowKernelSessionBridgeParams): UseWorkflowKernelSessionBridgeResult {
   const kernelBootstrapInFlightRef = useRef(false);
+  const interruptedNoticeSessionIdRef = useRef<string | null>(null);
 
   const persistWorkflowKernelSessionId = useCallback(
     (sessionId: string) => {
@@ -64,6 +67,27 @@ export function useWorkflowKernelSessionBridge({
         if (persistedSessionId) {
           const recovered = await recoverWorkflowKernelSession(persistedSessionId);
           if (recovered?.session?.sessionId) {
+            const interruptedByRestart = recovered.events.some((event) => {
+              if (event.kind !== 'input_submitted') return false;
+              const payload = event.payload as Record<string, unknown> | null;
+              const metadata = (payload?.metadata as Record<string, unknown> | undefined) ?? undefined;
+              return metadata?.reasonCode === 'interrupted_by_restart';
+            });
+            if (interruptedByRestart && interruptedNoticeSessionIdRef.current !== recovered.session.sessionId) {
+              interruptedNoticeSessionIdRef.current = recovered.session.sessionId;
+              useExecutionStore.getState().appendCard({
+                cardType: 'workflow_info',
+                cardId: `workflow-restart-interrupted-${Date.now()}`,
+                data: {
+                  level: 'warning',
+                  message: i18n.t('simpleMode:workflow.recovered.interruptedByRestart', {
+                    defaultValue:
+                      'Execution was interrupted by app restart. Please retry from the current plan/task state.',
+                  }),
+                },
+                interactive: false,
+              });
+            }
             kernelBootstrapInFlightRef.current = false;
             return;
           }

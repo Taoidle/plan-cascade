@@ -61,6 +61,7 @@ pub async fn generate_task_prd(
             s.status = TaskModeStatus::GeneratingPrd;
             let snapshot = s.clone();
             drop(sessions);
+            persist_task_session_best_effort(&state, &snapshot, "generate_task_prd.status_generating").await;
             sync_kernel_task_snapshot_and_emit(
                 &app_handle,
                 kernel_state.inner(),
@@ -96,6 +97,12 @@ pub async fn generate_task_prd(
                         }
                         drop(sessions);
                         if let Some(snapshot) = updated_session.as_ref() {
+                            persist_task_session_best_effort(
+                                &state,
+                                snapshot,
+                                "generate_task_prd.compiled_spec_reviewing",
+                            )
+                            .await;
                             sync_kernel_task_snapshot_and_emit(
                                 &app_handle,
                                 kernel_state.inner(),
@@ -170,6 +177,12 @@ pub async fn generate_task_prd(
                     }
                     drop(sessions);
                     if let Some(snapshot) = updated_session.as_ref() {
+                        persist_task_session_best_effort(
+                            &state,
+                            snapshot,
+                            "generate_task_prd.provider_resolution_failed",
+                        )
+                        .await;
                         sync_kernel_task_snapshot_and_emit(
                             &app_handle,
                             kernel_state.inner(),
@@ -249,6 +262,12 @@ pub async fn generate_task_prd(
                     }
                     drop(sessions);
                     if let Some(snapshot) = updated_session.as_ref() {
+                        persist_task_session_best_effort(
+                            &state,
+                            snapshot,
+                            "generate_task_prd.llm_generation_failed",
+                        )
+                        .await;
                         sync_kernel_task_snapshot_and_emit(
                             &app_handle,
                             kernel_state.inner(),
@@ -280,6 +299,7 @@ pub async fn generate_task_prd(
                 }
                 drop(sessions);
                 if let Some(snapshot) = updated_session.as_ref() {
+                    persist_task_session_best_effort(&state, snapshot, "generate_task_prd.reviewing_prd").await;
                     sync_kernel_task_snapshot_and_emit(
                         &app_handle,
                         kernel_state.inner(),
@@ -308,6 +328,7 @@ pub async fn generate_task_prd(
         }
         drop(sessions);
         if let Some(snapshot) = updated_session.as_ref() {
+            persist_task_session_best_effort(&state, snapshot, "generate_task_prd.cancelled").await;
             sync_kernel_task_snapshot_and_emit(
                 &app_handle,
                 kernel_state.inner(),
@@ -380,6 +401,7 @@ pub async fn explore_project(
             s.status = TaskModeStatus::Exploring;
             let snapshot = s.clone();
             drop(sessions);
+            persist_task_session_best_effort(&state, &snapshot, "explore_project.status_exploring").await;
             sync_kernel_task_snapshot_and_emit(
                 &app_handle,
                 kernel_state.inner(),
@@ -437,6 +459,7 @@ pub async fn explore_project(
             }
             drop(sessions);
             if let Some(snapshot) = updated_session.as_ref() {
+                persist_task_session_best_effort(&state, snapshot, "explore_project.quick_initialized").await;
                 sync_kernel_task_snapshot_and_emit(
                     &app_handle,
                     kernel_state.inner(),
@@ -795,6 +818,7 @@ pub async fn explore_project(
         }
         drop(sessions);
         if let Some(snapshot) = updated_session.as_ref() {
+            persist_task_session_best_effort(&state, snapshot, "explore_project.complete_initialized").await;
             sync_kernel_task_snapshot_and_emit(
                 &app_handle,
                 kernel_state.inner(),
@@ -832,6 +856,7 @@ pub async fn explore_project(
         }
         drop(sessions);
         if let Some(snapshot) = updated_session.as_ref() {
+            persist_task_session_best_effort(&state, snapshot, "explore_project.cancelled").await;
             sync_kernel_task_snapshot_and_emit(
                 &app_handle,
                 kernel_state.inner(),

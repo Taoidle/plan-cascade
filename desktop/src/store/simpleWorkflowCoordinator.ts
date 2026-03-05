@@ -308,6 +308,9 @@ export async function applyPlanEditViaCoordinator(operation: PlanEditOperation):
   return useWorkflowKernelStore.getState().applyPlanEdit(operation);
 }
 
+/**
+ * @deprecated Legacy kernel-only phase transition path. Do not use for real plan execution.
+ */
 export async function executePlanViaCoordinator(): Promise<WorkflowSession | null> {
   return useWorkflowKernelStore.getState().executePlan();
 }
