@@ -12,7 +12,6 @@ import { ChevronDownIcon, ChevronRightIcon } from '@radix-ui/react-icons';
 import type { PlanBatchData, PlanCardData, PlanStepData } from '../../../types/planModeCard';
 import type { PlanEditOperation } from '../../../types/workflowKernel';
 import { usePlanOrchestratorStore } from '../../../store/planOrchestrator';
-import { usePlanModeStore } from '../../../store/planMode';
 import { useWorkflowKernelStore } from '../../../store/workflowKernel';
 import {
   applyPlanEditViaCoordinator,
@@ -328,7 +327,7 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
 
   const approvePlan = usePlanOrchestratorStore((s) => s.approvePlan);
   const retryStep = usePlanOrchestratorStore((s) => s.retryStep);
-  const stepStatuses = usePlanModeStore((s) => s.stepStatuses);
+  const stepStatuses = usePlanOrchestratorStore((s) => s.stepStatuses || {});
   const workflowSession = useWorkflowKernelStore((s) => s.session);
 
   useEffect(() => {

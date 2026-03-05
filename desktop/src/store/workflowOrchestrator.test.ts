@@ -108,9 +108,9 @@ describe('workflowOrchestrator task progress events', () => {
       qualityGateResults: {},
       error: null,
       isCancelling: false,
-      approvePrd: vi.fn().mockResolvedValue(undefined),
-      cancelExecution: vi.fn().mockResolvedValue(undefined),
-      fetchReport: vi.fn().mockResolvedValue(undefined),
+      approvePrd: vi.fn().mockResolvedValue(true),
+      cancelExecution: vi.fn().mockResolvedValue(true),
+      fetchReport: vi.fn().mockResolvedValue(null),
     } as unknown as ReturnType<typeof useTaskModeStore.getState>);
 
     useWorkflowOrchestratorStore.setState({
@@ -149,7 +149,7 @@ describe('workflowOrchestrator task progress events', () => {
       }),
     });
 
-    expect(useTaskModeStore.getState().storyStatuses).toEqual({});
+    expect(useWorkflowOrchestratorStore.getState().storyStatuses).toEqual({});
   });
 
   it('converges to cancelled state on execution_cancelled', async () => {
@@ -168,11 +168,8 @@ describe('workflowOrchestrator task progress events', () => {
     });
 
     const workflowState = useWorkflowOrchestratorStore.getState();
-    const taskState = useTaskModeStore.getState();
-
     expect(workflowState.phase).toBe('cancelled');
     expect(workflowState.isCancelling).toBe(false);
-    expect(taskState.isCancelling).toBe(false);
   });
 
   it('injects one completion card with report data and synthesizes matching summary', async () => {
@@ -186,8 +183,7 @@ describe('workflowOrchestrator task progress events', () => {
       success: true,
     };
     useTaskModeStore.setState({
-      report,
-      fetchReport: vi.fn().mockResolvedValue(undefined),
+      fetchReport: vi.fn().mockResolvedValue(report),
     } as unknown as ReturnType<typeof useTaskModeStore.getState>);
 
     await useWorkflowOrchestratorStore.getState().approvePrd(TEST_PRD);
@@ -229,23 +225,27 @@ describe('workflowOrchestrator task progress events', () => {
   it('injects one fallback completion card on report timeout and does not append late report card', async () => {
     vi.useFakeTimers();
     useTaskModeStore.setState({
-      report: null,
       fetchReport: vi.fn().mockImplementation(
         () =>
-          new Promise<void>((resolve) => {
+          new Promise<{
+            sessionId: string;
+            totalStories: number;
+            storiesCompleted: number;
+            storiesFailed: number;
+            totalDurationMs: number;
+            agentAssignments: Record<string, string>;
+            success: boolean;
+          }>((resolve) => {
             setTimeout(() => {
-              useTaskModeStore.setState({
-                report: {
-                  sessionId: 'task-session',
-                  totalStories: 1,
-                  storiesCompleted: 1,
-                  storiesFailed: 0,
-                  totalDurationMs: 9999,
-                  agentAssignments: { 'story-1': 'late-agent' },
-                  success: true,
-                },
-              } as unknown as ReturnType<typeof useTaskModeStore.getState>);
-              resolve();
+              resolve({
+                sessionId: 'task-session',
+                totalStories: 1,
+                storiesCompleted: 1,
+                storiesFailed: 0,
+                totalDurationMs: 9999,
+                agentAssignments: { 'story-1': 'late-agent' },
+                success: true,
+              });
             }, 2000);
           }),
       ),

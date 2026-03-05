@@ -42,8 +42,6 @@ export interface PlanState {
   planId: string | null;
   runningStepId: string | null;
   pendingClarification: PlanClarificationSnapshot | null;
-  // DEPRECATED: legacy compatibility field.
-  pendingQuestion: string | null;
   retryableSteps: string[];
   planRevision: number;
   lastEditOperation: string | null;

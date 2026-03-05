@@ -7,6 +7,7 @@ import { usePlanModeStore } from './planMode';
 import { useWorkflowOrchestratorStore } from './workflowOrchestrator';
 import { usePlanOrchestratorStore } from './planOrchestrator';
 import { useWorkflowKernelStore } from './workflowKernel';
+import { selectKernelPlanRuntime, selectKernelTaskRuntime } from './workflowKernelSelectors';
 
 export interface SubmitWorkflowInputParams {
   transitionAndSubmitInput: (
@@ -32,8 +33,8 @@ export interface StartModeParams {
   linkModeSession: (mode: WorkflowMode, modeSessionId: string) => Promise<WorkflowSession | null>;
   cancelKernelOperation: (reason?: string) => Promise<WorkflowSession | null>;
   startChat: (prompt: string, source: 'simple') => Promise<void>;
-  startTaskWorkflow: (description: string) => Promise<void>;
-  startPlanWorkflow: (description: string) => Promise<void>;
+  startTaskWorkflow: (description: string) => Promise<{ modeSessionId: string | null }>;
+  startPlanWorkflow: (description: string) => Promise<{ modeSessionId: string | null }>;
 }
 
 export interface StartModeResult {
@@ -64,17 +65,19 @@ export async function submitWorkflowInputWithTracking({
   );
 }
 
-async function rollbackModeRuntime(mode: WorkflowMode): Promise<void> {
+async function rollbackModeRuntime(mode: WorkflowMode, modeSessionId?: string | null): Promise<void> {
+  const kernelSession = useWorkflowKernelStore.getState().session;
   if (mode === 'task') {
     const taskStore = useTaskModeStore.getState();
-    if (taskStore.sessionId) {
+    const taskSessionId = modeSessionId ?? selectKernelTaskRuntime(kernelSession).linkedSessionId;
+    if (taskSessionId) {
       try {
-        await taskStore.cancelOperation();
+        await taskStore.cancelOperation(taskSessionId);
       } catch {
         // best effort cleanup
       }
       try {
-        await taskStore.exitTaskMode();
+        await taskStore.exitTaskMode(taskSessionId);
       } catch {
         // best effort cleanup
       }
@@ -85,14 +88,15 @@ async function rollbackModeRuntime(mode: WorkflowMode): Promise<void> {
 
   if (mode === 'plan') {
     const planStore = usePlanModeStore.getState();
-    if (planStore.sessionId) {
+    const planSessionId = modeSessionId ?? selectKernelPlanRuntime(kernelSession).linkedSessionId;
+    if (planSessionId) {
       try {
-        await planStore.cancelOperation();
+        await planStore.cancelOperation(planSessionId);
       } catch {
         // best effort cleanup
       }
       try {
-        await planStore.exitPlanMode();
+        await planStore.exitPlanMode(planSessionId);
       } catch {
         // best effort cleanup
       }
@@ -106,8 +110,9 @@ async function compensateStartFailure(
   reasonCode: 'mode_start_failed' | 'mode_session_link_failed',
   transitionAndSubmitInput: SubmitWorkflowInputParams['transitionAndSubmitInput'],
   cancelKernelOperation: StartModeParams['cancelKernelOperation'],
+  modeSessionId?: string | null,
 ): Promise<void> {
-  await rollbackModeRuntime(mode);
+  await rollbackModeRuntime(mode, modeSessionId);
 
   try {
     await submitWorkflowInputWithTracking({
@@ -166,9 +171,7 @@ export async function startModeWithCompensation({
 
   try {
     if (mode === 'task') {
-      await startTaskWorkflow(prompt);
-      const taskModeSessionId =
-        useTaskModeStore.getState().sessionId || useWorkflowOrchestratorStore.getState().sessionId;
+      const { modeSessionId: taskModeSessionId } = await startTaskWorkflow(prompt);
       if (!taskModeSessionId) {
         await compensateStartFailure(mode, 'mode_start_failed', transitionAndSubmitInput, cancelKernelOperation);
         return { ok: false, errorCode: 'mode_start_failed', session: kernelSession };
@@ -176,7 +179,13 @@ export async function startModeWithCompensation({
 
       const linked = await linkModeSession('task', taskModeSessionId);
       if (!linked) {
-        await compensateStartFailure(mode, 'mode_session_link_failed', transitionAndSubmitInput, cancelKernelOperation);
+        await compensateStartFailure(
+          mode,
+          'mode_session_link_failed',
+          transitionAndSubmitInput,
+          cancelKernelOperation,
+          taskModeSessionId,
+        );
         return { ok: false, errorCode: 'mode_session_link_failed', session: kernelSession };
       }
 
@@ -184,8 +193,7 @@ export async function startModeWithCompensation({
     }
 
     if (mode === 'plan') {
-      await startPlanWorkflow(prompt);
-      const planModeSessionId = usePlanModeStore.getState().sessionId || usePlanOrchestratorStore.getState().sessionId;
+      const { modeSessionId: planModeSessionId } = await startPlanWorkflow(prompt);
       if (!planModeSessionId) {
         await compensateStartFailure(mode, 'mode_start_failed', transitionAndSubmitInput, cancelKernelOperation);
         return { ok: false, errorCode: 'mode_start_failed', session: kernelSession };
@@ -193,7 +201,13 @@ export async function startModeWithCompensation({
 
       const linked = await linkModeSession('plan', planModeSessionId);
       if (!linked) {
-        await compensateStartFailure(mode, 'mode_session_link_failed', transitionAndSubmitInput, cancelKernelOperation);
+        await compensateStartFailure(
+          mode,
+          'mode_session_link_failed',
+          transitionAndSubmitInput,
+          cancelKernelOperation,
+          planModeSessionId,
+        );
         return { ok: false, errorCode: 'mode_session_link_failed', session: kernelSession };
       }
 

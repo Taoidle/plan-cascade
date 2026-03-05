@@ -71,16 +71,11 @@ describe('planOrchestrator event handling', () => {
     usePlanOrchestratorStore.getState().resetWorkflow();
 
     usePlanModeStore.setState({
-      sessionId: 'session-1',
-      currentBatch: 0,
-      totalBatches: 0,
-      stepStatuses: {},
-      report: null,
       error: null,
-      approvePlan: vi.fn().mockResolvedValue(undefined),
-      retryPlanStep: vi.fn().mockResolvedValue(undefined),
+      approvePlan: vi.fn().mockResolvedValue(true),
+      retryPlanStep: vi.fn().mockResolvedValue(true),
       fetchStepOutput: vi.fn().mockResolvedValue(null),
-      fetchReport: vi.fn().mockResolvedValue(undefined),
+      fetchReport: vi.fn().mockResolvedValue(null),
     } as unknown as ReturnType<typeof usePlanModeStore.getState>);
 
     usePlanOrchestratorStore.setState({
@@ -106,7 +101,7 @@ describe('planOrchestrator event handling', () => {
       }),
     });
 
-    expect(usePlanModeStore.getState().stepStatuses).toEqual({});
+    expect(usePlanOrchestratorStore.getState().stepStatuses).toEqual({});
   });
 
   it('converges to cancelled state on execution_cancelled event', async () => {
@@ -159,11 +154,10 @@ describe('planOrchestrator event handling', () => {
     await Promise.resolve();
 
     const orchestratorState = usePlanOrchestratorStore.getState();
-    const planState = usePlanModeStore.getState();
     const completionCards = extractPlanCompletionCards();
 
     expect(orchestratorState.phase).toBe('completed');
-    expect(planState.stepStatuses['step-1']).toBe('completed');
+    expect(orchestratorState.stepStatuses['step-1']).toBe('completed');
     expect(completionCards).toHaveLength(1);
     expect(completionCards[0]?.data?.success).toBe(true);
   });
@@ -197,11 +191,10 @@ describe('planOrchestrator event handling', () => {
     await Promise.resolve();
 
     const orchestratorState = usePlanOrchestratorStore.getState();
-    const planState = usePlanModeStore.getState();
     const completionCards = extractPlanCompletionCards();
 
     expect(orchestratorState.phase).toBe('failed');
-    expect(planState.stepStatuses['step-1']).toBe('failed');
+    expect(orchestratorState.stepStatuses['step-1']).toBe('failed');
     expect(completionCards).toHaveLength(1);
     expect(completionCards[0]?.data?.success).toBe(false);
   });
@@ -241,10 +234,10 @@ describe('planOrchestrator event handling', () => {
   });
 
   it('retries a single step and converges to completed after execution_completed', async () => {
-    const retryPlanStep = vi.fn().mockResolvedValue(undefined);
+    const retryPlanStep = vi.fn().mockResolvedValue(true);
     usePlanModeStore.setState({
       retryPlanStep,
-      fetchReport: vi.fn().mockResolvedValue(undefined),
+      fetchReport: vi.fn().mockResolvedValue(null),
       report: null,
     } as unknown as ReturnType<typeof usePlanModeStore.getState>);
     usePlanOrchestratorStore.setState({
@@ -265,6 +258,7 @@ describe('planOrchestrator event handling', () => {
       expect.anything(),
       undefined,
       expect.any(String),
+      'session-1',
     );
 
     progressListener!({
@@ -291,7 +285,7 @@ describe('planOrchestrator event handling', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(usePlanModeStore.getState().stepStatuses['step-1']).toBe('completed');
+    expect(usePlanOrchestratorStore.getState().stepStatuses['step-1']).toBe('completed');
     expect(usePlanOrchestratorStore.getState().phase).toBe('completed');
   });
 
@@ -324,7 +318,7 @@ describe('planOrchestrator event handling', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(usePlanModeStore.getState().stepStatuses['step-1']).toBe('failed');
+    expect(usePlanOrchestratorStore.getState().stepStatuses['step-1']).toBe('failed');
     expect(usePlanOrchestratorStore.getState().phase).toBe('failed');
   });
 });
@@ -345,21 +339,19 @@ describe('planOrchestrator clarification recovery', () => {
       transitionAndSubmitInput,
     } as unknown as ReturnType<typeof useWorkflowKernelStore.getState>);
 
-    const enterPlanMode = vi.fn().mockImplementation(async () => {
-      usePlanModeStore.setState({
-        sessionId: 'plan-session-1',
-        analysis: {
-          domain: 'general',
-          complexity: 2,
-          estimatedSteps: 2,
-          needsClarification: true,
-          reasoning: 'Need more detail.',
-          adapterName: 'default',
-          suggestedApproach: 'Ask one more question',
-        },
-        currentQuestion: null,
-        error: null,
-      } as unknown as ReturnType<typeof usePlanModeStore.getState>);
+    const enterPlanMode = vi.fn().mockResolvedValue({
+      sessionId: 'plan-session-1',
+      phase: 'clarifying',
+      analysis: {
+        domain: 'general',
+        complexity: 2,
+        estimatedSteps: 2,
+        needsClarification: true,
+        reasoning: 'Need more detail.',
+        adapterName: 'default',
+        suggestedApproach: 'Ask one more question',
+      },
+      currentQuestion: null,
     });
 
     usePlanModeStore.setState({
@@ -390,20 +382,13 @@ describe('planOrchestrator clarification recovery', () => {
 
   it('keeps clarification_error after submit failure and only skip proceeds to planning', async () => {
     const submitClarification = vi.fn().mockResolvedValue(null);
-    const skipClarification = vi.fn().mockResolvedValue(undefined);
-    const generatePlan = vi.fn().mockImplementation(async () => {
-      usePlanModeStore.setState({
-        plan: TEST_PLAN,
-        error: null,
-      } as unknown as ReturnType<typeof usePlanModeStore.getState>);
-    });
+    const skipClarification = vi.fn().mockResolvedValue(true);
+    const generatePlan = vi.fn().mockResolvedValue(TEST_PLAN);
 
     usePlanModeStore.setState({
       submitClarification,
       skipClarification,
       generatePlan,
-      sessionId: 'plan-session-2',
-      plan: null,
       error: null,
     } as unknown as ReturnType<typeof usePlanModeStore.getState>);
 
@@ -451,7 +436,6 @@ function createKernelPlanSession() {
         planId: null,
         runningStepId: null,
         pendingClarification: null,
-        pendingQuestion: null,
         retryableSteps: [],
         planRevision: 0,
         lastEditOperation: null,

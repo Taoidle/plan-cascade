@@ -468,7 +468,6 @@ function createKernelSession(activeMode: 'chat' | 'plan' | 'task' = 'chat'): Wor
         planId: null,
         runningStepId: null,
         pendingClarification: null,
-        pendingQuestion: null,
         retryableSteps: [],
         planRevision: 0,
         lastEditOperation: null,
@@ -588,7 +587,7 @@ function resetStates() {
   });
 
   storeHarness.setWorkflowOrchestratorState({
-    pendingQuestion: null,
+    pendingInterviewQuestion: null,
     phase: 'idle',
     sessionId: null,
     startWorkflow: vi.fn(async () => {
@@ -600,6 +599,7 @@ function resetStates() {
         ...storeHarness.getTaskModeState(),
         sessionId: 'task-session-1',
       });
+      return { modeSessionId: 'task-session-1' };
     }),
     submitInterviewAnswer: vi.fn(async () => undefined),
     skipInterviewQuestion: vi.fn(async () => undefined),
@@ -624,6 +624,7 @@ function resetStates() {
         ...storeHarness.getPlanModeState(),
         sessionId: 'plan-session-1',
       });
+      return { modeSessionId: 'plan-session-1' };
     }),
     submitClarification: vi.fn(async () => undefined),
     skipClarification: vi.fn(async () => undefined),
@@ -825,7 +826,7 @@ describe('SimpleMode', () => {
     storeHarness.setWorkflowOrchestratorState({
       ...storeHarness.getWorkflowOrchestratorState(),
       phase: 'analyzing',
-      pendingQuestion: null,
+      pendingInterviewQuestion: null,
     });
 
     renderSimpleMode();

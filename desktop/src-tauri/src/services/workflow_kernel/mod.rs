@@ -111,9 +111,6 @@ pub struct PlanState {
     pub running_step_id: Option<String>,
     #[serde(default)]
     pub pending_clarification: Option<PlanClarificationSnapshot>,
-    // DEPRECATED: legacy fallback field kept for persisted-session compatibility.
-    #[serde(default)]
-    pub pending_question: Option<String>,
     pub retryable_steps: Vec<String>,
     pub plan_revision: u64,
     pub last_edit_operation: Option<String>,
@@ -126,7 +123,6 @@ impl Default for PlanState {
             plan_id: None,
             running_step_id: None,
             pending_clarification: None,
-            pending_question: None,
             retryable_steps: Vec::new(),
             plan_revision: 0,
             last_edit_operation: None,
@@ -814,13 +810,6 @@ impl WorkflowKernelState {
                         plan.running_step_id = None;
                     }
                     plan.pending_clarification = pending_clarification.clone();
-                    plan.pending_question = plan
-                        .pending_clarification
-                        .as_ref()
-                        .map(|snapshot| snapshot.question.clone());
-                    if plan.pending_clarification.is_none() && phase.is_some() {
-                        plan.pending_question = None;
-                    }
                     session.updated_at = now_rfc3339();
                 }
             }
@@ -972,10 +961,6 @@ impl WorkflowKernelState {
                     plan.running_step_id = Some(running_step_id.to_string());
                 }
                 plan.pending_clarification = plan_snapshot.pending_clarification.clone();
-                plan.pending_question = plan
-                    .pending_clarification
-                    .as_ref()
-                    .map(|snapshot| snapshot.question.clone());
             }
 
             if let Some(task_snapshot) = task_snapshot {
@@ -1258,36 +1243,6 @@ impl WorkflowKernelState {
                 plan.phase = "idle".to_string();
                 repaired.push("mode_snapshots.plan.phase".to_string());
             }
-            if plan.pending_clarification.is_none() {
-                if let Some(legacy_question) = plan
-                    .pending_question
-                    .as_ref()
-                    .map(|value| value.trim())
-                    .filter(|value| !value.is_empty())
-                {
-                    plan.pending_clarification = Some(PlanClarificationSnapshot {
-                        question_id: "legacy-recovered-question".to_string(),
-                        question: legacy_question.to_string(),
-                        hint: None,
-                        input_type: "text".to_string(),
-                        options: Vec::new(),
-                        required: false,
-                    });
-                    repaired.push("mode_snapshots.plan.pending_clarification".to_string());
-                }
-            }
-            if let Some(pending) = plan.pending_clarification.as_ref() {
-                if plan
-                    .pending_question
-                    .as_ref()
-                    .map(|value| value.trim())
-                    .unwrap_or("")
-                    .is_empty()
-                {
-                    plan.pending_question = Some(pending.question.clone());
-                    repaired.push("mode_snapshots.plan.pending_question".to_string());
-                }
-            }
         }
         if let Some(task) = session.mode_snapshots.task.as_mut() {
             if task.phase.trim().is_empty() {
@@ -1457,7 +1412,6 @@ fn apply_intent_to_mode_state(session: &mut WorkflowSession, intent: &UserInputI
             match intent.intent_type {
                 UserInputIntentType::PlanClarification => {
                     plan.phase = "planning".to_string();
-                    plan.pending_question = None;
                 }
                 UserInputIntentType::PlanApproval => {
                     plan.phase = "executing".to_string();
@@ -1846,36 +1800,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn repair_snapshot_integrity_converts_legacy_pending_question() {
-        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
-        let kernel = WorkflowKernelState::new_with_storage_dir(temp_dir.path().to_path_buf());
-
-        let mut session = kernel
-            .open_session(Some(WorkflowMode::Plan), None)
-            .await
-            .expect("open session");
-        {
-            session.mode_snapshots.ensure_mode(WorkflowMode::Plan);
-            let plan = session.mode_snapshots.plan_mut();
-            plan.pending_question = Some("Need legacy clarification".to_string());
-            plan.pending_clarification = None;
-        }
-
-        let repaired = WorkflowKernelState::repair_snapshot_integrity(&mut session);
-        let plan = session.mode_snapshots.plan.as_ref().expect("plan snapshot");
-        let pending = plan
-            .pending_clarification
-            .as_ref()
-            .expect("pending clarification converted from legacy field");
-
-        assert_eq!(pending.question, "Need legacy clarification");
-        assert_eq!(pending.question_id, "legacy-recovered-question");
-        assert!(repaired
-            .iter()
-            .any(|item| item == "mode_snapshots.plan.pending_clarification"));
-    }
-
-    #[tokio::test]
     async fn rehydrate_from_linked_sessions_restores_pending_interactions() {
         let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let kernel = WorkflowKernelState::new_with_storage_dir(temp_dir.path().to_path_buf());
@@ -1930,10 +1854,6 @@ mod tests {
                 .as_ref()
                 .map(|item| item.question_id.as_str()),
             Some("plan-q1")
-        );
-        assert_eq!(
-            plan.pending_question.as_deref(),
-            Some("Which scope should be prioritized?")
         );
 
         let task = updated.mode_snapshots.task.as_ref().expect("task snapshot");

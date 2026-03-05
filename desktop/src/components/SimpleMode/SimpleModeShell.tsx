@@ -23,8 +23,6 @@ import { useSettingsStore } from '../../store/settings';
 import { useWorkflowOrchestratorStore } from '../../store/workflowOrchestrator';
 import { usePlanOrchestratorStore } from '../../store/planOrchestrator';
 import { useWorkflowKernelStore } from '../../store/workflowKernel';
-import { useTaskModeStore } from '../../store/taskMode';
-import { usePlanModeStore } from '../../store/planMode';
 import { useGitStore } from '../../store/git';
 import { useFileChangesStore } from '../../store/fileChanges';
 import { useToolPermissionStore } from '../../store/toolPermission';
@@ -289,8 +287,6 @@ export function SimpleModeShell() {
   const workflowKernelChatPhase = kernelChatRuntime.phase;
   const workflowKernelPendingInterview = kernelTaskRuntime.pendingInterview;
   const workflowKernelPendingClarification = kernelPlanRuntime.pendingClarification;
-  const workflowKernelLinkedTaskSessionId = kernelTaskRuntime.linkedSessionId;
-  const workflowKernelLinkedPlanSessionId = kernelPlanRuntime.linkedSessionId;
 
   const kernelInterviewQuestion = useMemo<InterviewQuestionCardData | null>(() => {
     if (!workflowKernelPendingInterview) return null;
@@ -371,29 +367,6 @@ export function SimpleModeShell() {
   const effectiveTaskPhaseForInput = taskInterviewingPhase ? 'interviewing' : workflowPhase;
   const effectivePlanPhaseForInput = planClarifyingPhase ? 'clarifying' : planPhase;
   const isInterviewSubmitting = taskInterviewingPhase && taskPendingQuestion === null;
-
-  useEffect(() => {
-    if (workflowKernelLinkedTaskSessionId) {
-      useTaskModeStore.setState((state) =>
-        state.sessionId === workflowKernelLinkedTaskSessionId
-          ? state
-          : {
-              ...state,
-              sessionId: workflowKernelLinkedTaskSessionId,
-            },
-      );
-    }
-    if (workflowKernelLinkedPlanSessionId) {
-      usePlanModeStore.setState((state) =>
-        state.sessionId === workflowKernelLinkedPlanSessionId
-          ? state
-          : {
-              ...state,
-              sessionId: workflowKernelLinkedPlanSessionId,
-            },
-      );
-    }
-  }, [workflowKernelLinkedTaskSessionId, workflowKernelLinkedPlanSessionId]);
 
   // Tool permission state
   const permissionRequest = useToolPermissionStore((s) => s.pendingRequest);

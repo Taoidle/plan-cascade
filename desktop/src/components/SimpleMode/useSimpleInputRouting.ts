@@ -15,8 +15,8 @@ interface UseSimpleInputRoutingParams {
   isAnalyzingStrategy: boolean;
   start: (prompt: string, source: 'simple') => Promise<void>;
   sendFollowUp: (prompt: string) => Promise<void>;
-  startWorkflow: (description: string) => Promise<void>;
-  startPlanWorkflow: (description: string) => Promise<void>;
+  startWorkflow: (description: string) => Promise<{ modeSessionId: string | null }>;
+  startPlanWorkflow: (description: string) => Promise<{ modeSessionId: string | null }>;
   overrideConfigNatural: (text: string) => void;
   addPrdFeedback: (feedback: string) => void;
   submitPlanClarification: (answer: {

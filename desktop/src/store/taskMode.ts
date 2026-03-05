@@ -1,9 +1,8 @@
 /**
  * Task Mode Store
  *
- * Zustand store for Task Mode lifecycle management.
- * Manages mode switching, PRD generation/review, execution monitoring,
- * and quality gate results via Tauri IPC commands and events.
+ * Command client for Task Mode lifecycle IPC.
+ * Session lifecycle truth is owned by workflow kernel snapshots.
  */
 
 import { create } from 'zustand';
@@ -189,86 +188,57 @@ interface CommandResponse<T> {
   error: string | null;
 }
 
+function normalizeSessionId(value: string | null | undefined): string | null {
+  const normalized = value?.trim() ?? '';
+  return normalized.length > 0 ? normalized : null;
+}
+
+let activeTaskSessionId: string | null = null;
+
+function resolveSessionId(explicit?: string | null): string | null {
+  return normalizeSessionId(explicit) ?? activeTaskSessionId;
+}
+
+async function resolveRequestLlm(overrideProvider?: string, overrideModel?: string, overrideBaseUrl?: string) {
+  const settingsStore = (await import('./settings')).useSettingsStore.getState();
+  const finalProvider = overrideProvider || settingsStore.provider;
+  const finalModel = overrideModel || settingsStore.model;
+  const { resolveProviderBaseUrl } = await import('../lib/providers');
+  const finalBaseUrl =
+    overrideBaseUrl !== undefined
+      ? overrideBaseUrl
+      : finalProvider
+        ? resolveProviderBaseUrl(finalProvider, settingsStore)
+        : undefined;
+  return { finalProvider, finalModel, finalBaseUrl, settingsStore };
+}
+
 // ============================================================================
 // State Interface
 // ============================================================================
 
 export interface TaskModeState {
-  /** Current session ID */
-  sessionId: string | null;
-  status: TaskModeSessionStatus;
-
-  /** Strategy analysis (shows recommendation) */
-  strategyAnalysis: StrategyAnalysis | null;
-
-  /** Whether strategy analysis has been dismissed */
-  suggestionDismissed: boolean;
-
-  /** Generated/approved PRD */
-  prd: TaskPrd | null;
-
-  /** Current batch index */
-  currentBatch: number;
-
-  /** Total batches */
-  totalBatches: number;
-
-  /** Per-story execution status */
-  storyStatuses: Record<string, string>;
-
-  /** Per-story quality gate results */
-  qualityGateResults: Record<string, StoryQualityGateResults>;
-
-  /** Execution report (after completion) */
-  report: ExecutionReport | null;
-
-  /** Loading state */
   isLoading: boolean;
-
-  /** True while waiting for backend execution_cancelled confirmation */
   isCancelling: boolean;
-
-  /** Error message */
   error: string | null;
+  _requestId: number;
 
-  // Actions
-  /** Analyze task description for mode recommendation */
-  analyzeForMode: (description: string) => Promise<void>;
-
-  /** Dismiss the mode suggestion */
-  dismissSuggestion: () => void;
-
-  /** Enter task mode with a description */
-  enterTaskMode: (description: string) => Promise<void>;
-
-  /** Generate PRD from current session, optionally with conversation history for context */
+  analyzeForMode: (description: string) => Promise<StrategyAnalysis | null>;
+  enterTaskMode: (description: string) => Promise<TaskModeSession | null>;
   generatePrd: (
     conversationHistory?: CrossModeConversationTurn[],
     maxContextTokens?: number,
     overrideProvider?: string,
     overrideModel?: string,
     overrideBaseUrl?: string,
-  ) => Promise<void>;
-
-  /** Approve PRD (optionally with edits) and start execution */
-  approvePrd: (prd: TaskPrd) => Promise<void>;
-
-  /** Get current execution status */
-  refreshStatus: () => Promise<void>;
-
-  /** Cancel current execution */
-  cancelExecution: () => Promise<void>;
-
-  /** Cancel current pre-execution operation */
-  cancelOperation: () => Promise<void>;
-
-  /** Get execution report */
-  fetchReport: () => Promise<void>;
-
-  /** Exit task mode */
-  exitTaskMode: () => Promise<void>;
-
-  /** Reset store to initial state */
+    sessionId?: string | null,
+  ) => Promise<TaskPrd | null>;
+  approvePrd: (prd: TaskPrd, sessionId?: string | null) => Promise<boolean>;
+  refreshStatus: (sessionId?: string | null) => Promise<TaskExecutionStatus | null>;
+  cancelExecution: (sessionId?: string | null) => Promise<boolean>;
+  cancelOperation: (sessionId?: string | null) => Promise<boolean>;
+  fetchReport: (sessionId?: string | null) => Promise<ExecutionReport | null>;
+  exitTaskMode: (sessionId?: string | null) => Promise<boolean>;
   reset: () => void;
 }
 
@@ -277,19 +247,10 @@ export interface TaskModeState {
 // ============================================================================
 
 const DEFAULT_STATE = {
-  sessionId: null,
-  status: 'initialized' as TaskModeSessionStatus,
-  strategyAnalysis: null,
-  suggestionDismissed: false,
-  prd: null,
-  currentBatch: 0,
-  totalBatches: 0,
-  storyStatuses: {},
-  qualityGateResults: {},
-  report: null,
   isLoading: false,
   isCancelling: false,
-  error: null,
+  error: null as string | null,
+  _requestId: 0,
 };
 
 // ============================================================================
@@ -300,45 +261,53 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
   ...DEFAULT_STATE,
 
   analyzeForMode: async (description: string) => {
-    set({ isLoading: true, error: null, suggestionDismissed: false });
+    const requestId = get()._requestId + 1;
+    set({ isLoading: true, error: null, _requestId: requestId });
     try {
       const result = await invoke<CommandResponse<StrategyAnalysis>>('analyze_task_for_mode', { description });
-      if (result.success && result.data) {
-        set({ strategyAnalysis: result.data, isLoading: false });
-      } else {
+      if (get()._requestId !== requestId) return null;
+      if (!result.success || !result.data) {
         set({ isLoading: false, error: result.error ?? 'Analysis failed' });
+        return null;
       }
+      set({ isLoading: false });
+      return result.data;
     } catch (e) {
+      if (get()._requestId !== requestId) return null;
       set({ isLoading: false, error: String(e) });
+      return null;
     }
   },
 
-  dismissSuggestion: () => {
-    set({ suggestionDismissed: true });
-  },
-
   enterTaskMode: async (description: string) => {
-    set({ isLoading: true, isCancelling: false, error: null });
+    const requestId = get()._requestId + 1;
+    set({ isLoading: true, isCancelling: false, error: null, _requestId: requestId });
     try {
       const result = await invoke<CommandResponse<TaskModeSession>>('enter_task_mode', { description });
-      if (result.success && result.data) {
-        const session = result.data;
-        const normalizedStatus = normalizeTaskModeSessionStatus(session.status);
-        const contextSourcesStore = useContextSourcesStore.getState();
-        contextSourcesStore.setMemorySessionId(session.sessionId);
-        set({
-          sessionId: session.sessionId,
-          status: normalizedStatus.status,
-          strategyAnalysis: session.strategyAnalysis,
-          prd: session.prd,
-          isLoading: false,
-          error: normalizedStatus.warning,
-        });
-      } else {
+      if (get()._requestId !== requestId) return null;
+
+      if (!result.success || !result.data) {
         set({ isLoading: false, error: result.error ?? 'Failed to enter task mode' });
+        return null;
       }
+
+      const session = result.data;
+      activeTaskSessionId = normalizeSessionId(session.sessionId);
+      useContextSourcesStore.getState().setMemorySessionId(activeTaskSessionId);
+
+      const normalizedStatus = normalizeTaskModeSessionStatus(session.status);
+      set({ isLoading: false, error: normalizedStatus.warning });
+      if (normalizedStatus.warning) {
+        return {
+          ...session,
+          status: normalizedStatus.status,
+        };
+      }
+      return session;
     } catch (e) {
+      if (get()._requestId !== requestId) return null;
       set({ isLoading: false, error: String(e) });
+      return null;
     }
   },
 
@@ -348,32 +317,31 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
     overrideProvider?: string,
     overrideModel?: string,
     overrideBaseUrl?: string,
+    sessionId?: string | null,
   ) => {
-    const { sessionId } = get();
-    if (!sessionId) {
+    const resolvedSessionId = resolveSessionId(sessionId);
+    if (!resolvedSessionId) {
       set({ error: 'No active session' });
-      return;
+      return null;
     }
-    set({ isLoading: true, error: null });
+
+    const requestId = get()._requestId + 1;
+    set({ isLoading: true, error: null, _requestId: requestId });
+
     try {
-      // Read provider/model + endpoint settings from settings store
-      const settingsStore = (await import('./settings')).useSettingsStore.getState();
-      const { provider, model, glmEndpoint, qwenEndpoint, minimaxEndpoint } = settingsStore;
-      const finalProvider = overrideProvider || provider;
-      const finalModel = overrideModel || model;
-      const { resolveProviderBaseUrl } = await import('../lib/providers');
-      const finalBaseUrl =
-        overrideBaseUrl !== undefined
-          ? overrideBaseUrl
-          : finalProvider
-            ? resolveProviderBaseUrl(finalProvider, { glmEndpoint, qwenEndpoint, minimaxEndpoint })
-            : undefined;
+      const { finalProvider, finalModel, finalBaseUrl, settingsStore } = await resolveRequestLlm(
+        overrideProvider,
+        overrideModel,
+        overrideBaseUrl,
+      );
+
       const contextSourcesStore = useContextSourcesStore.getState();
-      contextSourcesStore.setMemorySessionId(sessionId);
+      contextSourcesStore.setMemorySessionId(resolvedSessionId);
       const contextSources = contextSourcesStore.buildConfig() ?? null;
+
       const result = await invoke<CommandResponse<TaskPrd>>('generate_task_prd', {
         request: {
-          sessionId,
+          sessionId: resolvedSessionId,
           provider: finalProvider || null,
           model: finalModel || null,
           apiKey: null,
@@ -384,39 +352,45 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
           projectPath: settingsStore.workspacePath || null,
         },
       });
-      if (result.success && result.data) {
-        set({
-          prd: result.data,
-          isLoading: false,
-        });
-      } else {
+      if (get()._requestId !== requestId) return null;
+
+      if (!result.success || !result.data) {
         set({ isLoading: false, error: result.error ?? 'PRD generation failed' });
+        return null;
       }
+
+      set({ isLoading: false });
+      return result.data;
     } catch (e) {
+      if (get()._requestId !== requestId) return null;
       set({ isLoading: false, error: String(e) });
+      return null;
     }
   },
 
-  approvePrd: async (prd: TaskPrd) => {
-    const { sessionId } = get();
-    if (!sessionId) {
+  approvePrd: async (prd: TaskPrd, sessionId?: string | null) => {
+    const resolvedSessionId = resolveSessionId(sessionId);
+    if (!resolvedSessionId) {
       set({ error: 'No active session' });
-      return;
+      return false;
     }
-    set({ isLoading: true, error: null });
+
+    const requestId = get()._requestId + 1;
+    set({ isLoading: true, error: null, _requestId: requestId });
+
     try {
       const settingsStore = (await import('./settings')).useSettingsStore.getState();
-      const { provider, model, defaultAgent, phaseConfigs, glmEndpoint, qwenEndpoint, minimaxEndpoint } = settingsStore;
+      const { provider, model, defaultAgent, phaseConfigs } = settingsStore;
       const { resolveProviderBaseUrl } = await import('../lib/providers');
-      const baseUrl = provider
-        ? resolveProviderBaseUrl(provider, { glmEndpoint, qwenEndpoint, minimaxEndpoint })
-        : undefined;
+      const baseUrl = provider ? resolveProviderBaseUrl(provider, settingsStore) : undefined;
+
       const contextSourcesStore = useContextSourcesStore.getState();
-      contextSourcesStore.setMemorySessionId(sessionId);
+      contextSourcesStore.setMemorySessionId(resolvedSessionId);
       const contextSources = contextSourcesStore.buildConfig() ?? null;
+
       const result = await invoke<CommandResponse<boolean>>('approve_task_prd', {
         request: {
-          sessionId,
+          sessionId: resolvedSessionId,
           prd,
           provider: provider || null,
           model: model || null,
@@ -429,118 +403,143 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
           projectPath: settingsStore.workspacePath || null,
         },
       });
-      if (result.success) {
-        set({
-          prd,
-          isLoading: false,
-        });
-      } else {
+      if (get()._requestId !== requestId) return false;
+
+      if (!result.success) {
         set({ isLoading: false, error: result.error ?? 'PRD approval failed' });
+        return false;
       }
+
+      set({ isLoading: false });
+      return true;
     } catch (e) {
+      if (get()._requestId !== requestId) return false;
       set({ isLoading: false, error: String(e) });
+      return false;
     }
   },
 
-  refreshStatus: async () => {
-    const { sessionId } = get();
-    if (!sessionId) return;
+  refreshStatus: async (sessionId?: string | null) => {
+    const resolvedSessionId = resolveSessionId(sessionId);
+    if (!resolvedSessionId) return null;
+
     try {
-      const result = await invoke<CommandResponse<TaskExecutionStatus>>('get_task_execution_status', { sessionId });
-      if (result.success && result.data) {
-        const status = result.data;
-        const normalizedStatus = normalizeTaskModeSessionStatus(status.status);
-        set({
-          status: normalizedStatus.status,
-          currentBatch: status.currentBatch,
-          totalBatches: status.totalBatches,
-          storyStatuses: status.storyStatuses,
-          error: normalizedStatus.warning,
-        });
+      const result = await invoke<CommandResponse<TaskExecutionStatus>>('get_task_execution_status', {
+        sessionId: resolvedSessionId,
+      });
+      if (!result.success || !result.data) return null;
+
+      const normalizedStatus = normalizeTaskModeSessionStatus(result.data.status);
+      if (normalizedStatus.warning) {
+        set({ error: normalizedStatus.warning });
       }
+
+      return {
+        ...result.data,
+        status: normalizedStatus.status,
+      };
     } catch {
-      // Silently ignore refresh errors
+      return null;
     }
   },
 
-  cancelExecution: async () => {
-    const { sessionId } = get();
-    if (!sessionId) {
+  cancelExecution: async (sessionId?: string | null) => {
+    const resolvedSessionId = resolveSessionId(sessionId);
+    if (!resolvedSessionId) {
       set({ error: 'No active session' });
-      return;
+      return false;
     }
-    if (get().isCancelling) return;
-    set({ isLoading: true, isCancelling: true, error: null });
+    if (get().isCancelling) return false;
+
+    const requestId = get()._requestId + 1;
+    set({ _requestId: requestId, isCancelling: true, error: null });
+
     try {
-      const result = await invoke<CommandResponse<boolean>>('cancel_task_execution', { sessionId });
-      if (result.success) {
-        // Await backend execution_cancelled event to finalize state.
-        set({ isLoading: false });
-      } else {
-        set({ isLoading: false, isCancelling: false, error: result.error ?? 'Cancel failed' });
+      const result = await invoke<CommandResponse<boolean>>('cancel_task_execution', { sessionId: resolvedSessionId });
+      if (get()._requestId !== requestId) return false;
+
+      if (!result.success) {
+        set({ isCancelling: false, error: result.error ?? 'Cancel failed' });
+        return false;
       }
+      return true;
     } catch (e) {
-      set({ isLoading: false, isCancelling: false, error: String(e) });
+      if (get()._requestId !== requestId) return false;
+      set({ isCancelling: false, error: String(e) });
+      return false;
     }
   },
 
-  cancelOperation: async () => {
-    const { sessionId } = get();
+  cancelOperation: async (sessionId?: string | null) => {
+    const requestId = get()._requestId + 1;
+    set({ _requestId: requestId, error: null });
+
     try {
       const result = await invoke<CommandResponse<boolean>>('cancel_task_operation', {
-        sessionId: sessionId || null,
+        sessionId: resolveSessionId(sessionId),
       });
+      if (get()._requestId !== requestId) return false;
       if (!result.success) {
         set({ error: result.error ?? 'Cancel failed' });
+        return false;
       }
+      return true;
+    } catch (e) {
+      if (get()._requestId !== requestId) return false;
+      set({ error: String(e) });
+      return false;
+    }
+  },
+
+  fetchReport: async (sessionId?: string | null) => {
+    const resolvedSessionId = resolveSessionId(sessionId);
+    if (!resolvedSessionId) {
+      set({ error: 'No active session' });
+      return null;
+    }
+
+    try {
+      const result = await invoke<CommandResponse<ExecutionReport>>('get_task_execution_report', {
+        sessionId: resolvedSessionId,
+      });
+      if (result.success && result.data) {
+        return result.data;
+      }
+      set({ error: result.error ?? 'Failed to fetch report' });
+      return null;
     } catch (e) {
       set({ error: String(e) });
+      return null;
     }
   },
 
-  fetchReport: async () => {
-    const { sessionId } = get();
-    if (!sessionId) {
-      set({ error: 'No active session' });
-      return;
-    }
-    set({ isLoading: true, error: null });
-    try {
-      const result = await invoke<CommandResponse<ExecutionReport>>('get_task_execution_report', { sessionId });
-      if (result.success && result.data) {
-        set({ report: result.data, isLoading: false });
-      } else {
-        set({ isLoading: false, error: result.error ?? 'Failed to fetch report' });
-      }
-    } catch (e) {
-      set({ isLoading: false, error: String(e) });
-    }
-  },
+  exitTaskMode: async (sessionId?: string | null) => {
+    const resolvedSessionId = resolveSessionId(sessionId);
+    const requestId = get()._requestId + 1;
+    set({ _requestId: requestId, error: null });
 
-  exitTaskMode: async () => {
-    const { sessionId } = get();
-    if (!sessionId) {
-      set({ error: 'No active session' });
-      return;
-    }
-    set({ isLoading: true, error: null });
-    try {
-      const result = await invoke<CommandResponse<boolean>>('exit_task_mode', { sessionId });
-      if (result.success) {
-        const contextSourcesStore = useContextSourcesStore.getState();
-        contextSourcesStore.setMemorySessionId(null);
-        set({ ...DEFAULT_STATE });
-      } else {
-        set({ isLoading: false, error: result.error ?? 'Failed to exit task mode' });
+    if (resolvedSessionId) {
+      try {
+        const result = await invoke<CommandResponse<boolean>>('exit_task_mode', { sessionId: resolvedSessionId });
+        if (!result.success) {
+          set({ error: result.error ?? 'Failed to exit task mode' });
+          return false;
+        }
+      } catch (e) {
+        set({ error: String(e) });
+        return false;
       }
-    } catch (e) {
-      set({ isLoading: false, error: String(e) });
     }
+
+    activeTaskSessionId = null;
+    useContextSourcesStore.getState().setMemorySessionId(null);
+    return true;
   },
 
   reset: () => {
+    activeTaskSessionId = null;
     useContextSourcesStore.getState().setMemorySessionId(null);
-    set({ ...DEFAULT_STATE });
+    set((state) => ({ ...DEFAULT_STATE, _requestId: state._requestId + 1 }));
   },
 }));
 

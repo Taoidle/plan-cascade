@@ -1,26 +1,16 @@
-/**
- * Task Mode Store Tests
- *
- * Story 007: Frontend Task Mode Store and UI Components
- * Tests the Zustand store logic for task mode lifecycle management.
- */
-
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-// Mock Tauri APIs before importing the store
 const mockInvoke = vi.fn();
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }));
 
-// Import after mocks
 import { normalizeTaskModeSessionStatus, useTaskModeStore } from './taskMode';
 import type { StrategyAnalysis, TaskModeSession, TaskPrd, TaskExecutionStatus, ExecutionReport } from './taskMode';
 import { useContextSourcesStore } from './contextSources';
 import { useProjectsStore } from './projects';
 import { useSettingsStore } from './settings';
 
-// Helpers
 function resetStore() {
   useTaskModeStore.getState().reset();
   useSettingsStore.setState({ defaultAgent: 'claude-code' });
@@ -101,171 +91,134 @@ function mockPrd(): TaskPrd {
   };
 }
 
-// ===========================================================================
-// Tests
-// ===========================================================================
+async function enterSession(session: TaskModeSession = mockSession()) {
+  mockInvoke.mockResolvedValueOnce({ success: true, data: session, error: null });
+  const entered = await useTaskModeStore.getState().enterTaskMode(session.description);
+  expect(entered?.sessionId).toBe(session.sessionId);
+}
 
 describe('TaskModeStore', () => {
   beforeEach(() => {
     resetStore();
   });
 
-  // =========================================================================
-  // Initial State
-  // =========================================================================
   describe('initial state', () => {
-    it('should start with default state and no session', () => {
+    it('starts with command-client state only', () => {
       const state = useTaskModeStore.getState();
-      expect(state.sessionId).toBeNull();
-      expect(state.status).toBe('initialized');
-      expect(state.strategyAnalysis).toBeNull();
-      expect(state.suggestionDismissed).toBe(false);
-      expect(state.prd).toBeNull();
-      expect(state.currentBatch).toBe(0);
-      expect(state.totalBatches).toBe(0);
-      expect(state.storyStatuses).toEqual({});
-      expect(state.qualityGateResults).toEqual({});
-      expect(state.report).toBeNull();
       expect(state.isLoading).toBe(false);
+      expect(state.isCancelling).toBe(false);
       expect(state.error).toBeNull();
+      expect(state._requestId).toBeGreaterThanOrEqual(0);
     });
   });
 
-  // =========================================================================
-  // analyzeForMode
-  // =========================================================================
   describe('analyzeForMode', () => {
-    it('should update strategyAnalysis on success', async () => {
+    it('returns strategy analysis on success', async () => {
       const analysis = mockAnalysis('task');
       mockInvoke.mockResolvedValueOnce({ success: true, data: analysis, error: null });
 
-      await useTaskModeStore.getState().analyzeForMode('Build a complex app');
+      const result = await useTaskModeStore.getState().analyzeForMode('Build a complex app');
 
-      const state = useTaskModeStore.getState();
-      expect(state.strategyAnalysis).toEqual(analysis);
-      expect(state.isLoading).toBe(false);
-      expect(state.error).toBeNull();
-      expect(state.suggestionDismissed).toBe(false);
+      expect(result).toEqual(analysis);
+      expect(useTaskModeStore.getState().isLoading).toBe(false);
+      expect(useTaskModeStore.getState().error).toBeNull();
       expect(mockInvoke).toHaveBeenCalledWith('analyze_task_for_mode', {
         description: 'Build a complex app',
       });
     });
 
-    it('should set error on failure', async () => {
+    it('sets error on backend failure', async () => {
       mockInvoke.mockResolvedValueOnce({ success: false, data: null, error: 'Analysis error' });
 
-      await useTaskModeStore.getState().analyzeForMode('bad input');
+      const result = await useTaskModeStore.getState().analyzeForMode('bad input');
 
-      const state = useTaskModeStore.getState();
-      expect(state.strategyAnalysis).toBeNull();
-      expect(state.error).toBe('Analysis error');
-      expect(state.isLoading).toBe(false);
+      expect(result).toBeNull();
+      expect(useTaskModeStore.getState().error).toBe('Analysis error');
+      expect(useTaskModeStore.getState().isLoading).toBe(false);
     });
 
-    it('should handle invoke exception', async () => {
+    it('handles invoke exception', async () => {
       mockInvoke.mockRejectedValueOnce(new Error('Network error'));
 
-      await useTaskModeStore.getState().analyzeForMode('test');
+      const result = await useTaskModeStore.getState().analyzeForMode('test');
 
-      const state = useTaskModeStore.getState();
-      expect(state.error).toContain('Network error');
-      expect(state.isLoading).toBe(false);
+      expect(result).toBeNull();
+      expect(useTaskModeStore.getState().error).toContain('Network error');
+      expect(useTaskModeStore.getState().isLoading).toBe(false);
     });
   });
 
-  // =========================================================================
-  // dismissSuggestion
-  // =========================================================================
-  describe('dismissSuggestion', () => {
-    it('should set suggestionDismissed to true', () => {
-      useTaskModeStore.getState().dismissSuggestion();
-      expect(useTaskModeStore.getState().suggestionDismissed).toBe(true);
-    });
-  });
-
-  // =========================================================================
-  // enterTaskMode
-  // =========================================================================
   describe('enterTaskMode', () => {
-    it('should enter task mode and update state on success', async () => {
+    it('returns session and sets memory session id on success', async () => {
       const session = mockSession();
       session.status = 'exploring';
       mockInvoke.mockResolvedValueOnce({ success: true, data: session, error: null });
 
-      await useTaskModeStore.getState().enterTaskMode('Build feature X');
+      const result = await useTaskModeStore.getState().enterTaskMode('Build feature X');
 
-      const state = useTaskModeStore.getState();
-      expect(state.sessionId).toBe('session-123');
-      expect(state.status).toBe('exploring');
-      expect(state.strategyAnalysis).toEqual(session.strategyAnalysis);
-      expect(state.isLoading).toBe(false);
+      expect(result?.sessionId).toBe('session-123');
+      expect(result?.status).toBe('exploring');
       expect(useContextSourcesStore.getState().memorySessionId).toBe('session-123');
+      expect(useTaskModeStore.getState().isLoading).toBe(false);
       expect(mockInvoke).toHaveBeenCalledWith('enter_task_mode', {
         description: 'Build feature X',
       });
     });
 
-    it('should set error on failure', async () => {
+    it('sets error on failure', async () => {
       mockInvoke.mockResolvedValueOnce({
         success: false,
         data: null,
         error: 'Already in task mode',
       });
 
-      await useTaskModeStore.getState().enterTaskMode('test');
+      const result = await useTaskModeStore.getState().enterTaskMode('test');
 
-      const state = useTaskModeStore.getState();
-      expect(state.error).toBe('Already in task mode');
+      expect(result).toBeNull();
+      expect(useTaskModeStore.getState().error).toBe('Already in task mode');
     });
 
-    it('falls back unknown backend status to initialized', async () => {
+    it('normalizes unknown backend status to initialized', async () => {
       const session = {
         ...mockSession(),
         status: 'future_status',
       } as unknown as TaskModeSession;
       mockInvoke.mockResolvedValueOnce({ success: true, data: session, error: null });
 
-      await useTaskModeStore.getState().enterTaskMode('Build feature X');
+      const result = await useTaskModeStore.getState().enterTaskMode('Build feature X');
 
-      const state = useTaskModeStore.getState();
-      expect(state.status).toBe('initialized');
-      expect(state.error).toContain("Unknown task mode session status 'future_status'");
+      expect(result?.status).toBe('initialized');
+      expect(useTaskModeStore.getState().error).toContain("Unknown task mode session status 'future_status'");
     });
   });
 
-  // =========================================================================
-  // generatePrd
-  // =========================================================================
   describe('generatePrd', () => {
-    it('should generate PRD and store it', async () => {
-      // First enter task mode
-      useTaskModeStore.setState({ sessionId: 'session-123' });
-      useContextSourcesStore.setState({ memorySessionId: null });
-
+    it('returns PRD on success', async () => {
+      await enterSession();
       const prd = mockPrd();
       mockInvoke.mockResolvedValueOnce({ success: true, data: prd, error: null });
 
-      await useTaskModeStore.getState().generatePrd();
+      const result = await useTaskModeStore.getState().generatePrd();
 
-      const state = useTaskModeStore.getState();
-      expect(state.prd).toEqual(prd);
-      expect(state.isLoading).toBe(false);
+      expect(result).toEqual(prd);
+      expect(useTaskModeStore.getState().isLoading).toBe(false);
       expect(useContextSourcesStore.getState().memorySessionId).toBe('session-123');
     });
 
-    it('should set error if no active session', async () => {
-      await useTaskModeStore.getState().generatePrd();
+    it('sets error if no active session', async () => {
+      const result = await useTaskModeStore.getState().generatePrd();
 
-      const state = useTaskModeStore.getState();
-      expect(state.error).toBe('No active session');
+      expect(result).toBeNull();
+      expect(useTaskModeStore.getState().error).toBe('No active session');
     });
 
-    it('should set error on backend failure', async () => {
-      useTaskModeStore.setState({ sessionId: 'session-123' });
+    it('sets error on backend failure', async () => {
+      await enterSession();
       mockInvoke.mockResolvedValueOnce({ success: false, data: null, error: 'Wrong status' });
 
-      await useTaskModeStore.getState().generatePrd();
+      const result = await useTaskModeStore.getState().generatePrd();
 
+      expect(result).toBeNull();
       expect(useTaskModeStore.getState().error).toBe('Wrong status');
     });
 
@@ -285,7 +238,7 @@ describe('TaskModeStore', () => {
         selectedCollections: ['col-1'],
         selectedDocuments: [{ collection_id: 'col-1', document_uid: 'doc-1' }],
       });
-      useTaskModeStore.setState({ sessionId: 'session-123' });
+      await enterSession();
       mockInvoke.mockResolvedValueOnce({ success: true, data: mockPrd(), error: null });
 
       await useTaskModeStore.getState().generatePrd(undefined, undefined, 'openai', 'gpt-test', 'http://localhost');
@@ -315,45 +268,25 @@ describe('TaskModeStore', () => {
     });
   });
 
-  // =========================================================================
-  // approvePrd
-  // =========================================================================
   describe('approvePrd', () => {
-    it('should approve PRD and keep editable PRD state', async () => {
-      useTaskModeStore.setState({ sessionId: 'session-123' });
-
-      const prd = mockPrd();
+    it('approves PRD successfully', async () => {
+      await enterSession();
       mockInvoke.mockResolvedValueOnce({ success: true, data: true, error: null });
 
-      await useTaskModeStore.getState().approvePrd(prd);
+      const ok = await useTaskModeStore.getState().approvePrd(mockPrd());
 
-      const state = useTaskModeStore.getState();
-      expect(state.prd).toEqual(prd);
-      expect(state.isLoading).toBe(false);
+      expect(ok).toBe(true);
+      expect(useTaskModeStore.getState().isLoading).toBe(false);
     });
 
-    it('should set error if PRD has no stories', async () => {
-      useTaskModeStore.setState({ sessionId: 'session-123' });
-      mockInvoke.mockResolvedValueOnce({
-        success: false,
-        data: null,
-        error: 'PRD must contain at least one story',
-      });
-
-      const emptyPrd: TaskPrd = {
-        title: 'Empty',
-        description: 'No stories',
-        stories: [],
-        batches: [],
-      };
-
-      await useTaskModeStore.getState().approvePrd(emptyPrd);
-
-      expect(useTaskModeStore.getState().error).toBe('PRD must contain at least one story');
+    it('sets error when no active session', async () => {
+      const ok = await useTaskModeStore.getState().approvePrd(mockPrd());
+      expect(ok).toBe(false);
+      expect(useTaskModeStore.getState().error).toBe('No active session');
     });
 
     it('passes globalDefaultAgent to approve_task_prd payload', async () => {
-      useTaskModeStore.setState({ sessionId: 'session-123' });
+      await enterSession();
       useSettingsStore.setState({ defaultAgent: 'codex' });
       mockInvoke.mockResolvedValueOnce({ success: true, data: true, error: null });
 
@@ -375,13 +308,9 @@ describe('TaskModeStore', () => {
     });
   });
 
-  // =========================================================================
-  // refreshStatus
-  // =========================================================================
   describe('refreshStatus', () => {
-    it('should update execution status from backend', async () => {
-      useTaskModeStore.setState({ sessionId: 'session-123' });
-
+    it('returns latest execution status', async () => {
+      await enterSession();
       const status: TaskExecutionStatus = {
         sessionId: 'session-123',
         status: 'executing',
@@ -393,25 +322,21 @@ describe('TaskModeStore', () => {
       };
       mockInvoke.mockResolvedValueOnce({ success: true, data: status, error: null });
 
-      await useTaskModeStore.getState().refreshStatus();
+      const result = await useTaskModeStore.getState().refreshStatus();
 
-      const state = useTaskModeStore.getState();
-      expect(state.status).toBe('executing');
-      expect(state.currentBatch).toBe(1);
-      expect(state.totalBatches).toBe(3);
-      expect(state.storyStatuses).toEqual({
-        'story-001': 'completed',
-        'story-002': 'running',
-      });
+      expect(result?.status).toBe('executing');
+      expect(result?.currentBatch).toBe(1);
+      expect(result?.totalBatches).toBe(3);
     });
 
-    it('should do nothing if no session', async () => {
-      await useTaskModeStore.getState().refreshStatus();
+    it('returns null if no session', async () => {
+      const result = await useTaskModeStore.getState().refreshStatus();
+      expect(result).toBeNull();
       expect(mockInvoke).not.toHaveBeenCalled();
     });
 
     it('normalizes unknown status returned by refreshStatus', async () => {
-      useTaskModeStore.setState({ sessionId: 'session-123' });
+      await enterSession();
       const unknownStatus = {
         sessionId: 'session-123',
         status: 'post_processing',
@@ -423,41 +348,34 @@ describe('TaskModeStore', () => {
       } as unknown as TaskExecutionStatus;
       mockInvoke.mockResolvedValueOnce({ success: true, data: unknownStatus, error: null });
 
-      await useTaskModeStore.getState().refreshStatus();
+      const result = await useTaskModeStore.getState().refreshStatus();
 
-      const state = useTaskModeStore.getState();
-      expect(state.status).toBe('initialized');
-      expect(state.error).toContain("Unknown task mode session status 'post_processing'");
+      expect(result?.status).toBe('initialized');
+      expect(useTaskModeStore.getState().error).toContain("Unknown task mode session status 'post_processing'");
     });
   });
 
-  // =========================================================================
-  // cancelExecution
-  // =========================================================================
   describe('cancelExecution', () => {
-    it('should request cancel and wait for event confirmation', async () => {
-      useTaskModeStore.setState({ sessionId: 'session-123' });
+    it('requests cancellation and keeps isCancelling=true until progress event confirms', async () => {
+      await enterSession();
       mockInvoke.mockResolvedValueOnce({ success: true, data: true, error: null });
 
-      await useTaskModeStore.getState().cancelExecution();
+      const ok = await useTaskModeStore.getState().cancelExecution();
 
+      expect(ok).toBe(true);
       expect(useTaskModeStore.getState().isCancelling).toBe(true);
-      expect(useTaskModeStore.getState().isLoading).toBe(false);
     });
 
-    it('should set error if no session', async () => {
-      await useTaskModeStore.getState().cancelExecution();
+    it('sets error if no session', async () => {
+      const ok = await useTaskModeStore.getState().cancelExecution();
+      expect(ok).toBe(false);
       expect(useTaskModeStore.getState().error).toBe('No active session');
     });
   });
 
-  // =========================================================================
-  // fetchReport
-  // =========================================================================
   describe('fetchReport', () => {
-    it('should fetch and store execution report', async () => {
-      useTaskModeStore.setState({ sessionId: 'session-123' });
-
+    it('returns execution report', async () => {
+      await enterSession();
       const report: ExecutionReport = {
         sessionId: 'session-123',
         totalStories: 5,
@@ -469,68 +387,49 @@ describe('TaskModeStore', () => {
       };
       mockInvoke.mockResolvedValueOnce({ success: true, data: report, error: null });
 
-      await useTaskModeStore.getState().fetchReport();
+      const result = await useTaskModeStore.getState().fetchReport();
 
-      expect(useTaskModeStore.getState().report).toEqual(report);
-      expect(useTaskModeStore.getState().isLoading).toBe(false);
+      expect(result).toEqual(report);
     });
 
-    it('should set error if no session', async () => {
-      await useTaskModeStore.getState().fetchReport();
+    it('sets error if no session', async () => {
+      const result = await useTaskModeStore.getState().fetchReport();
+      expect(result).toBeNull();
       expect(useTaskModeStore.getState().error).toBe('No active session');
     });
   });
 
-  // =========================================================================
-  // exitTaskMode
-  // =========================================================================
   describe('exitTaskMode', () => {
-    it('should reset state on successful exit', async () => {
-      useTaskModeStore.setState({
-        sessionId: 'session-123',
-      });
+    it('clears active session and memory scope on successful exit', async () => {
+      await enterSession();
       mockInvoke.mockResolvedValueOnce({ success: true, data: true, error: null });
 
-      await useTaskModeStore.getState().exitTaskMode();
+      const ok = await useTaskModeStore.getState().exitTaskMode();
 
-      const state = useTaskModeStore.getState();
-      expect(state.sessionId).toBeNull();
-      expect(state.prd).toBeNull();
+      expect(ok).toBe(true);
       expect(useContextSourcesStore.getState().memorySessionId).toBeNull();
     });
 
-    it('should set error on failure', async () => {
-      useTaskModeStore.setState({ sessionId: 'session-123' });
-      mockInvoke.mockResolvedValueOnce({
-        success: false,
-        data: null,
-        error: 'Invalid session',
-      });
+    it('sets error on failure', async () => {
+      await enterSession();
+      mockInvoke.mockResolvedValueOnce({ success: false, data: null, error: 'Invalid session' });
 
-      await useTaskModeStore.getState().exitTaskMode();
+      const ok = await useTaskModeStore.getState().exitTaskMode();
 
+      expect(ok).toBe(false);
       expect(useTaskModeStore.getState().error).toBe('Invalid session');
     });
   });
 
-  // =========================================================================
-  // Reset
-  // =========================================================================
   describe('reset', () => {
-    it('should reset all state to defaults', () => {
-      useTaskModeStore.setState({
-        sessionId: 'session-123',
-        prd: mockPrd(),
-        currentBatch: 2,
-        error: 'old error',
-      });
+    it('resets command-client state and clears memory scope', () => {
+      useTaskModeStore.setState({ isLoading: true, error: 'old error' });
+      useContextSourcesStore.getState().setMemorySessionId('session-123');
 
       useTaskModeStore.getState().reset();
 
       const state = useTaskModeStore.getState();
-      expect(state.sessionId).toBeNull();
-      expect(state.status).toBe('initialized');
-      expect(state.prd).toBeNull();
+      expect(state.isLoading).toBe(false);
       expect(state.error).toBeNull();
       expect(useContextSourcesStore.getState().memorySessionId).toBeNull();
     });

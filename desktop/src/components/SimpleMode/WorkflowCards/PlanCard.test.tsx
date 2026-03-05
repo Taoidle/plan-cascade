@@ -6,14 +6,9 @@ import type { WorkflowSession } from '../../../types/workflowKernel';
 const planOrchestratorHarness = vi.hoisted(() => ({
   state: {
     phase: 'reviewing_plan',
+    stepStatuses: {} as Record<string, string>,
     approvePlan: vi.fn().mockResolvedValue(undefined),
     retryStep: vi.fn().mockResolvedValue(undefined),
-  },
-}));
-
-const planModeHarness = vi.hoisted(() => ({
-  state: {
-    stepStatuses: {} as Record<string, string>,
   },
 }));
 
@@ -38,10 +33,6 @@ vi.mock('react-i18next', () => ({
 vi.mock('../../../store/planOrchestrator', () => ({
   usePlanOrchestratorStore: (selector: (state: typeof planOrchestratorHarness.state) => unknown) =>
     selector(planOrchestratorHarness.state),
-}));
-
-vi.mock('../../../store/planMode', () => ({
-  usePlanModeStore: (selector: (state: typeof planModeHarness.state) => unknown) => selector(planModeHarness.state),
 }));
 
 vi.mock('../../../store/workflowKernel', () => ({
@@ -72,7 +63,6 @@ function createPlanKernelSession(phase: string): WorkflowSession {
         planId: null,
         runningStepId: null,
         pendingClarification: null,
-        pendingQuestion: null,
         retryableSteps: [],
         planRevision: 0,
         lastEditOperation: null,
@@ -95,9 +85,9 @@ function createPlanKernelSession(phase: string): WorkflowSession {
 describe('PlanCard interactive gating', () => {
   beforeEach(() => {
     planOrchestratorHarness.state.phase = 'reviewing_plan';
+    planOrchestratorHarness.state.stepStatuses = {};
     planOrchestratorHarness.state.approvePlan.mockClear();
     planOrchestratorHarness.state.retryStep.mockClear();
-    planModeHarness.state.stepStatuses = {};
     kernelHarness.session = null;
     i18nHarness.t.mockClear();
   });
@@ -273,7 +263,7 @@ describe('PlanCard interactive gating', () => {
 
   it('routes failed-step retry button to planOrchestrator.retryStep', async () => {
     const user = userEvent.setup();
-    planModeHarness.state.stepStatuses = { 'step-1': 'failed' };
+    planOrchestratorHarness.state.stepStatuses = { 'step-1': 'failed' };
     kernelHarness.session = createPlanKernelSession('failed');
 
     render(

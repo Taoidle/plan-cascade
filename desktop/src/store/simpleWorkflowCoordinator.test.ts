@@ -64,8 +64,10 @@ describe('simpleWorkflowCoordinator', () => {
       linkModeSession,
       cancelKernelOperation,
       startChat: vi.fn(),
-      startTaskWorkflow,
-      startPlanWorkflow: vi.fn(),
+      startTaskWorkflow: startTaskWorkflow as unknown as (
+        description: string,
+      ) => Promise<{ modeSessionId: string | null }>,
+      startPlanWorkflow: vi.fn().mockResolvedValue({ modeSessionId: null }),
     });
 
     expect(result).toEqual({
@@ -80,13 +82,13 @@ describe('simpleWorkflowCoordinator', () => {
 
   it('compensates with mode_start_failed when task start throws', async () => {
     const kernelSession = createKernelSession('task');
+    kernelSession.linkedModeSessions.task = 'task-runtime-1';
     const transitionAndSubmitInput = vi.fn().mockResolvedValueOnce(kernelSession).mockResolvedValueOnce(kernelSession);
     const cancelKernelOperation = vi.fn().mockResolvedValue(kernelSession);
     const taskCancel = vi.fn().mockResolvedValue(undefined);
     const taskExit = vi.fn().mockResolvedValue(undefined);
 
     useTaskModeStore.setState({
-      sessionId: 'task-runtime-1',
       cancelOperation: taskCancel,
       exitTaskMode: taskExit,
     } as unknown as ReturnType<typeof useTaskModeStore.getState>);
@@ -106,13 +108,13 @@ describe('simpleWorkflowCoordinator', () => {
       cancelKernelOperation,
       startChat: vi.fn(),
       startTaskWorkflow: vi.fn().mockRejectedValue(new Error('start failed')),
-      startPlanWorkflow: vi.fn(),
+      startPlanWorkflow: vi.fn().mockResolvedValue({ modeSessionId: null }),
     });
 
     expect(result.ok).toBe(false);
     expect(result.errorCode).toBe('mode_start_failed');
-    expect(taskCancel).toHaveBeenCalledTimes(1);
-    expect(taskExit).toHaveBeenCalledTimes(1);
+    expect(taskCancel).not.toHaveBeenCalled();
+    expect(taskExit).not.toHaveBeenCalled();
     expect(cancelKernelOperation).toHaveBeenCalledWith('mode_start_failed');
     expect(transitionAndSubmitInput).toHaveBeenNthCalledWith(
       2,
@@ -136,14 +138,11 @@ describe('simpleWorkflowCoordinator', () => {
     const linkModeSession = vi.fn().mockResolvedValue(null);
 
     useTaskModeStore.setState({
-      sessionId: 'task-runtime-2',
       cancelOperation: taskCancel,
       exitTaskMode: taskExit,
     } as unknown as ReturnType<typeof useTaskModeStore.getState>);
 
-    const startTaskWorkflow = vi.fn().mockImplementation(async () => {
-      useWorkflowOrchestratorStore.setState({ sessionId: 'task-mode-session-2' });
-    });
+    const startTaskWorkflow = vi.fn().mockResolvedValue({ modeSessionId: 'task-mode-session-2' });
 
     const result = await startModeWithCompensation({
       mode: 'task',
@@ -160,12 +159,12 @@ describe('simpleWorkflowCoordinator', () => {
       cancelKernelOperation,
       startChat: vi.fn(),
       startTaskWorkflow,
-      startPlanWorkflow: vi.fn(),
+      startPlanWorkflow: vi.fn().mockResolvedValue({ modeSessionId: null }),
     });
 
     expect(result.ok).toBe(false);
     expect(result.errorCode).toBe('mode_session_link_failed');
-    expect(linkModeSession).toHaveBeenCalledWith('task', 'task-runtime-2');
+    expect(linkModeSession).toHaveBeenCalledWith('task', 'task-mode-session-2');
     expect(taskCancel).toHaveBeenCalledTimes(1);
     expect(taskExit).toHaveBeenCalledTimes(1);
     expect(cancelKernelOperation).toHaveBeenCalledWith('mode_session_link_failed');

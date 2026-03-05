@@ -22,6 +22,7 @@ import {
   type StrategyAnalysis,
   type GateResult,
   type ExecutionReport,
+  type StoryQualityGateResults,
 } from './taskMode';
 import { useSpecInterviewStore, type InterviewQuestion, type InterviewSession } from './specInterview';
 import { useSettingsStore } from './settings';
@@ -83,7 +84,22 @@ interface WorkflowOrchestratorState {
   editablePrd: TaskPrd | null;
 
   /** Currently pending interview question */
-  pendingQuestion: InterviewQuestionCardData | null;
+  pendingInterviewQuestion: InterviewQuestionCardData | null;
+
+  /** Execution projection: current batch */
+  currentBatch: number;
+
+  /** Execution projection: total batches */
+  totalBatches: number;
+
+  /** Execution projection: per-story status */
+  storyStatuses: Record<string, string>;
+
+  /** Execution projection: per-story gate results */
+  qualityGateResults: Record<string, StoryQualityGateResults>;
+
+  /** Execution projection: completion report */
+  report: ExecutionReport | null;
 
   /** Requirement analysis result (from PM persona) */
   requirementAnalysis: RequirementAnalysisCardData | null;
@@ -113,7 +129,7 @@ interface WorkflowOrchestratorState {
   _completionCardInjectedRunToken: number | null;
 
   // Actions
-  startWorkflow: (description: string) => Promise<void>;
+  startWorkflow: (description: string) => Promise<{ modeSessionId: string | null }>;
   confirmConfig: (overrides?: Partial<WorkflowConfig>) => Promise<void>;
   updateConfig: (updates: Partial<WorkflowConfig>) => void;
   overrideConfigNatural: (text: string) => void;
@@ -159,7 +175,12 @@ const DEFAULT_STATE = {
   strategyAnalysis: null as StrategyAnalysis | null,
   explorationResult: null as ExplorationCardData | null,
   editablePrd: null as TaskPrd | null,
-  pendingQuestion: null as InterviewQuestionCardData | null,
+  pendingInterviewQuestion: null as InterviewQuestionCardData | null,
+  currentBatch: 0,
+  totalBatches: 0,
+  storyStatuses: {} as Record<string, string>,
+  qualityGateResults: {} as Record<string, StoryQualityGateResults>,
+  report: null as ExecutionReport | null,
   requirementAnalysis: null as RequirementAnalysisCardData | null,
   architectureReview: null as ArchitectureReviewCardData | null,
   architectureReviewRound: 0,
@@ -384,6 +405,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
    */
   startWorkflow: async (description: string) => {
     const runToken = get()._runToken + 1;
+    let modeSessionId: string | null = null;
     // Add user message as 'info' StreamLine so it appears as a chat bubble in ChatTranscript
     const executionState = useExecutionStore.getState();
     const turnId = getNextTurnId(executionState.streamingOutput);
@@ -394,32 +416,36 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
     // Extract complete Chat conversation history for Task context sharing
     const conversationHistory = buildConversationHistory();
-    if (!isRunActive(get, runToken)) return;
+    if (!isRunActive(get, runToken)) return { modeSessionId: null };
     set({ _conversationHistory: conversationHistory });
 
     try {
       // 1. Enter task mode (creates session + runs strategy analysis)
-      await useTaskModeStore.getState().enterTaskMode(description);
-      if (!isRunActive(get, runToken)) return;
+      const enteredSession = await useTaskModeStore.getState().enterTaskMode(description);
+      if (!isRunActive(get, runToken)) return { modeSessionId: null };
 
-      const taskModeState = useTaskModeStore.getState();
-      if (taskModeState.error) {
-        if (!isRunActive(get, runToken)) return;
-        set({ phase: 'failed', error: taskModeState.error });
-        injectError(i18n.t('workflow.orchestrator.strategyAnalysisFailed', { ns: 'simpleMode' }), taskModeState.error);
-        return;
+      const taskModeError = useTaskModeStore.getState().error;
+      if (taskModeError || !enteredSession) {
+        if (!isRunActive(get, runToken)) return { modeSessionId: null };
+        set({ phase: 'failed', error: taskModeError || 'Failed to enter task mode' });
+        injectError(
+          i18n.t('workflow.orchestrator.strategyAnalysisFailed', { ns: 'simpleMode' }),
+          taskModeError || 'Failed to enter task mode',
+        );
+        return { modeSessionId: null };
       }
 
-      const sessionId = taskModeState.sessionId;
-      let analysis = taskModeState.strategyAnalysis;
+      const sessionId = enteredSession.sessionId;
+      modeSessionId = sessionId;
+      let analysis = enteredSession.strategyAnalysis;
 
       // 2. Try LLM enhancement of strategy analysis
       const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
-      if (!isRunActive(get, runToken)) return;
+      if (!isRunActive(get, runToken)) return { modeSessionId: modeSessionId ?? null };
       const strategyResolved = resolvePhaseAgent('plan_strategy');
       if (analysis) {
         try {
-          if (!isRunActive(get, runToken)) return;
+          if (!isRunActive(get, runToken)) return { modeSessionId: modeSessionId ?? null };
           injectInfo(i18n.t('workflow.orchestrator.enhancingAnalysis', { ns: 'simpleMode' }), 'info');
 
           const enhanced = await invoke<{ success: boolean; data: StrategyAnalysis | null; error: string | null }>(
@@ -434,23 +460,22 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
               locale: i18n.language,
             },
           );
-          if (!isRunActive(get, runToken)) return;
+          if (!isRunActive(get, runToken)) return { modeSessionId: modeSessionId ?? null };
 
           if (enhanced.success && enhanced.data) {
             analysis = enhanced.data;
-            useTaskModeStore.setState({ strategyAnalysis: analysis });
           }
         } catch {
           // LLM enhancement failed — silently use keyword analysis
         }
       }
 
-      if (!isRunActive(get, runToken)) return;
+      if (!isRunActive(get, runToken)) return { modeSessionId: modeSessionId ?? null };
       set({ sessionId, strategyAnalysis: analysis });
 
       // 3. Inject strategy card (with LLM-enhanced or keyword result)
       if (analysis) {
-        if (!isRunActive(get, runToken)) return;
+        if (!isRunActive(get, runToken)) return { modeSessionId: modeSessionId ?? null };
         injectCard('strategy_card', buildStrategyCardData(analysis, formatModelDisplay(strategyResolved)));
       }
 
@@ -473,17 +498,19 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         }
       }
 
-      if (!isRunActive(get, runToken)) return;
+      if (!isRunActive(get, runToken)) return { modeSessionId: modeSessionId ?? null };
       set({ config, phase: 'configuring' });
 
       // 5. Inject config card (user interacts with it to advance)
-      if (!isRunActive(get, runToken)) return;
+      if (!isRunActive(get, runToken)) return { modeSessionId: modeSessionId ?? null };
       injectCard('config_card', buildConfigCardData(config, false), true);
+      return { modeSessionId: modeSessionId ?? null };
     } catch (e) {
-      if (!isRunActive(get, runToken)) return;
+      if (!isRunActive(get, runToken)) return { modeSessionId: null };
       const msg = e instanceof Error ? e.message : String(e);
       set({ phase: 'failed', error: msg });
       injectError(i18n.t('workflow.orchestrator.workflowFailed', { ns: 'simpleMode' }), msg);
+      return { modeSessionId: null };
     }
   },
 
@@ -588,7 +615,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
             interviewSession.question_cursor + 1,
             interviewSession.max_questions,
           );
-          set({ pendingQuestion: questionData });
+          set({ pendingInterviewQuestion: questionData });
           injectCard('interview_question', questionData, true);
         } else {
           injectInfo(
@@ -657,7 +684,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   /** Submit answer to current interview question */
   submitInterviewAnswer: async (answer: string) => {
     const runToken = get()._runToken;
-    const { pendingQuestion, interviewId } = get();
+    const { pendingInterviewQuestion, interviewId } = get();
     const kernelPendingInterview = selectKernelTaskRuntime(useWorkflowKernelStore.getState().session).pendingInterview;
     const resolvedInterviewId = interviewId || kernelPendingInterview?.interviewId || null;
     if (!resolvedInterviewId) return;
@@ -667,12 +694,13 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
     // Inject answer card
     const answerData: InterviewAnswerCardData = {
-      questionId: pendingQuestion?.questionId ?? kernelPendingInterview?.questionId ?? 'kernel-pending-question',
+      questionId:
+        pendingInterviewQuestion?.questionId ?? kernelPendingInterview?.questionId ?? 'kernel-pending-question',
       answer,
       skipped: false,
     };
     injectCard('interview_answer', answerData);
-    set({ pendingQuestion: null });
+    set({ pendingInterviewQuestion: null });
 
     // Submit to backend
     const updatedSession = await useSpecInterviewStore.getState().submitAnswer(answer, resolvedInterviewId);
@@ -731,7 +759,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         nextSession.question_cursor + 1,
         nextSession.max_questions,
       );
-      set({ pendingQuestion: questionData });
+      set({ pendingInterviewQuestion: questionData });
       injectCard('interview_question', questionData, true);
       return;
     }
@@ -751,7 +779,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   /** Skip current interview question */
   skipInterviewQuestion: async () => {
     const runToken = get()._runToken;
-    const { pendingQuestion, interviewId } = get();
+    const { pendingInterviewQuestion, interviewId } = get();
     const kernelPendingInterview = selectKernelTaskRuntime(useWorkflowKernelStore.getState().session).pendingInterview;
     const resolvedInterviewId = interviewId || kernelPendingInterview?.interviewId || null;
     if (!resolvedInterviewId) return;
@@ -760,12 +788,13 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     }
 
     const answerData: InterviewAnswerCardData = {
-      questionId: pendingQuestion?.questionId ?? kernelPendingInterview?.questionId ?? 'kernel-pending-question',
+      questionId:
+        pendingInterviewQuestion?.questionId ?? kernelPendingInterview?.questionId ?? 'kernel-pending-question',
       answer: '',
       skipped: true,
     };
     injectCard('interview_answer', answerData);
-    set({ pendingQuestion: null });
+    set({ pendingInterviewQuestion: null });
 
     // Submit skip (empty answer)
     const updatedSession = await useSpecInterviewStore.getState().submitAnswer('', resolvedInterviewId);
@@ -814,7 +843,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         nextSession.question_cursor + 1,
         nextSession.max_questions,
       );
-      set({ pendingQuestion: questionData });
+      set({ pendingInterviewQuestion: questionData });
       injectCard('interview_question', questionData, true);
       return;
     }
@@ -939,31 +968,30 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   cancelWorkflow: async () => {
     const { phase, sessionId, _runToken } = get();
     const linkedSessionId = selectKernelTaskRuntime(useWorkflowKernelStore.getState().session).linkedSessionId;
-    const effectiveSessionId = sessionId || linkedSessionId || useTaskModeStore.getState().sessionId || null;
+    const effectiveSessionId = sessionId || linkedSessionId || null;
     if (!sessionId && effectiveSessionId) {
       set({ sessionId: effectiveSessionId });
-      useTaskModeStore.setState({ sessionId: effectiveSessionId });
     }
 
     if (phase === 'executing' && effectiveSessionId) {
       if (get().isCancelling) return;
       set({ isCancelling: true, error: null });
-      await useTaskModeStore.getState().cancelExecution();
-      const taskState = useTaskModeStore.getState();
-      if (taskState.error) {
-        set({ isCancelling: false, error: taskState.error });
+      const cancelled = await useTaskModeStore.getState().cancelExecution(effectiveSessionId);
+      const taskModeError = useTaskModeStore.getState().error;
+      if (!cancelled && taskModeError) {
+        set({ isCancelling: false, error: taskModeError });
         injectError(
           i18n.t('workflow.orchestrator.cancelFailed', {
             ns: 'simpleMode',
             defaultValue: 'Cancel Failed',
           }),
-          taskState.error,
+          taskModeError,
           i18n.t('workflow.orchestrator.cancelRetry', {
             ns: 'simpleMode',
             defaultValue: 'Please retry cancellation.',
           }),
         );
-        throw new Error(taskState.error);
+        throw new Error(taskModeError);
       }
       injectInfo(
         i18n.t('workflow.orchestrator.cancelling', {
@@ -977,7 +1005,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
     const nextRunToken = _runToken + 1;
     set({ _runToken: nextRunToken, isCancelling: false });
-    await useTaskModeStore.getState().cancelOperation();
+    await useTaskModeStore.getState().cancelOperation(effectiveSessionId);
 
     // Unsubscribe from events
     const { _unlistenFn } = get();
@@ -1395,13 +1423,14 @@ async function designDocAndExecutePhase(set: SetFn, get: GetFn, prd: TaskPrd, ru
   try {
     await subscribeToProgressEvents(set, get, runToken);
     if (!isRunActive(get, runToken)) return;
-    await useTaskModeStore.getState().approvePrd(prd);
+    const approved = await useTaskModeStore.getState().approvePrd(prd, get().sessionId);
     if (!isRunActive(get, runToken)) return;
 
     const taskModeError = useTaskModeStore.getState().error;
-    if (taskModeError) {
-      set({ phase: 'failed', error: taskModeError });
-      injectError(i18n.t('workflow.orchestrator.executionFailed', { ns: 'simpleMode' }), taskModeError);
+    if (!approved || taskModeError) {
+      const message = taskModeError || 'Task execution could not be started';
+      set({ phase: 'failed', error: message });
+      injectError(i18n.t('workflow.orchestrator.executionFailed', { ns: 'simpleMode' }), message);
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -1434,7 +1463,7 @@ async function generatePrdPhase(set: SetFn, get: GetFn, runToken: number) {
     const history = get()._conversationHistory || [];
     const settings = useSettingsStore.getState();
     const maxContextTokens = settings.maxTotalTokens ?? 200_000;
-    await useTaskModeStore
+    const prd = await useTaskModeStore
       .getState()
       .generatePrd(
         history,
@@ -1442,17 +1471,17 @@ async function generatePrdPhase(set: SetFn, get: GetFn, runToken: number) {
         prdResolved.provider || undefined,
         prdResolved.model || undefined,
         prdResolved.baseUrl,
+        get().sessionId,
       );
     if (!isRunActive(get, runToken)) return;
 
-    const taskModeState = useTaskModeStore.getState();
-    if (taskModeState.error) {
-      set({ phase: 'failed', error: taskModeState.error });
-      injectError(i18n.t('workflow.orchestrator.prdGenerationFailed', { ns: 'simpleMode' }), taskModeState.error);
+    const taskModeError = useTaskModeStore.getState().error;
+    if (taskModeError) {
+      set({ phase: 'failed', error: taskModeError });
+      injectError(i18n.t('workflow.orchestrator.prdGenerationFailed', { ns: 'simpleMode' }), taskModeError);
       return;
     }
 
-    const prd = taskModeState.prd;
     if (!prd) {
       set({ phase: 'failed', error: 'PRD generation returned empty result' });
       injectError(
@@ -1510,15 +1539,7 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
       const payload = event.payload;
       const state = get();
       if (state.sessionId && payload.sessionId !== state.sessionId) return;
-      const taskModeState = useTaskModeStore.getState();
-      const taskModePatch: {
-        currentBatch: number;
-        totalBatches: number;
-        storyStatuses?: Record<string, string>;
-        qualityGateResults?: typeof taskModeState.qualityGateResults;
-        isCancelling?: boolean;
-        error?: string | null;
-      } = {
+      const orchestratorPatch: Partial<WorkflowOrchestratorState> = {
         currentBatch: payload.currentBatch,
         totalBatches: payload.totalBatches,
       };
@@ -1526,15 +1547,15 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
       // Accumulate story status
       if (payload.storyId && payload.storyStatus) {
         accumulatedStatuses[payload.storyId] = payload.storyStatus;
-        taskModePatch.storyStatuses = {
-          ...taskModeState.storyStatuses,
+        orchestratorPatch.storyStatuses = {
+          ...state.storyStatuses,
           [payload.storyId]: payload.storyStatus,
         };
       }
 
       if (payload.storyId && payload.gateResults && payload.gateResults.length > 0) {
-        taskModePatch.qualityGateResults = {
-          ...taskModeState.qualityGateResults,
+        orchestratorPatch.qualityGateResults = {
+          ...state.qualityGateResults,
           [payload.storyId]: {
             storyId: payload.storyId,
             overallStatus: deriveGateOverallStatus(payload.gateResults),
@@ -1564,6 +1585,7 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
             agent: null,
             progressPct: payload.progressPct,
           } as ExecutionUpdateCardData);
+          set(orchestratorPatch as Partial<WorkflowOrchestratorState>);
           break;
         }
 
@@ -1578,6 +1600,7 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
             agent: payload.agentName,
             progressPct: payload.progressPct,
           } as ExecutionUpdateCardData);
+          set(orchestratorPatch as Partial<WorkflowOrchestratorState>);
           break;
         }
 
@@ -1603,6 +1626,7 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
               codeReviewScores: [],
             } as GateResultCardData);
           }
+          set(orchestratorPatch as Partial<WorkflowOrchestratorState>);
           break;
         }
 
@@ -1628,33 +1652,30 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
               codeReviewScores: [],
             } as GateResultCardData);
           }
+          set(orchestratorPatch as Partial<WorkflowOrchestratorState>);
           break;
         }
 
         case 'execution_completed': {
           const fallbackTotalStories =
-            Object.keys(accumulatedStatuses).length ||
-            state.editablePrd?.stories.length ||
-            taskModeState.prd?.stories.length ||
-            0;
+            Object.keys(accumulatedStatuses).length || state.editablePrd?.stories.length || 0;
           const totalStories = fallbackTotalStories;
           const completedCount = Object.values(accumulatedStatuses).filter((s) => s === 'completed').length;
           const failedCount = Object.values(accumulatedStatuses).filter((s) => s === 'failed').length;
           const success = failedCount === 0;
-          taskModePatch.isCancelling = false;
-          useTaskModeStore.setState(taskModePatch);
+          orchestratorPatch.isCancelling = false;
 
-          set({ phase: success ? 'completed' : 'failed', isCancelling: false });
+          set({
+            ...(orchestratorPatch as Partial<WorkflowOrchestratorState>),
+            phase: success ? 'completed' : 'failed',
+            isCancelling: false,
+          });
 
           void (async () => {
             let report: ExecutionReport | null = null;
             try {
               report = await Promise.race<ExecutionReport | null>([
-                (async () => {
-                  await useTaskModeStore.getState().fetchReport();
-                  const latestReport = useTaskModeStore.getState().report;
-                  return latestReport && latestReport.sessionId === payload.sessionId ? latestReport : null;
-                })(),
+                useTaskModeStore.getState().fetchReport(payload.sessionId),
                 new Promise<null>((resolve) => {
                   setTimeout(() => resolve(null), 1500);
                 }),
@@ -1665,9 +1686,11 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
 
             if (!isRunActive(get, runToken)) return;
             if (get()._completionCardInjectedRunToken === runToken) return;
+            const latestReport = get().report;
+            const effectiveReport = report && report.sessionId === payload.sessionId ? report : latestReport;
 
-            const completionData = report
-              ? buildCompletionReportDataFromReport(report)
+            const completionData = effectiveReport
+              ? buildCompletionReportDataFromReport(effectiveReport)
               : buildCompletionReportDataFallback({
                   success,
                   totalStories,
@@ -1676,7 +1699,7 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
                 });
 
             injectCard('completion_report', completionData);
-            set({ _completionCardInjectedRunToken: runToken });
+            set({ _completionCardInjectedRunToken: runToken, report: effectiveReport ?? null });
 
             // Synthesize execution result into conversation history (Task → Chat writeback)
             synthesizeExecutionTurn(completionData.completed, completionData.totalStories, completionData.success);
@@ -1685,9 +1708,12 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
         }
 
         case 'execution_cancelled': {
-          taskModePatch.isCancelling = false;
-          useTaskModeStore.setState(taskModePatch);
-          set({ phase: 'cancelled', isCancelling: false });
+          orchestratorPatch.isCancelling = false;
+          set({
+            ...(orchestratorPatch as Partial<WorkflowOrchestratorState>),
+            phase: 'cancelled',
+            isCancelling: false,
+          });
           injectInfo(
             i18n.t('workflow.orchestrator.workflowCancelled', {
               ns: 'simpleMode',
@@ -1700,11 +1726,13 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
 
         case 'error': {
           if (payload.error) {
-            taskModePatch.error = payload.error;
+            orchestratorPatch.error = payload.error;
           }
-          taskModePatch.isCancelling = false;
-          useTaskModeStore.setState(taskModePatch);
-          set({ isCancelling: false });
+          orchestratorPatch.isCancelling = false;
+          set({
+            ...(orchestratorPatch as Partial<WorkflowOrchestratorState>),
+            isCancelling: false,
+          });
           if (payload.error) {
             injectError(i18n.t('workflow.orchestrator.executionError', { ns: 'simpleMode' }), payload.error);
           }
@@ -1712,9 +1740,9 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
         }
         default: {
           if (payload.eventType === 'story_failed' && payload.error) {
-            taskModePatch.error = payload.error;
+            orchestratorPatch.error = payload.error;
           }
-          useTaskModeStore.setState(taskModePatch);
+          set(orchestratorPatch as Partial<WorkflowOrchestratorState>);
           break;
         }
       }
