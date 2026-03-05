@@ -24,15 +24,44 @@ export type RiskLevel = 'low' | 'medium' | 'high';
 /** Parallelization benefit */
 export type Benefit = 'none' | 'moderate' | 'significant';
 
-/** Task mode session status - mirrors Rust TaskModeStatus */
+/** Task mode session status - MUST stay in sync with Rust TaskModeStatus */
 export type TaskModeSessionStatus =
   | 'initialized'
+  | 'exploring'
   | 'generating_prd'
   | 'reviewing_prd'
   | 'executing'
   | 'completed'
   | 'failed'
   | 'cancelled';
+
+const KNOWN_TASK_MODE_SESSION_STATUSES: TaskModeSessionStatus[] = [
+  'initialized',
+  'exploring',
+  'generating_prd',
+  'reviewing_prd',
+  'executing',
+  'completed',
+  'failed',
+  'cancelled',
+];
+
+/**
+ * Runtime guard for backend enum drift.
+ * Unknown values degrade to `initialized` and surface a warning via store error.
+ */
+export function normalizeTaskModeSessionStatus(raw: unknown): {
+  status: TaskModeSessionStatus;
+  warning: string | null;
+} {
+  if (typeof raw === 'string' && KNOWN_TASK_MODE_SESSION_STATUSES.includes(raw as TaskModeSessionStatus)) {
+    return { status: raw as TaskModeSessionStatus, warning: null };
+  }
+  return {
+    status: 'initialized',
+    warning: `Unknown task mode session status '${String(raw)}'; defaulted to 'initialized'.`,
+  };
+}
 
 /** Quality gate phase */
 export type GatePhase = 'pre_validation' | 'validation' | 'post_validation';
@@ -167,6 +196,7 @@ interface CommandResponse<T> {
 export interface TaskModeState {
   /** Current session ID */
   sessionId: string | null;
+  status: TaskModeSessionStatus;
 
   /** Strategy analysis (shows recommendation) */
   strategyAnalysis: StrategyAnalysis | null;
@@ -248,6 +278,7 @@ export interface TaskModeState {
 
 const DEFAULT_STATE = {
   sessionId: null,
+  status: 'initialized' as TaskModeSessionStatus,
   strategyAnalysis: null,
   suggestionDismissed: false,
   prd: null,
@@ -292,13 +323,16 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
       const result = await invoke<CommandResponse<TaskModeSession>>('enter_task_mode', { description });
       if (result.success && result.data) {
         const session = result.data;
+        const normalizedStatus = normalizeTaskModeSessionStatus(session.status);
         const contextSourcesStore = useContextSourcesStore.getState();
         contextSourcesStore.setMemorySessionId(session.sessionId);
         set({
           sessionId: session.sessionId,
+          status: normalizedStatus.status,
           strategyAnalysis: session.strategyAnalysis,
           prd: session.prd,
           isLoading: false,
+          error: normalizedStatus.warning,
         });
       } else {
         set({ isLoading: false, error: result.error ?? 'Failed to enter task mode' });
@@ -415,10 +449,13 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
       const result = await invoke<CommandResponse<TaskExecutionStatus>>('get_task_execution_status', { sessionId });
       if (result.success && result.data) {
         const status = result.data;
+        const normalizedStatus = normalizeTaskModeSessionStatus(status.status);
         set({
+          status: normalizedStatus.status,
           currentBatch: status.currentBatch,
           totalBatches: status.totalBatches,
           storyStatuses: status.storyStatuses,
+          error: normalizedStatus.warning,
         });
       }
     } catch {

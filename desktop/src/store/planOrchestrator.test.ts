@@ -78,6 +78,7 @@ describe('planOrchestrator event handling', () => {
       report: null,
       error: null,
       approvePlan: vi.fn().mockResolvedValue(undefined),
+      retryPlanStep: vi.fn().mockResolvedValue(undefined),
       fetchStepOutput: vi.fn().mockResolvedValue(null),
       fetchReport: vi.fn().mockResolvedValue(undefined),
     } as unknown as ReturnType<typeof usePlanModeStore.getState>);
@@ -85,6 +86,7 @@ describe('planOrchestrator event handling', () => {
     usePlanOrchestratorStore.setState({
       phase: 'reviewing_plan',
       sessionId: 'session-1',
+      editablePlan: TEST_PLAN,
       _runToken: 1,
       isBusy: false,
       isCancelling: false,
@@ -236,6 +238,94 @@ describe('planOrchestrator event handling', () => {
     await Promise.resolve();
 
     expect(extractPlanCompletionCards()).toHaveLength(1);
+  });
+
+  it('retries a single step and converges to completed after execution_completed', async () => {
+    const retryPlanStep = vi.fn().mockResolvedValue(undefined);
+    usePlanModeStore.setState({
+      retryPlanStep,
+      fetchReport: vi.fn().mockResolvedValue(undefined),
+      report: null,
+    } as unknown as ReturnType<typeof usePlanModeStore.getState>);
+    usePlanOrchestratorStore.setState({
+      phase: 'failed',
+      editablePlan: TEST_PLAN,
+      sessionId: 'session-1',
+      _runToken: 5,
+    } as unknown as ReturnType<typeof usePlanOrchestratorStore.getState>);
+
+    await usePlanOrchestratorStore.getState().retryStep('step-1');
+    expect(progressListener).not.toBeNull();
+    expect(retryPlanStep).toHaveBeenCalledWith(
+      'step-1',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      expect.anything(),
+      undefined,
+      expect.any(String),
+    );
+
+    progressListener!({
+      payload: payload({
+        eventType: 'step_started',
+        stepId: 'step-1',
+        stepStatus: 'running',
+      }),
+    });
+    progressListener!({
+      payload: payload({
+        eventType: 'step_completed',
+        stepId: 'step-1',
+        stepStatus: 'completed',
+      }),
+    });
+    progressListener!({
+      payload: payload({
+        eventType: 'execution_completed',
+        progressPct: 100,
+      }),
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(usePlanModeStore.getState().stepStatuses['step-1']).toBe('completed');
+    expect(usePlanOrchestratorStore.getState().phase).toBe('completed');
+  });
+
+  it('retries a single step and converges to failed when retry step fails', async () => {
+    usePlanOrchestratorStore.setState({
+      phase: 'failed',
+      editablePlan: TEST_PLAN,
+      sessionId: 'session-1',
+      _runToken: 9,
+    } as unknown as ReturnType<typeof usePlanOrchestratorStore.getState>);
+
+    await usePlanOrchestratorStore.getState().retryStep('step-1');
+    expect(progressListener).not.toBeNull();
+
+    progressListener!({
+      payload: payload({
+        eventType: 'step_failed',
+        stepId: 'step-1',
+        stepStatus: 'failed',
+        error: 'retry failed',
+      }),
+    });
+    progressListener!({
+      payload: payload({
+        eventType: 'execution_completed',
+        progressPct: 100,
+      }),
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(usePlanModeStore.getState().stepStatuses['step-1']).toBe('failed');
+    expect(usePlanOrchestratorStore.getState().phase).toBe('failed');
   });
 });
 

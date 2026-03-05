@@ -14,7 +14,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 // Import after mocks
-import { useTaskModeStore } from './taskMode';
+import { normalizeTaskModeSessionStatus, useTaskModeStore } from './taskMode';
 import type { StrategyAnalysis, TaskModeSession, TaskPrd, TaskExecutionStatus, ExecutionReport } from './taskMode';
 import { useContextSourcesStore } from './contextSources';
 import { useProjectsStore } from './projects';
@@ -117,6 +117,7 @@ describe('TaskModeStore', () => {
     it('should start with default state and no session', () => {
       const state = useTaskModeStore.getState();
       expect(state.sessionId).toBeNull();
+      expect(state.status).toBe('initialized');
       expect(state.strategyAnalysis).toBeNull();
       expect(state.suggestionDismissed).toBe(false);
       expect(state.prd).toBeNull();
@@ -188,12 +189,14 @@ describe('TaskModeStore', () => {
   describe('enterTaskMode', () => {
     it('should enter task mode and update state on success', async () => {
       const session = mockSession();
+      session.status = 'exploring';
       mockInvoke.mockResolvedValueOnce({ success: true, data: session, error: null });
 
       await useTaskModeStore.getState().enterTaskMode('Build feature X');
 
       const state = useTaskModeStore.getState();
       expect(state.sessionId).toBe('session-123');
+      expect(state.status).toBe('exploring');
       expect(state.strategyAnalysis).toEqual(session.strategyAnalysis);
       expect(state.isLoading).toBe(false);
       expect(useContextSourcesStore.getState().memorySessionId).toBe('session-123');
@@ -213,6 +216,20 @@ describe('TaskModeStore', () => {
 
       const state = useTaskModeStore.getState();
       expect(state.error).toBe('Already in task mode');
+    });
+
+    it('falls back unknown backend status to initialized', async () => {
+      const session = {
+        ...mockSession(),
+        status: 'future_status',
+      } as unknown as TaskModeSession;
+      mockInvoke.mockResolvedValueOnce({ success: true, data: session, error: null });
+
+      await useTaskModeStore.getState().enterTaskMode('Build feature X');
+
+      const state = useTaskModeStore.getState();
+      expect(state.status).toBe('initialized');
+      expect(state.error).toContain("Unknown task mode session status 'future_status'");
     });
   });
 
@@ -379,6 +396,7 @@ describe('TaskModeStore', () => {
       await useTaskModeStore.getState().refreshStatus();
 
       const state = useTaskModeStore.getState();
+      expect(state.status).toBe('executing');
       expect(state.currentBatch).toBe(1);
       expect(state.totalBatches).toBe(3);
       expect(state.storyStatuses).toEqual({
@@ -390,6 +408,26 @@ describe('TaskModeStore', () => {
     it('should do nothing if no session', async () => {
       await useTaskModeStore.getState().refreshStatus();
       expect(mockInvoke).not.toHaveBeenCalled();
+    });
+
+    it('normalizes unknown status returned by refreshStatus', async () => {
+      useTaskModeStore.setState({ sessionId: 'session-123' });
+      const unknownStatus = {
+        sessionId: 'session-123',
+        status: 'post_processing',
+        currentBatch: 2,
+        totalBatches: 4,
+        storyStatuses: {},
+        storiesCompleted: 2,
+        storiesFailed: 0,
+      } as unknown as TaskExecutionStatus;
+      mockInvoke.mockResolvedValueOnce({ success: true, data: unknownStatus, error: null });
+
+      await useTaskModeStore.getState().refreshStatus();
+
+      const state = useTaskModeStore.getState();
+      expect(state.status).toBe('initialized');
+      expect(state.error).toContain("Unknown task mode session status 'post_processing'");
     });
   });
 
@@ -491,9 +529,18 @@ describe('TaskModeStore', () => {
 
       const state = useTaskModeStore.getState();
       expect(state.sessionId).toBeNull();
+      expect(state.status).toBe('initialized');
       expect(state.prd).toBeNull();
       expect(state.error).toBeNull();
       expect(useContextSourcesStore.getState().memorySessionId).toBeNull();
+    });
+  });
+
+  describe('normalizeTaskModeSessionStatus', () => {
+    it('accepts known exploring status', () => {
+      const normalized = normalizeTaskModeSessionStatus('exploring');
+      expect(normalized.status).toBe('exploring');
+      expect(normalized.warning).toBeNull();
     });
   });
 });

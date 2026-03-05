@@ -7,6 +7,7 @@ const planOrchestratorHarness = vi.hoisted(() => ({
   state: {
     phase: 'reviewing_plan',
     approvePlan: vi.fn().mockResolvedValue(undefined),
+    retryStep: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -94,6 +95,8 @@ function createPlanKernelSession(phase: string): WorkflowSession {
 describe('PlanCard interactive gating', () => {
   beforeEach(() => {
     planOrchestratorHarness.state.phase = 'reviewing_plan';
+    planOrchestratorHarness.state.approvePlan.mockClear();
+    planOrchestratorHarness.state.retryStep.mockClear();
     planModeHarness.state.stepStatuses = {};
     kernelHarness.session = null;
     i18nHarness.t.mockClear();
@@ -265,6 +268,43 @@ describe('PlanCard interactive gating', () => {
 
     await waitFor(() => {
       expect(screen.getAllByText(/plan\.reorder\.up/).length).toBeGreaterThan(0);
+    });
+  });
+
+  it('routes failed-step retry button to planOrchestrator.retryStep', async () => {
+    const user = userEvent.setup();
+    planModeHarness.state.stepStatuses = { 'step-1': 'failed' };
+    kernelHarness.session = createPlanKernelSession('failed');
+
+    render(
+      <PlanCard
+        interactive
+        data={{
+          title: 'Plan',
+          description: 'desc',
+          domain: 'general',
+          adapterName: 'default',
+          editable: true,
+          steps: [
+            {
+              id: 'step-1',
+              title: 'Step 1',
+              description: 'desc',
+              priority: 'medium',
+              dependencies: [],
+              completionCriteria: ['done'],
+              expectedOutput: 'result',
+            },
+          ],
+          batches: [{ index: 0, stepIds: ['step-1'] }],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'plan.retryStep' }));
+
+    await waitFor(() => {
+      expect(planOrchestratorHarness.state.retryStep).toHaveBeenCalledWith('step-1');
     });
   });
 });

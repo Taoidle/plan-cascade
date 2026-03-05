@@ -173,8 +173,15 @@ async fn sync_kernel_plan_snapshot_and_emit(
 ) {
     let phase = Some(plan_phase_to_kernel_phase(session.phase).to_string());
     let pending = map_pending_clarification(session.current_question.as_ref());
+    let running_step_id = session.step_states.iter().find_map(|(step_id, state)| {
+        if matches!(state, StepExecutionState::Running) {
+            Some(step_id.clone())
+        } else {
+            None
+        }
+    });
     let kernel_session_ids = kernel_state
-        .sync_plan_snapshot_by_linked_session(&session.session_id, phase, pending)
+        .sync_plan_snapshot_by_linked_session(&session.session_id, phase, pending, running_step_id)
         .await
         .unwrap_or_default();
     emit_kernel_updates(app, kernel_state, &kernel_session_ids, source).await;
@@ -193,10 +200,10 @@ fn default_model_for_provider(provider: &str) -> String {
     }
 }
 
-async fn resolve_plan_provider_and_model(
+pub(crate) async fn resolve_plan_provider_and_model(
     provider: Option<String>,
     model: Option<String>,
-    app_state: &tauri::State<'_, AppState>,
+    app_state: &AppState,
 ) -> (String, String) {
     let provider_from_db = app_state
         .with_database(|db| db.get_setting("llm_provider"))
@@ -292,6 +299,20 @@ pub struct ApprovePlanRequest {
     pub locale: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RetryPlanStepRequest {
+    pub session_id: String,
+    pub step_id: String,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub base_url: Option<String>,
+    pub project_path: Option<String>,
+    pub context_sources: Option<ContextSourceConfig>,
+    pub conversation_context: Option<String>,
+    pub locale: Option<String>,
+}
+
 // ============================================================================
 // Commands
 // ============================================================================
@@ -304,7 +325,7 @@ pub use lifecycle_reporting_commands::{
     cancel_plan_execution, cancel_plan_operation, exit_plan_mode, get_plan_execution_report,
     get_plan_execution_status, get_step_output, list_plan_adapters,
 };
-pub use planning_execution_commands::{approve_plan, generate_plan};
+pub use planning_execution_commands::{approve_plan, generate_plan, retry_plan_step};
 pub use session_analysis_commands::{
     enter_plan_mode, skip_plan_clarification, submit_plan_clarification,
 };
@@ -495,7 +516,7 @@ pub(crate) fn locale_instruction(locale_tag: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        ApprovePlanRequest, EnterPlanModeRequest, GeneratePlanRequest,
+        ApprovePlanRequest, EnterPlanModeRequest, GeneratePlanRequest, RetryPlanStepRequest,
         SubmitPlanClarificationRequest,
     };
 
@@ -603,6 +624,31 @@ mod tests {
                 "steps": [],
                 "batches": []
             }
+        }));
+        assert!(legacy.is_err(), "legacy snake_case keys must be rejected");
+    }
+
+    #[test]
+    fn retry_plan_step_request_accepts_camel_case_only() {
+        let ok = serde_json::from_value::<RetryPlanStepRequest>(serde_json::json!({
+            "sessionId": "sid-1",
+            "stepId": "step-2",
+            "provider": "openai",
+            "model": "gpt-4o",
+            "baseUrl": "https://api.example.com",
+            "projectPath": "/tmp/project",
+            "contextSources": null,
+            "conversationContext": "ctx",
+            "locale": "en-US"
+        }))
+        .expect("camelCase retry_plan_step payload should deserialize");
+        assert_eq!(ok.session_id, "sid-1");
+        assert_eq!(ok.step_id, "step-2");
+        assert_eq!(ok.project_path.as_deref(), Some("/tmp/project"));
+
+        let legacy = serde_json::from_value::<RetryPlanStepRequest>(serde_json::json!({
+            "session_id": "sid-1",
+            "step_id": "step-2",
         }));
         assert!(legacy.is_err(), "legacy snake_case keys must be rejected");
     }

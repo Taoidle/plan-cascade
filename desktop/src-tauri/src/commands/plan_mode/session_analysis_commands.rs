@@ -45,100 +45,125 @@ pub async fn enter_plan_mode(
     let result = tokio::select! {
         _ = operation_token.cancelled() => Ok(CommandResponse::err(PLAN_OPERATION_CANCELLED_ERROR)),
         result = async {
-            // Run analysis if provider is specified
-            if let (Some(ref prov), Some(ref mdl)) = (&provider, &model) {
-                let llm_provider = resolve_llm_provider(prov, mdl, None, base_url.clone(), &app_state)
-                    .await
-                    .map_err(|e| format!("Failed to resolve LLM provider: {e}"))?;
-
-                let registry = state.adapter_registry.read().await;
-
-                let locale_tag = normalize_locale(locale.as_deref());
-                let lang_instruction = locale_instruction(locale_tag);
-                let plan_context = build_plan_conversation_context(
-                    &app_state,
-                    &knowledge_state,
-                    project_path.as_deref(),
-                    Some(session_id.as_str()),
-                    conversation_context.as_deref(),
-                    context_sources.as_ref(),
-                    &description,
-                    InjectionPhase::Planning,
-                )
-                .await;
-                let plan_context_ref = if plan_context.rendered_context.is_empty() {
-                    None
-                } else {
-                    Some(plan_context.rendered_context.as_str())
-                };
-
-                match crate::services::plan_mode::analyzer::analyze_task(
-                    &description,
-                    plan_context_ref,
-                    lang_instruction,
-                    llm_provider.clone(),
-                    &registry,
-                )
-                .await
-                {
-                    Ok(analysis) => {
-                        if analysis.needs_clarification {
-                            // Generate first clarification question
-                            let adapter = registry
-                                .get(&analysis.adapter_name)
-                                .unwrap_or_else(|| registry.find_for_domain(&analysis.domain));
-
-                            match crate::services::plan_mode::clarifier::generate_clarification_question(
-                                &description,
-                                &analysis,
-                                &[],
-                                plan_context_ref,
-                                lang_instruction,
-                                adapter.as_ref(),
-                                llm_provider,
-                            )
-                            .await
-                            {
-                                Ok(Some(question)) => {
-                                    session.current_question = Some(question);
-                                    session.phase = PlanModePhase::Clarifying;
-                                }
-                                _ => {
-                                    // Question generation failed or returned None — skip to planning
-                                    session.phase = PlanModePhase::Planning;
-                                }
-                            }
-                        } else {
-                            session.phase = PlanModePhase::Planning;
-                        }
-                        session.analysis = Some(analysis);
+            let (resolved_provider, resolved_model) =
+                resolve_plan_provider_and_model(provider, model, app_state.inner()).await;
+            let llm_provider = match resolve_llm_provider(
+                &resolved_provider,
+                &resolved_model,
+                None,
+                base_url.clone(),
+                &app_state,
+            )
+            .await
+            {
+                Ok(provider) => provider,
+                Err(e) => {
+                    // Provider resolution failed, but we can still proceed with a safe fallback.
+                    session.phase = PlanModePhase::Planning;
+                    session.analysis = Some(PlanAnalysis {
+                        domain: crate::services::plan_mode::types::TaskDomain::General,
+                        complexity: 5,
+                        estimated_steps: 4,
+                        needs_clarification: false,
+                        reasoning: format!(
+                            "Provider resolution failed: {e}. Proceeding with general approach."
+                        ),
+                        adapter_name: "general".to_string(),
+                        suggested_approach: "Standard decomposition".to_string(),
+                    });
+                    // Store session
+                    {
+                        let mut sessions = state.sessions.write().await;
+                        sessions.insert(session.session_id.clone(), session.clone());
                     }
-                    Err(e) => {
-                        // Analysis failed, but we can still proceed without it
-                        session.phase = PlanModePhase::Planning;
-                        session.analysis = Some(PlanAnalysis {
-                            domain: crate::services::plan_mode::types::TaskDomain::General,
-                            complexity: 5,
-                            estimated_steps: 4,
-                            needs_clarification: false,
-                            reasoning: format!("Analysis failed: {e}. Proceeding with general approach."),
-                            adapter_name: "general".to_string(),
-                            suggested_approach: "Standard decomposition".to_string(),
-                        });
-                    }
+
+                    sync_kernel_plan_snapshot_and_emit(
+                        &app_handle,
+                        kernel_state.inner(),
+                        &session,
+                        "plan_mode.enter_plan_mode",
+                    )
+                    .await;
+
+                    return Ok(CommandResponse::ok(session));
                 }
+            };
+
+            let registry = state.adapter_registry.read().await;
+
+            let locale_tag = normalize_locale(locale.as_deref());
+            let lang_instruction = locale_instruction(locale_tag);
+            let plan_context = build_plan_conversation_context(
+                &app_state,
+                &knowledge_state,
+                project_path.as_deref(),
+                Some(session_id.as_str()),
+                conversation_context.as_deref(),
+                context_sources.as_ref(),
+                &description,
+                InjectionPhase::Planning,
+            )
+            .await;
+            let plan_context_ref = if plan_context.rendered_context.is_empty() {
+                None
             } else {
-                // No provider specified — skip analysis
-                session.phase = PlanModePhase::Planning;
-                session.analysis = Some(PlanAnalysis {
-                    domain: crate::services::plan_mode::types::TaskDomain::General,
-                    complexity: 5,
-                    estimated_steps: 4,
-                    needs_clarification: false,
-                    reasoning: "No LLM provider configured for analysis. Using defaults.".to_string(),
-                    adapter_name: "general".to_string(),
-                    suggested_approach: "Standard decomposition".to_string(),
-                });
+                Some(plan_context.rendered_context.as_str())
+            };
+
+            match crate::services::plan_mode::analyzer::analyze_task(
+                &description,
+                plan_context_ref,
+                lang_instruction,
+                llm_provider.clone(),
+                &registry,
+            )
+            .await
+            {
+                Ok(analysis) => {
+                    if analysis.needs_clarification {
+                        // Generate first clarification question
+                        let adapter = registry
+                            .get(&analysis.adapter_name)
+                            .unwrap_or_else(|| registry.find_for_domain(&analysis.domain));
+
+                        match crate::services::plan_mode::clarifier::generate_clarification_question(
+                            &description,
+                            &analysis,
+                            &[],
+                            plan_context_ref,
+                            lang_instruction,
+                            adapter.as_ref(),
+                            llm_provider,
+                        )
+                        .await
+                        {
+                            Ok(Some(question)) => {
+                                session.current_question = Some(question);
+                                session.phase = PlanModePhase::Clarifying;
+                            }
+                            _ => {
+                                // Question generation failed or returned None — skip to planning
+                                session.phase = PlanModePhase::Planning;
+                            }
+                        }
+                    } else {
+                        session.phase = PlanModePhase::Planning;
+                    }
+                    session.analysis = Some(analysis);
+                }
+                Err(e) => {
+                    // Analysis failed, but we can still proceed without it
+                    session.phase = PlanModePhase::Planning;
+                    session.analysis = Some(PlanAnalysis {
+                        domain: crate::services::plan_mode::types::TaskDomain::General,
+                        complexity: 5,
+                        estimated_steps: 4,
+                        needs_clarification: false,
+                        reasoning: format!("Analysis failed: {e}. Proceeding with general approach."),
+                        adapter_name: "general".to_string(),
+                        suggested_approach: "Standard decomposition".to_string(),
+                    });
+                }
             }
 
             // Store session
@@ -226,51 +251,55 @@ pub async fn submit_plan_clarification(
     let next_question_result = tokio::select! {
         _ = operation_token.cancelled() => Err(PLAN_OPERATION_CANCELLED_ERROR.to_string()),
         result = async {
-            if let (Some(ref prov), Some(ref mdl)) = (&provider, &model) {
-                let llm_provider = resolve_llm_provider(prov, mdl, None, base_url, &app_state)
-                    .await
-                    .map_err(|e| format!("Failed to resolve LLM provider: {e}"))?;
+            let (resolved_provider, resolved_model) =
+                resolve_plan_provider_and_model(provider, model, app_state.inner()).await;
+            let llm_provider = resolve_llm_provider(
+                &resolved_provider,
+                &resolved_model,
+                None,
+                base_url,
+                &app_state,
+            )
+            .await
+            .map_err(|e| format!("Failed to resolve LLM provider: {e}"))?;
 
-                let registry = state.adapter_registry.read().await;
-                let adapter = registry
-                    .get(&adapter_name)
-                    .unwrap_or_else(|| registry.find_for_domain(&analysis.domain));
+            let registry = state.adapter_registry.read().await;
+            let adapter = registry
+                .get(&adapter_name)
+                .unwrap_or_else(|| registry.find_for_domain(&analysis.domain));
 
-                let locale_tag = normalize_locale(locale.as_deref());
-                let lang_instruction = locale_instruction(locale_tag);
-                let plan_context = build_plan_conversation_context(
-                    &app_state,
-                    &knowledge_state,
-                    project_path.as_deref(),
-                    Some(session_id.as_str()),
-                    conversation_context.as_deref(),
-                    context_sources.as_ref(),
-                    &description,
-                    InjectionPhase::Planning,
-                )
-                .await;
-                let plan_context_ref = if plan_context.rendered_context.is_empty() {
-                    None
-                } else {
-                    Some(plan_context.rendered_context.as_str())
-                };
-
-                Ok(
-                    crate::services::plan_mode::clarifier::generate_clarification_question(
-                        &description,
-                        &analysis,
-                        &clarifications,
-                        plan_context_ref,
-                        lang_instruction,
-                        adapter.as_ref(),
-                        llm_provider,
-                    )
-                    .await
-                    .unwrap_or(None),
-                )
+            let locale_tag = normalize_locale(locale.as_deref());
+            let lang_instruction = locale_instruction(locale_tag);
+            let plan_context = build_plan_conversation_context(
+                &app_state,
+                &knowledge_state,
+                project_path.as_deref(),
+                Some(session_id.as_str()),
+                conversation_context.as_deref(),
+                context_sources.as_ref(),
+                &description,
+                InjectionPhase::Planning,
+            )
+            .await;
+            let plan_context_ref = if plan_context.rendered_context.is_empty() {
+                None
             } else {
-                Ok(None)
-            }
+                Some(plan_context.rendered_context.as_str())
+            };
+
+            Ok(
+                crate::services::plan_mode::clarifier::generate_clarification_question(
+                    &description,
+                    &analysis,
+                    &clarifications,
+                    plan_context_ref,
+                    lang_instruction,
+                    adapter.as_ref(),
+                    llm_provider,
+                )
+                .await
+                .unwrap_or(None),
+            )
         } => result,
     };
     clear_plan_operation_token(&state, &session_id, &operation_id).await;
@@ -344,4 +373,43 @@ pub async fn skip_plan_clarification(
     .await;
 
     Ok(CommandResponse::ok(result))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_plan_provider_and_model;
+    use crate::state::AppState;
+
+    #[tokio::test]
+    async fn resolves_default_model_when_request_model_is_missing() {
+        let app_state = AppState::new();
+        app_state
+            .initialize()
+            .await
+            .expect("app state should initialize");
+
+        let (provider, model) = resolve_plan_provider_and_model(
+            Some("openai".to_string()),
+            None,
+            &app_state,
+        )
+        .await;
+
+        assert_eq!(provider, "openai");
+        assert!(!model.trim().is_empty(), "resolved model should not be empty");
+    }
+
+    #[tokio::test]
+    async fn resolves_provider_and_model_when_both_are_missing() {
+        let app_state = AppState::new();
+        app_state
+            .initialize()
+            .await
+            .expect("app state should initialize");
+
+        let (provider, model) = resolve_plan_provider_and_model(None, None, &app_state).await;
+
+        assert!(!provider.trim().is_empty(), "resolved provider should not be empty");
+        assert!(!model.trim().is_empty(), "resolved model should not be empty");
+    }
 }

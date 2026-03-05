@@ -20,6 +20,7 @@ import { useContextSourcesStore } from './contextSources';
 import { selectKernelPlanRuntime } from './workflowKernelSelectors';
 import { buildConversationHistory } from '../lib/contextBridge';
 import { getNextTurnId } from '../lib/conversationUtils';
+import { createWorkflowKernelActionIntent } from '../lib/workflowKernelIntent';
 import type { CardPayload } from '../types/workflowCard';
 import type {
   PlanModePhase,
@@ -84,6 +85,7 @@ interface PlanOrchestratorState {
   skipClarification: () => Promise<void>;
   proceedToPlanning: () => Promise<void>;
   approvePlan: (plan: PlanCardData) => Promise<void>;
+  retryStep: (stepId: string) => Promise<void>;
   cancelWorkflow: () => Promise<void>;
   resetWorkflow: () => void;
 }
@@ -231,6 +233,202 @@ function injectClarificationResolutionCard(reasonCode: string | null, message: s
   );
 }
 
+type PlanOrchestratorGet = () => PlanOrchestratorState;
+type PlanOrchestratorSet = (partial: Partial<PlanOrchestratorState>) => void;
+
+function stopProgressSubscription(get: PlanOrchestratorGet, set: PlanOrchestratorSet, fallbackUnlisten?: UnlistenFn) {
+  const activeUnlisten = get()._progressUnlisten;
+  if (activeUnlisten) {
+    activeUnlisten();
+  } else if (fallbackUnlisten) {
+    fallbackUnlisten();
+  }
+  set({ _progressUnlisten: null });
+}
+
+async function subscribePlanProgressEvents(
+  runToken: number,
+  plan: PlanCardData,
+  get: PlanOrchestratorGet,
+  set: PlanOrchestratorSet,
+): Promise<UnlistenFn> {
+  let unlistenRef: UnlistenFn | null = null;
+  const unlisten = await listen<PlanModeProgressPayload>('plan-mode-progress', (event) => {
+    if (get()._runToken !== runToken) return;
+    const payload = event.payload;
+    const { sessionId } = get();
+    if (payload.sessionId !== sessionId) return;
+
+    const planModeState = usePlanModeStore.getState();
+    const planModePatch: {
+      currentBatch: number;
+      totalBatches: number;
+      stepStatuses?: Record<string, string>;
+      error?: string | null;
+      isCancelling?: boolean;
+    } = {
+      currentBatch: payload.currentBatch,
+      totalBatches: payload.totalBatches,
+    };
+    if (payload.stepId && payload.stepStatus) {
+      planModePatch.stepStatuses = {
+        ...planModeState.stepStatuses,
+        [payload.stepId]: payload.stepStatus,
+      };
+    }
+
+    const stepTitle = plan.steps.find((s) => s.id === payload.stepId)?.title;
+    injectCard('plan_step_update', {
+      eventType: payload.eventType as PlanStepUpdateCardData['eventType'],
+      currentBatch: payload.currentBatch,
+      totalBatches: payload.totalBatches,
+      stepId: payload.stepId,
+      stepTitle,
+      stepStatus: payload.stepStatus,
+      progressPct: payload.progressPct,
+      error: payload.error,
+    } satisfies PlanStepUpdateCardData);
+
+    if (payload.eventType === 'step_completed' && payload.stepId) {
+      const completedStepId = payload.stepId;
+      const completedStepTitle = stepTitle ?? completedStepId;
+      const planStore = usePlanModeStore.getState();
+      void planStore
+        .fetchStepOutput(completedStepId)
+        .then((stepOutput) => {
+          if (get()._runToken !== runToken) return;
+          if (!stepOutput) {
+            const latestError = usePlanModeStore.getState().error;
+            if (latestError) {
+              injectError(i18n.t('planMode:orchestrator.stepOutputLoadFailed', 'Step Output Unavailable'), latestError);
+            }
+            return;
+          }
+          injectCard('plan_step_output', {
+            stepId: completedStepId,
+            stepTitle: completedStepTitle,
+            content: stepOutput.content,
+            format: normalizeStepOutputFormat(stepOutput.format),
+            criteriaMet: stepOutput.criteriaMet ?? [],
+          } satisfies PlanStepOutputCardData);
+        })
+        .catch((error) => {
+          if (get()._runToken !== runToken) return;
+          injectError(
+            i18n.t('planMode:orchestrator.stepOutputLoadFailed', 'Step Output Unavailable'),
+            error instanceof Error ? error.message : String(error),
+          );
+        });
+    }
+
+    if (payload.eventType === 'execution_completed') {
+      const mergedStepStatuses = {
+        ...planModeState.stepStatuses,
+        ...(planModePatch.stepStatuses ?? {}),
+      };
+      const hasFailedSteps = Object.values(mergedStepStatuses).some((status) => status === 'failed');
+      const terminalPhase: PlanModePhase = hasFailedSteps ? 'failed' : 'completed';
+
+      planModePatch.isCancelling = false;
+      usePlanModeStore.setState(planModePatch);
+      set({
+        phase: terminalPhase,
+        isBusy: false,
+        isCancelling: false,
+        _progressUnlisten: null,
+      });
+      unlistenRef?.();
+
+      void (async () => {
+        try {
+          await usePlanModeStore.getState().fetchReport();
+        } catch {
+          // best-effort report fetch; fallback card is injected below if unavailable.
+        }
+        if (get()._runToken !== runToken) return;
+        if (get()._completionCardInjectedRunToken === runToken) return;
+
+        const latestReport = usePlanModeStore.getState().report;
+        const report = latestReport && latestReport.sessionId === payload.sessionId ? latestReport : null;
+        const completionData = report
+          ? buildPlanCompletionCardDataFromReport(report, terminalPhase === 'completed')
+          : buildPlanCompletionCardDataFallback(plan, mergedStepStatuses, terminalPhase === 'completed');
+
+        injectCard('plan_completion_card', completionData as unknown as Record<string, unknown>);
+        set({ _completionCardInjectedRunToken: runToken });
+      })();
+      return;
+    }
+
+    if (payload.eventType === 'execution_cancelled') {
+      if (get()._runToken !== runToken) return;
+      planModePatch.isCancelling = false;
+      usePlanModeStore.setState(planModePatch);
+      set({ phase: 'cancelled', isBusy: false, isCancelling: false, _progressUnlisten: null });
+      unlistenRef?.();
+      return;
+    }
+
+    if (payload.eventType === 'step_failed' && payload.error) {
+      planModePatch.error = payload.error;
+    }
+    usePlanModeStore.setState(planModePatch);
+  });
+  unlistenRef = unlisten;
+  return unlisten;
+}
+
+interface PlanExecutionStartParams {
+  runToken: number;
+  plan: PlanCardData;
+  rollbackPhase: PlanModePhase;
+  startErrorTitle: string;
+  invokeExecution: () => Promise<void>;
+  get: PlanOrchestratorGet;
+  set: PlanOrchestratorSet;
+}
+
+async function startPlanExecutionWithProgress({
+  runToken,
+  plan,
+  rollbackPhase,
+  startErrorTitle,
+  invokeExecution,
+  get,
+  set,
+}: PlanExecutionStartParams): Promise<boolean> {
+  const unlisten = await subscribePlanProgressEvents(runToken, plan, get, set);
+  if (get()._runToken !== runToken) {
+    unlisten();
+    return false;
+  }
+  set({ _progressUnlisten: unlisten });
+
+  try {
+    await invokeExecution();
+  } catch (error) {
+    stopProgressSubscription(get, set, unlisten);
+    set({ phase: rollbackPhase, isBusy: false, isCancelling: false });
+    injectError(startErrorTitle, error instanceof Error ? error.message : String(error));
+    return false;
+  }
+
+  if (get()._runToken !== runToken) {
+    stopProgressSubscription(get, set, unlisten);
+    return false;
+  }
+
+  const latestPlanState = usePlanModeStore.getState();
+  if (latestPlanState.error) {
+    stopProgressSubscription(get, set, unlisten);
+    set({ phase: rollbackPhase, isBusy: false, isCancelling: false });
+    injectError(startErrorTitle, latestPlanState.error);
+    return false;
+  }
+
+  return true;
+}
+
 // ============================================================================
 // Default State
 // ============================================================================
@@ -261,6 +459,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
     const planStore = usePlanModeStore.getState();
     const settings = useSettingsStore.getState();
     const { resolveProviderBaseUrl } = await import('../lib/providers');
+    const { resolvePhaseAgent } = await import('../lib/phaseAgentResolver');
 
     set({ isBusy: true, isCancelling: false, taskDescription: description, phase: 'analyzing', _runToken: runToken });
 
@@ -285,16 +484,19 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
         ? conversationHistory.map((t) => `user: ${t.user}\nassistant: ${t.assistant}`).join('\n')
         : undefined;
 
-    // Resolve provider base URL (handles multi-endpoint providers like Qwen, GLM, MiniMax)
-    const baseUrl = settings.provider ? resolveProviderBaseUrl(settings.provider, settings) : undefined;
+    // Resolve LLM from phase config first, then fall back to global settings.
+    const strategyAgent = resolvePhaseAgent('plan_strategy');
+    const provider = strategyAgent.provider || settings.provider;
+    const model = strategyAgent.model || settings.model;
+    const baseUrl = strategyAgent.baseUrl ?? (provider ? resolveProviderBaseUrl(provider, settings) : undefined);
     const projectPath = settings.workspacePath || undefined;
     const contextSources = buildPlanContextSources(null);
 
     // Enter plan mode (runs analysis)
     const enteredSession = await planStore.enterPlanMode(
       description,
-      settings.provider,
-      settings.model,
+      provider,
+      model,
       baseUrl,
       projectPath,
       contextSources,
@@ -536,7 +738,7 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
 
   approvePlan: async (plan: PlanCardData) => {
     const runToken = get()._runToken;
-    set({ phase: 'executing', isBusy: true, isCancelling: false });
+    set({ phase: 'executing', isBusy: true, isCancelling: false, _completionCardInjectedRunToken: null });
 
     injectInfo(i18n.t('planMode:orchestrator.planApproved', 'Plan approved! Starting execution...'));
 
@@ -546,139 +748,6 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       phase: 'executing',
     } satisfies PlanPersonaIndicatorData);
 
-    // Subscribe to progress events
-    const unlisten = await listen<PlanModeProgressPayload>('plan-mode-progress', (event) => {
-      if (get()._runToken !== runToken) return;
-      const payload = event.payload;
-      const { sessionId } = get();
-      if (payload.sessionId !== sessionId) return;
-
-      const planModeState = usePlanModeStore.getState();
-      const planModePatch: {
-        currentBatch: number;
-        totalBatches: number;
-        stepStatuses?: Record<string, string>;
-        error?: string | null;
-        isCancelling?: boolean;
-      } = {
-        currentBatch: payload.currentBatch,
-        totalBatches: payload.totalBatches,
-      };
-      if (payload.stepId && payload.stepStatus) {
-        planModePatch.stepStatuses = {
-          ...planModeState.stepStatuses,
-          [payload.stepId]: payload.stepStatus,
-        };
-      }
-
-      // Inject step update cards
-      const stepTitle = plan.steps.find((s) => s.id === payload.stepId)?.title;
-
-      injectCard('plan_step_update', {
-        eventType: payload.eventType as PlanStepUpdateCardData['eventType'],
-        currentBatch: payload.currentBatch,
-        totalBatches: payload.totalBatches,
-        stepId: payload.stepId,
-        stepTitle,
-        stepStatus: payload.stepStatus,
-        progressPct: payload.progressPct,
-        error: payload.error,
-      } satisfies PlanStepUpdateCardData);
-
-      if (payload.eventType === 'step_completed' && payload.stepId) {
-        const completedStepId = payload.stepId;
-        const completedStepTitle = stepTitle ?? completedStepId;
-        const planStore = usePlanModeStore.getState();
-        void planStore
-          .fetchStepOutput(completedStepId)
-          .then((stepOutput) => {
-            if (get()._runToken !== runToken) return;
-            if (!stepOutput) {
-              const latestError = usePlanModeStore.getState().error;
-              if (latestError) {
-                injectError(
-                  i18n.t('planMode:orchestrator.stepOutputLoadFailed', 'Step Output Unavailable'),
-                  latestError,
-                );
-              }
-              return;
-            }
-
-            injectCard('plan_step_output', {
-              stepId: completedStepId,
-              stepTitle: completedStepTitle,
-              content: stepOutput.content,
-              format: normalizeStepOutputFormat(stepOutput.format),
-              criteriaMet: stepOutput.criteriaMet ?? [],
-            } satisfies PlanStepOutputCardData);
-          })
-          .catch((error) => {
-            if (get()._runToken !== runToken) return;
-            injectError(
-              i18n.t('planMode:orchestrator.stepOutputLoadFailed', 'Step Output Unavailable'),
-              error instanceof Error ? error.message : String(error),
-            );
-          });
-      }
-
-      // On completion, inject completion card
-      if (payload.eventType === 'execution_completed') {
-        const mergedStepStatuses = {
-          ...planModeState.stepStatuses,
-          ...(planModePatch.stepStatuses ?? {}),
-        };
-        const hasFailedSteps = Object.values(mergedStepStatuses).some((status) => status === 'failed');
-        const terminalPhase: PlanModePhase = hasFailedSteps ? 'failed' : 'completed';
-
-        planModePatch.isCancelling = false;
-        usePlanModeStore.setState(planModePatch);
-        set({
-          phase: terminalPhase,
-          isBusy: false,
-          isCancelling: false,
-          _progressUnlisten: null,
-        });
-        unlisten();
-
-        void (async () => {
-          try {
-            await planModeState.fetchReport();
-          } catch {
-            // best-effort report fetch; fallback card is injected below if unavailable.
-          }
-          if (get()._runToken !== runToken) return;
-          if (get()._completionCardInjectedRunToken === runToken) return;
-
-          const latestReport = usePlanModeStore.getState().report;
-          const report = latestReport && latestReport.sessionId === payload.sessionId ? latestReport : null;
-          const completionData = report
-            ? buildPlanCompletionCardDataFromReport(report, terminalPhase === 'completed')
-            : buildPlanCompletionCardDataFallback(plan, mergedStepStatuses, terminalPhase === 'completed');
-
-          injectCard('plan_completion_card', completionData as unknown as Record<string, unknown>);
-          set({ _completionCardInjectedRunToken: runToken });
-        })();
-      } else if (payload.eventType === 'execution_cancelled') {
-        if (get()._runToken !== runToken) return;
-        planModePatch.isCancelling = false;
-        usePlanModeStore.setState(planModePatch);
-        set({ phase: 'cancelled', isBusy: false, isCancelling: false, _progressUnlisten: null });
-        unlisten();
-      } else {
-        if (payload.eventType === 'step_failed' && payload.error) {
-          planModePatch.error = payload.error;
-        }
-        usePlanModeStore.setState(planModePatch);
-      }
-    });
-
-    if (get()._runToken !== runToken) {
-      unlisten();
-      return;
-    }
-    set({ _progressUnlisten: unlisten });
-
-    // Trigger approval
     const planStore = usePlanModeStore.getState();
     const settings = useSettingsStore.getState();
     const projectPath = settings.workspacePath || undefined;
@@ -688,54 +757,112 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       conversationHistory.length > 0
         ? conversationHistory.map((t) => `user: ${t.user}\nassistant: ${t.assistant}`).join('\n')
         : undefined;
-    try {
-      await planStore.approvePlan(
-        plan,
-        undefined,
-        undefined,
-        undefined,
-        projectPath,
-        contextSources,
-        contextStr,
-        i18n.language,
-      );
-    } catch (error) {
-      if (get()._progressUnlisten) {
-        get()._progressUnlisten?.();
-      } else {
-        unlisten();
-      }
-      set({ _progressUnlisten: null, phase: 'reviewing_plan', isBusy: false, isCancelling: false });
-      injectError(
-        i18n.t('planMode:orchestrator.approveFailed', 'Failed to start plan execution'),
-        error instanceof Error ? error.message : String(error),
-      );
+    await startPlanExecutionWithProgress({
+      runToken,
+      plan,
+      rollbackPhase: 'reviewing_plan',
+      startErrorTitle: i18n.t('planMode:orchestrator.approveFailed', 'Failed to start plan execution'),
+      invokeExecution: () =>
+        planStore.approvePlan(
+          plan,
+          undefined,
+          undefined,
+          undefined,
+          projectPath,
+          contextSources,
+          contextStr,
+          i18n.language,
+        ),
+      get,
+      set,
+    });
+  },
+
+  retryStep: async (stepId: string) => {
+    const normalizedStepId = stepId.trim();
+    if (!normalizedStepId) return;
+    if (get()._progressUnlisten || get().phase === 'executing') return;
+
+    const fallbackPlan = usePlanModeStore.getState().plan;
+    const plan = get().editablePlan ?? fallbackPlan;
+    if (!plan) {
+      injectError(i18n.t('planMode:orchestrator.retryFailed', 'Failed to retry plan step'), 'No active plan found');
       return;
     }
 
-    if (get()._runToken !== runToken) {
-      if (get()._progressUnlisten) {
-        get()._progressUnlisten?.();
-      } else {
-        unlisten();
-      }
-      set({ _progressUnlisten: null });
+    const previousPhase = get().phase;
+    const effectiveSessionId = get().sessionId || usePlanModeStore.getState().sessionId || null;
+    if (!effectiveSessionId) {
+      injectError(i18n.t('planMode:orchestrator.retryFailed', 'Failed to retry plan step'), 'No active session found');
       return;
     }
 
-    const latestPlanState = usePlanModeStore.getState();
-    if (latestPlanState.error) {
-      if (get()._progressUnlisten) {
-        get()._progressUnlisten?.();
-      } else {
-        unlisten();
-      }
-      set({ _progressUnlisten: null, phase: 'reviewing_plan', isBusy: false, isCancelling: false });
-      injectError(
-        i18n.t('planMode:orchestrator.approveFailed', 'Failed to start plan execution'),
-        latestPlanState.error,
-      );
-    }
+    const runToken = get()._runToken + 1;
+    set({
+      sessionId: effectiveSessionId,
+      editablePlan: plan,
+      phase: 'executing',
+      isBusy: true,
+      isCancelling: false,
+      _runToken: runToken,
+      _completionCardInjectedRunToken: null,
+    });
+    usePlanModeStore.setState({ sessionId: effectiveSessionId });
+
+    injectInfo(i18n.t('planMode:orchestrator.retryingStep', 'Retrying step {{id}}...', { id: normalizedStepId }));
+    injectCard('plan_persona_indicator', {
+      role: 'executor',
+      displayName: i18n.t('planMode:personas.executor', 'Executor'),
+      phase: 'executing',
+    } satisfies PlanPersonaIndicatorData);
+
+    // Best-effort kernel intent trace for retry action.
+    const transitionAndSubmitInput = useWorkflowKernelStore.getState().transitionAndSubmitInput;
+    void transitionAndSubmitInput(
+      'plan',
+      createWorkflowKernelActionIntent({
+        mode: 'plan',
+        type: 'execution_control',
+        source: 'plan_orchestrator',
+        action: 'retry_step',
+        content: `retry_step:${normalizedStepId}`,
+        metadata: {
+          stepId: normalizedStepId,
+        },
+      }),
+    ).catch(() => {
+      // best effort kernel intent recording
+    });
+
+    const planStore = usePlanModeStore.getState();
+    const settings = useSettingsStore.getState();
+    const projectPath = settings.workspacePath || undefined;
+    const contextSources = buildPlanContextSources(effectiveSessionId);
+    const conversationHistory = buildConversationHistory();
+    const contextStr =
+      conversationHistory.length > 0
+        ? conversationHistory.map((t) => `user: ${t.user}\nassistant: ${t.assistant}`).join('\n')
+        : undefined;
+
+    await startPlanExecutionWithProgress({
+      runToken,
+      plan,
+      rollbackPhase: previousPhase === 'executing' ? 'failed' : previousPhase,
+      startErrorTitle: i18n.t('planMode:orchestrator.retryFailed', 'Failed to retry plan step'),
+      invokeExecution: () =>
+        planStore.retryPlanStep(
+          normalizedStepId,
+          undefined,
+          undefined,
+          undefined,
+          projectPath,
+          contextSources,
+          contextStr,
+          i18n.language,
+        ),
+      get,
+      set,
+    });
   },
 
   cancelWorkflow: async () => {

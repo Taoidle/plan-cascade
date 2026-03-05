@@ -243,6 +243,7 @@ fn main() {
             plan_cascade_desktop::commands::plan_mode::session_analysis_commands::skip_plan_clarification,
             plan_cascade_desktop::commands::plan_mode::planning_execution_commands::generate_plan,
             plan_cascade_desktop::commands::plan_mode::planning_execution_commands::approve_plan,
+            plan_cascade_desktop::commands::plan_mode::planning_execution_commands::retry_plan_step,
             plan_cascade_desktop::commands::plan_mode::lifecycle_reporting_commands::get_plan_execution_status,
             plan_cascade_desktop::commands::plan_mode::lifecycle_reporting_commands::cancel_plan_execution,
             plan_cascade_desktop::commands::plan_mode::lifecycle_reporting_commands::cancel_plan_operation,

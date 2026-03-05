@@ -83,6 +83,16 @@ export interface PlanModeState {
     conversationContext?: string,
     locale?: string,
   ) => Promise<void>;
+  retryPlanStep: (
+    stepId: string,
+    provider?: string,
+    model?: string,
+    baseUrl?: string,
+    projectPath?: string,
+    contextSources?: ContextSourceConfig,
+    conversationContext?: string,
+    locale?: string,
+  ) => Promise<void>;
   refreshStatus: () => Promise<void>;
   cancelExecution: () => Promise<void>;
   cancelOperation: () => Promise<void>;
@@ -315,6 +325,53 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
         set({ isLoading: false });
       } else {
         set({ isLoading: false, error: result.error || 'Failed to approve plan' });
+      }
+    } catch (e) {
+      if (get()._requestId !== requestId) return;
+      set({ isLoading: false, error: String(e) });
+    }
+  },
+
+  retryPlanStep: async (stepId, provider, model, baseUrl, projectPath, contextSources, conversationContext, locale) => {
+    const { sessionId } = get();
+    const normalizedStepId = stepId.trim();
+    if (!sessionId) {
+      set({ error: 'No active plan session' });
+      return;
+    }
+    if (!normalizedStepId) {
+      set({ error: 'Step id is required for retry' });
+      return;
+    }
+
+    const requestId = get()._requestId + 1;
+    set({ isLoading: true, error: null, _requestId: requestId });
+    try {
+      const settingsStore = (await import('./settings')).useSettingsStore.getState();
+      const finalProvider = provider || settingsStore.provider;
+      const finalModel = model || settingsStore.model;
+      const { resolveProviderBaseUrl } = await import('../lib/providers');
+      const finalBaseUrl = baseUrl || resolveProviderBaseUrl(finalProvider, settingsStore);
+
+      const result = await invoke<CommandResponse<boolean>>('retry_plan_step', {
+        request: {
+          sessionId,
+          stepId: normalizedStepId,
+          provider: finalProvider || null,
+          model: finalModel || null,
+          baseUrl: finalBaseUrl || null,
+          projectPath: projectPath || null,
+          contextSources: contextSources || null,
+          conversationContext: conversationContext || null,
+          locale: locale || null,
+        },
+      });
+      if (get()._requestId !== requestId) return;
+
+      if (result.success) {
+        set({ isLoading: false });
+      } else {
+        set({ isLoading: false, error: result.error || `Failed to retry step '${normalizedStepId}'` });
       }
     } catch (e) {
       if (get()._requestId !== requestId) return;

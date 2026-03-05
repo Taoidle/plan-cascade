@@ -125,6 +125,48 @@ describe('planMode store', () => {
     expect(state.error).toBe('Approve failed');
   });
 
+  it('retries a failed step via retry_plan_step command', async () => {
+    usePlanModeStore.setState({ sessionId: 'plan-session-1' });
+    mockInvoke.mockResolvedValueOnce({
+      success: true,
+      data: true,
+      error: null,
+    });
+
+    await usePlanModeStore.getState().retryPlanStep('step-2', 'openai', 'gpt-4o', 'https://api.example.com');
+
+    const state = usePlanModeStore.getState();
+    expect(state.isLoading).toBe(false);
+    expect(state.error).toBeNull();
+    expect(mockInvoke).toHaveBeenCalledWith('retry_plan_step', {
+      request: {
+        sessionId: 'plan-session-1',
+        stepId: 'step-2',
+        provider: 'openai',
+        model: 'gpt-4o',
+        baseUrl: 'https://api.example.com',
+        projectPath: null,
+        contextSources: null,
+        conversationContext: null,
+        locale: null,
+      },
+    });
+  });
+
+  it('stores error when retry_plan_step fails', async () => {
+    usePlanModeStore.setState({ sessionId: 'plan-session-1' });
+    mockInvoke.mockResolvedValueOnce({
+      success: false,
+      data: null,
+      error: 'Step not retryable',
+    });
+
+    await usePlanModeStore.getState().retryPlanStep('step-2');
+
+    expect(usePlanModeStore.getState().error).toBe('Step not retryable');
+    expect(usePlanModeStore.getState().isLoading).toBe(false);
+  });
+
   it('resets cancelling state when cancel_plan_execution fails', async () => {
     usePlanModeStore.setState({ sessionId: 'plan-session-1' });
     mockInvoke.mockResolvedValueOnce({

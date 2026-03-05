@@ -298,6 +298,10 @@ export async function executePlanViaCoordinator(): Promise<WorkflowSession | nul
   return useWorkflowKernelStore.getState().executePlan();
 }
 
+/**
+ * @deprecated Legacy kernel retry path. Simple Plan UI now calls planOrchestrator.retryStep.
+ * Kept for backward compatibility with older callers.
+ */
 export async function retryPlanStepViaCoordinator(stepId: string): Promise<WorkflowSession | null> {
   return useWorkflowKernelStore.getState().retryStep(stepId);
 }

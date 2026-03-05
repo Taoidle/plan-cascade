@@ -17,7 +17,6 @@ import { useWorkflowKernelStore } from '../../../store/workflowKernel';
 import {
   applyPlanEditViaCoordinator,
   executePlanViaCoordinator,
-  retryPlanStepViaCoordinator,
   submitWorkflowActionIntentViaCoordinator,
 } from '../../../store/simpleWorkflowCoordinator';
 import {
@@ -328,6 +327,7 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
   const [retryingStepId, setRetryingStepId] = useState<string | null>(null);
 
   const approvePlan = usePlanOrchestratorStore((s) => s.approvePlan);
+  const retryStep = usePlanOrchestratorStore((s) => s.retryStep);
   const stepStatuses = usePlanModeStore((s) => s.stepStatuses);
   const workflowSession = useWorkflowKernelStore((s) => s.session);
 
@@ -780,20 +780,12 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
       if (!stepId || retryingStepId) return;
       setRetryingStepId(stepId);
       try {
-        await submitWorkflowActionIntentViaCoordinator({
-          mode: 'plan',
-          type: 'execution_control',
-          source: 'plan_card',
-          action: 'retry_step',
-          content: `retry_step:${stepId}`,
-          metadata: { stepId },
-        });
-        await retryPlanStepViaCoordinator(stepId);
+        await retryStep(stepId);
       } finally {
         setRetryingStepId(null);
       }
     },
-    [retryingStepId],
+    [retryStep, retryingStepId],
   );
 
   return (

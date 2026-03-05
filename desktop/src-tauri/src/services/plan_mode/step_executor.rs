@@ -405,6 +405,242 @@ pub async fn execute_plan(
     Ok((final_outputs, final_states))
 }
 
+/// Retry a single failed/cancelled step and preserve existing outputs/states.
+pub async fn retry_single_step(
+    session_id: &str,
+    plan: &Plan,
+    step_id: &str,
+    mut existing_outputs: HashMap<String, StepOutput>,
+    mut existing_states: HashMap<String, StepExecutionState>,
+    adapter: Arc<dyn DomainAdapter>,
+    provider: Arc<dyn LlmProvider>,
+    runtime: Option<StepExecutionRuntime>,
+    config: StepExecutionConfig,
+    shared_context: Option<String>,
+    language_instruction: String,
+    app_handle: Option<tauri::AppHandle>,
+    cancellation_token: CancellationToken,
+) -> AppResult<(
+    HashMap<String, StepOutput>,
+    HashMap<String, StepExecutionState>,
+)> {
+    let step = plan
+        .steps
+        .iter()
+        .find(|value| value.id == step_id)
+        .ok_or_else(|| AppError::Internal(format!("Step not found in plan: {step_id}")))?;
+
+    let total_batches = plan.batches.len().max(1);
+    let current_batch = plan
+        .batches
+        .iter()
+        .position(|batch| batch.step_ids.iter().any(|id| id == step_id))
+        .unwrap_or(0);
+    let total_steps = plan.steps.len().max(1);
+
+    if cancellation_token.is_cancelled() {
+        existing_states.insert(step.id.clone(), StepExecutionState::Cancelled);
+        if let Some(handle) = app_handle.as_ref() {
+            emit_event(
+                handle,
+                PlanModeProgressEvent::execution_cancelled(
+                    session_id,
+                    current_batch,
+                    total_batches,
+                ),
+            );
+        }
+        return Ok((existing_outputs, existing_states));
+    }
+
+    existing_states.insert(step.id.clone(), StepExecutionState::Running);
+    let completed_before = existing_states
+        .values()
+        .filter(|value| matches!(value, StepExecutionState::Completed { .. }))
+        .count();
+    let started_pct = (completed_before as f64 / total_steps as f64) * 100.0;
+    if let Some(handle) = app_handle.as_ref() {
+        emit_event(
+            handle,
+            PlanModeProgressEvent::step_started(
+                session_id,
+                current_batch,
+                total_batches,
+                &step.id,
+                started_pct,
+            ),
+        );
+    }
+
+    let mut missing_dependencies = Vec::new();
+    let mut dep_outputs = Vec::new();
+    for dep_id in &step.dependencies {
+        if let Some(output) = existing_outputs.get(dep_id) {
+            let dep_title = plan
+                .steps
+                .iter()
+                .find(|s| s.id == *dep_id)
+                .map(|s| s.title.clone())
+                .unwrap_or_else(|| dep_id.clone());
+            dep_outputs.push((dep_title, output.clone()));
+        } else {
+            missing_dependencies.push(dep_id.clone());
+        }
+    }
+
+    if !missing_dependencies.is_empty() {
+        let reason = format!(
+            "Missing dependency outputs for retry step '{}': {}",
+            step.id,
+            missing_dependencies.join(", ")
+        );
+        existing_states.insert(
+            step.id.clone(),
+            StepExecutionState::Failed {
+                reason: reason.clone(),
+            },
+        );
+        let completed_count = existing_states
+            .values()
+            .filter(|value| matches!(value, StepExecutionState::Completed { .. }))
+            .count();
+        let pct = (completed_count as f64 / total_steps as f64) * 100.0;
+        if let Some(handle) = app_handle.as_ref() {
+            emit_event(
+                handle,
+                PlanModeProgressEvent::step_failed(
+                    session_id,
+                    current_batch,
+                    total_batches,
+                    &step.id,
+                    &reason,
+                    pct,
+                ),
+            );
+            emit_event(
+                handle,
+                PlanModeProgressEvent::execution_completed(session_id, total_batches, pct),
+            );
+        }
+        return Ok((existing_outputs, existing_states));
+    }
+
+    let dep_outputs = truncate_dep_outputs(
+        dep_outputs,
+        config.max_dep_output_chars,
+        config.max_total_dep_chars,
+    );
+    let started_at = Instant::now();
+
+    match execute_single_step(
+        step,
+        &dep_outputs,
+        plan,
+        adapter.as_ref(),
+        provider.as_ref(),
+        runtime.as_ref(),
+        shared_context.as_deref(),
+        &language_instruction,
+        cancellation_token.clone(),
+    )
+    .await
+    {
+        Ok(output) => {
+            if cancellation_token.is_cancelled() {
+                existing_states.insert(step.id.clone(), StepExecutionState::Cancelled);
+                if let Some(handle) = app_handle.as_ref() {
+                    emit_event(
+                        handle,
+                        PlanModeProgressEvent::execution_cancelled(
+                            session_id,
+                            current_batch,
+                            total_batches,
+                        ),
+                    );
+                }
+                return Ok((existing_outputs, existing_states));
+            }
+
+            existing_states.insert(
+                step.id.clone(),
+                StepExecutionState::Completed {
+                    duration_ms: started_at.elapsed().as_millis() as u64,
+                },
+            );
+            existing_outputs.insert(step.id.clone(), output);
+            let completed_count = existing_states
+                .values()
+                .filter(|value| matches!(value, StepExecutionState::Completed { .. }))
+                .count();
+            let pct = (completed_count as f64 / total_steps as f64) * 100.0;
+            if let Some(handle) = app_handle.as_ref() {
+                emit_event(
+                    handle,
+                    PlanModeProgressEvent::step_completed(
+                        session_id,
+                        current_batch,
+                        total_batches,
+                        &step.id,
+                        pct,
+                    ),
+                );
+                emit_event(
+                    handle,
+                    PlanModeProgressEvent::execution_completed(session_id, total_batches, pct),
+                );
+            }
+        }
+        Err(error) => {
+            if cancellation_token.is_cancelled() {
+                existing_states.insert(step.id.clone(), StepExecutionState::Cancelled);
+                if let Some(handle) = app_handle.as_ref() {
+                    emit_event(
+                        handle,
+                        PlanModeProgressEvent::execution_cancelled(
+                            session_id,
+                            current_batch,
+                            total_batches,
+                        ),
+                    );
+                }
+                return Ok((existing_outputs, existing_states));
+            }
+
+            let reason = format!("{error}");
+            existing_states.insert(
+                step.id.clone(),
+                StepExecutionState::Failed {
+                    reason: reason.clone(),
+                },
+            );
+            let completed_count = existing_states
+                .values()
+                .filter(|value| matches!(value, StepExecutionState::Completed { .. }))
+                .count();
+            let pct = (completed_count as f64 / total_steps as f64) * 100.0;
+            if let Some(handle) = app_handle.as_ref() {
+                emit_event(
+                    handle,
+                    PlanModeProgressEvent::step_failed(
+                        session_id,
+                        current_batch,
+                        total_batches,
+                        &step.id,
+                        &reason,
+                        pct,
+                    ),
+                );
+                emit_event(
+                    handle,
+                    PlanModeProgressEvent::execution_completed(session_id, total_batches, pct),
+                );
+            }
+        }
+    }
+
+    Ok((existing_outputs, existing_states))
+}
+
 /// Build the current progress from step states.
 pub fn build_progress(
     step_states: &HashMap<String, StepExecutionState>,
@@ -649,9 +885,88 @@ fn emit_event(handle: &tauri::AppHandle, event: PlanModeProgressEvent) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use crate::services::llm::types::{
+        LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message, ProviderConfig, StopReason,
+        ToolDefinition, UsageStats,
+    };
     use crate::services::plan_mode::adapters::general::GeneralAdapter;
     use crate::services::plan_mode::types::StepPriority;
+    use plan_cascade_core::streaming::UnifiedStreamEvent;
     use std::collections::HashMap as StdHashMap;
+    use tokio::sync::mpsc;
+
+    struct MockRetryProvider {
+        config: ProviderConfig,
+        content: String,
+    }
+
+    impl MockRetryProvider {
+        fn new(content: impl Into<String>) -> Self {
+            Self {
+                config: ProviderConfig::default(),
+                content: content.into(),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for MockRetryProvider {
+        fn name(&self) -> &'static str {
+            "mock-retry-provider"
+        }
+
+        fn model(&self) -> &str {
+            &self.config.model
+        }
+
+        fn supports_thinking(&self) -> bool {
+            false
+        }
+
+        fn supports_tools(&self) -> bool {
+            false
+        }
+
+        async fn send_message(
+            &self,
+            _messages: Vec<Message>,
+            _system: Option<String>,
+            _tools: Vec<ToolDefinition>,
+            _request_options: LlmRequestOptions,
+        ) -> LlmResult<LlmResponse> {
+            Ok(LlmResponse {
+                content: Some(self.content.clone()),
+                thinking: None,
+                tool_calls: vec![],
+                stop_reason: StopReason::EndTurn,
+                usage: UsageStats::default(),
+                model: self.config.model.clone(),
+                search_citations: vec![],
+            })
+        }
+
+        async fn stream_message(
+            &self,
+            _messages: Vec<Message>,
+            _system: Option<String>,
+            _tools: Vec<ToolDefinition>,
+            _tx: mpsc::Sender<UnifiedStreamEvent>,
+            _request_options: LlmRequestOptions,
+        ) -> LlmResult<LlmResponse> {
+            Err(LlmError::Other {
+                message: "streaming not needed in this test".to_string(),
+            })
+        }
+
+        async fn health_check(&self) -> LlmResult<()> {
+            Ok(())
+        }
+
+        fn config(&self) -> &ProviderConfig {
+            &self.config
+        }
+    }
 
     #[test]
     fn test_truncate_dep_outputs() {
@@ -726,5 +1041,157 @@ mod tests {
         assert!(names.contains("Read"));
         assert!(names.contains("Grep"));
         assert!(names.contains("LS"));
+    }
+
+    fn build_single_step_plan(step: super::super::types::PlanStep) -> Plan {
+        Plan {
+            title: "Retry Plan".to_string(),
+            description: "Retry test plan".to_string(),
+            domain: super::super::types::TaskDomain::General,
+            adapter_name: "general".to_string(),
+            batches: vec![super::super::types::PlanBatch {
+                index: 0,
+                step_ids: vec![step.id.clone()],
+            }],
+            steps: vec![step],
+            execution_config: Default::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_retry_single_step_success_updates_output_and_state() {
+        let step = super::super::types::PlanStep {
+            id: "s1".to_string(),
+            title: "Retry Step".to_string(),
+            description: "Run retry".to_string(),
+            priority: StepPriority::Medium,
+            dependencies: vec![],
+            completion_criteria: vec!["done".to_string()],
+            expected_output: "output".to_string(),
+            metadata: StdHashMap::new(),
+        };
+        let plan = build_single_step_plan(step);
+        let mut states = HashMap::new();
+        states.insert(
+            "s1".to_string(),
+            StepExecutionState::Failed {
+                reason: "previous failure".to_string(),
+            },
+        );
+
+        let (outputs, states) = retry_single_step(
+            "sid-1",
+            &plan,
+            "s1",
+            HashMap::new(),
+            states,
+            Arc::new(GeneralAdapter),
+            Arc::new(MockRetryProvider::new("retry ok")),
+            None,
+            StepExecutionConfig::default(),
+            None,
+            "Use English".to_string(),
+            None,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("retry should succeed");
+
+        assert!(matches!(
+            states.get("s1"),
+            Some(StepExecutionState::Completed { .. })
+        ));
+        assert_eq!(
+            outputs.get("s1").and_then(|output| output.content.split('\n').next()),
+            Some("retry ok")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_retry_single_step_fails_when_dependency_output_missing() {
+        let step = super::super::types::PlanStep {
+            id: "s2".to_string(),
+            title: "Dependent Step".to_string(),
+            description: "Needs prior output".to_string(),
+            priority: StepPriority::Medium,
+            dependencies: vec!["s1".to_string()],
+            completion_criteria: vec![],
+            expected_output: "output".to_string(),
+            metadata: StdHashMap::new(),
+        };
+        let plan = build_single_step_plan(step);
+        let mut states = HashMap::new();
+        states.insert(
+            "s2".to_string(),
+            StepExecutionState::Failed {
+                reason: "previous failure".to_string(),
+            },
+        );
+
+        let (_outputs, states) = retry_single_step(
+            "sid-1",
+            &plan,
+            "s2",
+            HashMap::new(),
+            states,
+            Arc::new(GeneralAdapter),
+            Arc::new(MockRetryProvider::new("unused")),
+            None,
+            StepExecutionConfig::default(),
+            None,
+            "Use English".to_string(),
+            None,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("retry call should return updated states");
+
+        match states.get("s2") {
+            Some(StepExecutionState::Failed { reason }) => {
+                assert!(reason.contains("Missing dependency outputs"));
+                assert!(reason.contains("s1"));
+            }
+            other => panic!("expected failed state, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_retry_single_step_marks_cancelled_when_token_is_cancelled() {
+        let step = super::super::types::PlanStep {
+            id: "s1".to_string(),
+            title: "Retry Step".to_string(),
+            description: "Run retry".to_string(),
+            priority: StepPriority::Medium,
+            dependencies: vec![],
+            completion_criteria: vec![],
+            expected_output: "output".to_string(),
+            metadata: StdHashMap::new(),
+        };
+        let plan = build_single_step_plan(step);
+        let cancel_token = CancellationToken::new();
+        cancel_token.cancel();
+
+        let (_outputs, states) = retry_single_step(
+            "sid-1",
+            &plan,
+            "s1",
+            HashMap::new(),
+            HashMap::new(),
+            Arc::new(GeneralAdapter),
+            Arc::new(MockRetryProvider::new("unused")),
+            None,
+            StepExecutionConfig::default(),
+            None,
+            "Use English".to_string(),
+            None,
+            cancel_token,
+        )
+        .await
+        .expect("retry call should return updated states");
+
+        assert!(matches!(
+            states.get("s1"),
+            Some(StepExecutionState::Cancelled)
+        ));
     }
 }

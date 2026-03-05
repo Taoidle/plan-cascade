@@ -782,6 +782,7 @@ impl WorkflowKernelState {
         plan_session_id: &str,
         phase: Option<String>,
         pending_clarification: Option<PlanClarificationSnapshot>,
+        running_step_id: Option<String>,
     ) -> Result<Vec<String>, String> {
         let linked_kernel_sessions = self
             .kernel_sessions_linked_to_mode_session(WorkflowMode::Plan, plan_session_id)
@@ -802,6 +803,15 @@ impl WorkflowKernelState {
                         .filter(|value| !value.is_empty())
                     {
                         plan.phase = next_phase.to_string();
+                    }
+                    if let Some(next_running_step_id) = running_step_id
+                        .as_ref()
+                        .map(|value| value.trim())
+                        .filter(|value| !value.is_empty())
+                    {
+                        plan.running_step_id = Some(next_running_step_id.to_string());
+                    } else if phase.as_deref() != Some("executing") {
+                        plan.running_step_id = None;
                     }
                     plan.pending_clarification = pending_clarification.clone();
                     plan.pending_question = plan
