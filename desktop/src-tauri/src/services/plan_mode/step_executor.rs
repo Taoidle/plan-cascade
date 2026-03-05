@@ -311,6 +311,7 @@ pub async fn execute_plan(
                             return;
                         }
 
+                        let output_for_event = output.clone();
                         let duration_ms = start.elapsed().as_millis() as u64;
                         {
                             let mut s = states.write().await;
@@ -338,6 +339,7 @@ pub async fn execute_plan(
                                 batch_index,
                                 total_b,
                                 &step.id,
+                                output_for_event,
                                 pct,
                             ),
                         );
@@ -561,6 +563,7 @@ pub async fn retry_single_step(
                 return Ok((existing_outputs, existing_states));
             }
 
+            let output_for_event = output.clone();
             existing_states.insert(
                 step.id.clone(),
                 StepExecutionState::Completed {
@@ -581,6 +584,7 @@ pub async fn retry_single_step(
                         current_batch,
                         total_batches,
                         &step.id,
+                        output_for_event,
                         pct,
                     ),
                 );

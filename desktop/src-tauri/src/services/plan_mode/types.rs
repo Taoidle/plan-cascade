@@ -423,6 +423,8 @@ pub struct PlanModeProgressEvent {
     pub step_status: Option<String>,
     /// Error message (if any)
     pub error: Option<String>,
+    /// Step output payload when a step completes successfully
+    pub step_output: Option<StepOutput>,
     /// Overall progress percentage (0-100)
     pub progress_pct: f64,
 }
@@ -442,6 +444,7 @@ impl PlanModeProgressEvent {
             step_id: None,
             step_status: None,
             error: None,
+            step_output: None,
             progress_pct,
         }
     }
@@ -461,6 +464,7 @@ impl PlanModeProgressEvent {
             step_id: Some(step_id.to_string()),
             step_status: Some("running".to_string()),
             error: None,
+            step_output: None,
             progress_pct,
         }
     }
@@ -470,6 +474,7 @@ impl PlanModeProgressEvent {
         current_batch: usize,
         total_batches: usize,
         step_id: &str,
+        step_output: StepOutput,
         progress_pct: f64,
     ) -> Self {
         Self {
@@ -480,6 +485,7 @@ impl PlanModeProgressEvent {
             step_id: Some(step_id.to_string()),
             step_status: Some("completed".to_string()),
             error: None,
+            step_output: Some(step_output),
             progress_pct,
         }
     }
@@ -500,6 +506,7 @@ impl PlanModeProgressEvent {
             step_id: Some(step_id.to_string()),
             step_status: Some("failed".to_string()),
             error: Some(error.to_string()),
+            step_output: None,
             progress_pct,
         }
     }
@@ -513,6 +520,7 @@ impl PlanModeProgressEvent {
             step_id: None,
             step_status: None,
             error: None,
+            step_output: None,
             progress_pct,
         }
     }
@@ -530,6 +538,7 @@ impl PlanModeProgressEvent {
             step_id: None,
             step_status: None,
             error: None,
+            step_output: None,
             progress_pct: 0.0,
         }
     }

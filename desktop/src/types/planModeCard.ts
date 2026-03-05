@@ -263,6 +263,7 @@ export interface PlanModeProgressPayload {
   stepId?: string;
   stepStatus?: string;
   error?: string;
+  stepOutput?: StepOutputData;
   progressPct: number;
 }
 

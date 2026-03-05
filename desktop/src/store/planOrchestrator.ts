@@ -305,33 +305,48 @@ async function subscribePlanProgressEvents(
     if (payload.eventType === 'step_completed' && payload.stepId) {
       const completedStepId = payload.stepId;
       const completedStepTitle = stepTitle ?? completedStepId;
-      const planStore = usePlanModeStore.getState();
-      void planStore
-        .fetchStepOutput(completedStepId, sessionId)
-        .then((stepOutput) => {
-          if (get()._runToken !== runToken) return;
-          if (!stepOutput) {
-            const latestError = usePlanModeStore.getState().error;
-            if (latestError) {
-              injectError(i18n.t('planMode:orchestrator.stepOutputLoadFailed', 'Step Output Unavailable'), latestError);
+      const stepOutputFromEvent = payload.stepOutput;
+      if (stepOutputFromEvent) {
+        injectCard('plan_step_output', {
+          stepId: completedStepId,
+          stepTitle: completedStepTitle,
+          content: stepOutputFromEvent.content,
+          format: normalizeStepOutputFormat(stepOutputFromEvent.format),
+          criteriaMet: stepOutputFromEvent.criteriaMet ?? [],
+        } satisfies PlanStepOutputCardData);
+      } else {
+        const planStore = usePlanModeStore.getState();
+        void planStore
+          .fetchStepOutput(completedStepId, sessionId)
+          .then((stepOutput) => {
+            if (get()._runToken !== runToken) return;
+            if (!stepOutput) {
+              const latestError = usePlanModeStore.getState().error;
+              // Back-compat: older backends only persist outputs after full execution.
+              if (latestError && !latestError.includes('No output for step')) {
+                injectError(
+                  i18n.t('planMode:orchestrator.stepOutputLoadFailed', 'Step Output Unavailable'),
+                  latestError,
+                );
+              }
+              return;
             }
-            return;
-          }
-          injectCard('plan_step_output', {
-            stepId: completedStepId,
-            stepTitle: completedStepTitle,
-            content: stepOutput.content,
-            format: normalizeStepOutputFormat(stepOutput.format),
-            criteriaMet: stepOutput.criteriaMet ?? [],
-          } satisfies PlanStepOutputCardData);
-        })
-        .catch((error) => {
-          if (get()._runToken !== runToken) return;
-          injectError(
-            i18n.t('planMode:orchestrator.stepOutputLoadFailed', 'Step Output Unavailable'),
-            error instanceof Error ? error.message : String(error),
-          );
-        });
+            injectCard('plan_step_output', {
+              stepId: completedStepId,
+              stepTitle: completedStepTitle,
+              content: stepOutput.content,
+              format: normalizeStepOutputFormat(stepOutput.format),
+              criteriaMet: stepOutput.criteriaMet ?? [],
+            } satisfies PlanStepOutputCardData);
+          })
+          .catch((error) => {
+            if (get()._runToken !== runToken) return;
+            injectError(
+              i18n.t('planMode:orchestrator.stepOutputLoadFailed', 'Step Output Unavailable'),
+              error instanceof Error ? error.message : String(error),
+            );
+          });
+      }
     }
 
     if (payload.eventType === 'execution_completed') {
