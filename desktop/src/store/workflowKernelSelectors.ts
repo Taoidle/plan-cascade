@@ -4,8 +4,16 @@ import type {
   WorkflowSession,
   WorkflowStatus,
 } from '../types/workflowKernel';
-
-const TERMINAL_PHASES = new Set(['idle', 'completed', 'failed', 'cancelled']);
+import {
+  isKernelLifecyclePhaseTerminal,
+  isPlanPhaseBusy,
+  isTaskPhaseBusy,
+  isWorkflowModeActive,
+  normalizePlanPhase,
+  normalizeTaskPhase,
+  type NormalizedPlanPhase,
+  type NormalizedTaskPhase,
+} from './workflowPhaseModel';
 
 export interface KernelRuntimeBase {
   phase: string;
@@ -15,11 +23,15 @@ export interface KernelRuntimeBase {
 }
 
 export interface KernelTaskRuntime extends KernelRuntimeBase {
+  normalizedPhase: NormalizedTaskPhase;
+  isBusy: boolean;
   pendingInterview: TaskInterviewSnapshot | null;
   interviewId: string | null;
 }
 
 export interface KernelPlanRuntime extends KernelRuntimeBase {
+  normalizedPhase: NormalizedPlanPhase;
+  isBusy: boolean;
   pendingClarification: PlanClarificationSnapshot | null;
 }
 
@@ -31,7 +43,7 @@ function normalizePendingPrompt(prompt: string | null | undefined): string | nul
 }
 
 export function isKernelPhaseTerminal(phase: string | null | undefined): boolean {
-  return TERMINAL_PHASES.has((phase ?? '').toLowerCase());
+  return isKernelLifecyclePhaseTerminal(phase);
 }
 
 export function isKernelRuntimeBusy(runtime: Pick<KernelRuntimeBase, 'phase' | 'isActive'>): boolean {
@@ -42,17 +54,32 @@ export function selectKernelChatRuntime(session: WorkflowSession | null): Kernel
   return {
     phase: session?.modeSnapshots.chat?.phase ?? 'ready',
     linkedSessionId: null,
-    isActive: isKernelModeActive(session, 'chat'),
+    isActive: isWorkflowModeActive({
+      mode: 'chat',
+      currentMode: session?.activeMode ?? 'chat',
+      isKernelSessionActive: session?.status === 'active',
+      phase: session?.modeSnapshots.chat?.phase ?? 'ready',
+    }),
     pendingPrompt: normalizePendingPrompt(session?.modeSnapshots.chat?.draftInput),
   };
 }
 
 export function selectKernelTaskRuntime(session: WorkflowSession | null): KernelTaskRuntime {
   const pendingInterview = session?.modeSnapshots.task?.pendingInterview ?? null;
+  const phase = session?.modeSnapshots.task?.phase ?? 'idle';
+  const normalizedPhase = normalizeTaskPhase(phase);
+  const isActive = isWorkflowModeActive({
+    mode: 'task',
+    currentMode: session?.activeMode ?? 'chat',
+    isKernelSessionActive: session?.status === 'active',
+    phase,
+  });
   return {
-    phase: session?.modeSnapshots.task?.phase ?? 'idle',
+    phase,
+    normalizedPhase,
     linkedSessionId: session?.linkedModeSessions?.task ?? null,
-    isActive: isKernelModeActive(session, 'task'),
+    isActive,
+    isBusy: isActive && isTaskPhaseBusy(phase),
     pendingPrompt: normalizePendingPrompt(pendingInterview?.question),
     pendingInterview,
     interviewId: pendingInterview?.interviewId ?? null,
@@ -61,10 +88,20 @@ export function selectKernelTaskRuntime(session: WorkflowSession | null): Kernel
 
 export function selectKernelPlanRuntime(session: WorkflowSession | null): KernelPlanRuntime {
   const pendingClarification = session?.modeSnapshots.plan?.pendingClarification ?? null;
+  const phase = session?.modeSnapshots.plan?.phase ?? 'idle';
+  const normalizedPhase = normalizePlanPhase(phase);
+  const isActive = isWorkflowModeActive({
+    mode: 'plan',
+    currentMode: session?.activeMode ?? 'chat',
+    isKernelSessionActive: session?.status === 'active',
+    phase,
+  });
   return {
-    phase: session?.modeSnapshots.plan?.phase ?? 'idle',
+    phase,
+    normalizedPhase,
     linkedSessionId: session?.linkedModeSessions?.plan ?? null,
-    isActive: isKernelModeActive(session, 'plan'),
+    isActive,
+    isBusy: isActive && isPlanPhaseBusy(phase),
     pendingPrompt: normalizePendingPrompt(pendingClarification?.question),
     pendingClarification,
   };
@@ -75,5 +112,33 @@ export function isKernelModeActive(
   mode: 'chat' | 'plan' | 'task',
   expectedStatus: WorkflowStatus = 'active',
 ): boolean {
-  return session?.status === expectedStatus && session.activeMode === mode;
+  return isWorkflowModeActive({
+    mode,
+    currentMode: session?.activeMode ?? 'chat',
+    isKernelSessionActive: session?.status === expectedStatus,
+    phase:
+      mode === 'task'
+        ? (session?.modeSnapshots.task?.phase ?? 'idle')
+        : mode === 'plan'
+          ? (session?.modeSnapshots.plan?.phase ?? 'idle')
+          : (session?.modeSnapshots.chat?.phase ?? 'ready'),
+  });
+}
+
+export interface KernelRuntimeStatus {
+  isTaskActive: boolean;
+  isPlanActive: boolean;
+  isTaskBusy: boolean;
+  isPlanBusy: boolean;
+}
+
+export function selectKernelRuntimeStatus(session: WorkflowSession | null): KernelRuntimeStatus {
+  const taskRuntime = selectKernelTaskRuntime(session);
+  const planRuntime = selectKernelPlanRuntime(session);
+  return {
+    isTaskActive: taskRuntime.isActive,
+    isPlanActive: planRuntime.isActive,
+    isTaskBusy: taskRuntime.isBusy,
+    isPlanBusy: planRuntime.isBusy,
+  };
 }

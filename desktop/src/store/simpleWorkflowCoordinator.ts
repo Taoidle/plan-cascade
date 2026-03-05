@@ -346,8 +346,69 @@ export async function submitWorkflowActionIntentViaCoordinator(
   });
 }
 
+export interface PlanEditApplyResult {
+  ok: boolean;
+  errorCode: 'intent_submit_failed' | 'apply_edit_failed' | null;
+  message: string | null;
+  session: WorkflowSession | null;
+}
+
+export interface ApplyPlanEditWithIntentParams {
+  operation: PlanEditOperation;
+  action?: string;
+  content?: string;
+  source?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export async function applyPlanEditViaCoordinator(operation: PlanEditOperation): Promise<WorkflowSession | null> {
   return useWorkflowKernelStore.getState().applyPlanEdit(operation);
+}
+
+export async function applyPlanEditWithIntent({
+  operation,
+  action,
+  content,
+  source = 'plan_card',
+  metadata,
+}: ApplyPlanEditWithIntentParams): Promise<PlanEditApplyResult> {
+  try {
+    await submitWorkflowActionIntentViaCoordinator({
+      mode: 'plan',
+      type: 'plan_edit_instruction',
+      source,
+      action: action || operation.type,
+      content: content ?? `${operation.type}:${operation.targetStepId ?? ''}`,
+      metadata: {
+        stepId: operation.targetStepId ?? null,
+        ...(metadata ?? {}),
+      },
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: 'intent_submit_failed',
+      message: error instanceof Error ? error.message : String(error),
+      session: null,
+    };
+  }
+
+  const session = await applyPlanEditViaCoordinator(operation);
+  if (!session) {
+    return {
+      ok: false,
+      errorCode: 'apply_edit_failed',
+      message: useWorkflowKernelStore.getState().error || 'Failed to apply plan edit',
+      session: null,
+    };
+  }
+
+  return {
+    ok: true,
+    errorCode: null,
+    message: null,
+    session,
+  };
 }
 
 /**

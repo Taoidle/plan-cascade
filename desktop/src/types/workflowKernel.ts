@@ -8,6 +8,34 @@ export type WorkflowMode = 'chat' | 'plan' | 'task';
 
 export type WorkflowStatus = 'active' | 'completed' | 'failed' | 'cancelled';
 
+export type TaskLifecyclePhase =
+  | 'idle'
+  | 'analyzing'
+  | 'configuring'
+  | 'interviewing'
+  | 'exploring'
+  | 'requirement_analysis'
+  | 'generating_prd'
+  | 'reviewing_prd'
+  | 'architecture_review'
+  | 'generating_design_doc'
+  | 'executing'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export type PlanLifecyclePhase =
+  | 'idle'
+  | 'analyzing'
+  | 'clarifying'
+  | 'clarification_error'
+  | 'planning'
+  | 'reviewing_plan'
+  | 'executing'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
 export interface ConversationTurn {
   user: string;
   assistant: string;
@@ -38,7 +66,7 @@ export interface PlanClarificationSnapshot {
 }
 
 export interface PlanState {
-  phase: string;
+  phase: PlanLifecyclePhase;
   planId: string | null;
   runningStepId: string | null;
   pendingClarification: PlanClarificationSnapshot | null;
@@ -61,7 +89,7 @@ export interface TaskInterviewSnapshot {
 }
 
 export interface TaskState {
-  phase: string;
+  phase: TaskLifecyclePhase;
   prdId: string | null;
   currentStoryId: string | null;
   interviewSessionId: string | null;

@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { WorkflowSession } from '../../../types/workflowKernel';
+import type { TaskLifecyclePhase } from '../../../types/workflowKernel';
 
 const orchestratorHarness = vi.hoisted(() => ({
   state: {
@@ -42,7 +43,7 @@ vi.mock('../../../store/simpleWorkflowCoordinator', () => ({
 
 import { PrdCard } from './PrdCard';
 
-function createTaskKernelSession(phase: string): WorkflowSession {
+function createTaskKernelSession(phase: TaskLifecyclePhase): WorkflowSession {
   const now = '2026-03-04T00:00:00Z';
   return {
     sessionId: 'kernel-task-1',

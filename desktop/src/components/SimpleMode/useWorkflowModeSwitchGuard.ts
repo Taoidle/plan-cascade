@@ -4,15 +4,9 @@ import { buildConversationHistory } from '../../lib/contextBridge';
 import { useExecutionStore } from '../../store/execution';
 import { switchModeSafely } from '../../store/simpleWorkflowCoordinator';
 import type { HandoffContextBundle, WorkflowMode, WorkflowSession } from '../../types/workflowKernel';
+import { resolveModeSwitchBlockReasonFromKernel, type ModeSwitchBlockReason } from '../../store/workflowPhaseModel';
 
 type ToastLevel = 'info' | 'success' | 'error';
-
-type ModeSwitchBlockReason =
-  | 'running_execution'
-  | 'task_workflow_active'
-  | 'plan_workflow_active'
-  | 'structured_question_pending'
-  | null;
 
 interface UseWorkflowModeSwitchGuardParams {
   workflowMode: WorkflowMode;
@@ -40,28 +34,6 @@ interface UseWorkflowModeSwitchGuardResult {
   handleModeSwitchDialogOpenChange: (open: boolean) => void;
 }
 
-const ACTIVE_TASK_PHASES = new Set([
-  'analyzing',
-  'configuring',
-  'interviewing',
-  'exploring',
-  'requirement_analysis',
-  'generating_prd',
-  'reviewing_prd',
-  'architecture_review',
-  'generating_design_doc',
-  'executing',
-]);
-
-const ACTIVE_PLAN_PHASES = new Set([
-  'analyzing',
-  'clarifying',
-  'clarification_error',
-  'planning',
-  'reviewing_plan',
-  'executing',
-]);
-
 export function resolveModeSwitchBlockReason(params: {
   isRunning: boolean;
   workflowMode: WorkflowMode;
@@ -72,28 +44,7 @@ export function resolveModeSwitchBlockReason(params: {
   hasStructuredInterviewQuestion: boolean;
   hasPlanClarifyQuestion: boolean;
 }): ModeSwitchBlockReason {
-  if (params.hasStructuredInterviewQuestion || params.hasPlanClarifyQuestion) {
-    return 'structured_question_pending';
-  }
-  if (params.isRunning) {
-    return 'running_execution';
-  }
-
-  const taskActive =
-    params.isTaskWorkflowActive ||
-    (params.workflowMode === 'task' && ACTIVE_TASK_PHASES.has((params.workflowPhase || '').toLowerCase()));
-  if (taskActive) {
-    return 'task_workflow_active';
-  }
-
-  const planActive =
-    params.isPlanWorkflowActive ||
-    (params.workflowMode === 'plan' && ACTIVE_PLAN_PHASES.has((params.planPhase || '').toLowerCase()));
-  if (planActive) {
-    return 'plan_workflow_active';
-  }
-
-  return null;
+  return resolveModeSwitchBlockReasonFromKernel(params);
 }
 
 export function useWorkflowModeSwitchGuard({

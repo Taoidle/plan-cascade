@@ -17,7 +17,7 @@ import { WorkspaceTreeSidebar } from './WorkspaceTreeSidebar';
 import { EdgeCollapseButton } from './EdgeCollapseButton';
 import { BottomStatusBar } from './BottomStatusBar';
 import { ChatToolbar } from './ChatToolbar';
-import { TabbedRightPanel, type RightPanelTab } from './TabbedRightPanel';
+import { TabbedRightPanel } from './TabbedRightPanel';
 import { useExecutionStore } from '../../store/execution';
 import { useSettingsStore } from '../../store/settings';
 import { useWorkflowOrchestratorStore } from '../../store/workflowOrchestrator';
@@ -27,14 +27,9 @@ import { useGitStore } from '../../store/git';
 import { useFileChangesStore } from '../../store/fileChanges';
 import { useToolPermissionStore } from '../../store/toolPermission';
 import { useAgentsStore } from '../../store/agents';
+import { useWorkflowObservabilityStore } from '../../store/workflowObservability';
 import { createFileChangeCardBridge } from '../../lib/fileChangeCardBridge';
 import { listenOpenAIChanges } from '../../lib/simpleModeNavigation';
-import {
-  captureElementToBlob,
-  blobToBase64,
-  saveBinaryWithDialog,
-  localTimestampForFilename,
-} from '../../lib/exportUtils';
 import { useToast } from '../shared/Toast';
 import { useContextSourcesStore } from '../../store/contextSources';
 import { ChatTranscript } from './ChatTranscript';
@@ -52,10 +47,12 @@ import { SimplePanelLayout } from './SimplePanelLayout';
 import { SimpleInputSection } from './SimpleInputSection';
 import { SimpleInputComposer } from './SimpleInputComposer';
 import { WorkflowModeSwitchDialog } from './WorkflowModeSwitchDialog';
-import { useWorkflowModeSwitchGuard } from './useWorkflowModeSwitchGuard';
-import { useWorkflowKernelSessionBridge } from './useWorkflowKernelSessionBridge';
 import { useSimpleInputRouting } from './useSimpleInputRouting';
-import { useQueuedChatMessages } from './useQueuedChatMessages';
+import { useSimpleExport } from './useSimpleExport';
+import { useSimplePanelState } from './useSimplePanelState';
+import { useSimpleModeSwitch } from './useSimpleModeSwitch';
+import { useSimpleKernelSession } from './useSimpleKernelSession';
+import { useSimpleQueueRuntime } from './useSimpleQueueRuntime';
 import { buildConversationHistory } from '../../lib/contextBridge';
 import {
   cancelActiveWorkflow,
@@ -64,11 +61,17 @@ import {
 } from '../../store/simpleWorkflowCoordinator';
 import type { WorkflowMode } from '../../types/workflowKernel';
 import {
-  isKernelRuntimeBusy,
   selectKernelChatRuntime,
   selectKernelPlanRuntime,
+  selectKernelRuntimeStatus,
   selectKernelTaskRuntime,
 } from '../../store/workflowKernelSelectors';
+import {
+  isPlanPhaseBusy,
+  isTaskPhaseBusy,
+  isWorkflowModeActive,
+  markUnknownPhaseForReporting,
+} from '../../store/workflowPhaseModel';
 
 interface CommandResponse<T> {
   success: boolean;
@@ -78,14 +81,8 @@ interface CommandResponse<T> {
 
 const MAX_QUEUED_CHAT_MESSAGES = 20;
 const TOKEN_ESTIMATE_DEBOUNCE_MS = 180;
-const RIGHT_PANEL_WIDTH_STORAGE_PREFIX = 'simple_mode_right_panel_width_v1:';
-const DEFAULT_RIGHT_PANEL_WIDTH = 620;
 const MIN_RIGHT_PANEL_WIDTH = 420;
 const MAX_RIGHT_PANEL_WIDTH = 960;
-
-function rightPanelWidthStorageKey(workspacePath: string | null): string {
-  return `${RIGHT_PANEL_WIDTH_STORAGE_PREFIX}${workspacePath || '__default_workspace__'}`;
-}
 
 export function SimpleModeShell() {
   const { t } = useTranslation('simpleMode');
@@ -138,13 +135,7 @@ export function SimpleModeShell() {
   const autoPanelHoverEnabled = useSettingsStore((s) => s.autoPanelHoverEnabled);
 
   const [description, setDescription] = useState('');
-  const [leftPanelHoverExpanded, setLeftPanelHoverExpanded] = useState(false);
-  const [rightPanelHoverExpanded, setRightPanelHoverExpanded] = useState(false);
-  const [rightPanelOpen, setRightPanelOpen] = useState(false);
-  const [rightPanelWidth, setRightPanelWidth] = useState(DEFAULT_RIGHT_PANEL_WIDTH);
-  const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>('output');
   const [workflowMode, setWorkflowMode] = useState<WorkflowMode>('chat');
-  const [supportsPointerHover, setSupportsPointerHover] = useState(false);
   const [tokenEstimate, setTokenEstimate] = useState<PromptTokenEstimateResult | null>(null);
   const [isEstimatingTokenBudget, setIsEstimatingTokenBudget] = useState(false);
   const [promptTokenBudget, setPromptTokenBudget] = useState(DEFAULT_PROMPT_TOKEN_BUDGET);
@@ -153,10 +144,27 @@ export function SimpleModeShell() {
   const inputBoxRef = useRef<InputBoxHandle>(null);
   // Ref for ChatTranscript scroll container (used for image export)
   const chatScrollRef = useRef<HTMLDivElement>(null);
-  const [isCapturing, setIsCapturing] = useState(false);
   const leftHoverTimerRef = useRef<number | null>(null);
   const rightHoverTimerRef = useRef<number | null>(null);
   const rightPanelResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const {
+    leftPanelHoverExpanded,
+    rightPanelHoverExpanded,
+    rightPanelOpen,
+    rightPanelWidth,
+    rightPanelTab,
+    supportsPointerHover,
+    setLeftPanelHoverExpanded,
+    setRightPanelHoverExpanded,
+    setRightPanelOpen,
+    setRightPanelWidth,
+    setRightPanelTab,
+  } = useSimplePanelState(workspacePath);
+  const { isCapturing, handleExportImage } = useSimpleExport({
+    chatScrollRef,
+    showToast,
+    t,
+  });
 
   const workflowKernelSessionId = useWorkflowKernelStore((s) => s.sessionId);
   const workflowKernelSession = useWorkflowKernelStore((s) => s.session);
@@ -170,7 +178,7 @@ export function SimpleModeShell() {
 
   const isRunning = simpleController.isRunning;
 
-  const { clearPersistedWorkflowKernelSessionId } = useWorkflowKernelSessionBridge({
+  const { clearPersistedWorkflowKernelSessionId } = useSimpleKernelSession({
     workspacePath,
     workflowMode,
     workflowKernelSessionId,
@@ -187,29 +195,6 @@ export function SimpleModeShell() {
     };
   }, [initialize, cleanup]);
 
-  useEffect(() => {
-    if (typeof localStorage === 'undefined') return;
-    const stored = localStorage.getItem(rightPanelWidthStorageKey(workspacePath));
-    if (!stored) return;
-    const parsed = Number.parseInt(stored, 10);
-    if (!Number.isFinite(parsed)) return;
-    setRightPanelWidth(Math.max(MIN_RIGHT_PANEL_WIDTH, Math.min(MAX_RIGHT_PANEL_WIDTH, parsed)));
-  }, [workspacePath]);
-
-  useEffect(() => {
-    if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(rightPanelWidthStorageKey(workspacePath), String(Math.round(rightPanelWidth)));
-  }, [workspacePath, rightPanelWidth]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
-    const media = window.matchMedia('(hover: hover) and (pointer: fine)');
-    const handleChange = () => setSupportsPointerHover(media.matches);
-    handleChange();
-    media.addEventListener('change', handleChange);
-    return () => media.removeEventListener('change', handleChange);
-  }, []);
-
   // Handle navigation requests coming from chat cards.
   useEffect(() => {
     return listenOpenAIChanges(({ turnIndex }) => {
@@ -221,7 +206,7 @@ export function SimpleModeShell() {
         useFileChangesStore.getState().selectTurn(turnIndex);
       }
     });
-  }, []);
+  }, [setRightPanelHoverExpanded, setRightPanelOpen, setRightPanelTab]);
 
   const prevPathRef = useRef(workspacePath);
   useEffect(() => {
@@ -282,6 +267,7 @@ export function SimpleModeShell() {
   const kernelChatRuntime = useMemo(() => selectKernelChatRuntime(workflowKernelSession), [workflowKernelSession]);
   const kernelTaskRuntime = useMemo(() => selectKernelTaskRuntime(workflowKernelSession), [workflowKernelSession]);
   const kernelPlanRuntime = useMemo(() => selectKernelPlanRuntime(workflowKernelSession), [workflowKernelSession]);
+  const kernelRuntimeStatus = useMemo(() => selectKernelRuntimeStatus(workflowKernelSession), [workflowKernelSession]);
   const workflowKernelTaskPhase = kernelTaskRuntime.phase;
   const workflowKernelPlanPhase = kernelPlanRuntime.phase;
   const workflowKernelChatPhase = kernelChatRuntime.phase;
@@ -363,11 +349,65 @@ export function SimpleModeShell() {
   const hasTextInterviewQuestion = taskInterviewingPhase && !!taskPendingQuestion && !hasStructuredInterviewQuestion;
   const hasStructuredPlanClarifyQuestion = planClarifyingPhase && !!planPendingQuestion;
   const hasPlanClarifyQuestion = planClarifyingPhase && !!planPendingQuestion;
-  const isTaskWorkflowActiveForSwitchGuard = workflowMode === 'task' && isKernelRuntimeBusy(kernelTaskRuntime);
-  const isPlanWorkflowActiveForSwitchGuard = workflowMode === 'plan' && isKernelRuntimeBusy(kernelPlanRuntime);
+  const isTaskWorkflowActiveForSwitchGuard = workflowMode === 'task' && kernelRuntimeStatus.isTaskActive;
+  const isPlanWorkflowActiveForSwitchGuard = workflowMode === 'plan' && kernelRuntimeStatus.isPlanActive;
   const effectiveTaskPhaseForInput = taskInterviewingPhase ? 'interviewing' : workflowPhase;
   const effectivePlanPhaseForInput = planClarifyingPhase ? 'clarifying' : planPhase;
   const isInterviewSubmitting = taskInterviewingPhase && taskPendingQuestion === null;
+  const recordInteractiveActionFailure = useWorkflowObservabilityStore((s) => s.recordInteractiveActionFailure);
+
+  useEffect(() => {
+    if (!workflowKernelSession) return;
+    if (
+      markUnknownPhaseForReporting('task', workflowPhase) &&
+      isWorkflowModeActive({
+        mode: 'task',
+        currentMode: workflowKernelSession.activeMode,
+        isKernelSessionActive: workflowKernelSession.status === 'active',
+        phase: workflowPhase,
+      })
+    ) {
+      void recordInteractiveActionFailure({
+        card: 'workflow_phase',
+        action: 'unknown_phase_detected',
+        errorCode: 'unknown_task_phase',
+        message: `Unknown task phase: ${workflowPhase}`,
+        mode: 'task',
+        kernelSessionId: workflowKernelSession.sessionId,
+        modeSessionId: kernelTaskRuntime.linkedSessionId,
+        phaseBefore: workflowPhase,
+        phaseAfter: workflowPhase,
+      });
+    }
+    if (
+      markUnknownPhaseForReporting('plan', planPhase) &&
+      isWorkflowModeActive({
+        mode: 'plan',
+        currentMode: workflowKernelSession.activeMode,
+        isKernelSessionActive: workflowKernelSession.status === 'active',
+        phase: planPhase,
+      })
+    ) {
+      void recordInteractiveActionFailure({
+        card: 'workflow_phase',
+        action: 'unknown_phase_detected',
+        errorCode: 'unknown_plan_phase',
+        message: `Unknown plan phase: ${planPhase}`,
+        mode: 'plan',
+        kernelSessionId: workflowKernelSession.sessionId,
+        modeSessionId: kernelPlanRuntime.linkedSessionId,
+        phaseBefore: planPhase,
+        phaseAfter: planPhase,
+      });
+    }
+  }, [
+    workflowKernelSession,
+    workflowPhase,
+    planPhase,
+    kernelTaskRuntime.linkedSessionId,
+    kernelPlanRuntime.linkedSessionId,
+    recordInteractiveActionFailure,
+  ]);
 
   // Tool permission state
   const permissionRequest = useToolPermissionStore((s) => s.pendingRequest);
@@ -462,7 +502,7 @@ export function SimpleModeShell() {
     moveQueuedChatMessage,
     setQueuedChatMessagePriority,
     retryQueuedChatMessage,
-  } = useQueuedChatMessages({
+  } = useSimpleQueueRuntime({
     workspacePath,
     sessionId: queueSessionId ?? '',
     workflowMode,
@@ -472,19 +512,10 @@ export function SimpleModeShell() {
     isAnalyzingStrategy,
     permissionRequest,
     isTaskWorkflowBusy:
-      workflowMode === 'task' &&
-      (effectiveTaskPhaseForInput === 'analyzing' ||
-        effectiveTaskPhaseForInput === 'exploring' ||
-        effectiveTaskPhaseForInput === 'requirement_analysis' ||
-        effectiveTaskPhaseForInput === 'generating_prd' ||
-        effectiveTaskPhaseForInput === 'generating_design_doc' ||
-        effectiveTaskPhaseForInput === 'executing'),
+      workflowMode === 'task' && kernelRuntimeStatus.isTaskActive && isTaskPhaseBusy(effectiveTaskPhaseForInput),
     isPlanWorkflowBusy:
       workflowMode === 'plan' &&
-      (planIsBusy ||
-        effectivePlanPhaseForInput === 'analyzing' ||
-        effectivePlanPhaseForInput === 'planning' ||
-        effectivePlanPhaseForInput === 'executing'),
+      (planIsBusy || (kernelRuntimeStatus.isPlanActive && isPlanPhaseBusy(effectivePlanPhaseForInput))),
     attachments,
     addAttachment,
     clearAttachments,
@@ -501,7 +532,7 @@ export function SimpleModeShell() {
     handleWorkflowModeChange,
     handleConfirmModeSwitch,
     handleModeSwitchDialogOpenChange,
-  } = useWorkflowModeSwitchGuard({
+  } = useSimpleModeSwitch({
     workflowMode,
     isRunning,
     workflowPhase,
@@ -667,6 +698,7 @@ export function SimpleModeShell() {
       resetPlanWorkflow,
       resetWorkflowKernel,
       openWorkflowKernelSession,
+      setRightPanelOpen,
     ],
   );
 
@@ -729,76 +761,25 @@ export function SimpleModeShell() {
     t,
   ]);
 
-  const handleExportImage = useCallback(async () => {
-    const el = chatScrollRef.current;
-    if (!el) return;
-
-    const previousScrollTop = el.scrollTop;
-    const waitForNextFrame = () =>
-      new Promise<void>((resolve) => {
-        requestAnimationFrame(() => resolve());
-      });
-
-    setIsCapturing(true);
-    try {
-      await waitForNextFrame();
-      await waitForNextFrame();
-      const isDark = document.documentElement.classList.contains('dark');
-      const blob = await captureElementToBlob(el, 'png', {
-        backgroundColor: isDark ? '#111827' : '#ffffff',
-      });
-      const base64 = await blobToBase64(blob);
-      const ts = localTimestampForFilename();
-      const saved = await saveBinaryWithDialog(`chat-export-${ts}.png`, base64);
-      if (saved) {
-        showToast(t('chatToolbar.exportImageSuccess', { defaultValue: 'Image exported successfully' }), 'success');
-      }
-    } catch (err) {
-      console.error('Export image failed:', err);
-      showToast(t('chatToolbar.exportImageFailed', { defaultValue: 'Failed to export image' }), 'error');
-    } finally {
-      setIsCapturing(false);
-      requestAnimationFrame(() => {
-        if (chatScrollRef.current) {
-          chatScrollRef.current.scrollTop = previousScrollTop;
-        }
-      });
-    }
-  }, [showToast, t]);
-
   const kernelStatus = workflowKernelSession?.status ?? 'active';
   const kernelSessionMode = workflowKernelSession?.activeMode ?? workflowMode;
   const hasActiveKernelSession = kernelStatus === 'active';
-  const isTaskWorkflowActive =
-    workflowMode === 'task' &&
-    kernelSessionMode === 'task' &&
-    hasActiveKernelSession &&
-    workflowPhase !== 'idle' &&
-    workflowPhase !== 'completed' &&
-    workflowPhase !== 'failed' &&
-    workflowPhase !== 'cancelled';
-  const isPlanWorkflowActive =
-    workflowMode === 'plan' &&
-    kernelSessionMode === 'plan' &&
-    hasActiveKernelSession &&
-    planPhase !== 'idle' &&
-    planPhase !== 'completed' &&
-    planPhase !== 'failed' &&
-    planPhase !== 'cancelled';
+  const isTaskWorkflowActive = isWorkflowModeActive({
+    mode: 'task',
+    currentMode: kernelSessionMode,
+    isKernelSessionActive: hasActiveKernelSession,
+    phase: workflowPhase,
+  });
+  const isPlanWorkflowActive = isWorkflowModeActive({
+    mode: 'plan',
+    currentMode: kernelSessionMode,
+    isKernelSessionActive: hasActiveKernelSession,
+    phase: planPhase,
+  });
   const isTaskWorkflowBusy =
-    workflowMode === 'task' &&
-    (effectiveTaskPhaseForInput === 'analyzing' ||
-      effectiveTaskPhaseForInput === 'exploring' ||
-      effectiveTaskPhaseForInput === 'requirement_analysis' ||
-      effectiveTaskPhaseForInput === 'generating_prd' ||
-      effectiveTaskPhaseForInput === 'generating_design_doc' ||
-      effectiveTaskPhaseForInput === 'executing');
+    workflowMode === 'task' && isTaskWorkflowActive && isTaskPhaseBusy(effectiveTaskPhaseForInput);
   const isPlanWorkflowBusy =
-    workflowMode === 'plan' &&
-    (planIsBusy ||
-      effectivePlanPhaseForInput === 'analyzing' ||
-      effectivePlanPhaseForInput === 'planning' ||
-      effectivePlanPhaseForInput === 'executing');
+    workflowMode === 'plan' && isPlanWorkflowActive && (planIsBusy || isPlanPhaseBusy(effectivePlanPhaseForInput));
   const isStructuredWorkflowCancelling =
     (workflowMode === 'task' && taskWorkflowCancelling) || (workflowMode === 'plan' && planWorkflowCancelling);
   const canQueueWhileRunning =
@@ -854,7 +835,7 @@ export function SimpleModeShell() {
     if (!hoverPanelsEnabled || !sidebarCollapsed) return;
     clearLeftHoverTimer();
     setLeftPanelHoverExpanded(true);
-  }, [hoverPanelsEnabled, sidebarCollapsed, clearLeftHoverTimer]);
+  }, [hoverPanelsEnabled, sidebarCollapsed, clearLeftHoverTimer, setLeftPanelHoverExpanded]);
 
   const scheduleCloseLeftHoverPanel = useCallback(() => {
     if (!hoverPanelsEnabled || !sidebarCollapsed) return;
@@ -863,13 +844,13 @@ export function SimpleModeShell() {
       setLeftPanelHoverExpanded(false);
       leftHoverTimerRef.current = null;
     }, 180);
-  }, [hoverPanelsEnabled, sidebarCollapsed, clearLeftHoverTimer]);
+  }, [hoverPanelsEnabled, sidebarCollapsed, clearLeftHoverTimer, setLeftPanelHoverExpanded]);
 
   const openRightHoverPanel = useCallback(() => {
     if (!hoverPanelsEnabled || rightPanelOpen) return;
     clearRightHoverTimer();
     setRightPanelHoverExpanded(true);
-  }, [hoverPanelsEnabled, rightPanelOpen, clearRightHoverTimer]);
+  }, [hoverPanelsEnabled, rightPanelOpen, clearRightHoverTimer, setRightPanelHoverExpanded]);
 
   const scheduleCloseRightHoverPanel = useCallback(() => {
     if (!hoverPanelsEnabled || rightPanelOpen) return;
@@ -878,7 +859,7 @@ export function SimpleModeShell() {
       setRightPanelHoverExpanded(false);
       rightHoverTimerRef.current = null;
     }, 180);
-  }, [hoverPanelsEnabled, rightPanelOpen, clearRightHoverTimer]);
+  }, [hoverPanelsEnabled, rightPanelOpen, clearRightHoverTimer, setRightPanelHoverExpanded]);
 
   useEffect(() => {
     if (hoverPanelsEnabled) return;
@@ -886,7 +867,13 @@ export function SimpleModeShell() {
     clearRightHoverTimer();
     setLeftPanelHoverExpanded(false);
     setRightPanelHoverExpanded(false);
-  }, [hoverPanelsEnabled, clearLeftHoverTimer, clearRightHoverTimer]);
+  }, [
+    hoverPanelsEnabled,
+    clearLeftHoverTimer,
+    clearRightHoverTimer,
+    setLeftPanelHoverExpanded,
+    setRightPanelHoverExpanded,
+  ]);
 
   useEffect(
     () => () => {
@@ -913,7 +900,14 @@ export function SimpleModeShell() {
     } else {
       setRightPanelTab('output');
     }
-  }, [isRightPanelOpen, rightPanelOpen, rightPanelTab]);
+  }, [
+    isRightPanelOpen,
+    rightPanelOpen,
+    rightPanelTab,
+    setRightPanelHoverExpanded,
+    setRightPanelOpen,
+    setRightPanelTab,
+  ]);
 
   const clampRightPanelWidth = useCallback((value: number) => {
     const viewportLimit =
@@ -948,7 +942,7 @@ export function SimpleModeShell() {
       window.addEventListener('mouseup', handleMouseUp);
       event.preventDefault();
     },
-    [clampRightPanelWidth, isRightPanelOpen, rightPanelWidth],
+    [clampRightPanelWidth, isRightPanelOpen, rightPanelWidth, setRightPanelWidth],
   );
 
   useEffect(() => {

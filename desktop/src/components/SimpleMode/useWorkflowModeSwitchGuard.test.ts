@@ -54,6 +54,20 @@ describe('useWorkflowModeSwitchGuard', () => {
     expect(reason).toBe('structured_question_pending');
   });
 
+  it('treats unknown plan phase as active and blocks switching conservatively', () => {
+    const reason = resolveModeSwitchBlockReason({
+      isRunning: false,
+      workflowMode: 'plan',
+      workflowPhase: 'idle',
+      planPhase: 'unknown_phase',
+      isTaskWorkflowActive: false,
+      isPlanWorkflowActive: false,
+      hasStructuredInterviewQuestion: false,
+      hasPlanClarifyQuestion: false,
+    });
+    expect(reason).toBe('plan_workflow_active');
+  });
+
   it('opens confirmation dialog and blocks direct mode switch when guarded', () => {
     const params = createBaseParams();
     const { result } = renderHook(() => useWorkflowModeSwitchGuard({ ...params, workflowPhase: 'analyzing' }));

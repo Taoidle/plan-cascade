@@ -25,7 +25,7 @@ import {
   type StoryQualityGateResults,
   type PrdFeedbackApplySummary,
 } from './taskMode';
-import { useSpecInterviewStore, type InterviewQuestion, type InterviewSession } from './specInterview';
+import { useSpecInterviewStore, type InterviewQuestion } from './specInterview';
 import { useSettingsStore } from './settings';
 import { useWorkflowKernelStore } from './workflowKernel';
 import { selectKernelTaskRuntime } from './workflowKernelSelectors';
@@ -36,21 +36,29 @@ import { parseWorkflowConfigNatural } from '../lib/workflowConfigNaturalParser';
 import { failResult, okResult, type ActionResult } from '../types/actionResult';
 import type { CrossModeConversationTurn } from '../types/crossModeContext';
 import { applyArchitectureModifications } from './workflowOrchestrator/architectureModifications';
+import {
+  injectWorkflowCard as injectCard,
+  injectWorkflowError as injectError,
+  injectWorkflowInfo as injectInfo,
+} from './workflowOrchestrator/cardInjection';
+import { runExplorePhase } from './workflowOrchestrator/phases/explorePhase';
+import { runRequirementPhase } from './workflowOrchestrator/phases/requirementPhase';
+import { runArchitecturePhase } from './workflowOrchestrator/phases/architecturePhase';
+import { runDesignDocAndExecutionPhase } from './workflowOrchestrator/phases/executionPhase';
+import { runPrdPhase } from './workflowOrchestrator/phases/prdPhase';
+import { runInterviewPhase } from './workflowOrchestrator/phases/interviewPhase';
+import type { WorkflowPhaseRuntime } from './workflowOrchestrator/phases/runtime';
 import type {
   WorkflowPhase,
   WorkflowConfig,
-  CardPayload,
   InterviewQuestionCardData,
   StrategyCardData,
   ConfigCardData,
   PrdCardData,
-  DesignDocCardData,
   ExplorationCardData,
   ExecutionUpdateCardData,
   GateResultCardData,
   CompletionReportCardData,
-  WorkflowInfoData,
-  WorkflowErrorData,
   InterviewAnswerCardData,
   RequirementAnalysisCardData,
   ArchitectureReviewCardData,
@@ -194,39 +202,8 @@ const DEFAULT_STATE = {
   _completionCardInjectedRunToken: null as number | null,
 };
 
-// ============================================================================
-// Helpers
-// ============================================================================
-
-let _cardCounter = 0;
-
-function nextCardId(): string {
-  return `card-${++_cardCounter}-${Date.now()}`;
-}
-
 function isRunActive(get: GetFn, runToken: number): boolean {
   return get()._runToken === runToken;
-}
-
-/** Inject a card message into the chat transcript */
-function injectCard<T extends CardPayload['cardType']>(cardType: T, data: CardPayload['data'], interactive = false) {
-  const payload: CardPayload = {
-    cardType,
-    cardId: nextCardId(),
-    data,
-    interactive,
-  };
-  useExecutionStore.getState().appendCard(payload);
-}
-
-/** Inject an info-level workflow message */
-function injectInfo(message: string, level: WorkflowInfoData['level'] = 'info') {
-  injectCard('workflow_info', { message, level } as WorkflowInfoData);
-}
-
-/** Inject a workflow error card */
-function injectError(title: string, description: string, suggestedFix: string | null = null) {
-  injectCard('workflow_error', { title, description, suggestedFix } as WorkflowErrorData);
 }
 
 /** Map backend InterviewQuestion to card data */
@@ -344,6 +321,10 @@ function normalizeExplorationCardData(data: ExplorationCardData): ExplorationCar
   };
 }
 
+function synthesizePlanningTurnForPrdPhase(taskDescription: string, strategyAnalysis: unknown, prd: TaskPrd) {
+  synthesizePlanningTurn(taskDescription, (strategyAnalysis as StrategyAnalysis | null) ?? null, prd);
+}
+
 function buildCompletionReportDataFromReport(report: ExecutionReport): CompletionReportCardData {
   return {
     success: report.success,
@@ -396,7 +377,7 @@ function buildPrdFeedbackSummaryMessage(summary: PrdFeedbackApplySummary): strin
 
 async function syncKernelTaskPhase(
   phase: Extract<WorkflowPhase, 'requirement_analysis' | 'architecture_review' | 'generating_design_doc'>,
-  reasonCode: string,
+  reasonCode?: string,
 ): Promise<void> {
   const transitionAndSubmitInput = useWorkflowKernelStore.getState().transitionAndSubmitInput;
   const session = useWorkflowKernelStore.getState().session;
@@ -409,7 +390,7 @@ async function syncKernelTaskPhase(
       metadata: {
         mode: 'task',
         phase,
-        reasonCode,
+        reasonCode: reasonCode ?? null,
       },
     });
   } catch {
@@ -566,6 +547,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   confirmConfig: async (overrides?: Partial<WorkflowConfig>) => {
     const state = get();
     const runToken = state._runToken;
+    const phaseRuntime = buildPhaseRuntime(set, get, runToken);
     const config = overrides ? { ...state.config, ...overrides } : state.config;
     if (!isRunActive(get, runToken)) {
       return failResult('stale_run_token', 'Configuration request was superseded');
@@ -574,131 +556,43 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
     try {
       // Always explore first (exploration provides context for interview BA)
-      await explorePhase(set, get, runToken);
+      await runExplorePhase(phaseRuntime, { normalizeExplorationCardData });
       if (!isRunActive(get, runToken)) {
         return failResult('stale_run_token', 'Configuration request was superseded');
       }
 
       if (config.specInterviewEnabled) {
-        // Start interview flow (BA now has exploration context)
-        if (!isRunActive(get, runToken)) {
-          return failResult('stale_run_token', 'Configuration request was superseded');
-        }
-        set({ phase: 'interviewing' });
-
-        const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
-        if (!isRunActive(get, runToken)) {
-          return failResult('stale_run_token', 'Configuration request was superseded');
-        }
-        const interviewResolved = resolvePhaseAgent('plan_interview');
-
-        injectCard('persona_indicator', {
-          role: 'BusinessAnalyst',
-          displayName: 'Business Analyst',
-          phase: 'interviewing',
-          model: formatModelDisplay(interviewResolved),
-        });
-        injectInfo(i18n.t('workflow.orchestrator.startingInterview', { ns: 'simpleMode' }), 'info');
-
-        const settings = useSettingsStore.getState();
-        const workspacePath = settings.workspacePath;
-        const { explorationResult } = get();
-        const interviewConfig = {
-          description: state.taskDescription,
-          flow_level: config.flowLevel,
-          max_questions: config.flowLevel === 'quick' ? 10 : config.flowLevel === 'full' ? 25 : 18,
-          first_principles: false,
-          project_path: workspacePath,
-          exploration_context: explorationResult ? JSON.stringify(explorationResult) : null,
-          task_session_id: state.sessionId,
-          locale: i18n.language,
-        };
-
-        // Set LLM provider settings so specInterview store passes them to backend
-        if (interviewResolved.provider) {
-          useSpecInterviewStore.getState().setProviderSettings({
-            provider: interviewResolved.provider,
-            model: interviewResolved.model || undefined,
-            baseUrl: interviewResolved.baseUrl || undefined,
-          });
-        }
-
-        // Retry with exponential backoff if backend not yet initialized (race with init_app)
-        const maxRetries = 5;
-        const baseDelay = 500;
-        let session: InterviewSession | null = null;
-        for (let attempt = 0; attempt < maxRetries; attempt++) {
-          session = await useSpecInterviewStore.getState().startInterview(interviewConfig);
-          if (!isRunActive(get, runToken)) {
-            return failResult('stale_run_token', 'Configuration request was superseded');
-          }
-          if (session) break;
-          const interviewError = useSpecInterviewStore.getState().error || '';
-          if (interviewError.includes('not initialized') && attempt < maxRetries - 1) {
-            await new Promise((r) => setTimeout(r, baseDelay * Math.pow(2, attempt)));
-            if (!isRunActive(get, runToken)) {
-              return failResult('stale_run_token', 'Configuration request was superseded');
-            }
-            useSpecInterviewStore.getState().clearError();
-            continue;
-          }
-          break;
-        }
-
-        if (!session) {
-          const interviewError = useSpecInterviewStore.getState().error;
-          set({ phase: 'failed', error: interviewError || 'Failed to start interview' });
-          injectError(
-            i18n.t('workflow.orchestrator.interviewFailed', { ns: 'simpleMode' }),
-            interviewError || i18n.t('workflow.orchestrator.interviewStartFailed', { ns: 'simpleMode' }),
-          );
-          return failResult('interview_start_failed', interviewError || 'Failed to start interview');
-        }
-
-        if (!isRunActive(get, runToken)) {
-          return failResult('stale_run_token', 'Configuration request was superseded');
-        }
-        set({ interviewId: session.id });
-
-        let interviewSession = session;
-        if (!interviewSession.current_question && interviewSession.status !== 'finalized') {
-          const recovered = await useSpecInterviewStore.getState().fetchState(interviewSession.id);
-          if (!isRunActive(get, runToken)) {
-            return failResult('stale_run_token', 'Configuration request was superseded');
-          }
-          if (recovered) interviewSession = recovered;
-        }
-
-        // Present first question
-        if (interviewSession.current_question) {
-          const questionData = mapInterviewQuestion(
-            interviewSession.current_question,
-            interviewSession.question_cursor + 1,
-            interviewSession.max_questions,
-          );
-          set({ pendingInterviewQuestion: questionData });
-          injectCard('interview_question', questionData, true);
-        } else {
-          injectInfo(
-            i18n.t('workflow.orchestrator.interviewQuestionUnavailable', {
-              ns: 'simpleMode',
-              defaultValue: 'Interview question unavailable, continuing with requirement analysis.',
-            }),
-            'warning',
-          );
-          await requirementAnalysisPhase(set, get, runToken);
-          if (!isRunActive(get, runToken)) {
-            return failResult('stale_run_token', 'Configuration request was superseded');
-          }
-          await generatePrdPhase(set, get, runToken);
+        const interviewResult = await runInterviewPhase(
+          phaseRuntime,
+          { flowLevel: config.flowLevel },
+          {
+            mapInterviewQuestion,
+            runRequirementPhase: async (runtime) => {
+              await runRequirementPhase(runtime, { syncKernelTaskPhase });
+            },
+            runPrdPhase: async (runtime) =>
+              runPrdPhase(runtime, {
+                toPrdCardData,
+                synthesizePlanningTurn: synthesizePlanningTurnForPrdPhase,
+              }),
+          },
+        );
+        if (!interviewResult.ok) {
+          return interviewResult;
         }
       } else {
         // Skip interview, run requirement analysis then generate PRD
-        await requirementAnalysisPhase(set, get, runToken);
+        await runRequirementPhase(phaseRuntime, { syncKernelTaskPhase });
         if (!isRunActive(get, runToken)) {
           return failResult('stale_run_token', 'Configuration request was superseded');
         }
-        await generatePrdPhase(set, get, runToken);
+        const prdResult = await runPrdPhase(phaseRuntime, {
+          toPrdCardData,
+          synthesizePlanningTurn: synthesizePlanningTurnForPrdPhase,
+        });
+        if (!prdResult.ok) {
+          return prdResult;
+        }
       }
     } catch (e) {
       if (!isRunActive(get, runToken)) {
@@ -807,9 +701,13 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
       if (compiled) {
         // Advance to requirement analysis then PRD generation
-        await requirementAnalysisPhase(set, get, runToken);
+        const phaseRuntime = buildPhaseRuntime(set, get, runToken);
+        await runRequirementPhase(phaseRuntime, { syncKernelTaskPhase });
         if (!isRunActive(get, runToken)) return;
-        await generatePrdPhase(set, get, runToken);
+        await runPrdPhase(phaseRuntime, {
+          toPrdCardData,
+          synthesizePlanningTurn: synthesizePlanningTurnForPrdPhase,
+        });
       } else {
         const error = useSpecInterviewStore.getState().error;
         set({ phase: 'failed', error: error || 'Failed to compile spec' });
@@ -847,9 +745,13 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       }),
       'warning',
     );
-    await requirementAnalysisPhase(set, get, runToken);
+    const phaseRuntime = buildPhaseRuntime(set, get, runToken);
+    await runRequirementPhase(phaseRuntime, { syncKernelTaskPhase });
     if (!isRunActive(get, runToken)) return;
-    await generatePrdPhase(set, get, runToken);
+    await runPrdPhase(phaseRuntime, {
+      toPrdCardData,
+      synthesizePlanningTurn: synthesizePlanningTurnForPrdPhase,
+    });
   },
 
   /** Skip current interview question */
@@ -892,9 +794,13 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       });
       if (!isRunActive(get, runToken)) return;
       if (compiled) {
-        await requirementAnalysisPhase(set, get, runToken);
+        const phaseRuntime = buildPhaseRuntime(set, get, runToken);
+        await runRequirementPhase(phaseRuntime, { syncKernelTaskPhase });
         if (!isRunActive(get, runToken)) return;
-        await generatePrdPhase(set, get, runToken);
+        await runPrdPhase(phaseRuntime, {
+          toPrdCardData,
+          synthesizePlanningTurn: synthesizePlanningTurnForPrdPhase,
+        });
       } else {
         const error = useSpecInterviewStore.getState().error;
         set({ phase: 'failed', error: error || 'Failed to compile spec' });
@@ -931,9 +837,13 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       }),
       'warning',
     );
-    await requirementAnalysisPhase(set, get, runToken);
+    const phaseRuntime = buildPhaseRuntime(set, get, runToken);
+    await runRequirementPhase(phaseRuntime, { syncKernelTaskPhase });
     if (!isRunActive(get, runToken)) return;
-    await generatePrdPhase(set, get, runToken);
+    await runPrdPhase(phaseRuntime, {
+      toPrdCardData,
+      synthesizePlanningTurn: synthesizePlanningTurnForPrdPhase,
+    });
   },
 
   /** Update a story field in the editable PRD */
@@ -963,7 +873,15 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
     // Non-quick flow: run architecture review (interactive — returns after injecting card)
     if (state.config.flowLevel !== 'quick') {
-      await architectureReviewPhase(set, get, prd, runToken);
+      const phaseRuntime = buildPhaseRuntime(set, get, runToken);
+      await runArchitecturePhase(phaseRuntime, prd, {
+        syncKernelTaskPhase,
+        runDesignDocAndExecutionPhase: async (runtime, runtimePrd) =>
+          runDesignDocAndExecutionPhase(runtime, runtimePrd, {
+            syncKernelTaskPhase,
+            subscribeToProgressEvents: subscribeToTaskProgressFromRuntime,
+          }),
+      });
       // Architecture review is interactive — user clicks Accept/Revise in the card.
       // The continuation happens in approveArchitecture() action.
       if (get().phase === 'failed') {
@@ -973,7 +891,11 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     }
 
     // Quick flow: skip architecture review, go straight to design doc + execution
-    await designDocAndExecutePhase(set, get, prd, runToken);
+    const phaseRuntime = buildPhaseRuntime(set, get, runToken);
+    await runDesignDocAndExecutionPhase(phaseRuntime, prd, {
+      syncKernelTaskPhase,
+      subscribeToProgressEvents: subscribeToTaskProgressFromRuntime,
+    });
     if (get().phase === 'failed') {
       return failResult('execution_start_failed', get().error || 'Task execution could not be started');
     }
@@ -1061,7 +983,11 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         return failResult('missing_prd', 'No PRD to execute after architecture approval');
       }
 
-      await designDocAndExecutePhase(set, get, prd, runToken);
+      const phaseRuntime = buildPhaseRuntime(set, get, runToken);
+      await runDesignDocAndExecutionPhase(phaseRuntime, prd, {
+        syncKernelTaskPhase,
+        subscribeToProgressEvents: subscribeToTaskProgressFromRuntime,
+      });
       if (get().phase === 'failed') {
         return failResult('execution_start_failed', get().error || 'Task execution could not be started');
       }
@@ -1187,522 +1113,18 @@ type SetFn = (
 ) => void;
 type GetFn = () => WorkflowOrchestratorState;
 
-/**
- * Explore project codebase (Senior Engineer persona).
- *
- * For quick flow: skips exploration entirely.
- * For standard/full flow: runs project exploration, injects results as card.
- */
-async function explorePhase(set: SetFn, get: GetFn, runToken: number) {
-  if (!isRunActive(get, runToken)) return;
-  const { config, taskDescription } = get();
-  const effectiveSessionId = resolveTaskSessionId(get, set);
-  if (!effectiveSessionId) {
-    set({ phase: 'failed', error: 'No active task session' });
-    injectError(
-      i18n.t('workflow.orchestrator.explorationFailed', { ns: 'simpleMode' }),
-      i18n.t('workflow.orchestrator.sessionMissing', {
-        ns: 'simpleMode',
-        defaultValue: 'No active task session found.',
-      }),
-    );
-    return;
-  }
-
-  // Quick flow: skip exploration entirely
-  if (config.flowLevel === 'quick') return;
-
-  set({ phase: 'exploring' });
-
-  const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
-  if (!isRunActive(get, runToken)) return;
-  const explorationResolved = resolvePhaseAgent('plan_exploration');
-
-  injectCard('persona_indicator', {
-    role: 'SeniorEngineer',
-    displayName: 'Senior Engineer',
-    phase: 'exploring',
-    model: formatModelDisplay(explorationResolved),
-  });
-  injectInfo(i18n.t('workflow.orchestrator.exploringProject', { ns: 'simpleMode' }), 'info');
-
-  try {
-    const result = await invoke<{
-      success: boolean;
-      data: ExplorationCardData | null;
-      error: string | null;
-    }>('explore_project', {
-      request: {
-        sessionId: effectiveSessionId,
-        flowLevel: config.flowLevel,
-        taskDescription,
-        provider: explorationResolved.provider || null,
-        model: explorationResolved.model || null,
-        apiKey: null,
-        baseUrl: explorationResolved.baseUrl || null,
-        locale: i18n.language,
-        contextSources: (await import('./contextSources')).useContextSourcesStore.getState().buildConfig() ?? null,
-      },
-    });
-    if (!isRunActive(get, runToken)) return;
-
-    if (result.success && result.data) {
-      const normalized = normalizeExplorationCardData(result.data);
-      set({ explorationResult: normalized });
-      injectCard('exploration_card', normalized);
-    } else {
-      injectInfo(i18n.t('workflow.orchestrator.explorationFailed', { ns: 'simpleMode' }), 'warning');
-    }
-  } catch {
-    injectInfo(i18n.t('workflow.orchestrator.explorationFailed', { ns: 'simpleMode' }), 'warning');
-  }
+function buildPhaseRuntime(set: SetFn, get: GetFn, runToken: number): WorkflowPhaseRuntime {
+  return {
+    set: set as unknown as WorkflowPhaseRuntime['set'],
+    get: get as unknown as WorkflowPhaseRuntime['get'],
+    runToken,
+    isRunActive: isRunActive as WorkflowPhaseRuntime['isRunActive'],
+    resolveTaskSessionId: resolveTaskSessionId as WorkflowPhaseRuntime['resolveTaskSessionId'],
+  };
 }
 
-/**
- * Requirement analysis phase (Product Manager persona).
- *
- * Runs the PM expert-formatter pipeline to analyze requirements
- * from task description, interview results, and exploration context.
- */
-async function requirementAnalysisPhase(set: SetFn, get: GetFn, runToken: number) {
-  if (!isRunActive(get, runToken)) return;
-  const { config, taskDescription, explorationResult } = get();
-  const effectiveSessionId = resolveTaskSessionId(get, set);
-  if (!effectiveSessionId) {
-    set({ phase: 'failed', error: 'No active task session' });
-    injectError(
-      i18n.t('workflow.orchestrator.requirementAnalysisFailed', { ns: 'simpleMode' }),
-      i18n.t('workflow.orchestrator.sessionMissing', {
-        ns: 'simpleMode',
-        defaultValue: 'No active task session found.',
-      }),
-    );
-    return;
-  }
-
-  // Skip for quick flow
-  if (config.flowLevel === 'quick') return;
-
-  set({ phase: 'requirement_analysis' });
-  await syncKernelTaskPhase('requirement_analysis', 'requirement_analysis_started');
-
-  const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
-  if (!isRunActive(get, runToken)) return;
-  const reqResolved = resolvePhaseAgent('plan_requirements');
-
-  injectCard('persona_indicator', {
-    role: 'ProductManager',
-    displayName: 'Product Manager',
-    phase: 'requirement_analysis',
-    model: formatModelDisplay(reqResolved),
-  });
-  injectInfo(
-    i18n.t('workflow.orchestrator.analyzingRequirements', {
-      ns: 'simpleMode',
-      defaultValue: 'Analyzing requirements...',
-    }),
-    'info',
-  );
-
-  try {
-    // Build exploration context string for the backend
-    const explorationContext = explorationResult ? JSON.stringify(explorationResult) : null;
-
-    // Get compiled spec from interview (if any)
-    const specStore = useSpecInterviewStore.getState();
-    const interviewResult = specStore.compiledSpec ? JSON.stringify(specStore.compiledSpec) : null;
-
-    const contextSources = (await import('./contextSources')).useContextSourcesStore.getState().buildConfig() ?? null;
-    const projectPath = useSettingsStore.getState().workspacePath || null;
-    const result = await invoke<{
-      success: boolean;
-      data: RequirementAnalysisCardData | null;
-      error: string | null;
-    }>('run_requirement_analysis', {
-      request: {
-        sessionId: effectiveSessionId,
-        taskDescription,
-        interviewResult,
-        explorationContext,
-        provider: reqResolved.provider || null,
-        model: reqResolved.model || null,
-        apiKey: null,
-        baseUrl: reqResolved.baseUrl || null,
-        locale: i18n.language,
-        contextSources,
-        projectPath,
-      },
-    });
-    if (!isRunActive(get, runToken)) return;
-
-    if (result.success && result.data) {
-      set({ requirementAnalysis: result.data });
-      injectCard('requirement_analysis_card', result.data);
-    } else {
-      // Non-blocking — warn and continue
-      injectInfo(
-        i18n.t('workflow.orchestrator.requirementAnalysisFailed', {
-          ns: 'simpleMode',
-          defaultValue: 'Requirement analysis could not be completed. Continuing...',
-        }),
-        'warning',
-      );
-    }
-  } catch {
-    injectInfo(
-      i18n.t('workflow.orchestrator.requirementAnalysisFailed', {
-        ns: 'simpleMode',
-        defaultValue: 'Requirement analysis could not be completed. Continuing...',
-      }),
-      'warning',
-    );
-  }
-}
-
-/**
- * Architecture review phase (Software Architect persona).
- *
- * Reviews the approved PRD and injects an interactive card for
- * the user to accept or request revisions. Max 3 rounds.
- */
-async function architectureReviewPhase(set: SetFn, get: GetFn, prd: TaskPrd, runToken: number) {
-  if (!isRunActive(get, runToken)) return;
-  const { architectureReviewRound, explorationResult } = get();
-  const effectiveSessionId = resolveTaskSessionId(get, set);
-  if (!effectiveSessionId) {
-    set({ phase: 'failed', error: 'No active task session' });
-    injectError(
-      i18n.t('workflow.orchestrator.architectureReviewFailed', { ns: 'simpleMode' }),
-      i18n.t('workflow.orchestrator.sessionMissing', {
-        ns: 'simpleMode',
-        defaultValue: 'No active task session found.',
-      }),
-    );
-    return;
-  }
-
-  // Max 3 rounds to prevent infinite loops
-  if (architectureReviewRound >= 3) {
-    injectInfo(
-      i18n.t('workflow.orchestrator.architectureReviewMaxRounds', {
-        ns: 'simpleMode',
-        defaultValue: 'Architecture review limit reached (3 rounds). Proceeding with current PRD.',
-      }),
-      'warning',
-    );
-    return;
-  }
-
-  set({ phase: 'architecture_review', architectureReviewRound: architectureReviewRound + 1 });
-  await syncKernelTaskPhase('architecture_review', 'architecture_review_started');
-
-  const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
-  if (!isRunActive(get, runToken)) return;
-  const archResolved = resolvePhaseAgent('plan_architecture');
-
-  injectCard('persona_indicator', {
-    role: 'SoftwareArchitect',
-    displayName: 'Software Architect',
-    phase: 'architecture_review',
-    model: formatModelDisplay(archResolved),
-  });
-  injectInfo(
-    i18n.t('workflow.orchestrator.reviewingArchitecture', {
-      ns: 'simpleMode',
-      defaultValue: 'Reviewing architecture...',
-    }),
-    'info',
-  );
-
-  try {
-    const explorationContext = explorationResult ? JSON.stringify(explorationResult) : null;
-
-    const archContextSources =
-      (await import('./contextSources')).useContextSourcesStore.getState().buildConfig() ?? null;
-    const projectPath = useSettingsStore.getState().workspacePath || null;
-    const result = await invoke<{
-      success: boolean;
-      data: ArchitectureReviewCardData | null;
-      error: string | null;
-    }>('run_architecture_review', {
-      request: {
-        sessionId: effectiveSessionId,
-        prdJson: JSON.stringify(prd),
-        explorationContext,
-        provider: archResolved.provider || null,
-        model: archResolved.model || null,
-        apiKey: null,
-        baseUrl: archResolved.baseUrl || null,
-        locale: i18n.language,
-        contextSources: archContextSources,
-        projectPath,
-      },
-    });
-    if (!isRunActive(get, runToken)) return;
-
-    if (result.success && result.data) {
-      set({ architectureReview: result.data });
-      injectCard('architecture_review_card', result.data, true);
-      // Phase stays as 'architecture_review' — user interacts with the card
-      // Continuation happens in approveArchitecture() action
-    } else {
-      // Architecture review failed — skip and continue
-      injectInfo(
-        i18n.t('workflow.orchestrator.architectureReviewFailed', {
-          ns: 'simpleMode',
-          defaultValue: 'Architecture review could not be completed. Continuing...',
-        }),
-        'warning',
-      );
-      // Continue to design doc + execution
-      await designDocAndExecutePhase(set, get, prd, runToken);
-    }
-  } catch {
-    injectInfo(
-      i18n.t('workflow.orchestrator.architectureReviewFailed', {
-        ns: 'simpleMode',
-        defaultValue: 'Architecture review could not be completed. Continuing...',
-      }),
-      'warning',
-    );
-    await designDocAndExecutePhase(set, get, prd, runToken);
-  }
-}
-
-/**
- * Design doc generation + execution phase.
- *
- * Generates design doc from PRD, then starts story execution.
- * Extracted from approvePrd to share between approveArchitecture and quick flow.
- */
-async function designDocAndExecutePhase(set: SetFn, get: GetFn, prd: TaskPrd, runToken: number) {
-  if (!isRunActive(get, runToken)) return;
-  const effectiveSessionId = resolveTaskSessionId(get, set);
-  if (!effectiveSessionId) {
-    set({ phase: 'failed', error: 'No active task session' });
-    injectError(
-      i18n.t('workflow.orchestrator.executionFailed', { ns: 'simpleMode' }),
-      i18n.t('workflow.orchestrator.sessionMissing', {
-        ns: 'simpleMode',
-        defaultValue: 'No active task session found.',
-      }),
-    );
-    return;
-  }
-  set({ phase: 'generating_design_doc', editablePrd: prd });
-  await syncKernelTaskPhase('generating_design_doc', 'design_doc_generation_started');
-  injectInfo(i18n.t('workflow.orchestrator.generatingDesignDoc', { ns: 'simpleMode' }), 'info');
-
-  try {
-    const projectPath = useSettingsStore.getState().workspacePath || null;
-    const designResult = await invoke<{
-      success: boolean;
-      data?: {
-        design_doc: {
-          overview: { title: string; summary: string };
-          architecture: {
-            system_overview: string;
-            data_flow: string;
-            infrastructure: { existing_services: string[]; new_services: string[] };
-            components: {
-              name: string;
-              description: string;
-              responsibilities: string[];
-              dependencies: string[];
-              features: string[];
-            }[];
-            patterns: {
-              name: string;
-              description: string;
-              rationale: string;
-              applies_to: string[];
-            }[];
-          };
-          decisions: {
-            id: string;
-            title: string;
-            context: string;
-            decision: string;
-            rationale: string;
-            alternatives_considered: string[];
-            status: string;
-            applies_to: string[];
-          }[];
-          feature_mappings: Record<
-            string,
-            {
-              description: string;
-              components: string[];
-              patterns: string[];
-              decisions: string[];
-            }
-          >;
-        };
-        saved_path: string | null;
-        generation_info: unknown;
-      };
-      error?: string;
-    }>('prepare_design_doc_for_task', { sessionId: effectiveSessionId, prd, projectPath });
-    if (!isRunActive(get, runToken)) return;
-    if (designResult.success && designResult.data) {
-      const doc = designResult.data.design_doc;
-      const cardData: DesignDocCardData = {
-        title: doc.overview.title,
-        summary: doc.overview.summary,
-        systemOverview: doc.architecture.system_overview,
-        dataFlow: doc.architecture.data_flow,
-        infrastructure: {
-          existingServices: doc.architecture.infrastructure?.existing_services ?? [],
-          newServices: doc.architecture.infrastructure?.new_services ?? [],
-        },
-        componentsCount: doc.architecture.components.length,
-        componentNames: doc.architecture.components.map((c) => c.name),
-        components: doc.architecture.components.map((c) => ({
-          name: c.name,
-          description: c.description,
-          responsibilities: c.responsibilities ?? [],
-          dependencies: c.dependencies ?? [],
-          features: c.features ?? [],
-        })),
-        patternsCount: doc.architecture.patterns.length,
-        patternNames: doc.architecture.patterns.map((p) => p.name),
-        patterns: doc.architecture.patterns.map((p) => ({
-          name: p.name,
-          description: p.description,
-          rationale: p.rationale,
-          appliesTo: p.applies_to ?? [],
-        })),
-        decisionsCount: doc.decisions.length,
-        decisions: doc.decisions.map((d) => ({
-          id: d.id,
-          title: d.title,
-          context: d.context,
-          decision: d.decision,
-          rationale: d.rationale,
-          alternatives: d.alternatives_considered ?? [],
-          status: d.status,
-          appliesTo: d.applies_to ?? [],
-        })),
-        featureMappingsCount: Object.keys(doc.feature_mappings).length,
-        featureMappings: Object.entries(doc.feature_mappings).map(([featureId, mapping]) => ({
-          featureId,
-          description: mapping.description ?? '',
-          components: mapping.components ?? [],
-          patterns: mapping.patterns ?? [],
-          decisions: mapping.decisions ?? [],
-        })),
-        savedPath: designResult.data.saved_path,
-      };
-      injectCard('design_doc_card', cardData);
-    }
-    if (!designResult.success) {
-      injectInfo(i18n.t('workflow.orchestrator.designDocFailed', { ns: 'simpleMode' }), 'warning');
-    }
-  } catch {
-    injectInfo(i18n.t('workflow.orchestrator.designDocFailed', { ns: 'simpleMode' }), 'warning');
-  }
-
-  // Start execution
-  if (!isRunActive(get, runToken)) return;
-  set({ phase: 'executing', isCancelling: false });
-  injectInfo(i18n.t('workflow.orchestrator.prdApproved', { ns: 'simpleMode' }), 'success');
-
-  try {
-    await subscribeToProgressEvents(set, get, runToken);
-    if (!isRunActive(get, runToken)) return;
-    const approved = await useTaskModeStore.getState().approvePrd(prd, effectiveSessionId);
-    if (!isRunActive(get, runToken)) return;
-
-    const taskModeError = useTaskModeStore.getState().error;
-    if (!approved || taskModeError) {
-      const message = taskModeError || 'Task execution could not be started';
-      set({ phase: 'failed', error: message });
-      injectError(i18n.t('workflow.orchestrator.executionFailed', { ns: 'simpleMode' }), message);
-    }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    set({ phase: 'failed', error: msg });
-    injectError(i18n.t('workflow.orchestrator.executionFailed', { ns: 'simpleMode' }), msg);
-  }
-}
-
-/**
- * Generate PRD phase (called after config confirmation or interview completion).
- */
-async function generatePrdPhase(set: SetFn, get: GetFn, runToken: number) {
-  if (!isRunActive(get, runToken)) return;
-  const effectiveSessionId = resolveTaskSessionId(get, set);
-  if (!effectiveSessionId) {
-    set({ phase: 'failed', error: 'No active task session' });
-    injectError(
-      i18n.t('workflow.orchestrator.prdGenerationFailed', { ns: 'simpleMode' }),
-      i18n.t('workflow.orchestrator.sessionMissing', {
-        ns: 'simpleMode',
-        defaultValue: 'No active task session found.',
-      }),
-    );
-    return;
-  }
-  set({ phase: 'generating_prd' });
-
-  const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
-  if (!isRunActive(get, runToken)) return;
-  const prdResolved = resolvePhaseAgent('plan_prd');
-
-  injectCard('persona_indicator', {
-    role: 'TechLead',
-    displayName: 'Tech Lead',
-    phase: 'generating_prd',
-    model: formatModelDisplay(prdResolved),
-  });
-  injectInfo(i18n.t('workflow.orchestrator.generatingPrd', { ns: 'simpleMode' }), 'info');
-
-  try {
-    // Pass conversation history and context budget to PRD generation
-    const history = get()._conversationHistory || [];
-    const settings = useSettingsStore.getState();
-    const maxContextTokens = settings.maxTotalTokens ?? 200_000;
-    const prd = await useTaskModeStore
-      .getState()
-      .generatePrd(
-        history,
-        maxContextTokens,
-        prdResolved.provider || undefined,
-        prdResolved.model || undefined,
-        prdResolved.baseUrl,
-        effectiveSessionId,
-      );
-    if (!isRunActive(get, runToken)) return;
-
-    const taskModeError = useTaskModeStore.getState().error;
-    if (taskModeError) {
-      set({ phase: 'failed', error: taskModeError });
-      injectError(i18n.t('workflow.orchestrator.prdGenerationFailed', { ns: 'simpleMode' }), taskModeError);
-      return;
-    }
-
-    if (!prd) {
-      set({ phase: 'failed', error: 'PRD generation returned empty result' });
-      injectError(
-        i18n.t('workflow.orchestrator.prdGenerationFailed', { ns: 'simpleMode' }),
-        i18n.t('workflow.orchestrator.prdMissingData', { ns: 'simpleMode' }),
-      );
-      return;
-    }
-
-    // Synthesize planning turn into conversation history (Task → Chat writeback)
-    const { taskDescription, strategyAnalysis } = get();
-    synthesizePlanningTurn(taskDescription, strategyAnalysis, prd);
-
-    set({ phase: 'reviewing_prd', editablePrd: prd });
-
-    // Inject PRD card
-    injectCard('prd_card', toPrdCardData(prd), true);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    set({ phase: 'failed', error: msg });
-    injectError(i18n.t('workflow.orchestrator.prdGenerationFailed', { ns: 'simpleMode' }), msg);
-  }
+function subscribeToTaskProgressFromRuntime(setter: unknown, getter: unknown, runToken: number) {
+  return subscribeToProgressEvents(setter as SetFn, getter as GetFn, runToken);
 }
 
 /**

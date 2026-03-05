@@ -164,4 +164,38 @@ describe('simple plan/task i18n parity', () => {
       expect(ja, `[${sample.namespace}] ja fallback detected for ${sample.key}`).not.toBe(sample.key);
     }
   });
+
+  it('prevents hard-coded persona display names in workflow orchestrator', () => {
+    const currentDir = path.dirname(fileURLToPath(import.meta.url));
+    const projectRoot = path.resolve(currentDir, '../../..');
+    const orchestratorPath = path.join(projectRoot, 'src/store/workflowOrchestrator.ts');
+    const content = fs.readFileSync(orchestratorPath, 'utf8');
+
+    expect(content).not.toMatch(/displayName:\s*'Business Analyst'/);
+    expect(content).not.toMatch(/displayName:\s*'Senior Engineer'/);
+    expect(content).not.toMatch(/displayName:\s*'Product Manager'/);
+    expect(content).not.toMatch(/displayName:\s*'Software Architect'/);
+    expect(content).not.toMatch(/displayName:\s*'Tech Lead'/);
+  });
+
+  it('keeps task persona localization keys available in en/zh/ja', () => {
+    const personaKeys = [
+      'workflow.persona.TechLead',
+      'workflow.persona.SeniorEngineer',
+      'workflow.persona.BusinessAnalyst',
+      'workflow.persona.ProductManager',
+      'workflow.persona.SoftwareArchitect',
+      'workflow.persona.Developer',
+      'workflow.persona.QaEngineer',
+    ] as const;
+
+    for (const key of personaKeys) {
+      const en = getNestedString(enSimpleMode as LocaleTree, key);
+      const zh = getNestedString(zhSimpleMode as LocaleTree, key);
+      const ja = getNestedString(jaSimpleMode as LocaleTree, key);
+      expect(en.length, `missing en persona key: ${key}`).toBeGreaterThan(0);
+      expect(zh.length, `missing zh persona key: ${key}`).toBeGreaterThan(0);
+      expect(ja.length, `missing ja persona key: ${key}`).toBeGreaterThan(0);
+    }
+  });
 });

@@ -387,7 +387,7 @@ export interface ArchitectureReviewCardData {
 /** Persona indicator badge data */
 export interface PersonaIndicatorData {
   role: string;
-  displayName: string;
+  displayName?: string;
   phase: string;
   model?: string;
 }

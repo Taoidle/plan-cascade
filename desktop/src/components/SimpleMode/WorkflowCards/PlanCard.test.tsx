@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { WorkflowSession } from '../../../types/workflowKernel';
+import type { PlanLifecyclePhase } from '../../../types/workflowKernel';
 
 const planOrchestratorHarness = vi.hoisted(() => ({
   state: {
@@ -14,6 +15,20 @@ const planOrchestratorHarness = vi.hoisted(() => ({
 
 const kernelHarness = vi.hoisted(() => ({
   session: null as WorkflowSession | null,
+  getStateSession: null as WorkflowSession | null,
+  refreshSessionState: vi.fn().mockResolvedValue({
+    session: {
+      modeSnapshots: {
+        plan: {
+          planRevision: 1,
+        },
+      },
+    },
+  }),
+}));
+
+const coordinatorHarness = vi.hoisted(() => ({
+  applyPlanEditWithIntent: vi.fn().mockResolvedValue({ ok: true, errorCode: null, message: null, session: {} }),
 }));
 
 const i18nHarness = vi.hoisted(() => ({
@@ -36,19 +51,27 @@ vi.mock('../../../store/planOrchestrator', () => ({
 }));
 
 vi.mock('../../../store/workflowKernel', () => ({
-  useWorkflowKernelStore: (selector: (state: { session: WorkflowSession | null }) => unknown) =>
-    selector({ session: kernelHarness.session }),
+  useWorkflowKernelStore: Object.assign(
+    (selector: (state: { session: WorkflowSession | null; refreshSessionState: () => Promise<unknown> }) => unknown) =>
+      selector({ session: kernelHarness.session, refreshSessionState: kernelHarness.refreshSessionState }),
+    {
+      getState: () => ({
+        session: kernelHarness.getStateSession ?? kernelHarness.session,
+        refreshSessionState: kernelHarness.refreshSessionState,
+      }),
+    },
+  ),
 }));
 
 vi.mock('../../../store/simpleWorkflowCoordinator', () => ({
-  applyPlanEditViaCoordinator: vi.fn().mockResolvedValue(undefined),
+  applyPlanEditWithIntent: coordinatorHarness.applyPlanEditWithIntent,
   retryPlanStepViaCoordinator: vi.fn().mockResolvedValue(undefined),
   submitWorkflowActionIntentViaCoordinator: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { PlanCard } from './PlanCard';
 
-function createPlanKernelSession(phase: string): WorkflowSession {
+function createPlanKernelSession(phase: PlanLifecyclePhase): WorkflowSession {
   const now = '2026-03-04T00:00:00Z';
   return {
     sessionId: 'kernel-plan-1',
@@ -88,6 +111,24 @@ describe('PlanCard interactive gating', () => {
     planOrchestratorHarness.state.approvePlan.mockClear();
     planOrchestratorHarness.state.retryStep.mockClear();
     kernelHarness.session = null;
+    kernelHarness.getStateSession = null;
+    kernelHarness.refreshSessionState.mockClear();
+    kernelHarness.refreshSessionState.mockResolvedValue({
+      session: {
+        modeSnapshots: {
+          plan: {
+            planRevision: 1,
+          },
+        },
+      },
+    });
+    coordinatorHarness.applyPlanEditWithIntent.mockClear();
+    coordinatorHarness.applyPlanEditWithIntent.mockResolvedValue({
+      ok: true,
+      errorCode: null,
+      message: null,
+      session: {},
+    });
     i18nHarness.t.mockClear();
   });
 
@@ -239,7 +280,14 @@ describe('PlanCard interactive gating', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: /Step 1/i }));
+    const stepToggle = screen.getByRole('button', { name: /Step 1/i });
+    await user.click(stepToggle);
+    if (!screen.queryByText('plan.editStep')) {
+      await user.click(stepToggle);
+    }
+    await waitFor(() => {
+      expect(screen.getByText('plan.editStep')).toBeInTheDocument();
+    });
     await user.click(screen.getByText('plan.editStep'));
     await user.clear(screen.getByPlaceholderText('plan.stepTitle'));
     await user.type(screen.getByPlaceholderText('plan.stepTitle'), 'Step 1 updated');
@@ -294,6 +342,282 @@ describe('PlanCard interactive gating', () => {
 
     await waitFor(() => {
       expect(planOrchestratorHarness.state.retryStep).toHaveBeenCalledWith('step-1');
+    });
+  });
+
+  it('shows failed edit status when plan edit intent/apply fails', async () => {
+    const user = userEvent.setup();
+    kernelHarness.session = createPlanKernelSession('reviewing_plan');
+    coordinatorHarness.applyPlanEditWithIntent.mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'intent_submit_failed',
+      message: 'intent failed',
+      session: null,
+    });
+
+    render(
+      <PlanCard
+        interactive
+        data={{
+          title: 'Plan',
+          description: 'desc',
+          domain: 'general',
+          adapterName: 'default',
+          editable: true,
+          steps: [
+            {
+              id: 'step-1',
+              title: 'Step 1',
+              description: 'desc',
+              priority: 'medium',
+              dependencies: [],
+              completionCriteria: ['done'],
+              expectedOutput: 'result',
+            },
+          ],
+          batches: [{ index: 0, stepIds: ['step-1'] }],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /Step 1/i }));
+    await waitFor(() => {
+      expect(screen.getByText('plan.editStep')).toBeInTheDocument();
+    });
+    await user.click(screen.getByText('plan.editStep'));
+    await user.clear(screen.getByPlaceholderText('plan.stepTitle'));
+    await user.type(screen.getByPlaceholderText('plan.stepTitle'), 'Step 1 updated');
+    await user.click(screen.getByText('common:save'));
+
+    await waitFor(() => {
+      expect(screen.getAllByText('intent failed').length).toBeGreaterThan(0);
+      expect(screen.getByText('plan.editSummary.status.failed')).toBeInTheDocument();
+    });
+  });
+
+  it('rolls back local optimistic plan edit after apply failure', async () => {
+    const user = userEvent.setup();
+    kernelHarness.session = createPlanKernelSession('reviewing_plan');
+    coordinatorHarness.applyPlanEditWithIntent.mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'apply_edit_failed',
+      message: 'apply failed',
+      session: null,
+    });
+
+    render(
+      <PlanCard
+        interactive
+        data={{
+          title: 'Plan',
+          description: 'desc',
+          domain: 'general',
+          adapterName: 'default',
+          editable: true,
+          steps: [
+            {
+              id: 'step-1',
+              title: 'Step 1',
+              description: 'desc',
+              priority: 'medium',
+              dependencies: [],
+              completionCriteria: ['done'],
+              expectedOutput: 'result',
+            },
+          ],
+          batches: [{ index: 0, stepIds: ['step-1'] }],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /Step 1/i }));
+    await waitFor(() => {
+      expect(screen.getByText('plan.editStep')).toBeInTheDocument();
+    });
+    await user.click(screen.getByText('plan.editStep'));
+    await user.clear(screen.getByPlaceholderText('plan.stepTitle'));
+    await user.type(screen.getByPlaceholderText('plan.stepTitle'), 'Updated title');
+    await user.click(screen.getByText('common:save'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Step 1')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Updated title')).toBeNull();
+  });
+
+  it('retries a failed edit operation from edit summary', async () => {
+    const user = userEvent.setup();
+    kernelHarness.session = createPlanKernelSession('reviewing_plan');
+    coordinatorHarness.applyPlanEditWithIntent
+      .mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'apply_edit_failed',
+        message: 'first failure',
+        session: null,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        errorCode: null,
+        message: null,
+        session: {},
+      });
+
+    render(
+      <PlanCard
+        interactive
+        data={{
+          title: 'Plan',
+          description: 'desc',
+          domain: 'general',
+          adapterName: 'default',
+          editable: true,
+          steps: [
+            {
+              id: 'step-1',
+              title: 'Step 1',
+              description: 'desc',
+              priority: 'medium',
+              dependencies: [],
+              completionCriteria: ['done'],
+              expectedOutput: 'result',
+            },
+          ],
+          batches: [{ index: 0, stepIds: ['step-1'] }],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /Step 1/i }));
+    await waitFor(() => {
+      expect(screen.getByText('plan.editStep')).toBeInTheDocument();
+    });
+    await user.click(screen.getByText('plan.editStep'));
+    await user.clear(screen.getByPlaceholderText('plan.stepTitle'));
+    await user.type(screen.getByPlaceholderText('plan.stepTitle'), 'Retry me');
+    await user.click(screen.getByText('common:save'));
+
+    await waitFor(() => {
+      expect(screen.getByText('plan.editSummary.retry')).toBeInTheDocument();
+    });
+    await user.click(screen.getByText('plan.editSummary.retry'));
+
+    await waitFor(() => {
+      expect(coordinatorHarness.applyPlanEditWithIntent).toHaveBeenCalledTimes(2);
+      expect(screen.getByText('plan.editSummary.status.success')).toBeInTheDocument();
+    });
+  });
+
+  it('detects revision conflict before applying edit and asks user to retry', async () => {
+    const user = userEvent.setup();
+    kernelHarness.session = createPlanKernelSession('reviewing_plan');
+
+    render(
+      <PlanCard
+        interactive
+        data={{
+          title: 'Plan',
+          description: 'desc',
+          domain: 'general',
+          adapterName: 'default',
+          editable: true,
+          steps: [
+            {
+              id: 'step-1',
+              title: 'Step 1',
+              description: 'desc',
+              priority: 'medium',
+              dependencies: [],
+              completionCriteria: ['done'],
+              expectedOutput: 'result',
+            },
+          ],
+          batches: [{ index: 0, stepIds: ['step-1'] }],
+        }}
+      />,
+    );
+
+    kernelHarness.getStateSession = {
+      ...createPlanKernelSession('reviewing_plan'),
+      modeSnapshots: {
+        chat: null,
+        task: null,
+        plan: {
+          ...createPlanKernelSession('reviewing_plan').modeSnapshots.plan!,
+          planRevision: 3,
+        },
+      },
+    };
+
+    const parallelismInput = screen.getByRole('spinbutton');
+    await user.clear(parallelismInput);
+    await user.type(parallelismInput, '5');
+    await user.click(screen.getByText('plan.parallelism.apply'));
+
+    await waitFor(() => {
+      expect(screen.getAllByText('plan.editConflictDetected').length).toBeGreaterThan(0);
+      expect(coordinatorHarness.applyPlanEditWithIntent).not.toHaveBeenCalled();
+    });
+  });
+
+  it('keeps successful and failed edit summaries independently for consecutive edits', async () => {
+    const user = userEvent.setup();
+    kernelHarness.session = createPlanKernelSession('reviewing_plan');
+    coordinatorHarness.applyPlanEditWithIntent
+      .mockResolvedValueOnce({
+        ok: true,
+        errorCode: null,
+        message: null,
+        session: {},
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'apply_edit_failed',
+        message: 'second failed',
+        session: null,
+      });
+
+    render(
+      <PlanCard
+        interactive
+        data={{
+          title: 'Plan',
+          description: 'desc',
+          domain: 'general',
+          adapterName: 'default',
+          editable: true,
+          steps: [
+            {
+              id: 'step-1',
+              title: 'Step 1',
+              description: 'desc',
+              priority: 'medium',
+              dependencies: [],
+              completionCriteria: ['done'],
+              expectedOutput: 'result',
+            },
+          ],
+          batches: [{ index: 0, stepIds: ['step-1'] }],
+        }}
+      />,
+    );
+
+    const parallelInput = screen.getByDisplayValue('4');
+    await user.clear(parallelInput);
+    await user.type(parallelInput, '5');
+    await user.click(screen.getByText('plan.parallelism.apply'));
+    await waitFor(() => {
+      expect(screen.getByText('plan.editSummary.status.success')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: /Step 1/i }));
+    await user.click(screen.getByText('plan.editStep'));
+    await user.clear(screen.getByPlaceholderText('plan.stepTitle'));
+    await user.type(screen.getByPlaceholderText('plan.stepTitle'), 'second edit');
+    await user.click(screen.getByText('common:save'));
+
+    await waitFor(() => {
+      expect(screen.getAllByText('second failed').length).toBeGreaterThan(0);
+      expect(screen.getByText('plan.editSummary.status.failed')).toBeInTheDocument();
     });
   });
 

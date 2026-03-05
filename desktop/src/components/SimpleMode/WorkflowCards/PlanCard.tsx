@@ -13,9 +13,10 @@ import type { PlanBatchData, PlanCardData, PlanStepData } from '../../../types/p
 import type { PlanEditOperation } from '../../../types/workflowKernel';
 import { usePlanOrchestratorStore } from '../../../store/planOrchestrator';
 import { useWorkflowKernelStore } from '../../../store/workflowKernel';
+import { useExecutionStore } from '../../../store/execution';
 import { reportInteractiveActionFailure } from '../../../lib/workflowObservability';
 import {
-  applyPlanEditViaCoordinator,
+  applyPlanEditWithIntent,
   submitWorkflowActionIntentViaCoordinator,
 } from '../../../store/simpleWorkflowCoordinator';
 import {
@@ -52,6 +53,20 @@ interface PlanEditSummaryEntry {
   before?: string;
   after?: string;
   batchRecomputed: boolean;
+  status: 'pending' | 'success' | 'failed';
+  errorMessage?: string;
+}
+
+interface FailedPlanEditOperation {
+  summaryId: string;
+  operation: PlanEditOperation;
+  metadata?: Record<string, unknown>;
+  beforePlan: PlanCardData;
+  afterPlan: PlanCardData;
+}
+
+function clonePlan(plan: PlanCardData): PlanCardData {
+  return JSON.parse(JSON.stringify(plan)) as PlanCardData;
 }
 
 function priorityColor(priority: string): string {
@@ -317,10 +332,13 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
     withRecomputedBatches(ensurePlanExecutionConfig(data)),
   );
   const [editSummary, setEditSummary] = useState<PlanEditSummaryEntry[]>([]);
+  const [failedOps, setFailedOps] = useState<Record<string, FailedPlanEditOperation>>({});
+  const [pendingOps, setPendingOps] = useState<Record<string, true>>({});
   const [editingStepId, setEditingStepId] = useState<string | null>(null);
   const [stepDraft, setStepDraft] = useState<StepEditDraft | null>(null);
   const [addStepDraft, setAddStepDraft] = useState<AddStepDraft>(() => buildAddDraft(data.steps));
   const [parallelDraft, setParallelDraft] = useState<number>(getPlanMaxParallel(data));
+  const [workingPlanRevision, setWorkingPlanRevision] = useState<number>(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [retryingStepId, setRetryingStepId] = useState<string | null>(null);
@@ -329,18 +347,24 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
   const retryStep = usePlanOrchestratorStore((s) => s.retryStep);
   const stepStatuses = usePlanOrchestratorStore((s) => s.stepStatuses || {});
   const workflowSession = useWorkflowKernelStore((s) => s.session);
+  const refreshWorkflowSessionState = useWorkflowKernelStore((s) => s.refreshSessionState);
+  const appendExecutionCard = useExecutionStore((s) => s.appendCard);
+  const kernelPlanRevision = workflowSession?.modeSnapshots.plan?.planRevision ?? 0;
 
   useEffect(() => {
     const normalized = withRecomputedBatches(ensurePlanExecutionConfig(data));
     setWorkingPlan(normalized);
+    setWorkingPlanRevision(kernelPlanRevision);
     setExpandedSteps(new Set());
     setEditSummary([]);
+    setFailedOps({});
+    setPendingOps({});
     setEditingStepId(null);
     setStepDraft(null);
     setAddStepDraft(buildAddDraft(normalized.steps));
     setParallelDraft(getPlanMaxParallel(normalized));
     setSubmitError(null);
-  }, [data]);
+  }, [data, kernelPlanRevision]);
 
   const isKernelPlanActive = workflowSession?.status === 'active' && workflowSession.activeMode === 'plan';
   const kernelPlanPhase = workflowSession?.modeSnapshots.plan?.phase ?? 'idle';
@@ -353,36 +377,143 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
 
   const validationIssues = useMemo(() => validatePlanDraft(workingPlan), [workingPlan]);
 
-  const appendEditSummary = useCallback((entry: Omit<PlanEditSummaryEntry, 'id'>) => {
-    setEditSummary((prev) => [
-      {
-        id: `${entry.operation}-${Date.now()}-${Math.random()}`,
-        ...entry,
-      },
-      ...prev,
-    ]);
+  const appendEditSummary = useCallback((entry: Omit<PlanEditSummaryEntry, 'id' | 'status'>): string => {
+    const id = `${entry.operation}-${Date.now()}-${Math.random()}`;
+    setEditSummary((prev) => [{ id, status: 'pending', ...entry }, ...prev]);
+    return id;
   }, []);
 
-  const submitPlanEditOperation = useCallback(
-    async (operation: PlanEditOperation, metadata?: Record<string, unknown>) => {
-      try {
-        await submitWorkflowActionIntentViaCoordinator({
-          mode: 'plan',
-          type: 'plan_edit_instruction',
-          source: 'plan_card',
-          action: operation.type,
-          content: `${operation.type}:${operation.targetStepId ?? ''}`,
-          metadata: {
-            stepId: operation.targetStepId ?? null,
-            ...metadata,
-          },
-        });
-        await applyPlanEditViaCoordinator(operation);
-      } catch {
-        // Keep UI responsive even if kernel edit logging fails.
-      }
+  const updateEditSummaryStatus = useCallback(
+    (summaryId: string, status: PlanEditSummaryEntry['status'], error?: string) => {
+      setEditSummary((prev) =>
+        prev.map((entry) =>
+          entry.id === summaryId
+            ? {
+                ...entry,
+                status,
+                errorMessage: status === 'failed' ? error || '' : undefined,
+              }
+            : entry,
+        ),
+      );
     },
     [],
+  );
+
+  const submitPlanEditOperation = useCallback(
+    async (
+      operation: PlanEditOperation,
+      metadata?: Record<string, unknown>,
+      options?: {
+        summaryId?: string;
+        beforePlan?: PlanCardData;
+        afterPlan?: PlanCardData;
+      },
+    ): Promise<boolean> => {
+      const summaryId = options?.summaryId ?? `${operation.type}-${Date.now()}`;
+      const beforePlan = clonePlan(options?.beforePlan ?? workingPlan);
+      const afterPlan = clonePlan(options?.afterPlan ?? workingPlan);
+      const latestKernelRevision = useWorkflowKernelStore.getState().session?.modeSnapshots.plan?.planRevision ?? 0;
+      if (latestKernelRevision > workingPlanRevision) {
+        await refreshWorkflowSessionState();
+        setWorkingPlan(withRecomputedBatches(ensurePlanExecutionConfig(data)));
+        setWorkingPlanRevision(
+          useWorkflowKernelStore.getState().session?.modeSnapshots.plan?.planRevision ?? latestKernelRevision,
+        );
+        const message = t('plan.editConflictDetected', {
+          defaultValue: 'Plan changed remotely. Local draft was refreshed; please retry your edit.',
+        });
+        setSubmitError(message);
+        updateEditSummaryStatus(summaryId, 'failed', message);
+        setFailedOps((prev) => ({
+          ...prev,
+          [summaryId]: {
+            summaryId,
+            operation,
+            metadata,
+            beforePlan,
+            afterPlan,
+          },
+        }));
+        return false;
+      }
+
+      setPendingOps((prev) => ({ ...prev, [summaryId]: true }));
+      const result = await applyPlanEditWithIntent({
+        operation,
+        source: 'plan_card',
+        action: operation.type,
+        content: `${operation.type}:${operation.targetStepId ?? ''}`,
+        metadata: {
+          stepId: operation.targetStepId ?? null,
+          ...metadata,
+        },
+      });
+      setPendingOps((prev) => {
+        const next = { ...prev };
+        delete next[summaryId];
+        return next;
+      });
+
+      if (!result.ok) {
+        const message = result.message || t('plan.editApplyFailed', { defaultValue: 'Failed to apply plan edit.' });
+        setWorkingPlan(beforePlan);
+        setSubmitError(message);
+        updateEditSummaryStatus(summaryId, 'failed', message);
+        setFailedOps((prev) => ({
+          ...prev,
+          [summaryId]: {
+            summaryId,
+            operation,
+            metadata,
+            beforePlan,
+            afterPlan,
+          },
+        }));
+        appendExecutionCard({
+          cardType: 'workflow_error',
+          cardId: `plan-edit-failed-${summaryId}`,
+          data: {
+            title: t('plan.editApplyFailed', { defaultValue: 'Failed to apply plan edit.' }),
+            description: message,
+            suggestedFix: t('plan.editRetryHint', { defaultValue: 'Retry the failed edit, then approve the plan.' }),
+          },
+          interactive: false,
+        });
+        await reportInteractiveActionFailure({
+          card: 'plan_card',
+          action: operation.type,
+          errorCode: result.errorCode || 'plan_edit_failed',
+          message,
+          session: workflowSession,
+        });
+        return false;
+      }
+
+      setFailedOps((prev) => {
+        const next = { ...prev };
+        delete next[summaryId];
+        return next;
+      });
+      setSubmitError(null);
+      updateEditSummaryStatus(summaryId, 'success');
+      const refreshed = await refreshWorkflowSessionState();
+      const latestRevision = refreshed?.session.modeSnapshots.plan?.planRevision;
+      if (typeof latestRevision === 'number') {
+        setWorkingPlanRevision(latestRevision);
+      }
+      return true;
+    },
+    [
+      appendExecutionCard,
+      data,
+      refreshWorkflowSessionState,
+      t,
+      updateEditSummaryStatus,
+      workflowSession,
+      workingPlan,
+      workingPlanRevision,
+    ],
   );
 
   const toggleStep = useCallback((stepId: string) => {
@@ -441,6 +572,7 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
       dependencies: nextDependencies,
     };
 
+    const beforePlan = clonePlan(workingPlan);
     const nextPlan = withRecomputedBatches(
       {
         ...workingPlan,
@@ -448,6 +580,7 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
       },
       workingPlan.batches,
     );
+    const afterPlan = clonePlan(nextPlan);
 
     setWorkingPlan(nextPlan);
     const changedFieldLabels = changedFields.map((field) =>
@@ -455,7 +588,7 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
         defaultValue: field,
       }),
     );
-    appendEditSummary({
+    const summaryId = appendEditSummary({
       operation: 'update_step',
       stepId: editingStepId,
       details: changedFieldLabels.join(', '),
@@ -465,7 +598,7 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
     });
     cancelEditStep();
 
-    await submitPlanEditOperation(
+    const updatedOk = await submitPlanEditOperation(
       {
         type: 'update_step',
         targetStepId: editingStepId,
@@ -479,7 +612,13 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
       {
         changedFields,
       },
+      {
+        summaryId,
+        beforePlan,
+        afterPlan,
+      },
     );
+    if (!updatedOk) return;
 
     const beforeDeps = new Set(targetStep.dependencies);
     const afterDeps = new Set(updatedStep.dependencies);
@@ -497,6 +636,10 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
         {
           dependencyStepId: depId,
         },
+        {
+          beforePlan: afterPlan,
+          afterPlan,
+        },
       );
     }
 
@@ -512,6 +655,10 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
         },
         {
           dependencyStepId: depId,
+        },
+        {
+          beforePlan: afterPlan,
+          afterPlan,
         },
       );
     }
@@ -534,6 +681,7 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
       expectedOutput: '',
     };
 
+    const beforePlan = clonePlan(workingPlan);
     const nextPlan = withRecomputedBatches(
       {
         ...workingPlan,
@@ -541,10 +689,11 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
       },
       workingPlan.batches,
     );
+    const afterPlan = clonePlan(nextPlan);
 
     setWorkingPlan(nextPlan);
     setAddStepDraft(buildAddDraft(nextPlan.steps));
-    appendEditSummary({
+    const summaryId = appendEditSummary({
       operation: 'add_step',
       stepId: newStep.id,
       details: newStep.title,
@@ -562,6 +711,11 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
       {
         stepId: newStep.id,
       },
+      {
+        summaryId,
+        beforePlan,
+        afterPlan,
+      },
     );
   }, [addStepDraft, appendEditSummary, isActive, submitPlanEditOperation, workingPlan]);
 
@@ -572,6 +726,7 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
       if (!targetStep) return;
       if (workingPlan.steps.length <= 1) return;
 
+      const beforePlan = clonePlan(workingPlan);
       const nextPlan = withRecomputedBatches(
         {
           ...workingPlan,
@@ -579,6 +734,7 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
         },
         workingPlan.batches,
       );
+      const afterPlan = clonePlan(nextPlan);
 
       setWorkingPlan(nextPlan);
       setExpandedSteps((prev) => {
@@ -586,7 +742,7 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
         next.delete(stepId);
         return next;
       });
-      appendEditSummary({
+      const summaryId = appendEditSummary({
         operation: 'remove_step',
         stepId,
         details: targetStep.title,
@@ -602,6 +758,11 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
         {
           removedStepId: stepId,
         },
+        {
+          summaryId,
+          beforePlan,
+          afterPlan,
+        },
       );
     },
     [appendEditSummary, isActive, submitPlanEditOperation, workingPlan],
@@ -613,6 +774,7 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
       const moved = moveStep(workingPlan.steps, stepId, direction);
       if (moved === workingPlan.steps) return;
 
+      const beforePlan = clonePlan(workingPlan);
       const nextPlan = withRecomputedBatches(
         {
           ...workingPlan,
@@ -620,10 +782,11 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
         },
         workingPlan.batches,
       );
+      const afterPlan = clonePlan(nextPlan);
 
       setWorkingPlan(nextPlan);
       const toIndex = moved.findIndex((step) => step.id === stepId);
-      appendEditSummary({
+      const summaryId = appendEditSummary({
         operation: 'reorder_step',
         stepId,
         details: t(`plan.reorder.${direction}`, {
@@ -646,6 +809,11 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
           direction,
           toIndex,
         },
+        {
+          summaryId,
+          beforePlan,
+          afterPlan,
+        },
       );
     },
     [appendEditSummary, isActive, submitPlanEditOperation, t, workingPlan],
@@ -657,6 +825,7 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
       const step = workingPlan.steps.find((item) => item.id === stepId);
       if (!step || step.dependencies.length === 0) return;
 
+      const beforePlan = clonePlan(workingPlan);
       const nextPlan = withRecomputedBatches(
         {
           ...workingPlan,
@@ -671,9 +840,10 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
         },
         workingPlan.batches,
       );
+      const afterPlan = clonePlan(nextPlan);
 
       setWorkingPlan(nextPlan);
-      appendEditSummary({
+      const summaryId = appendEditSummary({
         operation: 'clear_dependency',
         stepId,
         details: step.dependencies.join(', '),
@@ -694,6 +864,11 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
         {
           dependencies: step.dependencies,
         },
+        {
+          summaryId,
+          beforePlan,
+          afterPlan,
+        },
       );
     },
     [appendEditSummary, isActive, submitPlanEditOperation, workingPlan],
@@ -708,6 +883,7 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
       return;
     }
 
+    const beforePlan = clonePlan(workingPlan);
     const nextPlan = withRecomputedBatches(
       {
         ...workingPlan,
@@ -717,10 +893,11 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
       },
       workingPlan.batches,
     );
+    const afterPlan = clonePlan(nextPlan);
 
     setWorkingPlan(nextPlan);
     setParallelDraft(nextMaxParallel);
-    appendEditSummary({
+    const summaryId = appendEditSummary({
       operation: 'set_parallelism',
       details: `${currentMaxParallel} -> ${nextMaxParallel}`,
       before: String(currentMaxParallel),
@@ -737,6 +914,11 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
       },
       {
         maxParallel: nextMaxParallel,
+      },
+      {
+        summaryId,
+        beforePlan,
+        afterPlan,
       },
     );
   }, [appendEditSummary, isActive, parallelDraft, submitPlanEditOperation, workingPlan]);
@@ -795,6 +977,21 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
       }
     },
     [retryStep, retryingStepId],
+  );
+
+  const handleRetryFailedEdit = useCallback(
+    async (summaryId: string) => {
+      const failed = failedOps[summaryId];
+      if (!failed || pendingOps[summaryId]) return;
+      setWorkingPlan(clonePlan(failed.afterPlan));
+      updateEditSummaryStatus(summaryId, 'pending');
+      await submitPlanEditOperation(failed.operation, failed.metadata, {
+        summaryId,
+        beforePlan: failed.beforePlan,
+        afterPlan: failed.afterPlan,
+      });
+    },
+    [failedOps, pendingOps, submitPlanEditOperation, updateEditSummaryStatus],
   );
 
   return (
@@ -1023,6 +1220,37 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
                 {entry.stepId ? ` · ${entry.stepId}` : ''}
                 {entry.details ? ` · ${entry.details}` : ''}
               </div>
+              <div className="mt-1 flex items-center gap-2 text-2xs">
+                <span
+                  className={clsx(
+                    'px-1.5 py-0.5 rounded border',
+                    entry.status === 'success'
+                      ? 'border-emerald-200 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300'
+                      : entry.status === 'failed'
+                        ? 'border-rose-200 dark:border-rose-700 text-rose-700 dark:text-rose-300'
+                        : 'border-amber-200 dark:border-amber-700 text-amber-700 dark:text-amber-300',
+                  )}
+                >
+                  {entry.status === 'success'
+                    ? t('plan.editSummary.status.success', { defaultValue: 'Applied' })
+                    : entry.status === 'failed'
+                      ? t('plan.editSummary.status.failed', { defaultValue: 'Failed' })
+                      : t('plan.editSummary.status.pending', { defaultValue: 'Pending' })}
+                </span>
+                {entry.status === 'failed' && failedOps[entry.id] && (
+                  <button
+                    onClick={() => {
+                      void handleRetryFailedEdit(entry.id);
+                    }}
+                    disabled={!!pendingOps[entry.id]}
+                    className="px-1.5 py-0.5 rounded border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/30 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {pendingOps[entry.id]
+                      ? t('plan.editSummary.retrying', { defaultValue: 'Retrying...' })
+                      : t('plan.editSummary.retry', { defaultValue: 'Retry' })}
+                  </button>
+                )}
+              </div>
               {entry.before && (
                 <div className="mt-1 text-2xs text-gray-500 dark:text-gray-400">
                   <span className="font-medium">{t('common:before', { defaultValue: 'Before' })}:</span> {entry.before}
@@ -1039,6 +1267,9 @@ export function PlanCard({ data, interactive }: { data: PlanCardData; interactiv
                     defaultValue: 'Execution batches recomputed.',
                   })}
                 </div>
+              )}
+              {entry.status === 'failed' && entry.errorMessage && (
+                <div className="text-2xs text-rose-600 dark:text-rose-300">{entry.errorMessage}</div>
               )}
             </div>
           ))}
