@@ -12,7 +12,6 @@ import {
 import type { WorkflowPhaseRuntime } from './runtime';
 
 interface ArchitecturePhaseDeps {
-  syncKernelTaskPhase: (phase: 'architecture_review', source?: string) => Promise<void>;
   runDesignDocAndExecutionPhase: (runtime: WorkflowPhaseRuntime, prd: TaskPrd) => Promise<void>;
 }
 
@@ -53,8 +52,6 @@ export async function runArchitecturePhase(
   }
 
   set({ phase: 'architecture_review', architectureReviewRound: architectureReviewRound + 1 });
-  await deps.syncKernelTaskPhase('architecture_review', 'architecture_review_started');
-
   const { resolvePhaseAgent, formatModelDisplay } = await import('../../../lib/phaseAgentResolver');
   if (!isRunActive(get, runToken)) return;
   const archResolved = resolvePhaseAgent('plan_architecture');

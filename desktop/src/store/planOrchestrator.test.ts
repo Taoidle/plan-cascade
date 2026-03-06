@@ -51,6 +51,14 @@ function extractPlanCompletionCards() {
     .filter((card) => card.cardType === 'plan_completion_card');
 }
 
+function extractPlanStepUpdateCards() {
+  return useExecutionStore
+    .getState()
+    .streamingOutput.filter((line) => line.type === 'card')
+    .map((line) => JSON.parse(line.content) as { cardType?: string; data?: Record<string, unknown> })
+    .filter((card) => card.cardType === 'plan_step_update');
+}
+
 describe('planOrchestrator event handling', () => {
   let progressListener: ((event: { payload: PlanModeProgressPayload }) => void) | null = null;
   const unlisten = vi.fn();
@@ -121,10 +129,53 @@ describe('planOrchestrator event handling', () => {
     const orchestratorState = usePlanOrchestratorStore.getState();
     const planState = usePlanModeStore.getState();
 
-    expect(orchestratorState.phase).toBe('cancelled');
+    expect(orchestratorState.phase).toBe('executing');
     expect(orchestratorState.isBusy).toBe(false);
     expect(orchestratorState.isCancelling).toBe(false);
     expect(planState.isCancelling).toBe(false);
+    const completionCards = extractPlanCompletionCards();
+    expect(completionCards).toHaveLength(1);
+    expect(completionCards[0]?.data?.terminalState).toBe('cancelled');
+  });
+
+  it('uses terminal cancelled report stats when execution_cancelled includes terminalReport', async () => {
+    await usePlanOrchestratorStore.getState().approvePlan(TEST_PLAN);
+    expect(progressListener).not.toBeNull();
+
+    progressListener!({
+      payload: payload({
+        eventType: 'execution_cancelled',
+        progressPct: 100,
+        terminalReport: {
+          sessionId: 'session-1',
+          planTitle: 'Test Plan',
+          success: false,
+          terminalState: 'cancelled',
+          totalSteps: 7,
+          stepsCompleted: 2,
+          stepsFailed: 1,
+          stepsCancelled: 3,
+          stepsAttempted: 6,
+          stepsFailedBeforeCancel: 1,
+          totalDurationMs: 4200,
+          stepSummaries: {},
+          failureReasons: { 'step-4': 'blocked' },
+          cancelledBy: 'user',
+          runId: 'run-cancelled-1',
+          finalConclusionMarkdown: 'cancelled summary',
+          highlights: [],
+          nextActions: ['resume'],
+          retryStats: { totalRetries: 2, stepsRetried: 1, exhaustedFailures: 0 },
+        },
+      }),
+    });
+
+    const completionCards = extractPlanCompletionCards();
+    expect(completionCards).toHaveLength(1);
+    expect(completionCards[0]?.data?.terminalState).toBe('cancelled');
+    expect(completionCards[0]?.data?.stepsCancelled).toBe(3);
+    expect(completionCards[0]?.data?.stepsAttempted).toBe(6);
+    expect(completionCards[0]?.data?.stepsFailedBeforeCancel).toBe(1);
   });
 
   it('keeps completed terminal phase when report fetch fails', async () => {
@@ -157,7 +208,7 @@ describe('planOrchestrator event handling', () => {
     const orchestratorState = usePlanOrchestratorStore.getState();
     const completionCards = extractPlanCompletionCards();
 
-    expect(orchestratorState.phase).toBe('completed');
+    expect(orchestratorState.phase).toBe('executing');
     expect(orchestratorState.stepStatuses['step-1']).toBe('completed');
     expect(completionCards).toHaveLength(1);
     expect(completionCards[0]?.data?.success).toBe(true);
@@ -194,10 +245,66 @@ describe('planOrchestrator event handling', () => {
     const orchestratorState = usePlanOrchestratorStore.getState();
     const completionCards = extractPlanCompletionCards();
 
-    expect(orchestratorState.phase).toBe('failed');
+    expect(orchestratorState.phase).toBe('executing');
     expect(orchestratorState.stepStatuses['step-1']).toBe('failed');
     expect(completionCards).toHaveLength(1);
     expect(completionCards[0]?.data?.success).toBe(false);
+  });
+
+  it('records failed step diagnostics with fullContent in update card payload', async () => {
+    await usePlanOrchestratorStore.getState().approvePlan(TEST_PLAN);
+    expect(progressListener).not.toBeNull();
+
+    progressListener!({
+      payload: payload({
+        eventType: 'step_failed',
+        stepId: 'step-1',
+        stepStatus: 'failed',
+        error: 'Step output incomplete',
+        attemptCount: 2,
+        errorCode: 'incomplete_narration',
+        stepOutput: {
+          stepId: 'step-1',
+          summary: 'short summary',
+          content: '让我先实现这个模块。',
+          fullContent: '让我先实现这个模块。\n这里是失败步骤的完整输出诊断内容。',
+          format: 'markdown',
+          criteriaMet: [],
+          artifacts: [],
+          truncated: false,
+          originalLength: 29,
+          shownLength: 29,
+          qualityState: 'incomplete',
+          incompleteReason: 'Output is an execution narration rather than a completed result',
+          attemptCount: 2,
+          iterations: 24,
+          stopReason: 'max_iterations',
+          errorCode: 'max_iterations_no_recovery',
+          toolEvidence: [],
+        },
+      }),
+    });
+
+    const updateCards = extractPlanStepUpdateCards();
+    expect(updateCards).toHaveLength(1);
+    expect(updateCards[0]?.data?.eventType).toBe('step_failed');
+
+    const diagnostics = (updateCards[0]?.data?.diagnostics ?? null) as {
+      fullContent?: string;
+      qualityState?: string;
+      attemptCount?: number;
+      iterations?: number;
+      stopReason?: string;
+      errorCode?: string;
+    } | null;
+    expect(diagnostics?.fullContent).toBe('让我先实现这个模块。\n这里是失败步骤的完整输出诊断内容。');
+    expect(diagnostics?.qualityState).toBe('incomplete');
+    expect(diagnostics?.attemptCount).toBe(2);
+    expect(updateCards[0]?.data?.attemptCount).toBe(2);
+    expect(updateCards[0]?.data?.errorCode).toBe('incomplete_narration');
+    expect(diagnostics?.iterations).toBe(24);
+    expect(diagnostics?.stopReason).toBe('max_iterations');
+    expect(diagnostics?.errorCode).toBe('max_iterations_no_recovery');
   });
 
   it('injects at most one plan completion card for the same run token', async () => {
@@ -207,11 +314,19 @@ describe('planOrchestrator event handling', () => {
         sessionId: 'session-1',
         planTitle: 'Test Plan',
         success: true,
+        terminalState: 'completed',
         totalSteps: 1,
         stepsCompleted: 1,
         stepsFailed: 0,
         totalDurationMs: 1000,
         stepSummaries: { 'step-1': 'done' },
+        failureReasons: {},
+        cancelledBy: null,
+        runId: 'run-1',
+        finalConclusionMarkdown: 'all done',
+        highlights: ['done'],
+        nextActions: ['ship'],
+        retryStats: { totalRetries: 0, stepsRetried: 0, exhaustedFailures: 0 },
       },
     } as unknown as ReturnType<typeof usePlanModeStore.getState>);
 
@@ -232,6 +347,57 @@ describe('planOrchestrator event handling', () => {
     await Promise.resolve();
 
     expect(extractPlanCompletionCards()).toHaveLength(1);
+  });
+
+  it('injects completion card from kernel terminal fallback when progress terminal report is missing', async () => {
+    useWorkflowKernelStore.setState({
+      sessionId: 'kernel-plan-1',
+      session: {
+        ...createKernelPlanSession(),
+        activeMode: 'plan',
+        modeSnapshots: {
+          ...createKernelPlanSession().modeSnapshots,
+          plan: {
+            ...createKernelPlanSession().modeSnapshots.plan,
+            phase: 'completed',
+          },
+        },
+        linkedModeSessions: { plan: 'session-1' },
+      },
+    } as unknown as ReturnType<typeof useWorkflowKernelStore.getState>);
+    usePlanModeStore.setState({
+      fetchReport: vi.fn().mockResolvedValue({
+        sessionId: 'session-1',
+        planTitle: 'Test Plan',
+        success: true,
+        terminalState: 'completed',
+        totalSteps: 1,
+        stepsCompleted: 1,
+        stepsFailed: 0,
+        totalDurationMs: 100,
+        stepSummaries: { 'step-1': 'done' },
+        failureReasons: {},
+        cancelledBy: null,
+        runId: 'run-fallback',
+        finalConclusionMarkdown: 'final',
+        highlights: ['done'],
+        nextActions: ['ship'],
+        retryStats: { totalRetries: 0, stepsRetried: 0, exhaustedFailures: 0 },
+      }),
+    } as unknown as ReturnType<typeof usePlanModeStore.getState>);
+    usePlanOrchestratorStore.setState({
+      phase: 'executing',
+      sessionId: 'session-1',
+      editablePlan: TEST_PLAN,
+      _runToken: 22,
+      _completionCardInjectedRunToken: null,
+    } as unknown as ReturnType<typeof usePlanOrchestratorStore.getState>);
+
+    await usePlanOrchestratorStore.getState().ensureTerminalCompletionCardFromKernel();
+
+    const completionCards = extractPlanCompletionCards();
+    expect(completionCards).toHaveLength(1);
+    expect(completionCards[0]?.data?.planTitle).toBe('Test Plan');
   });
 
   it('retries a single step and converges to completed after execution_completed', async () => {
@@ -287,7 +453,7 @@ describe('planOrchestrator event handling', () => {
     await Promise.resolve();
 
     expect(usePlanOrchestratorStore.getState().stepStatuses['step-1']).toBe('completed');
-    expect(usePlanOrchestratorStore.getState().phase).toBe('completed');
+    expect(usePlanOrchestratorStore.getState().phase).toBe('executing');
   });
 
   it('retries a single step and converges to failed when retry step fails', async () => {
@@ -320,7 +486,7 @@ describe('planOrchestrator event handling', () => {
     await Promise.resolve();
 
     expect(usePlanOrchestratorStore.getState().stepStatuses['step-1']).toBe('failed');
-    expect(usePlanOrchestratorStore.getState().phase).toBe('failed');
+    expect(usePlanOrchestratorStore.getState().phase).toBe('executing');
   });
 
   it('falls back to kernel linked session and rolls back to reviewing_plan when approve fails', async () => {
@@ -377,11 +543,9 @@ describe('planOrchestrator clarification recovery', () => {
   });
 
   it('enters clarification_error when clarifying has no question', async () => {
-    const transitionAndSubmitInput = vi.fn().mockResolvedValue(createKernelPlanSession());
     useWorkflowKernelStore.setState({
       sessionId: 'kernel-plan-1',
       session: createKernelPlanSession(),
-      transitionAndSubmitInput,
     } as unknown as ReturnType<typeof useWorkflowKernelStore.getState>);
 
     const enterPlanMode = vi.fn().mockResolvedValue({
@@ -407,16 +571,6 @@ describe('planOrchestrator clarification recovery', () => {
 
     expect(usePlanOrchestratorStore.getState().phase).toBe('clarification_error');
     expect(usePlanOrchestratorStore.getState().pendingClarifyQuestion).toBeNull();
-    expect(transitionAndSubmitInput).toHaveBeenCalledWith(
-      'plan',
-      expect.objectContaining({
-        type: 'system_phase_update',
-        metadata: expect.objectContaining({
-          phase: 'clarification_error',
-          reasonCode: 'clarification_question_missing',
-        }),
-      }),
-    );
 
     const cards = useExecutionStore
       .getState()

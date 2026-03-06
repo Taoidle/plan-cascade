@@ -12,10 +12,11 @@ import {
 import type { WorkflowPhaseRuntime } from './runtime';
 
 interface RequirementPhaseDeps {
-  syncKernelTaskPhase: (phase: 'requirement_analysis', source?: string) => Promise<void>;
+  // Reserved for future extension.
+  _unused?: never;
 }
 
-export async function runRequirementPhase(runtime: WorkflowPhaseRuntime, deps: RequirementPhaseDeps): Promise<void> {
+export async function runRequirementPhase(runtime: WorkflowPhaseRuntime, _deps: RequirementPhaseDeps): Promise<void> {
   const { set, get, runToken, isRunActive, resolveTaskSessionId } = runtime;
   if (!isRunActive(get, runToken)) return;
 
@@ -40,7 +41,6 @@ export async function runRequirementPhase(runtime: WorkflowPhaseRuntime, deps: R
   if (config.flowLevel === 'quick') return;
 
   set({ phase: 'requirement_analysis' });
-  await deps.syncKernelTaskPhase('requirement_analysis', 'requirement_analysis_started');
 
   const { resolvePhaseAgent, formatModelDisplay } = await import('../../../lib/phaseAgentResolver');
   if (!isRunActive(get, runToken)) return;

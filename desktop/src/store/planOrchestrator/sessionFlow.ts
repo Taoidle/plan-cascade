@@ -33,14 +33,13 @@ interface SessionFlowDeps {
   buildPlanContextSources: (sessionId?: string | null) => ContextSourceConfig | undefined;
   resolvePlanSessionId: (get: PlanGet, set: PlanSet) => string | null;
   normalizeKernelPlanPhase: (phase: string | null | undefined) => PlanModePhase;
-  syncKernelPlanPhase: (phase: PlanModePhase, reasonCode?: string) => Promise<void>;
 }
 
 export async function startPlanWorkflowFlow(
   description: string,
   deps: SessionFlowDeps,
 ): Promise<{ modeSessionId: string | null }> {
-  const { get, set, buildPlanContextSources, normalizeKernelPlanPhase, syncKernelPlanPhase } = deps;
+  const { get, set, buildPlanContextSources, normalizeKernelPlanPhase } = deps;
   const runToken = get()._runToken + 1;
   let modeSessionId: string | null = null;
   const planStore = usePlanModeStore.getState();
@@ -97,11 +96,13 @@ export async function startPlanWorkflowFlow(
         hint: kernelPendingClarification.hint,
         inputType:
           kernelPendingClarification.inputType === 'single_select' ||
+          kernelPendingClarification.inputType === 'multi_select' ||
           kernelPendingClarification.inputType === 'boolean' ||
           kernelPendingClarification.inputType === 'textarea'
             ? kernelPendingClarification.inputType
             : 'text',
         options: kernelPendingClarification.options ?? [],
+        allowCustom: kernelPendingClarification.allowCustom ?? true,
       } satisfies PlanClarifyQuestionCardData)
     : null;
   const fallbackSessionId = kernelPlanRuntime.linkedSessionId;
@@ -160,7 +161,6 @@ export async function startPlanWorkflowFlow(
       injectInfo(message);
       injectClarificationResolutionCard('clarification_question_missing', message);
       set({ phase: 'clarification_error', isBusy: false, pendingClarifyQuestion: null });
-      await syncKernelPlanPhase('clarification_error', 'clarification_question_missing');
     }
   } else {
     if (get()._runToken !== runToken) return { modeSessionId: modeSessionId ?? null };
@@ -173,7 +173,7 @@ export async function submitClarificationFlow(
   answer: PlanClarifyAnswerCardData,
   deps: SessionFlowDeps,
 ): Promise<{ ok: boolean; errorCode?: string | null }> {
-  const { get, set, resolvePlanSessionId, buildPlanContextSources, syncKernelPlanPhase } = deps;
+  const { get, set, resolvePlanSessionId, buildPlanContextSources } = deps;
   const runToken = get()._runToken;
   const effectiveSessionId = resolvePlanSessionId(get, set);
   if (!effectiveSessionId) {
@@ -218,7 +218,6 @@ export async function submitClarificationFlow(
     injectInfo(message);
     injectClarificationResolutionCard('clarification_submit_failed', message);
     set({ phase: 'clarification_error', pendingClarifyQuestion: null, isBusy: false });
-    await syncKernelPlanPhase('clarification_error', 'clarification_submit_failed');
     return { ok: false, errorCode: 'clarification_submit_failed' };
   }
 
@@ -245,19 +244,17 @@ export async function submitClarificationFlow(
   set({ phase: 'clarification_error', pendingClarifyQuestion: null, isBusy: false });
   injectInfo(message);
   injectClarificationResolutionCard('clarification_question_missing', message);
-  await syncKernelPlanPhase('clarification_error', 'clarification_question_missing');
   return { ok: false, errorCode: 'clarification_question_missing' };
 }
 
 export async function retryClarificationFlow(deps: SessionFlowDeps): Promise<void> {
-  const { get, set, syncKernelPlanPhase } = deps;
+  const { get, set } = deps;
   const runToken = get()._runToken;
   const description = get().taskDescription.trim();
   if (!description) return;
 
   injectInfo(i18n.t('planMode:orchestrator.retryClarification', 'Retrying clarification...'));
   set({ phase: 'analyzing', isBusy: true, pendingClarifyQuestion: null });
-  await syncKernelPlanPhase('analyzing', 'clarification_retry');
 
   if (get()._runToken !== runToken) return;
   await get().startPlanWorkflow(description);

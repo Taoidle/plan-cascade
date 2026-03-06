@@ -15,7 +15,20 @@ export function PlanStepOutputCard({ data }: { data: PlanStepOutputCardData }) {
   const { t } = useTranslation('planMode');
   const [isExpanded, setIsExpanded] = useState(false);
   const allMet = data.criteriaMet.length === 0 || data.criteriaMet.every((c) => c.met);
-  const contentPreview = data.content.length > 280 ? `${data.content.slice(0, 280)}...` : data.content;
+  const qualityIncomplete = data.qualityState === 'incomplete';
+  const incompleteGroup = (() => {
+    const reason = (data.incompleteReason ?? '').toLowerCase();
+    if (reason.includes('execution narration')) return t('output.incompleteNarration', 'Narration-only output');
+    if (reason.includes('completion criteria unmet'))
+      return t('output.incompleteCriteria', 'Completion criteria unmet');
+    if (reason.includes('max iterations') || reason.includes('maximum iterations')) {
+      return t('output.incompleteMaxIterations', 'Iteration limit reached');
+    }
+    return null;
+  })();
+  const previewSource = data.summary ?? data.content;
+  const contentPreview = previewSource.length > 280 ? `${previewSource.slice(0, 280)}...` : previewSource;
+  const expandedContent = data.fullContent ?? data.content;
 
   return (
     <div
@@ -40,21 +53,64 @@ export function PlanStepOutputCard({ data }: { data: PlanStepOutputCardData }) {
         <span
           className={clsx(
             'text-2xs px-1.5 py-0.5 rounded font-medium',
-            allMet
+            allMet && !qualityIncomplete
               ? 'bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400'
               : 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400',
           )}
         >
-          {allMet ? t('output.passed', 'passed') : t('output.partial', 'partial')}
+          {allMet && !qualityIncomplete ? t('output.passed', 'passed') : t('output.partial', 'partial')}
         </span>
       </button>
 
       {/* Expanded content */}
       {isExpanded && (
         <div className="mt-2 space-y-2">
+          {data.truncated && (
+            <p className="text-2xs text-amber-700 dark:text-amber-300">
+              {t('output.truncatedHint', 'Displayed output was truncated in execution context')} (
+              {data.shownLength ?? expandedContent.length}/{data.originalLength ?? expandedContent.length})
+            </p>
+          )}
+          {qualityIncomplete && data.incompleteReason && (
+            <p className="text-2xs text-amber-700 dark:text-amber-300">
+              {t('output.incompleteReason', 'Marked incomplete')}: {data.incompleteReason}
+              {incompleteGroup ? ` (${incompleteGroup})` : ''}
+            </p>
+          )}
+          {typeof data.attemptCount === 'number' && data.attemptCount > 1 && (
+            <p className="text-2xs text-gray-500">
+              {t('output.attemptCount', 'Attempts')}: {data.attemptCount}
+            </p>
+          )}
+          {(typeof data.iterations === 'number' || data.stopReason || data.errorCode) && (
+            <p className="text-2xs text-gray-500">
+              {typeof data.iterations === 'number' ? `${t('output.iterations', 'Iterations')}: ${data.iterations}` : ''}
+              {typeof data.iterations === 'number' && data.stopReason ? ' | ' : ''}
+              {data.stopReason ? `${t('output.stopReason', 'Stop reason')}: ${data.stopReason}` : ''}
+              {(typeof data.iterations === 'number' || data.stopReason) && data.errorCode ? ' | ' : ''}
+              {data.errorCode ? `code: ${data.errorCode}` : ''}
+            </p>
+          )}
+
+          {Array.isArray(data.artifacts) && data.artifacts.length > 0 && (
+            <div className="space-y-0.5">
+              <span className="text-2xs font-medium text-gray-500">{t('output.artifacts', 'Artifacts')}:</span>
+              <div className="flex flex-wrap gap-1">
+                {data.artifacts.map((artifact, index) => (
+                  <code
+                    key={`${artifact}-${index}`}
+                    className="text-2xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
+                  >
+                    {artifact}
+                  </code>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Output content */}
-          <div className="text-xs text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-900 rounded p-2 max-h-48 overflow-y-auto whitespace-pre-wrap font-mono">
-            {data.content.length > 2000 ? `${data.content.slice(0, 2000)}...` : data.content}
+          <div className="text-xs text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-900 rounded p-2 max-h-64 overflow-y-auto whitespace-pre-wrap font-mono">
+            {expandedContent}
           </div>
 
           {/* Criteria results */}
@@ -74,7 +130,7 @@ export function PlanStepOutputCard({ data }: { data: PlanStepOutputCardData }) {
         </div>
       )}
 
-      {!isExpanded && data.content.length > 0 && (
+      {!isExpanded && previewSource.length > 0 && (
         <p className="mt-2 text-2xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-words">
           {contentPreview}
         </p>

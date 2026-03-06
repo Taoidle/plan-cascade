@@ -103,6 +103,8 @@ pub struct PlanClarificationSnapshot {
     pub options: Vec<String>,
     #[serde(default)]
     pub required: bool,
+    #[serde(default = "default_true")]
+    pub allow_custom: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -147,6 +149,10 @@ pub struct TaskInterviewSnapshot {
     pub allow_custom: bool,
     pub question_number: u32,
     pub total_questions: u32,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1826,6 +1832,7 @@ mod tests {
                 input_type: "single_select".to_string(),
                 options: vec!["Performance".to_string(), "UX".to_string()],
                 required: true,
+                allow_custom: false,
             }),
         };
         let task_snapshot = TaskSnapshotRehydrate {

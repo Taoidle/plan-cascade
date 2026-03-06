@@ -146,6 +146,10 @@ pub async fn approve_plan(
 
     let max_parallel = plan.execution_config.normalized_max_parallel();
     plan.execution_config.max_parallel = max_parallel;
+    let max_step_iterations = plan.execution_config.normalized_max_step_iterations();
+    plan.execution_config.max_step_iterations = max_step_iterations;
+    let retry_policy = plan.execution_config.normalized_retry_policy();
+    plan.execution_config.retry = retry_policy.clone();
     plan.batches = crate::services::plan_mode::types::calculate_plan_batches_with_parallel(
         &plan.steps,
         max_parallel,
@@ -192,6 +196,7 @@ pub async fn approve_plan(
             .ok_or_else(|| "No active plan mode session".to_string())?;
         session.plan = Some(plan.clone());
         session.phase = PlanModePhase::Executing;
+        session.step_attempts.clear();
         session.clone()
     };
     persist_plan_session_best_effort(&state, &executing_session_snapshot, "approve_plan.executing").await;
@@ -278,6 +283,14 @@ pub async fn approve_plan(
     tokio::spawn(async move {
         let mut config = crate::services::plan_mode::step_executor::StepExecutionConfig::default();
         config.max_parallel = max_parallel;
+        config.max_step_iterations = max_step_iterations;
+        config.max_retry_attempts = if retry_policy.enabled {
+            retry_policy.max_attempts
+        } else {
+            0
+        };
+        config.retry_backoff_ms = retry_policy.backoff_ms;
+        config.fail_batch_on_exhausted = retry_policy.fail_batch_on_exhausted;
 
         let mut plan_mut = plan;
         let app_for_execute = app_handle.clone();
@@ -301,7 +314,7 @@ pub async fn approve_plan(
         let mut sessions = sessions_arc.write().await;
         if let Some(session) = sessions.get_mut(&sid) {
             match result {
-                Ok((outputs, states)) => {
+                Ok((outputs, states, step_attempts)) => {
                     let failed = states
                         .values()
                         .any(|s| matches!(s, StepExecutionState::Failed { .. }));
@@ -311,6 +324,7 @@ pub async fn approve_plan(
 
                     session.step_outputs = outputs;
                     session.step_states = states;
+                    session.step_attempts = step_attempts;
                     session.plan = Some(plan_mut);
 
                     if cancelled {
@@ -323,6 +337,7 @@ pub async fn approve_plan(
                 }
                 Err(e) => {
                     session.phase = PlanModePhase::Failed;
+                    session.step_attempts.clear();
                     // Store error in a synthetic step state
                     session.step_states.insert(
                         "_error".to_string(),
@@ -560,7 +575,16 @@ pub async fn retry_plan_step(
 
     tokio::spawn(async move {
         let mut config = crate::services::plan_mode::step_executor::StepExecutionConfig::default();
+        let normalized_retry = plan.execution_config.normalized_retry_policy();
         config.max_parallel = plan.execution_config.normalized_max_parallel();
+        config.max_step_iterations = plan.execution_config.normalized_max_step_iterations();
+        config.max_retry_attempts = if normalized_retry.enabled {
+            normalized_retry.max_attempts
+        } else {
+            0
+        };
+        config.retry_backoff_ms = normalized_retry.backoff_ms;
+        config.fail_batch_on_exhausted = normalized_retry.fail_batch_on_exhausted;
 
         let app_for_retry = app_handle.clone();
         let result = crate::services::plan_mode::step_executor::retry_single_step(
@@ -594,6 +618,8 @@ pub async fn retry_plan_step(
 
                     session.step_outputs = outputs;
                     session.step_states = states;
+                    let attempts = session.step_attempts.entry(retry_step_id.clone()).or_insert(0);
+                    *attempts = attempts.saturating_add(1);
                     session.plan = Some(plan.clone());
                     if has_non_completed {
                         session.phase = PlanModePhase::Failed;
@@ -603,6 +629,8 @@ pub async fn retry_plan_step(
                 }
                 Err(error) => {
                     session.phase = PlanModePhase::Failed;
+                    let attempts = session.step_attempts.entry(retry_step_id.clone()).or_insert(0);
+                    *attempts = attempts.saturating_add(1);
                     session.step_states.insert(
                         retry_step_id.clone(),
                         StepExecutionState::Failed {

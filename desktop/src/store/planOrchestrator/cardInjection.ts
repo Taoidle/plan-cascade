@@ -47,25 +47,39 @@ export function normalizeStepOutputFormat(format: string | undefined): PlanStepO
   return 'text';
 }
 
-export function buildPlanCompletionCardDataFromReport(
-  report: PlanExecutionReport,
-  success: boolean,
-): PlanCompletionCardData {
+export function buildPlanCompletionCardDataFromReport(report: PlanExecutionReport): PlanCompletionCardData {
+  const normalizedTerminalState =
+    report.terminalState === 'completed' || report.terminalState === 'failed' || report.terminalState === 'cancelled'
+      ? report.terminalState
+      : report.success
+        ? 'completed'
+        : 'failed';
   return {
-    success,
+    success: report.success,
+    terminalState: normalizedTerminalState,
     planTitle: report.planTitle,
     totalSteps: report.totalSteps,
     stepsCompleted: report.stepsCompleted,
     stepsFailed: report.stepsFailed,
+    stepsCancelled: report.stepsCancelled ?? 0,
+    stepsAttempted: report.stepsAttempted ?? report.stepsCompleted + report.stepsFailed,
+    stepsFailedBeforeCancel: report.stepsFailedBeforeCancel ?? 0,
     totalDurationMs: report.totalDurationMs,
     stepSummaries: report.stepSummaries,
+    failureReasons: report.failureReasons,
+    cancelledBy: report.cancelledBy,
+    runId: report.runId,
+    finalConclusionMarkdown: report.finalConclusionMarkdown,
+    highlights: report.highlights,
+    nextActions: report.nextActions,
+    retryStats: report.retryStats,
   };
 }
 
 export function buildPlanCompletionCardDataFallback(
   plan: PlanCardData,
   stepStatuses: Record<string, string>,
-  success: boolean,
+  terminalState: PlanCompletionCardData['terminalState'],
 ): PlanCompletionCardData {
   const totalSteps = plan.steps.length;
   const stepsCompleted = plan.steps.filter((step) => stepStatuses[step.id] === 'completed').length;
@@ -86,13 +100,35 @@ export function buildPlanCompletionCardDataFallback(
     }),
   );
 
+  const effectiveTerminalState = terminalState ?? (stepsFailed > 0 ? 'failed' : 'completed');
   return {
-    success,
+    success: effectiveTerminalState === 'completed' && stepsFailed === 0,
+    terminalState: effectiveTerminalState,
     planTitle: plan.title,
     totalSteps,
     stepsCompleted,
     stepsFailed,
+    stepsCancelled: plan.steps.filter((step) => stepStatuses[step.id] === 'cancelled').length,
+    stepsAttempted: plan.steps.filter((step) => ['completed', 'failed', 'cancelled'].includes(stepStatuses[step.id]))
+      .length,
+    stepsFailedBeforeCancel: effectiveTerminalState === 'cancelled' ? stepsFailed : 0,
     totalDurationMs: 0,
     stepSummaries,
+    failureReasons: {},
+    cancelledBy: effectiveTerminalState === 'cancelled' ? 'user' : null,
+    finalConclusionMarkdown:
+      effectiveTerminalState === 'completed'
+        ? 'Execution finished. Review each step summary and artifacts for final delivery.'
+        : 'Execution did not fully complete. Resolve failed or blocked steps before continuing.',
+    highlights: [],
+    nextActions:
+      effectiveTerminalState === 'completed'
+        ? ['Validate outputs and merge into the final result.']
+        : ['Retry blocked steps and verify dependency outputs first.'],
+    retryStats: {
+      totalRetries: 0,
+      stepsRetried: 0,
+      exhaustedFailures: 0,
+    },
   };
 }

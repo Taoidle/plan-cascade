@@ -331,16 +331,15 @@ Respond in JSON format:
 
 /// Truncate output to approximately `max_chars` characters.
 fn truncate_output(content: &str, max_chars: usize) -> String {
-    if content.len() <= max_chars {
-        content.to_string()
-    } else {
-        let truncated = &content[..max_chars];
-        format!(
-            "{}...\n\n[Output truncated — {} chars total]",
-            truncated,
-            content.len()
-        )
+    let content_chars = content.chars().count();
+    if content_chars <= max_chars {
+        return content.to_string();
     }
+    let truncated: String = content.chars().take(max_chars).collect();
+    format!(
+        "{}...\n\n[Output truncated — {} chars total]",
+        truncated, content_chars
+    )
 }
 
 #[cfg(test)]

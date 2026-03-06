@@ -3378,11 +3378,14 @@ impl OrchestratorService {
                                     if remaining == 0 {
                                         break;
                                     }
-                                    let snippet = if text.len() > remaining {
-                                        &text[..remaining]
-                                    } else {
-                                        text.as_str()
-                                    };
+                                    let overhead = role_label.len() + 2 + 2; // ": " + "\n\n"
+                                    if remaining <= overhead {
+                                        break;
+                                    }
+                                    let snippet = utf8_safe_prefix_by_bytes(text, remaining - overhead);
+                                    if snippet.is_empty() {
+                                        break;
+                                    }
                                     buf.push_str(role_label);
                                     buf.push_str(": ");
                                     buf.push_str(snippet);
@@ -4509,6 +4512,17 @@ impl OrchestratorService {
     }
 }
 
+fn utf8_safe_prefix_by_bytes(text: &str, max_bytes: usize) -> &str {
+    if max_bytes >= text.len() {
+        return text;
+    }
+    let mut cut = max_bytes;
+    while cut > 0 && !text.is_char_boundary(cut) {
+        cut = cut.saturating_sub(1);
+    }
+    &text[..cut]
+}
+
 #[cfg(test)]
 mod skill_tool_policy_tests {
     use super::*;
@@ -4583,6 +4597,23 @@ mod skill_tool_policy_tests {
                 safe
             );
         }
+    }
+
+    #[test]
+    fn utf8_safe_prefix_by_bytes_never_splits_multibyte_char() {
+        let text = "abc听def";
+        // 5 falls in the middle of '听' (bytes 3..6), should backtrack to 3.
+        let truncated = utf8_safe_prefix_by_bytes(text, 5);
+        assert_eq!(truncated, "abc");
+        assert!(truncated.is_char_boundary(truncated.len()));
+    }
+
+    #[test]
+    fn utf8_safe_prefix_by_bytes_keeps_exact_char_boundary() {
+        let text = "abc听def";
+        let truncated = utf8_safe_prefix_by_bytes(text, 6);
+        assert_eq!(truncated, "abc听");
+        assert!(truncated.is_char_boundary(truncated.len()));
     }
 
     #[test]

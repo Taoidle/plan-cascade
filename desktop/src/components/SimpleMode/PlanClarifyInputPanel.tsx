@@ -63,6 +63,8 @@ function PlanClarifyAnswerInput({
       return <BooleanAnswer onSubmit={onSubmit} loading={loading} />;
     case 'single_select':
       return <SingleSelectAnswer question={question} onSubmit={onSubmit} loading={loading} />;
+    case 'multi_select':
+      return <MultiSelectAnswer question={question} onSubmit={onSubmit} loading={loading} />;
     case 'textarea':
       return <TextareaAnswer question={question} onSubmit={onSubmit} loading={loading} />;
     default:
@@ -105,26 +107,199 @@ function SingleSelectAnswer({
   onSubmit,
   loading,
 }: Pick<PlanClarifyInputPanelProps, 'question' | 'onSubmit' | 'loading'>) {
+  const { t } = useTranslation('planMode');
   const options = question.options ?? [];
-  if (options.length === 0) return null;
+  const hasOptions = options.length > 0;
+  const [selected, setSelected] = useState<string | null>(null);
+  const [showCustom, setShowCustom] = useState(false);
+  const [customValue, setCustomValue] = useState('');
+  const customInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (showCustom) customInputRef.current?.focus();
+  }, [showCustom]);
+
+  const handleSubmit = useCallback(() => {
+    if (showCustom && customValue.trim()) {
+      onSubmit(customValue.trim());
+      return;
+    }
+    if (selected) {
+      onSubmit(selected);
+    }
+  }, [showCustom, customValue, selected, onSubmit]);
+
+  const canSubmit = showCustom ? customValue.trim().length > 0 : selected !== null;
+  if (!hasOptions) return null;
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-      {options.map((option) => (
-        <button
-          key={option}
-          onClick={() => onSubmit(option)}
-          disabled={loading}
-          className={clsx(
-            'px-3 py-2 rounded text-xs text-left border transition-colors',
-            'border-amber-300 dark:border-amber-700 bg-white dark:bg-gray-900',
-            'text-amber-800 dark:text-amber-200 hover:bg-amber-50 dark:hover:bg-amber-900/30',
-            'disabled:opacity-50 disabled:cursor-not-allowed',
+    <div className="space-y-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {options.map((option) => (
+          <button
+            key={option}
+            onClick={() => {
+              setSelected(option);
+              setShowCustom(false);
+              setCustomValue('');
+            }}
+            disabled={loading}
+            className={clsx(
+              'px-3 py-2 rounded text-xs text-left border transition-colors',
+              !showCustom && selected === option
+                ? 'border-amber-500 dark:border-amber-500 bg-amber-100 dark:bg-amber-900/40'
+                : 'border-amber-300 dark:border-amber-700 bg-white dark:bg-gray-900',
+              'text-amber-800 dark:text-amber-200 hover:bg-amber-50 dark:hover:bg-amber-900/30',
+              'disabled:opacity-50 disabled:cursor-not-allowed',
+            )}
+          >
+            {option}
+          </button>
+        ))}
+      </div>
+      {question.allowCustom && (
+        <>
+          {!showCustom ? (
+            <button
+              onClick={() => {
+                setShowCustom(true);
+                setSelected(null);
+              }}
+              disabled={loading}
+              className="w-full text-left px-3 py-1.5 rounded text-xs text-amber-700 dark:text-amber-300 bg-white dark:bg-gray-900 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors border border-dashed border-amber-300 dark:border-amber-700 disabled:opacity-50"
+            >
+              {t('clarify.otherOption', { defaultValue: 'Other (type custom answer)' })}
+            </button>
+          ) : (
+            <input
+              ref={customInputRef}
+              value={customValue}
+              onChange={(event) => setCustomValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && customValue.trim()) {
+                  event.preventDefault();
+                  onSubmit(customValue.trim());
+                }
+              }}
+              disabled={loading}
+              placeholder={t('clarify.customPlaceholder', { defaultValue: 'Type custom answer...' })}
+              className={clsx(
+                'w-full px-3 py-2 rounded text-sm border transition-colors',
+                'border-amber-300 dark:border-amber-700 bg-white dark:bg-gray-900',
+                'text-amber-900 dark:text-amber-100 placeholder:text-amber-500/70 dark:placeholder:text-amber-400/60',
+                'focus:outline-none focus:ring-2 focus:ring-amber-500/30 disabled:opacity-50',
+              )}
+            />
           )}
-        >
-          {option}
-        </button>
-      ))}
+        </>
+      )}
+      <button
+        onClick={handleSubmit}
+        disabled={loading || !canSubmit}
+        className="px-3 py-1.5 rounded text-xs font-medium bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      >
+        {t('clarify.submitStructured', { defaultValue: 'Submit' })}
+      </button>
+    </div>
+  );
+}
+
+function MultiSelectAnswer({
+  question,
+  onSubmit,
+  loading,
+}: Pick<PlanClarifyInputPanelProps, 'question' | 'onSubmit' | 'loading'>) {
+  const { t } = useTranslation('planMode');
+  const options = question.options ?? [];
+  const hasOptions = options.length > 0;
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showCustom, setShowCustom] = useState(false);
+  const [customValue, setCustomValue] = useState('');
+  const customInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (showCustom) customInputRef.current?.focus();
+  }, [showCustom]);
+
+  const toggle = useCallback((option: string) => {
+    setSelected((previous) => {
+      const next = new Set(previous);
+      if (next.has(option)) {
+        next.delete(option);
+      } else {
+        next.add(option);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleSubmit = useCallback(() => {
+    const values = Array.from(selected);
+    if (showCustom && customValue.trim()) {
+      values.push(customValue.trim());
+    }
+    if (values.length > 0) {
+      onSubmit(values.join(', '));
+    }
+  }, [selected, showCustom, customValue, onSubmit]);
+
+  const hasAnySelection = selected.size > 0 || (showCustom && customValue.trim().length > 0);
+  if (!hasOptions) return null;
+
+  return (
+    <div className="space-y-2">
+      <div className="space-y-1 max-h-40 overflow-y-auto">
+        {options.map((option) => (
+          <button
+            key={option}
+            onClick={() => toggle(option)}
+            disabled={loading}
+            className={clsx(
+              'w-full text-left px-3 py-1.5 rounded text-xs transition-colors border',
+              selected.has(option)
+                ? 'border-amber-500 dark:border-amber-500 bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200'
+                : 'border-amber-300 dark:border-amber-700 bg-white dark:bg-gray-900 text-amber-800 dark:text-amber-200 hover:bg-amber-50 dark:hover:bg-amber-900/30',
+              'disabled:opacity-50',
+            )}
+          >
+            {option}
+          </button>
+        ))}
+      </div>
+      {question.allowCustom && (
+        <>
+          {!showCustom ? (
+            <button
+              onClick={() => setShowCustom(true)}
+              disabled={loading}
+              className="w-full text-left px-3 py-1.5 rounded text-xs text-amber-700 dark:text-amber-300 bg-white dark:bg-gray-900 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors border border-dashed border-amber-300 dark:border-amber-700 disabled:opacity-50"
+            >
+              {t('clarify.otherOption', { defaultValue: 'Other (type custom answer)' })}
+            </button>
+          ) : (
+            <input
+              ref={customInputRef}
+              value={customValue}
+              onChange={(event) => setCustomValue(event.target.value)}
+              disabled={loading}
+              placeholder={t('clarify.customPlaceholder', { defaultValue: 'Type custom answer...' })}
+              className={clsx(
+                'w-full px-3 py-2 rounded text-sm border transition-colors',
+                'border-amber-300 dark:border-amber-700 bg-white dark:bg-gray-900',
+                'text-amber-900 dark:text-amber-100 placeholder:text-amber-500/70 dark:placeholder:text-amber-400/60',
+                'focus:outline-none focus:ring-2 focus:ring-amber-500/30 disabled:opacity-50',
+              )}
+            />
+          )}
+        </>
+      )}
+      <button
+        onClick={handleSubmit}
+        disabled={loading || !hasAnySelection}
+        className="px-3 py-1.5 rounded text-xs font-medium bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      >
+        {t('clarify.submitStructured', { defaultValue: 'Submit' })}
+      </button>
     </div>
   );
 }

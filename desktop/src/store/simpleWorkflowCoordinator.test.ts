@@ -83,7 +83,7 @@ describe('simpleWorkflowCoordinator', () => {
   it('compensates with mode_start_failed when task start throws', async () => {
     const kernelSession = createKernelSession('task');
     kernelSession.linkedModeSessions.task = 'task-runtime-1';
-    const transitionAndSubmitInput = vi.fn().mockResolvedValueOnce(kernelSession).mockResolvedValueOnce(kernelSession);
+    const transitionAndSubmitInput = vi.fn().mockResolvedValueOnce(kernelSession);
     const cancelKernelOperation = vi.fn().mockResolvedValue(kernelSession);
     const taskCancel = vi.fn().mockResolvedValue(undefined);
     const taskExit = vi.fn().mockResolvedValue(undefined);
@@ -116,22 +116,12 @@ describe('simpleWorkflowCoordinator', () => {
     expect(taskCancel).not.toHaveBeenCalled();
     expect(taskExit).not.toHaveBeenCalled();
     expect(cancelKernelOperation).toHaveBeenCalledWith('mode_start_failed');
-    expect(transitionAndSubmitInput).toHaveBeenNthCalledWith(
-      2,
-      'task',
-      expect.objectContaining({
-        type: 'system_phase_update',
-        metadata: expect.objectContaining({
-          reasonCode: 'mode_start_failed',
-        }),
-      }),
-      undefined,
-    );
+    expect(transitionAndSubmitInput).toHaveBeenCalledTimes(1);
   });
 
   it('compensates with mode_session_link_failed when link fails', async () => {
     const kernelSession = createKernelSession('task');
-    const transitionAndSubmitInput = vi.fn().mockResolvedValueOnce(kernelSession).mockResolvedValueOnce(kernelSession);
+    const transitionAndSubmitInput = vi.fn().mockResolvedValueOnce(kernelSession);
     const cancelKernelOperation = vi.fn().mockResolvedValue(kernelSession);
     const taskCancel = vi.fn().mockResolvedValue(undefined);
     const taskExit = vi.fn().mockResolvedValue(undefined);
@@ -168,17 +158,7 @@ describe('simpleWorkflowCoordinator', () => {
     expect(taskCancel).toHaveBeenCalledTimes(1);
     expect(taskExit).toHaveBeenCalledTimes(1);
     expect(cancelKernelOperation).toHaveBeenCalledWith('mode_session_link_failed');
-    expect(transitionAndSubmitInput).toHaveBeenNthCalledWith(
-      2,
-      'task',
-      expect.objectContaining({
-        type: 'system_phase_update',
-        metadata: expect.objectContaining({
-          reasonCode: 'mode_session_link_failed',
-        }),
-      }),
-      undefined,
-    );
+    expect(transitionAndSubmitInput).toHaveBeenCalledTimes(1);
   });
 
   it('injects clientRequestId metadata on tracked workflow input', async () => {

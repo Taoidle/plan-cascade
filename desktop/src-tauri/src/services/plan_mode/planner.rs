@@ -129,7 +129,18 @@ fn parse_plan(text: &str, domain: &TaskDomain, adapter_name: &str) -> AppResult<
         .map(|value| value as usize)
         .unwrap_or(4)
         .clamp(1, 8);
-    let execution_config = PlanExecutionConfig { max_parallel };
+    let max_step_iterations = parsed
+        .get("executionConfig")
+        .and_then(|v| v.get("maxStepIterations"))
+        .and_then(|v| v.as_u64())
+        .map(|value| value as u32)
+        .unwrap_or(36)
+        .clamp(12, 96);
+    let execution_config = PlanExecutionConfig {
+        max_parallel,
+        max_step_iterations,
+        retry: Default::default(),
+    };
     let batches = calculate_plan_batches_with_parallel(&steps, execution_config.max_parallel);
 
     Ok(Plan {

@@ -36,6 +36,7 @@ pub async fn enter_plan_mode(
         plan: None,
         step_outputs: HashMap::new(),
         step_states: HashMap::new(),
+        step_attempts: HashMap::new(),
         progress: None,
         created_at: chrono::Utc::now().to_rfc3339(),
     };

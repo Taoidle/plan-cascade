@@ -28,7 +28,6 @@ interface ExecutionFlowDeps {
     runToken: number;
     plan: PlanCardData;
     rollbackPhase: PlanModePhase;
-    rollbackReasonCode: string;
     startErrorTitle: string;
     invokeExecution: () => Promise<void>;
     get: PlanGet;
@@ -68,7 +67,6 @@ export async function approvePlanFlow(plan: PlanCardData, deps: ExecutionFlowDep
     runToken,
     plan,
     rollbackPhase: 'reviewing_plan',
-    rollbackReasonCode: 'plan_approval_failed',
     startErrorTitle: i18n.t('planMode:orchestrator.approveFailed', 'Failed to start plan execution'),
     invokeExecution: () =>
       (async () => {
@@ -160,7 +158,6 @@ export async function retryStepFlow(stepId: string, deps: ExecutionFlowDeps): Pr
     runToken,
     plan,
     rollbackPhase: previousPhase === 'executing' ? 'failed' : previousPhase,
-    rollbackReasonCode: 'plan_retry_failed',
     startErrorTitle: i18n.t('planMode:orchestrator.retryFailed', 'Failed to retry plan step'),
     invokeExecution: () =>
       (async () => {

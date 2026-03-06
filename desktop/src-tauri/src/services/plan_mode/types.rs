@@ -196,17 +196,83 @@ pub struct Plan {
 pub struct PlanExecutionConfig {
     /// Maximum number of parallel step executions.
     pub max_parallel: usize,
+    /// Max orchestrator iterations for a single step execution.
+    #[serde(default = "default_max_step_iterations")]
+    pub max_step_iterations: u32,
+    /// Automatic retry behavior for failed or incomplete steps.
+    #[serde(default)]
+    pub retry: PlanRetryPolicy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanRetryPolicy {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Number of retries after the first attempt.
+    #[serde(default = "default_retry_max_attempts")]
+    pub max_attempts: usize,
+    #[serde(default = "default_retry_backoff_ms")]
+    pub backoff_ms: u64,
+    #[serde(default = "default_true")]
+    pub fail_batch_on_exhausted: bool,
+}
+
+fn default_retry_max_attempts() -> usize {
+    2
+}
+
+fn default_retry_backoff_ms() -> u64 {
+    800
+}
+
+fn default_max_step_iterations() -> u32 {
+    36
+}
+
+impl Default for PlanRetryPolicy {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_attempts: default_retry_max_attempts(),
+            backoff_ms: default_retry_backoff_ms(),
+            fail_batch_on_exhausted: true,
+        }
+    }
+}
+
+impl PlanRetryPolicy {
+    pub fn normalized(&self) -> Self {
+        Self {
+            enabled: self.enabled,
+            max_attempts: self.max_attempts.min(5),
+            backoff_ms: self.backoff_ms.clamp(100, 5_000),
+            fail_batch_on_exhausted: self.fail_batch_on_exhausted,
+        }
+    }
 }
 
 impl Default for PlanExecutionConfig {
     fn default() -> Self {
-        Self { max_parallel: 4 }
+        Self {
+            max_parallel: 4,
+            max_step_iterations: default_max_step_iterations(),
+            retry: PlanRetryPolicy::default(),
+        }
     }
 }
 
 impl PlanExecutionConfig {
     pub fn normalized_max_parallel(&self) -> usize {
         self.max_parallel.clamp(1, 8)
+    }
+
+    pub fn normalized_retry_policy(&self) -> PlanRetryPolicy {
+        self.retry.normalized()
+    }
+
+    pub fn normalized_max_step_iterations(&self) -> u32 {
+        self.max_step_iterations.clamp(12, 96)
     }
 }
 
@@ -246,6 +312,9 @@ pub struct ClarificationQuestion {
     pub hint: Option<String>,
     /// Input type for the question
     pub input_type: ClarificationInputType,
+    /// Whether the user can provide a custom answer for select types
+    #[serde(default = "default_true")]
+    pub allow_custom: bool,
 }
 
 /// Input types for clarification questions.
@@ -255,6 +324,7 @@ pub enum ClarificationInputType {
     Text,
     Textarea,
     SingleSelect(Vec<String>),
+    MultiSelect(Vec<String>),
     Boolean,
 }
 
@@ -293,6 +363,12 @@ pub struct StepOutput {
     pub step_id: String,
     /// The actual output content
     pub content: String,
+    /// A concise user-facing summary of the output
+    #[serde(default)]
+    pub summary: String,
+    /// Full output content before any display truncation
+    #[serde(default)]
+    pub full_content: String,
     /// Output format (text, markdown, json, etc.)
     pub format: OutputFormat,
     /// Validation results for completion criteria
@@ -300,6 +376,53 @@ pub struct StepOutput {
     /// Any artifacts produced (file paths, URLs, etc.)
     #[serde(default)]
     pub artifacts: Vec<String>,
+    /// Whether the output shown in `content` is truncated from `full_content`
+    #[serde(default)]
+    pub truncated: bool,
+    /// Character length of the original full output
+    #[serde(default)]
+    pub original_length: usize,
+    /// Character length of the shown output
+    #[serde(default)]
+    pub shown_length: usize,
+    /// Output quality state from quality gate.
+    #[serde(default)]
+    pub quality_state: StepOutputQualityState,
+    /// Reason when quality gate marks output incomplete.
+    #[serde(default)]
+    pub incomplete_reason: Option<String>,
+    /// Number of attempts used to produce this output.
+    #[serde(default = "default_step_attempt_count")]
+    pub attempt_count: usize,
+    /// Tool/evidence markers extracted from execution context.
+    #[serde(default)]
+    pub tool_evidence: Vec<String>,
+    /// Iteration count used by orchestrator for this output.
+    #[serde(default)]
+    pub iterations: u32,
+    /// Stop reason from orchestrator/runtime if available.
+    #[serde(default)]
+    pub stop_reason: Option<String>,
+    /// Structured error code for diagnostics.
+    #[serde(default)]
+    pub error_code: Option<String>,
+}
+
+fn default_step_attempt_count() -> usize {
+    1
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StepOutputQualityState {
+    Complete,
+    Incomplete,
+}
+
+impl Default for StepOutputQualityState {
+    fn default() -> Self {
+        Self::Complete
+    }
 }
 
 /// Output format types.
@@ -374,6 +497,9 @@ pub struct PlanModeSession {
     /// Step execution states keyed by step ID
     #[serde(default)]
     pub step_states: HashMap<String, StepExecutionState>,
+    /// Step attempt counters keyed by step ID
+    #[serde(default)]
+    pub step_attempts: HashMap<String, usize>,
     /// Execution progress summary
     pub progress: Option<PlanExecutionProgress>,
     /// Session creation timestamp
@@ -423,13 +549,40 @@ pub struct PlanModeProgressEvent {
     pub step_status: Option<String>,
     /// Error message (if any)
     pub error: Option<String>,
+    /// Current attempt number when relevant.
+    #[serde(default)]
+    pub attempt_count: Option<usize>,
+    /// Structured error code when relevant.
+    #[serde(default)]
+    pub error_code: Option<String>,
     /// Step output payload when a step completes successfully
     pub step_output: Option<StepOutput>,
+    /// Terminal report payload when execution reaches a terminal state
+    pub terminal_report: Option<PlanExecutionReport>,
     /// Overall progress percentage (0-100)
     pub progress_pct: f64,
+    /// Stable run identifier for observability.
+    #[serde(default)]
+    pub run_id: String,
+    /// Monotonic sequence within the run.
+    #[serde(default)]
+    pub event_seq: u64,
+    /// Event producer source.
+    #[serde(default)]
+    pub source: String,
+    /// Optional drop reason when event carries degraded data.
+    #[serde(default)]
+    pub drop_reason: Option<String>,
 }
 
 impl PlanModeProgressEvent {
+    fn with_metadata(mut self, run_id: &str, event_seq: u64, source: &str) -> Self {
+        self.run_id = run_id.to_string();
+        self.event_seq = event_seq;
+        self.source = source.to_string();
+        self
+    }
+
     pub fn batch_started(
         session_id: &str,
         current_batch: usize,
@@ -444,8 +597,15 @@ impl PlanModeProgressEvent {
             step_id: None,
             step_status: None,
             error: None,
+            attempt_count: None,
+            error_code: None,
             step_output: None,
+            terminal_report: None,
             progress_pct,
+            run_id: String::new(),
+            event_seq: 0,
+            source: String::new(),
+            drop_reason: None,
         }
     }
 
@@ -464,8 +624,15 @@ impl PlanModeProgressEvent {
             step_id: Some(step_id.to_string()),
             step_status: Some("running".to_string()),
             error: None,
+            attempt_count: None,
+            error_code: None,
             step_output: None,
+            terminal_report: None,
             progress_pct,
+            run_id: String::new(),
+            event_seq: 0,
+            source: String::new(),
+            drop_reason: None,
         }
     }
 
@@ -485,8 +652,15 @@ impl PlanModeProgressEvent {
             step_id: Some(step_id.to_string()),
             step_status: Some("completed".to_string()),
             error: None,
+            attempt_count: None,
+            error_code: None,
             step_output: Some(step_output),
+            terminal_report: None,
             progress_pct,
+            run_id: String::new(),
+            event_seq: 0,
+            source: String::new(),
+            drop_reason: None,
         }
     }
 
@@ -506,12 +680,108 @@ impl PlanModeProgressEvent {
             step_id: Some(step_id.to_string()),
             step_status: Some("failed".to_string()),
             error: Some(error.to_string()),
+            attempt_count: None,
+            error_code: None,
             step_output: None,
+            terminal_report: None,
             progress_pct,
+            run_id: String::new(),
+            event_seq: 0,
+            source: String::new(),
+            drop_reason: None,
         }
     }
 
-    pub fn execution_completed(session_id: &str, total_batches: usize, progress_pct: f64) -> Self {
+    pub fn step_failed_with_output(
+        session_id: &str,
+        current_batch: usize,
+        total_batches: usize,
+        step_id: &str,
+        error: &str,
+        step_output: StepOutput,
+        progress_pct: f64,
+    ) -> Self {
+        Self {
+            session_id: session_id.to_string(),
+            event_type: "step_failed".to_string(),
+            current_batch,
+            total_batches,
+            step_id: Some(step_id.to_string()),
+            step_status: Some("failed".to_string()),
+            error: Some(error.to_string()),
+            attempt_count: None,
+            error_code: None,
+            step_output: Some(step_output),
+            terminal_report: None,
+            progress_pct,
+            run_id: String::new(),
+            event_seq: 0,
+            source: String::new(),
+            drop_reason: None,
+        }
+    }
+
+    pub fn step_retrying(
+        session_id: &str,
+        current_batch: usize,
+        total_batches: usize,
+        step_id: &str,
+        error: &str,
+        progress_pct: f64,
+    ) -> Self {
+        Self {
+            session_id: session_id.to_string(),
+            event_type: "step_retrying".to_string(),
+            current_batch,
+            total_batches,
+            step_id: Some(step_id.to_string()),
+            step_status: Some("retrying".to_string()),
+            error: Some(error.to_string()),
+            attempt_count: None,
+            error_code: None,
+            step_output: None,
+            terminal_report: None,
+            progress_pct,
+            run_id: String::new(),
+            event_seq: 0,
+            source: String::new(),
+            drop_reason: None,
+        }
+    }
+
+    pub fn batch_blocked(
+        session_id: &str,
+        current_batch: usize,
+        total_batches: usize,
+        error: &str,
+        progress_pct: f64,
+    ) -> Self {
+        Self {
+            session_id: session_id.to_string(),
+            event_type: "batch_blocked".to_string(),
+            current_batch,
+            total_batches,
+            step_id: None,
+            step_status: Some("blocked".to_string()),
+            error: Some(error.to_string()),
+            attempt_count: None,
+            error_code: None,
+            step_output: None,
+            terminal_report: None,
+            progress_pct,
+            run_id: String::new(),
+            event_seq: 0,
+            source: String::new(),
+            drop_reason: None,
+        }
+    }
+
+    pub fn execution_completed(
+        session_id: &str,
+        total_batches: usize,
+        progress_pct: f64,
+        terminal_report: PlanExecutionReport,
+    ) -> Self {
         Self {
             session_id: session_id.to_string(),
             event_type: "execution_completed".to_string(),
@@ -520,8 +790,15 @@ impl PlanModeProgressEvent {
             step_id: None,
             step_status: None,
             error: None,
+            attempt_count: None,
+            error_code: None,
             step_output: None,
+            terminal_report: Some(terminal_report),
             progress_pct,
+            run_id: String::new(),
+            event_seq: 0,
+            source: String::new(),
+            drop_reason: None,
         }
     }
 
@@ -529,6 +806,7 @@ impl PlanModeProgressEvent {
         session_id: &str,
         current_batch: usize,
         total_batches: usize,
+        terminal_report: PlanExecutionReport,
     ) -> Self {
         Self {
             session_id: session_id.to_string(),
@@ -538,9 +816,30 @@ impl PlanModeProgressEvent {
             step_id: None,
             step_status: None,
             error: None,
+            attempt_count: None,
+            error_code: None,
             step_output: None,
+            terminal_report: Some(terminal_report),
             progress_pct: 0.0,
+            run_id: String::new(),
+            event_seq: 0,
+            source: String::new(),
+            drop_reason: None,
         }
+    }
+
+    pub fn with_observability(self, run_id: &str, event_seq: u64, source: &str) -> Self {
+        self.with_metadata(run_id, event_seq, source)
+    }
+
+    pub fn with_attempt_metadata(
+        mut self,
+        attempt_count: Option<usize>,
+        error_code: Option<impl Into<String>>,
+    ) -> Self {
+        self.attempt_count = attempt_count;
+        self.error_code = error_code.map(Into::into);
+        self
     }
 }
 
@@ -558,16 +857,58 @@ pub struct PlanExecutionReport {
     pub plan_title: String,
     /// Overall success
     pub success: bool,
+    /// Terminal state of this run
+    pub terminal_state: String,
     /// Total steps
     pub total_steps: usize,
     /// Steps completed
     pub steps_completed: usize,
     /// Steps failed
     pub steps_failed: usize,
+    /// Steps cancelled
+    #[serde(default)]
+    pub steps_cancelled: usize,
+    /// Steps that reached any terminal state (completed/failed/cancelled)
+    #[serde(default)]
+    pub steps_attempted: usize,
+    /// Number of failed steps observed before cancellation happened.
+    #[serde(default)]
+    pub steps_failed_before_cancel: usize,
     /// Total duration in milliseconds
     pub total_duration_ms: u64,
     /// Per-step output summaries (step_id → truncated content)
     pub step_summaries: HashMap<String, String>,
+    /// Per-step failure reason map (step_id → reason)
+    pub failure_reasons: HashMap<String, String>,
+    /// Who initiated cancellation if terminal_state is cancelled
+    pub cancelled_by: Option<String>,
+    /// Stable run identifier.
+    #[serde(default)]
+    pub run_id: String,
+    /// Final synthesized conclusion markdown.
+    #[serde(default)]
+    pub final_conclusion_markdown: String,
+    /// High-level highlights.
+    #[serde(default)]
+    pub highlights: Vec<String>,
+    /// Suggested next actions.
+    #[serde(default)]
+    pub next_actions: Vec<String>,
+    /// Retry metrics for this run.
+    #[serde(default)]
+    pub retry_stats: PlanRetryStats,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanRetryStats {
+    pub total_retries: usize,
+    pub steps_retried: usize,
+    pub exhausted_failures: usize,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 // ============================================================================
@@ -745,5 +1086,16 @@ mod tests {
         }
         .is_terminal());
         assert!(StepExecutionState::Cancelled.is_terminal());
+    }
+
+    #[test]
+    fn test_plan_execution_config_normalizes_max_step_iterations() {
+        let mut cfg = PlanExecutionConfig::default();
+        cfg.max_step_iterations = 8;
+        assert_eq!(cfg.normalized_max_step_iterations(), 12);
+        cfg.max_step_iterations = 128;
+        assert_eq!(cfg.normalized_max_step_iterations(), 96);
+        cfg.max_step_iterations = 48;
+        assert_eq!(cfg.normalized_max_step_iterations(), 48);
     }
 }

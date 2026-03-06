@@ -218,6 +218,7 @@ fn map_plan_input_type(input_type: &ClarificationInputType) -> (String, Vec<Stri
         ClarificationInputType::SingleSelect(options) => {
             ("single_select".to_string(), options.clone())
         }
+        ClarificationInputType::MultiSelect(options) => ("multi_select".to_string(), options.clone()),
         ClarificationInputType::Boolean => ("boolean".to_string(), Vec::new()),
     }
 }
@@ -232,6 +233,7 @@ fn map_plan_session_to_rehydrate(session: &PlanModeSession) -> PlanSnapshotRehyd
             input_type,
             options,
             required: false,
+            allow_custom: question.allow_custom,
         }
     });
 
@@ -976,6 +978,7 @@ mod tests {
             plan: None,
             step_outputs: HashMap::new(),
             step_states: HashMap::new(),
+            step_attempts: HashMap::new(),
             progress: Some(PlanExecutionProgress {
                 current_batch: 0,
                 total_batches: 1,

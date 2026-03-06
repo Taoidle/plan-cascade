@@ -18,6 +18,10 @@ function eventIcon(eventType: string): string {
       return '\u2705';
     case 'step_failed':
       return '\u274C';
+    case 'step_retrying':
+      return '\u27F3';
+    case 'batch_blocked':
+      return '\u26D4';
     default:
       return '\u2022';
   }
@@ -33,6 +37,10 @@ function eventLabel(eventType: string, t: (key: string, defaultValue: string) =>
       return t('execution.stepCompleted', 'Step Completed');
     case 'step_failed':
       return t('execution.stepFailed', 'Step Failed');
+    case 'step_retrying':
+      return t('execution.stepRetrying', 'Step Retrying');
+    case 'batch_blocked':
+      return t('execution.batchBlocked', 'Batch Blocked');
     default:
       return eventType;
   }
@@ -40,7 +48,7 @@ function eventLabel(eventType: string, t: (key: string, defaultValue: string) =>
 
 export function PlanStepUpdateCard({ data }: { data: PlanStepUpdateCardData }) {
   const { t } = useTranslation('planMode');
-  const isFailed = data.eventType === 'step_failed';
+  const isFailed = data.eventType === 'step_failed' || data.eventType === 'batch_blocked';
 
   return (
     <div
@@ -63,6 +71,11 @@ export function PlanStepUpdateCard({ data }: { data: PlanStepUpdateCardData }) {
           {eventLabel(data.eventType, t)}
         </span>
         {data.stepTitle && <span className="text-xs text-gray-600 dark:text-gray-400 truncate">{data.stepTitle}</span>}
+        {typeof data.attemptCount === 'number' && (
+          <span className="text-2xs text-gray-500">
+            {t('execution.attempt', 'Attempt')}: {data.attemptCount}
+          </span>
+        )}
         <span className="ml-auto text-2xs text-gray-500">
           {t('execution.batchLabel', 'Batch {{current}}/{{total}}', {
             current: data.currentBatch + 1,
@@ -83,6 +96,14 @@ export function PlanStepUpdateCard({ data }: { data: PlanStepUpdateCardData }) {
 
       {/* Error message */}
       {data.error && <p className="mt-1 text-2xs text-red-600 dark:text-red-400">{data.error}</p>}
+      {data.errorCode && <p className="mt-1 text-2xs text-red-500">code: {data.errorCode}</p>}
+      {(typeof data.diagnostics?.iterations === 'number' || data.diagnostics?.stopReason) && (
+        <p className="mt-1 text-2xs text-gray-600 dark:text-gray-400">
+          {typeof data.diagnostics?.iterations === 'number' ? `iterations: ${data.diagnostics.iterations}` : ''}
+          {typeof data.diagnostics?.iterations === 'number' && data.diagnostics?.stopReason ? ' | ' : ''}
+          {data.diagnostics?.stopReason ? `stop: ${data.diagnostics.stopReason}` : ''}
+        </p>
+      )}
     </div>
   );
 }

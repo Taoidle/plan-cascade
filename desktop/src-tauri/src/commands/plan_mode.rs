@@ -23,7 +23,7 @@ use crate::services::knowledge::observability;
 use crate::services::plan_mode::adapter_registry::{AdapterInfo, AdapterRegistry};
 use crate::services::plan_mode::types::{
     ClarificationAnswer, Plan, PlanAnalysis, PlanExecutionReport, PlanModePhase, PlanModeSession,
-    StepExecutionState, StepOutput,
+    PlanRetryStats, StepExecutionState, StepOutput,
 };
 use crate::services::skills::model::InjectionPhase;
 use crate::services::task_mode::context_provider::{
@@ -58,7 +58,7 @@ struct PlanModeSessionRecordV1 {
     session: PlanModeSession,
 }
 
-const PLAN_MODE_SESSION_RECORD_VERSION: u32 = 1;
+const PLAN_MODE_SESSION_RECORD_VERSION: u32 = 2;
 
 impl PlanModeState {
     pub fn new() -> Self {
@@ -246,6 +246,9 @@ fn map_clarification_input_type(
         crate::services::plan_mode::types::ClarificationInputType::SingleSelect(options) => {
             ("single_select".to_string(), options.clone())
         }
+        crate::services::plan_mode::types::ClarificationInputType::MultiSelect(options) => {
+            ("multi_select".to_string(), options.clone())
+        }
         crate::services::plan_mode::types::ClarificationInputType::Boolean => {
             ("boolean".to_string(), Vec::new())
         }
@@ -264,6 +267,7 @@ fn map_pending_clarification(
             input_type,
             options,
             required: false,
+            allow_custom: value.allow_custom,
         }
     })
 }
@@ -783,6 +787,7 @@ mod tests {
             plan: None,
             step_outputs: HashMap::new(),
             step_states: HashMap::new(),
+            step_attempts: HashMap::new(),
             progress: None,
             created_at: "2026-03-05T00:00:00Z".to_string(),
         }

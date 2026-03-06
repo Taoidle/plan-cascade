@@ -1,5 +1,90 @@
 use super::*;
 
+fn truncate_with_ellipsis(content: &str, max_chars: usize) -> String {
+    let mut chars = content.chars();
+    let truncated: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{truncated}...")
+    } else {
+        content.to_string()
+    }
+}
+
+fn synthesize_terminal_conclusion(
+    plan_title: &str,
+    terminal_state: &str,
+    steps_completed: usize,
+    steps_cancelled: usize,
+    total_steps: usize,
+    step_summaries: &HashMap<String, String>,
+    failure_reasons: &HashMap<String, String>,
+) -> String {
+    let mut lines = vec![
+        format!("# {} — Execution Summary", plan_title),
+        format!(
+            "- Terminal state: `{}`\n- Steps completed: {}/{}\n- Steps cancelled: {}",
+            terminal_state, steps_completed, total_steps, steps_cancelled
+        ),
+    ];
+
+    if !step_summaries.is_empty() {
+        lines.push("## Step outcomes".to_string());
+        let mut ids: Vec<_> = step_summaries.keys().cloned().collect();
+        ids.sort();
+        for step_id in ids.into_iter().take(6) {
+            if let Some(summary) = step_summaries.get(&step_id) {
+                lines.push(format!("- {}: {}", step_id, summary));
+            }
+        }
+    }
+
+    if !failure_reasons.is_empty() {
+        lines.push("## Failures".to_string());
+        let mut ids: Vec<_> = failure_reasons.keys().cloned().collect();
+        ids.sort();
+        for step_id in ids {
+            if let Some(reason) = failure_reasons.get(&step_id) {
+                lines.push(format!("- {}: {}", step_id, reason));
+            }
+        }
+    } else if terminal_state == "cancelled" {
+        lines.push("Execution was cancelled before all planned steps finished.".to_string());
+    }
+
+    lines.join("\n")
+}
+
+fn compute_retry_stats_from_session(
+    step_attempts: &HashMap<String, usize>,
+    step_states: &HashMap<String, StepExecutionState>,
+) -> PlanRetryStats {
+    let mut total_retries = 0usize;
+    let mut steps_retried = 0usize;
+    for attempts in step_attempts.values() {
+        if *attempts > 1 {
+            steps_retried += 1;
+            total_retries += attempts.saturating_sub(1);
+        }
+    }
+
+    let exhausted_failures = step_states
+        .iter()
+        .filter(|(step_id, state)| {
+            matches!(state, StepExecutionState::Failed { .. })
+                && step_attempts
+                    .get(step_id.as_str())
+                    .map(|attempts| *attempts > 1)
+                    .unwrap_or(false)
+        })
+        .count();
+
+    PlanRetryStats {
+        total_retries,
+        steps_retried,
+        exhausted_failures,
+    }
+}
+
 /// Get current execution status.
 #[tauri::command]
 pub async fn get_plan_execution_status(
@@ -126,6 +211,12 @@ pub async fn get_plan_execution_report(
         .values()
         .filter(|s| matches!(s, StepExecutionState::Failed { .. }))
         .count();
+    let steps_cancelled = session
+        .step_states
+        .values()
+        .filter(|s| matches!(s, StepExecutionState::Cancelled))
+        .count();
+    let steps_attempted = steps_completed + steps_failed + steps_cancelled;
 
     let total_duration_ms: u64 = session
         .step_states
@@ -140,24 +231,109 @@ pub async fn get_plan_execution_report(
         .step_outputs
         .iter()
         .map(|(id, output)| {
-            let summary = if output.content.len() > 200 {
-                format!("{}...", &output.content[..200])
+            let summary = if output.summary.trim().is_empty() {
+                let source = if output.full_content.trim().is_empty() {
+                    output.content.as_str()
+                } else {
+                    output.full_content.as_str()
+                };
+                truncate_with_ellipsis(source, 200)
             } else {
-                output.content.clone()
+                truncate_with_ellipsis(&output.summary, 200)
             };
             (id.clone(), summary)
         })
         .collect();
 
+    let failure_reasons: HashMap<String, String> = session
+        .step_states
+        .iter()
+        .filter_map(|(id, state)| match state {
+            StepExecutionState::Failed { reason } => Some((id.clone(), reason.clone())),
+            _ => None,
+        })
+        .collect();
+
+    let terminal_state = match session.phase {
+        PlanModePhase::Completed => "completed",
+        PlanModePhase::Cancelled => "cancelled",
+        PlanModePhase::Failed => "failed",
+        _ if steps_failed > 0 => "failed",
+        _ if steps_completed == total_steps => "completed",
+        _ => "failed",
+    }
+    .to_string();
+
+    let cancelled_by = if terminal_state == "cancelled" {
+        Some("user".to_string())
+    } else {
+        None
+    };
+    let final_conclusion_markdown = synthesize_terminal_conclusion(
+        &plan.title,
+        &terminal_state,
+        steps_completed,
+        steps_cancelled,
+        total_steps,
+        &step_summaries,
+        &failure_reasons,
+    );
+    let mut highlights: Vec<String> = plan
+        .steps
+        .iter()
+        .filter_map(|step| {
+            step_summaries
+                .get(step.id.as_str())
+                .map(|summary| format!("{}: {}", step.title, summary))
+        })
+        .take(5)
+        .collect();
+    if highlights.is_empty() {
+        highlights.push("No completed step summaries available.".to_string());
+    }
+    let next_actions = if terminal_state == "completed" {
+        vec![
+            "Review generated artifacts and publish final deliverables.".to_string(),
+            "Run domain-specific verification on outputs before handoff.".to_string(),
+        ]
+    } else if terminal_state == "cancelled" {
+        vec![
+            "Resume from the latest completed steps after addressing cancellation causes.".to_string(),
+            "Re-run blocked steps first to avoid repeating completed work.".to_string(),
+        ]
+    } else {
+        vec![
+            "Inspect failed steps and retry after fixing blocking issues.".to_string(),
+            "Do not continue to dependent batches until blocking steps are resolved.".to_string(),
+        ]
+    };
+    let retry_stats = compute_retry_stats_from_session(&session.step_attempts, &session.step_states);
+    let is_cancelled_terminal = terminal_state == "cancelled";
+
     Ok(CommandResponse::ok(PlanExecutionReport {
         session_id: session.session_id.clone(),
         plan_title: plan.title.clone(),
         success: steps_failed == 0 && steps_completed == total_steps,
+        terminal_state,
         total_steps,
         steps_completed,
         steps_failed,
+        steps_cancelled,
+        steps_attempted,
+        steps_failed_before_cancel: if is_cancelled_terminal {
+            steps_failed
+        } else {
+            0
+        },
         total_duration_ms,
         step_summaries,
+        failure_reasons,
+        cancelled_by,
+        run_id: format!("report-{}", session.session_id),
+        final_conclusion_markdown,
+        highlights,
+        next_actions,
+        retry_stats,
     }))
 }
 
@@ -223,4 +399,35 @@ pub async fn list_plan_adapters(
 ) -> Result<CommandResponse<Vec<AdapterInfo>>, String> {
     let registry = state.adapter_registry.read().await;
     Ok(CommandResponse::ok(registry.list()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compute_retry_stats_counts_attempts_and_exhausted_failures() {
+        let mut states = HashMap::new();
+        states.insert(
+            "step-1".to_string(),
+            StepExecutionState::Completed { duration_ms: 100 },
+        );
+        states.insert(
+            "step-2".to_string(),
+            StepExecutionState::Failed {
+                reason: "still failed".to_string(),
+            },
+        );
+        states.insert("step-3".to_string(), StepExecutionState::Failed { reason: "one shot".to_string() });
+
+        let mut attempts = HashMap::new();
+        attempts.insert("step-1".to_string(), 3usize);
+        attempts.insert("step-2".to_string(), 2usize);
+        attempts.insert("step-3".to_string(), 1usize);
+
+        let stats = compute_retry_stats_from_session(&attempts, &states);
+        assert_eq!(stats.total_retries, 3);
+        assert_eq!(stats.steps_retried, 2);
+        assert_eq!(stats.exhausted_failures, 1);
+    }
 }

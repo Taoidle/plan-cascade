@@ -282,6 +282,11 @@ pub(crate) fn text_describes_pending_action(text: &str) -> bool {
         "verify",
         "look at",
         "look into",
+        "create",
+        "implement",
+        "refactor",
+        "generate",
+        "build",
     ];
 
     let zh_action_terms = [
@@ -294,6 +299,10 @@ pub(crate) fn text_describes_pending_action(text: &str) -> bool {
         "\u{6253}\u{5f00}",         // 打开
         "\u{5217}\u{51fa}",         // 列出
         "\u{770b}\u{4e00}\u{4e0b}", // 看一下
+        "\u{521b}\u{5efa}",         // 创建
+        "\u{5b9e}\u{73b0}",         // 实现
+        "\u{91cd}\u{6784}",         // 重构
+        "\u{751f}\u{6210}",         // 生成
     ];
 
     let has_pending_marker = en_pending_markers.iter().any(|p| text_lower.contains(p))

@@ -63,6 +63,7 @@ export interface PlanClarificationSnapshot {
   inputType: string;
   options: string[];
   required: boolean;
+  allowCustom?: boolean;
 }
 
 export interface PlanState {

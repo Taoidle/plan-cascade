@@ -83,10 +83,14 @@ pub async fn generate_clarification_question(
          {{\n\
            \"question\": \"Your specific clarification question\",\n\
            \"hint\": \"A helpful hint or example answer\",\n\
-           \"inputType\": \"text|textarea|boolean\"\n\
+           \"inputType\": \"text|textarea|boolean|single_select|multi_select\",\n\
+           \"options\": [\"Option 1\", \"Option 2\"],\n\
+           \"allowCustom\": true\n\
          }}\n\
          ```\n\n\
          IMPORTANT: The question and hint MUST follow the output language instruction above.\n\
+         For `single_select` and `multi_select`, provide 2-6 meaningful options.\n\
+         For `text`/`textarea`/`boolean`, return an empty options array.\n\
          Only ask questions about genuinely missing critical information. \
          Do not ask about obvious details or repeat previous questions.",
         persona.identity_prompt, persona.thinking_style,
@@ -134,9 +138,10 @@ pub async fn generate_clarification_question(
     match parse_clarification_question(text, previous_qa.len()) {
         Some(q) => Ok(Some(q)),
         None => {
+            let preview: String = text.chars().take(200).collect();
             warn!(
                 "Failed to parse clarification question from LLM response: {}",
-                &text[..text.len().min(200)]
+                preview
             );
             Ok(None)
         }
@@ -169,9 +174,33 @@ fn parse_clarification_question(
         .and_then(|v| v.as_str())
         .unwrap_or("text");
 
+    let parsed_options: Vec<String> = parsed
+        .get("options")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let allow_custom = parsed
+        .get("allowCustom")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
     let input_type = match input_type_str {
         "textarea" => ClarificationInputType::Textarea,
         "boolean" => ClarificationInputType::Boolean,
+        "single_select" if parsed_options.len() >= 2 => {
+            ClarificationInputType::SingleSelect(parsed_options)
+        }
+        "multi_select" if parsed_options.len() >= 2 => {
+            ClarificationInputType::MultiSelect(parsed_options)
+        }
         _ => ClarificationInputType::Text,
     };
 
@@ -180,6 +209,7 @@ fn parse_clarification_question(
         question,
         hint,
         input_type,
+        allow_custom,
     })
 }
 
@@ -201,6 +231,7 @@ mod tests {
         assert_eq!(q.question, "What is the target audience?");
         assert_eq!(q.hint, Some("e.g., developers, managers".to_string()));
         assert!(matches!(q.input_type, ClarificationInputType::Text));
+        assert!(q.allow_custom);
     }
 
     #[test]
@@ -211,6 +242,7 @@ mod tests {
         assert_eq!(q.question_id, "q3");
         assert!(matches!(q.input_type, ClarificationInputType::Textarea));
         assert_eq!(q.hint, None); // empty hint → None
+        assert!(q.allow_custom);
     }
 
     #[test]
@@ -220,6 +252,40 @@ mod tests {
         let q = parse_clarification_question(text, 1).unwrap();
         assert_eq!(q.question_id, "q2");
         assert!(matches!(q.input_type, ClarificationInputType::Boolean));
+        assert!(q.allow_custom);
+    }
+
+    #[test]
+    fn test_parse_clarification_question_single_select() {
+        let text = r#"{
+          "question": "Which environment should we prioritize?",
+          "hint": "Select one",
+          "inputType": "single_select",
+          "options": ["desktop", "mobile", "web"],
+          "allowCustom": false
+        }"#;
+        let q = parse_clarification_question(text, 1).unwrap();
+        assert!(matches!(
+            q.input_type,
+            ClarificationInputType::SingleSelect(ref options) if options.len() == 3
+        ));
+        assert!(!q.allow_custom);
+    }
+
+    #[test]
+    fn test_parse_clarification_question_multi_select() {
+        let text = r#"{
+          "question": "Which outcomes matter most?",
+          "hint": "Select all that apply",
+          "inputType": "multi_select",
+          "options": ["speed", "quality", "stability"]
+        }"#;
+        let q = parse_clarification_question(text, 1).unwrap();
+        assert!(matches!(
+            q.input_type,
+            ClarificationInputType::MultiSelect(ref options) if options.len() == 3
+        ));
+        assert!(q.allow_custom);
     }
 
     #[test]

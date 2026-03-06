@@ -9,6 +9,16 @@ use crate::services::persona::types::Persona;
 use crate::services::plan_mode::adapter::{build_plan_persona, DomainAdapter};
 use crate::services::plan_mode::types::{Plan, PlanPersonaRole, PlanStep, StepOutput, TaskDomain};
 
+fn truncate_with_ellipsis(content: &str, max_chars: usize) -> String {
+    let mut chars = content.chars();
+    let truncated: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{truncated}...")
+    } else {
+        content.to_string()
+    }
+}
+
 /// Writing-focused adapter for content creation tasks.
 pub struct WritingAdapter;
 
@@ -141,11 +151,7 @@ Respond in JSON format:
 
         match final_output {
             Some(output) => {
-                let preview = if output.content.len() > 500 {
-                    format!("{}...", &output.content[..500])
-                } else {
-                    output.content.clone()
-                };
+                let preview = truncate_with_ellipsis(&output.content, 500);
                 Some(format!(
                     "Writing plan '{}' completed. Final output preview:\n\n{}",
                     plan.title, preview

@@ -12,7 +12,6 @@ import {
 import type { WorkflowPhaseRuntime } from './runtime';
 
 interface ExecutionPhaseDeps {
-  syncKernelTaskPhase: (phase: 'generating_design_doc', source?: string) => Promise<void>;
   subscribeToProgressEvents: (set: unknown, get: unknown, runToken: number) => Promise<void>;
 }
 
@@ -38,7 +37,6 @@ export async function runDesignDocAndExecutionPhase(
   }
 
   set({ phase: 'generating_design_doc', editablePrd: prd });
-  await deps.syncKernelTaskPhase('generating_design_doc', 'design_doc_generation_started');
   injectInfo(i18n.t('workflow.orchestrator.generatingDesignDoc', { ns: 'simpleMode' }), 'info');
 
   try {

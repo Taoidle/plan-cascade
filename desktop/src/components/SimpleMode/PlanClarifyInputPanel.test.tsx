@@ -40,7 +40,7 @@ describe('PlanClarifyInputPanel', () => {
     expect(onSubmit).toHaveBeenCalledWith('yes');
   });
 
-  it('submits single select answers with one click', () => {
+  it('submits single select answers after selecting and confirming', () => {
     const { onSubmit } = renderPanel({
       questionId: 'q-select',
       question: 'Choose target',
@@ -50,7 +50,23 @@ describe('PlanClarifyInputPanel', () => {
     });
 
     fireEvent.click(screen.getByText('beta'));
+    fireEvent.click(screen.getByText('Submit'));
     expect(onSubmit).toHaveBeenCalledWith('beta');
+  });
+
+  it('submits multi select answers as comma-separated values', () => {
+    const { onSubmit } = renderPanel({
+      questionId: 'q-multi',
+      question: 'Choose goals',
+      hint: null,
+      inputType: 'multi_select',
+      options: ['speed', 'quality', 'reliability'],
+    });
+
+    fireEvent.click(screen.getByText('speed'));
+    fireEvent.click(screen.getByText('reliability'));
+    fireEvent.click(screen.getByText('Submit'));
+    expect(onSubmit).toHaveBeenCalledWith('speed, reliability');
   });
 
   it('submits text answers on Enter', () => {

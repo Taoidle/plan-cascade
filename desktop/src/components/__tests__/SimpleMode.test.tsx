@@ -629,6 +629,7 @@ function resetStates() {
     submitClarification: vi.fn(async () => undefined),
     skipClarification: vi.fn(async () => undefined),
     cancelWorkflow: vi.fn(async () => undefined),
+    ensureTerminalCompletionCardFromKernel: vi.fn(async () => undefined),
     isCancelling: false,
     resetWorkflow: vi.fn(),
   });

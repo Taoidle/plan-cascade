@@ -33,8 +33,6 @@ import { listenOpenAIChanges } from '../../lib/simpleModeNavigation';
 import { useToast } from '../shared/Toast';
 import { useContextSourcesStore } from '../../store/contextSources';
 import { ChatTranscript } from './ChatTranscript';
-import type { PlanClarifyQuestionCardData } from '../../types/planModeCard';
-import type { InterviewQuestionCardData } from '../../types/workflowCard';
 import {
   DEFAULT_PROMPT_TOKEN_BUDGET,
   estimatePromptTokensFallback,
@@ -53,6 +51,7 @@ import { useSimplePanelState } from './useSimplePanelState';
 import { useSimpleModeSwitch } from './useSimpleModeSwitch';
 import { useSimpleKernelSession } from './useSimpleKernelSession';
 import { useSimpleQueueRuntime } from './useSimpleQueueRuntime';
+import { useWorkflowQuestionSpecs } from './useWorkflowQuestionSpecs';
 import { buildConversationHistory } from '../../lib/contextBridge';
 import {
   cancelActiveWorkflow,
@@ -257,11 +256,11 @@ export function SimpleModeShell() {
   const resetWorkflow = useWorkflowOrchestratorStore((s) => s.resetWorkflow);
 
   // Plan mode orchestrator
-  const planIsBusy = usePlanOrchestratorStore((s) => s.isBusy);
   const startPlanWorkflow = usePlanOrchestratorStore((s) => s.startPlanWorkflow);
   const submitPlanClarification = usePlanOrchestratorStore((s) => s.submitClarification);
   const skipPlanClarification = usePlanOrchestratorStore((s) => s.skipClarification);
   const cancelPlanWorkflow = usePlanOrchestratorStore((s) => s.cancelWorkflow);
+  const ensurePlanTerminalCompletionCard = usePlanOrchestratorStore((s) => s.ensureTerminalCompletionCardFromKernel);
   const planWorkflowCancelling = usePlanOrchestratorStore((s) => s.isCancelling);
   const resetPlanWorkflow = usePlanOrchestratorStore((s) => s.resetWorkflow);
   const kernelChatRuntime = useMemo(() => selectKernelChatRuntime(workflowKernelSession), [workflowKernelSession]);
@@ -274,65 +273,10 @@ export function SimpleModeShell() {
   const workflowKernelPendingInterview = kernelTaskRuntime.pendingInterview;
   const workflowKernelPendingClarification = kernelPlanRuntime.pendingClarification;
 
-  const kernelInterviewQuestion = useMemo<InterviewQuestionCardData | null>(() => {
-    if (!workflowKernelPendingInterview) return null;
-    const inputType: InterviewQuestionCardData['inputType'] = (() => {
-      switch (workflowKernelPendingInterview.inputType) {
-        case 'boolean':
-          return 'boolean';
-        case 'single_select':
-          return 'single_select';
-        case 'multi_select':
-          return 'multi_select';
-        case 'textarea':
-          return 'textarea';
-        case 'text':
-        case 'list':
-        default:
-          return 'text';
-      }
-    })();
-
-    return {
-      questionId: workflowKernelPendingInterview.questionId,
-      question: workflowKernelPendingInterview.question,
-      hint: workflowKernelPendingInterview.hint,
-      required: workflowKernelPendingInterview.required,
-      inputType,
-      options: workflowKernelPendingInterview.options ?? [],
-      allowCustom: workflowKernelPendingInterview.allowCustom ?? true,
-      questionNumber: workflowKernelPendingInterview.questionNumber ?? 1,
-      totalQuestions: workflowKernelPendingInterview.totalQuestions ?? 1,
-    };
-  }, [workflowKernelPendingInterview]);
-
-  const kernelPlanClarifyQuestion = useMemo<PlanClarifyQuestionCardData | null>(() => {
-    if (!workflowKernelPendingClarification) return null;
-    const inputType: PlanClarifyQuestionCardData['inputType'] = (() => {
-      switch (workflowKernelPendingClarification.inputType) {
-        case 'boolean':
-          return 'boolean';
-        case 'single_select':
-          return 'single_select';
-        case 'textarea':
-          return 'textarea';
-        case 'text':
-        default:
-          return 'text';
-      }
-    })();
-
-    return {
-      questionId: workflowKernelPendingClarification.questionId,
-      question: workflowKernelPendingClarification.question,
-      hint: workflowKernelPendingClarification.hint,
-      inputType,
-      options: workflowKernelPendingClarification.options ?? [],
-    };
-  }, [workflowKernelPendingClarification]);
-
-  const taskPendingQuestion = kernelInterviewQuestion;
-  const planPendingQuestion = kernelPlanClarifyQuestion;
+  const { taskPendingQuestion, planPendingQuestion } = useWorkflowQuestionSpecs(
+    workflowKernelPendingInterview,
+    workflowKernelPendingClarification,
+  );
   const workflowPhase = workflowKernelTaskPhase;
   const planPhase = workflowKernelPlanPhase;
   const chatPhase = workflowKernelChatPhase;
@@ -514,8 +458,7 @@ export function SimpleModeShell() {
     isTaskWorkflowBusy:
       workflowMode === 'task' && kernelRuntimeStatus.isTaskActive && isTaskPhaseBusy(effectiveTaskPhaseForInput),
     isPlanWorkflowBusy:
-      workflowMode === 'plan' &&
-      (planIsBusy || (kernelRuntimeStatus.isPlanActive && isPlanPhaseBusy(effectivePlanPhaseForInput))),
+      workflowMode === 'plan' && kernelRuntimeStatus.isPlanActive && isPlanPhaseBusy(effectivePlanPhaseForInput),
     attachments,
     addAttachment,
     clearAttachments,
@@ -779,7 +722,7 @@ export function SimpleModeShell() {
   const isTaskWorkflowBusy =
     workflowMode === 'task' && isTaskWorkflowActive && isTaskPhaseBusy(effectiveTaskPhaseForInput);
   const isPlanWorkflowBusy =
-    workflowMode === 'plan' && isPlanWorkflowActive && (planIsBusy || isPlanPhaseBusy(effectivePlanPhaseForInput));
+    workflowMode === 'plan' && isPlanWorkflowActive && isPlanPhaseBusy(effectivePlanPhaseForInput);
   const isStructuredWorkflowCancelling =
     (workflowMode === 'task' && taskWorkflowCancelling) || (workflowMode === 'plan' && planWorkflowCancelling);
   const canQueueWhileRunning =
@@ -860,6 +803,12 @@ export function SimpleModeShell() {
       rightHoverTimerRef.current = null;
     }, 180);
   }, [hoverPanelsEnabled, rightPanelOpen, clearRightHoverTimer, setRightPanelHoverExpanded]);
+
+  useEffect(() => {
+    if (workflowMode !== 'plan') return;
+    if (planPhase !== 'completed' && planPhase !== 'failed' && planPhase !== 'cancelled') return;
+    void ensurePlanTerminalCompletionCard();
+  }, [workflowMode, planPhase, ensurePlanTerminalCompletionCard]);
 
   useEffect(() => {
     if (hoverPanelsEnabled) return;

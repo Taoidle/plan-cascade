@@ -375,29 +375,6 @@ function buildPrdFeedbackSummaryMessage(summary: PrdFeedbackApplySummary): strin
   return segments.join('\n');
 }
 
-async function syncKernelTaskPhase(
-  phase: Extract<WorkflowPhase, 'requirement_analysis' | 'architecture_review' | 'generating_design_doc'>,
-  reasonCode?: string,
-): Promise<void> {
-  const transitionAndSubmitInput = useWorkflowKernelStore.getState().transitionAndSubmitInput;
-  const session = useWorkflowKernelStore.getState().session;
-  if (!session || session.activeMode !== 'task') return;
-
-  try {
-    await transitionAndSubmitInput('task', {
-      type: 'system_phase_update',
-      content: `phase:${phase}`,
-      metadata: {
-        mode: 'task',
-        phase,
-        reasonCode: reasonCode ?? null,
-      },
-    });
-  } catch {
-    // best-effort kernel phase sync
-  }
-}
-
 function resolveTaskSessionId(
   get: () => WorkflowOrchestratorState,
   set: (
@@ -568,7 +545,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
           {
             mapInterviewQuestion,
             runRequirementPhase: async (runtime) => {
-              await runRequirementPhase(runtime, { syncKernelTaskPhase });
+              await runRequirementPhase(runtime, {});
             },
             runPrdPhase: async (runtime) =>
               runPrdPhase(runtime, {
@@ -582,7 +559,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         }
       } else {
         // Skip interview, run requirement analysis then generate PRD
-        await runRequirementPhase(phaseRuntime, { syncKernelTaskPhase });
+        await runRequirementPhase(phaseRuntime, {});
         if (!isRunActive(get, runToken)) {
           return failResult('stale_run_token', 'Configuration request was superseded');
         }
@@ -702,7 +679,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       if (compiled) {
         // Advance to requirement analysis then PRD generation
         const phaseRuntime = buildPhaseRuntime(set, get, runToken);
-        await runRequirementPhase(phaseRuntime, { syncKernelTaskPhase });
+        await runRequirementPhase(phaseRuntime, {});
         if (!isRunActive(get, runToken)) return;
         await runPrdPhase(phaseRuntime, {
           toPrdCardData,
@@ -746,7 +723,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       'warning',
     );
     const phaseRuntime = buildPhaseRuntime(set, get, runToken);
-    await runRequirementPhase(phaseRuntime, { syncKernelTaskPhase });
+    await runRequirementPhase(phaseRuntime, {});
     if (!isRunActive(get, runToken)) return;
     await runPrdPhase(phaseRuntime, {
       toPrdCardData,
@@ -795,7 +772,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       if (!isRunActive(get, runToken)) return;
       if (compiled) {
         const phaseRuntime = buildPhaseRuntime(set, get, runToken);
-        await runRequirementPhase(phaseRuntime, { syncKernelTaskPhase });
+        await runRequirementPhase(phaseRuntime, {});
         if (!isRunActive(get, runToken)) return;
         await runPrdPhase(phaseRuntime, {
           toPrdCardData,
@@ -838,7 +815,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       'warning',
     );
     const phaseRuntime = buildPhaseRuntime(set, get, runToken);
-    await runRequirementPhase(phaseRuntime, { syncKernelTaskPhase });
+    await runRequirementPhase(phaseRuntime, {});
     if (!isRunActive(get, runToken)) return;
     await runPrdPhase(phaseRuntime, {
       toPrdCardData,
@@ -875,10 +852,8 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     if (state.config.flowLevel !== 'quick') {
       const phaseRuntime = buildPhaseRuntime(set, get, runToken);
       await runArchitecturePhase(phaseRuntime, prd, {
-        syncKernelTaskPhase,
         runDesignDocAndExecutionPhase: async (runtime, runtimePrd) =>
           runDesignDocAndExecutionPhase(runtime, runtimePrd, {
-            syncKernelTaskPhase,
             subscribeToProgressEvents: subscribeToTaskProgressFromRuntime,
           }),
       });
@@ -893,7 +868,6 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     // Quick flow: skip architecture review, go straight to design doc + execution
     const phaseRuntime = buildPhaseRuntime(set, get, runToken);
     await runDesignDocAndExecutionPhase(phaseRuntime, prd, {
-      syncKernelTaskPhase,
       subscribeToProgressEvents: subscribeToTaskProgressFromRuntime,
     });
     if (get().phase === 'failed') {
@@ -985,7 +959,6 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
       const phaseRuntime = buildPhaseRuntime(set, get, runToken);
       await runDesignDocAndExecutionPhase(phaseRuntime, prd, {
-        syncKernelTaskPhase,
         subscribeToProgressEvents: subscribeToTaskProgressFromRuntime,
       });
       if (get().phase === 'failed') {

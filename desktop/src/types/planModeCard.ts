@@ -71,8 +71,9 @@ export interface PlanClarifyQuestionCardData {
   questionId: string;
   question: string;
   hint: string | null;
-  inputType: 'text' | 'textarea' | 'single_select' | 'boolean';
+  inputType: 'text' | 'textarea' | 'single_select' | 'multi_select' | 'boolean';
   options?: string[];
+  allowCustom?: boolean;
 }
 
 /** Clarification answer card data (Clarifying phase) */
@@ -107,6 +108,15 @@ export interface PlanCardData {
 
 export interface PlanExecutionConfigData {
   maxParallel: number;
+  maxStepIterations?: number;
+  retry?: PlanRetryPolicyData;
+}
+
+export interface PlanRetryPolicyData {
+  enabled: boolean;
+  maxAttempts: number;
+  backoffMs: number;
+  failBatchOnExhausted: boolean;
 }
 
 /** Plan step data */
@@ -128,7 +138,7 @@ export interface PlanBatchData {
 
 /** Plan step update card data (Executing phase) */
 export interface PlanStepUpdateCardData {
-  eventType: 'batch_started' | 'step_started' | 'step_completed' | 'step_failed';
+  eventType: 'batch_started' | 'step_started' | 'step_completed' | 'step_failed' | 'step_retrying' | 'batch_blocked';
   currentBatch: number;
   totalBatches: number;
   stepId?: string;
@@ -136,14 +146,47 @@ export interface PlanStepUpdateCardData {
   stepStatus?: string;
   progressPct: number;
   error?: string;
+  attemptCount?: number;
+  errorCode?: string;
+  diagnostics?: PlanStepOutputDiagnosticData;
+}
+
+export interface PlanStepOutputDiagnosticData {
+  summary?: string;
+  content: string;
+  fullContent: string;
+  format: 'text' | 'markdown' | 'json' | 'html' | 'code';
+  truncated: boolean;
+  originalLength: number;
+  shownLength: number;
+  qualityState?: 'complete' | 'incomplete';
+  incompleteReason?: string | null;
+  attemptCount?: number;
+  toolEvidence?: string[];
+  iterations?: number;
+  stopReason?: string | null;
+  errorCode?: string | null;
 }
 
 /** Plan step output card data (Executing phase) */
 export interface PlanStepOutputCardData {
   stepId: string;
   stepTitle: string;
+  summary?: string;
   content: string;
+  fullContent?: string;
   format: 'text' | 'markdown' | 'json' | 'html' | 'code';
+  truncated?: boolean;
+  originalLength?: number;
+  shownLength?: number;
+  artifacts?: string[];
+  qualityState?: 'complete' | 'incomplete';
+  incompleteReason?: string | null;
+  attemptCount?: number;
+  toolEvidence?: string[];
+  iterations?: number;
+  stopReason?: string | null;
+  errorCode?: string | null;
   criteriaMet: CriterionResultData[];
 }
 
@@ -157,12 +200,29 @@ export interface CriterionResultData {
 /** Plan completion card data (Completed phase) */
 export interface PlanCompletionCardData {
   success: boolean;
+  terminalState?: 'completed' | 'failed' | 'cancelled';
   planTitle: string;
   totalSteps: number;
   stepsCompleted: number;
   stepsFailed: number;
+  stepsCancelled?: number;
+  stepsAttempted?: number;
+  stepsFailedBeforeCancel?: number;
   totalDurationMs: number;
   stepSummaries: Record<string, string>;
+  failureReasons?: Record<string, string>;
+  cancelledBy?: string | null;
+  runId?: string;
+  finalConclusionMarkdown?: string;
+  highlights?: string[];
+  nextActions?: string[];
+  retryStats?: PlanRetryStatsData;
+}
+
+export interface PlanRetryStatsData {
+  totalRetries: number;
+  stepsRetried: number;
+  exhaustedFailures: number;
 }
 
 /** Plan persona indicator data (all phases) */
@@ -211,10 +271,22 @@ export interface PlanModeSession {
 /** Step output from backend */
 export interface StepOutputData {
   stepId: string;
+  summary?: string;
   content: string;
+  fullContent?: string;
   format: string;
   criteriaMet: CriterionResultData[];
   artifacts: string[];
+  truncated?: boolean;
+  originalLength?: number;
+  shownLength?: number;
+  qualityState?: 'complete' | 'incomplete';
+  incompleteReason?: string | null;
+  attemptCount?: number;
+  toolEvidence?: string[];
+  iterations?: number;
+  stopReason?: string | null;
+  errorCode?: string | null;
 }
 
 /** Step execution state */
@@ -240,11 +312,22 @@ export interface PlanExecutionReport {
   sessionId: string;
   planTitle: string;
   success: boolean;
+  terminalState: string;
   totalSteps: number;
   stepsCompleted: number;
   stepsFailed: number;
+  stepsCancelled?: number;
+  stepsAttempted?: number;
+  stepsFailedBeforeCancel?: number;
   totalDurationMs: number;
   stepSummaries: Record<string, string>;
+  failureReasons: Record<string, string>;
+  cancelledBy: string | null;
+  runId: string;
+  finalConclusionMarkdown: string;
+  highlights: string[];
+  nextActions: string[];
+  retryStats: PlanRetryStatsData;
 }
 
 /** Adapter info */
@@ -263,8 +346,15 @@ export interface PlanModeProgressPayload {
   stepId?: string;
   stepStatus?: string;
   error?: string;
+  attemptCount?: number;
+  errorCode?: string;
   stepOutput?: StepOutputData;
+  terminalReport?: PlanExecutionReport;
   progressPct: number;
+  runId?: string;
+  eventSeq?: number;
+  source?: string;
+  dropReason?: string | null;
 }
 
 /** Execution status response */

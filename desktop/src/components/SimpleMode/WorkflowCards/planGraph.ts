@@ -3,6 +3,8 @@ import type { PlanBatchData, PlanCardData, PlanStepData } from '../../../types/p
 export const PLAN_MAX_PARALLEL_MIN = 1;
 export const PLAN_MAX_PARALLEL_MAX = 8;
 export const PLAN_DEFAULT_MAX_PARALLEL = 4;
+export const PLAN_DEFAULT_RETRY_MAX_ATTEMPTS = 2;
+export const PLAN_DEFAULT_RETRY_BACKOFF_MS = 800;
 
 export type PlanValidationIssueCode =
   | 'duplicate_step_id'
@@ -27,10 +29,21 @@ export function getPlanMaxParallel(plan: Pick<PlanCardData, 'executionConfig'>):
 }
 
 export function ensurePlanExecutionConfig(plan: PlanCardData): PlanCardData {
+  const retry = plan.executionConfig?.retry;
   return {
     ...plan,
     executionConfig: {
       maxParallel: getPlanMaxParallel(plan),
+      retry: {
+        enabled: retry?.enabled ?? true,
+        maxAttempts: Number.isFinite(retry?.maxAttempts)
+          ? Math.max(0, Math.min(5, Math.trunc(retry?.maxAttempts ?? PLAN_DEFAULT_RETRY_MAX_ATTEMPTS)))
+          : PLAN_DEFAULT_RETRY_MAX_ATTEMPTS,
+        backoffMs: Number.isFinite(retry?.backoffMs)
+          ? Math.max(100, Math.min(5000, Math.trunc(retry?.backoffMs ?? PLAN_DEFAULT_RETRY_BACKOFF_MS)))
+          : PLAN_DEFAULT_RETRY_BACKOFF_MS,
+        failBatchOnExhausted: retry?.failBatchOnExhausted ?? true,
+      },
     },
   };
 }

@@ -101,6 +101,7 @@ export interface PlanOrchestratorState {
   approvePlan: (plan: PlanCardData) => Promise<ActionResult>;
   retryStep: (stepId: string) => Promise<void>;
   cancelWorkflow: () => Promise<void>;
+  ensureTerminalCompletionCardFromKernel: () => Promise<void>;
   resetWorkflow: () => void;
 }
 
@@ -152,26 +153,6 @@ function resolvePlanSessionId(get: PlanOrchestratorGet, set: PlanOrchestratorSet
   return null;
 }
 
-async function syncKernelPlanPhase(phase: PlanModePhase, reasonCode?: string): Promise<void> {
-  const transitionAndSubmitInput = useWorkflowKernelStore.getState().transitionAndSubmitInput;
-  const session = useWorkflowKernelStore.getState().session;
-  if (!session || session.activeMode !== 'plan') return;
-
-  try {
-    await transitionAndSubmitInput('plan', {
-      type: 'system_phase_update',
-      content: `phase:${phase}`,
-      metadata: {
-        mode: 'plan',
-        phase,
-        reasonCode: reasonCode ?? null,
-      },
-    });
-  } catch {
-    // best effort kernel phase sync
-  }
-}
-
 type PlanOrchestratorGet = () => PlanOrchestratorState;
 type PlanOrchestratorSet = (partial: Partial<PlanOrchestratorState>) => void;
 
@@ -191,12 +172,20 @@ async function subscribePlanProgressEvents(
   get: PlanOrchestratorGet,
   set: PlanOrchestratorSet,
 ): Promise<UnlistenFn> {
+  const stepUpdateEvents = new Set<PlanStepUpdateCardData['eventType']>([
+    'batch_started',
+    'step_started',
+    'step_completed',
+    'step_failed',
+    'step_retrying',
+    'batch_blocked',
+  ]);
   let unlistenRef: UnlistenFn | null = null;
   const unlisten = await listen<PlanModeProgressPayload>('plan-mode-progress', (event) => {
     if (get()._runToken !== runToken) return;
     const payload = event.payload;
-    const { sessionId, stepStatuses: currentStepStatuses } = get();
-    if (payload.sessionId !== sessionId) return;
+    const { stepStatuses: currentStepStatuses, sessionId } = get();
+    if (sessionId && payload.sessionId !== sessionId) return;
 
     const orchestratorPatch: {
       stepStatuses?: Record<string, string>;
@@ -212,16 +201,39 @@ async function subscribePlanProgressEvents(
     }
 
     const stepTitle = plan.steps.find((s) => s.id === payload.stepId)?.title;
-    injectCard('plan_step_update', {
-      eventType: payload.eventType as PlanStepUpdateCardData['eventType'],
-      currentBatch: payload.currentBatch,
-      totalBatches: payload.totalBatches,
-      stepId: payload.stepId,
-      stepTitle,
-      stepStatus: payload.stepStatus,
-      progressPct: payload.progressPct,
-      error: payload.error,
-    } satisfies PlanStepUpdateCardData);
+    if (stepUpdateEvents.has(payload.eventType as PlanStepUpdateCardData['eventType'])) {
+      const stepOutputFromEvent = payload.stepOutput;
+      injectCard('plan_step_update', {
+        eventType: payload.eventType as PlanStepUpdateCardData['eventType'],
+        currentBatch: payload.currentBatch,
+        totalBatches: payload.totalBatches,
+        stepId: payload.stepId,
+        stepTitle,
+        stepStatus: payload.stepStatus,
+        progressPct: payload.progressPct,
+        error: payload.error,
+        attemptCount: payload.attemptCount,
+        errorCode: payload.errorCode,
+        diagnostics: stepOutputFromEvent
+          ? {
+              summary: stepOutputFromEvent.summary,
+              content: stepOutputFromEvent.content,
+              fullContent: stepOutputFromEvent.fullContent ?? stepOutputFromEvent.content,
+              format: normalizeStepOutputFormat(stepOutputFromEvent.format),
+              truncated: stepOutputFromEvent.truncated ?? false,
+              originalLength: stepOutputFromEvent.originalLength ?? stepOutputFromEvent.content.length,
+              shownLength: stepOutputFromEvent.shownLength ?? stepOutputFromEvent.content.length,
+              qualityState: stepOutputFromEvent.qualityState,
+              incompleteReason: stepOutputFromEvent.incompleteReason,
+              attemptCount: stepOutputFromEvent.attemptCount,
+              toolEvidence: stepOutputFromEvent.toolEvidence ?? [],
+              iterations: stepOutputFromEvent.iterations,
+              stopReason: stepOutputFromEvent.stopReason,
+              errorCode: stepOutputFromEvent.errorCode,
+            }
+          : undefined,
+      } satisfies PlanStepUpdateCardData);
+    }
 
     if (payload.eventType === 'step_completed' && payload.stepId) {
       const completedStepId = payload.stepId;
@@ -231,42 +243,28 @@ async function subscribePlanProgressEvents(
         injectCard('plan_step_output', {
           stepId: completedStepId,
           stepTitle: completedStepTitle,
-          content: stepOutputFromEvent.content,
+          summary: stepOutputFromEvent.summary,
+          content: stepOutputFromEvent.summary ?? stepOutputFromEvent.content,
+          fullContent: stepOutputFromEvent.fullContent ?? stepOutputFromEvent.content,
           format: normalizeStepOutputFormat(stepOutputFromEvent.format),
+          artifacts: stepOutputFromEvent.artifacts ?? [],
+          truncated: stepOutputFromEvent.truncated ?? false,
+          originalLength: stepOutputFromEvent.originalLength ?? stepOutputFromEvent.content.length,
+          shownLength: stepOutputFromEvent.shownLength ?? stepOutputFromEvent.content.length,
+          qualityState: stepOutputFromEvent.qualityState,
+          incompleteReason: stepOutputFromEvent.incompleteReason,
+          attemptCount: stepOutputFromEvent.attemptCount,
+          toolEvidence: stepOutputFromEvent.toolEvidence ?? [],
+          iterations: stepOutputFromEvent.iterations,
+          stopReason: stepOutputFromEvent.stopReason,
+          errorCode: stepOutputFromEvent.errorCode,
           criteriaMet: stepOutputFromEvent.criteriaMet ?? [],
         } satisfies PlanStepOutputCardData);
       } else {
-        const planStore = usePlanModeStore.getState();
-        void planStore
-          .fetchStepOutput(completedStepId, sessionId)
-          .then((stepOutput) => {
-            if (get()._runToken !== runToken) return;
-            if (!stepOutput) {
-              const latestError = usePlanModeStore.getState().error;
-              // Back-compat: older backends only persist outputs after full execution.
-              if (latestError && !latestError.includes('No output for step')) {
-                injectError(
-                  i18n.t('planMode:orchestrator.stepOutputLoadFailed', 'Step Output Unavailable'),
-                  latestError,
-                );
-              }
-              return;
-            }
-            injectCard('plan_step_output', {
-              stepId: completedStepId,
-              stepTitle: completedStepTitle,
-              content: stepOutput.content,
-              format: normalizeStepOutputFormat(stepOutput.format),
-              criteriaMet: stepOutput.criteriaMet ?? [],
-            } satisfies PlanStepOutputCardData);
-          })
-          .catch((error) => {
-            if (get()._runToken !== runToken) return;
-            injectError(
-              i18n.t('planMode:orchestrator.stepOutputLoadFailed', 'Step Output Unavailable'),
-              error instanceof Error ? error.message : String(error),
-            );
-          });
+        injectError(
+          i18n.t('planMode:orchestrator.stepOutputLoadFailed', 'Step Output Unavailable'),
+          `Missing step output in progress event for step '${completedStepId}'`,
+        );
       }
     }
 
@@ -275,12 +273,9 @@ async function subscribePlanProgressEvents(
         ...currentStepStatuses,
         ...(orchestratorPatch.stepStatuses ?? {}),
       };
-      const hasFailedSteps = Object.values(mergedStepStatuses).some((status) => status === 'failed');
-      const terminalPhase: PlanModePhase = hasFailedSteps ? 'failed' : 'completed';
 
       orchestratorPatch.isCancelling = false;
       set({
-        phase: terminalPhase,
         isBusy: false,
         isCancelling: false,
         stepStatuses: mergedStepStatuses,
@@ -288,24 +283,26 @@ async function subscribePlanProgressEvents(
       });
       unlistenRef?.();
 
-      void (async () => {
-        let fetchedReport: PlanExecutionReport | null = null;
-        try {
-          fetchedReport = await usePlanModeStore.getState().fetchReport(sessionId);
-        } catch {
-          fetchedReport = null;
+      if (get()._completionCardInjectedRunToken !== runToken) {
+        const progressReport = payload.terminalReport ?? null;
+        const existingReport = get().report;
+        const effectiveReport =
+          progressReport && progressReport.sessionId === payload.sessionId ? progressReport : existingReport;
+        if (effectiveReport && effectiveReport.sessionId === payload.sessionId) {
+          const immediateCompletionData = buildPlanCompletionCardDataFromReport(effectiveReport);
+          injectCard('plan_completion_card', immediateCompletionData as unknown as Record<string, unknown>);
+          set({ _completionCardInjectedRunToken: runToken, report: effectiveReport });
+        } else {
+          const fallbackTerminal: PlanModePhase = Object.values(mergedStepStatuses).some(
+            (status) => status === 'failed',
+          )
+            ? 'failed'
+            : 'completed';
+          const fallbackData = buildPlanCompletionCardDataFallback(plan, mergedStepStatuses, fallbackTerminal);
+          injectCard('plan_completion_card', fallbackData as unknown as Record<string, unknown>);
+          set({ _completionCardInjectedRunToken: runToken });
         }
-        if (get()._runToken !== runToken) return;
-        if (get()._completionCardInjectedRunToken === runToken) return;
-
-        const report = fetchedReport && fetchedReport.sessionId === payload.sessionId ? fetchedReport : get().report;
-        const completionData = report
-          ? buildPlanCompletionCardDataFromReport(report, terminalPhase === 'completed')
-          : buildPlanCompletionCardDataFallback(plan, mergedStepStatuses, terminalPhase === 'completed');
-
-        injectCard('plan_completion_card', completionData as unknown as Record<string, unknown>);
-        set({ _completionCardInjectedRunToken: runToken, report: report ?? null });
-      })();
+      }
       return;
     }
 
@@ -313,13 +310,28 @@ async function subscribePlanProgressEvents(
       if (get()._runToken !== runToken) return;
       orchestratorPatch.isCancelling = false;
       set({
-        phase: 'cancelled',
         isBusy: false,
         isCancelling: false,
         stepStatuses: orchestratorPatch.stepStatuses ?? currentStepStatuses,
         _progressUnlisten: null,
       });
       unlistenRef?.();
+      if (get()._completionCardInjectedRunToken !== runToken) {
+        const progressReport = payload.terminalReport ?? null;
+        if (progressReport && progressReport.sessionId === payload.sessionId) {
+          const cancelledData = buildPlanCompletionCardDataFromReport(progressReport);
+          injectCard('plan_completion_card', cancelledData as unknown as Record<string, unknown>);
+          set({ _completionCardInjectedRunToken: runToken, report: progressReport });
+        } else {
+          const fallbackData = buildPlanCompletionCardDataFallback(
+            plan,
+            orchestratorPatch.stepStatuses ?? currentStepStatuses,
+            'cancelled',
+          );
+          injectCard('plan_completion_card', fallbackData as unknown as Record<string, unknown>);
+          set({ _completionCardInjectedRunToken: runToken });
+        }
+      }
       return;
     }
 
@@ -333,7 +345,6 @@ interface PlanExecutionStartParams {
   runToken: number;
   plan: PlanCardData;
   rollbackPhase: PlanModePhase;
-  rollbackReasonCode?: string;
   startErrorTitle: string;
   invokeExecution: () => Promise<void>;
   get: PlanOrchestratorGet;
@@ -344,7 +355,6 @@ async function startPlanExecutionWithProgress({
   runToken,
   plan,
   rollbackPhase,
-  rollbackReasonCode,
   startErrorTitle,
   invokeExecution,
   get,
@@ -362,10 +372,9 @@ async function startPlanExecutionWithProgress({
   } catch (error) {
     stopProgressSubscription(get, set, unlisten);
     set({ phase: rollbackPhase, isBusy: false, isCancelling: false });
-    await syncKernelPlanPhase(rollbackPhase, rollbackReasonCode);
     const message = error instanceof Error ? error.message : String(error);
     injectError(startErrorTitle, message);
-    return failResult(rollbackReasonCode ?? 'execution_start_failed', message);
+    return failResult('execution_start_failed', message);
   }
 
   if (get()._runToken !== runToken) {
@@ -377,9 +386,8 @@ async function startPlanExecutionWithProgress({
   if (latestError) {
     stopProgressSubscription(get, set, unlisten);
     set({ phase: rollbackPhase, isBusy: false, isCancelling: false });
-    await syncKernelPlanPhase(rollbackPhase, rollbackReasonCode);
     injectError(startErrorTitle, latestError);
-    return failResult(rollbackReasonCode ?? 'execution_start_failed', latestError);
+    return failResult('execution_start_failed', latestError);
   }
 
   return okResult();
@@ -419,7 +427,6 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       buildPlanContextSources,
       resolvePlanSessionId,
       normalizeKernelPlanPhase,
-      syncKernelPlanPhase,
     }),
 
   submitClarification: async (answer: PlanClarifyAnswerCardData) =>
@@ -429,7 +436,6 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       buildPlanContextSources,
       resolvePlanSessionId,
       normalizeKernelPlanPhase,
-      syncKernelPlanPhase,
     }),
 
   retryClarification: async () =>
@@ -439,7 +445,6 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       buildPlanContextSources,
       resolvePlanSessionId,
       normalizeKernelPlanPhase,
-      syncKernelPlanPhase,
     }),
 
   skipClarification: async () =>
@@ -449,7 +454,6 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       buildPlanContextSources,
       resolvePlanSessionId,
       normalizeKernelPlanPhase,
-      syncKernelPlanPhase,
     }),
 
   proceedToPlanning: async () =>
@@ -459,7 +463,6 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       buildPlanContextSources,
       resolvePlanSessionId,
       normalizeKernelPlanPhase,
-      syncKernelPlanPhase,
     }),
 
   approvePlan: async (plan: PlanCardData) =>
@@ -491,6 +494,38 @@ export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get)
       startPlanExecutionWithProgress,
       defaultState: DEFAULT_STATE,
     }),
+
+  ensureTerminalCompletionCardFromKernel: async () => {
+    const runToken = get()._runToken;
+    if (get()._completionCardInjectedRunToken === runToken) return;
+
+    const sessionId = resolvePlanSessionId(get, set);
+    if (!sessionId) return;
+
+    const kernelSession = useWorkflowKernelStore.getState().session;
+    const kernelPlanPhase = normalizeKernelPlanPhase(selectKernelPlanRuntime(kernelSession).phase);
+    if (kernelPlanPhase !== 'completed' && kernelPlanPhase !== 'failed' && kernelPlanPhase !== 'cancelled') {
+      return;
+    }
+
+    const fetchedReport = await usePlanModeStore.getState().fetchReport(sessionId);
+    const plan = get().editablePlan;
+    const completionData =
+      fetchedReport && fetchedReport.sessionId === sessionId
+        ? buildPlanCompletionCardDataFromReport(fetchedReport)
+        : plan
+          ? buildPlanCompletionCardDataFallback(plan, get().stepStatuses, kernelPlanPhase)
+          : null;
+    if (!completionData) return;
+
+    injectCard('plan_completion_card', completionData as unknown as Record<string, unknown>);
+    set({
+      report: fetchedReport ?? get().report,
+      _completionCardInjectedRunToken: runToken,
+      isBusy: false,
+      isCancelling: false,
+    });
+  },
 
   resetWorkflow: () => {
     const { _progressUnlisten } = get();
