@@ -1,5 +1,5 @@
-import { useExecutionStore } from '../execution';
 import type { CardPayload, WorkflowErrorData, WorkflowInfoData } from '../../types/workflowCard';
+import { routeModeCard, routeModeStreamLine } from '../modeTranscriptRouting';
 
 let cardCounter = 0;
 
@@ -19,7 +19,7 @@ export function injectWorkflowCard<T extends CardPayload['cardType']>(
     data,
     interactive,
   };
-  useExecutionStore.getState().appendCard(payload);
+  void routeModeCard('task', payload);
 }
 
 export function injectWorkflowInfo(message: string, level: WorkflowInfoData['level'] = 'info'): void {
@@ -28,4 +28,13 @@ export function injectWorkflowInfo(message: string, level: WorkflowInfoData['lev
 
 export function injectWorkflowError(title: string, description: string, suggestedFix: string | null = null): void {
   injectWorkflowCard('workflow_error', { title, description, suggestedFix } as WorkflowErrorData);
+}
+
+export function appendWorkflowUserMessage(message: string): void {
+  const trimmed = message.trim();
+  if (!trimmed) return;
+  void routeModeStreamLine('task', trimmed, 'info', {
+    turnBoundary: 'user',
+    turnId: Date.now(),
+  });
 }

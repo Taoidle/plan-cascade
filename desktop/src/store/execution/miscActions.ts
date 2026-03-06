@@ -53,8 +53,6 @@ interface MiscActions {
   retryStory: ExecutionState['retryStory'];
   rollbackToTurn: ExecutionState['rollbackToTurn'];
   appendStandaloneTurn: ExecutionState['appendStandaloneTurn'];
-  setPendingTaskContext: ExecutionState['setPendingTaskContext'];
-  clearPendingTaskContext: ExecutionState['clearPendingTaskContext'];
 }
 
 export function createMiscActions(deps: MiscActionDeps): MiscActions {
@@ -107,13 +105,19 @@ export function createMiscActions(deps: MiscActionDeps): MiscActions {
       const state = get();
 
       if ((state.status === 'running' || state.status === 'paused') && hasMeaningfulForegroundContent(state)) {
-        get().backgroundCurrentSession();
+        if (state.isChatSession) {
+          get().parkForegroundRuntime();
+        } else {
+          get().backgroundCurrentSession();
+        }
         const postBgState = get();
         set({
           ...initialState,
           connectionStatus: postBgState.connectionStatus,
           history: postBgState.history,
           backgroundSessions: postBgState.backgroundSessions,
+          runtimeRegistry: postBgState.runtimeRegistry,
+          activeRuntimeHandleId: postBgState.activeRuntimeHandleId,
           activeSessionId: postBgState.activeSessionId,
           foregroundParentSessionId: null,
           foregroundBgId: null,
@@ -141,6 +145,8 @@ export function createMiscActions(deps: MiscActionDeps): MiscActions {
         connectionStatus: state.connectionStatus,
         history: get().history,
         backgroundSessions,
+        runtimeRegistry: state.runtimeRegistry,
+        activeRuntimeHandleId: state.activeRuntimeHandleId,
         activeSessionId: state.activeSessionId,
         foregroundParentSessionId: null,
         foregroundBgId: null,
@@ -436,14 +442,6 @@ export function createMiscActions(deps: MiscActionDeps): MiscActions {
       set({
         standaloneTurns: trimStandaloneTurns([...get().standaloneTurns, turn], limit),
       });
-    },
-
-    setPendingTaskContext: (context) => {
-      set({ _pendingTaskContext: context });
-    },
-
-    clearPendingTaskContext: () => {
-      set({ _pendingTaskContext: null });
     },
   };
 }

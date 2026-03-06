@@ -90,11 +90,52 @@
     "toggleSidebar": "サイドバー切替",
     "sessions": "セッション",
     "rename": "名前変更",
+    "renamePrompt": "セッション名を変更",
     "deleteSession": "セッション削除",
+    "deleteSessionConfirm": "このセッションを完全に削除しますか？この操作は元に戻せません。",
+    "archiveSession": "セッションをアーカイブ",
+    "archiveSessionConfirm": "この実行中セッションをアーカイブしますか？",
+    "archiveAction": "アーカイブ",
+    "restoreAction": "復元",
+    "restoreSession": "セッションを復元",
     "activeSessions": "アクティブセッション",
     "switchSession": "このセッションに切替",
     "removeSession": "セッションを削除",
-    "currentFork": "（現在）"
+    "currentFork": "（現在）",
+    "clearAllSessions": "すべてのセッションを削除",
+    "clearAllSessionsConfirm": "すべてのセッションと履歴を削除しますか？この操作は元に戻せません。",
+    "noWorkspace": "ワークスペースなし",
+    "sort": {
+      "label": "パスの並び替え",
+      "recent": "並び替え: 最近",
+      "name": "並び替え: 名前"
+    },
+    "archived": {
+      "show": "アーカイブを表示",
+      "hide": "アーカイブを隠す"
+    },
+    "badges": {
+      "live": "実行中",
+      "history": "履歴",
+      "archived": "アーカイブ済み"
+    },
+    "status": {
+      "idle": "待機中",
+      "running": "実行中",
+      "attention": "要確認"
+    },
+    "time": {
+      "justNow": "たった今",
+      "minutesAgo": "{{count}}分前",
+      "hoursAgo": "{{count}}時間前",
+      "daysAgo": "{{count}}日前"
+    },
+    "placeholderTitles": {
+      "chat": "新しいチャット",
+      "plan": "新しいプラン",
+      "task": "新しいタスク",
+      "session": "新しいセッション"
+    }
   },
   "skillPanel": {
     "title": "スキルとメモリ",

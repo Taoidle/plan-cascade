@@ -3382,7 +3382,8 @@ impl OrchestratorService {
                                     if remaining <= overhead {
                                         break;
                                     }
-                                    let snippet = utf8_safe_prefix_by_bytes(text, remaining - overhead);
+                                    let snippet =
+                                        utf8_safe_prefix_by_bytes(text, remaining - overhead);
                                     if snippet.is_empty() {
                                         break;
                                     }

@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
@@ -32,7 +33,8 @@ use crate::services::task_mode::exploration::{
 };
 use crate::services::task_mode::prd_generator;
 use crate::services::workflow_kernel::{
-    WorkflowKernelState, WorkflowKernelUpdatedEvent, WorkflowStatus,
+    HandoffContextBundle, WorkflowKernelState, WorkflowKernelUpdatedEvent, WorkflowMode,
+    WorkflowStatus,
     WORKFLOW_KERNEL_UPDATED_CHANNEL,
 };
 
@@ -144,6 +146,9 @@ pub struct TaskModeSession {
     pub exploration_result: Option<ExplorationResult>,
     /// Execution progress
     pub progress: Option<BatchExecutionProgress>,
+    /// Persisted execution launch metadata used for background resume.
+    #[serde(default)]
+    pub execution_resume_payload: Option<Value>,
     /// When the session was created
     pub created_at: String,
 }
@@ -316,6 +321,20 @@ pub struct ExploreProjectRequest {
 pub struct ApproveTaskPrdRequest {
     pub session_id: String,
     pub prd: TaskPrd,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub base_url: Option<String>,
+    pub execution_mode: Option<StoryExecutionMode>,
+    pub workflow_config: Option<TaskWorkflowConfig>,
+    pub global_default_agent: Option<String>,
+    pub phase_configs: Option<HashMap<String, PhaseConfigInput>>,
+    pub context_sources: Option<crate::services::task_mode::context_provider::ContextSourceConfig>,
+    pub project_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskExecutionResumePayload {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub base_url: Option<String>,
@@ -616,10 +635,14 @@ impl TaskModeState {
             version: TASK_MODE_SESSION_RECORD_VERSION,
             session: session.clone(),
         };
-        let encoded =
-            serde_json::to_vec_pretty(&record).map_err(|e| format!("Failed to encode task mode session: {e}"))?;
-        fs::write(self.session_file_path(&session.session_id), encoded)
-            .map_err(|e| format!("Failed to persist task mode session '{}': {e}", session.session_id))
+        let encoded = serde_json::to_vec_pretty(&record)
+            .map_err(|e| format!("Failed to encode task mode session: {e}"))?;
+        fs::write(self.session_file_path(&session.session_id), encoded).map_err(|e| {
+            format!(
+                "Failed to persist task mode session '{}': {e}",
+                session.session_id
+            )
+        })
     }
 
     pub async fn store_session_snapshot(&self, session: TaskModeSession) -> Result<(), String> {
@@ -635,18 +658,23 @@ impl TaskModeState {
         if !path.exists() {
             return Ok(());
         }
-        fs::remove_file(path)
-            .map_err(|e| format!("Failed to delete persisted task mode session '{session_id}': {e}"))
+        fs::remove_file(path).map_err(|e| {
+            format!("Failed to delete persisted task mode session '{session_id}': {e}")
+        })
     }
 
-    async fn read_persisted_session(&self, session_id: &str) -> Result<Option<TaskModeSession>, String> {
+    async fn read_persisted_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<TaskModeSession>, String> {
         let path = self.session_file_path(session_id);
         if !path.exists() {
             return Ok(None);
         }
 
-        let raw = fs::read(&path)
-            .map_err(|e| format!("Failed to read persisted task mode session '{session_id}': {e}"))?;
+        let raw = fs::read(&path).map_err(|e| {
+            format!("Failed to read persisted task mode session '{session_id}': {e}")
+        })?;
         let record: TaskModeSessionRecordV1 = serde_json::from_slice(&raw)
             .map_err(|e| format!("Persisted task mode session '{session_id}' is corrupted: {e}"))?;
         if record.version != TASK_MODE_SESSION_RECORD_VERSION {
@@ -842,6 +870,68 @@ fn injection_phase_to_context_phase(
         crate::services::skills::model::InjectionPhase::Retry => "implementation",
         crate::services::skills::model::InjectionPhase::Always => "analysis",
     }
+}
+
+pub(crate) async fn handoff_context_for_task_session(
+    kernel_state: &WorkflowKernelState,
+    task_session_id: &str,
+) -> Option<HandoffContextBundle> {
+    kernel_state
+        .handoff_context_for_mode_session(WorkflowMode::Task, task_session_id)
+        .await
+}
+
+pub(crate) fn conversation_history_from_task_handoff(
+    handoff: &HandoffContextBundle,
+) -> Vec<ConversationTurnInput> {
+    handoff
+        .conversation_context
+        .iter()
+        .map(|turn| ConversationTurnInput {
+            user: turn.user.clone(),
+            assistant: turn.assistant.clone(),
+        })
+        .collect()
+}
+
+pub(crate) fn render_task_handoff_context(handoff: &HandoffContextBundle) -> Option<String> {
+    let mut sections = Vec::new();
+
+    if !handoff.artifact_refs.is_empty() {
+        sections.push(format!(
+            "[artifact-refs]\n{}",
+            handoff.artifact_refs.join("\n")
+        ));
+    }
+
+    if !handoff.context_sources.is_empty() {
+        sections.push(format!(
+            "[context-sources]\n{}",
+            handoff.context_sources.join("\n")
+        ));
+    }
+
+    if !handoff.metadata.is_empty() {
+        if let Ok(metadata) = serde_json::to_string_pretty(&handoff.metadata) {
+            sections.push(format!("[handoff-metadata]\n{}", metadata));
+        }
+    }
+
+    if sections.is_empty() {
+        None
+    } else {
+        Some(sections.join("\n\n"))
+    }
+}
+
+pub(crate) async fn conversation_history_for_task_session(
+    kernel_state: &WorkflowKernelState,
+    task_session_id: &str,
+) -> Vec<ConversationTurnInput> {
+    handoff_context_for_task_session(kernel_state, task_session_id)
+        .await
+        .map(|handoff| conversation_history_from_task_handoff(&handoff))
+        .unwrap_or_default()
 }
 
 async fn assemble_enriched_context_v2(
@@ -2290,6 +2380,7 @@ mod tests {
             prd: None,
             exploration_result: None,
             progress: None,
+            execution_resume_payload: None,
             created_at: "2026-02-18T00:00:00Z".to_string(),
         };
         let json = serde_json::to_string(&session).unwrap();
@@ -2307,6 +2398,7 @@ mod tests {
             prd: None,
             exploration_result: None,
             progress: None,
+            execution_resume_payload: None,
             created_at: "2026-03-05T00:00:00Z".to_string(),
         }
     }
@@ -2366,6 +2458,27 @@ mod tests {
             !state.session_file_path(session_id).exists(),
             "persisted task session should be removed"
         );
+    }
+
+    #[test]
+    fn render_task_handoff_context_includes_non_conversation_sections() {
+        let handoff = HandoffContextBundle {
+            conversation_context: Vec::new(),
+            artifact_refs: vec!["spec.md".to_string()],
+            context_sources: vec!["chat_transcript_sync".to_string()],
+            metadata: serde_json::Map::from_iter([(
+                "workspacePath".to_string(),
+                Value::String("/tmp/demo".to_string()),
+            )]),
+        };
+
+        let rendered = render_task_handoff_context(&handoff).expect("rendered handoff context");
+        assert!(rendered.contains("[artifact-refs]"));
+        assert!(rendered.contains("spec.md"));
+        assert!(rendered.contains("[context-sources]"));
+        assert!(rendered.contains("chat_transcript_sync"));
+        assert!(rendered.contains("[handoff-metadata]"));
+        assert!(rendered.contains("workspacePath"));
     }
 
     #[test]

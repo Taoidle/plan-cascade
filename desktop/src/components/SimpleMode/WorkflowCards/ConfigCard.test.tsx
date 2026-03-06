@@ -50,6 +50,9 @@ function createTaskKernelSession(phase: TaskLifecyclePhase): WorkflowSession {
   const now = '2026-03-04T00:00:00Z';
   return {
     sessionId: 'kernel-task-1',
+    sessionKind: 'simple_root',
+    displayTitle: 'Kernel task',
+    workspacePath: '/tmp/project',
     status: 'active',
     activeMode: 'task',
     modeSnapshots: {
@@ -63,6 +66,10 @@ function createTaskKernelSession(phase: TaskLifecyclePhase): WorkflowSession {
         pendingInterview: null,
         completedStories: 0,
         failedStories: 0,
+        runId: null,
+        backgroundStatus: null,
+        resumableFromCheckpoint: false,
+        lastCheckpointId: null,
       },
     },
     handoffContext: {
@@ -72,6 +79,15 @@ function createTaskKernelSession(phase: TaskLifecyclePhase): WorkflowSession {
       metadata: {},
     },
     linkedModeSessions: {},
+    backgroundState: 'foreground',
+    contextLedger: {
+      conversationTurnCount: 0,
+      artifactRefCount: 0,
+      contextSourceKinds: [],
+      lastCompactionAt: null,
+      ledgerVersion: 1,
+    },
+    modeRuntimeMeta: {},
     lastError: null,
     createdAt: now,
     updatedAt: now,

@@ -1,5 +1,5 @@
 import i18n from '../../i18n';
-import { useExecutionStore } from '../execution';
+import { routeModeCard, routeModeStreamLine } from '../modeTranscriptRouting';
 import type { CardPayload } from '../../types/workflowCard';
 import type {
   PlanCardData,
@@ -16,7 +16,7 @@ export function injectPlanCard(cardType: string, data: Record<string, unknown>, 
     data: data as unknown as CardPayload['data'],
     interactive,
   };
-  useExecutionStore.getState().appendCard(payload);
+  void routeModeCard('plan', payload);
 }
 
 export function injectPlanInfo(message: string): void {
@@ -25,6 +25,15 @@ export function injectPlanInfo(message: string): void {
 
 export function injectPlanError(title: string, description: string): void {
   injectPlanCard('workflow_error', { title, description, suggestedFix: '' });
+}
+
+export function appendPlanUserMessage(message: string): void {
+  const trimmed = message.trim();
+  if (!trimmed) return;
+  void routeModeStreamLine('plan', trimmed, 'info', {
+    turnBoundary: 'user',
+    turnId: Date.now(),
+  });
 }
 
 export function injectClarificationResolutionCard(reasonCode: string | null, message: string): void {

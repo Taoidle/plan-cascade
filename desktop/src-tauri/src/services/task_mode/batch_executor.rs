@@ -568,6 +568,11 @@ pub struct BatchExecutor {
     llm_provider: Option<Arc<dyn LlmProvider>>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct BatchExecutorResumeState {
+    pub story_statuses: HashMap<String, String>,
+}
+
 /// Internal execution state.
 #[derive(Debug)]
 struct BatchExecutionState {
@@ -591,6 +596,45 @@ impl BatchExecutor {
         let story_states: HashMap<String, StoryExecutionState> = stories
             .iter()
             .map(|s| (s.id.clone(), StoryExecutionState::Pending))
+            .collect();
+
+        Self {
+            stories,
+            config,
+            cancellation_token,
+            state: Arc::new(RwLock::new(BatchExecutionState {
+                story_states,
+                current_batch: 0,
+                total_batches: 0,
+                agent_assignments: HashMap::new(),
+            })),
+            llm_provider: None,
+        }
+    }
+
+    pub fn new_with_resume_state(
+        stories: Vec<ExecutableStory>,
+        config: ExecutionConfig,
+        cancellation_token: CancellationToken,
+        resume_state: BatchExecutorResumeState,
+    ) -> Self {
+        let story_states: HashMap<String, StoryExecutionState> = stories
+            .iter()
+            .map(|story| {
+                let state = match resume_state
+                    .story_statuses
+                    .get(&story.id)
+                    .map(|value| value.as_str())
+                {
+                    Some("completed") => StoryExecutionState::Completed {
+                        agent: "recovered".to_string(),
+                        duration_ms: 0,
+                        gate_result: None,
+                    },
+                    _ => StoryExecutionState::Pending,
+                };
+                (story.id.clone(), state)
+            })
             .collect();
 
         Self {
@@ -772,7 +816,14 @@ impl BatchExecutor {
         let story_map: HashMap<String, &ExecutableStory> =
             self.stories.iter().map(|s| (s.id.clone(), s)).collect();
 
-        let mut stories_processed: usize = 0;
+        let mut stories_processed: usize = {
+            let state = self.state.read().await;
+            state
+                .story_states
+                .values()
+                .filter(|story_state| story_state.is_terminal())
+                .count()
+        };
 
         for batch in &batches {
             // Check cancellation before each batch
@@ -811,6 +862,15 @@ impl BatchExecutor {
 
             self.set_current_batch(batch.index, total_batches).await;
 
+            stories_processed = {
+                let state = self.state.read().await;
+                state
+                    .story_states
+                    .values()
+                    .filter(|story_state| story_state.is_terminal())
+                    .count()
+            };
+
             let progress_pct = if total_stories > 0 {
                 (stories_processed as f64 / total_stories as f64) * 100.0
             } else {
@@ -828,6 +888,18 @@ impl BatchExecutor {
             let mut handles = Vec::new();
 
             for story_id in &batch.story_ids {
+                let should_skip = {
+                    let state = self.state.read().await;
+                    state
+                        .story_states
+                        .get(story_id)
+                        .map(|story_state| story_state.is_completed())
+                        .unwrap_or(false)
+                };
+                if should_skip {
+                    continue;
+                }
+
                 let story = match story_map.get(story_id) {
                     Some(s) => (*s).clone(),
                     None => continue,
@@ -914,7 +986,14 @@ impl BatchExecutor {
                 let _ = handle.await;
             }
 
-            stories_processed += batch.story_ids.len();
+            stories_processed = {
+                let state = self.state.read().await;
+                state
+                    .story_states
+                    .values()
+                    .filter(|story_state| story_state.is_terminal())
+                    .count()
+            };
         }
 
         let duration_ms = start.elapsed().as_millis() as u64;

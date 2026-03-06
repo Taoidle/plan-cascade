@@ -6,7 +6,22 @@
 
 export type WorkflowMode = 'chat' | 'plan' | 'task';
 
-export type WorkflowStatus = 'active' | 'completed' | 'failed' | 'cancelled';
+export type WorkflowStatus = 'active' | 'completed' | 'failed' | 'cancelled' | 'archived';
+
+export type WorkflowSessionKind = 'simple_root';
+
+export type WorkflowBackgroundState = 'foreground' | 'background_idle' | 'background_running' | 'interrupted';
+
+export type ChatLifecyclePhase =
+  | 'idle'
+  | 'ready'
+  | 'submitting'
+  | 'streaming'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted';
 
 export type TaskLifecyclePhase =
   | 'idle'
@@ -49,7 +64,7 @@ export interface HandoffContextBundle {
 }
 
 export interface ChatState {
-  phase: string;
+  phase: ChatLifecyclePhase | string;
   draftInput: string;
   turnCount: number;
   lastUserMessage: string | null;
@@ -74,6 +89,10 @@ export interface PlanState {
   retryableSteps: string[];
   planRevision: number;
   lastEditOperation: string | null;
+  runId?: string | null;
+  backgroundStatus?: string | null;
+  resumableFromCheckpoint?: boolean;
+  lastCheckpointId?: string | null;
 }
 
 export interface TaskInterviewSnapshot {
@@ -97,6 +116,10 @@ export interface TaskState {
   pendingInterview: TaskInterviewSnapshot | null;
   completedStories: number;
   failedStories: number;
+  runId?: string | null;
+  backgroundStatus?: string | null;
+  resumableFromCheckpoint?: boolean;
+  lastCheckpointId?: string | null;
 }
 
 export type ModeState =
@@ -168,15 +191,109 @@ export interface PlanEditOperation {
 
 export interface WorkflowSession {
   sessionId: string;
+  sessionKind: WorkflowSessionKind;
+  displayTitle: string;
+  workspacePath: string | null;
   status: WorkflowStatus;
   activeMode: WorkflowMode;
   modeSnapshots: ModeSnapshots;
   handoffContext: HandoffContextBundle;
   linkedModeSessions: Partial<Record<WorkflowMode, string>>;
+  backgroundState: WorkflowBackgroundState;
+  contextLedger: WorkflowContextLedgerSummary;
+  modeRuntimeMeta: Partial<Record<WorkflowMode, ModeRuntimeMeta>>;
   lastError: string | null;
   createdAt: string;
   updatedAt: string;
   lastCheckpointId: string | null;
+}
+
+export interface ModeRuntimeMeta {
+  mode: WorkflowMode;
+  runId: string | null;
+  bindingSessionId: string | null;
+  isForeground: boolean;
+  isBackgroundRunning: boolean;
+  isInterrupted: boolean;
+  resumePolicy: string;
+  lastHeartbeatAt: string | null;
+  lastCheckpointId: string | null;
+  lastError: string | null;
+}
+
+export interface WorkflowContextLedgerSummary {
+  conversationTurnCount: number;
+  artifactRefCount: number;
+  contextSourceKinds: string[];
+  lastCompactionAt: string | null;
+  ledgerVersion: number;
+}
+
+export interface WorkflowSessionCatalogItem {
+  sessionId: string;
+  sessionKind: WorkflowSessionKind;
+  displayTitle: string;
+  workspacePath: string | null;
+  activeMode: WorkflowMode;
+  status: WorkflowStatus;
+  backgroundState: WorkflowBackgroundState;
+  updatedAt: string;
+  createdAt: string;
+  lastError: string | null;
+  contextLedger: WorkflowContextLedgerSummary;
+  modeSnapshots: ModeSnapshots;
+  modeRuntimeMeta: Partial<Record<WorkflowMode, ModeRuntimeMeta>>;
+}
+
+export interface WorkflowSessionCatalogState {
+  activeSessionId: string | null;
+  sessions: WorkflowSessionCatalogItem[];
+}
+
+export interface ModeTranscriptPayload {
+  sessionId: string;
+  mode: WorkflowMode;
+  revision: number;
+  lines: unknown[];
+}
+
+export interface ModeViewSnapshot {
+  mode: WorkflowMode;
+  lines: unknown[];
+  draftInput: string;
+  queuedMessages: unknown[];
+  attachments: unknown[];
+  scrollAnchor: string | null;
+  lastLoadedAt: number | null;
+  hasUnreadBackgroundUpdates: boolean;
+}
+
+export interface SimpleRootSessionView {
+  sessionId: string;
+  activeMode: WorkflowMode;
+  modeViews: Partial<Record<WorkflowMode, ModeViewSnapshot>>;
+}
+
+export interface WorkflowSessionCatalogUpdatedEvent {
+  activeSessionId: string | null;
+  sessions: WorkflowSessionCatalogItem[];
+  source: string;
+}
+
+export interface WorkflowModeTranscriptUpdatedEvent {
+  sessionId: string;
+  mode: WorkflowMode;
+  revision: number;
+  appendedLines: unknown[];
+  replaceFromLineId?: number | null;
+  source: string;
+}
+
+export interface ResumeResult {
+  sessionId: string;
+  mode: WorkflowMode;
+  resumed: boolean;
+  reason: string;
 }
 
 export interface WorkflowCheckpoint {

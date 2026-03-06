@@ -10,15 +10,25 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { CommandResponse } from '../lib/tauri';
 import type {
   HandoffContextBundle,
+  ModeTranscriptPayload,
   PlanEditOperation,
+  ResumeResult,
   UserInputIntent,
+  WorkflowSessionCatalogItem,
+  WorkflowSessionCatalogState,
+  WorkflowSessionCatalogUpdatedEvent,
   WorkflowKernelUpdatedEvent,
   WorkflowMode,
+  WorkflowModeTranscriptUpdatedEvent,
   WorkflowSession,
   WorkflowSessionState,
 } from '../types/workflowKernel';
+import { useSimpleSessionStore } from './simpleSessionStore';
+import { selectStableConversationLines } from '../lib/conversationUtils';
 
 const WORKFLOW_KERNEL_UPDATED_CHANNEL = 'workflow-kernel-updated';
+const WORKFLOW_SESSION_CATALOG_UPDATED_CHANNEL = 'workflow-session-catalog-updated';
+const WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL = 'workflow-mode-transcript-updated';
 
 const DEFAULT_HANDOFF: HandoffContextBundle = {
   conversationContext: [],
@@ -26,6 +36,12 @@ const DEFAULT_HANDOFF: HandoffContextBundle = {
   contextSources: [],
   metadata: {},
 };
+
+function mergeStableTranscriptLines(sessionId: string, mode: WorkflowMode, incomingLines: unknown[]): unknown[] {
+  if (mode !== 'chat') return incomingLines;
+  const existingLines = useSimpleSessionStore.getState().getModeLines(sessionId, mode);
+  return selectStableConversationLines(incomingLines as never[], existingLines as never[]) as unknown[];
+}
 
 function normalizeHandoff(bundle?: HandoffContextBundle): HandoffContextBundle {
   if (!bundle) return DEFAULT_HANDOFF;
@@ -54,17 +70,41 @@ function normalizePlanEdit(operation: PlanEditOperation): PlanEditOperation {
 
 export interface WorkflowKernelStore {
   sessionId: string | null;
+  activeRootSessionId: string | null;
   activeMode: WorkflowMode;
   session: WorkflowSession | null;
   events: WorkflowSessionState['events'];
   checkpoints: WorkflowSessionState['checkpoints'];
+  sessionCatalog: WorkflowSessionCatalogItem[];
   revision: number;
   isLoading: boolean;
   error: string | null;
   _requestId: number;
   _updatesUnlisten: UnlistenFn | null;
+  _catalogUpdatesUnlisten: UnlistenFn | null;
+  _transcriptUpdatesUnlisten: UnlistenFn | null;
 
   openSession: (initialMode?: WorkflowMode, initialContext?: HandoffContextBundle) => Promise<WorkflowSession | null>;
+  listSessions: () => Promise<WorkflowSessionCatalogItem[]>;
+  getSessionCatalogState: () => Promise<WorkflowSessionCatalogState | null>;
+  activateSession: (sessionId: string) => Promise<WorkflowSessionState | null>;
+  renameSession: (sessionId: string, displayTitle: string) => Promise<WorkflowSession | null>;
+  archiveSession: (sessionId: string) => Promise<WorkflowSessionCatalogState | null>;
+  restoreSession: (sessionId: string) => Promise<WorkflowSessionState | null>;
+  deleteSession: (sessionId: string) => Promise<WorkflowSessionCatalogState | null>;
+  resumeBackgroundRuns: (sessionId?: string | null) => Promise<ResumeResult[]>;
+  getModeTranscript: (sessionId: string, mode: WorkflowMode) => Promise<ModeTranscriptPayload | null>;
+  appendContextItems: (targetMode: WorkflowMode, handoff: HandoffContextBundle) => Promise<WorkflowSession | null>;
+  appendModeTranscript: (
+    sessionId: string,
+    mode: WorkflowMode,
+    lines: unknown[],
+  ) => Promise<ModeTranscriptPayload | null>;
+  storeModeTranscript: (
+    sessionId: string,
+    mode: WorkflowMode,
+    lines: unknown[],
+  ) => Promise<ModeTranscriptPayload | null>;
   transitionMode: (targetMode: WorkflowMode, handoff?: HandoffContextBundle) => Promise<WorkflowSession | null>;
   submitInput: (intent: UserInputIntent) => Promise<WorkflowSession | null>;
   transitionAndSubmitInput: (
@@ -86,20 +126,25 @@ export interface WorkflowKernelStore {
 
 const DEFAULT_STATE = {
   sessionId: null,
+  activeRootSessionId: null,
   activeMode: 'chat' as WorkflowMode,
   session: null as WorkflowSession | null,
   events: [] as WorkflowSessionState['events'],
   checkpoints: [] as WorkflowSessionState['checkpoints'],
+  sessionCatalog: [] as WorkflowSessionCatalogItem[],
   revision: 0,
   isLoading: false,
   error: null as string | null,
   _requestId: 0,
   _updatesUnlisten: null as UnlistenFn | null,
+  _catalogUpdatesUnlisten: null as UnlistenFn | null,
+  _transcriptUpdatesUnlisten: null as UnlistenFn | null,
 };
 
 function applySession(set: (partial: Partial<WorkflowKernelStore>) => void, session: WorkflowSession) {
   set({
     sessionId: session.sessionId,
+    activeRootSessionId: session.sessionId,
     activeMode: session.activeMode,
     session,
     error: null,
@@ -109,6 +154,7 @@ function applySession(set: (partial: Partial<WorkflowKernelStore>) => void, sess
 function applySessionState(set: (partial: Partial<WorkflowKernelStore>) => void, sessionState: WorkflowSessionState) {
   set({
     sessionId: sessionState.session.sessionId,
+    activeRootSessionId: sessionState.session.sessionId,
     activeMode: sessionState.session.activeMode,
     session: sessionState.session,
     events: sessionState.events,
@@ -139,6 +185,7 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
       applySession(set, result.data);
       set({ isLoading: false });
       await get().subscribeToUpdates();
+      void get().getSessionCatalogState();
       void get().refreshSessionState();
       return result.data;
     } catch (error) {
@@ -147,6 +194,343 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
         isLoading: false,
         error: error instanceof Error ? error.message : String(error),
       });
+      return null;
+    }
+  },
+
+  listSessions: async () => {
+    try {
+      const result = await invoke<CommandResponse<WorkflowSessionCatalogItem[]>>('workflow_list_sessions');
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to list workflow sessions' });
+        return [];
+      }
+      set({ sessionCatalog: result.data, error: null });
+      return result.data;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return [];
+    }
+  },
+
+  getSessionCatalogState: async () => {
+    try {
+      const result = await invoke<CommandResponse<WorkflowSessionCatalogState>>('workflow_get_session_catalog_state');
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to load workflow session catalog' });
+        return null;
+      }
+      set({
+        activeRootSessionId: result.data.activeSessionId,
+        sessionCatalog: result.data.sessions,
+        error: null,
+      });
+      return result.data;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  },
+
+  activateSession: async (sessionId) => {
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId) {
+      set({ error: 'Session id cannot be empty' });
+      return null;
+    }
+    const requestId = get()._requestId + 1;
+    set({ isLoading: true, error: null, _requestId: requestId });
+    try {
+      const result = await invoke<CommandResponse<WorkflowSessionState>>('workflow_activate_session', {
+        sessionId: normalizedSessionId,
+      });
+      if (get()._requestId !== requestId) return null;
+      if (!result.success || !result.data) {
+        set({ isLoading: false, error: result.error || 'Failed to activate workflow session' });
+        return null;
+      }
+      applySessionState(set, result.data);
+      set({ isLoading: false, activeRootSessionId: normalizedSessionId });
+      await get().subscribeToUpdates();
+      void get().getSessionCatalogState();
+      return result.data;
+    } catch (error) {
+      if (get()._requestId !== requestId) return null;
+      set({ isLoading: false, error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  },
+
+  renameSession: async (sessionId, displayTitle) => {
+    const normalizedSessionId = sessionId.trim();
+    const normalizedTitle = displayTitle.trim();
+    if (!normalizedSessionId) {
+      set({ error: 'Session id cannot be empty' });
+      return null;
+    }
+    if (!normalizedTitle) {
+      set({ error: 'Display title cannot be empty' });
+      return null;
+    }
+    try {
+      const result = await invoke<CommandResponse<WorkflowSession>>('workflow_rename_session', {
+        sessionId: normalizedSessionId,
+        displayTitle: normalizedTitle,
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to rename workflow session' });
+        return null;
+      }
+      if (get().sessionId === normalizedSessionId) {
+        applySession(set, result.data);
+      } else {
+        set((state) => ({
+          sessionCatalog: mergeCatalogSession(state.sessionCatalog, result.data!),
+          error: null,
+        }));
+      }
+      void get().getSessionCatalogState();
+      return result.data;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  },
+
+  archiveSession: async (sessionId) => {
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId) {
+      set({ error: 'Session id cannot be empty' });
+      return null;
+    }
+    try {
+      const result = await invoke<CommandResponse<WorkflowSessionCatalogState>>('workflow_archive_session', {
+        sessionId: normalizedSessionId,
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to archive workflow session' });
+        return null;
+      }
+      const catalogState = result.data;
+      set({
+        activeRootSessionId: catalogState.activeSessionId,
+        sessionCatalog: catalogState.sessions,
+        error: null,
+      });
+
+      if (!catalogState.activeSessionId) {
+        set({
+          sessionId: null,
+          activeMode: 'chat',
+          session: null,
+          events: [],
+          checkpoints: [],
+          revision: 0,
+        });
+        return catalogState;
+      }
+
+      if (catalogState.activeSessionId !== get().sessionId) {
+        const sessionStateResult = await invoke<CommandResponse<WorkflowSessionState>>('workflow_get_session_state', {
+          sessionId: catalogState.activeSessionId,
+        });
+        if (sessionStateResult.success && sessionStateResult.data) {
+          applySessionState(set, sessionStateResult.data);
+        }
+      }
+
+      return catalogState;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  },
+
+  restoreSession: async (sessionId) => {
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId) {
+      set({ error: 'Session id cannot be empty' });
+      return null;
+    }
+    try {
+      const result = await invoke<CommandResponse<WorkflowSessionState>>('workflow_restore_session', {
+        sessionId: normalizedSessionId,
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to restore workflow session' });
+        return null;
+      }
+      applySessionState(set, result.data);
+      void get().getSessionCatalogState();
+      return result.data;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  },
+
+  deleteSession: async (sessionId) => {
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId) {
+      set({ error: 'Session id cannot be empty' });
+      return null;
+    }
+    try {
+      const result = await invoke<CommandResponse<WorkflowSessionCatalogState>>('workflow_delete_session', {
+        sessionId: normalizedSessionId,
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to delete workflow session' });
+        return null;
+      }
+      const catalogState = result.data;
+      set({
+        activeRootSessionId: catalogState.activeSessionId,
+        sessionCatalog: catalogState.sessions,
+        error: null,
+      });
+      if (!catalogState.activeSessionId) {
+        set({
+          sessionId: null,
+          activeMode: 'chat',
+          session: null,
+          events: [],
+          checkpoints: [],
+          revision: 0,
+        });
+        return catalogState;
+      }
+
+      if (catalogState.activeSessionId !== get().sessionId) {
+        const sessionStateResult = await invoke<CommandResponse<WorkflowSessionState>>('workflow_get_session_state', {
+          sessionId: catalogState.activeSessionId,
+        });
+        if (sessionStateResult.success && sessionStateResult.data) {
+          applySessionState(set, sessionStateResult.data);
+        }
+      }
+
+      return catalogState;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  },
+
+  resumeBackgroundRuns: async (sessionId) => {
+    try {
+      const result = await invoke<CommandResponse<ResumeResult[]>>('workflow_resume_background_runs', {
+        sessionId: sessionId || null,
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to inspect resumable workflow runs' });
+        return [];
+      }
+      return result.data;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return [];
+    }
+  },
+
+  getModeTranscript: async (sessionId, mode) => {
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId) {
+      set({ error: 'Session id cannot be empty' });
+      return null;
+    }
+    try {
+      const result = await invoke<CommandResponse<ModeTranscriptPayload>>('workflow_get_mode_transcript', {
+        sessionId: normalizedSessionId,
+        mode,
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to load workflow mode transcript' });
+        return null;
+      }
+      const mergedLines = mergeStableTranscriptLines(normalizedSessionId, mode, result.data.lines);
+      useSimpleSessionStore
+        .getState()
+        .setModeTranscriptSnapshot(normalizedSessionId, mode, mergedLines, result.data.revision);
+      useSimpleSessionStore.getState().markModeUnread(normalizedSessionId, mode, false);
+      return result.data;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  },
+
+  appendContextItems: async (targetMode, handoff) => {
+    const sessionId = get().sessionId;
+    if (!sessionId) {
+      set({ error: 'No active workflow session' });
+      return null;
+    }
+    try {
+      const result = await invoke<CommandResponse<WorkflowSession>>('workflow_append_context_items', {
+        sessionId,
+        targetMode,
+        handoff: normalizeHandoff(handoff),
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to append workflow context items' });
+        return null;
+      }
+      applySession(set, result.data);
+      void get().refreshSessionState();
+      return result.data;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  },
+
+  appendModeTranscript: async (sessionId, mode, lines) => {
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId) {
+      set({ error: 'Session id cannot be empty' });
+      return null;
+    }
+    try {
+      const result = await invoke<CommandResponse<ModeTranscriptPayload>>('workflow_append_mode_transcript', {
+        sessionId: normalizedSessionId,
+        mode,
+        lines,
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to append workflow mode transcript' });
+        return null;
+      }
+      return result.data;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  },
+
+  storeModeTranscript: async (sessionId, mode, lines) => {
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId) {
+      set({ error: 'Session id cannot be empty' });
+      return null;
+    }
+    try {
+      const result = await invoke<CommandResponse<ModeTranscriptPayload>>('workflow_store_mode_transcript', {
+        sessionId: normalizedSessionId,
+        mode,
+        lines,
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to persist workflow mode transcript' });
+        return null;
+      }
+      const mergedLines = mergeStableTranscriptLines(normalizedSessionId, mode, result.data.lines);
+      useSimpleSessionStore
+        .getState()
+        .setModeTranscriptSnapshot(normalizedSessionId, mode, mergedLines, result.data.revision);
+      return result.data;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
       return null;
     }
   },
@@ -393,6 +777,7 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
       applySessionState(set, result.data);
       set({ isLoading: false });
       await get().subscribeToUpdates();
+      void get().getSessionCatalogState();
       return result.data;
     } catch (error) {
       if (get()._requestId !== requestId) return null;
@@ -436,28 +821,81 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
   },
 
   subscribeToUpdates: async () => {
-    if (get()._updatesUnlisten) return;
-    try {
-      const unlisten = await listen<WorkflowKernelUpdatedEvent>(WORKFLOW_KERNEL_UPDATED_CHANNEL, (event) => {
-        const payload = event.payload;
-        const incomingSessionId = payload?.sessionState?.session?.sessionId;
-        if (!incomingSessionId) return;
-        const currentSessionId = get().sessionId;
-        if (currentSessionId && currentSessionId !== incomingSessionId) return;
+    if (!get()._updatesUnlisten) {
+      try {
+        const unlisten = await listen<WorkflowKernelUpdatedEvent>(WORKFLOW_KERNEL_UPDATED_CHANNEL, (event) => {
+          const payload = event.payload;
+          const incomingSession = payload?.sessionState?.session;
+          const incomingSessionId = incomingSession?.sessionId;
+          if (!incomingSessionId) return;
 
-        set({
-          sessionId: incomingSessionId,
-          activeMode: payload.sessionState.session.activeMode,
-          session: payload.sessionState.session,
-          events: payload.sessionState.events,
-          checkpoints: payload.sessionState.checkpoints,
-          revision: payload.revision,
-          error: null,
+          const currentSessionId = get().sessionId;
+          if (currentSessionId && currentSessionId !== incomingSessionId) return;
+
+          set({
+            sessionId: incomingSessionId,
+            activeRootSessionId: incomingSessionId,
+            activeMode: payload.sessionState.session.activeMode,
+            session: payload.sessionState.session,
+            events: payload.sessionState.events,
+            checkpoints: payload.sessionState.checkpoints,
+            revision: payload.revision,
+            error: null,
+          });
         });
-      });
-      set({ _updatesUnlisten: unlisten });
-    } catch {
-      // Event subscription failure should not block workflow.
+        set({ _updatesUnlisten: unlisten });
+      } catch {
+        // Event subscription failure should not block workflow.
+      }
+    }
+
+    if (!get()._catalogUpdatesUnlisten) {
+      try {
+        const unlisten = await listen<WorkflowSessionCatalogUpdatedEvent>(
+          WORKFLOW_SESSION_CATALOG_UPDATED_CHANNEL,
+          (event) => {
+            const payload = event.payload;
+            if (!payload) return;
+            set({
+              activeRootSessionId: payload.activeSessionId,
+              sessionCatalog: payload.sessions,
+            });
+          },
+        );
+        set({ _catalogUpdatesUnlisten: unlisten });
+      } catch {
+        // Event subscription failure should not block workflow.
+      }
+    }
+
+    if (!get()._transcriptUpdatesUnlisten) {
+      try {
+        const unlisten = await listen<WorkflowModeTranscriptUpdatedEvent>(
+          WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL,
+          (event) => {
+            const payload = event.payload;
+            if (!payload?.sessionId) return;
+
+            const store = useSimpleSessionStore.getState();
+            const existingLines = store.getModeLines(payload.sessionId, payload.mode);
+            const nextLines =
+              payload.replaceFromLineId != null ? payload.appendedLines : [...existingLines, ...payload.appendedLines];
+            const mergedLines = mergeStableTranscriptLines(payload.sessionId, payload.mode, nextLines);
+            store.setModeTranscriptSnapshot(payload.sessionId, payload.mode, mergedLines, payload.revision);
+
+            if (
+              get().activeRootSessionId &&
+              (get().activeRootSessionId !== payload.sessionId || get().activeMode !== payload.mode) &&
+              payload.appendedLines.length > 0
+            ) {
+              store.markModeUnread(payload.sessionId, payload.mode, true);
+            }
+          },
+        );
+        set({ _transcriptUpdatesUnlisten: unlisten });
+      } catch {
+        // Event subscription failure should not block workflow.
+      }
     }
   },
 
@@ -467,6 +905,16 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
       unlisten();
       set({ _updatesUnlisten: null });
     }
+    const catalogUnlisten = get()._catalogUpdatesUnlisten;
+    if (catalogUnlisten) {
+      catalogUnlisten();
+      set({ _catalogUpdatesUnlisten: null });
+    }
+    const transcriptUnlisten = get()._transcriptUpdatesUnlisten;
+    if (transcriptUnlisten) {
+      transcriptUnlisten();
+      set({ _transcriptUpdatesUnlisten: null });
+    }
   },
 
   reset: () => {
@@ -474,3 +922,31 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
     set({ ...DEFAULT_STATE });
   },
 }));
+
+function mergeCatalogSession(
+  catalog: WorkflowSessionCatalogItem[],
+  session: WorkflowSession,
+): WorkflowSessionCatalogItem[] {
+  const nextItem: WorkflowSessionCatalogItem = {
+    sessionId: session.sessionId,
+    sessionKind: session.sessionKind,
+    displayTitle: session.displayTitle,
+    workspacePath: session.workspacePath,
+    activeMode: session.activeMode,
+    status: session.status,
+    backgroundState: session.backgroundState,
+    updatedAt: session.updatedAt,
+    createdAt: session.createdAt,
+    lastError: session.lastError,
+    contextLedger: session.contextLedger,
+    modeSnapshots: session.modeSnapshots,
+    modeRuntimeMeta: session.modeRuntimeMeta,
+  };
+  const existingIndex = catalog.findIndex((item) => item.sessionId === session.sessionId);
+  if (existingIndex === -1) {
+    return [nextItem, ...catalog];
+  }
+  const nextCatalog = [...catalog];
+  nextCatalog[existingIndex] = nextItem;
+  return nextCatalog.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}

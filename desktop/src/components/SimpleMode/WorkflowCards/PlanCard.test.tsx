@@ -75,6 +75,9 @@ function createPlanKernelSession(phase: PlanLifecyclePhase): WorkflowSession {
   const now = '2026-03-04T00:00:00Z';
   return {
     sessionId: 'kernel-plan-1',
+    sessionKind: 'simple_root',
+    displayTitle: 'Kernel plan',
+    workspacePath: '/tmp/project',
     status: 'active',
     activeMode: 'plan',
     modeSnapshots: {
@@ -88,6 +91,10 @@ function createPlanKernelSession(phase: PlanLifecyclePhase): WorkflowSession {
         retryableSteps: [],
         planRevision: 0,
         lastEditOperation: null,
+        runId: null,
+        backgroundStatus: null,
+        resumableFromCheckpoint: false,
+        lastCheckpointId: null,
       },
     },
     handoffContext: {
@@ -97,6 +104,15 @@ function createPlanKernelSession(phase: PlanLifecyclePhase): WorkflowSession {
       metadata: {},
     },
     linkedModeSessions: {},
+    backgroundState: 'foreground',
+    contextLedger: {
+      conversationTurnCount: 0,
+      artifactRefCount: 0,
+      contextSourceKinds: [],
+      lastCompactionAt: null,
+      ledgerVersion: 1,
+    },
+    modeRuntimeMeta: {},
     lastError: null,
     createdAt: now,
     updatedAt: now,

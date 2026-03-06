@@ -1,8 +1,12 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { StreamEventPayload } from '../../lib/claudeCodeClient';
 import { reportNonFatal } from '../../lib/nonFatal';
+import { ToolCallStreamFilter } from '../../utils/toolCallFilter';
 import { useModeStore } from '../mode';
 import { useSettingsStore } from '../settings';
+import { useExecutionStore } from '../execution';
+import { useWorkflowKernelStore } from '../workflowKernel';
+import { useSimpleSessionStore } from '../simpleSessionStore';
 import { formatToolArgs } from './messageDispatch';
 import { triggerMemoryExtraction } from './memoryPostProcess';
 import { clearPendingDeltas, flushPendingDeltas, getPending, scheduleFlush } from './streamDeltas';
@@ -12,14 +16,29 @@ import {
   isForegroundSession,
   updateBackgroundSessionByTaskId,
 } from './sessionRouting';
-import type { AnalysisCoverageSnapshot, BackendUsageStats, ExecutionState, ExecutionStatus } from './types';
+import { buildExecutionRuntimeHandleId } from './runtimeRegistryActions';
+import type {
+  AnalysisCoverageSnapshot,
+  BackendUsageStats,
+  ExecutionRuntimeHandle,
+  ExecutionState,
+  ExecutionStatus,
+  StreamLine,
+} from './types';
+import { selectStableConversationLines } from '../../lib/conversationUtils';
 
 let unlisteners: UnlistenFn[] = [];
 let listenerSetupVersion = 0;
 let lateEventDroppedCount = 0;
+const CHAT_TRANSCRIPT_SYNC_DEBOUNCE_MS = 100;
+const chatTranscriptSyncTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 export function resetExecutionEventListenerState(): void {
   lateEventDroppedCount = 0;
+  for (const timer of chatTranscriptSyncTimers.values()) {
+    clearTimeout(timer);
+  }
+  chatTranscriptSyncTimers.clear();
 }
 
 export function cleanupExecutionEventListeners(): void {
@@ -29,6 +48,10 @@ export function cleanupExecutionEventListeners(): void {
   }
   unlisteners = [];
   lateEventDroppedCount = 0;
+  for (const timer of chatTranscriptSyncTimers.values()) {
+    clearTimeout(timer);
+  }
+  chatTranscriptSyncTimers.clear();
 }
 
 interface UnifiedEventPayload {
@@ -169,6 +192,209 @@ function toShortText(value: unknown, fallback = ''): string {
   return value.trim();
 }
 
+function cloneStreamLines(lines: StreamLine[]): StreamLine[] {
+  return lines.map((line) => ({ ...line }));
+}
+
+function getCachedChatTranscript(rootSessionId: string | null): StreamLine[] {
+  if (!rootSessionId) return [];
+  return useSimpleSessionStore.getState().getModeLines(rootSessionId, 'chat') as StreamLine[];
+}
+
+function upsertBackgroundChatRuntime(
+  state: ExecutionState,
+  rawSessionId: string,
+  updater: (runtime: ExecutionRuntimeHandle | null) => Partial<ExecutionRuntimeHandle>,
+): Partial<ExecutionState> {
+  const handleId = buildExecutionRuntimeHandleId('claude', rawSessionId);
+  const existing = state.runtimeRegistry[handleId] ?? null;
+  const rootSessionId = existing?.rootSessionId ?? resolveChatRootSessionId(rawSessionId, false);
+  if (!existing && !rootSessionId) return {};
+  const baseLines = selectStableConversationLines(
+    existing?.streamingOutput ?? [],
+    getCachedChatTranscript(rootSessionId),
+  );
+
+  const settings = useSettingsStore.getState();
+  const patch = updater(existing);
+  const base: ExecutionRuntimeHandle = existing ?? {
+    id: handleId,
+    source: 'claude',
+    rawSessionId,
+    rootSessionId,
+    mode: 'chat',
+    status: 'idle',
+    streamingOutput: cloneStreamLines(baseLines),
+    streamLineCounter: baseLines.reduce((max, line) => Math.max(max, line.id), 0),
+    currentTurnStartLineId: 0,
+    standaloneTurns: [],
+    latestUsage: null,
+    sessionUsageTotals: null,
+    startedAt: Date.now(),
+    workspacePath: settings.workspacePath ?? null,
+    llmBackend: settings.backend,
+    llmProvider: settings.provider,
+    llmModel: settings.model,
+    updatedAt: Date.now(),
+  };
+  const next: ExecutionRuntimeHandle = {
+    ...base,
+    ...patch,
+    rootSessionId: patch.rootSessionId ?? base.rootSessionId ?? null,
+    updatedAt: Date.now(),
+  };
+  return {
+    runtimeRegistry: {
+      ...state.runtimeRegistry,
+      [handleId]: next,
+    },
+  };
+}
+
+function appendToBackgroundChatRuntime(
+  state: ExecutionState,
+  rawSessionId: string,
+  content: string,
+  type: 'text' | 'tool' | 'error' | 'success',
+): Partial<ExecutionState> {
+  return upsertBackgroundChatRuntime(state, rawSessionId, (runtime) => {
+    const lines = runtime?.streamingOutput ?? [];
+    const last = lines.length > 0 ? lines[lines.length - 1] : null;
+    if ((type === 'text' || type === 'tool') && last && last.type === type) {
+      const updated = { ...last, content: last.content + content };
+      const nextLines = lines.slice();
+      nextLines[nextLines.length - 1] = updated;
+      return {
+        streamingOutput: nextLines,
+        streamLineCounter: runtime?.streamLineCounter ?? nextLines.length,
+      };
+    }
+    const nextId = (runtime?.streamLineCounter ?? 0) + 1;
+    return {
+      streamingOutput: [
+        ...lines,
+        {
+          id: nextId,
+          content,
+          type,
+          timestamp: Date.now(),
+        },
+      ],
+      streamLineCounter: nextId,
+    };
+  });
+}
+
+function upsertForegroundChatRuntimeFromState(state: ExecutionState): Partial<ExecutionState> {
+  const source = state.taskId ? 'claude' : state.standaloneSessionId ? 'standalone' : null;
+  const rawSessionId = state.taskId ?? state.standaloneSessionId;
+  if (!source || !rawSessionId) return {};
+  const settings = useSettingsStore.getState();
+  const handleId = buildExecutionRuntimeHandleId(source, rawSessionId);
+  const rootSessionId =
+    state.runtimeRegistry[handleId]?.rootSessionId ??
+    (source === 'claude'
+      ? resolveChatRootSessionId(rawSessionId, true)
+      : useWorkflowKernelStore.getState().activeRootSessionId);
+  const stableLines = selectStableConversationLines(
+    state.streamingOutput,
+    getCachedChatTranscript(rootSessionId ?? null),
+  );
+  return {
+    runtimeRegistry: {
+      ...state.runtimeRegistry,
+      [handleId]: {
+        id: handleId,
+        source,
+        rawSessionId,
+        rootSessionId: rootSessionId ?? null,
+        mode: 'chat',
+        status: state.status,
+        streamingOutput: cloneStreamLines(stableLines),
+        streamLineCounter: stableLines.reduce((max, line) => Math.max(max, line.id), 0),
+        currentTurnStartLineId: state.currentTurnStartLineId,
+        standaloneTurns: [...state.standaloneTurns],
+        latestUsage: state.latestUsage ? { ...state.latestUsage } : null,
+        sessionUsageTotals: state.sessionUsageTotals ? { ...state.sessionUsageTotals } : null,
+        startedAt: state.startedAt,
+        workspacePath: settings.workspacePath ?? null,
+        llmBackend: settings.backend,
+        llmProvider: settings.provider,
+        llmModel: settings.model,
+        updatedAt: Date.now(),
+      },
+    },
+    activeRuntimeHandleId: handleId,
+  };
+}
+
+function resolveChatRootSessionId(rawSessionId: string, allowActiveFallback = false): string | null {
+  const modeSessionId = `claude:${rawSessionId}`;
+  const kernel = useWorkflowKernelStore.getState();
+  if (kernel.session?.linkedModeSessions?.chat === modeSessionId) {
+    return kernel.session.sessionId;
+  }
+  for (const item of kernel.sessionCatalog) {
+    const bindingSessionId = item.modeRuntimeMeta?.chat?.bindingSessionId ?? null;
+    if (bindingSessionId === modeSessionId) {
+      return item.sessionId;
+    }
+  }
+  return allowActiveFallback ? (kernel.activeRootSessionId ?? kernel.sessionId) : null;
+}
+
+function scheduleChatTranscriptSync(
+  rawSessionId: string,
+  getLines: () => StreamLine[],
+  options?: { allowActiveFallback?: boolean },
+): void {
+  const rootSessionId = resolveChatRootSessionId(rawSessionId, options?.allowActiveFallback ?? false);
+  if (!rootSessionId) return;
+
+  const existingTimer = chatTranscriptSyncTimers.get(rootSessionId);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+  }
+
+  const timer = setTimeout(() => {
+    chatTranscriptSyncTimers.delete(rootSessionId);
+    const stableLines = selectStableConversationLines(getLines(), getCachedChatTranscript(rootSessionId));
+    void useWorkflowKernelStore
+      .getState()
+      .storeModeTranscript(rootSessionId, 'chat', cloneStreamLines(stableLines))
+      .catch((error) => {
+        reportNonFatal('execution.syncChatTranscript', error);
+      });
+  }, CHAT_TRANSCRIPT_SYNC_DEBOUNCE_MS);
+
+  chatTranscriptSyncTimers.set(rootSessionId, timer);
+}
+
+function scheduleForegroundChatTranscriptSync(rawSessionId: string, get: () => ExecutionState): void {
+  if (!get().isChatSession) return;
+  const runtimePatch = upsertForegroundChatRuntimeFromState(get());
+  if (Object.keys(runtimePatch).length > 0) {
+    useExecutionStore.setState(runtimePatch);
+  }
+  scheduleChatTranscriptSync(rawSessionId, () => useExecutionStore.getState().streamingOutput, {
+    allowActiveFallback: true,
+  });
+}
+
+function scheduleBackgroundChatTranscriptSync(rawSessionId: string, get: () => ExecutionState): void {
+  const handleId = buildExecutionRuntimeHandleId('claude', rawSessionId);
+  const runtime = get().runtimeRegistry[handleId];
+  const found = findBackgroundSessionByTaskId(get(), rawSessionId);
+  if (!runtime && !found?.snapshot.isChatSession) return;
+  scheduleChatTranscriptSync(rawSessionId, () => {
+    const latestState = useExecutionStore.getState();
+    const latestRuntime = latestState.runtimeRegistry[handleId];
+    if (latestRuntime?.streamingOutput.length) return latestRuntime.streamingOutput;
+    const latestLegacy = findBackgroundSessionByTaskId(latestState, rawSessionId);
+    return latestLegacy?.snapshot.streamingOutput ?? found?.snapshot.streamingOutput ?? [];
+  });
+}
+
 function handleUnifiedExecutionEvent(
   payload: UnifiedEventPayload,
   get: () => ExecutionState,
@@ -196,46 +422,88 @@ function handleUnifiedExecutionEvent(
   // their background snapshot instead of the foreground UI.
   if (payload.session_id && !isForegroundSession(state, payload.session_id)) {
     const bgSessionId = payload.session_id;
+    const handleId = buildExecutionRuntimeHandleId('claude', bgSessionId);
+    const hasRuntimeHandle =
+      Boolean(get().runtimeRegistry[handleId]) || Boolean(resolveChatRootSessionId(bgSessionId, false));
     switch (payload.type) {
       case 'text_delta': {
         const found = findBackgroundSessionByTaskId(get(), bgSessionId);
-        if (!found) return;
-        const filterResult = found.snapshot.toolCallFilter.processChunk(payload.content || '');
+        if (!found && !hasRuntimeHandle) return;
+        const filter = found?.snapshot.toolCallFilter ?? new ToolCallStreamFilter();
+        const filterResult = filter.processChunk(payload.content || '');
         if (filterResult.output) {
-          const upd = appendToBackgroundSession(get(), bgSessionId, filterResult.output, 'text');
-          if (Object.keys(upd).length > 0) set(upd);
+          if (hasRuntimeHandle) {
+            const runtimeUpd = appendToBackgroundChatRuntime(get(), bgSessionId, filterResult.output, 'text');
+            if (Object.keys(runtimeUpd).length > 0) set(runtimeUpd);
+          }
+          if (found) {
+            const legacyUpd = appendToBackgroundSession(get(), bgSessionId, filterResult.output, 'text');
+            if (Object.keys(legacyUpd).length > 0) set(legacyUpd);
+          }
         }
         if (filterResult.toolIndicator) {
-          const upd = appendToBackgroundSession(get(), bgSessionId, filterResult.toolIndicator, 'tool');
-          if (Object.keys(upd).length > 0) set(upd);
+          if (hasRuntimeHandle) {
+            const runtimeUpd = appendToBackgroundChatRuntime(get(), bgSessionId, filterResult.toolIndicator, 'tool');
+            if (Object.keys(runtimeUpd).length > 0) set(runtimeUpd);
+          }
+          if (found) {
+            const legacyUpd = appendToBackgroundSession(get(), bgSessionId, filterResult.toolIndicator, 'tool');
+            if (Object.keys(legacyUpd).length > 0) set(legacyUpd);
+          }
         }
+        scheduleBackgroundChatTranscriptSync(bgSessionId, get);
         break;
       }
       case 'tool_start':
         if (payload.tool_name) {
-          set(appendToBackgroundSession(get(), bgSessionId, `[tool] ${payload.tool_name} started`, 'tool'));
+          if (hasRuntimeHandle) {
+            set(appendToBackgroundChatRuntime(get(), bgSessionId, `[tool] ${payload.tool_name} started`, 'tool'));
+          }
+          const legacyUpd = appendToBackgroundSession(
+            get(),
+            bgSessionId,
+            `[tool] ${payload.tool_name} started`,
+            'tool',
+          );
+          if (Object.keys(legacyUpd).length > 0) set(legacyUpd);
+          scheduleBackgroundChatTranscriptSync(bgSessionId, get);
         }
         break;
       case 'tool_result': {
         const isErr = !!payload.error;
-        set(
-          appendToBackgroundSession(
-            get(),
-            bgSessionId,
-            `[tool] ${payload.tool_id || ''} ${isErr ? 'failed' : 'completed'}`,
-            isErr ? 'error' : 'success',
-          ),
+        if (hasRuntimeHandle) {
+          set(
+            appendToBackgroundChatRuntime(
+              get(),
+              bgSessionId,
+              `[tool] ${payload.tool_id || ''} ${isErr ? 'failed' : 'completed'}`,
+              isErr ? 'error' : 'success',
+            ),
+          );
+        }
+        const legacyUpd = appendToBackgroundSession(
+          get(),
+          bgSessionId,
+          `[tool] ${payload.tool_id || ''} ${isErr ? 'failed' : 'completed'}`,
+          isErr ? 'error' : 'success',
         );
+        if (Object.keys(legacyUpd).length > 0) set(legacyUpd);
+        scheduleBackgroundChatTranscriptSync(bgSessionId, get);
         break;
       }
       case 'error':
         if (payload.message) {
+          if (hasRuntimeHandle) {
+            set(appendToBackgroundChatRuntime(get(), bgSessionId, payload.message, 'error'));
+            set(
+              upsertBackgroundChatRuntime(get(), bgSessionId, () => ({
+                status: 'failed' as ExecutionStatus,
+              })),
+            );
+          }
           set(appendToBackgroundSession(get(), bgSessionId, payload.message, 'error'));
-          set(
-            updateBackgroundSessionByTaskId(get(), bgSessionId, () => ({
-              status: 'failed' as ExecutionStatus,
-            })),
-          );
+          set(updateBackgroundSessionByTaskId(get(), bgSessionId, () => ({ status: 'failed' as ExecutionStatus })));
+          scheduleBackgroundChatTranscriptSync(bgSessionId, get);
         }
         break;
       case 'complete': {
@@ -249,6 +517,13 @@ function handleUnifiedExecutionEvent(
         }
         // Mark background session as completed
         const bgFoundAfter = findBackgroundSessionByTaskId(get(), bgSessionId);
+        if (hasRuntimeHandle) {
+          set(
+            upsertBackgroundChatRuntime(get(), bgSessionId, (runtime) => ({
+              status: runtime ? 'idle' : ('idle' as ExecutionStatus),
+            })),
+          );
+        }
         if (bgFoundAfter) {
           const nextStatus: ExecutionStatus = bgFoundAfter.snapshot.isChatSession ? 'idle' : 'completed';
           set(
@@ -257,6 +532,7 @@ function handleUnifiedExecutionEvent(
             })),
           );
         }
+        scheduleBackgroundChatTranscriptSync(bgSessionId, get);
         break;
       }
       case 'tool_permission_request':
@@ -1094,29 +1370,65 @@ export async function setupExecutionEventListeners(
 
       // ---- Route to background session if not foreground ----
       if (!isForegroundSession(state, session_id)) {
+        const hasRuntimeHandle =
+          Boolean(get().runtimeRegistry[buildExecutionRuntimeHandleId('claude', session_id)]) ||
+          Boolean(resolveChatRootSessionId(session_id, false));
         switch (streamEvent.type) {
           case 'text_delta': {
             // Use the background snapshot's own ToolCallStreamFilter to keep
             // filtering isolated per session.
             const found = findBackgroundSessionByTaskId(state, session_id);
-            if (!found) return;
-            const filterResult = found.snapshot.toolCallFilter.processChunk(streamEvent.content);
-            let bgUpdate: Partial<ExecutionState> = {};
+            if (!found && !hasRuntimeHandle) return;
+            const filterResult = (found?.snapshot.toolCallFilter ?? new ToolCallStreamFilter()).processChunk(
+              streamEvent.content,
+            );
             if (filterResult.output) {
-              bgUpdate = appendToBackgroundSession(get(), session_id, filterResult.output, 'text');
-              if (Object.keys(bgUpdate).length > 0) set(bgUpdate);
+              if (hasRuntimeHandle) {
+                const runtimeUpdate = appendToBackgroundChatRuntime(get(), session_id, filterResult.output, 'text');
+                if (Object.keys(runtimeUpdate).length > 0) set(runtimeUpdate);
+              }
+              if (found) {
+                const bgUpdate = appendToBackgroundSession(get(), session_id, filterResult.output, 'text');
+                if (Object.keys(bgUpdate).length > 0) set(bgUpdate);
+              }
             }
             if (filterResult.toolIndicator) {
-              bgUpdate = appendToBackgroundSession(get(), session_id, filterResult.toolIndicator, 'tool');
-              if (Object.keys(bgUpdate).length > 0) set(bgUpdate);
+              if (hasRuntimeHandle) {
+                const runtimeUpdate = appendToBackgroundChatRuntime(
+                  get(),
+                  session_id,
+                  filterResult.toolIndicator,
+                  'tool',
+                );
+                if (Object.keys(runtimeUpdate).length > 0) set(runtimeUpdate);
+              }
+              if (found) {
+                const bgUpdate = appendToBackgroundSession(get(), session_id, filterResult.toolIndicator, 'tool');
+                if (Object.keys(bgUpdate).length > 0) set(bgUpdate);
+              }
             }
+            scheduleBackgroundChatTranscriptSync(session_id, get);
             break;
           }
           case 'tool_start':
+            if (hasRuntimeHandle) {
+              set(appendToBackgroundChatRuntime(get(), session_id, `[tool] ${streamEvent.tool_name} started`, 'tool'));
+            }
             set(appendToBackgroundSession(state, session_id, `[tool] ${streamEvent.tool_name} started`, 'tool'));
+            scheduleBackgroundChatTranscriptSync(session_id, get);
             break;
           case 'tool_result': {
             const bgIsError = !!streamEvent.error;
+            if (hasRuntimeHandle) {
+              set(
+                appendToBackgroundChatRuntime(
+                  get(),
+                  session_id,
+                  `[tool] ${streamEvent.tool_id} ${bgIsError ? 'failed' : 'completed'}`,
+                  bgIsError ? 'error' : 'success',
+                ),
+              );
+            }
             set(
               appendToBackgroundSession(
                 get(),
@@ -1125,15 +1437,21 @@ export async function setupExecutionEventListeners(
                 bgIsError ? 'error' : 'success',
               ),
             );
+            scheduleBackgroundChatTranscriptSync(session_id, get);
             break;
           }
           case 'error':
+            if (hasRuntimeHandle) {
+              set(appendToBackgroundChatRuntime(get(), session_id, streamEvent.message, 'error'));
+              set(upsertBackgroundChatRuntime(get(), session_id, () => ({ status: 'failed' as ExecutionStatus })));
+            }
             set(appendToBackgroundSession(get(), session_id, streamEvent.message, 'error'));
             set(
               updateBackgroundSessionByTaskId(get(), session_id, () => ({
                 status: 'failed' as ExecutionStatus,
               })),
             );
+            scheduleBackgroundChatTranscriptSync(session_id, get);
             break;
           case 'complete': {
             // Flush the per-session tool-call filter
@@ -1146,6 +1464,9 @@ export async function setupExecutionEventListeners(
             }
             // Mark session as idle (chat) or completed
             const bgFoundAfter = findBackgroundSessionByTaskId(get(), session_id);
+            if (hasRuntimeHandle) {
+              set(upsertBackgroundChatRuntime(get(), session_id, () => ({ status: 'idle' as ExecutionStatus })));
+            }
             if (bgFoundAfter) {
               const nextStatus: ExecutionStatus = bgFoundAfter.snapshot.isChatSession ? 'idle' : 'completed';
               set(
@@ -1154,6 +1475,7 @@ export async function setupExecutionEventListeners(
                 })),
               );
             }
+            scheduleBackgroundChatTranscriptSync(session_id, get);
             break;
           }
           case 'tool_permission_request':
@@ -1256,6 +1578,7 @@ export async function setupExecutionEventListeners(
           });
           get().addLog(`Error: ${streamEvent.message}`);
           get().saveToHistory();
+          scheduleForegroundChatTranscriptSync(session_id, get);
           break;
 
         case 'complete': {
@@ -1306,6 +1629,7 @@ export async function setupExecutionEventListeners(
             get().addLog('Execution completed');
             get().saveToHistory();
           }
+          scheduleForegroundChatTranscriptSync(session_id, get);
           break;
         }
       }
@@ -1327,10 +1651,27 @@ export async function setupExecutionEventListeners(
 
       // ---- Route to background session if not foreground ----
       if (!isForegroundSession(state, session_id)) {
+        const hasRuntimeHandle =
+          Boolean(get().runtimeRegistry[buildExecutionRuntimeHandleId('claude', session_id)]) ||
+          Boolean(resolveChatRootSessionId(session_id, false));
         if (update_type === 'started') {
+          if (hasRuntimeHandle) {
+            set(appendToBackgroundChatRuntime(get(), session_id, `[tool] ${execution.tool_name} started`, 'tool'));
+          }
           set(appendToBackgroundSession(get(), session_id, `[tool] ${execution.tool_name} started`, 'tool'));
+          scheduleBackgroundChatTranscriptSync(session_id, get);
         } else if (update_type === 'completed') {
           const bgStatus = execution.success ? 'success' : 'failed';
+          if (hasRuntimeHandle) {
+            set(
+              appendToBackgroundChatRuntime(
+                get(),
+                session_id,
+                `[tool] ${execution.tool_name} ${bgStatus}`,
+                execution.success ? 'success' : 'error',
+              ),
+            );
+          }
           set(
             appendToBackgroundSession(
               get(),
@@ -1339,6 +1680,7 @@ export async function setupExecutionEventListeners(
               execution.success ? 'success' : 'error',
             ),
           );
+          scheduleBackgroundChatTranscriptSync(session_id, get);
         }
         return;
       }
@@ -1365,22 +1707,35 @@ export async function setupExecutionEventListeners(
 
       // ---- Route to background session if not foreground ----
       if (!isForegroundSession(state, session.id)) {
+        const hasRuntimeHandle =
+          Boolean(get().runtimeRegistry[buildExecutionRuntimeHandleId('claude', session.id)]) ||
+          Boolean(resolveChatRootSessionId(session.id, false));
         if (update_type === 'state_changed') {
           if (session.state === 'error') {
             const errorMsg = session.error_message || 'Unknown error';
+            if (hasRuntimeHandle) {
+              set(appendToBackgroundChatRuntime(get(), session.id, `Session error: ${errorMsg}`, 'error'));
+              set(upsertBackgroundChatRuntime(get(), session.id, () => ({ status: 'failed' as ExecutionStatus })));
+            }
             set(appendToBackgroundSession(get(), session.id, `Session error: ${errorMsg}`, 'error'));
             set(
               updateBackgroundSessionByTaskId(get(), session.id, () => ({
                 status: 'failed' as ExecutionStatus,
               })),
             );
+            scheduleBackgroundChatTranscriptSync(session.id, get);
           } else if (session.state === 'cancelled') {
+            if (hasRuntimeHandle) {
+              set(appendToBackgroundChatRuntime(get(), session.id, 'Session cancelled.', 'error'));
+              set(upsertBackgroundChatRuntime(get(), session.id, () => ({ status: 'idle' as ExecutionStatus })));
+            }
             set(appendToBackgroundSession(get(), session.id, 'Session cancelled.', 'warning'));
             set(
               updateBackgroundSessionByTaskId(get(), session.id, () => ({
                 status: 'idle' as ExecutionStatus,
               })),
             );
+            scheduleBackgroundChatTranscriptSync(session.id, get);
           }
         }
         return;
@@ -1404,6 +1759,7 @@ export async function setupExecutionEventListeners(
             apiError: session.error_message || 'Session error',
           });
           get().addLog(`Session error: ${session.error_message || 'Unknown error'}`);
+          scheduleForegroundChatTranscriptSync(session.id, get);
         } else if (session.state === 'cancelled') {
           get().appendStreamLine('Session cancelled.', 'warning');
           clearPendingDeltas();
@@ -1414,6 +1770,7 @@ export async function setupExecutionEventListeners(
             activeExecutionId: null,
           });
           get().addLog('Session cancelled');
+          scheduleForegroundChatTranscriptSync(session.id, get);
         }
       }
     });

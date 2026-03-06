@@ -149,16 +149,9 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
         foregroundDirty: true,
       });
 
-      const pendingTaskContext = get()._pendingTaskContext;
-      let basePrompt = prompt;
-      if (pendingTaskContext) {
-        basePrompt = pendingTaskContext + '\n\n' + prompt;
-        set({ _pendingTaskContext: null });
-      }
-
       const followUpContextSources = resolveSessionScopedContext(sessionId, 'claude');
       const assembledPrompt = await buildClaudePromptWithContextEnvelope({
-        query: basePrompt,
+        query: prompt,
         lines: get().streamingOutput,
         projectPath: useSettingsStore.getState().workspacePath || '.',
         sessionId,

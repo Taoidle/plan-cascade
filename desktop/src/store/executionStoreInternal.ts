@@ -36,6 +36,7 @@ import { createStartAction } from './execution/startAction';
 import { createHistoryActions } from './execution/historyActions';
 import { createSessionTreeActions } from './execution/sessionTreeActions';
 import { createMiscActions } from './execution/miscActions';
+import { createRuntimeRegistryActions } from './execution/runtimeRegistryActions';
 import { createSessionPersistenceController } from './execution/sessionPersistence';
 
 import type {
@@ -45,6 +46,7 @@ import type {
   ConnectionStatus,
   ExecutionError,
   ExecutionHistoryItem,
+  ExecutionRuntimeHandle,
   ExecutionResult,
   ExecutionState,
   ExecutionStatus,
@@ -622,6 +624,8 @@ const initialState = {
   toolCallFilter: new ToolCallStreamFilter(),
   attachments: [] as FileAttachmentData[],
   backgroundSessions: {} as Record<string, SessionSnapshot>,
+  runtimeRegistry: {} as Record<string, ExecutionRuntimeHandle>,
+  activeRuntimeHandleId: null as string | null,
   activeSessionId: null as string | null,
   foregroundParentSessionId: null as string | null,
   foregroundBgId: null as string | null,
@@ -630,7 +634,6 @@ const initialState = {
   foregroundDirty: false,
   activeAgentId: null as string | null,
   activeAgentName: null as string | null,
-  _pendingTaskContext: null as string | null,
 };
 
 export const useExecutionStore = create<ExecutionState>()((set, get) => {
@@ -689,6 +692,11 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => {
     hasMeaningfulForegroundContent,
     createSessionSnapshotFromForeground,
     shouldPersistForegroundBeforeSwitch,
+  });
+  const runtimeRegistryActions = createRuntimeRegistryActions({
+    set,
+    get,
+    hasMeaningfulForegroundContent,
   });
   const miscActions = createMiscActions({
     set,
@@ -789,6 +797,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => {
     clearAttachments: miscActions.clearAttachments,
 
     backgroundCurrentSession: sessionTreeActions.backgroundCurrentSession,
+    parkForegroundRuntime: runtimeRegistryActions.parkForegroundRuntime,
+    restoreForegroundChatRuntime: runtimeRegistryActions.restoreForegroundChatRuntime,
     switchToSession: sessionTreeActions.switchToSession,
     removeBackgroundSession: sessionTreeActions.removeBackgroundSession,
 
@@ -800,8 +810,6 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => {
     editAndResend: conversationActions.editAndResend,
 
     appendStandaloneTurn: miscActions.appendStandaloneTurn,
-    setPendingTaskContext: miscActions.setPendingTaskContext,
-    clearPendingTaskContext: miscActions.clearPendingTaskContext,
   };
 });
 

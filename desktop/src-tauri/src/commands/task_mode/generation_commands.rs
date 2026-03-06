@@ -62,7 +62,12 @@ pub async fn generate_task_prd(
             s.status = TaskModeStatus::GeneratingPrd;
             let snapshot = s.clone();
             drop(sessions);
-            persist_task_session_best_effort(&state, &snapshot, "generate_task_prd.status_generating").await;
+            persist_task_session_best_effort(
+                &state,
+                &snapshot,
+                "generate_task_prd.status_generating",
+            )
+            .await;
             sync_kernel_task_snapshot_and_emit(
                 &app_handle,
                 kernel_state.inner(),
@@ -197,8 +202,26 @@ pub async fn generate_task_prd(
                 }
             };
 
-            // Call LLM for PRD generation with conversation history context
-            let history = conversation_history.unwrap_or_default();
+            // Root session context is resolved from kernel when the frontend omits history.
+            let root_handoff = if conversation_history
+                .as_ref()
+                .is_some_and(|history| !history.is_empty())
+            {
+                None
+            } else {
+                super::handoff_context_for_task_session(kernel_state.inner(), &session_id).await
+            };
+            let history = conversation_history
+                .filter(|history| !history.is_empty())
+                .unwrap_or_else(|| {
+                    root_handoff
+                        .as_ref()
+                        .map(super::conversation_history_from_task_handoff)
+                        .unwrap_or_default()
+                });
+            let handoff_context = root_handoff
+                .as_ref()
+                .and_then(super::render_task_handoff_context);
             let context_budget = max_context_tokens.unwrap_or(200_000);
 
             // Read exploration result from session for context injection
@@ -241,6 +264,11 @@ pub async fn generate_task_prd(
                 (Some(base), false) => Some(format!("{}\n\n{}", base, enriched.skills_block)),
                 (None, false) => Some(enriched.skills_block.clone()),
                 (base, true) => base,
+            };
+            let combined_context = match (combined_context, handoff_context) {
+                (Some(base), Some(handoff)) => Some(format!("{}\n\n{}", base, handoff)),
+                (None, Some(handoff)) => Some(handoff),
+                (base, None) => base,
             };
 
             let prd = match prd_generator::generate_prd_with_llm(
@@ -434,7 +462,10 @@ fn parse_feedback_prd_payload(
     max_parallel: usize,
 ) -> Result<(TaskPrd, Vec<String>), String> {
     let mut normalized = raw;
-    if let Some(stories) = normalized.get_mut("stories").and_then(|value| value.as_array_mut()) {
+    if let Some(stories) = normalized
+        .get_mut("stories")
+        .and_then(|value| value.as_array_mut())
+    {
         for story in stories {
             if let Some(object) = story.as_object_mut() {
                 if !object.contains_key("acceptanceCriteria") {
@@ -482,7 +513,10 @@ fn parse_feedback_prd_payload(
                 .map(|dependency| dependency.trim().to_string())
                 .filter(|dependency| !dependency.is_empty())
                 .collect();
-            if dependencies.iter().any(|dependency| dependency == &story_id) {
+            if dependencies
+                .iter()
+                .any(|dependency| dependency == &story_id)
+            {
                 return Err(format!("Story '{}' cannot depend on itself", story_id));
             }
 
@@ -520,14 +554,16 @@ fn parse_feedback_prd_payload(
 
     let executable: Vec<crate::services::task_mode::batch_executor::ExecutableStory> = stories
         .iter()
-        .map(|story| crate::services::task_mode::batch_executor::ExecutableStory {
-            id: story.id.clone(),
-            title: story.title.clone(),
-            description: story.description.clone(),
-            dependencies: story.dependencies.clone(),
-            acceptance_criteria: story.acceptance_criteria.clone(),
-            agent: None,
-        })
+        .map(
+            |story| crate::services::task_mode::batch_executor::ExecutableStory {
+                id: story.id.clone(),
+                title: story.title.clone(),
+                description: story.description.clone(),
+                dependencies: story.dependencies.clone(),
+                acceptance_criteria: story.acceptance_criteria.clone(),
+                agent: None,
+            },
+        )
         .collect();
     let batches = crate::services::task_mode::calculate_batches(&executable, max_parallel)
         .map_err(|error| format!("Failed to compute execution batches: {error}"))?;
@@ -768,7 +804,9 @@ pub async fn apply_task_prd_feedback(
                     false,
                 )
                 .await;
-                return Ok(CommandResponse::err("Invalid session ID or no active session"));
+                return Ok(CommandResponse::err(
+                    "Invalid session ID or no active session",
+                ));
             }
         };
         if session.status != TaskModeStatus::ReviewingPrd {
@@ -912,8 +950,26 @@ Output language:
                 phase_instructions.push_str(&enriched.skills_block);
             }
 
-            let history_snippet = conversation_history
-                .unwrap_or_default()
+            let root_handoff = if conversation_history
+                .as_ref()
+                .is_some_and(|history| !history.is_empty())
+            {
+                None
+            } else {
+                super::handoff_context_for_task_session(kernel_state.inner(), &session_id).await
+            };
+            let history = conversation_history
+                .filter(|history| !history.is_empty())
+                .unwrap_or_else(|| {
+                    root_handoff
+                        .as_ref()
+                        .map(super::conversation_history_from_task_handoff)
+                        .unwrap_or_default()
+                });
+            let handoff_context = root_handoff
+                .as_ref()
+                .and_then(super::render_task_handoff_context);
+            let history_snippet = history
                 .into_iter()
                 .rev()
                 .take(6)
@@ -929,17 +985,30 @@ Output language:
                 })
                 .collect::<Vec<_>>()
                 .join("\n\n");
-            let user_prompt = if history_snippet.is_empty() {
-                format!(
+            let user_prompt = match (
+                history_snippet.is_empty(),
+                handoff_context.as_deref().filter(|value| !value.trim().is_empty()),
+            ) {
+                (true, None) => format!(
                     "Apply this feedback to the PRD and return the full updated PRD JSON only:\n{}",
                     normalized_feedback
-                )
-            } else {
-                format!(
+                ),
+                (true, Some(handoff)) => format!(
+                    "Root session handoff context:\n{}\n\nApply this feedback to the PRD and return the full updated PRD JSON only:\n{}",
+                    handoff,
+                    normalized_feedback
+                ),
+                (false, None) => format!(
                     "Recent conversation context:\n{}\n\nApply this feedback to the PRD and return the full updated PRD JSON only:\n{}",
                     history_snippet,
                     normalized_feedback
-                )
+                ),
+                (false, Some(handoff)) => format!(
+                    "Recent conversation context:\n{}\n\nRoot session handoff context:\n{}\n\nApply this feedback to the PRD and return the full updated PRD JSON only:\n{}",
+                    history_snippet,
+                    handoff,
+                    normalized_feedback
+                ),
             };
 
             let target_schema = r#"{
@@ -1060,7 +1129,12 @@ Output language:
             ..base_observability_record.clone()
         }
     };
-    record_prd_feedback_apply_observability(app_state.inner(), observability_record, result.success).await;
+    record_prd_feedback_apply_observability(
+        app_state.inner(),
+        observability_record,
+        result.success,
+    )
+    .await;
 
     Ok(result)
 }
@@ -1123,7 +1197,8 @@ pub async fn explore_project(
             s.status = TaskModeStatus::Exploring;
             let snapshot = s.clone();
             drop(sessions);
-            persist_task_session_best_effort(&state, &snapshot, "explore_project.status_exploring").await;
+            persist_task_session_best_effort(&state, &snapshot, "explore_project.status_exploring")
+                .await;
             sync_kernel_task_snapshot_and_emit(
                 &app_handle,
                 kernel_state.inner(),
@@ -1698,10 +1773,11 @@ mod tests {
             dependencies: vec!["story-002".to_string()],
             acceptance_criteria: vec!["done".to_string()],
         });
-        next.batches.push(crate::services::task_mode::batch_executor::ExecutionBatch {
-            index: 2,
-            story_ids: vec!["story-003".to_string()],
-        });
+        next.batches
+            .push(crate::services::task_mode::batch_executor::ExecutionBatch {
+                index: 2,
+                story_ids: vec!["story-003".to_string()],
+            });
 
         let summary = build_prd_feedback_summary(&previous, &next, vec!["note".to_string()]);
         assert_eq!(summary.added_story_ids, vec!["story-003".to_string()]);

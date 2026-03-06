@@ -722,7 +722,10 @@ impl McpService {
         }
         let existing = self.db.get_mcp_server_by_name_case_insensitive(name)?;
         if matches!(conflict_policy, McpImportConflictPolicy::Skip) && existing.is_some() {
-            return Ok(ImportSingleResult::Skipped(format!("{}: duplicate_name", name)));
+            return Ok(ImportSingleResult::Skipped(format!(
+                "{}: duplicate_name",
+                name
+            )));
         }
 
         let command = config
@@ -777,28 +780,24 @@ impl McpService {
                 let mut merged_env = env;
                 let mut merged_headers = headers;
 
-                if (!redacted_env_keys.is_empty() || !redacted_header_keys.is_empty())
-                    && !dry_run
-                {
-                    let existing_with_secrets = self.get_server(&existing.id)?.ok_or_else(|| {
-                        AppError::not_found(format!(
-                            "Cannot load existing MCP server for replace: {}",
-                            existing.id
-                        ))
-                    })?;
-                    let existing_env = if existing_with_secrets.env.is_empty()
-                        && existing.has_env_secret
-                    {
-                        self.read_secret_map_from_keyring(&Self::env_secret_key(&existing.id))
-                    } else {
-                        existing_with_secrets.env.clone()
-                    };
+                if (!redacted_env_keys.is_empty() || !redacted_header_keys.is_empty()) && !dry_run {
+                    let existing_with_secrets =
+                        self.get_server(&existing.id)?.ok_or_else(|| {
+                            AppError::not_found(format!(
+                                "Cannot load existing MCP server for replace: {}",
+                                existing.id
+                            ))
+                        })?;
+                    let existing_env =
+                        if existing_with_secrets.env.is_empty() && existing.has_env_secret {
+                            self.read_secret_map_from_keyring(&Self::env_secret_key(&existing.id))
+                        } else {
+                            existing_with_secrets.env.clone()
+                        };
                     let existing_headers = if existing_with_secrets.headers.is_empty()
                         && existing.has_headers_secret
                     {
-                        self.read_secret_map_from_keyring(&Self::headers_secret_key(
-                            &existing.id,
-                        ))
+                        self.read_secret_map_from_keyring(&Self::headers_secret_key(&existing.id))
                     } else {
                         existing_with_secrets.headers.clone()
                     };
@@ -930,9 +929,7 @@ enum ImportSingleResult {
     Skipped(String),
 }
 
-fn parse_secret_map(
-    value: Option<&serde_json::Value>,
-) -> (HashMap<String, String>, Vec<String>) {
+fn parse_secret_map(value: Option<&serde_json::Value>) -> (HashMap<String, String>, Vec<String>) {
     let mut values = HashMap::new();
     let mut redacted = Vec::new();
 

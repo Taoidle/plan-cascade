@@ -90,11 +90,52 @@
     "toggleSidebar": "Toggle sidebar",
     "sessions": "Sessions",
     "rename": "rename",
+    "renamePrompt": "Rename session",
     "deleteSession": "Delete session",
+    "deleteSessionConfirm": "Delete this session permanently? This cannot be undone.",
+    "archiveSession": "Archive session",
+    "archiveSessionConfirm": "Archive this live session?",
+    "archiveAction": "archive",
+    "restoreAction": "restore",
+    "restoreSession": "Restore session",
     "activeSessions": "Active Sessions",
     "switchSession": "Switch to this session",
     "removeSession": "Remove session",
-    "currentFork": "(current)"
+    "currentFork": "(current)",
+    "clearAllSessions": "Clear All Sessions",
+    "clearAllSessionsConfirm": "Delete all sessions and history? This cannot be undone.",
+    "noWorkspace": "No Workspace",
+    "sort": {
+      "label": "Sort paths",
+      "recent": "Sort: Recent",
+      "name": "Sort: Name"
+    },
+    "archived": {
+      "show": "Show Archived",
+      "hide": "Hide Archived"
+    },
+    "badges": {
+      "live": "Live",
+      "history": "History",
+      "archived": "Archived"
+    },
+    "status": {
+      "idle": "Idle",
+      "running": "Running",
+      "attention": "Attention"
+    },
+    "time": {
+      "justNow": "just now",
+      "minutesAgo": "{{count}}m ago",
+      "hoursAgo": "{{count}}h ago",
+      "daysAgo": "{{count}}d ago"
+    },
+    "placeholderTitles": {
+      "chat": "New chat",
+      "plan": "New plan",
+      "task": "New task",
+      "session": "New session"
+    }
   },
   "skillPanel": {
     "title": "Skills & Memory",

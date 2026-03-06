@@ -629,7 +629,10 @@ pub async fn get_connected_mcp_server_tools(
     state: tauri::State<'_, McpRuntimeState>,
 ) -> Result<CommandResponse<Vec<ConnectedMcpToolDetail>>, String> {
     let connected = state.manager.list_connected_servers().await;
-    let info = match connected.into_iter().find(|entry| entry.server_id == server_id) {
+    let info = match connected
+        .into_iter()
+        .find(|entry| entry.server_id == server_id)
+    {
         Some(value) => value,
         None => {
             return Ok(CommandResponse::err(format!(
@@ -1124,10 +1127,7 @@ mod tests {
         }))
         .expect("command response");
         assert!(!result.success);
-        assert!(result
-            .error
-            .unwrap_or_default()
-            .contains("disabled"));
+        assert!(result.error.unwrap_or_default().contains("disabled"));
     }
 
     #[test]

@@ -18,6 +18,10 @@ export function useSimpleModeSwitch(params: {
     targetMode: WorkflowMode,
     handoff: HandoffContextBundle,
   ) => Promise<WorkflowSession | null>;
+  appendWorkflowKernelContextItems: (
+    targetMode: WorkflowMode,
+    handoff: HandoffContextBundle,
+  ) => Promise<WorkflowSession | null>;
   showToast: (message: string, level?: ToastLevel) => void;
   t: TFunction<'simpleMode'>;
 }) {

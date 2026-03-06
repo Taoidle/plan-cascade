@@ -28,6 +28,7 @@ import { useFileChangesStore } from '../../store/fileChanges';
 import { useToolPermissionStore } from '../../store/toolPermission';
 import { useAgentsStore } from '../../store/agents';
 import { useWorkflowObservabilityStore } from '../../store/workflowObservability';
+import { useSimpleSessionStore } from '../../store/simpleSessionStore';
 import { createFileChangeCardBridge } from '../../lib/fileChangeCardBridge';
 import { listenOpenAIChanges } from '../../lib/simpleModeNavigation';
 import { useToast } from '../shared/Toast';
@@ -52,7 +53,9 @@ import { useSimpleModeSwitch } from './useSimpleModeSwitch';
 import { useSimpleKernelSession } from './useSimpleKernelSession';
 import { useSimpleQueueRuntime } from './useSimpleQueueRuntime';
 import { useWorkflowQuestionSpecs } from './useWorkflowQuestionSpecs';
+import { buildSessionTreeViewModel } from './sessionTreeViewModel';
 import { buildConversationHistory } from '../../lib/contextBridge';
+import { selectStableConversationLines } from '../../lib/conversationUtils';
 import {
   cancelActiveWorkflow,
   submitWorkflowInputWithTracking,
@@ -119,16 +122,17 @@ export function SimpleModeShell() {
   const addAttachment = useExecutionStore((s) => s.addAttachment);
   const removeAttachment = useExecutionStore((s) => s.removeAttachment);
   const clearAttachments = useExecutionStore((s) => s.clearAttachments);
-  const backgroundSessions = useExecutionStore((s) => s.backgroundSessions);
-  const switchToSession = useExecutionStore((s) => s.switchToSession);
-  const removeBackgroundSession = useExecutionStore((s) => s.removeBackgroundSession);
-  const foregroundParentSessionId = useExecutionStore((s) => s.foregroundParentSessionId);
-  const foregroundBgId = useExecutionStore((s) => s.foregroundBgId);
+  const parkForegroundRuntime = useExecutionStore((s) => s.parkForegroundRuntime);
+  const restoreForegroundChatRuntime = useExecutionStore((s) => s.restoreForegroundChatRuntime);
   const activeAgentName = useExecutionStore((s) => s.activeAgentName);
   const backend = useSettingsStore((s) => s.backend);
   const provider = useSettingsStore((s) => s.provider);
   const model = useSettingsStore((s) => s.model);
   const workspacePath = useSettingsStore((s) => s.workspacePath);
+  const pinnedDirectories = useSettingsStore((s) => s.pinnedDirectories);
+  const sessionPathSort = useSettingsStore((s) => s.sessionPathSort);
+  const showArchivedSessions = useSettingsStore((s) => s.showArchivedSessions);
+  const setWorkspacePath = useSettingsStore((s) => s.setWorkspacePath);
   const sidebarCollapsed = useSettingsStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useSettingsStore((s) => s.setSidebarCollapsed);
   const autoPanelHoverEnabled = useSettingsStore((s) => s.autoPanelHoverEnabled);
@@ -169,15 +173,33 @@ export function SimpleModeShell() {
   const workflowKernelSession = useWorkflowKernelStore((s) => s.session);
   const openWorkflowKernelSession = useWorkflowKernelStore((s) => s.openSession);
   const recoverWorkflowKernelSession = useWorkflowKernelStore((s) => s.recoverSession);
+  const activateWorkflowKernelSession = useWorkflowKernelStore((s) => s.activateSession);
+  const renameWorkflowKernelSession = useWorkflowKernelStore((s) => s.renameSession);
+  const archiveWorkflowKernelSession = useWorkflowKernelStore((s) => s.archiveSession);
+  const restoreWorkflowKernelSession = useWorkflowKernelStore((s) => s.restoreSession);
+  const deleteWorkflowKernelSession = useWorkflowKernelStore((s) => s.deleteSession);
+  const getWorkflowKernelCatalogState = useWorkflowKernelStore((s) => s.getSessionCatalogState);
+  const resumeWorkflowKernelBackgroundRuns = useWorkflowKernelStore((s) => s.resumeBackgroundRuns);
+  const getWorkflowKernelModeTranscript = useWorkflowKernelStore((s) => s.getModeTranscript);
+  const storeWorkflowKernelModeTranscript = useWorkflowKernelStore((s) => s.storeModeTranscript);
+  const appendWorkflowKernelContextItems = useWorkflowKernelStore((s) => s.appendContextItems);
+  const workflowSessionCatalog = useWorkflowKernelStore((s) => s.sessionCatalog);
   const transitionWorkflowKernelMode = useWorkflowKernelStore((s) => s.transitionMode);
   const transitionAndSubmitWorkflowKernelInput = useWorkflowKernelStore((s) => s.transitionAndSubmitInput);
+  const submitWorkflowKernelInput = useWorkflowKernelStore((s) => s.submitInput);
   const linkWorkflowKernelModeSession = useWorkflowKernelStore((s) => s.linkModeSession);
   const cancelWorkflowKernelOperation = useWorkflowKernelStore((s) => s.cancelOperation);
-  const resetWorkflowKernel = useWorkflowKernelStore((s) => s.reset);
+  const activeRootSessionId = useSimpleSessionStore((s) => s.activeRootSessionId);
+  const setSimpleCatalogState = useSimpleSessionStore((s) => s.setCatalogState);
+  const getModeLines = useSimpleSessionStore((s) => s.getModeLines);
+  const setModeDraft = useSimpleSessionStore((s) => s.setDraft);
+  const getModeDraft = useSimpleSessionStore((s) => s.getDraft);
+  const setModeAttachments = useSimpleSessionStore((s) => s.setAttachments);
+  const getModeAttachments = useSimpleSessionStore((s) => s.getAttachments);
 
   const isRunning = simpleController.isRunning;
 
-  const { clearPersistedWorkflowKernelSessionId } = useSimpleKernelSession({
+  useSimpleKernelSession({
     workspacePath,
     workflowMode,
     workflowKernelSessionId,
@@ -185,6 +207,8 @@ export function SimpleModeShell() {
     setWorkflowMode,
     openWorkflowKernelSession,
     recoverWorkflowKernelSession,
+    getWorkflowKernelCatalogState,
+    activateWorkflowKernelSession,
   });
 
   useEffect(() => {
@@ -193,6 +217,21 @@ export function SimpleModeShell() {
       cleanup();
     };
   }, [initialize, cleanup]);
+
+  useEffect(() => {
+    void getWorkflowKernelCatalogState().then((catalogState) => {
+      if (catalogState) {
+        setSimpleCatalogState(catalogState);
+      }
+    });
+  }, [getWorkflowKernelCatalogState, setSimpleCatalogState]);
+
+  const backgroundResumeRequestedRef = useRef(false);
+  useEffect(() => {
+    if (backgroundResumeRequestedRef.current) return;
+    backgroundResumeRequestedRef.current = true;
+    void resumeWorkflowKernelBackgroundRuns();
+  }, [resumeWorkflowKernelBackgroundRuns]);
 
   // Handle navigation requests coming from chat cards.
   useEffect(() => {
@@ -353,6 +392,14 @@ export function SimpleModeShell() {
     recordInteractiveActionFailure,
   ]);
 
+  useEffect(() => {
+    if (workflowSessionCatalog.length === 0) return;
+    setSimpleCatalogState({
+      activeSessionId: workflowKernelSessionId ?? activeRootSessionId ?? null,
+      sessions: workflowSessionCatalog,
+    });
+  }, [activeRootSessionId, setSimpleCatalogState, workflowKernelSessionId, workflowSessionCatalog]);
+
   // Tool permission state
   const permissionRequest = useToolPermissionStore((s) => s.pendingRequest);
   const permissionQueueSize = useToolPermissionStore((s) => s.requestQueue.length);
@@ -406,6 +453,7 @@ export function SimpleModeShell() {
     hasStructuredPlanClarifyQuestion,
     linkWorkflowKernelModeSession,
     cancelWorkflowKernelOperation,
+    appendWorkflowKernelContextItems,
     transitionAndSubmitWorkflowKernelInput,
   });
 
@@ -417,10 +465,22 @@ export function SimpleModeShell() {
         user: turn.user,
         assistant: turn.assistant,
       }));
+      if (workflowMode === 'chat' && conversationContext.length > 0) {
+        await appendWorkflowKernelContextItems('chat', {
+          conversationContext,
+          artifactRefs: [],
+          contextSources: ['queue_mode_switch_sync'],
+          metadata: {
+            source: 'queued_message_dispatch',
+            sourceMode: workflowMode,
+            targetMode,
+          },
+        });
+      }
       const transitioned = await switchModeSafely({
         targetMode,
         handoff: {
-          conversationContext,
+          conversationContext: [],
           artifactRefs: [],
           contextSources: ['simple_mode'],
           metadata: {
@@ -435,7 +495,7 @@ export function SimpleModeShell() {
       setWorkflowMode(targetMode);
       return true;
     },
-    [workflowMode, transitionWorkflowKernelMode],
+    [appendWorkflowKernelContextItems, workflowMode, transitionWorkflowKernelMode],
   );
 
   const {
@@ -486,6 +546,7 @@ export function SimpleModeShell() {
     hasPlanClarifyQuestion,
     setWorkflowMode,
     transitionWorkflowKernelMode,
+    appendWorkflowKernelContextItems,
     showToast,
     t,
   });
@@ -497,6 +558,235 @@ export function SimpleModeShell() {
         }),
       })
     : null;
+  useEffect(() => {
+    if (!workflowKernelSessionId) return;
+    setModeDraft(workflowKernelSessionId, workflowMode, description);
+  }, [description, setModeDraft, workflowKernelSessionId, workflowMode]);
+
+  useEffect(() => {
+    if (!workflowKernelSessionId) return;
+    setModeAttachments(workflowKernelSessionId, workflowMode, attachments);
+  }, [attachments, setModeAttachments, workflowKernelSessionId, workflowMode]);
+
+  const persistForegroundModeView = useCallback(
+    (sessionId: string | null, mode: WorkflowMode) => {
+      if (!sessionId) return null;
+      const beforeState = useExecutionStore.getState();
+      if (mode !== 'chat') {
+        return null;
+      }
+      const hasForegroundContent =
+        beforeState.streamingOutput.length > 0 || !!beforeState.taskId || !!beforeState.standaloneSessionId;
+      if (!hasForegroundContent) return null;
+
+      void storeWorkflowKernelModeTranscript(sessionId, mode, beforeState.streamingOutput);
+
+      return parkForegroundRuntime();
+    },
+    [parkForegroundRuntime, storeWorkflowKernelModeTranscript],
+  );
+
+  const getLinkedChatRuntime = useCallback(
+    (sessionId: string | null): string | null => {
+      if (!sessionId) return null;
+      return workflowKernelSession?.sessionId === sessionId
+        ? kernelChatRuntime.linkedSessionId
+        : (workflowSessionCatalog.find((item) => item.sessionId === sessionId)?.modeRuntimeMeta?.chat
+            ?.bindingSessionId ?? null);
+    },
+    [kernelChatRuntime.linkedSessionId, workflowKernelSession?.sessionId, workflowSessionCatalog],
+  );
+
+  const parseLinkedChatRuntime = useCallback(
+    (sessionId: string | null): { source: 'claude' | 'standalone'; rawSessionId: string } | null => {
+      const linkedSessionId = getLinkedChatRuntime(sessionId);
+      if (!linkedSessionId) return null;
+      if (linkedSessionId.startsWith('claude:')) {
+        return { source: 'claude', rawSessionId: linkedSessionId.slice('claude:'.length) };
+      }
+      if (linkedSessionId.startsWith('standalone:')) {
+        return { source: 'standalone', rawSessionId: linkedSessionId.slice('standalone:'.length) };
+      }
+      return null;
+    },
+    [getLinkedChatRuntime],
+  );
+
+  const latestKernelChatMetaRef = useRef<{
+    title: string | null;
+    phase: string;
+    lastError: string | null;
+  }>({
+    title: null,
+    phase: chatPhase,
+    lastError: null,
+  });
+
+  useEffect(() => {
+    latestKernelChatMetaRef.current = {
+      title: workflowKernelSession?.displayTitle ?? null,
+      phase: chatPhase,
+      lastError: workflowKernelSession?.lastError ?? null,
+    };
+  }, [chatPhase, workflowKernelSession?.displayTitle, workflowKernelSession?.lastError]);
+
+  const rehydrateForegroundChatRuntime = useCallback(
+    (sessionId: string | null) => {
+      const linkedRuntime = parseLinkedChatRuntime(sessionId);
+      if (!linkedRuntime) {
+        reset();
+        return;
+      }
+
+      const cachedLines = (sessionId ? getModeLines(sessionId, 'chat') : []) as typeof streamingOutput;
+      const latestMeta = latestKernelChatMetaRef.current;
+      restoreForegroundChatRuntime({
+        source: linkedRuntime.source,
+        rawSessionId: linkedRuntime.rawSessionId,
+        fallbackLines: cachedLines,
+        title: latestMeta.title,
+        phase: latestMeta.phase,
+        lastError: latestMeta.lastError,
+      });
+    },
+    [getModeLines, parseLinkedChatRuntime, reset, restoreForegroundChatRuntime],
+  );
+
+  const restoreForegroundModeView = useCallback(
+    (sessionId: string | null, mode: WorkflowMode) => {
+      if (!sessionId) return;
+      if (mode !== 'chat') {
+        reset();
+        return;
+      }
+      rehydrateForegroundChatRuntime(sessionId);
+    },
+    [rehydrateForegroundChatRuntime, reset],
+  );
+
+  const previousModeViewRef = useRef<{ sessionId: string | null; mode: WorkflowMode } | null>(null);
+  const loadedModeKeyRef = useRef<string | null>(null);
+  const foregroundChatSnapshotRef = useRef<Record<string, typeof streamingOutput>>({});
+  useEffect(() => {
+    loadedModeKeyRef.current = null;
+    const hydrationKey = workflowKernelSessionId ? `${workflowKernelSessionId}:${workflowMode}` : null;
+    let cancelled = false;
+
+    const previous = previousModeViewRef.current;
+    if (previous && (previous.sessionId !== workflowKernelSessionId || previous.mode !== workflowMode)) {
+      persistForegroundModeView(previous.sessionId, previous.mode);
+    }
+
+    if (workflowKernelSessionId && hydrationKey) {
+      void getWorkflowKernelModeTranscript(workflowKernelSessionId, workflowMode).finally(() => {
+        if (!cancelled) {
+          loadedModeKeyRef.current = hydrationKey;
+        }
+      });
+    }
+
+    if (workflowKernelSessionId) {
+      setDescription(getModeDraft(workflowKernelSessionId, workflowMode));
+      const restoredAttachments = getModeAttachments(workflowKernelSessionId, workflowMode);
+      clearAttachments();
+      restoredAttachments.forEach((attachment) => addAttachment(attachment));
+      restoreForegroundModeView(workflowKernelSessionId, workflowMode);
+    }
+
+    previousModeViewRef.current = {
+      sessionId: workflowKernelSessionId,
+      mode: workflowMode,
+    };
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    addAttachment,
+    clearAttachments,
+    getWorkflowKernelModeTranscript,
+    getModeAttachments,
+    getModeDraft,
+    persistForegroundModeView,
+    restoreForegroundModeView,
+    workflowKernelSessionId,
+    workflowMode,
+  ]);
+
+  const linkedChatRuntimeId = useMemo(() => {
+    if (taskId?.trim()) return `claude:${taskId.trim()}`;
+    if (standaloneSessionId?.trim()) return `standalone:${standaloneSessionId.trim()}`;
+    return null;
+  }, [standaloneSessionId, taskId]);
+
+  const lastSyncedChatLedgerTurnCountRef = useRef(0);
+  useEffect(() => {
+    lastSyncedChatLedgerTurnCountRef.current = 0;
+  }, [workflowKernelSessionId]);
+  useEffect(() => {
+    if (!workflowKernelSessionId || workflowMode !== 'chat') return;
+    if (status === 'running' || isSubmitting) return;
+
+    const conversationContext = buildConversationHistory().map((turn) => ({
+      user: turn.user,
+      assistant: turn.assistant,
+    }));
+    if (conversationContext.length === 0) return;
+    if (lastSyncedChatLedgerTurnCountRef.current === conversationContext.length) return;
+
+    lastSyncedChatLedgerTurnCountRef.current = conversationContext.length;
+    void appendWorkflowKernelContextItems('chat', {
+      conversationContext,
+      artifactRefs: [],
+      contextSources: ['chat_transcript_sync'],
+      metadata: {
+        source: 'simple_mode_chat_ledger_sync',
+        workspacePath,
+      },
+    });
+  }, [
+    appendWorkflowKernelContextItems,
+    isSubmitting,
+    status,
+    streamingOutput,
+    workflowKernelSessionId,
+    workflowMode,
+    workspacePath,
+  ]);
+
+  const lastLinkedChatRuntimeRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!workflowKernelSessionId || !linkedChatRuntimeId) return;
+    if (lastLinkedChatRuntimeRef.current === linkedChatRuntimeId) return;
+    lastLinkedChatRuntimeRef.current = linkedChatRuntimeId;
+    void linkWorkflowKernelModeSession('chat', linkedChatRuntimeId);
+  }, [linkWorkflowKernelModeSession, linkedChatRuntimeId, workflowKernelSessionId]);
+
+  const lastReportedChatPhaseRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!workflowKernelSessionId) return;
+    const nextPhase =
+      status === 'running'
+        ? 'streaming'
+        : status === 'paused'
+          ? 'paused'
+          : status === 'completed'
+            ? 'completed'
+            : status === 'failed'
+              ? 'failed'
+              : 'ready';
+    if (lastReportedChatPhaseRef.current === nextPhase) return;
+    lastReportedChatPhaseRef.current = nextPhase;
+    void submitWorkflowKernelInput({
+      type: 'system_phase_update',
+      content: `phase:${nextPhase}`,
+      metadata: {
+        mode: 'chat',
+        phase: nextPhase,
+        source: 'simple_mode_chat_runtime_bridge',
+      },
+    });
+  }, [status, submitWorkflowKernelInput, workflowKernelSessionId]);
 
   const handleComposerSubmit = useCallback(async () => {
     const prompt = description.trim();
@@ -580,10 +870,10 @@ export function SimpleModeShell() {
   ]);
 
   const handleNewTask = useCallback(() => {
-    const hasContext = streamingOutput.length > 0 || useExecutionStore.getState()._pendingTaskContext;
+    const hasContext =
+      (workflowKernelSession?.contextLedger.conversationTurnCount ?? 0) > 0 || streamingOutput.length > 0;
 
-    clearPersistedWorkflowKernelSessionId();
-    resetWorkflowKernel();
+    persistForegroundModeView(workflowKernelSessionId, workflowMode);
     resetWorkflow();
     resetPlanWorkflow();
     reset();
@@ -595,6 +885,7 @@ export function SimpleModeShell() {
       contextSources: ['simple_mode'],
       metadata: {
         entry: 'new_task',
+        workspacePath,
       },
     });
 
@@ -602,22 +893,32 @@ export function SimpleModeShell() {
       showToast(t('contextBridge.contextReset', { defaultValue: 'Context cleared for new task' }), 'info');
     }
   }, [
-    clearPersistedWorkflowKernelSessionId,
     reset,
     clearStrategyAnalysis,
     resetWorkflow,
     resetPlanWorkflow,
-    resetWorkflowKernel,
     openWorkflowKernelSession,
+    persistForegroundModeView,
     streamingOutput,
     showToast,
     t,
+    workflowKernelSession?.contextLedger.conversationTurnCount,
+    workflowKernelSessionId,
+    workflowMode,
+    workspacePath,
   ]);
+
+  const handleNewTaskInPath = useCallback(
+    (path: string) => {
+      setWorkspacePath(path);
+      handleNewTask();
+    },
+    [handleNewTask, setWorkspacePath],
+  );
 
   const handleRestoreHistory = useCallback(
     (historyId: string) => {
-      clearPersistedWorkflowKernelSessionId();
-      resetWorkflowKernel();
+      persistForegroundModeView(workflowKernelSessionId, workflowMode);
       resetWorkflow();
       resetPlanWorkflow();
       restoreFromHistory(historyId);
@@ -631,47 +932,288 @@ export function SimpleModeShell() {
         metadata: {
           entry: 'restore_history',
           historyId,
+          workspacePath,
         },
       });
     },
     [
-      clearPersistedWorkflowKernelSessionId,
+      persistForegroundModeView,
+      workflowKernelSessionId,
+      workflowMode,
       restoreFromHistory,
       resetWorkflow,
       resetPlanWorkflow,
-      resetWorkflowKernel,
       openWorkflowKernelSession,
       setRightPanelOpen,
+      workspacePath,
     ],
   );
 
   const handleSwitchSession = useCallback(
-    (sessionId: string) => {
-      // Keep workflow/orchestrator state scoped to the foreground session.
-      clearPersistedWorkflowKernelSessionId();
-      resetWorkflowKernel();
+    async (sessionId: string) => {
+      persistForegroundModeView(workflowKernelSessionId, workflowMode);
       resetWorkflow();
       resetPlanWorkflow();
-      switchToSession(sessionId);
-      setWorkflowMode('chat');
+      const activated = await activateWorkflowKernelSession(sessionId);
+      if (activated?.session.workspacePath) {
+        setWorkspacePath(activated.session.workspacePath);
+      }
+      const nextMode = activated?.session.activeMode ?? 'chat';
+      setWorkflowMode(nextMode);
+      setDescription(getModeDraft(sessionId, nextMode));
+      const restoredAttachments = getModeAttachments(sessionId, nextMode);
+      clearAttachments();
+      restoredAttachments.forEach((attachment) => addAttachment(attachment));
+      restoreForegroundModeView(sessionId, nextMode);
+    },
+    [
+      activateWorkflowKernelSession,
+      addAttachment,
+      clearAttachments,
+      getModeAttachments,
+      getModeDraft,
+      persistForegroundModeView,
+      restoreForegroundModeView,
+      resetWorkflow,
+      resetPlanWorkflow,
+      workflowKernelSessionId,
+      workflowMode,
+      setWorkspacePath,
+    ],
+  );
+
+  const handleRenameWorkflowSession = useCallback(
+    async (sessionId: string, title: string) => {
+      await renameWorkflowKernelSession(sessionId, title);
+    },
+    [renameWorkflowKernelSession],
+  );
+
+  const handleArchiveWorkflowSession = useCallback(
+    async (sessionId: string) => {
+      const confirmed = window.confirm(
+        t('sidebar.archiveSessionConfirm', { defaultValue: 'Archive this live session?' }),
+      );
+      if (!confirmed) return;
+      persistForegroundModeView(workflowKernelSessionId, workflowMode);
+      const result = await archiveWorkflowKernelSession(sessionId);
+      if (!result) return;
+
+      if (result.activeSessionId) {
+        const activeCatalogItem = result.sessions.find((item) => item.sessionId === result.activeSessionId);
+        if (activeCatalogItem?.workspacePath) {
+          setWorkspacePath(activeCatalogItem.workspacePath);
+        }
+        const nextMode = activeCatalogItem?.activeMode ?? 'chat';
+        setWorkflowMode(nextMode);
+        setDescription(getModeDraft(result.activeSessionId, nextMode));
+        const restoredAttachments = getModeAttachments(result.activeSessionId, nextMode);
+        clearAttachments();
+        restoredAttachments.forEach((attachment) => addAttachment(attachment));
+        restoreForegroundModeView(result.activeSessionId, nextMode);
+        return;
+      }
+
+      resetWorkflow();
+      resetPlanWorkflow();
+      reset();
+      clearStrategyAnalysis();
       setDescription('');
-      void openWorkflowKernelSession('chat', {
+      await openWorkflowKernelSession('chat', {
         conversationContext: [],
         artifactRefs: [],
         contextSources: ['simple_mode'],
         metadata: {
-          entry: 'switch_session',
-          externalSessionId: sessionId,
+          entry: 'archive_last_session_recovery',
+          workspacePath,
         },
       });
     },
     [
-      clearPersistedWorkflowKernelSessionId,
-      resetWorkflow,
-      resetPlanWorkflow,
-      resetWorkflowKernel,
+      addAttachment,
+      archiveWorkflowKernelSession,
+      clearAttachments,
+      clearStrategyAnalysis,
+      getModeAttachments,
+      getModeDraft,
       openWorkflowKernelSession,
-      switchToSession,
+      persistForegroundModeView,
+      reset,
+      resetPlanWorkflow,
+      resetWorkflow,
+      restoreForegroundModeView,
+      setWorkspacePath,
+      t,
+      workflowKernelSessionId,
+      workflowMode,
+      workspacePath,
+    ],
+  );
+
+  const handleRestoreWorkflowSession = useCallback(
+    async (sessionId: string) => {
+      persistForegroundModeView(workflowKernelSessionId, workflowMode);
+      resetWorkflow();
+      resetPlanWorkflow();
+      const restored = await restoreWorkflowKernelSession(sessionId);
+      if (!restored) return;
+
+      if (restored.session.workspacePath) {
+        setWorkspacePath(restored.session.workspacePath);
+      }
+      const nextMode = restored.session.activeMode ?? 'chat';
+      setWorkflowMode(nextMode);
+      setDescription(getModeDraft(sessionId, nextMode));
+      const restoredAttachments = getModeAttachments(sessionId, nextMode);
+      clearAttachments();
+      restoredAttachments.forEach((attachment) => addAttachment(attachment));
+      restoreForegroundModeView(sessionId, nextMode);
+    },
+    [
+      addAttachment,
+      clearAttachments,
+      getModeAttachments,
+      getModeDraft,
+      persistForegroundModeView,
+      resetPlanWorkflow,
+      resetWorkflow,
+      restoreForegroundModeView,
+      restoreWorkflowKernelSession,
+      setWorkspacePath,
+      workflowKernelSessionId,
+      workflowMode,
+    ],
+  );
+
+  const handleDeleteWorkflowSession = useCallback(
+    async (sessionId: string) => {
+      const confirmed = window.confirm(
+        t('sidebar.deleteSessionConfirm', {
+          defaultValue: 'Delete this session permanently? This cannot be undone.',
+        }),
+      );
+      if (!confirmed) return;
+
+      persistForegroundModeView(workflowKernelSessionId, workflowMode);
+      const result = await deleteWorkflowKernelSession(sessionId);
+      if (!result) return;
+
+      if (result.activeSessionId) {
+        const activeCatalogItem = result.sessions.find((item) => item.sessionId === result.activeSessionId);
+        if (activeCatalogItem?.workspacePath) {
+          setWorkspacePath(activeCatalogItem.workspacePath);
+        }
+        const nextMode = activeCatalogItem?.activeMode ?? 'chat';
+        setWorkflowMode(nextMode);
+        setDescription(getModeDraft(result.activeSessionId, nextMode));
+        const restoredAttachments = getModeAttachments(result.activeSessionId, nextMode);
+        clearAttachments();
+        restoredAttachments.forEach((attachment) => addAttachment(attachment));
+        restoreForegroundModeView(result.activeSessionId, nextMode);
+        return;
+      }
+
+      resetWorkflow();
+      resetPlanWorkflow();
+      reset();
+      clearStrategyAnalysis();
+      clearAttachments();
+      setDescription('');
+      await openWorkflowKernelSession('chat', {
+        conversationContext: [],
+        artifactRefs: [],
+        contextSources: ['simple_mode'],
+        metadata: {
+          entry: 'delete_last_session_recovery',
+          workspacePath,
+        },
+      });
+    },
+    [
+      addAttachment,
+      clearAttachments,
+      clearStrategyAnalysis,
+      deleteWorkflowKernelSession,
+      getModeAttachments,
+      getModeDraft,
+      openWorkflowKernelSession,
+      persistForegroundModeView,
+      reset,
+      resetPlanWorkflow,
+      resetWorkflow,
+      restoreForegroundModeView,
+      setWorkspacePath,
+      t,
+      workflowKernelSessionId,
+      workflowMode,
+      workspacePath,
+    ],
+  );
+
+  const handleClearAllSessions = useCallback(async () => {
+    const confirmed = window.confirm(
+      t('sidebar.clearAllSessionsConfirm', {
+        defaultValue: 'Delete all sessions and history? This cannot be undone.',
+      }),
+    );
+    if (!confirmed) return;
+
+    persistForegroundModeView(workflowKernelSessionId, workflowMode);
+    const liveSessionIds = [...workflowSessionCatalog.map((session) => session.sessionId)];
+    for (const sessionId of liveSessionIds) {
+      await deleteWorkflowKernelSession(sessionId);
+    }
+    clearHistory();
+    resetWorkflow();
+    resetPlanWorkflow();
+    reset();
+    clearStrategyAnalysis();
+    clearAttachments();
+    setDescription('');
+    await openWorkflowKernelSession('chat', {
+      conversationContext: [],
+      artifactRefs: [],
+      contextSources: ['simple_mode'],
+      metadata: {
+        entry: 'clear_all_sessions',
+        workspacePath,
+      },
+    });
+  }, [
+    clearAttachments,
+    clearHistory,
+    clearStrategyAnalysis,
+    deleteWorkflowKernelSession,
+    openWorkflowKernelSession,
+    persistForegroundModeView,
+    reset,
+    resetPlanWorkflow,
+    resetWorkflow,
+    t,
+    workflowKernelSessionId,
+    workflowMode,
+    workflowSessionCatalog,
+    workspacePath,
+  ]);
+
+  const sessionTreePathGroups = useMemo(
+    () =>
+      buildSessionTreeViewModel({
+        workflowSessions: workflowSessionCatalog,
+        history,
+        activeSessionId: workflowKernelSessionId ?? activeRootSessionId,
+        pinnedDirectories,
+        pathSort: sessionPathSort,
+        includeArchived: showArchivedSessions,
+      }),
+    [
+      activeRootSessionId,
+      history,
+      pinnedDirectories,
+      sessionPathSort,
+      showArchivedSessions,
+      workflowKernelSessionId,
+      workflowSessionCatalog,
     ],
   );
 
@@ -754,10 +1296,76 @@ export function SimpleModeShell() {
   const hoverPanelsEnabled = autoPanelHoverEnabled && supportsPointerHover;
   const isLeftPanelOpen = !sidebarCollapsed || leftPanelHoverExpanded;
   const isRightPanelOpen = rightPanelOpen || rightPanelHoverExpanded;
+  const currentForegroundRuntimeId = taskId?.trim()
+    ? `claude:${taskId.trim()}`
+    : standaloneSessionId?.trim()
+      ? `standalone:${standaloneSessionId.trim()}`
+      : null;
+  const cachedModeLines = useMemo(
+    () => (workflowKernelSessionId ? getModeLines(workflowKernelSessionId, workflowMode) : []),
+    [getModeLines, workflowKernelSessionId, workflowMode],
+  );
+  const stableForegroundChatLines = useMemo(
+    () =>
+      workflowMode === 'chat'
+        ? (selectStableConversationLines(
+            streamingOutput,
+            (cachedModeLines as typeof streamingOutput) ?? [],
+          ) as typeof streamingOutput)
+        : streamingOutput,
+    [cachedModeLines, streamingOutput, workflowMode],
+  );
+  useEffect(() => {
+    if (workflowMode !== 'chat') return;
+    if (!workflowKernelSessionId) return;
+    if (!(streamingOutput.length > 0 || stableForegroundChatLines.length > 0)) return;
+    const previousSnapshot = foregroundChatSnapshotRef.current[workflowKernelSessionId] ?? [];
+    const nextSnapshot = selectStableConversationLines(stableForegroundChatLines, previousSnapshot);
+    if (nextSnapshot.length === 0) return;
+    foregroundChatSnapshotRef.current[workflowKernelSessionId] = nextSnapshot.map((line) => ({ ...line }));
+  }, [stableForegroundChatLines, streamingOutput, workflowKernelSessionId, workflowMode]);
+  const shouldUseForegroundTranscript =
+    workflowMode === 'chat' &&
+    (streamingOutput.length > 0 ||
+      !!currentForegroundRuntimeId ||
+      isChatSession ||
+      status === 'running' ||
+      status === 'paused' ||
+      isSubmitting);
+  const preservedForegroundChatLines = useMemo(
+    () =>
+      workflowKernelSessionId && workflowMode === 'chat'
+        ? (foregroundChatSnapshotRef.current[workflowKernelSessionId] ?? [])
+        : [],
+    [workflowKernelSessionId, workflowMode],
+  );
+  const displayLines = useMemo(
+    () =>
+      shouldUseForegroundTranscript
+        ? stableForegroundChatLines.length > 0
+          ? stableForegroundChatLines
+          : preservedForegroundChatLines.length > 0
+            ? preservedForegroundChatLines
+            : ((cachedModeLines as typeof streamingOutput) ?? [])
+        : ((cachedModeLines as typeof streamingOutput) ?? []),
+    [cachedModeLines, preservedForegroundChatLines, shouldUseForegroundTranscript, stableForegroundChatLines],
+  );
+
+  useEffect(() => {
+    if (workflowMode !== 'chat') return;
+    if (!shouldUseForegroundTranscript) return;
+    if (streamingOutput.length > 0) return;
+    if (preservedForegroundChatLines.length === 0) return;
+    useExecutionStore.setState({
+      streamingOutput: preservedForegroundChatLines.map((line) => ({ ...line })),
+      streamLineCounter: preservedForegroundChatLines.reduce((max, line) => Math.max(max, line.id), 0),
+      foregroundDirty: true,
+    });
+  }, [preservedForegroundChatLines, shouldUseForegroundTranscript, streamingOutput, workflowMode]);
 
   const detailLineCount = useMemo(
-    () => streamingOutput.filter((line) => line.type !== 'text' && line.type !== 'info').length,
-    [streamingOutput],
+    () => displayLines.filter((line) => line.type !== 'text' && line.type !== 'info').length,
+    [displayLines],
   );
 
   const clearLeftHoverTimer = useCallback(() => {
@@ -974,13 +1582,18 @@ export function SimpleModeShell() {
             onDelete={deleteHistory}
             onRename={renameHistory}
             onClear={clearHistory}
+            onClearAllSessions={handleClearAllSessions}
             onNewTask={handleNewTask}
-            currentTask={isChatSession ? streamingOutput[0]?.content || null : null}
-            backgroundSessions={backgroundSessions}
-            onSwitchSession={handleSwitchSession}
-            onRemoveSession={removeBackgroundSession}
-            foregroundParentSessionId={foregroundParentSessionId}
-            foregroundBgId={foregroundBgId}
+            workflowSessions={workflowSessionCatalog}
+            activeWorkflowSessionId={workflowKernelSessionId ?? activeRootSessionId}
+            onSwitchWorkflowSession={handleSwitchSession}
+            onRenameWorkflowSession={handleRenameWorkflowSession}
+            onArchiveWorkflowSession={handleArchiveWorkflowSession}
+            onRestoreWorkflowSession={handleRestoreWorkflowSession}
+            onDeleteWorkflowSession={handleDeleteWorkflowSession}
+            pathGroups={sessionTreePathGroups}
+            activePath={workspacePath}
+            onNewTaskInPath={handleNewTaskInPath}
           />
         }
         middlePanel={
@@ -1012,7 +1625,7 @@ export function SimpleModeShell() {
 
             <div className="flex-1 min-h-0">
               <ChatTranscript
-                lines={streamingOutput}
+                lines={displayLines}
                 status={status}
                 scrollRef={chatScrollRef}
                 forceFullRender={isCapturing}
@@ -1036,7 +1649,7 @@ export function SimpleModeShell() {
               isWorkflowCancelling={isStructuredWorkflowCancelling}
               onCancelWorkflow={handleCancelStructuredWorkflow}
               onExportImage={handleExportImage}
-              isExportDisabled={streamingOutput.length === 0}
+              isExportDisabled={displayLines.length === 0}
               isCapturing={isCapturing}
               rightPanelOpen={isRightPanelOpen}
               rightPanelTab={rightPanelTab}
@@ -1110,7 +1723,7 @@ export function SimpleModeShell() {
                 workflowPhase={rightPanelPhase}
                 logs={logs}
                 analysisCoverage={analysisCoverage}
-                streamingOutput={streamingOutput}
+                streamingOutput={displayLines}
                 workspacePath={workspacePath}
                 contextSessionId={contextSessionId}
               />

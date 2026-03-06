@@ -1,4 +1,263 @@
 use super::*;
+use crate::services::task_mode::batch_executor::BatchExecutorResumeState;
+use crate::services::workflow_kernel::{
+    WorkflowMode, WorkflowModeTranscriptUpdatedEvent, WorkflowSessionCatalogUpdatedEvent,
+    WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL, WORKFLOW_SESSION_CATALOG_UPDATED_CHANNEL,
+};
+use serde_json::{json, Value};
+
+fn transcript_timestamp() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn build_card_transcript_line(card_type: &str, data: Value, interactive: bool) -> Value {
+    let timestamp = transcript_timestamp();
+    let card_payload = json!({
+        "cardType": card_type,
+        "cardId": format!("{card_type}-{timestamp}"),
+        "data": data,
+        "interactive": interactive,
+    });
+    let content = serde_json::to_string(&card_payload).unwrap_or_else(|_| "{}".to_string());
+    json!({
+        "id": timestamp,
+        "type": "card",
+        "content": content,
+        "timestamp": timestamp,
+        "cardPayload": card_payload,
+    })
+}
+
+fn gate_overall_status(gate_results: &[crate::services::quality_gates::pipeline::PipelineGateResult]) -> &'static str {
+    if gate_results
+        .iter()
+        .any(|gate| matches!(gate.status, crate::models::quality_gates::GateStatus::Failed))
+    {
+        "failed"
+    } else if gate_results
+        .iter()
+        .all(|gate| matches!(gate.status, crate::models::quality_gates::GateStatus::Skipped))
+    {
+        "skipped"
+    } else {
+        "passed"
+    }
+}
+
+fn build_task_progress_transcript_lines(
+    event: &TaskModeProgressEvent,
+    story_titles: &HashMap<String, String>,
+) -> Vec<Value> {
+    match event.event_type.as_str() {
+        "batch_started" => vec![build_card_transcript_line(
+            "execution_update",
+            json!({
+                "eventType": "batch_start",
+                "currentBatch": event.current_batch,
+                "totalBatches": event.total_batches,
+                "storyId": Value::Null,
+                "storyTitle": Value::Null,
+                "status": format!("Batch {}/{}", event.current_batch + 1, event.total_batches),
+                "agent": Value::Null,
+                "progressPct": event.progress_pct,
+            }),
+            false,
+        )],
+        "story_started" | "story_completed" | "story_failed" => {
+            let event_type = match event.event_type.as_str() {
+                "story_started" => "story_start",
+                "story_completed" => "story_complete",
+                _ => "story_failed",
+            };
+            let story_title = event
+                .story_id
+                .as_ref()
+                .and_then(|story_id| story_titles.get(story_id))
+                .cloned()
+                .or_else(|| event.story_id.clone());
+            let mut lines = vec![build_card_transcript_line(
+                "execution_update",
+                json!({
+                    "eventType": event_type,
+                    "currentBatch": event.current_batch,
+                    "totalBatches": event.total_batches,
+                    "storyId": event.story_id,
+                    "storyTitle": story_title,
+                    "status": if event.event_type == "story_failed" {
+                        event.error.clone().unwrap_or_else(|| "failed".to_string())
+                    } else {
+                        event.story_status.clone().unwrap_or_else(|| "running".to_string())
+                    },
+                    "agent": event.agent_name,
+                    "progressPct": event.progress_pct,
+                }),
+                false,
+            )];
+
+            if let (Some(story_id), Some(gate_results)) = (event.story_id.as_ref(), event.gate_results.as_ref()) {
+                if !gate_results.is_empty() {
+                    let story_title = story_titles
+                        .get(story_id)
+                        .cloned()
+                        .unwrap_or_else(|| story_id.clone());
+                    lines.push(build_card_transcript_line(
+                        "gate_result",
+                        json!({
+                            "storyId": story_id,
+                            "storyTitle": story_title,
+                            "overallStatus": gate_overall_status(gate_results),
+                            "gates": gate_results,
+                            "codeReviewScores": [],
+                        }),
+                        false,
+                    ));
+                }
+            }
+            lines
+        }
+        "error" => event
+            .error
+            .as_ref()
+            .map(|error| {
+                vec![build_card_transcript_line(
+                    "workflow_error",
+                    json!({
+                        "title": "Execution Error",
+                        "description": error,
+                        "suggestedFix": Value::Null,
+                    }),
+                    false,
+                )]
+            })
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+fn build_task_completion_transcript_line(result: &BatchExecutionResult) -> Value {
+    let agent_assignments: HashMap<String, String> = result
+        .agent_assignments
+        .iter()
+        .map(|(story_id, assignment)| (story_id.clone(), assignment.agent_name.clone()))
+        .collect();
+    build_card_transcript_line(
+        "completion_report",
+        json!({
+            "success": result.success,
+            "totalStories": result.total_stories,
+            "completed": result.completed,
+            "failed": result.failed,
+            "duration": result.total_duration_ms,
+            "agentAssignments": agent_assignments,
+        }),
+        false,
+    )
+}
+
+async fn append_task_transcript_lines_for_linked_sessions(
+    app: &tauri::AppHandle,
+    kernel_state: &WorkflowKernelState,
+    task_session_id: &str,
+    lines: Vec<Value>,
+    source: &str,
+) {
+    if lines.is_empty() {
+        return;
+    }
+
+    let kernel_session_ids = kernel_state
+        .linked_kernel_sessions_for_mode_session(WorkflowMode::Task, task_session_id)
+        .await;
+    if kernel_session_ids.is_empty() {
+        return;
+    }
+
+    for kernel_session_id in &kernel_session_ids {
+        if let Ok(transcript) = kernel_state
+            .append_mode_transcript(kernel_session_id, WorkflowMode::Task, lines.clone())
+            .await
+        {
+            let _ = app.emit(
+                WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL,
+                WorkflowModeTranscriptUpdatedEvent {
+                    session_id: transcript.session_id,
+                    mode: transcript.mode,
+                    revision: transcript.revision,
+                    appended_lines: lines.clone(),
+                    replace_from_line_id: None,
+                    source: source.to_string(),
+                },
+            );
+        }
+    }
+
+    if let Ok(catalog_state) = kernel_state.get_session_catalog_state().await {
+        let _ = app.emit(
+            WORKFLOW_SESSION_CATALOG_UPDATED_CHANNEL,
+            WorkflowSessionCatalogUpdatedEvent {
+                active_session_id: catalog_state.active_session_id,
+                sessions: catalog_state.sessions,
+                source: source.to_string(),
+            },
+        );
+    }
+}
+
+fn apply_progress_event_to_session(session: &mut TaskModeSession, event: &TaskModeProgressEvent) {
+    let total_stories = session
+        .prd
+        .as_ref()
+        .map(|prd| prd.stories.len())
+        .unwrap_or(0);
+    let progress = session.progress.get_or_insert(BatchExecutionProgress {
+        current_batch: event.current_batch,
+        total_batches: event.total_batches,
+        stories_completed: 0,
+        stories_failed: 0,
+        total_stories,
+        story_statuses: HashMap::new(),
+        current_phase: "executing".to_string(),
+    });
+
+    progress.current_batch = event.current_batch;
+    progress.total_batches = event.total_batches;
+    if progress.total_stories == 0 {
+        progress.total_stories = total_stories;
+    }
+    if let (Some(story_id), Some(story_status)) = (&event.story_id, &event.story_status) {
+        progress
+            .story_statuses
+            .insert(story_id.clone(), story_status.clone());
+    }
+    progress.stories_completed = progress
+        .story_statuses
+        .values()
+        .filter(|status| status.as_str() == "completed")
+        .count();
+    progress.stories_failed = progress
+        .story_statuses
+        .values()
+        .filter(|status| status.as_str() == "failed")
+        .count();
+    progress.current_phase = match event.event_type.as_str() {
+        "batch_started" | "story_started" | "story_completed" | "story_failed" => "executing",
+        "execution_completed" => "completed",
+        "execution_cancelled" => "cancelled",
+        "error" => "failed",
+        _ => progress.current_phase.as_str(),
+    }
+    .to_string();
+
+    session.status = match event.event_type.as_str() {
+        "execution_completed" => TaskModeStatus::Completed,
+        "execution_cancelled" => TaskModeStatus::Cancelled,
+        "error" => TaskModeStatus::Failed,
+        _ => TaskModeStatus::Executing,
+    };
+}
 
 /// Approve a task PRD and trigger batch execution.
 ///
@@ -29,7 +288,20 @@ pub async fn approve_task_prd(
         project_path,
     } = request;
 
-    let task_description = {
+    let resume_payload = serde_json::to_value(TaskExecutionResumePayload {
+        provider: provider.clone(),
+        model: model.clone(),
+        base_url: base_url.clone(),
+        execution_mode: execution_mode.clone(),
+        workflow_config: workflow_config.clone(),
+        global_default_agent: global_default_agent.clone(),
+        phase_configs: phase_configs.clone(),
+        context_sources: context_sources.clone(),
+        project_path: project_path.clone(),
+    })
+    .ok();
+
+    let (task_description, resume_progress) = {
         let sessions = state.sessions.read().await;
         let session = match sessions.get(&session_id) {
             Some(s) => s,
@@ -39,13 +311,15 @@ pub async fn approve_task_prd(
                 ))
             }
         };
-        if session.status != TaskModeStatus::ReviewingPrd {
+        if session.status != TaskModeStatus::ReviewingPrd
+            && session.status != TaskModeStatus::Executing
+        {
             return Ok(CommandResponse::err(format!(
                 "Cannot approve PRD in {:?} status",
                 session.status
             )));
         }
-        session.description.clone()
+        (session.description.clone(), session.progress.clone())
     };
 
     // Validate PRD
@@ -93,6 +367,7 @@ pub async fn approve_task_prd(
                 };
                 session.prd = Some(approved_prd);
                 session.status = TaskModeStatus::Executing;
+                session.execution_resume_payload = resume_payload.clone();
                 updated_session = Some(session.clone());
                 drop(sessions);
                 if let Some(snapshot) = updated_session.as_ref() {
@@ -273,12 +548,26 @@ pub async fn approve_task_prd(
             };
             let plugin_quality_gates = plugin_state.collect_quality_gates().await;
             config.plugin_quality_gates = plugin_quality_gates;
+            let story_titles: HashMap<String, String> = stories
+                .iter()
+                .map(|story| (story.id.clone(), story.title.clone()))
+                .collect();
 
             // Spawn background tokio task for batch execution
             let exec_config = config;
             tokio::spawn(async move {
-                let executor =
-                    BatchExecutor::new(stories_for_exec, exec_config, cancellation_token);
+                let executor = if let Some(progress) = resume_progress.clone() {
+                    BatchExecutor::new_with_resume_state(
+                        stories_for_exec,
+                        exec_config,
+                        cancellation_token,
+                        BatchExecutorResumeState {
+                            story_statuses: progress.story_statuses,
+                        },
+                    )
+                } else {
+                    BatchExecutor::new(stories_for_exec, exec_config, cancellation_token)
+                };
                 let resolver = match &phase_configs {
                     Some(configs) if !configs.is_empty() => AgentResolver::new(
                         build_agents_config_from_frontend(configs, global_default_agent.as_deref()),
@@ -293,6 +582,9 @@ pub async fn approve_task_prd(
                 let completed_counter = Arc::new(AtomicU64::new(0));
                 let failed_counter = Arc::new(AtomicU64::new(0));
                 let current_story = Arc::new(Mutex::new(None::<String>));
+                let sessions_for_emit = sessions_arc.clone();
+                let state_for_emit = state_for_persist.clone();
+                let story_titles_for_emit = story_titles.clone();
                 let emit = move |event: TaskModeProgressEvent| {
                     let _ = app_for_emit.emit(TASK_MODE_EVENT_CHANNEL, &event);
 
@@ -343,7 +635,25 @@ pub async fn approve_task_prd(
                     let kernel_for_emit = kernel_for_emit.clone();
                     let app_for_emit = app_for_emit.clone();
                     let sid_for_emit = sid_for_emit.clone();
+                    let sessions_for_emit = sessions_for_emit.clone();
+                    let state_for_emit = state_for_emit.clone();
+                    let event_for_persist = event.clone();
+                    let story_titles_for_emit = story_titles_for_emit.clone();
                     tokio::spawn(async move {
+                        {
+                            let mut sessions = sessions_for_emit.write().await;
+                            if let Some(session) = sessions.get_mut(&sid_for_emit) {
+                                apply_progress_event_to_session(session, &event_for_persist);
+                                let snapshot = session.clone();
+                                drop(sessions);
+                                persist_task_session_best_effort(
+                                    &state_for_emit,
+                                    &snapshot,
+                                    "approve_task_prd.progress_event",
+                                )
+                                .await;
+                            }
+                        }
                         let kernel_session_ids = kernel_for_emit
                             .sync_task_snapshot_by_linked_session(
                                 &sid_for_emit,
@@ -359,6 +669,17 @@ pub async fn approve_task_prd(
                             &app_for_emit,
                             &kernel_for_emit,
                             &kernel_session_ids,
+                            "task_mode.approve_task_prd.progress_event",
+                        )
+                        .await;
+                        append_task_transcript_lines_for_linked_sessions(
+                            &app_for_emit,
+                            &kernel_for_emit,
+                            &sid_for_emit,
+                            build_task_progress_transcript_lines(
+                                &event_for_persist,
+                                &story_titles_for_emit,
+                            ),
                             "task_mode.approve_task_prd.progress_event",
                         )
                         .await;
@@ -429,6 +750,36 @@ pub async fn approve_task_prd(
                         "task_mode.approve_task_prd.execution_terminal",
                     )
                     .await;
+                }
+                match &result {
+                    Ok(exec_result) => {
+                        append_task_transcript_lines_for_linked_sessions(
+                            &app_handle,
+                            &kernel_state_handle,
+                            &sid,
+                            vec![build_task_completion_transcript_line(exec_result)],
+                            "task_mode.approve_task_prd.execution_terminal",
+                        )
+                        .await;
+                    }
+                    Err(error) => {
+                        append_task_transcript_lines_for_linked_sessions(
+                            &app_handle,
+                            &kernel_state_handle,
+                            &sid,
+                            vec![build_card_transcript_line(
+                                "workflow_error",
+                                json!({
+                                    "title": "Execution Error",
+                                    "description": error.to_string(),
+                                    "suggestedFix": Value::Null,
+                                }),
+                                false,
+                            )],
+                            "task_mode.approve_task_prd.execution_terminal",
+                        )
+                        .await;
+                    }
                 }
 
                 let mut tokens = tokens_arc.write().await;

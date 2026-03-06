@@ -2,7 +2,6 @@ import i18n from '../../i18n';
 import { usePlanModeStore } from '../planMode';
 import { useWorkflowKernelStore } from '../workflowKernel';
 import { useSettingsStore } from '../settings';
-import { buildConversationHistory } from '../../lib/contextBridge';
 import { createWorkflowKernelActionIntent } from '../../lib/workflowKernelIntent';
 import { failResult, type ActionResult } from '../../types/actionResult';
 import type { ContextSourceConfig } from '../../types/contextSources';
@@ -58,11 +57,6 @@ export async function approvePlanFlow(plan: PlanCardData, deps: ExecutionFlowDep
   const settings = useSettingsStore.getState();
   const projectPath = settings.workspacePath || undefined;
   const contextSources = buildPlanContextSources(effectiveSessionId);
-  const conversationHistory = buildConversationHistory();
-  const contextStr =
-    conversationHistory.length > 0
-      ? conversationHistory.map((t) => `user: ${t.user}\nassistant: ${t.assistant}`).join('\n')
-      : undefined;
   return startPlanExecutionWithProgress({
     runToken,
     plan,
@@ -77,7 +71,7 @@ export async function approvePlanFlow(plan: PlanCardData, deps: ExecutionFlowDep
           undefined,
           projectPath,
           contextSources,
-          contextStr,
+          undefined,
           i18n.language,
           effectiveSessionId,
         );
@@ -148,12 +142,6 @@ export async function retryStepFlow(stepId: string, deps: ExecutionFlowDeps): Pr
   const settings = useSettingsStore.getState();
   const projectPath = settings.workspacePath || undefined;
   const contextSources = buildPlanContextSources(effectiveSessionId);
-  const conversationHistory = buildConversationHistory();
-  const contextStr =
-    conversationHistory.length > 0
-      ? conversationHistory.map((t) => `user: ${t.user}\nassistant: ${t.assistant}`).join('\n')
-      : undefined;
-
   await startPlanExecutionWithProgress({
     runToken,
     plan,
@@ -168,7 +156,7 @@ export async function retryStepFlow(stepId: string, deps: ExecutionFlowDeps): Pr
           undefined,
           projectPath,
           contextSources,
-          contextStr,
+          undefined,
           i18n.language,
           effectiveSessionId,
         );

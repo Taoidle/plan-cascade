@@ -35,6 +35,7 @@ import type { SessionSnapshot } from './execution';
 import { useContextSourcesStore } from './contextSources';
 import { useProjectsStore } from './projects';
 import { useSettingsStore } from './settings';
+import { useWorkflowKernelStore } from './workflowKernel';
 import { ToolCallStreamFilter } from '../utils/toolCallFilter';
 
 const mockInvoke = vi.mocked(invoke);
@@ -54,9 +55,12 @@ function resetStore() {
   const store = useExecutionStore.getState();
   // Use the internal reset and also clear background sessions
   store.reset();
+  useWorkflowKernelStore.getState().reset();
   // Manually ensure backgroundSessions, activeSessionId, and foregroundBgId are reset
   useExecutionStore.setState({
     backgroundSessions: {},
+    runtimeRegistry: {},
+    activeRuntimeHandleId: null,
     activeSessionId: null,
     foregroundBgId: null,
     foregroundOriginHistoryId: null,
@@ -338,6 +342,126 @@ describe('Execution Store - Background Session State', () => {
       const snapshots = bgKeys.map((k) => state.backgroundSessions[k]);
       const taskDescs = snapshots.map((s) => s.taskDescription).sort();
       expect(taskDescs).toEqual(['First task', 'Second task']);
+    });
+  });
+
+  describe('parkForegroundRuntime()', () => {
+    it('parks the current runtime into runtimeRegistry and resets the foreground', () => {
+      useExecutionStore.setState({
+        taskDescription: 'Chat runtime',
+        status: 'running',
+        streamingOutput: [{ id: 1, content: 'hello', type: 'text', timestamp: 1000 }],
+        streamLineCounter: 1,
+        currentTurnStartLineId: 0,
+        taskId: 'chat-session-1',
+        isChatSession: true,
+        standaloneTurns: [],
+        standaloneSessionId: null,
+        latestUsage: null,
+        sessionUsageTotals: null,
+        startedAt: 1000,
+      });
+
+      const parkedId = useExecutionStore.getState().parkForegroundRuntime();
+      const state = useExecutionStore.getState();
+
+      expect(parkedId).toBeTruthy();
+      expect(parkedId).toBe('claude:chat-session-1');
+      expect(state.taskId).toBeNull();
+      expect(state.streamingOutput).toEqual([]);
+      expect(state.status).toBe('idle');
+      expect(state.activeRuntimeHandleId).toBe('claude:chat-session-1');
+
+      const parked = parkedId ? state.runtimeRegistry[parkedId] : null;
+      expect(parked?.rawSessionId).toBe('chat-session-1');
+      expect(parked?.source).toBe('claude');
+      expect(parked?.streamingOutput).toHaveLength(1);
+    });
+
+    it('restores chat runtime from runtimeRegistry without reading backgroundSessions', () => {
+      useExecutionStore.setState({
+        runtimeRegistry: {
+          'claude:chat-session-1': {
+            id: 'claude:chat-session-1',
+            source: 'claude',
+            rawSessionId: 'chat-session-1',
+            rootSessionId: 'root-1',
+            mode: 'chat',
+            status: 'running',
+            streamingOutput: [{ id: 1, content: 'restored', type: 'text', timestamp: 1000 }],
+            streamLineCounter: 1,
+            currentTurnStartLineId: 0,
+            standaloneTurns: [],
+            latestUsage: { input_tokens: 10, output_tokens: 20 },
+            sessionUsageTotals: { input_tokens: 10, output_tokens: 20 },
+            startedAt: 1000,
+            workspacePath: '/tmp/project',
+            llmBackend: 'openai',
+            llmProvider: 'openai',
+            llmModel: 'gpt-4o',
+            updatedAt: 1000,
+          },
+        },
+        backgroundSessions: {},
+      });
+
+      useExecutionStore.getState().restoreForegroundChatRuntime({
+        source: 'claude',
+        rawSessionId: 'chat-session-1',
+        fallbackLines: [],
+        title: 'Recovered chat',
+        phase: 'streaming',
+      });
+
+      const state = useExecutionStore.getState();
+      expect(state.taskId).toBe('chat-session-1');
+      expect(state.isChatSession).toBe(true);
+      expect(state.streamingOutput).toEqual([{ id: 1, content: 'restored', type: 'text', timestamp: 1000 }]);
+      expect(state.activeRuntimeHandleId).toBe('claude:chat-session-1');
+      expect(state.backgroundSessions).toEqual({});
+    });
+
+    it('restores fallback transcript when runtime snapshot has lost user turn boundaries', () => {
+      useExecutionStore.setState({
+        runtimeRegistry: {
+          'claude:chat-session-2': {
+            id: 'claude:chat-session-2',
+            source: 'claude',
+            rawSessionId: 'chat-session-2',
+            rootSessionId: 'root-2',
+            mode: 'chat',
+            status: 'running',
+            streamingOutput: [{ id: 2, content: 'assistant only', type: 'text', timestamp: 1001 }],
+            streamLineCounter: 2,
+            currentTurnStartLineId: 1,
+            standaloneTurns: [],
+            latestUsage: null,
+            sessionUsageTotals: null,
+            startedAt: 1000,
+            workspacePath: '/tmp/project',
+            llmBackend: 'openai',
+            llmProvider: 'openai',
+            llmModel: 'gpt-4o',
+            updatedAt: 1000,
+          },
+        },
+      });
+
+      useExecutionStore.getState().restoreForegroundChatRuntime({
+        source: 'claude',
+        rawSessionId: 'chat-session-2',
+        fallbackLines: [
+          { id: 1, content: 'real user prompt', type: 'info', timestamp: 1000, turnBoundary: 'user', turnId: 1 },
+          { id: 2, content: 'assistant only', type: 'text', timestamp: 1001, turnId: 1 },
+        ],
+        title: 'Recovered chat',
+        phase: 'streaming',
+      });
+
+      const state = useExecutionStore.getState();
+      expect(state.streamingOutput[0].content).toBe('real user prompt');
+      expect(state.streamingOutput[0].turnBoundary).toBe('user');
+      expect(state.taskId).toBe('chat-session-2');
     });
   });
 
@@ -1011,6 +1135,53 @@ describe('Execution Store - Background Session State', () => {
       expect(settings.provider).toBe('glm');
       expect(settings.model).toBe('glm-4.5');
     });
+
+    it('parks active chat runtime into runtimeRegistry when restoring history', () => {
+      const itemId = 'history-restore-chat-1';
+      useExecutionStore.setState({
+        history: [
+          {
+            id: itemId,
+            taskDescription: 'Restored history',
+            strategy: null,
+            status: 'completed',
+            startedAt: Date.now() - 10_000,
+            duration: 1000,
+            completedStories: 1,
+            totalStories: 1,
+            success: true,
+            conversationLines: [
+              { type: 'info', content: 'old question' },
+              { type: 'text', content: 'old answer' },
+            ],
+          },
+        ],
+        taskDescription: 'Live chat',
+        status: 'running',
+        taskId: 'chat-live-1',
+        isChatSession: true,
+        streamingOutput: [{ id: 1, content: 'live response', type: 'text', timestamp: 1000 }],
+        streamLineCounter: 1,
+        currentTurnStartLineId: 0,
+        standaloneTurns: [],
+        standaloneSessionId: null,
+        latestUsage: null,
+        sessionUsageTotals: null,
+        startedAt: 1000,
+        backgroundSessions: {},
+        runtimeRegistry: {},
+        activeRuntimeHandleId: null,
+      });
+
+      useExecutionStore.getState().restoreFromHistory(itemId);
+
+      const state = useExecutionStore.getState();
+      expect(state.runtimeRegistry['claude:chat-live-1']).toBeDefined();
+      expect(state.backgroundSessions).toEqual({});
+      expect(state.taskDescription).toBe('Restored history');
+      expect(state.taskId).toBeNull();
+      expect(state.isChatSession).toBe(false);
+    });
   });
 
   describe('history card payload migration', () => {
@@ -1508,6 +1679,56 @@ describe('Execution Store - Event Routing to Background Sessions', () => {
    * synthetic events.
    */
   async function setupForegroundAndBackground() {
+    useWorkflowKernelStore.setState({
+      activeRootSessionId: 'root-bg-1',
+      sessionCatalog: [
+        {
+          sessionId: 'root-bg-1',
+          sessionKind: 'simple_root',
+          displayTitle: 'Background session task',
+          workspacePath: '/tmp/project',
+          activeMode: 'chat',
+          status: 'active',
+          backgroundState: 'background_running',
+          updatedAt: '2026-03-06T00:00:00Z',
+          createdAt: '2026-03-06T00:00:00Z',
+          lastError: null,
+          contextLedger: {
+            conversationTurnCount: 0,
+            artifactRefCount: 0,
+            contextSourceKinds: [],
+            lastCompactionAt: null,
+            ledgerVersion: 1,
+          },
+          modeSnapshots: {
+            chat: {
+              phase: 'streaming',
+              draftInput: '',
+              turnCount: 1,
+              lastUserMessage: 'hello',
+              lastAssistantMessage: null,
+            },
+            plan: null,
+            task: null,
+          },
+          modeRuntimeMeta: {
+            chat: {
+              mode: 'chat',
+              runId: null,
+              bindingSessionId: 'claude:bg-session-1',
+              isForeground: false,
+              isBackgroundRunning: true,
+              isInterrupted: false,
+              resumePolicy: 'resume',
+              lastHeartbeatAt: null,
+              lastCheckpointId: null,
+              lastError: null,
+            },
+          },
+        },
+      ],
+    });
+
     // First, set up a session that will become the background session
     useExecutionStore.setState({
       taskDescription: 'Background session task',
@@ -1589,6 +1810,107 @@ describe('Execution Store - Event Routing to Background Sessions', () => {
       const lastLine = bgLines[bgLines.length - 1];
       expect(lastLine.content).toBe('Hello from background');
       expect(lastLine.type).toBe('text');
+
+      const runtime = useExecutionStore.getState().runtimeRegistry['claude:bg-session-1'];
+      expect(runtime).toBeDefined();
+      expect(runtime?.streamingOutput.some((line) => line.content === 'Hello from background')).toBe(true);
+    });
+
+    it('syncs background chat transcript into the kernel transcript store', async () => {
+      vi.useFakeTimers();
+      try {
+        await setupForegroundAndBackground();
+
+        useWorkflowKernelStore.setState({
+          activeRootSessionId: 'root-bg-1',
+          sessionCatalog: [
+            {
+              sessionId: 'root-bg-1',
+              sessionKind: 'simple_root',
+              displayTitle: 'Background chat',
+              workspacePath: '/tmp/project',
+              activeMode: 'chat',
+              status: 'active',
+              backgroundState: 'background_running',
+              updatedAt: '2026-03-06T00:00:00Z',
+              createdAt: '2026-03-06T00:00:00Z',
+              lastError: null,
+              contextLedger: {
+                conversationTurnCount: 0,
+                artifactRefCount: 0,
+                contextSourceKinds: [],
+                lastCompactionAt: null,
+                ledgerVersion: 1,
+              },
+              modeSnapshots: {
+                chat: {
+                  phase: 'streaming',
+                  draftInput: '',
+                  turnCount: 1,
+                  lastUserMessage: 'hi',
+                  lastAssistantMessage: null,
+                },
+                plan: null,
+                task: null,
+              },
+              modeRuntimeMeta: {
+                chat: {
+                  mode: 'chat',
+                  runId: null,
+                  bindingSessionId: 'claude:bg-session-1',
+                  isForeground: false,
+                  isBackgroundRunning: true,
+                  isInterrupted: false,
+                  resumePolicy: 'resume',
+                  lastHeartbeatAt: null,
+                  lastCheckpointId: null,
+                  lastError: null,
+                },
+              },
+            },
+          ],
+        });
+
+        mockInvoke.mockImplementation(async (command, payload) => {
+          if (command === 'workflow_store_mode_transcript') {
+            return {
+              success: true,
+              data: {
+                sessionId: (payload as { sessionId: string }).sessionId,
+                mode: 'chat',
+                revision: 1,
+                lines: (payload as { lines: unknown[] }).lines,
+              },
+              error: null,
+            };
+          }
+          return {
+            success: true,
+            data: null,
+            error: null,
+          };
+        });
+
+        emitEvent('claude_code:stream', {
+          event: { type: 'text_delta', content: 'Hello from background' },
+          session_id: 'bg-session-1',
+        });
+
+        await vi.advanceTimersByTimeAsync(150);
+
+        expect(mockInvoke).toHaveBeenCalledWith(
+          'workflow_store_mode_transcript',
+          expect.objectContaining({
+            sessionId: 'root-bg-1',
+            mode: 'chat',
+            lines: expect.arrayContaining([
+              expect.objectContaining({ content: 'Hello from background', type: 'text' }),
+            ]),
+          }),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('should route tool_start to background session', async () => {
@@ -2309,8 +2631,9 @@ describe('Execution Store - Auto-Background on start()', () => {
       startedAt: 1000,
     });
 
-    // Verify we have no background sessions initially
+    // Verify we have no parked runtimes initially
     expect(Object.keys(useExecutionStore.getState().backgroundSessions).length).toBe(0);
+    expect(Object.keys(useExecutionStore.getState().runtimeRegistry).length).toBe(0);
 
     // Call start() which should auto-background the current session
     // We expect the invoke to be called, but it will fail since it's mocked — that's okay,
@@ -2323,15 +2646,14 @@ describe('Execution Store - Auto-Background on start()', () => {
 
     const state = useExecutionStore.getState();
 
-    // Should have backgrounded the previous session
-    const bgKeys = Object.keys(state.backgroundSessions);
-    expect(bgKeys.length).toBe(1);
+    // Chat foreground should now be parked into runtimeRegistry, not legacy backgroundSessions.
+    expect(Object.keys(state.backgroundSessions)).toHaveLength(0);
+    expect(Object.keys(state.runtimeRegistry)).toHaveLength(1);
 
-    const snapshot = state.backgroundSessions[bgKeys[0]];
-    expect(snapshot.taskDescription).toBe('Running task');
-    expect(snapshot.status).toBe('running');
-    expect(snapshot.taskId).toBe('running-task-123');
-    expect(snapshot.streamingOutput).toHaveLength(2);
+    const runtime = state.runtimeRegistry['claude:running-task-123'];
+    expect(runtime?.status).toBe('running');
+    expect(runtime?.rawSessionId).toBe('running-task-123');
+    expect(runtime?.streamingOutput).toHaveLength(2);
   });
 
   it('should auto-background a running chat session when start() is called again', async () => {
@@ -2358,12 +2680,9 @@ describe('Execution Store - Auto-Background on start()', () => {
     }
 
     const state = useExecutionStore.getState();
-    const bgKeys = Object.keys(state.backgroundSessions);
-    expect(bgKeys.length).toBe(1);
-
-    const snapshot = state.backgroundSessions[bgKeys[0]];
-    expect(snapshot.taskDescription).toBe('Chat session task');
-    expect(snapshot.taskId).toBe('chat-task-456');
+    expect(Object.keys(state.backgroundSessions)).toHaveLength(0);
+    expect(state.runtimeRegistry['claude:chat-task-456']).toBeDefined();
+    expect(state.runtimeRegistry['claude:chat-task-456']?.rawSessionId).toBe('chat-task-456');
   });
 
   it('should NOT auto-background when start() is called from idle state', async () => {
@@ -2533,6 +2852,34 @@ describe('Execution Store - session-scoped context binding', () => {
     await useExecutionStore.getState().sendFollowUp('next step');
 
     expect(useContextSourcesStore.getState().memorySessionId).toBe('claude:claude-session-1');
+  });
+
+  it('does not prepend legacy pending task context in sendFollowUp() path', async () => {
+    useSettingsStore.setState({ backend: 'claude-code', provider: 'anthropic', model: 'claude-sonnet-4-6-20260219' });
+    useExecutionStore.setState({
+      status: 'completed',
+      taskId: 'claude-session-1',
+      isChatSession: true,
+      streamingOutput: [],
+      streamLineCounter: 0,
+    });
+
+    mockInvoke.mockImplementation(async (command: string, args?: unknown) => {
+      if (command === 'send_message') {
+        expect((args as { request?: { session_id?: string; prompt?: string } } | undefined)?.request).toMatchObject({
+          session_id: 'claude-session-1',
+          prompt: 'next step',
+        });
+        return {
+          success: true,
+          data: { accepted: true, execution_id: 'exec-1' },
+          error: null,
+        };
+      }
+      return { success: true, data: null, error: null };
+    });
+
+    await useExecutionStore.getState().sendFollowUp('next step');
   });
 
   it('binds standalone session id into context sources in regenerateResponse() path', async () => {

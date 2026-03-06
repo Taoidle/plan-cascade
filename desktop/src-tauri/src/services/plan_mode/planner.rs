@@ -11,8 +11,8 @@ use crate::utils::error::{AppError, AppResult};
 
 use super::adapter::DomainAdapter;
 use super::types::{
-    calculate_plan_batches_with_parallel, ClarificationAnswer, Plan, PlanExecutionConfig,
-    PlanStep, StepPriority, TaskDomain,
+    calculate_plan_batches_with_parallel, ClarificationAnswer, Plan, PlanExecutionConfig, PlanStep,
+    StepPriority, TaskDomain,
 };
 
 /// Generate a plan by decomposing the task into steps.

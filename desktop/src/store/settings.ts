@@ -11,11 +11,12 @@ import i18n from '../i18n';
 export type Backend = 'claude-code' | 'claude-api' | 'openai' | 'deepseek' | 'glm' | 'qwen' | 'minimax' | 'ollama';
 export type Theme = 'system' | 'light' | 'dark';
 export type Language = 'en' | 'zh' | 'ja';
+export type SessionPathSort = 'recent' | 'name';
 export type StandaloneContextTurns = 2 | 4 | 6 | 8 | 10 | 20 | 50 | 100 | 200 | 500 | -1;
 export type GlmEndpoint = 'standard' | 'coding' | 'international' | 'international-coding';
 export type MinimaxEndpoint = 'international' | 'china';
 export type QwenEndpoint = 'china' | 'singapore' | 'us';
-const SETTINGS_PERSIST_VERSION = 3;
+const SETTINGS_PERSIST_VERSION = 4;
 const EXECUTION_PHASE_IDS = ['planning', 'implementation', 'retry', 'refactor', 'review'] as const;
 
 function normalizeProviderKey(provider: string): string {
@@ -91,6 +92,8 @@ interface SettingsState {
   pinnedDirectories: string[];
   sidebarCollapsed: boolean;
   autoPanelHoverEnabled: boolean;
+  sessionPathSort: SessionPathSort;
+  showArchivedSessions: boolean;
 
   // Context compaction
   enableContextCompaction: boolean;
@@ -161,6 +164,8 @@ interface SettingsState {
   removePinnedDirectory: (path: string) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setAutoPanelHoverEnabled: (enabled: boolean) => void;
+  setSessionPathSort: (sort: SessionPathSort) => void;
+  setShowArchivedSessions: (show: boolean) => void;
 }
 
 const defaultSettings = {
@@ -222,6 +227,8 @@ const defaultSettings = {
   pinnedDirectories: [] as string[],
   sidebarCollapsed: false,
   autoPanelHoverEnabled: false,
+  sessionPathSort: 'recent' as SessionPathSort,
+  showArchivedSessions: false,
 
   // Context compaction
   enableContextCompaction: true,
@@ -438,6 +445,8 @@ export const useSettingsStore = create<SettingsState>()(
 
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
       setAutoPanelHoverEnabled: (autoPanelHoverEnabled) => set({ autoPanelHoverEnabled }),
+      setSessionPathSort: (sessionPathSort) => set({ sessionPathSort }),
+      setShowArchivedSessions: (showArchivedSessions) => set({ showArchivedSessions }),
     }),
     {
       name: 'plan-cascade-settings',

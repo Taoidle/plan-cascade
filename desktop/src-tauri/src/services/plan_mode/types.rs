@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 // ============================================================================
 // Domain & Phase Types
@@ -502,6 +503,9 @@ pub struct PlanModeSession {
     pub step_attempts: HashMap<String, usize>,
     /// Execution progress summary
     pub progress: Option<PlanExecutionProgress>,
+    /// Persisted execution launch metadata used for background resume.
+    #[serde(default)]
+    pub execution_resume_payload: Option<Value>,
     /// Session creation timestamp
     pub created_at: String,
 }

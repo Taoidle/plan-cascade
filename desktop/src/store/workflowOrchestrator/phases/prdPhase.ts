@@ -1,7 +1,6 @@
 import i18n from '../../../i18n';
 import { resolvePersonaDisplayName } from '../../../lib/personaI18n';
 import type { ActionResult } from '../../../types/actionResult';
-import type { CrossModeConversationTurn } from '../../../types/crossModeContext';
 import type { PrdCardData } from '../../../types/workflowCard';
 import { useSettingsStore } from '../../settings';
 import type { TaskPrd } from '../../taskMode';
@@ -50,14 +49,13 @@ export async function runPrdPhase(runtime: WorkflowPhaseRuntime, deps: PrdPhaseD
   injectInfo(i18n.t('workflow.orchestrator.generatingPrd', { ns: 'simpleMode' }), 'info');
 
   try {
-    const state = get() as { _conversationHistory?: unknown[]; taskDescription: string; strategyAnalysis: unknown };
-    const history = (state._conversationHistory || []) as CrossModeConversationTurn[];
+    const state = get() as { taskDescription: string; strategyAnalysis: unknown };
     const settings = useSettingsStore.getState();
     const maxContextTokens = settings.maxTotalTokens ?? 200_000;
     const prd = await useTaskModeStore
       .getState()
       .generatePrd(
-        history,
+        undefined,
         maxContextTokens,
         prdResolved.provider || undefined,
         prdResolved.model || undefined,

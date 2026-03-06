@@ -10,10 +10,6 @@ const coordinatorMocks = vi.hoisted(() => ({
   submitWorkflowInputWithTracking: vi.fn(),
 }));
 
-vi.mock('../../lib/contextBridge', () => ({
-  buildConversationHistory: vi.fn(() => []),
-}));
-
 vi.mock('../../store/simpleWorkflowCoordinator', () => ({
   startModeWithCompensation: (...args: unknown[]) => coordinatorMocks.startModeWithCompensation(...args),
   submitWorkflowInputWithTracking: (...args: unknown[]) => coordinatorMocks.submitWorkflowInputWithTracking(...args),
@@ -22,6 +18,9 @@ vi.mock('../../store/simpleWorkflowCoordinator', () => ({
 function createWorkflowSession(mode: 'chat' | 'task' | 'plan'): WorkflowSession {
   return {
     sessionId: `session-${mode}`,
+    sessionKind: 'simple_root',
+    displayTitle: `Session ${mode}`,
+    workspacePath: '/tmp/project',
     status: 'active',
     activeMode: mode,
     modeSnapshots: {
@@ -36,6 +35,15 @@ function createWorkflowSession(mode: 'chat' | 'task' | 'plan'): WorkflowSession 
       metadata: {},
     },
     linkedModeSessions: {},
+    backgroundState: 'foreground',
+    contextLedger: {
+      conversationTurnCount: 0,
+      artifactRefCount: 0,
+      contextSourceKinds: [],
+      lastCompactionAt: null,
+      ledgerVersion: 1,
+    },
+    modeRuntimeMeta: {},
     lastError: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -70,6 +78,7 @@ function createBaseParams() {
     hasStructuredPlanClarifyQuestion: false,
     linkWorkflowKernelModeSession: vi.fn().mockResolvedValue(createWorkflowSession('task')),
     cancelWorkflowKernelOperation: vi.fn().mockResolvedValue(createWorkflowSession('task')),
+    appendWorkflowKernelContextItems: vi.fn().mockResolvedValue(createWorkflowSession('chat')),
     transitionAndSubmitWorkflowKernelInput: vi.fn().mockResolvedValue(createWorkflowSession('task')) as unknown as (
       targetMode: 'chat' | 'task' | 'plan',
       intent: UserInputIntent,

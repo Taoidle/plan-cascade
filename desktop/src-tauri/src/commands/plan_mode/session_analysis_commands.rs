@@ -38,6 +38,7 @@ pub async fn enter_plan_mode(
         step_states: HashMap::new(),
         step_attempts: HashMap::new(),
         progress: None,
+        execution_resume_payload: None,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
     let session_id = session.session_id.clone();
@@ -99,6 +100,7 @@ pub async fn enter_plan_mode(
             let plan_context = build_plan_conversation_context(
                 &app_state,
                 &knowledge_state,
+                kernel_state.inner(),
                 project_path.as_deref(),
                 Some(session_id.as_str()),
                 conversation_context.as_deref(),
@@ -277,6 +279,7 @@ pub async fn submit_plan_clarification(
             let plan_context = build_plan_conversation_context(
                 &app_state,
                 &knowledge_state,
+                kernel_state.inner(),
                 project_path.as_deref(),
                 Some(session_id.as_str()),
                 conversation_context.as_deref(),
@@ -394,15 +397,14 @@ mod tests {
             .await
             .expect("app state should initialize");
 
-        let (provider, model) = resolve_plan_provider_and_model(
-            Some("openai".to_string()),
-            None,
-            &app_state,
-        )
-        .await;
+        let (provider, model) =
+            resolve_plan_provider_and_model(Some("openai".to_string()), None, &app_state).await;
 
         assert_eq!(provider, "openai");
-        assert!(!model.trim().is_empty(), "resolved model should not be empty");
+        assert!(
+            !model.trim().is_empty(),
+            "resolved model should not be empty"
+        );
     }
 
     #[tokio::test]
@@ -415,7 +417,13 @@ mod tests {
 
         let (provider, model) = resolve_plan_provider_and_model(None, None, &app_state).await;
 
-        assert!(!provider.trim().is_empty(), "resolved provider should not be empty");
-        assert!(!model.trim().is_empty(), "resolved model should not be empty");
+        assert!(
+            !provider.trim().is_empty(),
+            "resolved provider should not be empty"
+        );
+        assert!(
+            !model.trim().is_empty(),
+            "resolved model should not be empty"
+        );
     }
 }

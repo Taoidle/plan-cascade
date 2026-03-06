@@ -4,12 +4,16 @@
 //! Runs steps in parallel within each batch using tokio tasks.
 
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
+use serde_json::{json, Value};
+use tauri::{Emitter, Manager};
 use tokio::sync::{mpsc, RwLock, Semaphore};
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
@@ -28,14 +32,39 @@ use crate::services::orchestrator::{OrchestratorConfig, OrchestratorService};
 use crate::services::skills::model::SkillMatch;
 use crate::services::streaming::UnifiedStreamEvent;
 use crate::services::tools::definitions::get_tool_definitions_from_registry;
+use crate::services::workflow_kernel::{
+    WorkflowKernelState, WorkflowMode, WorkflowModeTranscriptUpdatedEvent,
+    WorkflowSessionCatalogUpdatedEvent, WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL,
+    WORKFLOW_SESSION_CATALOG_UPDATED_CHANNEL,
+};
 use crate::utils::error::{AppError, AppResult};
 
 use super::adapter::DomainAdapter;
 use super::types::{
     OutputFormat, Plan, PlanExecutionProgress, PlanExecutionReport, PlanModeProgressEvent,
-    PlanRetryStats, StepExecutionState, StepOutput, StepOutputQualityState, PLAN_MODE_EVENT_CHANNEL,
+    PlanRetryStats, StepExecutionState, StepOutput, StepOutputQualityState,
+    PLAN_MODE_EVENT_CHANNEL,
 };
 use super::validator::{all_criteria_met, validate_step_output};
+
+#[derive(Debug, Clone, Default)]
+pub struct PlanExecutionResumeState {
+    pub step_outputs: HashMap<String, StepOutput>,
+    pub step_states: HashMap<String, StepExecutionState>,
+    pub step_attempts: HashMap<String, usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PlanExecutionCheckpoint {
+    pub step_outputs: HashMap<String, StepOutput>,
+    pub step_states: HashMap<String, StepExecutionState>,
+    pub step_attempts: HashMap<String, usize>,
+    pub current_batch: usize,
+    pub total_batches: usize,
+}
+
+pub type PlanExecutionProgressCallback =
+    Arc<dyn Fn(PlanExecutionCheckpoint) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 /// Configuration for step execution.
 #[derive(Debug, Clone)]
@@ -177,6 +206,8 @@ pub async fn execute_plan(
     language_instruction: String,
     app_handle: tauri::AppHandle,
     cancellation_token: CancellationToken,
+    resume_state: Option<PlanExecutionResumeState>,
+    progress_callback: Option<PlanExecutionProgressCallback>,
 ) -> AppResult<(
     HashMap<String, StepOutput>,
     HashMap<String, StepExecutionState>,
@@ -184,32 +215,51 @@ pub async fn execute_plan(
 )> {
     adapter.before_execution(plan);
 
-    let step_outputs: Arc<RwLock<HashMap<String, StepOutput>>> =
-        Arc::new(RwLock::new(HashMap::new()));
-    let step_states: Arc<RwLock<HashMap<String, StepExecutionState>>> =
-        Arc::new(RwLock::new(HashMap::new()));
+    let mut restored_outputs = resume_state
+        .as_ref()
+        .map(|state| state.step_outputs.clone())
+        .unwrap_or_default();
+    let mut restored_states = resume_state
+        .as_ref()
+        .map(|state| state.step_states.clone())
+        .unwrap_or_default();
+    let restored_attempts = resume_state
+        .as_ref()
+        .map(|state| state.step_attempts.clone())
+        .unwrap_or_default();
 
-    // Initialize all steps as pending
-    {
-        let mut states = step_states.write().await;
-        for step in &plan.steps {
-            states.insert(step.id.clone(), StepExecutionState::Pending);
-        }
+    restored_outputs.retain(|step_id, _| plan.steps.iter().any(|step| step.id == *step_id));
+    for step in &plan.steps {
+        restored_states
+            .entry(step.id.clone())
+            .and_modify(|state| {
+                if !matches!(state, StepExecutionState::Completed { .. }) {
+                    *state = StepExecutionState::Pending;
+                }
+            })
+            .or_insert(StepExecutionState::Pending);
     }
+
+    let step_outputs: Arc<RwLock<HashMap<String, StepOutput>>> =
+        Arc::new(RwLock::new(restored_outputs));
+    let step_states: Arc<RwLock<HashMap<String, StepExecutionState>>> =
+        Arc::new(RwLock::new(restored_states));
 
     let total_batches = plan.batches.len();
     let total_steps = plan.steps.len().max(1);
     let semaphore = Arc::new(Semaphore::new(config.max_parallel));
     let run_id = uuid::Uuid::new_v4().to_string();
     let event_seq = Arc::new(AtomicU64::new(1));
-    let step_attempts: Arc<RwLock<HashMap<String, usize>>> = Arc::new(RwLock::new(HashMap::new()));
+    let step_attempts: Arc<RwLock<HashMap<String, usize>>> =
+        Arc::new(RwLock::new(restored_attempts));
 
     let step_map: HashMap<String, &super::types::PlanStep> =
         plan.steps.iter().map(|s| (s.id.clone(), s)).collect();
     let mut blocked_reason: Option<String> = None;
     let mut cancellation_event_emitted = false;
     let mut last_batch_index = 0usize;
-    let mut failure_fingerprints: HashMap<String, (FailureCategory, String, usize)> = HashMap::new();
+    let mut failure_fingerprints: HashMap<String, (FailureCategory, String, usize)> =
+        HashMap::new();
     let mut max_iteration_strategy_retries: HashMap<String, usize> = HashMap::new();
 
     for (batch_idx, batch) in plan.batches.iter().enumerate() {
@@ -272,38 +322,63 @@ pub async fn execute_plan(
             event_seq.as_ref(),
         );
 
-        execute_batch_round(BatchRoundRequest {
-            session_id,
-            batch_index: batch_idx,
-            total_batches,
-            total_steps,
-            target_step_ids: batch.step_ids.clone(),
-            step_map: &step_map,
-            plan,
-            adapter: adapter.clone(),
-            provider: provider.clone(),
-            runtime: runtime.clone(),
-            step_outputs: step_outputs.clone(),
-            step_states: step_states.clone(),
-            semaphore: semaphore.clone(),
-            config: config.clone(),
-            shared_context: shared_context.clone(),
-            language_instruction: language_instruction.clone(),
-            app_handle: app_handle.clone(),
-            cancellation_token: cancellation_token.clone(),
-            run_id: run_id.clone(),
-            event_seq: event_seq.clone(),
-            step_attempts: step_attempts.clone(),
-        })
-        .await;
+        let batch_step_ids = {
+            let states = step_states.read().await;
+            batch
+                .step_ids
+                .iter()
+                .filter(|step_id| {
+                    !matches!(
+                        states.get(step_id.as_str()),
+                        Some(StepExecutionState::Completed { .. })
+                    )
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        };
 
-        let mut failed_in_batch = collect_failed_steps_for_batch(&step_states, &batch.step_ids).await;
-        update_failure_streaks_for_batch(
-            &step_states,
-            &failed_in_batch,
-            &mut failure_fingerprints,
-        )
-        .await;
+        if !batch_step_ids.is_empty() {
+            execute_batch_round(BatchRoundRequest {
+                session_id,
+                batch_index: batch_idx,
+                total_batches,
+                total_steps,
+                target_step_ids: batch_step_ids,
+                step_map: &step_map,
+                plan,
+                adapter: adapter.clone(),
+                provider: provider.clone(),
+                runtime: runtime.clone(),
+                step_outputs: step_outputs.clone(),
+                step_states: step_states.clone(),
+                semaphore: semaphore.clone(),
+                config: config.clone(),
+                shared_context: shared_context.clone(),
+                language_instruction: language_instruction.clone(),
+                app_handle: app_handle.clone(),
+                cancellation_token: cancellation_token.clone(),
+                run_id: run_id.clone(),
+                event_seq: event_seq.clone(),
+                step_attempts: step_attempts.clone(),
+            })
+            .await;
+        }
+
+        if let Some(callback) = progress_callback.as_ref() {
+            callback(PlanExecutionCheckpoint {
+                step_outputs: step_outputs.read().await.clone(),
+                step_states: step_states.read().await.clone(),
+                step_attempts: step_attempts.read().await.clone(),
+                current_batch: batch_idx,
+                total_batches,
+            })
+            .await;
+        }
+
+        let mut failed_in_batch =
+            collect_failed_steps_for_batch(&step_states, &batch.step_ids).await;
+        update_failure_streaks_for_batch(&step_states, &failed_in_batch, &mut failure_fingerprints)
+            .await;
         if failed_in_batch.is_empty() {
             continue;
         }
@@ -340,8 +415,7 @@ pub async fn execute_plan(
                     if already_used >= 1 || attempts >= 2 {
                         continue;
                     }
-                    max_iteration_strategy_retries
-                        .insert(step_id.clone(), already_used + 1);
+                    max_iteration_strategy_retries.insert(step_id.clone(), already_used + 1);
                 }
                 retryable_steps.push(step_id.clone());
                 let progress_pct = {
@@ -474,7 +548,11 @@ pub async fn execute_plan(
         );
     }
     if !cancellation_token.is_cancelled() {
-        let terminal_state = if blocked_reason.is_some() { "failed" } else { "completed" };
+        let terminal_state = if blocked_reason.is_some() {
+            "failed"
+        } else {
+            "completed"
+        };
         let terminal_report = build_terminal_report(
             session_id,
             plan,
@@ -649,8 +727,7 @@ async fn execute_batch_round(request: BatchRoundRequest<'_>) {
                 cfg.max_total_dep_chars,
             );
             let step_max_iterations = compute_step_iteration_limit(&step, cfg.max_step_iterations);
-            let retry_failure_category =
-                retry_feedback.as_deref().map(classify_failure_reason);
+            let retry_failure_category = retry_feedback.as_deref().map(classify_failure_reason);
 
             match execute_single_step(
                 &step,
@@ -684,10 +761,10 @@ async fn execute_batch_round(request: BatchRoundRequest<'_>) {
                     )
                     .await;
 
-                    if let Some(reason) =
-                        detect_incomplete_output_reason(&step, &output, &results)
+                    if let Some(reason) = detect_incomplete_output_reason(&step, &output, &results)
                     {
-                        let category = classify_failure_reason(&format!("Step output incomplete: {reason}"));
+                        let category =
+                            classify_failure_reason(&format!("Step output incomplete: {reason}"));
                         output.quality_state = StepOutputQualityState::Incomplete;
                         output.incomplete_reason = Some(reason.clone());
                         output.error_code = Some(category.as_error_code().to_string());
@@ -819,10 +896,7 @@ async fn execute_batch_round(request: BatchRoundRequest<'_>) {
                             &reason,
                             pct,
                         )
-                        .with_attempt_metadata(
-                            Some(attempt_count),
-                            Some(category.as_error_code()),
-                        ),
+                        .with_attempt_metadata(Some(attempt_count), Some(category.as_error_code())),
                         &run,
                         seq.as_ref(),
                     );
@@ -1054,13 +1128,8 @@ pub async fn retry_single_step(
             }
 
             output.attempt_count = 1;
-            let criteria = validate_step_output(
-                step,
-                &mut output,
-                adapter.clone(),
-                provider.clone(),
-            )
-            .await;
+            let criteria =
+                validate_step_output(step, &mut output, adapter.clone(), provider.clone()).await;
             if let Some(reason) = detect_incomplete_output_reason(step, &output, &criteria) {
                 let category =
                     classify_failure_reason(&format!("Step output incomplete: {reason}"));
@@ -1452,8 +1521,10 @@ fn build_next_actions(
 ) -> Vec<String> {
     if terminal_state == "completed" {
         return vec![
-            "Review the generated outputs and consolidate them into final deliverables.".to_string(),
-            "Open any listed artifacts and run domain-specific validation before publishing.".to_string(),
+            "Review the generated outputs and consolidate them into final deliverables."
+                .to_string(),
+            "Open any listed artifacts and run domain-specific validation before publishing."
+                .to_string(),
         ];
     }
     if terminal_state == "cancelled" {
@@ -1469,7 +1540,10 @@ fn build_next_actions(
             .to_string(),
     ];
     if !failure_reasons.is_empty() {
-        actions.push("Inspect failure reasons in the report before re-executing subsequent batches.".to_string());
+        actions.push(
+            "Inspect failure reasons in the report before re-executing subsequent batches."
+                .to_string(),
+        );
     }
     actions
 }
@@ -1744,10 +1818,7 @@ fn detect_incomplete_output_reason(
     }
 
     let stripped_preface = strip_leading_narration_preface(primary);
-    let candidate = stripped_preface
-        .as_deref()
-        .unwrap_or(primary)
-        .trim();
+    let candidate = stripped_preface.as_deref().unwrap_or(primary).trim();
     if candidate.is_empty() {
         return Some("Output is an execution narration rather than a completed result".to_string());
     }
@@ -1755,9 +1826,11 @@ fn detect_incomplete_output_reason(
     let min_expected_length = dynamic_min_expected_length(step, candidate);
     let has_structured_result = content_looks_structured(candidate);
     let has_artifact_evidence = has_delivery_evidence(candidate);
-    let has_substantial_result =
-        candidate.chars().count() >= min_expected_length || has_structured_result || has_artifact_evidence;
-    let starts_with_pending = text_describes_pending_action(candidate) || starts_with_pending_narration(candidate);
+    let has_substantial_result = candidate.chars().count() >= min_expected_length
+        || has_structured_result
+        || has_artifact_evidence;
+    let starts_with_pending =
+        text_describes_pending_action(candidate) || starts_with_pending_narration(candidate);
 
     if starts_with_pending && stripped_preface.is_none() && !has_substantial_result {
         return Some("Output is an execution narration rather than a completed result".to_string());
@@ -1780,10 +1853,7 @@ fn detect_incomplete_output_reason(
             .filter(|result| !result.met)
             .map(|result| result.criterion.clone())
             .collect();
-        return Some(format!(
-            "Completion criteria unmet: {}",
-            unmet.join("; ")
-        ));
+        return Some(format!("Completion criteria unmet: {}", unmet.join("; ")));
     }
 
     None
@@ -1847,7 +1917,8 @@ fn compute_step_iteration_limit(step: &super::types::PlanStep, global_max: u32) 
     } else {
         3
     };
-    let score = (step.completion_criteria.len() * 2) + step.dependencies.len() + expected_output_len_bucket;
+    let score =
+        (step.completion_criteria.len() * 2) + step.dependencies.len() + expected_output_len_bucket;
     let recommended = if score <= 4 {
         24
     } else if score <= 8 {
@@ -1921,7 +1992,10 @@ fn strip_leading_narration_preface(content: &str) -> Option<String> {
 }
 
 fn content_looks_structured(content: &str) -> bool {
-    let non_empty_lines = content.lines().filter(|line| !line.trim().is_empty()).count();
+    let non_empty_lines = content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count();
     non_empty_lines >= 3
         || content.contains('\n')
             && (content.contains("- ")
@@ -2001,8 +2075,11 @@ fn compute_retry_stats(
 
 /// Emit a plan mode progress event.
 fn emit_event(handle: &tauri::AppHandle, event: PlanModeProgressEvent) {
-    use tauri::Emitter;
     let _ = handle.emit(PLAN_MODE_EVENT_CHANNEL, &event);
+    let app_handle = handle.clone();
+    tokio::spawn(async move {
+        append_plan_progress_transcript(&app_handle, &event).await;
+    });
 }
 
 fn emit_event_with_metadata(
@@ -2020,6 +2097,196 @@ fn emit_event_with_metadata(
 
 fn next_event_seq(counter: &AtomicU64) -> u64 {
     counter.fetch_add(1, Ordering::Relaxed)
+}
+
+fn transcript_timestamp() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn build_card_transcript_line(card_type: &str, data: Value, interactive: bool) -> Value {
+    let timestamp = transcript_timestamp();
+    let card_payload = json!({
+        "cardType": card_type,
+        "cardId": format!("{card_type}-{timestamp}"),
+        "data": data,
+        "interactive": interactive,
+    });
+    let content = serde_json::to_string(&card_payload).unwrap_or_else(|_| "{}".to_string());
+    json!({
+        "id": timestamp,
+        "type": "card",
+        "content": content,
+        "timestamp": timestamp,
+        "cardPayload": card_payload,
+    })
+}
+
+fn output_format_label(format: &OutputFormat) -> &'static str {
+    match format {
+        OutputFormat::Text => "text",
+        OutputFormat::Markdown => "markdown",
+        OutputFormat::Json => "json",
+        OutputFormat::Html => "html",
+        OutputFormat::Code => "code",
+    }
+}
+
+fn build_plan_progress_transcript_lines(event: &PlanModeProgressEvent) -> Vec<Value> {
+    match event.event_type.as_str() {
+        "batch_started" | "step_started" | "step_failed" | "step_retrying" | "batch_blocked" => vec![
+            build_card_transcript_line(
+                "plan_step_update",
+                json!({
+                    "eventType": event.event_type,
+                    "currentBatch": event.current_batch,
+                    "totalBatches": event.total_batches,
+                    "stepId": event.step_id,
+                    "stepTitle": event.step_id,
+                    "stepStatus": event.step_status,
+                    "progressPct": event.progress_pct,
+                    "error": event.error,
+                    "attemptCount": event.attempt_count,
+                    "errorCode": event.error_code,
+                    "diagnostics": event.step_output.as_ref().map(|output| json!({
+                        "summary": output.summary,
+                        "content": output.content,
+                        "fullContent": output.full_content,
+                        "format": output_format_label(&output.format),
+                        "truncated": output.truncated,
+                        "originalLength": output.original_length,
+                        "shownLength": output.shown_length,
+                        "qualityState": match output.quality_state {
+                            StepOutputQualityState::Complete => "complete",
+                            StepOutputQualityState::Incomplete => "incomplete",
+                        },
+                        "incompleteReason": output.incomplete_reason,
+                        "attemptCount": output.attempt_count,
+                        "toolEvidence": output.tool_evidence,
+                        "iterations": output.iterations,
+                        "stopReason": output.stop_reason,
+                        "errorCode": output.error_code,
+                    })),
+                }),
+                false,
+            ),
+        ],
+        "step_completed" => {
+            let mut lines = vec![build_card_transcript_line(
+                "plan_step_update",
+                json!({
+                    "eventType": "step_completed",
+                    "currentBatch": event.current_batch,
+                    "totalBatches": event.total_batches,
+                    "stepId": event.step_id,
+                    "stepTitle": event.step_id,
+                    "stepStatus": event.step_status,
+                    "progressPct": event.progress_pct,
+                    "error": event.error,
+                    "attemptCount": event.attempt_count,
+                    "errorCode": event.error_code,
+                }),
+                false,
+            )];
+            if let Some(output) = event.step_output.as_ref() {
+                let criteria_met: Vec<Value> = output
+                    .criteria_met
+                    .iter()
+                    .map(|criterion| {
+                        json!({
+                            "criterion": criterion.criterion,
+                            "met": criterion.met,
+                            "explanation": criterion.explanation,
+                        })
+                    })
+                    .collect();
+                lines.push(build_card_transcript_line(
+                    "plan_step_output",
+                    json!({
+                        "stepId": output.step_id,
+                        "stepTitle": output.step_id,
+                        "summary": output.summary,
+                        "content": output.content,
+                        "fullContent": output.full_content,
+                        "format": output_format_label(&output.format),
+                        "truncated": output.truncated,
+                        "originalLength": output.original_length,
+                        "shownLength": output.shown_length,
+                        "artifacts": output.artifacts,
+                        "qualityState": match output.quality_state {
+                            StepOutputQualityState::Complete => "complete",
+                            StepOutputQualityState::Incomplete => "incomplete",
+                        },
+                        "incompleteReason": output.incomplete_reason,
+                        "attemptCount": output.attempt_count,
+                        "toolEvidence": output.tool_evidence,
+                        "iterations": output.iterations,
+                        "stopReason": output.stop_reason,
+                        "errorCode": output.error_code,
+                        "criteriaMet": criteria_met,
+                    }),
+                    false,
+                ));
+            }
+            lines
+        }
+        "execution_cancelled" => vec![build_card_transcript_line(
+            "workflow_info",
+            json!({
+                "message": "Plan execution cancelled.",
+                "level": "warning",
+            }),
+            false,
+        )],
+        _ => Vec::new(),
+    }
+}
+
+async fn append_plan_progress_transcript(app: &tauri::AppHandle, event: &PlanModeProgressEvent) {
+    let kernel_state = app.state::<WorkflowKernelState>().inner().clone();
+    let lines = build_plan_progress_transcript_lines(event);
+    if lines.is_empty() {
+        return;
+    }
+
+    let kernel_session_ids = kernel_state
+        .linked_kernel_sessions_for_mode_session(WorkflowMode::Plan, &event.session_id)
+        .await;
+    if kernel_session_ids.is_empty() {
+        return;
+    }
+
+    for kernel_session_id in &kernel_session_ids {
+        if let Ok(transcript) = kernel_state
+            .append_mode_transcript(kernel_session_id, WorkflowMode::Plan, lines.clone())
+            .await
+        {
+            let _ = app.emit(
+                WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL,
+                WorkflowModeTranscriptUpdatedEvent {
+                    session_id: transcript.session_id,
+                    mode: transcript.mode,
+                    revision: transcript.revision,
+                    appended_lines: lines.clone(),
+                    replace_from_line_id: None,
+                    source: "plan_step_executor.progress_event".to_string(),
+                },
+            );
+        }
+    }
+
+    if let Ok(catalog_state) = kernel_state.get_session_catalog_state().await {
+        let _ = app.emit(
+            WORKFLOW_SESSION_CATALOG_UPDATED_CHANNEL,
+            WorkflowSessionCatalogUpdatedEvent {
+                active_session_id: catalog_state.active_session_id,
+                sessions: catalog_state.sessions,
+                source: "plan_step_executor.progress_event".to_string(),
+            },
+        );
+    }
 }
 
 fn emit_step_output_diagnostic_log(
@@ -2106,7 +2373,9 @@ fn extract_artifacts(content: &str) -> Vec<String> {
         if ch == '`' {
             if in_tick {
                 let candidate = current.trim();
-                if is_artifact_candidate(candidate) && !artifacts.iter().any(|value| value == candidate) {
+                if is_artifact_candidate(candidate)
+                    && !artifacts.iter().any(|value| value == candidate)
+                {
                     artifacts.push(candidate.to_string());
                 }
                 current.clear();
@@ -2166,13 +2435,13 @@ fn is_artifact_candidate(candidate: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use crate::services::llm::types::{
         LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message, ProviderConfig, StopReason,
         ToolDefinition, UsageStats,
     };
     use crate::services::plan_mode::adapters::general::GeneralAdapter;
     use crate::services::plan_mode::types::StepPriority;
+    use async_trait::async_trait;
     use plan_cascade_core::streaming::UnifiedStreamEvent;
     use std::collections::HashMap as StdHashMap;
     use tokio::sync::mpsc;
@@ -2409,7 +2678,9 @@ mod tests {
             Some(StepExecutionState::Completed { .. })
         ));
         assert_eq!(
-            outputs.get("s1").and_then(|output| output.content.split('\n').next()),
+            outputs
+                .get("s1")
+                .and_then(|output| output.content.split('\n').next()),
             Some("Result summary:")
         );
     }

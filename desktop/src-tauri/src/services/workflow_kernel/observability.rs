@@ -128,11 +128,14 @@ pub fn record_interactive_action_failure(
         &format!("{}.{}", INTERACTIVE_ACTION_FAIL_TOTAL_KEY, suffix),
         1,
     )?;
-    upsert_interactive_action_index(db, &InteractiveActionFailureLabel {
-        card,
-        action,
-        error_code,
-    })?;
+    upsert_interactive_action_index(
+        db,
+        &InteractiveActionFailureLabel {
+            card,
+            action,
+            error_code,
+        },
+    )?;
     write_latest_failure(db, record)
 }
 
@@ -227,10 +230,11 @@ fn upsert_interactive_action_index(
     label: &InteractiveActionFailureLabel,
 ) -> AppResult<()> {
     let mut labels = read_interactive_action_index(db)?;
-    if labels
-        .iter()
-        .any(|item| item.card == label.card && item.action == label.action && item.error_code == label.error_code)
-    {
+    if labels.iter().any(|item| {
+        item.card == label.card
+            && item.action == label.action
+            && item.error_code == label.error_code
+    }) {
         return Ok(());
     }
     labels.push(label.clone());
@@ -357,7 +361,10 @@ mod tests {
         assert_eq!(snapshot.metrics.interactive_action_fail_total, 1);
         assert_eq!(snapshot.interactive_action_fail_breakdown.len(), 1);
         assert_eq!(
-            snapshot.latest_failure.as_ref().map(|failure| failure.action.clone()),
+            snapshot
+                .latest_failure
+                .as_ref()
+                .map(|failure| failure.action.clone()),
             Some("approve_prd".to_string())
         );
     }

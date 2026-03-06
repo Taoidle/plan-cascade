@@ -53,7 +53,7 @@ export function isKernelRuntimeBusy(runtime: Pick<KernelRuntimeBase, 'phase' | '
 export function selectKernelChatRuntime(session: WorkflowSession | null): KernelChatRuntime {
   return {
     phase: session?.modeSnapshots.chat?.phase ?? 'ready',
-    linkedSessionId: null,
+    linkedSessionId: session?.linkedModeSessions?.chat ?? null,
     isActive: isWorkflowModeActive({
       mode: 'chat',
       currentMode: session?.activeMode ?? 'chat',

@@ -273,6 +273,27 @@ export interface SessionSnapshot {
   updatedAt?: number;
 }
 
+export interface ExecutionRuntimeHandle {
+  id: string;
+  source: 'claude' | 'standalone';
+  rawSessionId: string;
+  rootSessionId: string | null;
+  mode: 'chat';
+  status: ExecutionStatus;
+  streamingOutput: StreamLine[];
+  streamLineCounter: number;
+  currentTurnStartLineId: number;
+  standaloneTurns: StandaloneTurn[];
+  latestUsage: BackendUsageStats | null;
+  sessionUsageTotals: BackendUsageStats | null;
+  startedAt: number | null;
+  workspacePath: string | null;
+  llmBackend: string;
+  llmProvider: string;
+  llmModel: string;
+  updatedAt: number;
+}
+
 export interface ExecutionState {
   /** Current execution status */
   status: ExecutionStatus;
@@ -385,16 +406,22 @@ export interface ExecutionState {
   /** File attachments pending to be sent with the next message */
   attachments: FileAttachmentData[];
 
-  /** Background session snapshots keyed by session ID */
+  /** Legacy session-tree only: background session snapshots keyed by session ID */
   backgroundSessions: Record<string, SessionSnapshot>;
 
-  /** Currently active foreground session ID (for tracking which bg session was swapped in) */
+  /** Runtime handles used by Simple chat park/restore */
+  runtimeRegistry: Record<string, ExecutionRuntimeHandle>;
+
+  /** Active runtime handle for the current foreground chat adapter */
+  activeRuntimeHandleId: string | null;
+
+  /** Legacy session-tree only: currently active foreground session ID */
   activeSessionId: string | null;
 
   /** Parent session ID of the current foreground session (set when created via fork) */
   foregroundParentSessionId: string | null;
 
-  /** bg session ID representing the foreground in the tree (ghost). null if foreground was created fresh (fork/new). */
+  /** Legacy session-tree only: bg session ID representing the foreground ghost in the tree */
   foregroundBgId: string | null;
 
   /** Source history item ID for the current foreground (used for de-dup and switch heuristics). */
@@ -412,9 +439,6 @@ export interface ExecutionState {
   /** Active agent name for display */
   activeAgentName: string | null;
 
-  /** Pending task context to inject into the next sendFollowUp (Claude Code backend) */
-  _pendingTaskContext: string | null;
-
   // Actions
   /** Add a file attachment */
   addAttachment: (file: FileAttachmentData) => void;
@@ -425,8 +449,21 @@ export interface ExecutionState {
   /** Clear all file attachments */
   clearAttachments: () => void;
 
-  /** Snapshot the current foreground session into backgroundSessions and reset foreground */
+  /** Legacy session-tree only: snapshot the current foreground session into backgroundSessions and reset foreground */
   backgroundCurrentSession: () => void;
+
+  /** Park the current foreground chat runtime into runtimeRegistry and reset foreground */
+  parkForegroundRuntime: () => string | null;
+
+  /** Restore the foreground execution state for a linked chat runtime */
+  restoreForegroundChatRuntime: (params: {
+    source: 'claude' | 'standalone';
+    rawSessionId: string;
+    fallbackLines: StreamLine[];
+    title?: string | null;
+    phase?: string | null;
+    lastError?: string | null;
+  }) => void;
 
   /** Swap the foreground session with a background session by ID */
   switchToSession: (id: string) => void;
@@ -538,12 +575,6 @@ export interface ExecutionState {
 
   /** Append a synthetic StandaloneTurn (used by contextBridge for Task→Chat writeback) */
   appendStandaloneTurn: (turn: StandaloneTurn) => void;
-
-  /** Set pending task context to inject into next sendFollowUp (Claude Code backend) */
-  setPendingTaskContext: (context: string) => void;
-
-  /** Clear pending task context */
-  clearPendingTaskContext: () => void;
 
   /** Fork conversation at a turn: background original session, create truncated foreground copy */
   forkSessionAtTurn: (userLineId: number) => void;

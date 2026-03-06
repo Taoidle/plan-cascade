@@ -30,7 +30,7 @@ use crate::services::task_mode::context_provider::{
     ContextSourceConfig, MemorySourceConfig, SkillsSourceConfig,
 };
 use crate::services::workflow_kernel::{
-    PlanClarificationSnapshot, WorkflowKernelState, WorkflowKernelUpdatedEvent,
+    PlanClarificationSnapshot, WorkflowKernelState, WorkflowKernelUpdatedEvent, WorkflowMode,
     WORKFLOW_KERNEL_UPDATED_CHANNEL,
 };
 use crate::state::AppState;
@@ -111,10 +111,14 @@ impl PlanModeState {
             version: PLAN_MODE_SESSION_RECORD_VERSION,
             session: session.clone(),
         };
-        let encoded =
-            serde_json::to_vec_pretty(&record).map_err(|e| format!("Failed to encode plan mode session: {e}"))?;
-        fs::write(self.session_file_path(&session.session_id), encoded)
-            .map_err(|e| format!("Failed to persist plan mode session '{}': {e}", session.session_id))
+        let encoded = serde_json::to_vec_pretty(&record)
+            .map_err(|e| format!("Failed to encode plan mode session: {e}"))?;
+        fs::write(self.session_file_path(&session.session_id), encoded).map_err(|e| {
+            format!(
+                "Failed to persist plan mode session '{}': {e}",
+                session.session_id
+            )
+        })
     }
 
     pub async fn store_session_snapshot(&self, session: PlanModeSession) -> Result<(), String> {
@@ -130,18 +134,23 @@ impl PlanModeState {
         if !path.exists() {
             return Ok(());
         }
-        fs::remove_file(path)
-            .map_err(|e| format!("Failed to delete persisted plan mode session '{session_id}': {e}"))
+        fs::remove_file(path).map_err(|e| {
+            format!("Failed to delete persisted plan mode session '{session_id}': {e}")
+        })
     }
 
-    async fn read_persisted_session(&self, session_id: &str) -> Result<Option<PlanModeSession>, String> {
+    async fn read_persisted_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<PlanModeSession>, String> {
         let path = self.session_file_path(session_id);
         if !path.exists() {
             return Ok(None);
         }
 
-        let raw = fs::read(&path)
-            .map_err(|e| format!("Failed to read persisted plan mode session '{session_id}': {e}"))?;
+        let raw = fs::read(&path).map_err(|e| {
+            format!("Failed to read persisted plan mode session '{session_id}': {e}")
+        })?;
         let record: PlanModeSessionRecordV1 = serde_json::from_slice(&raw)
             .map_err(|e| format!("Persisted plan mode session '{session_id}' is corrupted: {e}"))?;
         if record.version != PLAN_MODE_SESSION_RECORD_VERSION {
@@ -307,7 +316,13 @@ async fn sync_kernel_plan_snapshot_and_emit(
         }
     });
     let kernel_session_ids = kernel_state
-        .sync_plan_snapshot_by_linked_session(&session.session_id, phase, pending, running_step_id, None)
+        .sync_plan_snapshot_by_linked_session(
+            &session.session_id,
+            phase,
+            pending,
+            running_step_id,
+            None,
+        )
         .await
         .unwrap_or_default();
     emit_kernel_updates(app, kernel_state, &kernel_session_ids, source).await;
@@ -439,6 +454,18 @@ pub struct RetryPlanStepRequest {
     pub locale: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanExecutionResumePayload {
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub base_url: Option<String>,
+    pub project_path: Option<String>,
+    pub context_sources: Option<ContextSourceConfig>,
+    pub conversation_context: Option<String>,
+    pub locale: Option<String>,
+}
+
 // ============================================================================
 // Commands
 // ============================================================================
@@ -490,6 +517,7 @@ pub struct PlanContextBundle {
 async fn build_plan_conversation_context(
     app_state: &AppState,
     knowledge_state: &crate::commands::knowledge::KnowledgeState,
+    kernel_state: &WorkflowKernelState,
     project_path: Option<&str>,
     session_id: Option<&str>,
     conversation_context: Option<&str>,
@@ -500,7 +528,22 @@ async fn build_plan_conversation_context(
     let mut bundle = PlanContextBundle::default();
     let mut sections = Vec::new();
 
-    if let Some(ctx) = conversation_context {
+    let kernel_conversation_context = if conversation_context
+        .map(str::trim)
+        .filter(|ctx| !ctx.is_empty())
+        .is_some()
+    {
+        None
+    } else if let Some(mode_session_id) = session_id {
+        kernel_state
+            .handoff_context_for_mode_session(WorkflowMode::Plan, mode_session_id)
+            .await
+            .map(|handoff| render_plan_handoff_context(&handoff))
+    } else {
+        None
+    };
+
+    if let Some(ctx) = conversation_context.or(kernel_conversation_context.as_deref()) {
         let trimmed = ctx.trim();
         if !trimmed.is_empty() {
             sections.push(trimmed.to_string());
@@ -594,6 +637,42 @@ async fn build_plan_conversation_context(
 
     bundle.rendered_context = sections.join("\n\n");
     bundle
+}
+
+fn render_plan_handoff_context(handoff: &crate::services::workflow_kernel::HandoffContextBundle) -> String {
+    let mut sections = Vec::new();
+
+    let conversation_section = handoff
+        .conversation_context
+        .iter()
+        .map(|turn| format!("user: {}\nassistant: {}", turn.user.trim(), turn.assistant.trim()))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    if !conversation_section.trim().is_empty() {
+        sections.push(conversation_section);
+    }
+
+    if !handoff.artifact_refs.is_empty() {
+        sections.push(format!(
+            "[artifact-refs]\n{}",
+            handoff.artifact_refs.join("\n")
+        ));
+    }
+
+    if !handoff.context_sources.is_empty() {
+        sections.push(format!(
+            "[context-sources]\n{}",
+            handoff.context_sources.join("\n")
+        ));
+    }
+
+    if !handoff.metadata.is_empty() {
+        if let Ok(metadata) = serde_json::to_string_pretty(&handoff.metadata) {
+            sections.push(format!("[handoff-metadata]\n{}", metadata));
+        }
+    }
+
+    sections.join("\n\n")
 }
 
 // ============================================================================
@@ -789,6 +868,7 @@ mod tests {
             step_states: HashMap::new(),
             step_attempts: HashMap::new(),
             progress: None,
+            execution_resume_payload: None,
             created_at: "2026-03-05T00:00:00Z".to_string(),
         }
     }

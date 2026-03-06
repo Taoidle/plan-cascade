@@ -2,19 +2,22 @@
 //!
 //! Unified command surface for Chat/Plan/Task workflow sessions.
 
+use crate::commands::plan_mode::{ApprovePlanRequest, PlanExecutionResumePayload};
+use crate::commands::task_mode::{ApproveTaskPrdRequest, TaskExecutionResumePayload};
 use crate::models::CommandResponse;
 use crate::services::plan_mode::types::{
     ClarificationInputType, PlanModePhase, PlanModeSession, StepExecutionState,
 };
 use crate::services::spec_interview::interview::InterviewSession;
 use crate::services::workflow_kernel::{
-    observability::{
-        self, WorkflowFailureRecordInput, WorkflowObservabilitySnapshot,
-    },
-    HandoffContextBundle, PlanClarificationSnapshot, PlanEditOperation, PlanSnapshotRehydrate,
-    TaskInterviewSnapshot, TaskSnapshotRehydrate, UserInputIntent, WorkflowKernelState,
-    WorkflowKernelUpdatedEvent, WorkflowMode, WorkflowSession, WorkflowSessionState,
-    WorkflowStatus, WORKFLOW_KERNEL_UPDATED_CHANNEL,
+    observability::{self, WorkflowFailureRecordInput, WorkflowObservabilitySnapshot},
+    HandoffContextBundle, ModeTranscriptPayload, PlanClarificationSnapshot, PlanEditOperation,
+    PlanSnapshotRehydrate, ResumeResult, TaskInterviewSnapshot, TaskSnapshotRehydrate,
+    UserInputIntent, WorkflowKernelState, WorkflowKernelUpdatedEvent, WorkflowMode,
+    WorkflowModeTranscriptUpdatedEvent, WorkflowSession, WorkflowSessionCatalogState,
+    WorkflowSessionCatalogUpdatedEvent, WorkflowSessionState, WorkflowStatus,
+    WORKFLOW_KERNEL_UPDATED_CHANNEL, WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL,
+    WORKFLOW_SESSION_CATALOG_UPDATED_CHANNEL,
 };
 use crate::{commands::plan_mode::PlanModeState, commands::spec_interview::SpecInterviewState};
 use crate::{commands::task_mode::TaskModeState, state::AppState};
@@ -46,6 +49,47 @@ fn emit_kernel_update(
     .map_err(|err| format!("Failed to emit workflow kernel update: {err}"))
 }
 
+async fn emit_session_catalog_update(
+    app: &tauri::AppHandle,
+    state: &WorkflowKernelState,
+    source: &str,
+) -> Result<(), String> {
+    let catalog_state = state.get_session_catalog_state().await?;
+    let payload = WorkflowSessionCatalogUpdatedEvent {
+        active_session_id: catalog_state.active_session_id,
+        sessions: catalog_state.sessions,
+        source: source.to_string(),
+    };
+    app.emit(WORKFLOW_SESSION_CATALOG_UPDATED_CHANNEL, payload)
+        .map_err(|err| format!("Failed to emit workflow session catalog update: {err}"))
+}
+
+fn build_mode_transcript_update(
+    transcript: &ModeTranscriptPayload,
+    source: &str,
+) -> WorkflowModeTranscriptUpdatedEvent {
+    WorkflowModeTranscriptUpdatedEvent {
+        session_id: transcript.session_id.clone(),
+        mode: transcript.mode,
+        revision: transcript.revision,
+        appended_lines: transcript.lines.clone(),
+        replace_from_line_id: Some(0),
+        source: source.to_string(),
+    }
+}
+
+fn emit_mode_transcript_update(
+    app: &tauri::AppHandle,
+    transcript: &ModeTranscriptPayload,
+    source: &str,
+) -> Result<(), String> {
+    app.emit(
+        WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL,
+        build_mode_transcript_update(transcript, source),
+    )
+    .map_err(|err| format!("Failed to emit workflow mode transcript update: {err}"))
+}
+
 fn workflow_mode_label(mode: WorkflowMode) -> &'static str {
     match mode {
         WorkflowMode::Chat => "chat",
@@ -56,9 +100,21 @@ fn workflow_mode_label(mode: WorkflowMode) -> &'static str {
 
 fn session_phase_for_mode(session: &WorkflowSession, mode: WorkflowMode) -> Option<String> {
     match mode {
-        WorkflowMode::Chat => session.mode_snapshots.chat.as_ref().map(|chat| chat.phase.clone()),
-        WorkflowMode::Plan => session.mode_snapshots.plan.as_ref().map(|plan| plan.phase.clone()),
-        WorkflowMode::Task => session.mode_snapshots.task.as_ref().map(|task| task.phase.clone()),
+        WorkflowMode::Chat => session
+            .mode_snapshots
+            .chat
+            .as_ref()
+            .map(|chat| chat.phase.clone()),
+        WorkflowMode::Plan => session
+            .mode_snapshots
+            .plan
+            .as_ref()
+            .map(|plan| plan.phase.clone()),
+        WorkflowMode::Task => session
+            .mode_snapshots
+            .task
+            .as_ref()
+            .map(|task| task.phase.clone()),
     }
 }
 
@@ -141,17 +197,18 @@ async fn link_mode_session_and_rehydrate(
                 .task
                 .as_ref()
                 .and_then(|task| task.interview_session_id.clone());
-            let pending_interview = if let (Some((spec_interview_state, app_state)), Some(interview_id)) =
-                (interview_context, interview_session_id.as_ref())
-            {
-                spec_interview_state
-                    .get_session_snapshot(interview_id, app_state)
-                    .await
-                    .as_ref()
-                    .and_then(map_task_interview_snapshot)
-            } else {
-                None
-            };
+            let pending_interview =
+                if let (Some((spec_interview_state, app_state)), Some(interview_id)) =
+                    (interview_context, interview_session_id.as_ref())
+                {
+                    spec_interview_state
+                        .get_session_snapshot(interview_id, app_state)
+                        .await
+                        .as_ref()
+                        .and_then(map_task_interview_snapshot)
+                } else {
+                    None
+                };
             let snapshot = map_task_session_to_rehydrate(
                 &task_session,
                 interview_session_id.clone(),
@@ -218,7 +275,9 @@ fn map_plan_input_type(input_type: &ClarificationInputType) -> (String, Vec<Stri
         ClarificationInputType::SingleSelect(options) => {
             ("single_select".to_string(), options.clone())
         }
-        ClarificationInputType::MultiSelect(options) => ("multi_select".to_string(), options.clone()),
+        ClarificationInputType::MultiSelect(options) => {
+            ("multi_select".to_string(), options.clone())
+        }
         ClarificationInputType::Boolean => ("boolean".to_string(), Vec::new()),
     }
 }
@@ -344,7 +403,9 @@ fn mark_plan_session_interrupted(session: &mut PlanModeSession) -> bool {
     true
 }
 
-fn mark_task_session_interrupted(session: &mut crate::commands::task_mode::TaskModeSession) -> bool {
+fn mark_task_session_interrupted(
+    session: &mut crate::commands::task_mode::TaskModeSession,
+) -> bool {
     if session.status != crate::commands::task_mode::TaskModeStatus::Executing {
         return false;
     }
@@ -371,7 +432,9 @@ pub struct WorkflowInteractiveActionFailureRecordRequest {
 }
 
 fn normalize_optional_value(value: Option<String>) -> Option<String> {
-    value.map(|item| item.trim().to_string()).filter(|item| !item.is_empty())
+    value
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
 }
 
 #[tauri::command]
@@ -391,7 +454,395 @@ pub async fn workflow_open_session(
                 "workflow_open_session",
             )
             .await;
+            let _ = emit_session_catalog_update(&app, state.inner(), "workflow_open_session").await;
             CommandResponse::ok(session)
+        }
+        Err(error) => CommandResponse::err(error),
+    })
+}
+
+#[tauri::command]
+pub async fn workflow_list_sessions(
+    state: tauri::State<'_, WorkflowKernelState>,
+) -> Result<
+    CommandResponse<Vec<crate::services::workflow_kernel::WorkflowSessionCatalogItem>>,
+    String,
+> {
+    let result = state.list_sessions().await;
+    Ok(match result {
+        Ok(sessions) => CommandResponse::ok(sessions),
+        Err(error) => CommandResponse::err(error),
+    })
+}
+
+#[tauri::command]
+pub async fn workflow_get_session_catalog_state(
+    state: tauri::State<'_, WorkflowKernelState>,
+) -> Result<CommandResponse<WorkflowSessionCatalogState>, String> {
+    let result = state.get_session_catalog_state().await;
+    Ok(match result {
+        Ok(catalog_state) => CommandResponse::ok(catalog_state),
+        Err(error) => CommandResponse::err(error),
+    })
+}
+
+#[tauri::command]
+pub async fn workflow_activate_session(
+    session_id: String,
+    state: tauri::State<'_, WorkflowKernelState>,
+    app: tauri::AppHandle,
+) -> Result<CommandResponse<WorkflowSessionState>, String> {
+    let result = state.activate_session(&session_id).await;
+    Ok(match result {
+        Ok(_) => match state.get_session_state(&session_id).await {
+            Ok(session_state) => {
+                let _ =
+                    emit_kernel_update(&app, session_state.clone(), "workflow_activate_session");
+                let _ =
+                    emit_session_catalog_update(&app, state.inner(), "workflow_activate_session")
+                        .await;
+                CommandResponse::ok(session_state)
+            }
+            Err(error) => CommandResponse::err(error),
+        },
+        Err(error) => CommandResponse::err(error),
+    })
+}
+
+#[tauri::command]
+pub async fn workflow_rename_session(
+    session_id: String,
+    display_title: String,
+    state: tauri::State<'_, WorkflowKernelState>,
+    app: tauri::AppHandle,
+) -> Result<CommandResponse<WorkflowSession>, String> {
+    let result = state.rename_session(&session_id, &display_title).await;
+    Ok(match result {
+        Ok(session) => {
+            if state.active_session_id().await.as_deref() == Some(session.session_id.as_str()) {
+                let _ = emit_kernel_update_for_session(
+                    &app,
+                    state.inner(),
+                    &session.session_id,
+                    "workflow_rename_session",
+                )
+                .await;
+            }
+            let _ =
+                emit_session_catalog_update(&app, state.inner(), "workflow_rename_session").await;
+            CommandResponse::ok(session)
+        }
+        Err(error) => CommandResponse::err(error),
+    })
+}
+
+#[tauri::command]
+pub async fn workflow_archive_session(
+    session_id: String,
+    state: tauri::State<'_, WorkflowKernelState>,
+    app: tauri::AppHandle,
+) -> Result<CommandResponse<WorkflowSessionCatalogState>, String> {
+    let result = state.archive_session(&session_id).await;
+    Ok(match result {
+        Ok(catalog_state) => {
+            if let Some(active_session_id) = catalog_state.active_session_id.as_deref() {
+                if let Ok(session_state) = state.get_session_state(active_session_id).await {
+                    let _ = emit_kernel_update(&app, session_state, "workflow_archive_session");
+                }
+            }
+            let _ =
+                emit_session_catalog_update(&app, state.inner(), "workflow_archive_session").await;
+            CommandResponse::ok(catalog_state)
+        }
+        Err(error) => CommandResponse::err(error),
+    })
+}
+
+#[tauri::command]
+pub async fn workflow_restore_session(
+    session_id: String,
+    state: tauri::State<'_, WorkflowKernelState>,
+    app: tauri::AppHandle,
+) -> Result<CommandResponse<WorkflowSessionState>, String> {
+    let result = state.restore_session(&session_id).await;
+    Ok(match result {
+        Ok(session_state) => {
+            let _ = emit_kernel_update(&app, session_state.clone(), "workflow_restore_session");
+            let _ =
+                emit_session_catalog_update(&app, state.inner(), "workflow_restore_session").await;
+            CommandResponse::ok(session_state)
+        }
+        Err(error) => CommandResponse::err(error),
+    })
+}
+
+#[tauri::command]
+pub async fn workflow_delete_session(
+    session_id: String,
+    state: tauri::State<'_, WorkflowKernelState>,
+    app: tauri::AppHandle,
+) -> Result<CommandResponse<WorkflowSessionCatalogState>, String> {
+    let result = state.delete_session(&session_id).await;
+    Ok(match result {
+        Ok(catalog_state) => {
+            if let Some(active_session_id) = catalog_state.active_session_id.as_deref() {
+                if let Ok(session_state) = state.get_session_state(active_session_id).await {
+                    let _ = emit_kernel_update(&app, session_state, "workflow_delete_session");
+                }
+            }
+            let _ =
+                emit_session_catalog_update(&app, state.inner(), "workflow_delete_session").await;
+            CommandResponse::ok(catalog_state)
+        }
+        Err(error) => CommandResponse::err(error),
+    })
+}
+
+#[tauri::command]
+pub async fn workflow_resume_background_runs(
+    session_id: Option<String>,
+    state: tauri::State<'_, WorkflowKernelState>,
+    plan_mode_state: tauri::State<'_, PlanModeState>,
+    task_mode_state: tauri::State<'_, TaskModeState>,
+    app_state: tauri::State<'_, AppState>,
+    knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
+    plugin_state: tauri::State<'_, crate::commands::plugins::PluginState>,
+    standalone_state: tauri::State<'_, crate::commands::standalone::StandaloneState>,
+    permission_state: tauri::State<'_, crate::commands::permissions::PermissionState>,
+    app: tauri::AppHandle,
+) -> Result<CommandResponse<Vec<ResumeResult>>, String> {
+    let result = state.resume_background_runs(session_id.as_deref()).await;
+    Ok(match result {
+        Ok(items) => {
+            let mut resumed_results = Vec::with_capacity(items.len());
+
+            for item in items {
+                let mut next = item.clone();
+                let recovered_session = match state.recover_session(&item.session_id).await {
+                    Ok(session) => session,
+                    Err(error) => {
+                        next.resumed = false;
+                        next.reason = format!("recover_session_failed:{error}");
+                        resumed_results.push(next);
+                        continue;
+                    }
+                };
+
+                match item.mode {
+                    WorkflowMode::Chat => {
+                        next.resumed = false;
+                        next.reason = "chat_marked_interrupted_after_restart".to_string();
+                    }
+                    WorkflowMode::Plan => {
+                        let Some(plan_session_id) = recovered_session
+                            .linked_mode_sessions
+                            .get(&WorkflowMode::Plan)
+                            .cloned()
+                        else {
+                            next.resumed = false;
+                            next.reason = "missing_linked_plan_session".to_string();
+                            resumed_results.push(next);
+                            continue;
+                        };
+
+                        let plan_session = match plan_mode_state
+                            .get_or_load_session_snapshot(&plan_session_id)
+                            .await
+                        {
+                            Ok(Some(session)) => session,
+                            Ok(None) => {
+                                next.resumed = false;
+                                next.reason = "missing_plan_session_snapshot".to_string();
+                                resumed_results.push(next);
+                                continue;
+                            }
+                            Err(error) => {
+                                next.resumed = false;
+                                next.reason = format!("load_plan_session_failed:{error}");
+                                resumed_results.push(next);
+                                continue;
+                            }
+                        };
+
+                        let Some(plan) = plan_session.plan.clone() else {
+                            next.resumed = false;
+                            next.reason = "missing_plan_payload".to_string();
+                            resumed_results.push(next);
+                            continue;
+                        };
+                        let Some(payload_value) = plan_session.execution_resume_payload.clone()
+                        else {
+                            next.resumed = false;
+                            next.reason = "missing_plan_resume_payload".to_string();
+                            resumed_results.push(next);
+                            continue;
+                        };
+                        let payload = match serde_json::from_value::<PlanExecutionResumePayload>(
+                            payload_value,
+                        ) {
+                            Ok(value) => value,
+                            Err(error) => {
+                                next.resumed = false;
+                                next.reason = format!("invalid_plan_resume_payload:{error}");
+                                resumed_results.push(next);
+                                continue;
+                            }
+                        };
+
+                        match crate::commands::plan_mode::planning_execution_commands::approve_plan(
+                            ApprovePlanRequest {
+                                session_id: plan_session_id,
+                                plan,
+                                provider: payload.provider,
+                                model: payload.model,
+                                base_url: payload.base_url,
+                                project_path: payload.project_path,
+                                context_sources: payload.context_sources,
+                                conversation_context: payload.conversation_context,
+                                locale: payload.locale,
+                            },
+                            plan_mode_state.clone(),
+                            app_state.clone(),
+                            knowledge_state.clone(),
+                            standalone_state.clone(),
+                            permission_state.clone(),
+                            state.clone(),
+                            app.clone(),
+                        )
+                        .await
+                        {
+                            Ok(response) if response.success && response.data == Some(true) => {
+                                state
+                                    .mark_mode_runtime_attached(
+                                        &item.session_id,
+                                        WorkflowMode::Plan,
+                                    )
+                                    .await;
+                                next.resumed = true;
+                                next.reason = "resume_started".to_string();
+                            }
+                            Ok(response) => {
+                                next.resumed = false;
+                                next.reason = response
+                                    .error
+                                    .unwrap_or_else(|| "plan_resume_rejected".to_string());
+                            }
+                            Err(error) => {
+                                next.resumed = false;
+                                next.reason = format!("plan_resume_failed:{error}");
+                            }
+                        }
+                    }
+                    WorkflowMode::Task => {
+                        let Some(task_session_id) = recovered_session
+                            .linked_mode_sessions
+                            .get(&WorkflowMode::Task)
+                            .cloned()
+                        else {
+                            next.resumed = false;
+                            next.reason = "missing_linked_task_session".to_string();
+                            resumed_results.push(next);
+                            continue;
+                        };
+
+                        let task_session = match task_mode_state
+                            .get_or_load_session_snapshot(&task_session_id)
+                            .await
+                        {
+                            Ok(Some(session)) => session,
+                            Ok(None) => {
+                                next.resumed = false;
+                                next.reason = "missing_task_session_snapshot".to_string();
+                                resumed_results.push(next);
+                                continue;
+                            }
+                            Err(error) => {
+                                next.resumed = false;
+                                next.reason = format!("load_task_session_failed:{error}");
+                                resumed_results.push(next);
+                                continue;
+                            }
+                        };
+
+                        let Some(prd) = task_session.prd.clone() else {
+                            next.resumed = false;
+                            next.reason = "missing_task_prd".to_string();
+                            resumed_results.push(next);
+                            continue;
+                        };
+                        let Some(payload_value) = task_session.execution_resume_payload.clone()
+                        else {
+                            next.resumed = false;
+                            next.reason = "missing_task_resume_payload".to_string();
+                            resumed_results.push(next);
+                            continue;
+                        };
+                        let payload = match serde_json::from_value::<TaskExecutionResumePayload>(
+                            payload_value,
+                        ) {
+                            Ok(value) => value,
+                            Err(error) => {
+                                next.resumed = false;
+                                next.reason = format!("invalid_task_resume_payload:{error}");
+                                resumed_results.push(next);
+                                continue;
+                            }
+                        };
+
+                        match crate::commands::task_mode::execution_commands::approve_task_prd(
+                            app.clone(),
+                            ApproveTaskPrdRequest {
+                                session_id: task_session_id,
+                                prd,
+                                provider: payload.provider,
+                                model: payload.model,
+                                base_url: payload.base_url,
+                                execution_mode: payload.execution_mode,
+                                workflow_config: payload.workflow_config,
+                                global_default_agent: payload.global_default_agent,
+                                phase_configs: payload.phase_configs,
+                                context_sources: payload.context_sources,
+                                project_path: payload.project_path,
+                            },
+                            task_mode_state.clone(),
+                            state.clone(),
+                            app_state.clone(),
+                            knowledge_state.clone(),
+                            plugin_state.clone(),
+                        )
+                        .await
+                        {
+                            Ok(response) if response.success && response.data == Some(true) => {
+                                state
+                                    .mark_mode_runtime_attached(
+                                        &item.session_id,
+                                        WorkflowMode::Task,
+                                    )
+                                    .await;
+                                next.resumed = true;
+                                next.reason = "resume_started".to_string();
+                            }
+                            Ok(response) => {
+                                next.resumed = false;
+                                next.reason = response
+                                    .error
+                                    .unwrap_or_else(|| "task_resume_rejected".to_string());
+                            }
+                            Err(error) => {
+                                next.resumed = false;
+                                next.reason = format!("task_resume_failed:{error}");
+                            }
+                        }
+                    }
+                }
+
+                resumed_results.push(next);
+            }
+
+            let _ =
+                emit_session_catalog_update(&app, state.inner(), "workflow_resume_background_runs")
+                    .await;
+            CommandResponse::ok(resumed_results)
         }
         Err(error) => CommandResponse::err(error),
     })
@@ -417,6 +868,8 @@ pub async fn workflow_transition_mode(
                 "workflow_transition_mode",
             )
             .await;
+            let _ =
+                emit_session_catalog_update(&app, state.inner(), "workflow_transition_mode").await;
             CommandResponse::ok(session)
         }
         Err(error) => CommandResponse::err(error),
@@ -440,6 +893,7 @@ pub async fn workflow_submit_input(
                 "workflow_submit_input",
             )
             .await;
+            let _ = emit_session_catalog_update(&app, state.inner(), "workflow_submit_input").await;
             CommandResponse::ok(session)
         }
         Err(error) => CommandResponse::err(error),
@@ -467,6 +921,12 @@ pub async fn workflow_transition_and_submit_input(
                 "workflow_transition_and_submit_input",
             )
             .await;
+            let _ = emit_session_catalog_update(
+                &app,
+                state.inner(),
+                "workflow_transition_and_submit_input",
+            )
+            .await;
             CommandResponse::ok(session)
         }
         Err(error) => CommandResponse::err(error),
@@ -490,6 +950,8 @@ pub async fn workflow_apply_plan_edit(
                 "workflow_apply_plan_edit",
             )
             .await;
+            let _ =
+                emit_session_catalog_update(&app, state.inner(), "workflow_apply_plan_edit").await;
             CommandResponse::ok(session)
         }
         Err(error) => CommandResponse::err(error),
@@ -512,6 +974,7 @@ pub async fn workflow_execute_plan(
                 "workflow_execute_plan",
             )
             .await;
+            let _ = emit_session_catalog_update(&app, state.inner(), "workflow_execute_plan").await;
             CommandResponse::ok(session)
         }
         Err(error) => CommandResponse::err(error),
@@ -535,6 +998,7 @@ pub async fn workflow_retry_step(
                 "workflow_retry_step",
             )
             .await;
+            let _ = emit_session_catalog_update(&app, state.inner(), "workflow_retry_step").await;
             CommandResponse::ok(session)
         }
         Err(error) => CommandResponse::err(error),
@@ -558,6 +1022,8 @@ pub async fn workflow_cancel_operation(
                 "workflow_cancel_operation",
             )
             .await;
+            let _ =
+                emit_session_catalog_update(&app, state.inner(), "workflow_cancel_operation").await;
             CommandResponse::ok(session)
         }
         Err(error) => CommandResponse::err(error),
@@ -572,6 +1038,72 @@ pub async fn workflow_get_session_state(
     let result = state.get_session_state(&session_id).await;
     Ok(match result {
         Ok(session_state) => CommandResponse::ok(session_state),
+        Err(error) => CommandResponse::err(error),
+    })
+}
+
+#[tauri::command]
+pub async fn workflow_get_mode_transcript(
+    session_id: String,
+    mode: WorkflowMode,
+    state: tauri::State<'_, WorkflowKernelState>,
+) -> Result<CommandResponse<ModeTranscriptPayload>, String> {
+    let result = state.get_mode_transcript(&session_id, mode).await;
+    Ok(match result {
+        Ok(payload) => CommandResponse::ok(payload),
+        Err(error) => CommandResponse::err(error),
+    })
+}
+
+#[tauri::command]
+pub async fn workflow_store_mode_transcript(
+    session_id: String,
+    mode: WorkflowMode,
+    lines: Vec<serde_json::Value>,
+    state: tauri::State<'_, WorkflowKernelState>,
+    app: tauri::AppHandle,
+) -> Result<CommandResponse<ModeTranscriptPayload>, String> {
+    let result = state.store_mode_transcript(&session_id, mode, lines).await;
+    Ok(match result {
+        Ok(payload) => {
+            let _ = emit_mode_transcript_update(&app, &payload, "workflow_store_mode_transcript");
+            let _ =
+                emit_session_catalog_update(&app, state.inner(), "workflow_store_mode_transcript")
+                    .await;
+            CommandResponse::ok(payload)
+        }
+        Err(error) => CommandResponse::err(error),
+    })
+}
+
+#[tauri::command]
+pub async fn workflow_append_mode_transcript(
+    session_id: String,
+    mode: WorkflowMode,
+    lines: Vec<serde_json::Value>,
+    state: tauri::State<'_, WorkflowKernelState>,
+    app: tauri::AppHandle,
+) -> Result<CommandResponse<ModeTranscriptPayload>, String> {
+    let appended_lines = lines.clone();
+    let result = state
+        .append_mode_transcript(&session_id, mode, lines)
+        .await;
+    Ok(match result {
+        Ok(payload) => {
+            let update = WorkflowModeTranscriptUpdatedEvent {
+                session_id: payload.session_id.clone(),
+                mode: payload.mode,
+                revision: payload.revision,
+                appended_lines,
+                replace_from_line_id: None,
+                source: "workflow_append_mode_transcript".to_string(),
+            };
+            let _ = app.emit(WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL, update);
+            let _ =
+                emit_session_catalog_update(&app, state.inner(), "workflow_append_mode_transcript")
+                    .await;
+            CommandResponse::ok(payload)
+        }
         Err(error) => CommandResponse::err(error),
     })
 }
@@ -668,7 +1200,10 @@ pub async fn workflow_recover_session(
         if let Some(mut plan_session) = loaded_plan_session {
             if mark_plan_session_interrupted(&mut plan_session) {
                 plan_interrupted = true;
-                if let Err(error) = plan_mode_state.store_session_snapshot(plan_session.clone()).await {
+                if let Err(error) = plan_mode_state
+                    .store_session_snapshot(plan_session.clone())
+                    .await
+                {
                     recovery_warnings.push(format!(
                         "Failed to persist interrupted plan session '{}': {}",
                         plan_session_id, error
@@ -730,7 +1265,10 @@ pub async fn workflow_recover_session(
                 .and_then(map_task_interview_snapshot);
             if mark_task_session_interrupted(&mut task_session) {
                 task_interrupted = true;
-                if let Err(error) = task_mode_state.store_session_snapshot(task_session.clone()).await {
+                if let Err(error) = task_mode_state
+                    .store_session_snapshot(task_session.clone())
+                    .await
+                {
                     recovery_warnings.push(format!(
                         "Failed to persist interrupted task session '{}': {}",
                         task_session_id, error
@@ -767,7 +1305,8 @@ pub async fn workflow_recover_session(
             .submit_input(
                 &session_id,
                 UserInputIntent {
-                    intent_type: crate::services::workflow_kernel::UserInputIntentType::SystemPhaseUpdate,
+                    intent_type:
+                        crate::services::workflow_kernel::UserInputIntentType::SystemPhaseUpdate,
                     content: "phase:failed".to_string(),
                     metadata: json!({
                         "mode": "plan",
@@ -783,7 +1322,8 @@ pub async fn workflow_recover_session(
             .submit_input(
                 &session_id,
                 UserInputIntent {
-                    intent_type: crate::services::workflow_kernel::UserInputIntentType::SystemPhaseUpdate,
+                    intent_type:
+                        crate::services::workflow_kernel::UserInputIntentType::SystemPhaseUpdate,
                     content: "phase:failed".to_string(),
                     metadata: json!({
                         "mode": "task",
@@ -812,6 +1352,8 @@ pub async fn workflow_recover_session(
     Ok(match state_result {
         Ok(session_state) => {
             let _ = emit_kernel_update(&app, session_state.clone(), "workflow_recover_session");
+            let _ =
+                emit_session_catalog_update(&app, state.inner(), "workflow_recover_session").await;
             CommandResponse::ok(session_state)
         }
         Err(error) => CommandResponse::err(error),
@@ -838,6 +1380,9 @@ pub async fn workflow_append_context_items(
                 "workflow_append_context_items",
             )
             .await;
+            let _ =
+                emit_session_catalog_update(&app, state.inner(), "workflow_append_context_items")
+                    .await;
             CommandResponse::ok(session)
         }
         Err(error) => CommandResponse::err(error),
@@ -920,6 +1465,8 @@ pub async fn workflow_link_mode_session(
                 "workflow_link_mode_session",
             )
             .await;
+            let _ = emit_session_catalog_update(&app, state.inner(), "workflow_link_mode_session")
+                .await;
             CommandResponse::ok(session)
         }
         Err(error) => {
@@ -987,6 +1534,7 @@ mod tests {
                 total_steps: 2,
                 progress_pct: 0.0,
             }),
+            execution_resume_payload: None,
             created_at: "2026-03-05T00:00:00Z".to_string(),
         }
     }
@@ -1012,6 +1560,7 @@ mod tests {
                     ("S003".to_string(), "pending".to_string()),
                 ]),
             }),
+            execution_resume_payload: None,
             created_at: "2026-03-05T00:00:00Z".to_string(),
         }
     }
@@ -1052,7 +1601,10 @@ mod tests {
         assert!(changed);
         assert_eq!(session.status, TaskModeStatus::Failed);
         assert_eq!(
-            session.progress.as_ref().map(|progress| progress.current_phase.as_str()),
+            session
+                .progress
+                .as_ref()
+                .map(|progress| progress.current_phase.as_str()),
             Some("failed")
         );
     }
@@ -1066,7 +1618,10 @@ mod tests {
         assert!(!changed);
         assert_eq!(session.status, TaskModeStatus::ReviewingPrd);
         assert_eq!(
-            session.progress.as_ref().map(|progress| progress.current_phase.as_str()),
+            session
+                .progress
+                .as_ref()
+                .map(|progress| progress.current_phase.as_str()),
             Some("executing")
         );
     }

@@ -6,9 +6,13 @@ import { buildHistorySessionId, createStandaloneSessionId } from './sessionLifec
 import type { ExecutionState, ExecutionStatus, SessionSnapshot } from './types';
 
 interface SessionTreeActions {
+  /** Legacy session-tree only. Simple chat should use runtimeRegistryActions instead. */
   backgroundCurrentSession: () => void;
+  /** Legacy session-tree only. Simple chat should restore via runtimeRegistryActions instead. */
   switchToSession: (id: string) => void;
+  /** Legacy session-tree only. */
   removeBackgroundSession: (id: string) => void;
+  /** Legacy session-tree only. */
   forkSessionAtTurn: (userLineId: number) => void;
 }
 
@@ -78,6 +82,7 @@ export function createSessionTreeActions(deps: SessionTreeActionDeps): SessionTr
   } = deps;
 
   return {
+    // Legacy session-tree path used by history/fork flows outside Simple.
     backgroundCurrentSession: () => {
       const state = get();
       const settingsState = useSettingsStore.getState();

@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { TFunction } from 'i18next';
 import { buildConversationHistory } from '../../lib/contextBridge';
-import { useExecutionStore } from '../../store/execution';
 import { switchModeSafely } from '../../store/simpleWorkflowCoordinator';
 import type { HandoffContextBundle, WorkflowMode, WorkflowSession } from '../../types/workflowKernel';
 import { resolveModeSwitchBlockReasonFromKernel, type ModeSwitchBlockReason } from '../../store/workflowPhaseModel';
@@ -19,6 +18,10 @@ interface UseWorkflowModeSwitchGuardParams {
   hasPlanClarifyQuestion: boolean;
   setWorkflowMode: (mode: WorkflowMode) => void;
   transitionWorkflowKernelMode: (
+    targetMode: WorkflowMode,
+    handoff: HandoffContextBundle,
+  ) => Promise<WorkflowSession | null>;
+  appendWorkflowKernelContextItems: (
     targetMode: WorkflowMode,
     handoff: HandoffContextBundle,
   ) => Promise<WorkflowSession | null>;
@@ -58,6 +61,7 @@ export function useWorkflowModeSwitchGuard({
   hasPlanClarifyQuestion,
   setWorkflowMode,
   transitionWorkflowKernelMode,
+  appendWorkflowKernelContextItems,
   showToast,
   t,
 }: UseWorkflowModeSwitchGuardParams): UseWorkflowModeSwitchGuardResult {
@@ -93,53 +97,53 @@ export function useWorkflowModeSwitchGuard({
     (newMode: WorkflowMode) => {
       if (newMode === workflowMode) return;
 
-      const executionSnapshot = useExecutionStore.getState();
-      const latestStreamingOutput = executionSnapshot.streamingOutput;
-      const hasChatHistory = latestStreamingOutput.length > 0;
-      const hasPendingTaskContext = executionSnapshot._pendingTaskContext;
+      const conversationContext = buildConversationHistory().map((turn) => ({
+        user: turn.user,
+        assistant: turn.assistant,
+      }));
+      const hasConversationContext = conversationContext.length > 0;
 
-      if (newMode === 'task' && hasChatHistory) {
+      if (newMode === 'task' && hasConversationContext) {
         showToast(
           t('contextBridge.switchToTaskWithContext', { defaultValue: 'Switching to Task mode with chat context' }),
           'info',
         );
-      } else if (newMode === 'plan' && hasChatHistory) {
+      } else if (newMode === 'plan' && hasConversationContext) {
         showToast(
           t('contextBridge.switchToPlanWithContext', { defaultValue: 'Switching to Plan mode with chat context' }),
           'info',
         );
-      } else if (newMode === 'chat' && hasPendingTaskContext) {
+      } else if (newMode === 'chat' && hasConversationContext) {
         showToast(
           t('contextBridge.switchToChatWithTaskContext', { defaultValue: 'Switching to Chat mode with task context' }),
           'info',
         );
       }
 
-      if (workflowMode === 'chat' && newMode === 'task' && hasChatHistory) {
-        const contextSummary = latestStreamingOutput
-          .slice(-20)
-          .map((line) => line.content)
-          .join('\n');
-        useExecutionStore.getState().setPendingTaskContext(contextSummary);
-      }
-
-      const conversationContext = buildConversationHistory().map((turn) => ({
-        user: turn.user,
-        assistant: turn.assistant,
-      }));
-
       void (async () => {
+        if (workflowMode === 'chat' && hasConversationContext) {
+          await appendWorkflowKernelContextItems('chat', {
+            conversationContext,
+            artifactRefs: [],
+            contextSources: ['mode_switch_sync'],
+            metadata: {
+              source: 'simple_mode_switch_guard',
+              sourceMode: workflowMode,
+              targetMode: newMode,
+            },
+          });
+        }
+
         const transitioned = await switchModeSafely({
           targetMode: newMode,
           handoff: {
-            conversationContext,
+            conversationContext: [],
             artifactRefs: [],
             contextSources: ['simple_mode'],
             metadata: {
               sourceMode: workflowMode,
               targetMode: newMode,
-              hasChatHistory,
-              hasPendingTaskContext: !!hasPendingTaskContext,
+              hasConversationContext,
               switchedAt: new Date().toISOString(),
             },
           },
@@ -159,7 +163,7 @@ export function useWorkflowModeSwitchGuard({
         setWorkflowMode(transitioned.activeMode);
       })();
     },
-    [setWorkflowMode, showToast, t, transitionWorkflowKernelMode, workflowMode],
+    [appendWorkflowKernelContextItems, setWorkflowMode, showToast, t, transitionWorkflowKernelMode, workflowMode],
   );
 
   const handleWorkflowModeChange = useCallback(

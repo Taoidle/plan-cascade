@@ -226,6 +226,15 @@ pub struct RagPipeline {
 }
 
 impl RagPipeline {
+    const KNOWLEDGE_CHUNKS_FTS_SCHEMA_SQL: &'static str =
+        "CREATE VIRTUAL TABLE knowledge_chunks_fts USING fts5(
+            content,
+            chunk_id UNINDEXED,
+            collection_id UNINDEXED,
+            document_uid UNINDEXED,
+            tokenize='unicode61'
+        )";
+
     /// Create a new RagPipeline.
     pub fn new(
         chunker: Arc<dyn Chunker>,
@@ -757,11 +766,24 @@ impl RagPipeline {
         Ok(())
     }
 
-    fn rebuild_fts(tx: &rusqlite::Transaction<'_>) -> AppResult<()> {
-        tx.execute("DELETE FROM knowledge_chunks_fts", [])
+    fn recreate_fts(tx: &rusqlite::Transaction<'_>) -> AppResult<()> {
+        tx.execute_batch(
+            "DROP TABLE IF EXISTS knowledge_chunks_fts;
+             DROP TABLE IF EXISTS knowledge_chunks_fts_data;
+             DROP TABLE IF EXISTS knowledge_chunks_fts_idx;
+             DROP TABLE IF EXISTS knowledge_chunks_fts_docsize;
+             DROP TABLE IF EXISTS knowledge_chunks_fts_config;",
+        )
+        .map_err(|e| AppError::database(format!("Failed dropping knowledge_chunks_fts: {}", e)))?;
+        tx.execute(Self::KNOWLEDGE_CHUNKS_FTS_SCHEMA_SQL, [])
             .map_err(|e| {
-                AppError::database(format!("Failed clearing knowledge_chunks_fts: {}", e))
+                AppError::database(format!("Failed creating knowledge_chunks_fts: {}", e))
             })?;
+        Ok(())
+    }
+
+    fn rebuild_fts(tx: &rusqlite::Transaction<'_>) -> AppResult<()> {
+        Self::recreate_fts(tx)?;
         tx.execute(
             "INSERT INTO knowledge_chunks_fts (chunk_id, collection_id, document_uid, content)
              SELECT id, collection_id, document_uid, content FROM knowledge_chunks",
@@ -2921,6 +2943,24 @@ mod tests {
     use crate::storage::database::Database;
     use tempfile::tempdir;
 
+    fn build_test_pipeline(database: Arc<Database>, root: &std::path::Path) -> RagPipeline {
+        let config = EmbeddingManagerConfig {
+            primary: EmbeddingProviderConfig::new(EmbeddingProviderType::TfIdf),
+            fallback: None,
+            cache_enabled: false,
+            cache_max_entries: 0,
+        };
+        let embedding_manager =
+            Arc::new(EmbeddingManager::from_config(config).expect("create embedding manager"));
+
+        let hnsw_index = Arc::new(HnswIndex::new(root.join("hnsw"), 8192));
+        let chunker: Arc<dyn Chunker> = Arc::new(ParagraphChunker::new(500));
+        let reranker: Option<Arc<dyn Reranker>> = Some(Arc::new(NoopReranker));
+
+        RagPipeline::new(chunker, embedding_manager, hnsw_index, reranker, database)
+            .expect("create pipeline")
+    }
+
     async fn create_test_pipeline() -> (RagPipeline, tempfile::TempDir) {
         let dir = tempdir().expect("tempdir");
         // Use file-based SQLite to avoid pool size=1 issues with in-memory DB
@@ -2937,24 +2977,7 @@ mod tests {
             conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)", []).unwrap();
         }
         let db = Arc::new(Database::from_pool_for_test(pool));
-
-        // Create EmbeddingManager with TfIdf provider
-        let config = EmbeddingManagerConfig {
-            primary: EmbeddingProviderConfig::new(EmbeddingProviderType::TfIdf),
-            fallback: None,
-            cache_enabled: false,
-            cache_max_entries: 0,
-        };
-        let embedding_manager =
-            Arc::new(EmbeddingManager::from_config(config).expect("create embedding manager"));
-
-        let hnsw_index = Arc::new(HnswIndex::new(dir.path().join("hnsw"), 8192));
-
-        let chunker: Arc<dyn Chunker> = Arc::new(ParagraphChunker::new(500));
-        let reranker: Option<Arc<dyn Reranker>> = Some(Arc::new(NoopReranker));
-
-        let pipeline = RagPipeline::new(chunker, embedding_manager, hnsw_index, reranker, db)
-            .expect("create pipeline");
+        let pipeline = build_test_pipeline(db, dir.path());
 
         (pipeline, dir)
     }
@@ -3169,6 +3192,42 @@ mod tests {
             collection.chunk_count >= 2,
             "chunk_count should include chunks from both ingests, got {}",
             collection.chunk_count,
+        );
+    }
+
+    #[tokio::test]
+    async fn init_schema_recovers_from_broken_fts_shadow_tables() {
+        let (pipeline, dir) = create_test_pipeline().await;
+
+        pipeline
+            .ingest(
+                "fts-recovery",
+                "proj-1",
+                "Broken FTS recovery",
+                vec![Document::new(
+                    "doc-1",
+                    "Recovery path should keep this searchable.",
+                )],
+            )
+            .await
+            .unwrap();
+
+        {
+            let conn = pipeline.database.get_connection().expect("conn");
+            conn.execute("DROP TABLE knowledge_chunks_fts_data", [])
+                .expect("drop fts shadow");
+        }
+
+        let recovered = build_test_pipeline(Arc::clone(&pipeline.database), dir.path());
+        let results = recovered
+            .query("fts-recovery", "proj-1", "Recovery", 5)
+            .await;
+
+        assert!(results.is_ok(), "pipeline should recover from broken FTS");
+        let result = results.unwrap();
+        assert!(
+            !result.results.is_empty(),
+            "fts query should still return rows"
         );
     }
 

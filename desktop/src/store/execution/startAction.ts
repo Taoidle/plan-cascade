@@ -142,7 +142,11 @@ export function createStartAction(
 
   return async (description: string, mode: 'simple' | 'expert') => {
     if (get().status === 'running') {
-      get().backgroundCurrentSession();
+      if (get().isChatSession) {
+        get().parkForegroundRuntime();
+      } else {
+        get().backgroundCurrentSession();
+      }
     }
 
     const agentStore = useAgentsStore.getState();

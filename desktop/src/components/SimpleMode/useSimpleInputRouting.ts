@@ -1,5 +1,4 @@
 import { useCallback } from 'react';
-import { buildConversationHistory } from '../../lib/contextBridge';
 import { reportInteractiveActionFailure } from '../../lib/workflowObservability';
 import { startModeWithCompensation, submitWorkflowInputWithTracking } from '../../store/simpleWorkflowCoordinator';
 import { useWorkflowKernelStore } from '../../store/workflowKernel';
@@ -38,6 +37,10 @@ interface UseSimpleInputRoutingParams {
   hasStructuredPlanClarifyQuestion: boolean;
   linkWorkflowKernelModeSession: (mode: WorkflowMode, modeSessionId: string) => Promise<WorkflowSession | null>;
   cancelWorkflowKernelOperation: (reason?: string) => Promise<WorkflowSession | null>;
+  appendWorkflowKernelContextItems: (
+    targetMode: WorkflowMode,
+    handoff: HandoffContextBundle,
+  ) => Promise<WorkflowSession | null>;
   transitionAndSubmitWorkflowKernelInput: (
     targetMode: WorkflowMode,
     intent: UserInputIntent,
@@ -81,6 +84,7 @@ export function useSimpleInputRouting({
   hasStructuredPlanClarifyQuestion,
   linkWorkflowKernelModeSession,
   cancelWorkflowKernelOperation,
+  appendWorkflowKernelContextItems,
   transitionAndSubmitWorkflowKernelInput,
 }: UseSimpleInputRoutingParams): UseSimpleInputRoutingResult {
   const handleStart = useCallback(
@@ -91,12 +95,8 @@ export function useSimpleInputRouting({
         setDescription('');
       }
 
-      const conversationContext = buildConversationHistory().map((turn) => ({
-        user: turn.user,
-        assistant: turn.assistant,
-      }));
       const handoff: HandoffContextBundle = {
-        conversationContext,
+        conversationContext: [],
         artifactRefs: [],
         contextSources: ['simple_mode'],
         metadata: {
@@ -139,6 +139,21 @@ export function useSimpleInputRouting({
       if (!prompt || isSubmitting) return;
       if (inputPrompt === undefined) {
         setDescription('');
+      }
+
+      if (workflowMode === 'chat') {
+        const conversationContext = useWorkflowKernelStore.getState().session?.handoffContext.conversationContext ?? [];
+        if (conversationContext.length > 0) {
+          await appendWorkflowKernelContextItems('chat', {
+            conversationContext,
+            artifactRefs: [],
+            contextSources: ['chat_mode_follow_up'],
+            metadata: {
+              source: 'simple_input_follow_up',
+              mode: workflowMode,
+            },
+          });
+        }
       }
 
       if (workflowMode === 'task') {
@@ -242,6 +257,7 @@ export function useSimpleInputRouting({
       hasStructuredInterviewQuestion,
       isSubmitting,
       overrideConfigNatural,
+      appendWorkflowKernelContextItems,
       planClarifyingPhase,
       planPendingQuestion,
       planPhase,

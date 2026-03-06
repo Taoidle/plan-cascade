@@ -14,6 +14,9 @@ import { useWorkflowKernelStore } from './workflowKernel';
 function createKernelSession(mode: WorkflowMode): WorkflowSession {
   return {
     sessionId: `kernel-${mode}`,
+    sessionKind: 'simple_root',
+    displayTitle: `Kernel ${mode}`,
+    workspacePath: '/tmp/project',
     status: 'active',
     activeMode: mode,
     modeSnapshots: {
@@ -28,6 +31,15 @@ function createKernelSession(mode: WorkflowMode): WorkflowSession {
       metadata: {},
     },
     linkedModeSessions: {},
+    backgroundState: 'foreground',
+    contextLedger: {
+      conversationTurnCount: 0,
+      artifactRefCount: 0,
+      contextSourceKinds: ['simple_mode'],
+      lastCompactionAt: null,
+      ledgerVersion: 1,
+    },
+    modeRuntimeMeta: {},
     lastError: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

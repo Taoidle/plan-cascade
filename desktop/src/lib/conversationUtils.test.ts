@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
+  countUserTurnBoundaries,
   deriveConversationTurns,
   rebuildStandaloneTurns,
   buildPromptWithAttachments,
   getNextTurnId,
   normalizeTurnBoundaries,
+  selectStableConversationLines,
 } from './conversationUtils';
 import type { NonCardStreamLineType, StreamLine } from '../store/execution';
 import type { FileAttachmentData } from '../types/attachment';
@@ -222,6 +224,25 @@ describe('turn boundary helpers', () => {
       { ...makeLine('info', 'Q2'), turnBoundary: 'user', turnId: 2 },
     ];
     expect(getNextTurnId(lines)).toBe(3);
+  });
+
+  it('counts normalized user turn boundaries', () => {
+    const lines: StreamLine[] = [makeLine('info', 'Q1'), makeLine('text', 'A1'), makeLine('info', 'Q2')];
+    expect(countUserTurnBoundaries(lines)).toBe(2);
+  });
+
+  it('prefers fallback transcript when primary loses all user boundaries', () => {
+    const fallback: StreamLine[] = [
+      { ...makeLine('info', 'User prompt'), turnBoundary: 'user', turnId: 1 },
+      makeLine('text', 'Assistant reply'),
+    ];
+    const degraded: StreamLine[] = [makeLine('text', 'Assistant reply')];
+
+    const selected = selectStableConversationLines(degraded, fallback);
+
+    expect(selected).toHaveLength(2);
+    expect(selected[0].content).toBe('User prompt');
+    expect(selected[0].turnBoundary).toBe('user');
   });
 });
 

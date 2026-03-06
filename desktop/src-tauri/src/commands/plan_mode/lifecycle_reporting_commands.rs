@@ -298,7 +298,8 @@ pub async fn get_plan_execution_report(
         ]
     } else if terminal_state == "cancelled" {
         vec![
-            "Resume from the latest completed steps after addressing cancellation causes.".to_string(),
+            "Resume from the latest completed steps after addressing cancellation causes."
+                .to_string(),
             "Re-run blocked steps first to avoid repeating completed work.".to_string(),
         ]
     } else {
@@ -307,7 +308,8 @@ pub async fn get_plan_execution_report(
             "Do not continue to dependent batches until blocking steps are resolved.".to_string(),
         ]
     };
-    let retry_stats = compute_retry_stats_from_session(&session.step_attempts, &session.step_states);
+    let retry_stats =
+        compute_retry_stats_from_session(&session.step_attempts, &session.step_states);
     let is_cancelled_terminal = terminal_state == "cancelled";
 
     Ok(CommandResponse::ok(PlanExecutionReport {
@@ -418,7 +420,12 @@ mod tests {
                 reason: "still failed".to_string(),
             },
         );
-        states.insert("step-3".to_string(), StepExecutionState::Failed { reason: "one shot".to_string() });
+        states.insert(
+            "step-3".to_string(),
+            StepExecutionState::Failed {
+                reason: "one shot".to_string(),
+            },
+        );
 
         let mut attempts = HashMap::new();
         attempts.insert("step-1".to_string(), 3usize);

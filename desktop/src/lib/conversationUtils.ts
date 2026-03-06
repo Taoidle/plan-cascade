@@ -125,6 +125,33 @@ export function getNextTurnId(lines: StreamLine[]): number {
   return maxTurnId + 1;
 }
 
+export function countUserTurnBoundaries(lines: StreamLine[]): number {
+  const normalized = normalizeTurnBoundaries(lines);
+  let count = 0;
+  for (const line of normalized) {
+    if (isUserTurnBoundary(line)) count += 1;
+  }
+  return count;
+}
+
+/**
+ * Prevent chat transcript regression when a transient runtime snapshot contains
+ * only assistant-side lines while the cached transcript still has real user
+ * turn boundaries.
+ */
+export function selectStableConversationLines(primary: StreamLine[], fallback: StreamLine[]): StreamLine[] {
+  const normalizedPrimary = normalizeTurnBoundaries(primary);
+  const normalizedFallback = normalizeTurnBoundaries(fallback);
+  const primaryTurns = countUserTurnBoundaries(normalizedPrimary);
+  const fallbackTurns = countUserTurnBoundaries(normalizedFallback);
+
+  if (primaryTurns === 0 && fallbackTurns > 0) {
+    return normalizedFallback;
+  }
+
+  return normalizedPrimary;
+}
+
 /**
  * Derive conversation turns from a flat StreamLine array.
  *

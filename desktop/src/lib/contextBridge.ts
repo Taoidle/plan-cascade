@@ -7,6 +7,7 @@
  */
 
 import { useExecutionStore, type StandaloneTurn } from '../store/execution';
+import { useWorkflowKernelStore } from '../store/workflowKernel';
 import { deriveConversationTurns } from './conversationUtils';
 import type { CrossModeConversationTurn } from '../types/crossModeContext';
 import type { StrategyAnalysis, TaskPrd } from '../store/taskMode';
@@ -36,6 +37,25 @@ export function buildConversationHistory(): CrossModeConversationTurn[] {
   }));
 }
 
+export function buildRootConversationHistory(): CrossModeConversationTurn[] {
+  const kernelConversation = useWorkflowKernelStore.getState().session?.handoffContext.conversationContext ?? [];
+  if (kernelConversation.length > 0) {
+    return kernelConversation.map((turn) => ({
+      user: turn.user,
+      assistant: turn.assistant,
+    }));
+  }
+  return buildConversationHistory();
+}
+
+export function buildRootConversationContextString(): string | undefined {
+  const conversationHistory = buildRootConversationHistory();
+  if (conversationHistory.length === 0) {
+    return undefined;
+  }
+  return conversationHistory.map((turn) => `user: ${turn.user}\nassistant: ${turn.assistant}`).join('\n');
+}
+
 /**
  * Synthesize a planning-phase turn into the conversation history.
  *
@@ -43,7 +63,11 @@ export function buildConversationHistory(): CrossModeConversationTurn[] {
  * Creates a StandaloneTurn summarizing the Task planning output
  * and appends it to the execution store's standaloneTurns.
  */
-export function synthesizePlanningTurn(description: string, analysis: StrategyAnalysis | null, prd: TaskPrd): void {
+export function synthesizePlanningTurn(
+  description: string,
+  analysis: StrategyAnalysis | null,
+  prd: TaskPrd,
+): CrossModeConversationTurn {
   const lines: string[] = [];
 
   if (analysis) {
@@ -59,7 +83,7 @@ export function synthesizePlanningTurn(description: string, analysis: StrategyAn
     lines.push(`- ${s.id}: ${s.title} [${s.priority}]`);
   }
 
-  appendSyntheticTurn(`[Task Mode] ${description}`, lines.join('\n'), {
+  return appendSyntheticTurn(`[Task Mode] ${description}`, lines.join('\n'), {
     source: 'task-synthesized',
     type: 'planning',
   });
@@ -70,9 +94,13 @@ export function synthesizePlanningTurn(description: string, analysis: StrategyAn
  *
  * Called when Task execution completes (success or failure).
  */
-export function synthesizeExecutionTurn(completedCount: number, totalCount: number, success: boolean): void {
+export function synthesizeExecutionTurn(
+  completedCount: number,
+  totalCount: number,
+  success: boolean,
+): CrossModeConversationTurn {
   const outcome = success ? 'completed successfully' : 'completed with failures';
-  appendSyntheticTurn(
+  return appendSyntheticTurn(
     '[Task Execution] Execute approved PRD',
     `Execution ${outcome}: ${completedCount}/${totalCount} stories completed.`,
     {
@@ -80,16 +108,6 @@ export function synthesizeExecutionTurn(completedCount: number, totalCount: numb
       type: 'execution',
     },
   );
-}
-
-/**
- * Set pending task context for Claude Code backend injection.
- *
- * When the user switches back to Chat after a Task workflow,
- * this context will be prepended to the next sendFollowUp prompt.
- */
-export function setPendingTaskContext(context: string): void {
-  useExecutionStore.getState().setPendingTaskContext(context);
 }
 
 // ============================================================================
@@ -100,7 +118,7 @@ function appendSyntheticTurn(
   userMessage: string,
   assistantMessage: string,
   metadata?: { source?: string; type?: string },
-): void {
+): CrossModeConversationTurn {
   const turn: StandaloneTurn = {
     user: userMessage,
     assistant: assistantMessage,
@@ -109,10 +127,8 @@ function appendSyntheticTurn(
   };
   useExecutionStore.getState().appendStandaloneTurn(turn);
 
-  // For Claude Code backend, also set pending context for next sendFollowUp
-  const execState = useExecutionStore.getState();
-  if (execState.isChatSession) {
-    const contextSummary = `[Context from Task Mode]\nUser: ${userMessage}\nResult: ${assistantMessage}`;
-    useExecutionStore.getState().setPendingTaskContext(contextSummary);
-  }
+  return {
+    user: userMessage,
+    assistant: assistantMessage,
+  };
 }

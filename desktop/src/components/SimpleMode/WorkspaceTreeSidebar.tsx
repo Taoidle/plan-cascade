@@ -6,17 +6,19 @@
  * and a collapsible "Other" group for unmatched sessions.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { ChevronRightIcon, ChevronLeftIcon, PlusIcon, Cross2Icon } from '@radix-ui/react-icons';
 import { type ExecutionHistoryItem, type SessionSnapshot } from '../../store/execution';
-import { useSettingsStore } from '../../store/settings';
+import { useSettingsStore, type SessionPathSort } from '../../store/settings';
 import { useSkillMemoryStore } from '../../store/skillMemory';
 import { usePluginStore } from '../../store/plugins';
 import { useAgentsStore } from '../../store/agents';
 import { usePromptsStore } from '../../store/prompts';
+import type { WorkflowSessionCatalogItem } from '../../types/workflowKernel';
 import { Collapsible } from './Collapsible';
+import { buildSessionTreeViewModel, type PathGroup, type SessionTreeItem } from './sessionTreeViewModel';
 import { SkillMemoryPanel } from './SkillMemoryPanel';
 import { PluginPanel } from './PluginPanel';
 import { AgentPanel } from './AgentPanel';
@@ -37,8 +39,9 @@ export interface WorkspaceTreeSidebarProps {
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onClear: () => void;
+  onClearAllSessions?: () => void;
   onNewTask: () => void;
-  currentTask: string | null;
+  currentTask?: string | null;
   /** Background session snapshots keyed by session ID */
   backgroundSessions?: Record<string, SessionSnapshot>;
   /** Called when user clicks a background session to switch to it */
@@ -49,6 +52,16 @@ export interface WorkspaceTreeSidebarProps {
   foregroundParentSessionId?: string | null;
   /** bg session ID representing the foreground in the tree (ghost entry) */
   foregroundBgId?: string | null;
+  workflowSessions?: WorkflowSessionCatalogItem[];
+  activeWorkflowSessionId?: string | null;
+  onSwitchWorkflowSession?: (id: string) => void;
+  onRenameWorkflowSession?: (id: string, title: string) => void;
+  onArchiveWorkflowSession?: (id: string) => void;
+  onRestoreWorkflowSession?: (id: string) => void;
+  onDeleteWorkflowSession?: (id: string) => void;
+  pathGroups?: PathGroup[];
+  activePath?: string | null;
+  onNewTaskInPath?: (path: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -61,101 +74,15 @@ function normalizeWorkspacePath(path: string | null | undefined): string | null 
   return value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 }
 
-function basename(path: string): string {
-  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
-  const lastSlash = normalized.lastIndexOf('/');
-  return lastSlash >= 0 ? normalized.slice(lastSlash + 1) : normalized;
-}
-
-function timeAgo(timestamp: number): string {
-  const seconds = Math.floor((Date.now() - timestamp) / 1000);
-  if (seconds < 60) return 'just now';
+function timeAgo(timestamp: number, nowMs: number, t: ReturnType<typeof useTranslation>['t']): string {
+  const seconds = Math.floor((nowMs - timestamp) / 1000);
+  if (seconds < 60) return t('sidebar.time.justNow', { defaultValue: 'just now' });
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) return t('sidebar.time.minutesAgo', { count: minutes, defaultValue: '{{count}}m ago' });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return t('sidebar.time.hoursAgo', { count: hours, defaultValue: '{{count}}h ago' });
   const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
-// ---------------------------------------------------------------------------
-// Grouping logic
-// ---------------------------------------------------------------------------
-
-interface DirectoryGroup {
-  path: string;
-  normalizedPath: string;
-  sessions: ExecutionHistoryItem[];
-  /** Background sessions belonging to this directory (keyed by ID) */
-  backgroundSessions: Record<string, SessionSnapshot>;
-}
-
-/** Match a path against pinned directories, returning the matching normalized path or null */
-function matchPinnedDirectory(
-  sessionPath: string | null,
-  normalizedPinned: { normalizedPath: string }[],
-): string | null {
-  if (!sessionPath) return null;
-  for (const pin of normalizedPinned) {
-    if (sessionPath === pin.normalizedPath || sessionPath.startsWith(pin.normalizedPath + '/')) {
-      return pin.normalizedPath;
-    }
-  }
-  return null;
-}
-
-function groupSessionsByDirectories(
-  history: ExecutionHistoryItem[],
-  pinnedDirectories: string[],
-  backgroundSessions: Record<string, SessionSnapshot> = {},
-): {
-  directories: DirectoryGroup[];
-  other: ExecutionHistoryItem[];
-  unmatchedBgSessions: Record<string, SessionSnapshot>;
-} {
-  const normalizedPinned = pinnedDirectories.map((p) => ({
-    path: p,
-    normalizedPath: p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase(),
-  }));
-
-  const dirMap = new Map<string, DirectoryGroup>();
-  for (const pin of normalizedPinned) {
-    dirMap.set(pin.normalizedPath, {
-      path: pin.path,
-      normalizedPath: pin.normalizedPath,
-      sessions: [],
-      backgroundSessions: {},
-    });
-  }
-
-  const other: ExecutionHistoryItem[] = [];
-
-  // Group history sessions
-  for (const session of history) {
-    const sessionPath = normalizeWorkspacePath(session.workspacePath);
-    const match = matchPinnedDirectory(sessionPath, normalizedPinned);
-    if (match) {
-      dirMap.get(match)!.sessions.push(session);
-    } else {
-      other.push(session);
-    }
-  }
-
-  // Group background sessions by workspace path
-  const unmatchedBgSessions: Record<string, SessionSnapshot> = {};
-  for (const [id, snapshot] of Object.entries(backgroundSessions)) {
-    const bgPath = normalizeWorkspacePath(snapshot.workspacePath);
-    const match = matchPinnedDirectory(bgPath, normalizedPinned);
-    if (match) {
-      dirMap.get(match)!.backgroundSessions[id] = snapshot;
-    } else {
-      unmatchedBgSessions[id] = snapshot;
-    }
-  }
-
-  const directories = normalizedPinned.map((pin) => dirMap.get(pin.normalizedPath)!).filter(Boolean);
-
-  return { directories, other, unmatchedBgSessions };
+  return t('sidebar.time.daysAgo', { count: days, defaultValue: '{{count}}d ago' });
 }
 
 // ---------------------------------------------------------------------------
@@ -333,6 +260,10 @@ function SidebarActions({
   activeTab,
   onNewTask,
   onAddDirectory,
+  sessionPathSort,
+  onSessionPathSortChange,
+  showArchivedSessions,
+  onToggleShowArchivedSessions,
   onManageSkills,
   onManagePlugins,
   onOpenPluginMarketplace,
@@ -342,6 +273,10 @@ function SidebarActions({
   activeTab: SidebarTabId;
   onNewTask: () => void;
   onAddDirectory: () => void;
+  sessionPathSort: SessionPathSort;
+  onSessionPathSortChange: (sort: SessionPathSort) => void;
+  showArchivedSessions: boolean;
+  onToggleShowArchivedSessions: () => void;
   onManageSkills: () => void;
   onManagePlugins: () => void;
   onOpenPluginMarketplace: () => void;
@@ -349,6 +284,7 @@ function SidebarActions({
   onManagePrompts: () => void;
 }) {
   const { t } = useTranslation('simpleMode');
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
 
   const secondaryBtn = clsx(
     'px-2 py-1.5 rounded-md text-xs font-medium transition-colors',
@@ -357,13 +293,19 @@ function SidebarActions({
     'border border-gray-200 dark:border-gray-700',
   );
 
+  const iconBtn = clsx(
+    'h-8 w-8 inline-flex items-center justify-center rounded-lg border transition-colors shrink-0',
+    'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300',
+    'hover:bg-gray-100 dark:hover:bg-gray-800',
+  );
+
   if (activeTab === 'sessions') {
     return (
-      <div className="space-y-2">
+      <div className="flex items-center gap-2">
         <button
           onClick={onNewTask}
           className={clsx(
-            'w-full px-3 py-2 rounded-lg text-xs font-medium transition-colors',
+            'h-8 flex-1 px-3 rounded-lg text-xs font-medium transition-colors inline-flex items-center justify-center',
             'bg-primary-600 text-white hover:bg-primary-700',
             'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1',
           )}
@@ -372,11 +314,84 @@ function SidebarActions({
         </button>
         <button
           onClick={onAddDirectory}
-          className={clsx(secondaryBtn, 'w-full inline-flex items-center justify-center gap-1')}
+          className={iconBtn}
+          aria-label={t('sidebar.addDirectory')}
+          title={t('sidebar.addDirectory')}
         >
-          <PlusIcon className="w-3.5 h-3.5" />
-          <span>{t('sidebar.addDirectory')}</span>
+          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path d="M2 5.5A1.5 1.5 0 013.5 4H8l1.2 1.5H16.5A1.5 1.5 0 0118 7v7.5a1.5 1.5 0 01-1.5 1.5h-13A1.5 1.5 0 012 14.5v-9z" />
+            <path d="M10 8a.75.75 0 01.75.75v1.5h1.5a.75.75 0 010 1.5h-1.5v1.5a.75.75 0 01-1.5 0v-1.5h-1.5a.75.75 0 010-1.5h1.5v-1.5A.75.75 0 0110 8z" />
+          </svg>
         </button>
+        <button
+          type="button"
+          onClick={onToggleShowArchivedSessions}
+          className={clsx(
+            iconBtn,
+            showArchivedSessions && 'border-primary-300 text-primary-700 dark:text-primary-300 dark:border-primary-700',
+          )}
+          aria-label={
+            showArchivedSessions
+              ? t('sidebar.archived.hide', { defaultValue: 'Hide Archived' })
+              : t('sidebar.archived.show', { defaultValue: 'Show Archived' })
+          }
+          title={
+            showArchivedSessions
+              ? t('sidebar.archived.hide', { defaultValue: 'Hide Archived' })
+              : t('sidebar.archived.show', { defaultValue: 'Show Archived' })
+          }
+        >
+          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path d="M4 4.75A1.75 1.75 0 015.75 3h8.5A1.75 1.75 0 0116 4.75v2.1a1.75 1.75 0 01-.513 1.237l-.487.488v5.675A1.75 1.75 0 0113.25 16h-6.5A1.75 1.75 0 015 14.25V8.575l-.487-.488A1.75 1.75 0 014 6.85v-2.1zm2.5-.25a.75.75 0 000 1.5h7a.75.75 0 000-1.5h-7z" />
+          </svg>
+        </button>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setSortMenuOpen((open) => !open)}
+            className={iconBtn}
+            aria-label={t('sidebar.sort.label', { defaultValue: 'Sort paths' })}
+            title={t('sidebar.sort.label', { defaultValue: 'Sort paths' })}
+          >
+            <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path d="M4 5.75A.75.75 0 014.75 5h10.5a.75.75 0 010 1.5H4.75A.75.75 0 014 5.75zm2 4A.75.75 0 016.75 9h8.5a.75.75 0 010 1.5h-8.5A.75.75 0 016 9.75zm3 4a.75.75 0 01.75-.75h5.5a.75.75 0 010 1.5h-5.5a.75.75 0 01-.75-.75z" />
+            </svg>
+          </button>
+          {sortMenuOpen && (
+            <div className="absolute right-0 top-11 z-10 min-w-[10rem] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg p-1">
+              <button
+                type="button"
+                onClick={() => {
+                  onSessionPathSortChange('recent');
+                  setSortMenuOpen(false);
+                }}
+                className={clsx(
+                  'w-full rounded-md px-2 py-1.5 text-left text-xs transition-colors',
+                  sessionPathSort === 'recent'
+                    ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
+                    : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800',
+                )}
+              >
+                {t('sidebar.sort.recent', { defaultValue: 'Sort: Recent' })}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onSessionPathSortChange('name');
+                  setSortMenuOpen(false);
+                }}
+                className={clsx(
+                  'w-full rounded-md px-2 py-1.5 text-left text-xs transition-colors',
+                  sessionPathSort === 'name'
+                    ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
+                    : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800',
+                )}
+              >
+                {t('sidebar.sort.name', { defaultValue: 'Sort: Name' })}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -417,135 +432,236 @@ function SidebarActions({
   );
 }
 
-// ---------------------------------------------------------------------------
-// SessionItem
-// ---------------------------------------------------------------------------
+function statusDotClass(status: SessionTreeItem['status']): string {
+  if (status === 'running') return 'bg-amber-500 dark:bg-amber-400';
+  if (status === 'attention') return 'bg-red-500 dark:bg-red-400';
+  return 'bg-gray-300 dark:bg-gray-600';
+}
 
-function SessionItem({
-  session,
-  depth,
-  onRestore,
-  onDelete,
-  onRename,
+function statusText(status: SessionTreeItem['status'], t: ReturnType<typeof useTranslation>['t']): string {
+  if (status === 'running') return t('sidebar.status.running', { defaultValue: 'Running' });
+  if (status === 'attention') return t('sidebar.status.attention', { defaultValue: 'Attention' });
+  return t('sidebar.status.idle', { defaultValue: 'Idle' });
+}
+
+function modeBadgeLabel(mode: SessionTreeItem['mode']): string | null {
+  if (mode === 'chat') return 'C';
+  if (mode === 'plan') return 'P';
+  if (mode === 'task') return 'T';
+  return null;
+}
+
+function SessionTreeRow({
+  item,
+  nowMs,
+  onActivateLive,
+  onRestoreHistory,
+  onDeleteHistory,
+  onRenameHistory,
+  onArchiveLive,
+  onRenameLive,
+  onRestoreArchived,
+  onDeleteArchived,
 }: {
-  session: ExecutionHistoryItem;
-  depth: number;
-  onRestore: (id: string) => void;
-  onDelete: (id: string) => void;
-  onRename: (id: string, title: string) => void;
+  item: SessionTreeItem;
+  nowMs: number;
+  onActivateLive?: (id: string) => void;
+  onRestoreHistory: (id: string) => void;
+  onDeleteHistory: (id: string) => void;
+  onRenameHistory: (id: string, title: string) => void;
+  onArchiveLive?: (id: string) => void;
+  onRenameLive?: (id: string, title: string) => void;
+  onRestoreArchived?: (id: string) => void;
+  onDeleteArchived?: (id: string) => void;
 }) {
   const { t } = useTranslation('simpleMode');
+
+  const handleActivate = useCallback(() => {
+    if (item.kind === 'live') {
+      onActivateLive?.(item.sourceSessionId);
+      return;
+    }
+    if (item.kind === 'archived') {
+      onRestoreArchived?.(item.sourceSessionId);
+      return;
+    }
+    onRestoreHistory(item.sourceSessionId);
+  }, [item, onActivateLive, onRestoreArchived, onRestoreHistory]);
 
   const handleRename = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      const current = session.title || session.taskDescription;
-      const next = window.prompt('Rename session', current);
+      if (item.kind !== 'history' && item.kind !== 'live' && item.kind !== 'archived') return;
+      const next = window.prompt(t('sidebar.renamePrompt', { defaultValue: 'Rename session' }), item.title);
       if (next === null) return;
-      onRename(session.id, next);
+      if (item.kind === 'live') {
+        onRenameLive?.(item.sourceSessionId, next);
+        return;
+      }
+      if (item.kind === 'archived') {
+        onRenameLive?.(item.sourceSessionId, next);
+        return;
+      }
+      onRenameHistory(item.sourceSessionId, next);
     },
-    [session, onRename],
+    [item, onRenameHistory, onRenameLive, t],
   );
 
   const handleDelete = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      onDelete(session.id);
+      if (item.kind === 'live') {
+        onDeleteArchived?.(item.sourceSessionId);
+        return;
+      }
+      if (item.kind === 'archived') {
+        onDeleteArchived?.(item.sourceSessionId);
+        return;
+      }
+      onDeleteHistory(item.sourceSessionId);
     },
-    [session.id, onDelete],
+    [item, onDeleteArchived, onDeleteHistory],
   );
 
   return (
     <div
       className={clsx(
-        'group flex items-start gap-2 py-1.5 pr-2 rounded-md cursor-pointer transition-colors',
-        'hover:bg-gray-50 dark:hover:bg-gray-800',
+        'group flex items-center gap-2 py-1.5 pr-2 rounded-md cursor-pointer transition-colors',
+        item.isActive
+          ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800'
+          : 'hover:bg-gray-50 dark:hover:bg-gray-800 border border-transparent',
       )}
-      style={{ paddingLeft: `${depth * 12 + 8}px` }}
-      onClick={() => onRestore(session.id)}
+      style={{ paddingLeft: 32 }}
+      onClick={handleActivate}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') onRestore(session.id);
+        if (e.key === 'Enter' || e.key === ' ') handleActivate();
       }}
+      title={item.workspacePath || item.title}
     >
-      {/* Status dot */}
-      <span
-        className={clsx(
-          'mt-1.5 w-2 h-2 rounded-full shrink-0',
-          session.success ? 'bg-green-500 dark:bg-green-400' : 'bg-red-500 dark:bg-red-400',
-        )}
-        title={session.success ? 'Success' : 'Failed'}
-      />
+      <span className={clsx('w-2 h-2 rounded-full shrink-0', statusDotClass(item.status))} />
 
-      {/* Content */}
       <div className="flex-1 min-w-0">
-        <p className="text-xs text-gray-900 dark:text-white line-clamp-1">{session.title || session.taskDescription}</p>
-        <p className="text-2xs text-gray-500 dark:text-gray-400 mt-0.5">{timeAgo(session.startedAt)}</p>
+        <div className="flex items-center gap-1 min-w-0">
+          <p className="min-w-0 flex-1 text-xs text-gray-900 dark:text-white truncate">{item.title}</p>
+          {item.mode && (
+            <span
+              className="shrink-0 inline-flex h-4 min-w-4 items-center justify-center rounded bg-gray-100 dark:bg-gray-800 px-1 text-[9px] font-semibold text-gray-500 dark:text-gray-400"
+              title={t(`sidebar.mode.${item.mode}`, { defaultValue: item.mode })}
+            >
+              {modeBadgeLabel(item.mode)}
+            </span>
+          )}
+          {item.kind === 'history' && (
+            <span
+              className="shrink-0 inline-flex h-4 w-4 items-center justify-center rounded bg-gray-100 dark:bg-gray-800 text-[9px] text-gray-500 dark:text-gray-400"
+              title={t('sidebar.badges.history', { defaultValue: 'History' })}
+            >
+              H
+            </span>
+          )}
+          {item.kind === 'archived' && (
+            <span
+              className="shrink-0 inline-flex h-4 w-4 items-center justify-center rounded bg-gray-100 dark:bg-gray-800 text-[9px] text-gray-500 dark:text-gray-400"
+              title={t('sidebar.badges.archived', { defaultValue: 'Archived' })}
+            >
+              A
+            </span>
+          )}
+        </div>
+        <div className="mt-0.5 flex items-center gap-2 text-2xs text-gray-500 dark:text-gray-400">
+          {item.status === 'attention' ? <span>{statusText(item.status, t)}</span> : null}
+          <span>{timeAgo(item.updatedAt, nowMs, t)}</span>
+        </div>
       </div>
 
-      {/* Hover actions */}
-      <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button
-          className="text-2xs px-1.5 py-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-700/50"
-          onClick={handleRename}
-          title={t('sidebar.rename')}
-        >
-          {t('sidebar.rename')}
-        </button>
-        <button
-          className="p-0.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/30"
-          onClick={handleDelete}
-          title={t('sidebar.deleteSession')}
-        >
-          <Cross2Icon className="w-3 h-3" />
-        </button>
-      </div>
+      {(item.kind === 'history' || item.kind === 'live' || item.kind === 'archived') && (
+        <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+          {item.kind === 'live' && (
+            <button
+              className="text-2xs px-1.5 py-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-700/50"
+              onClick={(event) => {
+                event.stopPropagation();
+                onArchiveLive?.(item.sourceSessionId);
+              }}
+              title={t('sidebar.archiveSession', { defaultValue: 'Archive session' })}
+            >
+              {t('sidebar.archiveAction', { defaultValue: 'archive' })}
+            </button>
+          )}
+          {item.kind === 'archived' && (
+            <button
+              className="text-2xs px-1.5 py-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-700/50"
+              onClick={(event) => {
+                event.stopPropagation();
+                onRestoreArchived?.(item.sourceSessionId);
+              }}
+              title={t('sidebar.restoreSession', { defaultValue: 'Restore session' })}
+            >
+              {t('sidebar.restoreAction', { defaultValue: 'restore' })}
+            </button>
+          )}
+          <button
+            className="text-2xs px-1.5 py-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-700/50"
+            onClick={handleRename}
+            title={t('sidebar.rename')}
+          >
+            {t('sidebar.rename')}
+          </button>
+          <button
+            className="p-0.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/30"
+            onClick={handleDelete}
+            title={t('sidebar.deleteSession', { defaultValue: 'Delete session' })}
+          >
+            <Cross2Icon className="w-3 h-3" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// DirectoryNode
-// ---------------------------------------------------------------------------
-
-function DirectoryNode({
+function PathGroupNode({
   group,
+  nowMs,
   isActive,
   isExpanded,
   onToggle,
   onUnpin,
-  onNewTaskInDir,
-  onRestore,
-  onDelete,
-  onRename,
-  onSwitchSession,
-  onRemoveSession,
-  foregroundParentSessionId,
-  foregroundBgId,
-  currentSessionDescription,
+  onNewTaskInPath,
+  onActivateLive,
+  onRestoreHistory,
+  onDeleteHistory,
+  onRenameHistory,
+  onArchiveLive,
+  onRenameLive,
+  onRestoreArchived,
+  onDeleteArchived,
 }: {
-  group: DirectoryGroup;
+  group: PathGroup;
+  nowMs: number;
   isActive: boolean;
   isExpanded: boolean;
   onToggle: () => void;
-  onUnpin: () => void;
-  onNewTaskInDir: () => void;
-  onRestore: (id: string) => void;
-  onDelete: (id: string) => void;
-  onRename: (id: string, title: string) => void;
-  onSwitchSession?: (id: string) => void;
-  onRemoveSession?: (id: string) => void;
-  foregroundParentSessionId?: string | null;
-  foregroundBgId?: string | null;
-  currentSessionDescription?: string;
+  onUnpin?: (() => void) | null;
+  onNewTaskInPath: () => void;
+  onActivateLive?: (id: string) => void;
+  onRestoreHistory: (id: string) => void;
+  onDeleteHistory: (id: string) => void;
+  onRenameHistory: (id: string, title: string) => void;
+  onArchiveLive?: (id: string) => void;
+  onRenameLive?: (id: string, title: string) => void;
+  onRestoreArchived?: (id: string) => void;
+  onDeleteArchived?: (id: string) => void;
 }) {
   const { t } = useTranslation('simpleMode');
+  const hasAttention = group.children.some((child) => child.status === 'attention');
 
   const handleUnpin = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      onUnpin();
+      onUnpin?.();
     },
     [onUnpin],
   );
@@ -553,20 +669,13 @@ function DirectoryNode({
   const handleNewTask = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      onNewTaskInDir();
+      onNewTaskInPath();
     },
-    [onNewTaskInDir],
+    [onNewTaskInPath],
   );
-
-  // Build tree of background sessions for this directory
-  const bgTree = useMemo(() => buildSessionTree(group.backgroundSessions), [group.backgroundSessions]);
-
-  const bgCount = Object.keys(group.backgroundSessions).length;
-  const totalCount = group.sessions.length + bgCount;
 
   return (
     <div>
-      {/* Directory header row */}
       <div
         className={clsx(
           'group flex items-center gap-1 px-2 py-1.5 rounded-md cursor-pointer transition-colors',
@@ -578,34 +687,35 @@ function DirectoryNode({
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') onToggle();
         }}
+        title={group.path || group.label}
       >
-        {/* Expand/collapse chevron */}
         <ChevronRightIcon
           className={clsx(
             'w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform duration-200',
             isExpanded && 'rotate-90',
           )}
         />
-
-        {/* Folder icon */}
         <svg className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
           <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
         </svg>
-
-        {/* Directory name */}
-        <span className="flex-1 min-w-0 text-xs font-medium text-gray-900 dark:text-white truncate">
-          {basename(group.path)}
-        </span>
-
-        {/* Session count badge */}
-        {totalCount > 0 && (
-          <span className="text-2xs px-1.5 py-0.5 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 shrink-0">
-            {totalCount}
-          </span>
+        <span className="flex-1 min-w-0 text-xs font-medium text-gray-900 dark:text-white truncate">{group.label}</span>
+        {(group.hasRunning || hasAttention) && (
+          <span
+            className={clsx(
+              'w-2 h-2 rounded-full shrink-0',
+              hasAttention ? 'bg-red-500 dark:bg-red-400' : 'bg-amber-500 dark:bg-amber-400',
+            )}
+          />
         )}
-
-        {/* Hover actions: unpin and new task */}
-        <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        <span className="text-2xs px-1.5 py-0.5 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 shrink-0">
+          {group.sessionCount}
+        </span>
+        <div
+          className={clsx(
+            'flex items-center gap-0.5 shrink-0 transition-opacity',
+            onUnpin ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+          )}
+        >
           <button
             className="p-0.5 rounded text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20"
             onClick={handleNewTask}
@@ -613,119 +723,33 @@ function DirectoryNode({
           >
             <PlusIcon className="w-3 h-3" />
           </button>
-          <button
-            className="p-0.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/30"
-            onClick={handleUnpin}
-            title={t('sidebar.removeDirectory')}
-          >
-            <Cross2Icon className="w-3 h-3" />
-          </button>
+          {onUnpin && (
+            <button
+              className="p-0.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/30"
+              onClick={handleUnpin}
+              title={t('sidebar.removeDirectory')}
+            >
+              <Cross2Icon className="w-3 h-3" />
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Child items: background sessions (with fork tree) + history sessions */}
-      {totalCount > 0 && (
-        <Collapsible open={isExpanded}>
-          <div className="mt-0.5">
-            {/* Background sessions with fork hierarchy */}
-            {onSwitchSession &&
-              onRemoveSession &&
-              bgTree.map((node) => (
-                <BackgroundSessionTreeItem
-                  key={node.id}
-                  node={node}
-                  depth={2}
-                  onSwitch={onSwitchSession}
-                  onRemove={onRemoveSession}
-                  foregroundParentSessionId={foregroundParentSessionId}
-                  foregroundBgId={foregroundBgId}
-                  currentSessionDescription={currentSessionDescription}
-                />
-              ))}
-
-            {/* History sessions */}
-            {group.sessions.map((session) => (
-              <SessionItem
-                key={session.id}
-                session={session}
-                depth={2}
-                onRestore={onRestore}
-                onDelete={onDelete}
-                onRename={onRename}
-              />
-            ))}
-          </div>
-        </Collapsible>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// OtherSessionsGroup
-// ---------------------------------------------------------------------------
-
-function OtherSessionsGroup({
-  sessions,
-  isExpanded,
-  onToggle,
-  onRestore,
-  onDelete,
-  onRename,
-}: {
-  sessions: ExecutionHistoryItem[];
-  isExpanded: boolean;
-  onToggle: () => void;
-  onRestore: (id: string) => void;
-  onDelete: (id: string) => void;
-  onRename: (id: string, title: string) => void;
-}) {
-  const { t } = useTranslation('simpleMode');
-
-  if (sessions.length === 0) return null;
-
-  return (
-    <div>
-      {/* Group header */}
-      <div
-        className={clsx(
-          'flex items-center gap-1 px-2 py-1.5 rounded-md cursor-pointer transition-colors',
-          'hover:bg-gray-50 dark:hover:bg-gray-800',
-        )}
-        onClick={onToggle}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') onToggle();
-        }}
-      >
-        <ChevronRightIcon
-          className={clsx(
-            'w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform duration-200',
-            isExpanded && 'rotate-90',
-          )}
-        />
-
-        <span className="flex-1 min-w-0 text-xs font-medium text-gray-500 dark:text-gray-400">
-          {t('sidebar.otherSessions')}
-        </span>
-
-        <span className="text-2xs px-1.5 py-0.5 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 shrink-0">
-          {sessions.length}
-        </span>
-      </div>
-
-      {/* Sessions */}
       <Collapsible open={isExpanded}>
         <div className="mt-0.5">
-          {sessions.map((session) => (
-            <SessionItem
-              key={session.id}
-              session={session}
-              depth={2}
-              onRestore={onRestore}
-              onDelete={onDelete}
-              onRename={onRename}
+          {group.children.map((item) => (
+            <SessionTreeRow
+              key={item.id}
+              item={item}
+              nowMs={nowMs}
+              onActivateLive={onActivateLive}
+              onRestoreHistory={onRestoreHistory}
+              onDeleteHistory={onDeleteHistory}
+              onRenameHistory={onRenameHistory}
+              onArchiveLive={onArchiveLive}
+              onRenameLive={onRenameLive}
+              onRestoreArchived={onRestoreArchived}
+              onDeleteArchived={onDeleteArchived}
             />
           ))}
         </div>
@@ -735,304 +759,28 @@ function OtherSessionsGroup({
 }
 
 // ---------------------------------------------------------------------------
-// Session tree helpers
-// ---------------------------------------------------------------------------
-
-interface SessionTreeNode {
-  id: string;
-  snapshot: SessionSnapshot;
-  children: SessionTreeNode[];
-}
-
-function buildSessionTree(sessions: Record<string, SessionSnapshot>): SessionTreeNode[] {
-  const nodeMap = new Map<string, SessionTreeNode>();
-
-  // Create nodes for all sessions
-  for (const [id, snapshot] of Object.entries(sessions)) {
-    nodeMap.set(id, { id, snapshot, children: [] });
-  }
-
-  const roots: SessionTreeNode[] = [];
-
-  for (const [id, node] of nodeMap) {
-    const parentId = node.snapshot.parentSessionId;
-    // Safety: skip self-referencing parents and missing parents
-    if (parentId && parentId !== id && nodeMap.has(parentId)) {
-      nodeMap.get(parentId)!.children.push(node);
-    } else {
-      roots.push(node);
-    }
-  }
-
-  return roots;
-}
-
-// ---------------------------------------------------------------------------
-// Background session helpers
-// ---------------------------------------------------------------------------
-
-function getStatusDotClasses(status: string): string {
-  switch (status) {
-    case 'running':
-    case 'streaming':
-      return 'bg-blue-500 dark:bg-blue-400 animate-pulse';
-    case 'completed':
-      return 'bg-green-500 dark:bg-green-400';
-    case 'failed':
-      return 'bg-red-500 dark:bg-red-400';
-    case 'paused':
-      return 'bg-yellow-500 dark:bg-yellow-400';
-    default:
-      return 'bg-gray-400 dark:bg-gray-500';
-  }
-}
-
-function truncateLabel(text: string, maxLen = 50): string {
-  if (!text) return '';
-  if (text.length <= maxLen) return text;
-  return text.slice(0, maxLen) + '...';
-}
-
-// ---------------------------------------------------------------------------
-// BackgroundSessionTreeItem (recursive)
-// ---------------------------------------------------------------------------
-
-function BackgroundSessionTreeItem({
-  node,
-  depth,
-  onSwitch,
-  onRemove,
-  foregroundParentSessionId,
-  foregroundBgId,
-  currentSessionDescription,
-}: {
-  node: SessionTreeNode;
-  depth: number;
-  onSwitch: (id: string) => void;
-  onRemove: (id: string) => void;
-  foregroundParentSessionId?: string | null;
-  foregroundBgId?: string | null;
-  currentSessionDescription?: string;
-}) {
-  const { t } = useTranslation('simpleMode');
-  const [expanded, setExpanded] = useState(true);
-
-  const isGhost = foregroundBgId === node.id;
-
-  const label =
-    isGhost && currentSessionDescription
-      ? truncateLabel(currentSessionDescription)
-      : node.snapshot.taskDescription
-        ? truncateLabel(node.snapshot.taskDescription)
-        : 'Untitled Session';
-
-  const handleRemove = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      onRemove(node.id);
-    },
-    [node.id, onRemove],
-  );
-
-  const handleToggle = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    setExpanded((prev) => !prev);
-  }, []);
-
-  // With ghost, the ghost node itself represents the foreground — no separate (current) child indicator
-  const showCurrentFork = !foregroundBgId && foregroundParentSessionId === node.id;
-  const hasChildren = node.children.length > 0 || showCurrentFork;
-
-  return (
-    <div>
-      <div
-        data-testid={`bg-session-item-${node.id}`}
-        className={clsx(
-          'group flex items-start gap-1 py-1.5 pr-2 rounded-md transition-colors',
-          isGhost
-            ? 'bg-primary-50 dark:bg-primary-900/20 cursor-default'
-            : 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800',
-        )}
-        style={{ paddingLeft: `${depth * 12 + 8}px` }}
-        onClick={isGhost ? undefined : () => onSwitch(node.id)}
-        role="button"
-        tabIndex={isGhost ? -1 : 0}
-        onKeyDown={
-          isGhost
-            ? undefined
-            : (e) => {
-                if (e.key === 'Enter' || e.key === ' ') onSwitch(node.id);
-              }
-        }
-        title={isGhost ? undefined : t('sidebar.switchSession')}
-      >
-        {/* Expand/collapse chevron */}
-        {hasChildren ? (
-          <button className="p-0.5 shrink-0 text-gray-400" onClick={handleToggle} tabIndex={-1}>
-            <ChevronRightIcon className={clsx('w-3 h-3 transition-transform duration-200', expanded && 'rotate-90')} />
-          </button>
-        ) : (
-          <span className="w-4 shrink-0" />
-        )}
-
-        {/* Status dot */}
-        <span
-          data-testid={`bg-status-dot-${node.id}`}
-          className={clsx(
-            'mt-1 w-2 h-2 rounded-full shrink-0',
-            isGhost ? 'bg-primary-500 dark:bg-primary-400' : getStatusDotClasses(node.snapshot.status),
-          )}
-        />
-
-        {/* Content */}
-        <div className="flex-1 min-w-0">
-          <p
-            className={clsx(
-              'text-xs line-clamp-1',
-              isGhost ? 'text-primary-700 dark:text-primary-300 font-medium' : 'text-gray-900 dark:text-white',
-            )}
-          >
-            {label}
-          </p>
-          {isGhost ? (
-            <p className="text-[10px] text-primary-500 dark:text-primary-400">{t('sidebar.currentFork')}</p>
-          ) : (
-            (node.snapshot.llmModel || node.snapshot.llmBackend) && (
-              <p className="text-[10px] text-gray-400 dark:text-gray-500 line-clamp-1">
-                {node.snapshot.llmModel || node.snapshot.llmBackend}
-              </p>
-            )
-          )}
-        </div>
-
-        {/* Remove button (hidden for ghost) */}
-        {!isGhost && (
-          <button
-            data-testid={`bg-remove-btn-${node.id}`}
-            className="p-0.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/30 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-            onClick={handleRemove}
-            title={t('sidebar.removeSession')}
-          >
-            <Cross2Icon className="w-3 h-3" />
-          </button>
-        )}
-      </div>
-
-      {/* Children */}
-      {expanded && hasChildren && (
-        <div>
-          {/* Current foreground as highlighted child (only when no ghost) */}
-          {showCurrentFork && (
-            <div
-              data-testid="current-fork-indicator"
-              className="flex items-center gap-1 py-1 rounded-md"
-              style={{ paddingLeft: `${(depth + 1) * 12 + 8}px` }}
-            >
-              <span className="w-4 shrink-0" />
-              <span className="mt-0.5 w-2 h-2 rounded-full shrink-0 bg-primary-500 dark:bg-primary-400" />
-              <span className="text-xs text-primary-600 dark:text-primary-400 font-medium line-clamp-1">
-                {currentSessionDescription ? truncateLabel(currentSessionDescription) : t('sidebar.currentFork')}
-              </span>
-              <span className="text-[10px] text-primary-500 dark:text-primary-400 shrink-0">
-                {t('sidebar.currentFork')}
-              </span>
-            </div>
-          )}
-
-          {/* Recursive child nodes */}
-          {node.children.map((child) => (
-            <BackgroundSessionTreeItem
-              key={child.id}
-              node={child}
-              depth={depth + 1}
-              onSwitch={onSwitch}
-              onRemove={onRemove}
-              foregroundParentSessionId={foregroundParentSessionId}
-              foregroundBgId={foregroundBgId}
-              currentSessionDescription={currentSessionDescription}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// BackgroundSessionsSection (only for sessions not matched to any directory)
-// ---------------------------------------------------------------------------
-
-function BackgroundSessionsSection({
-  backgroundSessions,
-  onSwitch,
-  onRemove,
-  foregroundParentSessionId,
-  foregroundBgId,
-  currentSessionDescription,
-}: {
-  backgroundSessions: Record<string, SessionSnapshot>;
-  onSwitch: (id: string) => void;
-  onRemove: (id: string) => void;
-  foregroundParentSessionId?: string | null;
-  foregroundBgId?: string | null;
-  currentSessionDescription?: string;
-}) {
-  const { t } = useTranslation('simpleMode');
-
-  const entries = useMemo(() => Object.entries(backgroundSessions), [backgroundSessions]);
-
-  const tree = useMemo(() => buildSessionTree(backgroundSessions), [backgroundSessions]);
-
-  if (entries.length === 0) return null;
-
-  return (
-    <div className="mb-2">
-      {/* Section header */}
-      <div className="flex items-center gap-1 px-2 py-1.5">
-        <span className="flex-1 min-w-0 text-xs font-medium text-gray-500 dark:text-gray-400">
-          {t('sidebar.activeSessions')}
-        </span>
-        <span className="text-2xs px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 shrink-0">
-          {entries.length}
-        </span>
-      </div>
-
-      {/* Session tree */}
-      <div className="space-y-0.5">
-        {tree.map((node) => (
-          <BackgroundSessionTreeItem
-            key={node.id}
-            node={node}
-            depth={0}
-            onSwitch={onSwitch}
-            onRemove={onRemove}
-            foregroundParentSessionId={foregroundParentSessionId}
-            foregroundBgId={foregroundBgId}
-            currentSessionDescription={currentSessionDescription}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // WorkspaceTreeSidebar (main component)
 // ---------------------------------------------------------------------------
 
-export function WorkspaceTreeSidebar({
+export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
   history,
   onRestore,
   onDelete,
   onRename,
   onClear,
+  onClearAllSessions,
   onNewTask,
-  currentTask,
-  backgroundSessions = {},
-  onSwitchSession,
-  onRemoveSession,
-  foregroundParentSessionId,
-  foregroundBgId,
+  currentTask: _currentTask,
+  workflowSessions = [],
+  activeWorkflowSessionId,
+  onSwitchWorkflowSession,
+  onRenameWorkflowSession,
+  onArchiveWorkflowSession,
+  onRestoreWorkflowSession,
+  onDeleteWorkflowSession,
+  pathGroups,
+  activePath,
+  onNewTaskInPath,
 }: WorkspaceTreeSidebarProps) {
   const { t } = useTranslation('simpleMode');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
@@ -1040,6 +788,10 @@ export function WorkspaceTreeSidebar({
   const addPinnedDirectory = useSettingsStore((s) => s.addPinnedDirectory);
   const removePinnedDirectory = useSettingsStore((s) => s.removePinnedDirectory);
   const setWorkspacePath = useSettingsStore((s) => s.setWorkspacePath);
+  const sessionPathSort = useSettingsStore((s) => s.sessionPathSort);
+  const setSessionPathSort = useSettingsStore((s) => s.setSessionPathSort);
+  const showArchivedSessions = useSettingsStore((s) => s.showArchivedSessions);
+  const setShowArchivedSessions = useSettingsStore((s) => s.setShowArchivedSessions);
 
   const skills = useSkillMemoryStore((s) => s.skills);
   const loadSkills = useSkillMemoryStore((s) => s.loadSkills);
@@ -1066,9 +818,18 @@ export function WorkspaceTreeSidebar({
   const promptCount = prompts.length;
   const [activeTab, setActiveTab] = useState<SidebarTabId>('sessions');
 
-  // Expand/collapse state for directory paths and "other" group
+  // Expand/collapse state for path groups
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set());
-  const [otherExpanded, setOtherExpanded] = useState(true);
+  const [relativeTimeNow, setRelativeTimeNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setRelativeTimeNow(Date.now());
+    }, 60_000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
 
   // Startup preload for tab badges/content responsiveness.
   const basePreloadedRef = useRef(false);
@@ -1116,32 +877,32 @@ export function WorkspaceTreeSidebar({
     });
   }, [workspacePath, pinnedDirectories]);
 
-  // Hide history rows that are already represented by active background snapshots
-  const visibleHistory = useMemo(() => {
-    const activeOriginHistoryIds = new Set<string>();
-    const activeSessionIds = new Set<string>();
-    for (const snapshot of Object.values(backgroundSessions)) {
-      if (snapshot.originHistoryId) activeOriginHistoryIds.add(snapshot.originHistoryId);
-      if (snapshot.taskId) {
-        activeSessionIds.add(`claude:${snapshot.taskId}`);
-      } else if (snapshot.standaloneSessionId) {
-        activeSessionIds.add(`standalone:${snapshot.standaloneSessionId}`);
-      }
-    }
-    if (activeOriginHistoryIds.size === 0 && activeSessionIds.size === 0) return history;
-    return history.filter(
-      (item) => !activeOriginHistoryIds.has(item.id) && !(item.sessionId && activeSessionIds.has(item.sessionId)),
-    );
-  }, [history, backgroundSessions]);
-
-  // Group sessions (history + background) by pinned directories
-  const { directories, other, unmatchedBgSessions } = useMemo(
-    () => groupSessionsByDirectories(visibleHistory, pinnedDirectories, backgroundSessions),
-    [visibleHistory, pinnedDirectories, backgroundSessions],
+  const effectivePathGroups = useMemo(
+    () =>
+      pathGroups ??
+      buildSessionTreeViewModel({
+        workflowSessions,
+        history,
+        activeSessionId: activeWorkflowSessionId,
+        pinnedDirectories,
+        pathSort: sessionPathSort,
+        includeArchived: showArchivedSessions,
+      }),
+    [
+      activeWorkflowSessionId,
+      history,
+      pathGroups,
+      pinnedDirectories,
+      sessionPathSort,
+      showArchivedSessions,
+      workflowSessions,
+    ],
   );
 
-  // Compute active normalized path for highlighting
-  const activeNormalized = useMemo(() => normalizeWorkspacePath(workspacePath), [workspacePath]);
+  const activeNormalized = useMemo(
+    () => normalizeWorkspacePath(activePath ?? workspacePath),
+    [activePath, workspacePath],
+  );
 
   // Toggle expand/collapse for a directory
   const toggleDirectory = useCallback((normalizedPath: string) => {
@@ -1154,11 +915,6 @@ export function WorkspaceTreeSidebar({
       }
       return next;
     });
-  }, []);
-
-  // Toggle "Other" group
-  const toggleOther = useCallback(() => {
-    setOtherExpanded((prev) => !prev);
   }, []);
 
   // Add directory via Tauri folder picker
@@ -1186,8 +942,7 @@ export function WorkspaceTreeSidebar({
     [removePinnedDirectory],
   );
 
-  // New task in a specific directory
-  const handleNewTaskInDir = useCallback(
+  const fallbackNewTaskInPath = useCallback(
     (dirPath: string) => {
       setWorkspacePath(dirPath);
       onNewTask();
@@ -1209,9 +964,9 @@ export function WorkspaceTreeSidebar({
     [history, setWorkspacePath, onRestore],
   );
 
-  const hasBgSessions = Object.keys(backgroundSessions).length > 0;
-  const isEmpty = pinnedDirectories.length === 0 && visibleHistory.length === 0 && !hasBgSessions;
-  const sessionCount = visibleHistory.length + Object.keys(backgroundSessions).length;
+  const sessionCount = effectivePathGroups.reduce((total, group) => total + group.sessionCount, 0);
+  const hasSessions = sessionCount > 0;
+  const isEmpty = pinnedDirectories.length === 0 && !hasSessions;
   const tabs = useMemo<SidebarTabDef[]>(
     () => [
       { id: 'sessions', label: t('sidebar.sessions'), count: sessionCount },
@@ -1254,6 +1009,10 @@ export function WorkspaceTreeSidebar({
           activeTab={activeTab}
           onNewTask={onNewTask}
           onAddDirectory={handleAddDirectory}
+          sessionPathSort={sessionPathSort}
+          onSessionPathSortChange={setSessionPathSort}
+          showArchivedSessions={showArchivedSessions}
+          onToggleShowArchivedSessions={() => setShowArchivedSessions(!showArchivedSessions)}
           onManageSkills={handleManageSkills}
           onManagePlugins={handleManagePlugins}
           onOpenPluginMarketplace={handleOpenPluginMarketplace}
@@ -1263,13 +1022,6 @@ export function WorkspaceTreeSidebar({
       </div>
 
       {/* Current task indicator */}
-      {activeTab === 'sessions' && currentTask && (
-        <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 text-xs">
-          <p className="text-gray-500 dark:text-gray-400">{t('sidebar.current')}</p>
-          <p className="text-gray-700 dark:text-gray-200 line-clamp-2">{currentTask}</p>
-        </div>
-      )}
-
       {activeTab === 'sessions' ? (
         <div
           id="sidebar-panel-sessions"
@@ -1278,18 +1030,6 @@ export function WorkspaceTreeSidebar({
           className="flex-1 min-h-0 flex flex-col"
         >
           <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
-            {/* Background sessions not matched to any pinned directory */}
-            {onSwitchSession && onRemoveSession && (
-              <BackgroundSessionsSection
-                backgroundSessions={unmatchedBgSessions}
-                onSwitch={onSwitchSession}
-                onRemove={onRemoveSession}
-                foregroundParentSessionId={foregroundParentSessionId}
-                foregroundBgId={foregroundBgId}
-                currentSessionDescription={currentTask || undefined}
-              />
-            )}
-
             {isEmpty ? (
               <div className="h-full flex flex-col items-center justify-center text-center px-4 py-8">
                 <svg className="w-8 h-8 text-gray-300 dark:text-gray-600 mb-2" fill="currentColor" viewBox="0 0 20 20">
@@ -1300,56 +1040,51 @@ export function WorkspaceTreeSidebar({
               </div>
             ) : (
               <>
-                {/* Pinned directory nodes */}
-                {directories.map((group) => {
+                {effectivePathGroups.map((group) => {
+                  const groupPath = group.path ? normalizeWorkspacePath(group.path) : group.normalizedPath;
                   const isActive =
                     activeNormalized !== null &&
-                    (activeNormalized === group.normalizedPath ||
-                      activeNormalized.startsWith(group.normalizedPath + '/'));
+                    groupPath !== null &&
+                    (activeNormalized === groupPath || activeNormalized.startsWith(`${groupPath}/`));
                   return (
-                    <DirectoryNode
+                    <PathGroupNode
                       key={group.normalizedPath}
                       group={group}
+                      nowMs={relativeTimeNow}
                       isActive={isActive}
                       isExpanded={expandedPaths.has(group.normalizedPath)}
                       onToggle={() => toggleDirectory(group.normalizedPath)}
-                      onUnpin={() => handleUnpin(group.path)}
-                      onNewTaskInDir={() => handleNewTaskInDir(group.path)}
-                      onRestore={handleRestore}
-                      onDelete={onDelete}
-                      onRename={onRename}
-                      onSwitchSession={onSwitchSession}
-                      onRemoveSession={onRemoveSession}
-                      foregroundParentSessionId={foregroundParentSessionId}
-                      foregroundBgId={foregroundBgId}
-                      currentSessionDescription={currentTask || undefined}
+                      onUnpin={
+                        group.path && pinnedDirectories.includes(group.path) ? () => handleUnpin(group.path!) : null
+                      }
+                      onNewTaskInPath={() =>
+                        group.path ? (onNewTaskInPath ?? fallbackNewTaskInPath)(group.path) : onNewTask()
+                      }
+                      onActivateLive={onSwitchWorkflowSession}
+                      onRestoreHistory={handleRestore}
+                      onDeleteHistory={onDelete}
+                      onRenameHistory={onRename}
+                      onArchiveLive={onArchiveWorkflowSession}
+                      onRenameLive={onRenameWorkflowSession}
+                      onRestoreArchived={onRestoreWorkflowSession}
+                      onDeleteArchived={onDeleteWorkflowSession}
                     />
                   );
                 })}
-
-                {/* Other sessions group */}
-                <OtherSessionsGroup
-                  sessions={other}
-                  isExpanded={otherExpanded}
-                  onToggle={toggleOther}
-                  onRestore={handleRestore}
-                  onDelete={onDelete}
-                  onRename={onRename}
-                />
               </>
             )}
           </div>
-          {history.length > 0 && (
+          {(history.length > 0 || workflowSessions.length > 0) && (
             <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-700">
               <button
-                onClick={onClear}
+                onClick={onClearAllSessions ?? onClear}
                 className={clsx(
                   'w-full text-xs px-2 py-1.5 rounded-md transition-colors',
                   'text-red-600 dark:text-red-400',
                   'hover:bg-red-50 dark:hover:bg-red-900/20',
                 )}
               >
-                {t('sidebar.clearAll')}
+                {t('sidebar.clearAllSessions', { defaultValue: t('sidebar.clearAll') })}
               </button>
             </div>
           )}
@@ -1398,6 +1133,6 @@ export function WorkspaceTreeSidebar({
       <SkillMemoryToast />
     </div>
   );
-}
+});
 
 export default WorkspaceTreeSidebar;

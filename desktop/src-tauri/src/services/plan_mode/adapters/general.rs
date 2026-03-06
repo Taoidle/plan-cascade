@@ -94,7 +94,9 @@ impl DomainAdapter for GeneralAdapter {
                     if let Some(rule_based) = rule_validate_direct_criterion(criterion, source) {
                         results.push(rule_based);
                     } else {
-                        results.push(llm_validate_criterion(criterion, source, provider.clone()).await);
+                        results.push(
+                            llm_validate_criterion(criterion, source, provider.clone()).await,
+                        );
                     }
                 }
             }
@@ -300,10 +302,7 @@ fn build_llm_explanation(parsed: &serde_json::Value) -> String {
     if missing.is_empty() {
         format!("{explanation}{confidence}")
     } else {
-        format!(
-            "{explanation}{confidence}; missing: {}",
-            missing.join(", ")
-        )
+        format!("{explanation}{confidence}; missing: {}", missing.join(", "))
     }
 }
 
@@ -366,13 +365,16 @@ mod tests {
 
     #[test]
     fn externally_verifiable_requires_validation_plan() {
-        assert!(output_has_validation_plan("验证方案: 通过 A/B test 和指标追踪评估准确率。"));
+        assert!(output_has_validation_plan(
+            "验证方案: 通过 A/B test 和指标追踪评估准确率。"
+        ));
         assert!(!output_has_validation_plan("将支持该功能并提供更好体验。"));
     }
 
     #[test]
     fn direct_rule_defers_to_llm_when_partial_semantic_match() {
-        let criterion = "明确各维度的改进目标（如：降低模式选择复杂度从高到低、提升状态可视化满意度等）";
+        let criterion =
+            "明确各维度的改进目标（如：降低模式选择复杂度从高到低、提升状态可视化满意度等）";
         let output = "## 二、改进目标设定\n- 降低模式选择复杂度\n- 提升状态可视化满意度";
         let result = rule_validate_direct_criterion(criterion, output);
         assert!(

@@ -7,12 +7,7 @@ import type {
 } from '../../types/workflowKernel';
 import i18n from '../../i18n';
 import { useExecutionStore } from '../../store/execution';
-
-const WORKFLOW_KERNEL_SESSION_STORAGE_PREFIX = 'simple_mode_workflow_kernel_session_v2:';
-
-function workflowKernelSessionStorageKey(workspacePath: string | null): string {
-  return `${WORKFLOW_KERNEL_SESSION_STORAGE_PREFIX}${workspacePath || '__default_workspace__'}`;
-}
+import { useSimpleSessionStore } from '../../store/simpleSessionStore';
 
 interface UseWorkflowKernelSessionBridgeParams {
   workspacePath: string;
@@ -25,6 +20,11 @@ interface UseWorkflowKernelSessionBridgeParams {
     initialContext?: HandoffContextBundle,
   ) => Promise<WorkflowSession | null>;
   recoverWorkflowKernelSession: (sessionId: string) => Promise<WorkflowSessionState | null>;
+  getWorkflowKernelCatalogState: () => Promise<{
+    activeSessionId: string | null;
+    sessions: Array<{ sessionId: string }>;
+  } | null>;
+  activateWorkflowKernelSession: (sessionId: string) => Promise<WorkflowSessionState | null>;
 }
 
 interface UseWorkflowKernelSessionBridgeResult {
@@ -39,22 +39,15 @@ export function useWorkflowKernelSessionBridge({
   setWorkflowMode,
   openWorkflowKernelSession,
   recoverWorkflowKernelSession,
+  getWorkflowKernelCatalogState,
+  activateWorkflowKernelSession,
 }: UseWorkflowKernelSessionBridgeParams): UseWorkflowKernelSessionBridgeResult {
   const kernelBootstrapInFlightRef = useRef(false);
   const interruptedNoticeSessionIdRef = useRef<string | null>(null);
 
-  const persistWorkflowKernelSessionId = useCallback(
-    (sessionId: string) => {
-      if (typeof localStorage === 'undefined') return;
-      localStorage.setItem(workflowKernelSessionStorageKey(workspacePath), sessionId);
-    },
-    [workspacePath],
-  );
-
   const clearPersistedWorkflowKernelSessionId = useCallback(() => {
-    if (typeof localStorage === 'undefined') return;
-    localStorage.removeItem(workflowKernelSessionStorageKey(workspacePath));
-  }, [workspacePath]);
+    useSimpleSessionStore.getState().setActiveRootSessionId(null);
+  }, []);
 
   useEffect(() => {
     if (workflowKernelSessionId) return;
@@ -62,59 +55,72 @@ export function useWorkflowKernelSessionBridge({
 
     kernelBootstrapInFlightRef.current = true;
     const bootstrap = async () => {
-      if (typeof localStorage !== 'undefined') {
-        const persistedSessionId = localStorage.getItem(workflowKernelSessionStorageKey(workspacePath));
-        if (persistedSessionId) {
-          const recovered = await recoverWorkflowKernelSession(persistedSessionId);
-          if (recovered?.session?.sessionId) {
-            const interruptedByRestart = recovered.events.some((event) => {
-              if (event.kind !== 'input_submitted') return false;
-              const payload = event.payload as Record<string, unknown> | null;
-              const metadata = (payload?.metadata as Record<string, unknown> | undefined) ?? undefined;
-              return metadata?.reasonCode === 'interrupted_by_restart';
+      const catalogState = await getWorkflowKernelCatalogState();
+      const persistedSessionId =
+        useSimpleSessionStore.getState().activeRootSessionId || catalogState?.activeSessionId || null;
+
+      if (persistedSessionId) {
+        const activated = await activateWorkflowKernelSession(persistedSessionId);
+        const recovered = activated ?? (await recoverWorkflowKernelSession(persistedSessionId));
+        if (recovered?.session?.sessionId) {
+          useSimpleSessionStore.getState().setActiveRootSessionId(recovered.session.sessionId);
+          const interruptedByRestart = recovered.events.some((event) => {
+            if (event.kind !== 'input_submitted') return false;
+            const payload = event.payload as Record<string, unknown> | null;
+            const metadata = (payload?.metadata as Record<string, unknown> | undefined) ?? undefined;
+            return metadata?.reasonCode === 'interrupted_by_restart';
+          });
+          if (interruptedByRestart && interruptedNoticeSessionIdRef.current !== recovered.session.sessionId) {
+            interruptedNoticeSessionIdRef.current = recovered.session.sessionId;
+            useExecutionStore.getState().appendCard({
+              cardType: 'workflow_info',
+              cardId: `workflow-restart-interrupted-${Date.now()}`,
+              data: {
+                level: 'warning',
+                message: i18n.t('simpleMode:workflow.recovered.interruptedByRestart', {
+                  defaultValue:
+                    'Execution was interrupted by app restart. Please retry from the current plan/task state.',
+                }),
+              },
+              interactive: false,
             });
-            if (interruptedByRestart && interruptedNoticeSessionIdRef.current !== recovered.session.sessionId) {
-              interruptedNoticeSessionIdRef.current = recovered.session.sessionId;
-              useExecutionStore.getState().appendCard({
-                cardType: 'workflow_info',
-                cardId: `workflow-restart-interrupted-${Date.now()}`,
-                data: {
-                  level: 'warning',
-                  message: i18n.t('simpleMode:workflow.recovered.interruptedByRestart', {
-                    defaultValue:
-                      'Execution was interrupted by app restart. Please retry from the current plan/task state.',
-                  }),
-                },
-                interactive: false,
-              });
-            }
-            kernelBootstrapInFlightRef.current = false;
-            return;
           }
-          localStorage.removeItem(workflowKernelSessionStorageKey(workspacePath));
+          kernelBootstrapInFlightRef.current = false;
+          return;
         }
       }
 
-      await openWorkflowKernelSession('chat', {
+      const opened = await openWorkflowKernelSession('chat', {
         conversationContext: [],
         artifactRefs: [],
         contextSources: ['simple_mode'],
         metadata: {
           entry: 'simple_mode_mount',
+          workspacePath,
         },
       });
+      if (opened?.sessionId) {
+        useSimpleSessionStore.getState().setActiveRootSessionId(opened.sessionId);
+      }
       kernelBootstrapInFlightRef.current = false;
     };
 
     void bootstrap().finally(() => {
       kernelBootstrapInFlightRef.current = false;
     });
-  }, [workflowKernelSessionId, workspacePath, openWorkflowKernelSession, recoverWorkflowKernelSession]);
+  }, [
+    activateWorkflowKernelSession,
+    getWorkflowKernelCatalogState,
+    openWorkflowKernelSession,
+    recoverWorkflowKernelSession,
+    workflowKernelSessionId,
+    workspacePath,
+  ]);
 
   useEffect(() => {
     if (!workflowKernelSessionId) return;
-    persistWorkflowKernelSessionId(workflowKernelSessionId);
-  }, [workflowKernelSessionId, persistWorkflowKernelSessionId]);
+    useSimpleSessionStore.getState().setActiveRootSessionId(workflowKernelSessionId);
+  }, [workflowKernelSessionId]);
 
   useEffect(() => {
     if (!workflowKernelSessionActiveMode || workflowKernelSessionActiveMode === workflowMode) return;

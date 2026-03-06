@@ -1,11 +1,8 @@
 import i18n from '../../i18n';
-import { useExecutionStore } from '../execution';
 import { usePlanModeStore } from '../planMode';
 import { useWorkflowKernelStore } from '../workflowKernel';
 import { useSettingsStore } from '../settings';
 import { selectKernelPlanRuntime } from '../workflowKernelSelectors';
-import { buildConversationHistory } from '../../lib/contextBridge';
-import { getNextTurnId } from '../../lib/conversationUtils';
 import { failResult, type ActionResult } from '../../types/actionResult';
 import type { ContextSourceConfig } from '../../types/contextSources';
 import type {
@@ -16,6 +13,7 @@ import type {
 } from '../../types/planModeCard';
 import type { PlanOrchestratorState } from '../planOrchestrator';
 import {
+  appendPlanUserMessage,
   injectClarificationResolutionCard,
   injectPlanCard as injectCard,
   injectPlanError as injectError,
@@ -49,9 +47,7 @@ export async function startPlanWorkflowFlow(
 
   set({ isBusy: true, isCancelling: false, taskDescription: description, phase: 'analyzing', _runToken: runToken });
 
-  const executionState = useExecutionStore.getState();
-  const turnId = getNextTurnId(executionState.streamingOutput);
-  executionState.appendStreamLine(description, 'info', undefined, undefined, { turnId, turnBoundary: 'user' });
+  appendPlanUserMessage(description);
 
   injectCard('plan_persona_indicator', {
     role: 'planner',
@@ -60,12 +56,6 @@ export async function startPlanWorkflowFlow(
   } satisfies PlanPersonaIndicatorData);
 
   injectInfo(i18n.t('planMode:orchestrator.analyzingTask', 'Analyzing task...'));
-
-  const conversationHistory = buildConversationHistory();
-  const contextStr =
-    conversationHistory.length > 0
-      ? conversationHistory.map((t) => `user: ${t.user}\nassistant: ${t.assistant}`).join('\n')
-      : undefined;
 
   const strategyAgent = resolvePhaseAgent('plan_strategy');
   const provider = strategyAgent.provider || settings.provider;
@@ -81,7 +71,7 @@ export async function startPlanWorkflowFlow(
     baseUrl,
     projectPath,
     contextSources,
-    contextStr,
+    undefined,
     i18n.language,
   );
   if (get()._runToken !== runToken) return { modeSessionId: null };
@@ -191,11 +181,6 @@ export async function submitClarificationFlow(
   const settings = useSettingsStore.getState();
   const projectPath = settings.workspacePath || undefined;
   const contextSources = buildPlanContextSources(effectiveSessionId);
-  const conversationHistory = buildConversationHistory();
-  const contextStr =
-    conversationHistory.length > 0
-      ? conversationHistory.map((t) => `user: ${t.user}\nassistant: ${t.assistant}`).join('\n')
-      : undefined;
   const updatedSession = await planStore.submitClarification(
     answer,
     undefined,
@@ -203,7 +188,7 @@ export async function submitClarificationFlow(
     undefined,
     projectPath,
     contextSources,
-    contextStr,
+    undefined,
     i18n.language,
     effectiveSessionId,
   );
@@ -295,11 +280,6 @@ export async function proceedToPlanningFlow(deps: SessionFlowDeps): Promise<void
 
   injectInfo(i18n.t('planMode:orchestrator.generatingPlan', 'Generating plan...'));
 
-  const conversationHistory = buildConversationHistory();
-  const contextStr =
-    conversationHistory.length > 0
-      ? conversationHistory.map((t) => `user: ${t.user}\nassistant: ${t.assistant}`).join('\n')
-      : undefined;
   const settings = useSettingsStore.getState();
   const projectPath = settings.workspacePath || undefined;
   const contextSources = buildPlanContextSources(effectiveSessionId);
@@ -311,7 +291,7 @@ export async function proceedToPlanningFlow(deps: SessionFlowDeps): Promise<void
     undefined,
     projectPath,
     contextSources,
-    contextStr,
+    undefined,
     i18n.language,
     effectiveSessionId,
   );

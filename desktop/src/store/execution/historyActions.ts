@@ -455,8 +455,12 @@ export function createHistoryActions(deps: HistoryActionDeps): HistoryActions {
         ? rebuildStandaloneTurns(normalizedLines)
         : [];
 
-      const currentState = get();
+      let currentState = get();
       let bgSessions = currentState.backgroundSessions;
+      let runtimeRegistry = currentState.runtimeRegistry;
+      let activeRuntimeHandleId = currentState.activeRuntimeHandleId;
+      let activeSessionId = currentState.activeSessionId;
+
       if (currentState.foregroundBgId && bgSessions[currentState.foregroundBgId]) {
         const curSettings = useSettingsStore.getState();
         const originalWorkspacePath = bgSessions[currentState.foregroundBgId].workspacePath;
@@ -468,15 +472,24 @@ export function createHistoryActions(deps: HistoryActionDeps): HistoryActions {
         updatedGhost.workspacePath = originalWorkspacePath;
         bgSessions = { ...bgSessions, [currentState.foregroundBgId]: updatedGhost };
       } else if (shouldPersistForegroundBeforeSwitch(currentState)) {
-        const curSettings = useSettingsStore.getState();
-        const newBgId =
-          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-            ? `bg-${crypto.randomUUID()}`
-            : `bg-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
-        bgSessions = {
-          ...bgSessions,
-          [newBgId]: createSessionSnapshotFromForeground(currentState, curSettings, newBgId),
-        };
+        if (currentState.isChatSession) {
+          get().parkForegroundRuntime();
+          currentState = get();
+          bgSessions = currentState.backgroundSessions;
+          runtimeRegistry = currentState.runtimeRegistry;
+          activeRuntimeHandleId = currentState.activeRuntimeHandleId;
+          activeSessionId = currentState.activeSessionId;
+        } else {
+          const curSettings = useSettingsStore.getState();
+          const newBgId =
+            typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+              ? `bg-${crypto.randomUUID()}`
+              : `bg-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+          bgSessions = {
+            ...bgSessions,
+            [newBgId]: createSessionSnapshotFromForeground(currentState, curSettings, newBgId),
+          };
+        }
       }
 
       set({
@@ -484,7 +497,9 @@ export function createHistoryActions(deps: HistoryActionDeps): HistoryActions {
         connectionStatus: currentState.connectionStatus,
         history: currentState.history,
         backgroundSessions: bgSessions,
-        activeSessionId: currentState.activeSessionId,
+        runtimeRegistry,
+        activeRuntimeHandleId,
+        activeSessionId,
         foregroundParentSessionId: null,
         foregroundBgId: null,
         foregroundOriginHistoryId: historyId,

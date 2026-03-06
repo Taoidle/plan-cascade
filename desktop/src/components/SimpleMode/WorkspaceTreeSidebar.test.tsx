@@ -1,96 +1,89 @@
-/**
- * WorkspaceTreeSidebar - Background Sessions Tests
- *
- * Story 008: Verify that background sessions are rendered separately from history
- * with status indicators, switch/remove actions, and proper i18n labels.
- * Also verifies fork hierarchy display within workspace directory tree.
- */
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { WorkspaceTreeSidebar, type WorkspaceTreeSidebarProps } from './WorkspaceTreeSidebar';
+import type { ExecutionHistoryItem, SessionSnapshot } from '../../store/execution';
+import type { WorkflowSessionCatalogItem } from '../../types/workflowKernel';
+import { ToolCallStreamFilter } from '../../utils/toolCallFilter';
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
-
-// Mock react-i18next
 vi.mock('react-i18next', () => ({
+  initReactI18next: { type: '3rdParty', init: () => {} },
   useTranslation: () => ({
-    t: (key: string) => {
+    t: (key: string, options?: { defaultValue?: string }) => {
       const translations: Record<string, string> = {
         'sidebar.newTask': 'New Task',
         'sidebar.addDirectory': 'Add Directory',
+        'sidebar.sessions': 'Sessions',
         'sidebar.skills': 'Skills',
         'sidebar.plugins': 'Plugins',
         'sidebar.agents': 'Agents',
         'sidebar.prompts': 'Prompts',
         'sidebar.clearAll': 'Clear All Sessions',
-        'sidebar.current': 'Current',
-        'sidebar.otherSessions': 'Other',
         'sidebar.noDirectories': 'No directories pinned',
         'sidebar.noDirectoriesHint': 'Click "Directory" to add a workspace',
         'sidebar.rename': 'rename',
+        'sidebar.renamePrompt': 'Rename session',
         'sidebar.deleteSession': 'Delete session',
-        'sidebar.activeSessions': 'Active Sessions',
-        'sidebar.switchSession': 'Switch to this session',
-        'sidebar.removeSession': 'Remove session',
-        'sidebar.currentFork': '(current)',
+        'sidebar.deleteSessionConfirm': 'Delete this session permanently? This cannot be undone.',
+        'sidebar.archiveSession': 'Archive session',
+        'sidebar.archiveAction': 'archive',
+        'sidebar.restoreAction': 'restore',
+        'sidebar.restoreSession': 'Restore session',
         'sidebar.removeDirectory': 'Remove from sidebar',
         'sidebar.newTaskInDir': 'New task in this directory',
-        'sidebar.toggleSidebar': 'Toggle sidebar',
-        'sidebar.sessions': 'Sessions',
-        'skillPanel.title': 'Skills & Memory',
-        'skillPanel.manageAll': 'Manage All...',
-        'skillPanel.loading': 'Loading...',
-        'skillPanel.detectedSkills': 'Auto-Detected Skills',
-        'skillPanel.projectSkills': 'Project Skills',
-        'skillPanel.memories': 'Memories',
-        'pluginPanel.manageAll': 'Manage All...',
-        'pluginPanel.marketplace': 'Marketplace',
-        'agentPanel.manageAll': 'Manage All...',
-        'promptPanel.manageAll': 'Manage All...',
+        'sidebar.clearAllSessions': 'Clear All Sessions',
+        'sidebar.sort.label': 'Sort paths',
+        'sidebar.sort.recent': 'Sort: Recent',
+        'sidebar.sort.name': 'Sort: Name',
+        'sidebar.archived.show': 'Show Archived',
+        'sidebar.archived.hide': 'Hide Archived',
+        'sidebar.badges.live': 'Live',
+        'sidebar.badges.history': 'History',
+        'sidebar.badges.archived': 'Archived',
+        'sidebar.status.idle': 'Idle',
+        'sidebar.status.running': 'Running',
+        'sidebar.status.attention': 'Attention',
+        'sidebar.time.justNow': 'just now',
+        'sidebar.noWorkspace': 'No Workspace',
       };
-      return translations[key] || key;
+      return translations[key] || options?.defaultValue || key;
     },
     i18n: { language: 'en' },
   }),
 }));
 
-// Settings store mock — default: no pinned directories
 let mockPinnedDirectories: string[] = [];
-let mockWorkspacePath = '/test/project';
+let mockWorkspacePath = '/repo/app';
+const addPinnedDirectory = vi.fn();
+const removePinnedDirectory = vi.fn();
+const setWorkspacePath = vi.fn();
+const setSessionPathSort = vi.fn();
+const setShowArchivedSessions = vi.fn();
+let mockSessionPathSort: 'recent' | 'name' = 'recent';
+let mockShowArchivedSessions = false;
 
 vi.mock('../../store/settings', () => ({
   useSettingsStore: vi.fn((selector) => {
     const state = {
       workspacePath: mockWorkspacePath,
       pinnedDirectories: mockPinnedDirectories,
-      addPinnedDirectory: vi.fn(),
-      removePinnedDirectory: vi.fn(),
-      setWorkspacePath: vi.fn(),
+      addPinnedDirectory,
+      removePinnedDirectory,
+      setWorkspacePath,
+      sessionPathSort: mockSessionPathSort,
+      setSessionPathSort,
+      showArchivedSessions: mockShowArchivedSessions,
+      setShowArchivedSessions,
     };
     return typeof selector === 'function' ? selector(state) : state;
   }),
 }));
 
-// Mock skillMemory store
 const mockSkillMemoryStore = {
   skills: [],
-  skillsLoading: false,
-  memories: [],
-  memoriesLoading: false,
-  panelOpen: false,
-  dialogOpen: false,
-  activeTab: 'skills',
-  toastMessage: null,
-  toastType: 'info',
   loadSkills: vi.fn(),
   loadMemories: vi.fn(),
-  loadMemoryStats: vi.fn(),
-  toggleSkill: vi.fn(),
-  togglePanel: vi.fn(),
   openDialog: vi.fn(),
-  closeDialog: vi.fn(),
-  setActiveTab: vi.fn(),
-  clearToast: vi.fn(),
 };
-
 vi.mock('../../store/skillMemory', () => ({
   useSkillMemoryStore: vi.fn((selector) =>
     typeof selector === 'function' ? selector(mockSkillMemoryStore) : mockSkillMemoryStore,
@@ -99,109 +92,109 @@ vi.mock('../../store/skillMemory', () => ({
 
 const mockPluginStore = {
   plugins: [],
-  loading: false,
-  panelOpen: false,
   loadPlugins: vi.fn(),
-  togglePlugin: vi.fn(),
   openDialog: vi.fn(),
   setActiveTab: vi.fn(),
 };
-
 vi.mock('../../store/plugins', () => ({
   usePluginStore: vi.fn((selector) => (typeof selector === 'function' ? selector(mockPluginStore) : mockPluginStore)),
 }));
 
 const mockAgentsStore = {
   agents: [],
-  searchQuery: '',
-  loading: { agents: false },
-  panelOpen: false,
   fetchAgents: vi.fn(),
   openDialog: vi.fn(),
-  setActiveAgentForSession: vi.fn(),
 };
-
 vi.mock('../../store/agents', () => ({
   useAgentsStore: vi.fn((selector) => (typeof selector === 'function' ? selector(mockAgentsStore) : mockAgentsStore)),
 }));
 
 const mockPromptsStore = {
   prompts: [],
-  loading: false,
-  panelOpen: false,
   fetchPrompts: vi.fn(),
   openDialog: vi.fn(),
 };
-
 vi.mock('../../store/prompts', () => ({
   usePromptsStore: vi.fn((selector) =>
     typeof selector === 'function' ? selector(mockPromptsStore) : mockPromptsStore,
   ),
 }));
 
-// Mock child components to keep sidebar behavior-focused tests stable
-vi.mock('./SkillMemoryPanel', () => ({
-  SkillMemoryPanel: () => <div data-testid="skill-memory-panel">Skills Panel</div>,
-}));
+vi.mock('./SkillMemoryPanel', () => ({ SkillMemoryPanel: () => <div data-testid="skill-memory-panel" /> }));
+vi.mock('./PluginPanel', () => ({ PluginPanel: () => <div data-testid="plugin-panel" /> }));
+vi.mock('./AgentPanel', () => ({ AgentPanel: () => <div data-testid="agent-panel" /> }));
+vi.mock('./PromptPanel', () => ({ PromptPanel: () => <div data-testid="prompt-panel" /> }));
+vi.mock('../SkillMemory/SkillMemoryDialog', () => ({ SkillMemoryDialog: () => null }));
+vi.mock('../Plugins/PluginDialog', () => ({ PluginDialog: () => null }));
+vi.mock('../Agents/AgentDialog', () => ({ AgentDialog: () => null }));
+vi.mock('../Prompts/PromptDialog', () => ({ PromptDialog: () => null }));
+vi.mock('../SkillMemory/SkillMemoryToast', () => ({ SkillMemoryToast: () => null }));
 
-vi.mock('./PluginPanel', () => ({
-  PluginPanel: () => <div data-testid="plugin-panel">Plugin Panel</div>,
-}));
-
-vi.mock('./AgentPanel', () => ({
-  AgentPanel: () => <div data-testid="agent-panel">Agent Panel</div>,
-}));
-
-vi.mock('./PromptPanel', () => ({
-  PromptPanel: () => <div data-testid="prompt-panel">Prompt Panel</div>,
-}));
-
-vi.mock('../SkillMemory/SkillMemoryDialog', () => ({
-  SkillMemoryDialog: () => null,
-}));
-
-vi.mock('../Plugins/PluginDialog', () => ({
-  PluginDialog: () => null,
-}));
-
-vi.mock('../Agents/AgentDialog', () => ({
-  AgentDialog: () => null,
-}));
-
-vi.mock('../Prompts/PromptDialog', () => ({
-  PromptDialog: () => null,
-}));
-
-vi.mock('../SkillMemory/SkillMemoryToast', () => ({
-  SkillMemoryToast: () => null,
-}));
-
-import { WorkspaceTreeSidebar, type WorkspaceTreeSidebarProps } from './WorkspaceTreeSidebar';
-import type { SessionSnapshot } from '../../store/execution';
-
-// Helper to create a mock SessionSnapshot
-function createMockSnapshot(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
+function createHistoryItem(overrides: Partial<ExecutionHistoryItem> = {}): ExecutionHistoryItem {
   return {
-    id: `bg-${Date.now()}-${Math.random()}`,
-    taskDescription: 'Background task',
-    status: 'running',
-    streamingOutput: [],
-    streamLineCounter: 0,
-    currentTurnStartLineId: 0,
-    taskId: null,
-    isChatSession: true,
-    standaloneTurns: [],
-    standaloneSessionId: null,
-    latestUsage: null,
-    sessionUsageTotals: null,
-    startedAt: Date.now(),
-    toolCallFilter: { reset: vi.fn(), feed: vi.fn() } as unknown as SessionSnapshot['toolCallFilter'],
-    llmBackend: 'claude-code',
-    llmProvider: 'anthropic',
-    llmModel: '',
-    parentSessionId: undefined,
-    workspacePath: undefined,
-    ...overrides,
+    id: overrides.id ?? 'history-1',
+    title: overrides.title,
+    taskDescription: overrides.taskDescription ?? 'Build feature',
+    workspacePath: overrides.workspacePath ?? '/repo/app',
+    strategy: overrides.strategy ?? 'direct',
+    status: overrides.status ?? 'completed',
+    startedAt: overrides.startedAt ?? Date.now() - 60_000,
+    completedAt: overrides.completedAt,
+    duration: overrides.duration ?? 1000,
+    completedStories: overrides.completedStories ?? 1,
+    totalStories: overrides.totalStories ?? 1,
+    success: overrides.success ?? true,
+    error: overrides.error,
+    conversationContent: overrides.conversationContent,
+    conversationLines: overrides.conversationLines,
+    sessionId: overrides.sessionId,
+    llmBackend: overrides.llmBackend,
+    llmProvider: overrides.llmProvider,
+    llmModel: overrides.llmModel,
+  };
+}
+
+function createWorkflowSession(overrides: Partial<WorkflowSessionCatalogItem> = {}): WorkflowSessionCatalogItem {
+  return {
+    sessionId: overrides.sessionId ?? 'root-1',
+    sessionKind: 'simple_root',
+    displayTitle: overrides.displayTitle ?? 'Implement billing',
+    workspacePath: 'workspacePath' in overrides ? (overrides.workspacePath ?? null) : '/repo/app',
+    status: overrides.status ?? 'active',
+    activeMode: overrides.activeMode ?? 'task',
+    backgroundState: overrides.backgroundState ?? 'background_running',
+    createdAt: overrides.createdAt ?? new Date(Date.now() - 60_000).toISOString(),
+    updatedAt: overrides.updatedAt ?? new Date().toISOString(),
+    lastError: overrides.lastError ?? null,
+    contextLedger: overrides.contextLedger ?? {
+      conversationTurnCount: 3,
+      artifactRefCount: 1,
+      contextSourceKinds: ['chat_transcript_sync'],
+      lastCompactionAt: null,
+      ledgerVersion: 1,
+    },
+    modeSnapshots: overrides.modeSnapshots ?? {
+      chat: { phase: 'ready', draftInput: '', turnCount: 3, lastUserMessage: null, lastAssistantMessage: null },
+      plan: {
+        phase: 'completed',
+        planId: null,
+        runningStepId: null,
+        pendingClarification: null,
+        retryableSteps: [],
+        planRevision: 1,
+        lastEditOperation: null,
+      },
+      task: {
+        phase: 'executing',
+        prdId: null,
+        currentStoryId: 'story-1',
+        interviewSessionId: null,
+        pendingInterview: null,
+        completedStories: 2,
+        failedStories: 0,
+      },
+    },
+    modeRuntimeMeta: overrides.modeRuntimeMeta ?? {},
   };
 }
 
@@ -212,849 +205,194 @@ const defaultProps: WorkspaceTreeSidebarProps = {
   onRename: vi.fn(),
   onClear: vi.fn(),
   onNewTask: vi.fn(),
-  currentTask: null,
 };
 
-describe('WorkspaceTreeSidebar - Background Sessions', () => {
+describe('WorkspaceTreeSidebar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockPinnedDirectories = [];
-    mockWorkspacePath = '/test/project';
-    mockSkillMemoryStore.skills = [];
-    mockSkillMemoryStore.memories = [];
-    mockPluginStore.plugins = [];
-    mockAgentsStore.agents = [];
-    mockPromptsStore.prompts = [];
+    mockWorkspacePath = '/repo/app';
+    mockSessionPathSort = 'recent';
+    mockShowArchivedSessions = false;
   });
 
-  it('should default to sessions tab and show sessions actions', () => {
-    render(<WorkspaceTreeSidebar {...defaultProps} backgroundSessions={{}} />);
+  it('renders empty state when there are no grouped sessions', () => {
+    render(<WorkspaceTreeSidebar {...defaultProps} />);
 
-    expect(screen.getByTestId('sidebar-tab-sessions')).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByText('New Task')).toBeInTheDocument();
-    expect(screen.getByText('Add Directory')).toBeInTheDocument();
-    expect(screen.queryByTestId('skill-memory-panel')).not.toBeInTheDocument();
+    expect(screen.getByText('No directories pinned')).toBeInTheDocument();
+    expect(screen.queryByText('Live Sessions')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'History' })).not.toBeInTheDocument();
   });
 
-  it('should switch tabs with single-panel rendering', () => {
-    render(<WorkspaceTreeSidebar {...defaultProps} backgroundSessions={{}} />);
-
-    fireEvent.click(screen.getByTestId('sidebar-tab-skills'));
-    expect(screen.getByTestId('sidebar-tab-skills')).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByTestId('skill-memory-panel')).toBeInTheDocument();
-    expect(screen.queryByText('New Task')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId('sidebar-tab-plugins'));
-    expect(screen.getByTestId('sidebar-tab-plugins')).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByTestId('plugin-panel')).toBeInTheDocument();
-    expect(screen.queryByTestId('skill-memory-panel')).not.toBeInTheDocument();
-  });
-
-  it('should open skill dialog from skills tab action', () => {
-    render(<WorkspaceTreeSidebar {...defaultProps} backgroundSessions={{}} />);
-
-    fireEvent.click(screen.getByTestId('sidebar-tab-skills'));
-    fireEvent.click(screen.getByText('Manage All...'));
-    expect(mockSkillMemoryStore.openDialog).toHaveBeenCalledWith('skills');
-  });
-
-  it('should open plugin marketplace from plugins tab action', () => {
-    render(<WorkspaceTreeSidebar {...defaultProps} backgroundSessions={{}} />);
-
-    fireEvent.click(screen.getByTestId('sidebar-tab-plugins'));
-    fireEvent.click(screen.getByText('Marketplace'));
-    expect(mockPluginStore.setActiveTab).toHaveBeenCalledWith('marketplace');
-    expect(mockPluginStore.openDialog).toHaveBeenCalled();
-  });
-
-  it('should preload sidebar tab data on mount', () => {
-    render(<WorkspaceTreeSidebar {...defaultProps} backgroundSessions={{}} />);
-
-    expect(mockPluginStore.loadPlugins).toHaveBeenCalled();
-    expect(mockAgentsStore.fetchAgents).toHaveBeenCalled();
-    expect(mockPromptsStore.fetchPrompts).toHaveBeenCalled();
-    expect(mockSkillMemoryStore.loadSkills).toHaveBeenCalledWith('/test/project');
-    expect(mockSkillMemoryStore.loadMemories).toHaveBeenCalledWith('/test/project');
-  });
-
-  it('should NOT render "Active Sessions" section when there are no background sessions', () => {
-    render(<WorkspaceTreeSidebar {...defaultProps} backgroundSessions={{}} />);
-
-    expect(screen.queryByText('Active Sessions')).not.toBeInTheDocument();
-  });
-
-  it('should render "Active Sessions" section when background sessions exist (no matching directory)', () => {
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-1': createMockSnapshot({ id: 'bg-1', taskDescription: 'Build API endpoint' }),
-    };
+  it('renders a single path tree with mixed live and history sessions', () => {
+    const onSwitchWorkflowSession = vi.fn();
+    const onRestore = vi.fn();
+    const onNewTaskInPath = vi.fn();
+    mockPinnedDirectories = ['/repo'];
 
     render(
       <WorkspaceTreeSidebar
         {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
+        onRestore={onRestore}
+        workflowSessions={[createWorkflowSession({ sessionId: 'root-live', displayTitle: 'Ship auth' })]}
+        history={[createHistoryItem({ id: 'history-1', title: 'Past chat', workspacePath: '/repo/app' })]}
+        activeWorkflowSessionId="root-live"
+        onSwitchWorkflowSession={onSwitchWorkflowSession}
+        onNewTaskInPath={onNewTaskInPath}
       />,
     );
 
-    expect(screen.getByText('Active Sessions')).toBeInTheDocument();
+    expect(screen.queryByText('Live Sessions')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'History' })).not.toBeInTheDocument();
+    expect(screen.getByText('repo')).toBeInTheDocument();
+    expect(screen.getByText('Ship auth')).toBeInTheDocument();
+    expect(screen.getByText('Past chat')).toBeInTheDocument();
+    expect(screen.getByTitle('History')).toBeInTheDocument();
+    expect(screen.getByTitle('task')).toBeInTheDocument();
+    expect(screen.queryByText('Task:executing')).not.toBeInTheDocument();
+    expect(screen.queryByText('Chat:ready')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /ship auth/i }));
+    expect(onSwitchWorkflowSession).toHaveBeenCalledWith('root-live');
+
+    fireEvent.click(screen.getByRole('button', { name: /past chat/i }));
+    expect(onRestore).toHaveBeenCalledWith('history-1');
+
+    fireEvent.click(screen.getByTitle('New task in this directory'));
+    expect(onNewTaskInPath).toHaveBeenCalledWith('/repo');
   });
 
-  it('should render background session labels (first ~50 chars of taskDescription)', () => {
-    const longDescription = 'A'.repeat(80);
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-1': createMockSnapshot({
+  it('supports renaming, archiving, deleting live sessions and clearing all sessions', () => {
+    const onRenameWorkflowSession = vi.fn();
+    const onArchiveWorkflowSession = vi.fn();
+    const onDeleteWorkflowSession = vi.fn();
+    const onClearAllSessions = vi.fn();
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('Renamed live session');
+
+    render(
+      <WorkspaceTreeSidebar
+        {...defaultProps}
+        workflowSessions={[createWorkflowSession({ sessionId: 'root-live', displayTitle: 'Ship auth' })]}
+        activeWorkflowSessionId="root-live"
+        onSwitchWorkflowSession={vi.fn()}
+        onRenameWorkflowSession={onRenameWorkflowSession}
+        onArchiveWorkflowSession={onArchiveWorkflowSession}
+        onDeleteWorkflowSession={onDeleteWorkflowSession}
+        onClearAllSessions={onClearAllSessions}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByTitle('rename')[0]);
+    expect(onRenameWorkflowSession).toHaveBeenCalledWith('root-live', 'Renamed live session');
+
+    fireEvent.click(screen.getByTitle('Archive session'));
+    expect(onArchiveWorkflowSession).toHaveBeenCalledWith('root-live');
+
+    fireEvent.click(screen.getByTitle('Delete session'));
+    expect(onDeleteWorkflowSession).toHaveBeenCalledWith('root-live');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear All Sessions' }));
+    expect(onClearAllSessions).toHaveBeenCalled();
+
+    promptSpy.mockRestore();
+  });
+
+  it('toggles a path group open and closed without changing workspace', () => {
+    mockWorkspacePath = '/other/workspace';
+    mockPinnedDirectories = ['/repo/path1'];
+
+    const { container } = render(
+      <WorkspaceTreeSidebar
+        {...defaultProps}
+        workflowSessions={[
+          createWorkflowSession({ sessionId: 'root-2', displayTitle: 'Session 1', workspacePath: '/repo/path1/app' }),
+        ]}
+      />,
+    );
+
+    const pathButton = screen.getByRole('button', { name: /path1/i });
+    const collapsible = container.querySelector('[style*="grid-template-rows"]') as HTMLElement;
+    expect(collapsible.style.gridTemplateRows).toBe('0fr');
+
+    fireEvent.click(pathButton);
+    expect(collapsible.style.gridTemplateRows).toBe('1fr');
+
+    fireEvent.click(pathButton);
+    expect(collapsible.style.gridTemplateRows).toBe('0fr');
+    expect(setWorkspacePath).not.toHaveBeenCalled();
+  });
+
+  it('ignores legacy background session props in the sessions tree', () => {
+    const legacyBackgroundSessions: Record<string, SessionSnapshot> = {
+      'bg-1': {
         id: 'bg-1',
-        taskDescription: longDescription,
-      }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-      />,
-    );
-
-    // Should display a truncated version of the description
-    const sessionLabel = screen.getByText(longDescription.slice(0, 50) + '...');
-    expect(sessionLabel).toBeInTheDocument();
-  });
-
-  it('should render "Untitled Session" for background sessions with no taskDescription', () => {
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-1': createMockSnapshot({ id: 'bg-1', taskDescription: '' }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByText('Untitled Session')).toBeInTheDocument();
-  });
-
-  it('should show a pulsing blue dot for running background sessions', () => {
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-1': createMockSnapshot({ id: 'bg-1', status: 'running', taskDescription: 'Running task' }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-      />,
-    );
-
-    // Find the status dot element (data-testid)
-    const dot = screen.getByTestId('bg-status-dot-bg-1');
-    expect(dot).toBeInTheDocument();
-    expect(dot.className).toContain('bg-blue-500');
-    expect(dot.className).toContain('animate-pulse');
-  });
-
-  it('should show a green dot for completed background sessions', () => {
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-1': createMockSnapshot({ id: 'bg-1', status: 'completed', taskDescription: 'Completed task' }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-      />,
-    );
-
-    const dot = screen.getByTestId('bg-status-dot-bg-1');
-    expect(dot.className).toContain('bg-green-500');
-    expect(dot.className).not.toContain('animate-pulse');
-  });
-
-  it('should show a red dot for failed background sessions', () => {
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-1': createMockSnapshot({ id: 'bg-1', status: 'failed', taskDescription: 'Failed task' }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-      />,
-    );
-
-    const dot = screen.getByTestId('bg-status-dot-bg-1');
-    expect(dot.className).toContain('bg-red-500');
-    expect(dot.className).not.toContain('animate-pulse');
-  });
-
-  it('should show a gray dot for idle background sessions', () => {
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-1': createMockSnapshot({ id: 'bg-1', status: 'idle', taskDescription: 'Idle session' }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-      />,
-    );
-
-    const dot = screen.getByTestId('bg-status-dot-bg-1');
-    expect(dot.className).toContain('bg-gray-400');
-  });
-
-  it('should call onSwitchSession when a background session is clicked', () => {
-    const onSwitchSession = vi.fn();
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-1': createMockSnapshot({ id: 'bg-1', taskDescription: 'Click me' }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={onSwitchSession}
-        onRemoveSession={vi.fn()}
-      />,
-    );
-
-    const sessionItem = screen.getByTestId('bg-session-item-bg-1');
-    fireEvent.click(sessionItem);
-
-    expect(onSwitchSession).toHaveBeenCalledWith('bg-1');
-  });
-
-  it('should call onRemoveSession when the remove button is clicked', () => {
-    const onRemoveSession = vi.fn();
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-1': createMockSnapshot({ id: 'bg-1', taskDescription: 'Remove me' }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={onRemoveSession}
-      />,
-    );
-
-    const removeBtn = screen.getByTestId('bg-remove-btn-bg-1');
-    fireEvent.click(removeBtn);
-
-    expect(onRemoveSession).toHaveBeenCalledWith('bg-1');
-  });
-
-  it('should render multiple background sessions', () => {
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-1': createMockSnapshot({ id: 'bg-1', status: 'running', taskDescription: 'Task Alpha' }),
-      'bg-2': createMockSnapshot({ id: 'bg-2', status: 'completed', taskDescription: 'Task Beta' }),
-      'bg-3': createMockSnapshot({ id: 'bg-3', status: 'failed', taskDescription: 'Task Gamma' }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByText('Task Alpha')).toBeInTheDocument();
-    expect(screen.getByText('Task Beta')).toBeInTheDocument();
-    expect(screen.getByText('Task Gamma')).toBeInTheDocument();
-
-    // Verify count badge
-    expect(screen.getAllByText('3').length).toBeGreaterThan(0);
-  });
-
-  // ---------------------------------------------------------------------------
-  // Fork hierarchy (tree) tests — no matching directory (Active Sessions section)
-  // ---------------------------------------------------------------------------
-
-  it('should nest forked sessions under their parent', () => {
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-parent': createMockSnapshot({
-        id: 'bg-parent',
-        taskDescription: 'Parent Session',
-      }),
-      'bg-child': createMockSnapshot({
-        id: 'bg-child',
-        taskDescription: 'Child Fork',
-        parentSessionId: 'bg-parent',
-      }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-      />,
-    );
-
-    // Both sessions should be visible
-    expect(screen.getByText('Parent Session')).toBeInTheDocument();
-    expect(screen.getByText('Child Fork')).toBeInTheDocument();
-
-    // The child should be nested (rendered inside the parent's tree node)
-    const parentItem = screen.getByTestId('bg-session-item-bg-parent');
-    const childItem = screen.getByTestId('bg-session-item-bg-child');
-    expect(parentItem).toBeInTheDocument();
-    expect(childItem).toBeInTheDocument();
-  });
-
-  it('should nest multiple forks under the same parent', () => {
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-parent': createMockSnapshot({
-        id: 'bg-parent',
-        taskDescription: 'Original Session',
-      }),
-      'bg-fork-1': createMockSnapshot({
-        id: 'bg-fork-1',
-        taskDescription: 'Fork 1',
-        parentSessionId: 'bg-parent',
-      }),
-      'bg-fork-2': createMockSnapshot({
-        id: 'bg-fork-2',
-        taskDescription: 'Fork 2',
-        parentSessionId: 'bg-parent',
-      }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByText('Original Session')).toBeInTheDocument();
-    expect(screen.getByText('Fork 1')).toBeInTheDocument();
-    expect(screen.getByText('Fork 2')).toBeInTheDocument();
-
-    // Count badge should show total count (3)
-    expect(screen.getAllByText('3').length).toBeGreaterThan(0);
-  });
-
-  it('should render orphan sessions (parent does not exist) as root nodes', () => {
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-orphan': createMockSnapshot({
-        id: 'bg-orphan',
-        taskDescription: 'Orphan Session',
-        parentSessionId: 'bg-nonexistent',
-      }),
-      'bg-root': createMockSnapshot({
-        id: 'bg-root',
-        taskDescription: 'Root Session',
-      }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-      />,
-    );
-
-    // Both should render as root-level items
-    expect(screen.getByText('Orphan Session')).toBeInTheDocument();
-    expect(screen.getByText('Root Session')).toBeInTheDocument();
-  });
-
-  it('should show current foreground under parent when foregroundParentSessionId is set', () => {
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-parent': createMockSnapshot({
-        id: 'bg-parent',
-        taskDescription: 'Parent Session',
-      }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-        foregroundParentSessionId="bg-parent"
-      />,
-    );
-
-    expect(screen.getByText('Parent Session')).toBeInTheDocument();
-    // The current fork indicator should be visible
-    expect(screen.getByTestId('current-fork-indicator')).toBeInTheDocument();
-    // Both the label and the badge render "(current)" text
-    const currentTexts = screen.getAllByText('(current)');
-    expect(currentTexts.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('should render sessions without parentSessionId as root nodes (backward compat)', () => {
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-1': createMockSnapshot({
-        id: 'bg-1',
-        taskDescription: 'Session A',
+        taskDescription: 'Legacy background task',
+        status: 'running',
+        streamingOutput: [],
+        streamLineCounter: 0,
+        currentTurnStartLineId: 0,
+        taskId: null,
+        isChatSession: true,
+        standaloneTurns: [],
+        standaloneSessionId: null,
+        latestUsage: null,
+        sessionUsageTotals: null,
+        startedAt: Date.now(),
+        toolCallFilter: new ToolCallStreamFilter(),
+        llmBackend: 'openai',
+        llmProvider: 'openai',
+        llmModel: 'gpt-4.1',
         parentSessionId: undefined,
-      }),
-      'bg-2': createMockSnapshot({
-        id: 'bg-2',
-        taskDescription: 'Session B',
-        parentSessionId: undefined,
-      }),
+        workspacePath: '/legacy/project',
+        updatedAt: Date.now(),
+      },
     };
 
     render(
       <WorkspaceTreeSidebar
         {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
+        backgroundSessions={legacyBackgroundSessions}
+        workflowSessions={[createWorkflowSession({ displayTitle: 'Primary session' })]}
       />,
     );
 
-    expect(screen.getByText('Session A')).toBeInTheDocument();
-    expect(screen.getByText('Session B')).toBeInTheDocument();
+    expect(screen.getByText('Primary session')).toBeInTheDocument();
+    expect(screen.queryByText('Legacy background task')).not.toBeInTheDocument();
   });
 
-  // ---------------------------------------------------------------------------
-  // Fork hierarchy inside workspace directory tree
-  // ---------------------------------------------------------------------------
-
-  it('should render bg sessions inside their workspace directory when it matches a pinned dir', () => {
-    mockPinnedDirectories = ['/test/project'];
-
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-1': createMockSnapshot({
-        id: 'bg-1',
-        taskDescription: 'Directory Session',
-        workspacePath: '/test/project',
-      }),
-    };
+  it('shows archived sessions when enabled and restores them from the tree', () => {
+    mockShowArchivedSessions = true;
+    const onRestoreWorkflowSession = vi.fn();
 
     render(
       <WorkspaceTreeSidebar
         {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
+        workflowSessions={[
+          createWorkflowSession({
+            sessionId: 'root-archived',
+            displayTitle: 'Archived billing',
+            status: 'archived',
+            backgroundState: 'background_idle',
+          }),
+        ]}
+        onRestoreWorkflowSession={onRestoreWorkflowSession}
+        onDeleteWorkflowSession={vi.fn()}
       />,
     );
 
-    // Session should be visible inside the directory
-    expect(screen.getByText('Directory Session')).toBeInTheDocument();
-    // "Active Sessions" section should NOT appear (session matched a directory)
-    expect(screen.queryByText('Active Sessions')).not.toBeInTheDocument();
-    // Directory node "project" should be visible
-    expect(screen.getByText('project')).toBeInTheDocument();
+    expect(screen.getByTitle('Archived')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /archived billing/i }));
+    expect(onRestoreWorkflowSession).toHaveBeenCalledWith('root-archived');
   });
 
-  it('should show fork hierarchy inside a workspace directory', () => {
-    mockPinnedDirectories = ['/test/project'];
+  it('exposes icon-based path sorting controls through settings actions', () => {
+    render(<WorkspaceTreeSidebar {...defaultProps} />);
 
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-parent': createMockSnapshot({
-        id: 'bg-parent',
-        taskDescription: 'Original Session',
-        workspacePath: '/test/project',
-      }),
-      'bg-fork': createMockSnapshot({
-        id: 'bg-fork',
-        taskDescription: 'Forked Session',
-        parentSessionId: 'bg-parent',
-        workspacePath: '/test/project',
-      }),
-    };
+    fireEvent.click(screen.getByRole('button', { name: 'Sort paths' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sort: Name' }));
+    expect(setSessionPathSort).toHaveBeenCalledWith('name');
 
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-      />,
-    );
-
-    // Both sessions visible under the directory
-    expect(screen.getByText('Original Session')).toBeInTheDocument();
-    expect(screen.getByText('Forked Session')).toBeInTheDocument();
-    // No separate "Active Sessions" section
-    expect(screen.queryByText('Active Sessions')).not.toBeInTheDocument();
-    // Fork is nested under parent
-    const parentItem = screen.getByTestId('bg-session-item-bg-parent');
-    const forkItem = screen.getByTestId('bg-session-item-bg-fork');
-    expect(parentItem).toBeInTheDocument();
-    expect(forkItem).toBeInTheDocument();
-  });
-
-  it('should show current foreground indicator inside workspace directory tree', () => {
-    mockPinnedDirectories = ['/test/project'];
-
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-parent': createMockSnapshot({
-        id: 'bg-parent',
-        taskDescription: 'Parent In Dir',
-        workspacePath: '/test/project',
-      }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-        foregroundParentSessionId="bg-parent"
-      />,
-    );
-
-    expect(screen.getByText('Parent In Dir')).toBeInTheDocument();
-    expect(screen.getByTestId('current-fork-indicator')).toBeInTheDocument();
-    expect(screen.queryByText('Active Sessions')).not.toBeInTheDocument();
-  });
-
-  it('should show bg sessions alongside history sessions in the same directory', () => {
-    mockPinnedDirectories = ['/test/project'];
-
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-1': createMockSnapshot({
-        id: 'bg-1',
-        taskDescription: 'Active BG Session',
-        workspacePath: '/test/project',
-        status: 'running',
-      }),
-    };
-
-    const historyItem = {
-      id: 'hist-1',
-      taskDescription: 'Completed History',
-      workspacePath: '/test/project',
-      startedAt: Date.now() - 60000,
-      success: true,
-      title: 'Completed History',
-      strategy: null as never,
-      status: 'completed' as const,
-      duration: 5000,
-      completedStories: 1,
-      totalStories: 1,
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        history={[historyItem]}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-      />,
-    );
-
-    // Both active bg session and history session visible under same directory
-    expect(screen.getByText('Active BG Session')).toBeInTheDocument();
-    expect(screen.getByText('Completed History')).toBeInTheDocument();
-    // Directory badge shows total count (2)
-    expect(screen.getAllByText('2').length).toBeGreaterThan(0);
-  });
-
-  it('should hide history item when an active session references originHistoryId', () => {
-    mockPinnedDirectories = ['/test/project'];
-
-    const historyItem = {
-      id: 'hist-1',
-      taskDescription: 'Original History Session',
-      workspacePath: '/test/project',
-      startedAt: Date.now() - 60000,
-      success: true,
-      title: 'Original History Session',
-      strategy: null as never,
-      status: 'completed' as const,
-      duration: 5000,
-      completedStories: 1,
-      totalStories: 1,
-    };
-
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-1': createMockSnapshot({
-        id: 'bg-1',
-        taskDescription: 'Active Fork',
-        workspacePath: '/test/project',
-        originHistoryId: 'hist-1',
-      }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        history={[historyItem]}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByText('Active Fork')).toBeInTheDocument();
-    expect(screen.queryByText('Original History Session')).not.toBeInTheDocument();
-  });
-
-  it('should hide history item when an active background session has the same sessionId', () => {
-    mockPinnedDirectories = ['/test/project'];
-
-    const historyItem = {
-      id: 'hist-fork-1',
-      taskDescription: 'Fork History Session',
-      workspacePath: '/test/project',
-      startedAt: Date.now() - 30000,
-      success: true,
-      title: 'Fork History Session',
-      strategy: null as never,
-      status: 'completed' as const,
-      duration: 3000,
-      completedStories: 1,
-      totalStories: 1,
-      sessionId: 'standalone:fork-session-1',
-    };
-
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-fork': createMockSnapshot({
-        id: 'bg-fork',
-        taskDescription: 'Active Fork Session',
-        workspacePath: '/test/project',
-        standaloneSessionId: 'fork-session-1',
-      }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        history={[historyItem]}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByText('Active Fork Session')).toBeInTheDocument();
-    expect(screen.queryByText('Fork History Session')).not.toBeInTheDocument();
-  });
-
-  it('should split bg sessions between directory and Active Sessions when only some match', () => {
-    mockPinnedDirectories = ['/test/project'];
-
-    const bgSessions: Record<string, SessionSnapshot> = {
-      'bg-matched': createMockSnapshot({
-        id: 'bg-matched',
-        taskDescription: 'Matched Session',
-        workspacePath: '/test/project',
-      }),
-      'bg-unmatched': createMockSnapshot({
-        id: 'bg-unmatched',
-        taskDescription: 'Unmatched Session',
-        // No workspacePath — goes to Active Sessions fallback
-      }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-      />,
-    );
-
-    // Matched session under directory
-    expect(screen.getByText('Matched Session')).toBeInTheDocument();
-    // Unmatched session in "Active Sessions"
-    expect(screen.getByText('Unmatched Session')).toBeInTheDocument();
-    expect(screen.getByText('Active Sessions')).toBeInTheDocument();
-  });
-
-  // ===========================================================================
-  // Ghost Entry (foregroundBgId) rendering
-  // ===========================================================================
-
-  it('should render ghost node with foreground styling', () => {
-    const ghostId = 'bg-ghost-1';
-    const bgSessions: Record<string, SessionSnapshot> = {
-      [ghostId]: createMockSnapshot({
-        id: ghostId,
-        taskDescription: 'Ghost Session',
-        status: 'running',
-      }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-        foregroundBgId={ghostId}
-      />,
-    );
-
-    const ghostItem = screen.getByTestId(`bg-session-item-${ghostId}`);
-    expect(ghostItem).toBeInTheDocument();
-    // Ghost node should have primary background styling
-    expect(ghostItem.className).toContain('bg-primary-50');
-    // Should show (current) badge
-    expect(screen.getByText('(current)')).toBeInTheDocument();
-  });
-
-  it('should not show (current) child indicator when foregroundBgId is set', () => {
-    const parentId = 'bg-parent-1';
-    const bgSessions: Record<string, SessionSnapshot> = {
-      [parentId]: createMockSnapshot({
-        id: parentId,
-        taskDescription: 'Parent Session',
-        status: 'running',
-      }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-        foregroundParentSessionId={parentId}
-        foregroundBgId={parentId}
-      />,
-    );
-
-    // When foregroundBgId is set, the (current) child indicator should NOT appear
-    // The ghost node itself shows (current) instead
-    expect(screen.queryByTestId('current-fork-indicator')).not.toBeInTheDocument();
-  });
-
-  it('should still show (current) child indicator when foregroundBgId is null', () => {
-    const parentId = 'bg-parent-2';
-    const bgSessions: Record<string, SessionSnapshot> = {
-      [parentId]: createMockSnapshot({
-        id: parentId,
-        taskDescription: 'Parent Session',
-        status: 'running',
-      }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-        foregroundParentSessionId={parentId}
-        foregroundBgId={null}
-      />,
-    );
-
-    // Without ghost, the (current) child indicator should appear under parent
-    expect(screen.getByTestId('current-fork-indicator')).toBeInTheDocument();
-  });
-
-  it('should render children under ghost node correctly', () => {
-    const ghostId = 'bg-ghost-2';
-    const childId = 'bg-child-1';
-    const bgSessions: Record<string, SessionSnapshot> = {
-      [ghostId]: createMockSnapshot({
-        id: ghostId,
-        taskDescription: 'Ghost Parent',
-        status: 'running',
-      }),
-      [childId]: createMockSnapshot({
-        id: childId,
-        taskDescription: 'Child Session',
-        status: 'idle',
-        parentSessionId: ghostId,
-      }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-        foregroundBgId={ghostId}
-      />,
-    );
-
-    // Ghost parent and child should both be rendered
-    expect(screen.getByTestId(`bg-session-item-${ghostId}`)).toBeInTheDocument();
-    expect(screen.getByTestId(`bg-session-item-${childId}`)).toBeInTheDocument();
-    expect(screen.getByText('Child Session')).toBeInTheDocument();
-  });
-
-  it('ghost node should not trigger onSwitchSession', () => {
-    const ghostId = 'bg-ghost-3';
-    const onSwitch = vi.fn();
-    const bgSessions: Record<string, SessionSnapshot> = {
-      [ghostId]: createMockSnapshot({
-        id: ghostId,
-        taskDescription: 'Ghost No Click',
-        status: 'running',
-      }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        backgroundSessions={bgSessions}
-        onSwitchSession={onSwitch}
-        onRemoveSession={vi.fn()}
-        foregroundBgId={ghostId}
-      />,
-    );
-
-    const ghostItem = screen.getByTestId(`bg-session-item-${ghostId}`);
-    fireEvent.click(ghostItem);
-
-    // Ghost node should not trigger switch
-    expect(onSwitch).not.toHaveBeenCalled();
-  });
-
-  it('ghost node should display currentSessionDescription instead of stale snapshot', () => {
-    const ghostId = 'bg-ghost-4';
-    const bgSessions: Record<string, SessionSnapshot> = {
-      [ghostId]: createMockSnapshot({
-        id: ghostId,
-        taskDescription: 'Stale description from snapshot',
-        status: 'running',
-      }),
-    };
-
-    render(
-      <WorkspaceTreeSidebar
-        {...defaultProps}
-        currentTask="Live foreground description"
-        backgroundSessions={bgSessions}
-        onSwitchSession={vi.fn()}
-        onRemoveSession={vi.fn()}
-        foregroundBgId={ghostId}
-      />,
-    );
-
-    // Ghost node should show the live description, not the stale snapshot description
-    const ghostItem = screen.getByTestId(`bg-session-item-${ghostId}`);
-    expect(ghostItem.textContent).toContain('Live foreground description');
-    expect(ghostItem.textContent).not.toContain('Stale description from snapshot');
+    fireEvent.click(screen.getByRole('button', { name: 'Show Archived' }));
+    expect(setShowArchivedSessions).toHaveBeenCalledWith(true);
   });
 });

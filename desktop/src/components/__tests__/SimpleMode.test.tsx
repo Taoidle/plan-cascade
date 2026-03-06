@@ -372,6 +372,8 @@ vi.mock('../../lib/exportUtils', () => ({
 
 vi.mock('../../lib/contextBridge', () => ({
   buildConversationHistory: () => [],
+  buildRootConversationHistory: () => [],
+  buildRootConversationContextString: () => undefined,
 }));
 
 vi.mock('../SimpleMode/queuePersistence', () => ({
@@ -453,6 +455,9 @@ import { SimpleMode } from '../SimpleMode';
 function createKernelSession(activeMode: 'chat' | 'plan' | 'task' = 'chat'): WorkflowSession {
   return {
     sessionId: 'kernel-session-1',
+    sessionKind: 'simple_root',
+    displayTitle: 'Test session',
+    workspacePath: '/tmp/project',
     status: 'active',
     activeMode,
     modeSnapshots: {
@@ -471,6 +476,10 @@ function createKernelSession(activeMode: 'chat' | 'plan' | 'task' = 'chat'): Wor
         retryableSteps: [],
         planRevision: 0,
         lastEditOperation: null,
+        runId: null,
+        backgroundStatus: null,
+        resumableFromCheckpoint: false,
+        lastCheckpointId: null,
       },
       task: {
         phase: 'idle',
@@ -480,6 +489,10 @@ function createKernelSession(activeMode: 'chat' | 'plan' | 'task' = 'chat'): Wor
         pendingInterview: null,
         completedStories: 0,
         failedStories: 0,
+        runId: null,
+        backgroundStatus: null,
+        resumableFromCheckpoint: false,
+        lastCheckpointId: null,
       },
     },
     handoffContext: {
@@ -489,6 +502,15 @@ function createKernelSession(activeMode: 'chat' | 'plan' | 'task' = 'chat'): Wor
       metadata: {},
     },
     linkedModeSessions: {} as Record<string, string>,
+    backgroundState: 'foreground',
+    contextLedger: {
+      conversationTurnCount: 0,
+      artifactRefCount: 0,
+      contextSourceKinds: [],
+      lastCompactionAt: null,
+      ledgerVersion: 1,
+    },
+    modeRuntimeMeta: {},
     lastError: null,
     createdAt: '2026-03-02T00:00:00Z',
     updatedAt: '2026-03-02T00:00:00Z',
@@ -531,12 +553,12 @@ function resetStates() {
     removeAttachment: vi.fn(),
     clearAttachments: vi.fn(),
     backgroundSessions: {},
+    backgroundCurrentSession: vi.fn(),
     switchToSession: vi.fn(),
     removeBackgroundSession: vi.fn(),
     foregroundParentSessionId: null,
     foregroundBgId: null,
     activeAgentName: null,
-    _pendingTaskContext: null,
   };
   storeHarness.setExecutionState(execution);
 
@@ -552,11 +574,44 @@ function resetStates() {
 
   storeHarness.setWorkflowKernelState({
     sessionId: 'kernel-session-1',
+    activeRootSessionId: 'kernel-session-1',
     session: createKernelSession('chat'),
+    sessionCatalog: [],
     openSession: vi.fn(async function () {
       return storeHarness.getWorkflowKernelState().session;
     }),
     recoverSession: vi.fn(async () => null),
+    getSessionCatalogState: vi.fn(async () => ({
+      activeSessionId: 'kernel-session-1',
+      sessions: [],
+    })),
+    resumeBackgroundRuns: vi.fn(async () => []),
+    getModeTranscript: vi.fn(async (_sessionId: string, mode: 'chat' | 'plan' | 'task') => ({
+      sessionId: 'kernel-session-1',
+      mode,
+      revision: 1,
+      lines: [],
+    })),
+    appendContextItems: vi.fn(async function () {
+      return storeHarness.getWorkflowKernelState().session;
+    }),
+    appendModeTranscript: vi.fn(async (_sessionId: string, mode: 'chat' | 'plan' | 'task', lines: unknown[]) => ({
+      sessionId: 'kernel-session-1',
+      mode,
+      revision: 2,
+      lines,
+    })),
+    storeModeTranscript: vi.fn(async (_sessionId: string, mode: 'chat' | 'plan' | 'task', lines: unknown[]) => ({
+      sessionId: 'kernel-session-1',
+      mode,
+      revision: 1,
+      lines,
+    })),
+    activateSession: vi.fn(async () => ({
+      session: storeHarness.getWorkflowKernelState().session,
+      events: [],
+      checkpoints: [],
+    })),
     transitionMode: vi.fn(async (targetMode: 'chat' | 'plan' | 'task') => {
       const session = createKernelSession(targetMode);
       storeHarness.setWorkflowKernelState({
@@ -568,7 +623,10 @@ function resetStates() {
     transitionAndSubmitInput: vi.fn(async function () {
       return storeHarness.getWorkflowKernelState().session;
     }),
-    linkModeSession: vi.fn(async (mode: 'plan' | 'task', modeSessionId: string) => {
+    submitInput: vi.fn(async function () {
+      return storeHarness.getWorkflowKernelState().session;
+    }),
+    linkModeSession: vi.fn(async (mode: 'chat' | 'plan' | 'task', modeSessionId: string) => {
       const currentSession = storeHarness.getWorkflowKernelState().session as ReturnType<typeof createKernelSession>;
       currentSession.linkedModeSessions[mode] = modeSessionId;
       return currentSession;
@@ -673,6 +731,7 @@ describe('SimpleMode', () => {
   it('mounts with initialize and unmounts with cleanup', () => {
     const { unmount } = renderSimpleMode();
     expect(storeHarness.getExecutionState().initialize).toHaveBeenCalledTimes(1);
+    expect(storeHarness.getWorkflowKernelState().resumeBackgroundRuns).toHaveBeenCalledTimes(1);
 
     unmount();
     expect(storeHarness.getExecutionState().cleanup).toHaveBeenCalledTimes(1);

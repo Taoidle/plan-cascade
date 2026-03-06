@@ -20,6 +20,7 @@ function createBaseParams() {
     hasPlanClarifyQuestion: false,
     setWorkflowMode: vi.fn(),
     transitionWorkflowKernelMode: vi.fn(),
+    appendWorkflowKernelContextItems: vi.fn(),
     showToast: vi.fn(),
     t: createT(),
   };

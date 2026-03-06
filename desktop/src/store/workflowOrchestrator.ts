@@ -8,14 +8,13 @@
  * Delegates to existing stores:
  * - useTaskModeStore: backend session lifecycle (enterTaskMode, generatePrd, approvePrd)
  * - useSpecInterviewStore: interview flow (startInterview, submitAnswer, compileSpec)
- * - useExecutionStore: appendCard for structured card injection into chat transcript
+ * - mode transcript routing: append cards into rootSession + task transcript
  */
 
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import i18n from '../i18n';
-import { useExecutionStore } from './execution';
 import {
   useTaskModeStore,
   type TaskPrd,
@@ -29,14 +28,13 @@ import { useSpecInterviewStore, type InterviewQuestion } from './specInterview';
 import { useSettingsStore } from './settings';
 import { useWorkflowKernelStore } from './workflowKernel';
 import { selectKernelTaskRuntime } from './workflowKernelSelectors';
-import { buildConversationHistory, synthesizePlanningTurn, synthesizeExecutionTurn } from '../lib/contextBridge';
-import { getNextTurnId } from '../lib/conversationUtils';
+import { synthesizePlanningTurn, synthesizeExecutionTurn } from '../lib/contextBridge';
 import { deriveGateOverallStatus } from '../lib/gateStatus';
 import { parseWorkflowConfigNatural } from '../lib/workflowConfigNaturalParser';
 import { failResult, okResult, type ActionResult } from '../types/actionResult';
-import type { CrossModeConversationTurn } from '../types/crossModeContext';
 import { applyArchitectureModifications } from './workflowOrchestrator/architectureModifications';
 import {
+  appendWorkflowUserMessage,
   injectWorkflowCard as injectCard,
   injectWorkflowError as injectError,
   injectWorkflowInfo as injectInfo,
@@ -129,9 +127,6 @@ interface WorkflowOrchestratorState {
   /** Event unsubscribe function */
   _unlistenFn: UnlistenFn | null;
 
-  /** Conversation history extracted from Chat for Task context sharing */
-  _conversationHistory: CrossModeConversationTurn[];
-
   /** Guards async continuations after cancel/reset */
   _runToken: number;
 
@@ -157,7 +152,6 @@ interface WorkflowOrchestratorState {
   ) => Promise<ActionResult>;
   cancelWorkflow: () => Promise<void>;
   resetWorkflow: () => void;
-  clearConversationHistory: () => void;
 }
 
 // ============================================================================
@@ -197,7 +191,6 @@ const DEFAULT_STATE = {
   error: null as string | null,
   isCancelling: false,
   _unlistenFn: null as UnlistenFn | null,
-  _conversationHistory: [] as CrossModeConversationTurn[],
   _runToken: 0,
   _completionCardInjectedRunToken: null as number | null,
 };
@@ -322,7 +315,16 @@ function normalizeExplorationCardData(data: ExplorationCardData): ExplorationCar
 }
 
 function synthesizePlanningTurnForPrdPhase(taskDescription: string, strategyAnalysis: unknown, prd: TaskPrd) {
-  synthesizePlanningTurn(taskDescription, (strategyAnalysis as StrategyAnalysis | null) ?? null, prd);
+  const turn = synthesizePlanningTurn(taskDescription, (strategyAnalysis as StrategyAnalysis | null) ?? null, prd);
+  void useWorkflowKernelStore.getState().appendContextItems('task', {
+    conversationContext: [turn],
+    artifactRefs: [],
+    contextSources: ['task_synthesized_planning'],
+    metadata: {
+      source: 'task_synthesized',
+      kind: 'planning',
+    },
+  });
 }
 
 function buildCompletionReportDataFromReport(report: ExecutionReport): CompletionReportCardData {
@@ -410,17 +412,10 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     const runToken = get()._runToken + 1;
     let modeSessionId: string | null = null;
     // Add user message as 'info' StreamLine so it appears as a chat bubble in ChatTranscript
-    const executionState = useExecutionStore.getState();
-    const turnId = getNextTurnId(executionState.streamingOutput);
-    executionState.appendStreamLine(description, 'info', undefined, undefined, { turnId, turnBoundary: 'user' });
+    appendWorkflowUserMessage(description);
 
     set({ phase: 'analyzing', taskDescription: description, error: null, isCancelling: false, _runToken: runToken });
     injectInfo(i18n.t('workflow.orchestrator.analyzingTask', { ns: 'simpleMode' }), 'info');
-
-    // Extract complete Chat conversation history for Task context sharing
-    const conversationHistory = buildConversationHistory();
-    if (!isRunActive(get, runToken)) return { modeSessionId: null };
-    set({ _conversationHistory: conversationHistory });
 
     try {
       // 1. Enter task mode (creates session + runs strategy analysis)
@@ -598,9 +593,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   /** Parse natural language config override */
   overrideConfigNatural: (text: string) => {
     // Add user message as 'info' StreamLine so it appears as a chat bubble
-    const executionState = useExecutionStore.getState();
-    const turnId = getNextTurnId(executionState.streamingOutput);
-    executionState.appendStreamLine(text, 'info', undefined, undefined, { turnId, turnBoundary: 'user' });
+    appendWorkflowUserMessage(text);
 
     const { updates, matched, unmatched } = parseWorkflowConfigNatural(text, i18n.language);
 
@@ -879,9 +872,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   /** Add feedback to editable PRD (during reviewing_prd phase) */
   addPrdFeedback: async (_feedback: string) => {
     // Add user message as 'info' StreamLine so it appears as a chat bubble
-    const executionState = useExecutionStore.getState();
-    const turnId = getNextTurnId(executionState.streamingOutput);
-    executionState.appendStreamLine(_feedback, 'info', undefined, undefined, { turnId, turnBoundary: 'user' });
+    appendWorkflowUserMessage(_feedback);
     const normalizedFeedback = _feedback.trim();
     if (!normalizedFeedback) {
       return failResult('empty_feedback', 'Feedback cannot be empty');
@@ -900,14 +891,13 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
     const { resolvePhaseAgent } = await import('../lib/phaseAgentResolver');
     const prdResolved = resolvePhaseAgent('plan_prd');
-    const history = get()._conversationHistory || [];
     const settings = useSettingsStore.getState();
     const maxContextTokens = settings.maxTotalTokens ?? 200_000;
     const result = await useTaskModeStore
       .getState()
       .applyPrdFeedback(
         normalizedFeedback,
-        history,
+        undefined,
         maxContextTokens,
         prdResolved.provider || undefined,
         prdResolved.model || undefined,
@@ -1067,11 +1057,6 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     useSpecInterviewStore.getState().reset();
 
     set((state) => ({ ...DEFAULT_STATE, _runToken: state._runToken + 1 }));
-  },
-
-  /** Clear conversation history without resetting the entire workflow */
-  clearConversationHistory: () => {
-    set({ _conversationHistory: [] });
   },
 }));
 
@@ -1296,7 +1281,20 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
             set({ _completionCardInjectedRunToken: runToken, report: effectiveReport ?? null });
 
             // Synthesize execution result into conversation history (Task → Chat writeback)
-            synthesizeExecutionTurn(completionData.completed, completionData.totalStories, completionData.success);
+            const turn = synthesizeExecutionTurn(
+              completionData.completed,
+              completionData.totalStories,
+              completionData.success,
+            );
+            void useWorkflowKernelStore.getState().appendContextItems('task', {
+              conversationContext: [turn],
+              artifactRefs: [],
+              contextSources: ['task_synthesized_execution'],
+              metadata: {
+                source: 'task_synthesized',
+                kind: 'execution',
+              },
+            });
           })();
           break;
         }

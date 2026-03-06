@@ -15,6 +15,8 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 vi.mock('../lib/contextBridge', () => ({
   buildConversationHistory: () => [],
+  buildRootConversationHistory: () => [],
+  buildRootConversationContextString: () => undefined,
   synthesizePlanningTurn: vi.fn(),
   synthesizeExecutionTurn: (...args: unknown[]) => synthesizeExecutionTurnMock(...args),
 }));

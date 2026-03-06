@@ -1,8 +1,9 @@
 import type { ExecutionState, ExecutionStatus, NonCardStreamLineType, SessionSnapshot, StreamLine } from './types';
 
 /**
- * Find a background session by its taskId (which corresponds to the
- * session_id emitted by the Rust backend).
+ * Legacy session-tree only.
+ * Find a background session by its taskId/sessionId in backgroundSessions.
+ * Simple chat runtime restore should prefer runtimeRegistry instead.
  */
 export function findBackgroundSessionByTaskId(
   state: ExecutionState,
@@ -17,7 +18,7 @@ export function findBackgroundSessionByTaskId(
 }
 
 /**
- * Apply a lightweight update to a background session identified by its taskId.
+ * Legacy session-tree only.
  */
 export function updateBackgroundSessionByTaskId(
   state: ExecutionState,
@@ -37,7 +38,7 @@ export function updateBackgroundSessionByTaskId(
 }
 
 /**
- * Append a StreamLine to a background session's streamingOutput.
+ * Legacy session-tree only.
  */
 export function appendToBackgroundSession(
   state: ExecutionState,
