@@ -1,4 +1,5 @@
-import { getNextTurnId } from '../../lib/conversationUtils';
+import { deriveConversationTurns, getNextTurnId, normalizeTurnBoundaries } from '../../lib/conversationUtils';
+import type { WorkflowSession } from '../../types/workflowKernel';
 import { useWorkflowKernelStore } from '../workflowKernel';
 import type { NonCardStreamLineType, StreamLine } from './types';
 
@@ -39,6 +40,34 @@ export function getActiveKernelChatTranscript(): { rootSessionId: string | null;
   return {
     rootSessionId,
     lines: getKernelChatTranscript(rootSessionId),
+  };
+}
+
+export function buildForkedChatSessionPayload(
+  transcriptLines: StreamLine[],
+  userLineId: number,
+): {
+  conversationContext: Array<{ user: string; assistant: string }>;
+  truncatedLines: StreamLine[];
+} | null {
+  const normalizedLines = normalizeTurnBoundaries(cloneStreamLines(transcriptLines));
+  const turns = deriveConversationTurns(normalizedLines);
+  const targetTurn = turns.find((turn) => turn.userLineId === userLineId);
+  if (!targetTurn) {
+    return null;
+  }
+
+  const truncatedLines = normalizedLines.slice(0, targetTurn.assistantEndIndex + 1).map((line) => ({ ...line }));
+  const conversationContext = deriveConversationTurns(truncatedLines)
+    .filter((turn) => turn.assistantText.trim().length > 0)
+    .map((turn) => ({
+      user: turn.userContent,
+      assistant: turn.assistantText,
+    }));
+
+  return {
+    conversationContext,
+    truncatedLines,
   };
 }
 
@@ -162,6 +191,58 @@ export async function appendKernelChatRuntimeLine(
   }
 
   return appendKernelChatRootLine(rootSessionId, normalizedContent, type);
+}
+
+export async function forkKernelChatSessionAtTurn(params: {
+  rootSessionId: string;
+  userLineId: number;
+  displayTitle?: string | null;
+  workspacePath?: string | null;
+  artifactRefs?: string[];
+  contextSources?: string[];
+}): Promise<WorkflowSession | null> {
+  const normalizedRootSessionId = params.rootSessionId.trim();
+  if (!normalizedRootSessionId) {
+    return null;
+  }
+
+  const transcriptLines = getKernelChatTranscript(normalizedRootSessionId);
+  const payload = buildForkedChatSessionPayload(transcriptLines, params.userLineId);
+  if (!payload) {
+    return null;
+  }
+
+  const kernel = useWorkflowKernelStore.getState();
+  const metadata: Record<string, string | number> = {
+    entry: 'fork_chat_turn',
+    sourceSessionId: normalizedRootSessionId,
+    sourceUserLineId: params.userLineId,
+  };
+  const normalizedDisplayTitle = params.displayTitle?.trim() ?? '';
+  if (normalizedDisplayTitle) {
+    metadata.displayTitle = normalizedDisplayTitle;
+  }
+  const normalizedWorkspacePath = params.workspacePath?.trim() ?? '';
+  if (normalizedWorkspacePath) {
+    metadata.workspacePath = normalizedWorkspacePath;
+  }
+
+  const opened = await kernel.openSession('chat', {
+    conversationContext: payload.conversationContext,
+    artifactRefs: [...(params.artifactRefs ?? [])],
+    contextSources: [...new Set(['simple_mode', 'chat_fork', ...(params.contextSources ?? [])])],
+    metadata,
+  });
+  if (!opened) {
+    return null;
+  }
+
+  const patched = await kernel.patchModeTranscript(opened.sessionId, 'chat', {
+    replaceFromLineId: 0,
+    appendedLines: payload.truncatedLines,
+  });
+
+  return patched ? opened : null;
 }
 
 export async function ensureActiveChatModeSessionLinked(

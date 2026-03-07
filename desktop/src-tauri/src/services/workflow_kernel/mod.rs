@@ -3117,7 +3117,7 @@ fn prepare_chat_turn_submission(
     chat.phase = "submitting".to_string();
     chat.pending_input.clear();
     chat.active_turn_id = Some(uuid::Uuid::new_v4().to_string());
-    if chat.turn_count == 1 {
+    if chat.turn_count == 1 && is_default_display_title(&session.display_title) {
         session.display_title = summarize_display_title(&intent.content);
     }
 }
@@ -3484,6 +3484,15 @@ fn derive_initial_display_title(
         WorkflowMode::Plan => "New plan".to_string(),
         WorkflowMode::Task => "New task".to_string(),
     }
+}
+
+fn is_default_display_title(title: &str) -> bool {
+    let normalized = title.trim().to_ascii_lowercase();
+    normalized.is_empty()
+        || matches!(
+            normalized.as_str(),
+            "new chat" | "new plan" | "new task" | "new session"
+        )
 }
 
 fn derive_workspace_path(initial_context: Option<&HandoffContextBundle>) -> Option<String> {
@@ -4403,5 +4412,36 @@ mod tests {
                 .and_then(|value| value.as_str()),
             Some("hello")
         );
+    }
+
+    #[tokio::test]
+    async fn manual_session_title_survives_first_chat_turn() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let kernel = WorkflowKernelState::new_with_storage_dir(temp_dir.path().to_path_buf());
+
+        let session = kernel
+            .open_session(Some(WorkflowMode::Chat), None)
+            .await
+            .expect("open session");
+        let session_id = session.session_id.clone();
+
+        kernel
+            .rename_session(&session_id, "Pinned title")
+            .await
+            .expect("rename session");
+
+        let updated = kernel
+            .submit_input(
+                &session_id,
+                UserInputIntent {
+                    intent_type: UserInputIntentType::ChatMessage,
+                    content: "this should not overwrite the manual title".to_string(),
+                    metadata: Value::Null,
+                },
+            )
+            .await
+            .expect("submit first chat message");
+
+        assert_eq!(updated.session.display_title, "Pinned title");
     }
 }

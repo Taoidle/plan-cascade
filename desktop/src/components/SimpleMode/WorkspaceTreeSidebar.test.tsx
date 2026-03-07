@@ -22,8 +22,15 @@ vi.mock('react-i18next', () => ({
         'sidebar.noDirectoriesHint': 'Click "Directory" to add a workspace',
         'sidebar.rename': 'rename',
         'sidebar.renamePrompt': 'Rename session',
+        'sidebar.renameDialogDescription': 'Enter a new title for this session.',
+        'sidebar.renameInputLabel': 'Session title',
+        'sidebar.renameInputPlaceholder': 'Enter session title',
+        'sidebar.cancelAction': 'Cancel',
+        'sidebar.archiveConfirmAction': 'Confirm',
+        'sidebar.renameConfirm': 'Confirm',
         'sidebar.deleteSession': 'Delete session',
         'sidebar.deleteSessionConfirm': 'Delete this session permanently? This cannot be undone.',
+        'sidebar.deleteConfirmAction': 'Delete',
         'sidebar.archiveSession': 'Archive session',
         'sidebar.archiveAction': 'archive',
         'sidebar.restoreAction': 'restore',
@@ -274,7 +281,6 @@ describe('WorkspaceTreeSidebar', () => {
     const onArchiveWorkflowSession = vi.fn();
     const onDeleteWorkflowSession = vi.fn();
     const onClearAllSessions = vi.fn();
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('Renamed live session');
 
     render(
       <WorkspaceTreeSidebar
@@ -290,18 +296,56 @@ describe('WorkspaceTreeSidebar', () => {
     );
 
     fireEvent.click(screen.getAllByTitle('rename')[0]);
+    fireEvent.change(screen.getByLabelText('Session title'), { target: { value: 'Renamed live session' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
     expect(onRenameWorkflowSession).toHaveBeenCalledWith('root-live', 'Renamed live session');
 
     fireEvent.click(screen.getByTitle('Archive session'));
+    expect(screen.getByText('Archive this live session?')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
     expect(onArchiveWorkflowSession).toHaveBeenCalledWith('root-live');
 
     fireEvent.click(screen.getByTitle('Delete session'));
+    expect(screen.getByText('Delete this session permanently? This cannot be undone.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     expect(onDeleteWorkflowSession).toHaveBeenCalledWith('root-live');
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear All Sessions' }));
     expect(onClearAllSessions).toHaveBeenCalled();
+  });
 
-    promptSpy.mockRestore();
+  it('does not delete live sessions when the confirmation is cancelled', () => {
+    const onDeleteWorkflowSession = vi.fn();
+
+    render(
+      <WorkspaceTreeSidebar
+        {...defaultProps}
+        workflowSessions={[createWorkflowSession({ sessionId: 'root-live', displayTitle: 'Ship auth' })]}
+        activeWorkflowSessionId="root-live"
+        onDeleteWorkflowSession={onDeleteWorkflowSession}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle('Delete session'));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onDeleteWorkflowSession).not.toHaveBeenCalled();
+  });
+
+  it('does not archive live sessions when the confirmation is cancelled', () => {
+    const onArchiveWorkflowSession = vi.fn();
+
+    render(
+      <WorkspaceTreeSidebar
+        {...defaultProps}
+        workflowSessions={[createWorkflowSession({ sessionId: 'root-live', displayTitle: 'Ship auth' })]}
+        activeWorkflowSessionId="root-live"
+        onArchiveWorkflowSession={onArchiveWorkflowSession}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle('Archive session'));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onArchiveWorkflowSession).not.toHaveBeenCalled();
   });
 
   it('toggles a path group open and closed without changing workspace', () => {

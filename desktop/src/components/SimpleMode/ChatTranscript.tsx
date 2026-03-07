@@ -33,6 +33,7 @@ interface ChatTranscriptProps {
   scrollRef?: React.RefObject<HTMLDivElement | null>;
   forceFullRender?: boolean;
   showPendingPlaceholder?: boolean;
+  onFork?: (userLineId: number) => void;
 }
 
 interface TurnRowProps {
@@ -49,6 +50,7 @@ interface TurnRowProps {
   onEditStart: (lineId: number) => void;
   onEditCancel: () => void;
   onCopy: (content: string) => void;
+  onFork: (userLineId: number) => void;
 }
 
 export function ChatTranscript({
@@ -57,6 +59,7 @@ export function ChatTranscript({
   scrollRef,
   forceFullRender = false,
   showPendingPlaceholder = status === 'running',
+  onFork,
 }: ChatTranscriptProps) {
   const { t } = useTranslation('simpleMode');
   const containerRef = useRef<HTMLDivElement>(null);
@@ -131,6 +134,17 @@ export function ChatTranscript({
   const handleCopy = useCallback((content: string) => {
     navigator.clipboard.writeText(content).catch(() => {});
   }, []);
+
+  const handleFork = useCallback(
+    (userLineId: number) => {
+      if (onFork) {
+        onFork(userLineId);
+        return;
+      }
+      useExecutionStore.getState().forkSessionAtTurn(userLineId);
+    },
+    [onFork],
+  );
 
   const handleScroll = useCallback(() => {
     if (!containerRef.current) return;
@@ -223,6 +237,7 @@ export function ChatTranscript({
                       onEditStart={handleEditStart}
                       onEditCancel={handleEditCancel}
                       onCopy={handleCopy}
+                      onFork={handleFork}
                     />
                   </div>
                 </div>
@@ -250,6 +265,7 @@ export function ChatTranscript({
                   onEditStart={handleEditStart}
                   onEditCancel={handleEditCancel}
                   onCopy={handleCopy}
+                  onFork={handleFork}
                 />
               );
             })}
@@ -307,6 +323,7 @@ const TurnRow = memo(function TurnRow({
   onEditStart,
   onEditCancel,
   onCopy,
+  onFork,
 }: TurnRowProps) {
   const { t } = useTranslation('simpleMode');
 
@@ -351,7 +368,7 @@ const TurnRow = memo(function TurnRow({
           isClaudeCodeBackend={isClaudeCodeBackend}
           onEdit={onEdit}
           onCopy={onCopy}
-          onFork={() => useExecutionStore.getState().forkSessionAtTurn(userLine.id)}
+          onFork={onFork}
         />
       ) : showPendingPlaceholder && status === 'running' && turn.turnIndex >= 0 && isLastTurn ? (
         <div className="flex justify-start">

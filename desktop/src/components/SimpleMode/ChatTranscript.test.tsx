@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { ChatTranscript } from './ChatTranscript';
 import type { StreamLine } from '../../store/execution';
+
+const mockForkSessionAtTurn = vi.hoisted(() => vi.fn());
 
 vi.mock('react-i18next', () => ({
   initReactI18next: {
@@ -9,7 +11,14 @@ vi.mock('react-i18next', () => ({
     init: () => {},
   },
   useTranslation: () => ({
-    t: (_key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? '',
+    t: (key: string, options?: { defaultValue?: string }) =>
+      (
+        ({
+          'messageActions.fork': 'Fork',
+        }) as Record<string, string>
+      )[key] ??
+      options?.defaultValue ??
+      key,
   }),
 }));
 
@@ -23,7 +32,7 @@ vi.mock('../../store/execution', () => {
     editAndResend: vi.fn(),
     regenerateResponse: vi.fn(),
     rollbackToTurn: vi.fn(),
-    forkSessionAtTurn: vi.fn(),
+    forkSessionAtTurn: mockForkSessionAtTurn,
   };
 
   const useExecutionStore = ((selector?: (input: typeof state) => unknown) => (selector ? selector(state) : state)) as {
@@ -137,5 +146,16 @@ describe('ChatTranscript render mode', () => {
     render(<ChatTranscript lines={lines} status="running" showPendingPlaceholder />);
 
     expect(screen.getByText('Thinking...')).toBeInTheDocument();
+  });
+
+  it('uses the provided fork handler instead of the legacy execution-store fork', () => {
+    const customFork = vi.fn();
+    mockForkSessionAtTurn.mockClear();
+
+    render(<ChatTranscript lines={buildLines(1)} status="idle" onFork={customFork} />);
+
+    fireEvent.click(screen.getByLabelText('Fork'));
+    expect(customFork).toHaveBeenCalledWith(1);
+    expect(mockForkSessionAtTurn).not.toHaveBeenCalled();
   });
 });

@@ -52,13 +52,14 @@ import { useSimpleModeSwitch } from './useSimpleModeSwitch';
 import { useSimpleKernelSession } from './useSimpleKernelSession';
 import { useSimpleQueueRuntime } from './useSimpleQueueRuntime';
 import { useWorkflowQuestionSpecs } from './useWorkflowQuestionSpecs';
-import { buildSessionTreeViewModel } from './sessionTreeViewModel';
+import { buildSessionTreeViewModel, normalizeSidebarSessionTitle } from './sessionTreeViewModel';
 import { buildConversationHistory } from '../../lib/contextBridge';
 import {
   cancelActiveWorkflow,
   submitWorkflowInputWithTracking,
   switchModeSafely,
 } from '../../store/simpleWorkflowCoordinator';
+import { forkKernelChatSessionAtTurn } from '../../store/execution/kernelTranscript';
 import type { WorkflowMode } from '../../types/workflowKernel';
 import {
   selectKernelChatRuntime,
@@ -923,6 +924,56 @@ export function SimpleModeShell() {
     [handleNewTask, setWorkspacePath],
   );
 
+  const handleForkWorkflowSession = useCallback(
+    async (userLineId: number) => {
+      if (!workflowKernelSessionId || workflowMode !== 'chat') {
+        return;
+      }
+
+      const baseTitle = normalizeSidebarSessionTitle(workflowKernelSession?.displayTitle, {
+        modeSnapshots: workflowKernelSession?.modeSnapshots ?? null,
+        activeMode: workflowKernelSession?.activeMode ?? workflowMode,
+        fallbackText: t('sidebar.placeholderTitles.session', { defaultValue: 'New session' }),
+      });
+      const forkLabel = t('messageActions.fork', { defaultValue: 'Fork' }).trim() || 'Fork';
+      const forkSuffix = `(${forkLabel})`;
+      const forkTitle = baseTitle.endsWith(forkSuffix) ? baseTitle : `${baseTitle} ${forkSuffix}`;
+
+      const forked = await forkKernelChatSessionAtTurn({
+        rootSessionId: workflowKernelSessionId,
+        userLineId,
+        displayTitle: forkTitle,
+        workspacePath: workflowKernelSession?.workspacePath ?? workspacePath,
+        artifactRefs: workflowKernelSession?.handoffContext.artifactRefs ?? [],
+        contextSources: workflowKernelSession?.handoffContext.contextSources ?? [],
+      });
+      if (!forked) {
+        showToast(t('messageActions.forkFailed', { defaultValue: 'Failed to fork session' }), 'error');
+        return;
+      }
+
+      resetWorkflow();
+      resetPlanWorkflow();
+      clearStrategyAnalysis();
+    },
+    [
+      clearStrategyAnalysis,
+      resetPlanWorkflow,
+      resetWorkflow,
+      showToast,
+      t,
+      workflowKernelSession?.activeMode,
+      workflowKernelSession?.displayTitle,
+      workflowKernelSession?.handoffContext.artifactRefs,
+      workflowKernelSession?.handoffContext.contextSources,
+      workflowKernelSession?.modeSnapshots,
+      workflowKernelSession?.workspacePath,
+      workflowKernelSessionId,
+      workflowMode,
+      workspacePath,
+    ],
+  );
+
   const handleRestoreHistory = useCallback(
     (historyId: string) => {
       persistForegroundModeView(workflowKernelSessionId, workflowMode);
@@ -998,10 +1049,6 @@ export function SimpleModeShell() {
 
   const handleArchiveWorkflowSession = useCallback(
     async (sessionId: string) => {
-      const confirmed = window.confirm(
-        t('sidebar.archiveSessionConfirm', { defaultValue: 'Archive this live session?' }),
-      );
-      if (!confirmed) return;
       persistForegroundModeView(workflowKernelSessionId, workflowMode);
       const result = await archiveWorkflowKernelSession(sessionId);
       if (!result) return;
@@ -1050,7 +1097,6 @@ export function SimpleModeShell() {
       resetWorkflow,
       restoreForegroundModeView,
       setWorkspacePath,
-      t,
       workflowKernelSessionId,
       workflowMode,
       workspacePath,
@@ -1094,13 +1140,6 @@ export function SimpleModeShell() {
 
   const handleDeleteWorkflowSession = useCallback(
     async (sessionId: string) => {
-      const confirmed = window.confirm(
-        t('sidebar.deleteSessionConfirm', {
-          defaultValue: 'Delete this session permanently? This cannot be undone.',
-        }),
-      );
-      if (!confirmed) return;
-
       persistForegroundModeView(workflowKernelSessionId, workflowMode);
       const result = await deleteWorkflowKernelSession(sessionId);
       if (!result) return;
@@ -1150,7 +1189,6 @@ export function SimpleModeShell() {
       resetWorkflow,
       restoreForegroundModeView,
       setWorkspacePath,
-      t,
       workflowKernelSessionId,
       workflowMode,
       workspacePath,
@@ -1679,6 +1717,7 @@ export function SimpleModeShell() {
                 showPendingPlaceholder={workflowMode === 'chat' ? showPendingChatPlaceholder : false}
                 scrollRef={chatScrollRef}
                 forceFullRender={isCapturing}
+                onFork={workflowMode === 'chat' ? handleForkWorkflowSession : undefined}
               />
             </div>
 
@@ -1812,6 +1851,7 @@ function KernelTranscriptChatPane({
   showPendingPlaceholder,
   scrollRef,
   forceFullRender,
+  onFork,
 }: {
   sessionId: string | null;
   mode: WorkflowMode;
@@ -1819,6 +1859,7 @@ function KernelTranscriptChatPane({
   showPendingPlaceholder: boolean;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   forceFullRender: boolean;
+  onFork?: (userLineId: number) => void;
 }) {
   const lines = useWorkflowKernelStore(
     useCallback(
@@ -1833,6 +1874,7 @@ function KernelTranscriptChatPane({
       showPendingPlaceholder={showPendingPlaceholder}
       scrollRef={scrollRef}
       forceFullRender={forceFullRender}
+      onFork={onFork}
     />
   );
 }

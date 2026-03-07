@@ -7,6 +7,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { ChevronRightIcon, ChevronLeftIcon, PlusIcon, Cross2Icon } from '@radix-ui/react-icons';
@@ -84,6 +85,8 @@ function timeAgo(timestamp: number, nowMs: number, t: ReturnType<typeof useTrans
   const days = Math.floor(hours / 24);
   return t('sidebar.time.daysAgo', { count: days, defaultValue: '{{count}}d ago' });
 }
+
+type SessionManageTarget = Pick<SessionTreeItem, 'kind' | 'sourceSessionId' | 'title'>;
 
 // ---------------------------------------------------------------------------
 // Sidebar Header
@@ -456,23 +459,19 @@ function SessionTreeRow({
   nowMs,
   onActivateLive,
   onRestoreHistory,
-  onDeleteHistory,
-  onRenameHistory,
-  onArchiveLive,
-  onRenameLive,
   onRestoreArchived,
-  onDeleteArchived,
+  onRequestArchive,
+  onRequestRename,
+  onRequestDelete,
 }: {
   item: SessionTreeItem;
   nowMs: number;
   onActivateLive?: (id: string) => void;
   onRestoreHistory: (id: string) => void;
-  onDeleteHistory: (id: string) => void;
-  onRenameHistory: (id: string, title: string) => void;
-  onArchiveLive?: (id: string) => void;
-  onRenameLive?: (id: string, title: string) => void;
   onRestoreArchived?: (id: string) => void;
-  onDeleteArchived?: (id: string) => void;
+  onRequestArchive: (target: SessionManageTarget) => void;
+  onRequestRename: (target: SessionManageTarget) => void;
+  onRequestDelete: (target: SessionManageTarget) => void;
 }) {
   const { t } = useTranslation('simpleMode');
 
@@ -488,39 +487,44 @@ function SessionTreeRow({
     onRestoreHistory(item.sourceSessionId);
   }, [item, onActivateLive, onRestoreArchived, onRestoreHistory]);
 
+  const handleArchive = useCallback(
+    (event: React.MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (item.kind !== 'live') return;
+      onRequestArchive({
+        kind: item.kind,
+        sourceSessionId: item.sourceSessionId,
+        title: item.title,
+      });
+    },
+    [item, onRequestArchive],
+  );
+
   const handleRename = useCallback(
     (e: React.MouseEvent) => {
+      e.preventDefault();
       e.stopPropagation();
-      if (item.kind !== 'history' && item.kind !== 'live' && item.kind !== 'archived') return;
-      const next = window.prompt(t('sidebar.renamePrompt', { defaultValue: 'Rename session' }), item.title);
-      if (next === null) return;
-      if (item.kind === 'live') {
-        onRenameLive?.(item.sourceSessionId, next);
-        return;
-      }
-      if (item.kind === 'archived') {
-        onRenameLive?.(item.sourceSessionId, next);
-        return;
-      }
-      onRenameHistory(item.sourceSessionId, next);
+      onRequestRename({
+        kind: item.kind,
+        sourceSessionId: item.sourceSessionId,
+        title: item.title,
+      });
     },
-    [item, onRenameHistory, onRenameLive, t],
+    [item, onRequestRename],
   );
 
   const handleDelete = useCallback(
     (e: React.MouseEvent) => {
+      e.preventDefault();
       e.stopPropagation();
-      if (item.kind === 'live') {
-        onDeleteArchived?.(item.sourceSessionId);
-        return;
-      }
-      if (item.kind === 'archived') {
-        onDeleteArchived?.(item.sourceSessionId);
-        return;
-      }
-      onDeleteHistory(item.sourceSessionId);
+      onRequestDelete({
+        kind: item.kind,
+        sourceSessionId: item.sourceSessionId,
+        title: item.title,
+      });
     },
-    [item, onDeleteArchived, onDeleteHistory],
+    [item, onRequestDelete],
   );
 
   return (
@@ -580,11 +584,9 @@ function SessionTreeRow({
         <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
           {item.kind === 'live' && (
             <button
+              type="button"
               className="text-2xs px-1.5 py-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-700/50"
-              onClick={(event) => {
-                event.stopPropagation();
-                onArchiveLive?.(item.sourceSessionId);
-              }}
+              onClick={handleArchive}
               title={t('sidebar.archiveSession', { defaultValue: 'Archive session' })}
             >
               {t('sidebar.archiveAction', { defaultValue: 'archive' })}
@@ -592,8 +594,10 @@ function SessionTreeRow({
           )}
           {item.kind === 'archived' && (
             <button
+              type="button"
               className="text-2xs px-1.5 py-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-700/50"
               onClick={(event) => {
+                event.preventDefault();
                 event.stopPropagation();
                 onRestoreArchived?.(item.sourceSessionId);
               }}
@@ -603,6 +607,7 @@ function SessionTreeRow({
             </button>
           )}
           <button
+            type="button"
             className="text-2xs px-1.5 py-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-700/50"
             onClick={handleRename}
             title={t('sidebar.rename')}
@@ -610,6 +615,7 @@ function SessionTreeRow({
             {t('sidebar.rename')}
           </button>
           <button
+            type="button"
             className="p-0.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/30"
             onClick={handleDelete}
             title={t('sidebar.deleteSession', { defaultValue: 'Delete session' })}
@@ -632,12 +638,10 @@ function PathGroupNode({
   onNewTaskInPath,
   onActivateLive,
   onRestoreHistory,
-  onDeleteHistory,
-  onRenameHistory,
-  onArchiveLive,
-  onRenameLive,
   onRestoreArchived,
-  onDeleteArchived,
+  onRequestArchive,
+  onRequestRename,
+  onRequestDelete,
 }: {
   group: PathGroup;
   nowMs: number;
@@ -648,18 +652,17 @@ function PathGroupNode({
   onNewTaskInPath: () => void;
   onActivateLive?: (id: string) => void;
   onRestoreHistory: (id: string) => void;
-  onDeleteHistory: (id: string) => void;
-  onRenameHistory: (id: string, title: string) => void;
-  onArchiveLive?: (id: string) => void;
-  onRenameLive?: (id: string, title: string) => void;
   onRestoreArchived?: (id: string) => void;
-  onDeleteArchived?: (id: string) => void;
+  onRequestArchive: (target: SessionManageTarget) => void;
+  onRequestRename: (target: SessionManageTarget) => void;
+  onRequestDelete: (target: SessionManageTarget) => void;
 }) {
   const { t } = useTranslation('simpleMode');
   const hasAttention = group.children.some((child) => child.status === 'attention');
 
   const handleUnpin = useCallback(
     (e: React.MouseEvent) => {
+      e.preventDefault();
       e.stopPropagation();
       onUnpin?.();
     },
@@ -668,6 +671,7 @@ function PathGroupNode({
 
   const handleNewTask = useCallback(
     (e: React.MouseEvent) => {
+      e.preventDefault();
       e.stopPropagation();
       onNewTaskInPath();
     },
@@ -717,6 +721,7 @@ function PathGroupNode({
           )}
         >
           <button
+            type="button"
             className="p-0.5 rounded text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20"
             onClick={handleNewTask}
             title={t('sidebar.newTaskInDir')}
@@ -725,6 +730,7 @@ function PathGroupNode({
           </button>
           {onUnpin && (
             <button
+              type="button"
               className="p-0.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/30"
               onClick={handleUnpin}
               title={t('sidebar.removeDirectory')}
@@ -744,12 +750,10 @@ function PathGroupNode({
               nowMs={nowMs}
               onActivateLive={onActivateLive}
               onRestoreHistory={onRestoreHistory}
-              onDeleteHistory={onDeleteHistory}
-              onRenameHistory={onRenameHistory}
-              onArchiveLive={onArchiveLive}
-              onRenameLive={onRenameLive}
               onRestoreArchived={onRestoreArchived}
-              onDeleteArchived={onDeleteArchived}
+              onRequestArchive={onRequestArchive}
+              onRequestRename={onRequestRename}
+              onRequestDelete={onRequestDelete}
             />
           ))}
         </div>
@@ -821,6 +825,10 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
   // Expand/collapse state for path groups
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set());
   const [relativeTimeNow, setRelativeTimeNow] = useState(() => Date.now());
+  const [archiveTarget, setArchiveTarget] = useState<SessionManageTarget | null>(null);
+  const [renameTarget, setRenameTarget] = useState<SessionManageTarget | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<SessionManageTarget | null>(null);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -1000,6 +1008,68 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
     openPromptDialog();
   }, [openPromptDialog]);
 
+  const handleRequestArchive = useCallback((target: SessionManageTarget) => {
+    setArchiveTarget(target);
+  }, []);
+
+  const handleCloseArchiveDialog = useCallback((open: boolean) => {
+    if (open) return;
+    setArchiveTarget(null);
+  }, []);
+
+  const handleConfirmArchive = useCallback(() => {
+    if (!archiveTarget || archiveTarget.kind !== 'live') return;
+    onArchiveWorkflowSession?.(archiveTarget.sourceSessionId);
+    setArchiveTarget(null);
+  }, [archiveTarget, onArchiveWorkflowSession]);
+
+  const handleRequestRename = useCallback((target: SessionManageTarget) => {
+    setRenameTarget(target);
+    setRenameValue(target.title);
+  }, []);
+
+  const handleCloseRenameDialog = useCallback((open: boolean) => {
+    if (open) return;
+    setRenameTarget(null);
+    setRenameValue('');
+  }, []);
+
+  const handleConfirmRename = useCallback(() => {
+    if (!renameTarget) return;
+    const trimmed = renameValue.trim();
+    if (!trimmed) return;
+
+    if (renameTarget.kind === 'history') {
+      onRename(renameTarget.sourceSessionId, trimmed);
+    } else {
+      onRenameWorkflowSession?.(renameTarget.sourceSessionId, trimmed);
+    }
+
+    setRenameTarget(null);
+    setRenameValue('');
+  }, [onRename, onRenameWorkflowSession, renameTarget, renameValue]);
+
+  const handleRequestDelete = useCallback((target: SessionManageTarget) => {
+    setDeleteTarget(target);
+  }, []);
+
+  const handleCloseDeleteDialog = useCallback((open: boolean) => {
+    if (open) return;
+    setDeleteTarget(null);
+  }, []);
+
+  const handleConfirmDelete = useCallback(() => {
+    if (!deleteTarget) return;
+
+    if (deleteTarget.kind === 'history') {
+      onDelete(deleteTarget.sourceSessionId);
+    } else {
+      onDeleteWorkflowSession?.(deleteTarget.sourceSessionId);
+    }
+
+    setDeleteTarget(null);
+  }, [deleteTarget, onDelete, onDeleteWorkflowSession]);
+
   return (
     <div className="h-full min-h-0 flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
       {/* Header: tabs + contextual actions */}
@@ -1062,12 +1132,10 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
                       }
                       onActivateLive={onSwitchWorkflowSession}
                       onRestoreHistory={handleRestore}
-                      onDeleteHistory={onDelete}
-                      onRenameHistory={onRename}
-                      onArchiveLive={onArchiveWorkflowSession}
-                      onRenameLive={onRenameWorkflowSession}
                       onRestoreArchived={onRestoreWorkflowSession}
-                      onDeleteArchived={onDeleteWorkflowSession}
+                      onRequestArchive={handleRequestArchive}
+                      onRequestRename={handleRequestRename}
+                      onRequestDelete={handleRequestDelete}
                     />
                   );
                 })}
@@ -1128,6 +1196,135 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
 
       {/* Prompt Dialog (portal-rendered) */}
       <PromptDialog />
+
+      <Dialog.Root open={archiveTarget !== null} onOpenChange={handleCloseArchiveDialog}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-[90] bg-black/40 backdrop-blur-[1px]" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-[100] w-[min(92vw,460px)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-700 dark:bg-gray-900">
+            <Dialog.Title className="text-base font-semibold text-gray-900 dark:text-gray-100">
+              {t('sidebar.archiveSession', { defaultValue: 'Archive session' })}
+            </Dialog.Title>
+            <Dialog.Description className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+              {t('sidebar.archiveSessionConfirm', { defaultValue: 'Archive this live session?' })}
+            </Dialog.Description>
+            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300">
+              {archiveTarget?.title ?? ''}
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => handleCloseArchiveDialog(false)}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                {t('sidebar.cancelAction', { defaultValue: 'Cancel' })}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmArchive}
+                className="rounded-md bg-primary-600 px-3 py-1.5 text-sm text-white transition-colors hover:bg-primary-700"
+              >
+                {t('sidebar.archiveConfirmAction', { defaultValue: 'Confirm' })}
+              </button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      <Dialog.Root open={renameTarget !== null} onOpenChange={handleCloseRenameDialog}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-[90] bg-black/40 backdrop-blur-[1px]" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-[100] w-[min(92vw,460px)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-700 dark:bg-gray-900">
+            <Dialog.Title className="text-base font-semibold text-gray-900 dark:text-gray-100">
+              {t('sidebar.renamePrompt', { defaultValue: 'Rename session' })}
+            </Dialog.Title>
+            <Dialog.Description className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+              {t('sidebar.renameDialogDescription', {
+                defaultValue: 'Enter a new title for this session.',
+              })}
+            </Dialog.Description>
+            <div className="mt-4">
+              <label
+                className="mb-2 block text-xs font-medium text-gray-700 dark:text-gray-300"
+                htmlFor="sidebar-rename-session-input"
+              >
+                {t('sidebar.renameInputLabel', { defaultValue: 'Session title' })}
+              </label>
+              <input
+                id="sidebar-rename-session-input"
+                autoFocus
+                type="text"
+                value={renameValue}
+                onChange={(event) => setRenameValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    handleConfirmRename();
+                  }
+                }}
+                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-colors focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30 dark:border-gray-600 dark:bg-gray-950 dark:text-gray-100"
+                placeholder={t('sidebar.renameInputPlaceholder', { defaultValue: 'Enter session title' })}
+              />
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => handleCloseRenameDialog(false)}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                {t('sidebar.cancelAction', { defaultValue: 'Cancel' })}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRename}
+                disabled={renameValue.trim().length === 0}
+                className={clsx(
+                  'rounded-md px-3 py-1.5 text-sm text-white transition-colors',
+                  renameValue.trim().length === 0
+                    ? 'cursor-not-allowed bg-gray-400 dark:bg-gray-600'
+                    : 'bg-primary-600 hover:bg-primary-700',
+                )}
+              >
+                {t('sidebar.renameConfirm', { defaultValue: 'Confirm' })}
+              </button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      <Dialog.Root open={deleteTarget !== null} onOpenChange={handleCloseDeleteDialog}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-[90] bg-black/40 backdrop-blur-[1px]" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-[100] w-[min(92vw,460px)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-700 dark:bg-gray-900">
+            <Dialog.Title className="text-base font-semibold text-gray-900 dark:text-gray-100">
+              {t('sidebar.deleteSession', { defaultValue: 'Delete session' })}
+            </Dialog.Title>
+            <Dialog.Description className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+              {t('sidebar.deleteSessionConfirm', {
+                defaultValue: 'Delete this session permanently? This cannot be undone.',
+              })}
+            </Dialog.Description>
+            <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+              {deleteTarget?.title ?? ''}
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => handleCloseDeleteDialog(false)}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                {t('sidebar.cancelAction', { defaultValue: 'Cancel' })}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                className="rounded-md bg-red-600 px-3 py-1.5 text-sm text-white transition-colors hover:bg-red-700"
+              >
+                {t('sidebar.deleteConfirmAction', { defaultValue: 'Delete' })}
+              </button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
 
       {/* Toast Notifications */}
       <SkillMemoryToast />
