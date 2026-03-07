@@ -3177,31 +3177,38 @@ fn upsert_chat_pending_text_line(
     if content.is_empty() {
         return;
     }
-    let existing = state
-        .pending_turn_lines
-        .iter_mut()
-        .rev()
-        .find(|line| transcript_line_type(line) == Some("text"));
-    if let Some(line) = existing {
-        if let Some(object) = line.as_object_mut() {
-            let next_content = if replace {
-                content.to_string()
-            } else {
-                format!(
-                    "{}{}",
-                    object
-                        .get("content")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default(),
-                    content
-                )
-            };
-            object.insert("content".to_string(), Value::String(next_content));
-            object.insert(
-                "timestamp".to_string(),
-                Value::Number(chrono::Utc::now().timestamp_millis().into()),
-            );
-        }
+    if replace {
+        state
+            .pending_turn_lines
+            .retain(|line| transcript_line_type(line) != Some("text"));
+        append_chat_pending_line(state, "text", content.to_string(), turn_id);
+        return;
+    }
+
+    let Some(last_line) = state.pending_turn_lines.last_mut() else {
+        append_chat_pending_line(state, "text", content.to_string(), turn_id);
+        return;
+    };
+
+    if transcript_line_type(last_line) != Some("text") {
+        append_chat_pending_line(state, "text", content.to_string(), turn_id);
+        return;
+    }
+
+    if let Some(object) = last_line.as_object_mut() {
+        let next_content = format!(
+            "{}{}",
+            object
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+            content
+        );
+        object.insert("content".to_string(), Value::String(next_content));
+        object.insert(
+            "timestamp".to_string(),
+            Value::Number(chrono::Utc::now().timestamp_millis().into()),
+        );
         return;
     }
 
@@ -4119,6 +4126,34 @@ mod tests {
             .rposition(|event| event.kind == WorkflowEventKind::InputSubmitted)
             .expect("input submitted event");
         assert!(transition_index < input_index);
+    }
+
+    #[test]
+    fn text_replace_rehomes_final_chat_answer_after_tool_activity() {
+        let mut state = ChatRuntimeSyncState::new(
+            "root-session".to_string(),
+            "standalone".to_string(),
+            None,
+            1,
+        );
+
+        upsert_chat_pending_text_line(&mut state, "draft answer", 1, false);
+        append_chat_pending_line(&mut state, "tool", "[tool:Read] src/app.ts".to_string(), 1);
+        upsert_chat_pending_text_line(&mut state, "cleaned final answer", 1, true);
+
+        assert_eq!(state.pending_turn_lines.len(), 2);
+        assert_eq!(
+            transcript_line_type(&state.pending_turn_lines[0]),
+            Some("tool")
+        );
+        assert_eq!(
+            transcript_line_type(&state.pending_turn_lines[1]),
+            Some("text")
+        );
+        assert_eq!(
+            transcript_line_content(&state.pending_turn_lines[1]),
+            Some("cleaned final answer")
+        );
     }
 
     #[tokio::test]

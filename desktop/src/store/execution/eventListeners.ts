@@ -716,35 +716,40 @@ function handleUnifiedExecutionEvent(
       break;
 
     case 'text_replace': {
-      // Replace accumulated text lines from the CURRENT TURN with a single
-      // cleaned version.  During streaming with FallbackToolFormatMode, the
-      // LLM often repeats its reasoning text before/between/after tool call
-      // blocks, producing multiple 'text' lines separated by 'tool' indicator
-      // lines.  The cleaned content from the backend has tool blocks stripped
-      // and duplicates removed, so we collapse current-turn text lines into one.
-      //
-      // IMPORTANT: Only touch lines whose id > currentTurnStartLineId so that
-      // previous turns' content is preserved in multi-turn conversations.
+      // Replace root assistant text lines from the CURRENT TURN with a single
+      // cleaned trailing answer. This preserves the relative order:
+      // thinking -> tool/task activity -> final answer.
       const lines = get().streamingOutput;
       const turnBoundary = get().currentTurnStartLineId;
       const textIndices = lines
-        .map((l, i) => (l.type === 'text' && l.id > turnBoundary ? i : -1))
+        .map((l, i) => (l.type === 'text' && !l.subAgentId && l.id > turnBoundary ? i : -1))
         .filter((i) => i >= 0);
+      const currentTurnId =
+        [...lines]
+          .reverse()
+          .find((line) => line.id > turnBoundary && !line.subAgentId && typeof line.turnId === 'number')?.turnId ??
+        undefined;
       const cleaned = payload.content || '';
       if (textIndices.length > 0) {
-        const lastTextIdx = textIndices[textIndices.length - 1];
-        const otherTextIndices = new Set(textIndices.slice(0, -1));
+        const textIndexSet = new Set(textIndices);
+        const updated = lines.filter((_, i) => !textIndexSet.has(i));
         if (cleaned) {
-          // Keep the last current-turn text line with cleaned content,
-          // remove earlier current-turn text lines
-          const updated = lines.filter((_, i) => !otherTextIndices.has(i));
-          const newLastIdx = lastTextIdx - otherTextIndices.size;
-          updated[newLastIdx] = { ...updated[newLastIdx], content: cleaned };
-          set({ streamingOutput: updated, foregroundDirty: true });
+          const nextLineId = Math.max(get().streamLineCounter, ...updated.map((line) => line.id), 0) + 1;
+          updated.push({
+            id: nextLineId,
+            content: cleaned,
+            type: 'text',
+            timestamp: Date.now(),
+            turnId: currentTurnId,
+            turnBoundary: 'assistant',
+          });
+          set({
+            streamingOutput: updated,
+            streamLineCounter: Math.max(get().streamLineCounter, nextLineId),
+            foregroundDirty: true,
+          });
         } else {
-          // Remove all current-turn text lines if cleaned is empty
-          const allTextIndices = new Set(textIndices);
-          set({ streamingOutput: lines.filter((_, i) => !allTextIndices.has(i)), foregroundDirty: true });
+          set({ streamingOutput: updated, foregroundDirty: true });
         }
         if (payload.session_id) {
           scheduleForegroundChatTranscriptSync(payload.session_id, get);
@@ -754,7 +759,10 @@ function handleUnifiedExecutionEvent(
         // the frontend filter suppresses completely. When the backend later
         // sends a cleaned TextReplace payload, treat it as a fresh assistant
         // text line instead of dropping it.
-        get().appendStreamLine(cleaned, 'text');
+        get().appendStreamLine(cleaned, 'text', undefined, undefined, {
+          turnId: currentTurnId,
+          turnBoundary: 'assistant',
+        });
         if (payload.session_id) {
           scheduleForegroundChatTranscriptSync(payload.session_id, get);
         }

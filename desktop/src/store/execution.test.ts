@@ -2975,6 +2975,123 @@ describe('Execution Store - Cancellation Consistency (Claude backend)', () => {
       useExecutionStore.getState().cleanup();
     }
   });
+
+  it('keeps tool activity above the final cleaned answer for the current turn', async () => {
+    vi.useFakeTimers();
+    try {
+      useWorkflowKernelStore.setState({
+        sessionId: 'root-standalone-order',
+        activeRootSessionId: 'root-standalone-order',
+        activeMode: 'chat',
+        sessionCatalog: [
+          {
+            sessionId: 'root-standalone-order',
+            sessionKind: 'simple_root',
+            displayTitle: 'Standalone ordering',
+            workspacePath: '/tmp/project',
+            activeMode: 'chat',
+            status: 'active',
+            backgroundState: 'foreground',
+            updatedAt: '2026-03-08T00:00:00Z',
+            createdAt: '2026-03-08T00:00:00Z',
+            lastError: null,
+            contextLedger: {
+              conversationTurnCount: 1,
+              artifactRefCount: 0,
+              contextSourceKinds: [],
+              lastCompactionAt: null,
+              ledgerVersion: 1,
+            },
+            modeSnapshots: {
+              chat: {
+                phase: 'streaming',
+                pendingInput: '',
+                activeTurnId: null,
+                turnCount: 1,
+                lastUserMessage: 'hello',
+                lastAssistantMessage: null,
+              },
+              plan: null,
+              task: null,
+            },
+            modeRuntimeMeta: {
+              chat: {
+                mode: 'chat',
+                runId: null,
+                bindingSessionId: 'standalone:standalone-order-live',
+                isForeground: true,
+                isBackgroundRunning: false,
+                isInterrupted: false,
+                resumePolicy: 'resume',
+                lastHeartbeatAt: null,
+                lastCheckpointId: null,
+                lastError: null,
+              },
+            },
+          },
+        ],
+        modeTranscriptsBySession: {
+          'root-standalone-order': {
+            chat: {
+              revision: 1,
+              loaded: true,
+              unread: false,
+              lines: [
+                { id: 1, content: 'hello', type: 'info', timestamp: 1, turnBoundary: 'user', turnId: 1 },
+                { id: 2, content: 'draft answer', type: 'text', timestamp: 2, turnBoundary: 'assistant', turnId: 1 },
+                { id: 3, content: '[tool:Read] src/app.ts', type: 'tool', timestamp: 3, turnId: 1 },
+              ],
+            },
+          },
+        },
+      });
+
+      useExecutionStore.setState({
+        status: 'running',
+        taskId: null,
+        standaloneSessionId: 'standalone-order-live',
+        isChatSession: false,
+        activeExecutionId: 'exec-current',
+        streamingOutput: [
+          { id: 1, content: 'hello', type: 'info', timestamp: 1, turnBoundary: 'user', turnId: 1 },
+          { id: 2, content: 'draft answer', type: 'text', timestamp: 2, turnBoundary: 'assistant', turnId: 1 },
+          { id: 3, content: '[tool:Read] src/app.ts', type: 'tool', timestamp: 3, turnId: 1 },
+        ],
+        streamLineCounter: 3,
+        currentTurnStartLineId: 1,
+      });
+
+      mockInvoke.mockResolvedValue({ success: true, data: null, error: null });
+
+      useExecutionStore.getState().initialize();
+      await vi.waitFor(() => {
+        expect(eventHandlers['standalone-event']).toBeDefined();
+      });
+
+      emitEvent('standalone-event', {
+        type: 'text_replace',
+        session_id: 'standalone-order-live',
+        execution_id: 'exec-current',
+        content: 'cleaned final answer',
+      });
+
+      await vi.advanceTimersByTimeAsync(150);
+
+      expect(useExecutionStore.getState().streamingOutput).toEqual([
+        expect.objectContaining({ id: 1, type: 'info', content: 'hello' }),
+        expect.objectContaining({ id: 3, type: 'tool', content: '[tool:Read] src/app.ts' }),
+        expect.objectContaining({
+          type: 'text',
+          content: 'cleaned final answer',
+          turnBoundary: 'assistant',
+          turnId: 1,
+        }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+      useExecutionStore.getState().cleanup();
+    }
+  });
 });
 
 describe('Execution Store - Standalone cancellation/regenerate consistency', () => {
