@@ -76,8 +76,8 @@ async function appendModeTranscriptLines(
   mode: WorkflowMode,
   lines: StreamLine[],
 ): Promise<void> {
-  const appendModeTranscript = useWorkflowKernelStore.getState().appendModeTranscript;
-  if (typeof appendModeTranscript !== 'function') {
+  const patchModeTranscript = useWorkflowKernelStore.getState().patchModeTranscript;
+  if (typeof patchModeTranscript !== 'function') {
     return;
   }
   const queueKey = `${rootSessionId}:${mode}`;
@@ -85,7 +85,10 @@ async function appendModeTranscriptLines(
   const next = previous
     .catch(() => undefined)
     .then(async () => {
-      await appendModeTranscript(rootSessionId, mode, lines);
+      await patchModeTranscript(rootSessionId, mode, {
+        replaceFromLineId: null,
+        appendedLines: lines,
+      });
     });
   transcriptAppendQueue.set(queueKey, next);
   await next;

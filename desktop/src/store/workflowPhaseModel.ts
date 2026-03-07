@@ -24,6 +24,15 @@ export const TASK_PHASES = [
   'cancelled',
 ] as const;
 
+export const CHAT_PHASES = [
+  'ready',
+  'submitting',
+  'streaming',
+  'paused',
+  'failed',
+  'cancelled',
+  'interrupted',
+] as const;
 export const PLAN_PHASES = [
   'idle',
   'analyzing',
@@ -39,11 +48,15 @@ export const PLAN_PHASES = [
 
 export type TaskPhase = (typeof TASK_PHASES)[number];
 export type PlanPhase = (typeof PLAN_PHASES)[number];
+export type ChatPhase = (typeof CHAT_PHASES)[number];
+export type NormalizedChatPhase = ChatPhase | 'unknown';
 export type NormalizedTaskPhase = TaskPhase | 'unknown';
 export type NormalizedPlanPhase = PlanPhase | 'unknown';
 
+const CHAT_PHASE_SET = new Set<string>(CHAT_PHASES);
 const TASK_PHASE_SET = new Set<string>(TASK_PHASES);
 const PLAN_PHASE_SET = new Set<string>(PLAN_PHASES);
+const CHAT_BUSY_PHASES = new Set<ChatPhase>(['submitting', 'streaming', 'paused']);
 const TASK_BUSY_PHASES = new Set<TaskPhase>([
   'analyzing',
   'exploring',
@@ -54,6 +67,7 @@ const TASK_BUSY_PHASES = new Set<TaskPhase>([
 ]);
 const PLAN_BUSY_PHASES = new Set<PlanPhase>(['analyzing', 'planning', 'executing']);
 const TERMINAL_PHASES = new Set<string>(['idle', 'completed', 'failed', 'cancelled']);
+const CHAT_TERMINAL_PHASES = new Set<string>(['ready', 'failed', 'cancelled', 'interrupted']);
 
 const reportedUnknownPhaseKeys = new Set<string>();
 
@@ -66,9 +80,22 @@ export function normalizeTaskPhase(phase: string | null | undefined): Normalized
   return TASK_PHASE_SET.has(normalized) ? (normalized as TaskPhase) : 'unknown';
 }
 
+export function normalizeChatPhase(phase: string | null | undefined): NormalizedChatPhase {
+  const normalized = normalizeRawPhase(phase);
+  if (normalized === 'running') return 'streaming';
+  if (normalized === 'idle' || normalized === 'completed') return 'ready';
+  return CHAT_PHASE_SET.has(normalized) ? (normalized as ChatPhase) : 'unknown';
+}
+
 export function normalizePlanPhase(phase: string | null | undefined): NormalizedPlanPhase {
   const normalized = normalizeRawPhase(phase);
   return PLAN_PHASE_SET.has(normalized) ? (normalized as PlanPhase) : 'unknown';
+}
+
+export function isChatPhaseTerminal(phase: string | null | undefined): boolean {
+  const normalized = normalizeChatPhase(phase);
+  if (normalized === 'unknown') return false;
+  return CHAT_TERMINAL_PHASES.has(normalized);
 }
 
 export function isTaskPhaseTerminal(phase: string | null | undefined): boolean {
@@ -89,6 +116,12 @@ export function isTaskPhaseBusy(phase: string | null | undefined): boolean {
   return TASK_BUSY_PHASES.has(normalized);
 }
 
+export function isChatPhaseBusy(phase: string | null | undefined): boolean {
+  const normalized = normalizeChatPhase(phase);
+  if (normalized === 'unknown') return false;
+  return CHAT_BUSY_PHASES.has(normalized);
+}
+
 export function isPlanPhaseBusy(phase: string | null | undefined): boolean {
   const normalized = normalizePlanPhase(phase);
   if (normalized === 'unknown') return true;
@@ -97,6 +130,9 @@ export function isPlanPhaseBusy(phase: string | null | undefined): boolean {
 
 export function isKernelLifecyclePhaseTerminal(phase: string | null | undefined): boolean {
   const normalized = normalizeRawPhase(phase);
+  if (CHAT_PHASE_SET.has(normalized) || normalized === 'running') {
+    return isChatPhaseTerminal(normalized);
+  }
   return TERMINAL_PHASES.has(normalized);
 }
 
@@ -110,7 +146,7 @@ export function isWorkflowModeActive(params: {
   if (!params.isKernelSessionActive) return false;
   if (params.mode === 'task') return !isTaskPhaseTerminal(params.phase);
   if (params.mode === 'plan') return !isPlanPhaseTerminal(params.phase);
-  return !isKernelLifecyclePhaseTerminal(params.phase);
+  return !isChatPhaseTerminal(params.phase);
 }
 
 export function resolveModeSwitchBlockReasonFromKernel(params: {

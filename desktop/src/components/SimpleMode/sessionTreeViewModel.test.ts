@@ -53,7 +53,8 @@ function createWorkflowSession(overrides: Partial<WorkflowSessionCatalogItem> = 
     modeSnapshots: overrides.modeSnapshots ?? {
       chat: {
         phase: 'ready',
-        draftInput: '',
+        pendingInput: '',
+        activeTurnId: null,
         turnCount: 2,
         lastUserMessage: 'Build the new sidebar tree for session management',
         lastAssistantMessage: null,
@@ -189,7 +190,8 @@ describe('sessionTreeViewModel', () => {
           modeSnapshots: {
             chat: {
               phase: 'streaming',
-              draftInput: '',
+              pendingInput: '',
+              activeTurnId: null,
               turnCount: 0,
               lastUserMessage: null,
               lastAssistantMessage: null,
@@ -224,7 +226,14 @@ describe('sessionTreeViewModel', () => {
       deriveSidebarSessionStatus({
         modeSnapshots: createWorkflowSession({
           modeSnapshots: {
-            chat: { phase: 'failed', draftInput: '', turnCount: 0, lastUserMessage: null, lastAssistantMessage: null },
+            chat: {
+              phase: 'failed',
+              pendingInput: '',
+              activeTurnId: null,
+              turnCount: 0,
+              lastUserMessage: null,
+              lastAssistantMessage: null,
+            },
             plan: {
               phase: 'idle',
               planId: null,

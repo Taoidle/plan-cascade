@@ -10,6 +10,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { CommandResponse } from '../lib/tauri';
 import type {
   HandoffContextBundle,
+  ModeTranscriptPatch,
   ModeTranscriptState,
   ModeTranscriptPayload,
   PlanEditOperation,
@@ -71,6 +72,29 @@ function upsertTranscriptState(
   };
 }
 
+function applyTranscriptPatch(existingLines: unknown[], payload: WorkflowModeTranscriptUpdatedEvent): unknown[] {
+  if (payload.replaceFromLineId == null) {
+    return [...cloneTranscriptLines(existingLines), ...cloneTranscriptLines(payload.appendedLines)];
+  }
+  if (payload.replaceFromLineId === 0) {
+    return cloneTranscriptLines(payload.lines ?? payload.appendedLines);
+  }
+
+  const replaceIndex = existingLines.findIndex((line) => {
+    if (!line || typeof line !== 'object') return false;
+    const lineId = (line as { id?: unknown }).id;
+    return typeof lineId === 'number' && Number.isFinite(lineId) && lineId === payload.replaceFromLineId;
+  });
+  if (replaceIndex < 0) {
+    return cloneTranscriptLines(payload.lines ?? payload.appendedLines);
+  }
+
+  return [
+    ...cloneTranscriptLines(existingLines.slice(0, replaceIndex)),
+    ...cloneTranscriptLines(payload.appendedLines),
+  ];
+}
+
 function normalizeHandoff(bundle?: HandoffContextBundle): HandoffContextBundle {
   if (!bundle) return DEFAULT_HANDOFF;
   return {
@@ -125,15 +149,10 @@ export interface WorkflowKernelStore {
   getModeTranscript: (sessionId: string, mode: WorkflowMode) => Promise<ModeTranscriptPayload | null>;
   getCachedModeTranscript: (sessionId: string | null, mode: WorkflowMode) => ModeTranscriptState;
   appendContextItems: (targetMode: WorkflowMode, handoff: HandoffContextBundle) => Promise<WorkflowSession | null>;
-  appendModeTranscript: (
+  patchModeTranscript: (
     sessionId: string,
     mode: WorkflowMode,
-    lines: unknown[],
-  ) => Promise<ModeTranscriptPayload | null>;
-  storeModeTranscript: (
-    sessionId: string,
-    mode: WorkflowMode,
-    lines: unknown[],
+    patch: ModeTranscriptPatch,
   ) => Promise<ModeTranscriptPayload | null>;
   transitionMode: (targetMode: WorkflowMode, handoff?: HandoffContextBundle) => Promise<WorkflowSession | null>;
   submitInput: (intent: UserInputIntent) => Promise<WorkflowSession | null>;
@@ -149,6 +168,7 @@ export interface WorkflowKernelStore {
   refreshSessionState: () => Promise<WorkflowSessionState | null>;
   recoverSession: (sessionId: string) => Promise<WorkflowSessionState | null>;
   linkModeSession: (mode: WorkflowMode, modeSessionId: string) => Promise<WorkflowSession | null>;
+  markChatTurnFailed: (error: string) => Promise<WorkflowSession | null>;
   subscribeToUpdates: () => Promise<void>;
   unsubscribeFromUpdates: () => void;
   reset: () => void;
@@ -526,57 +546,21 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
     }
   },
 
-  appendModeTranscript: async (sessionId, mode, lines) => {
+  patchModeTranscript: async (sessionId, mode, patch) => {
     const normalizedSessionId = sessionId.trim();
     if (!normalizedSessionId) {
       set({ error: 'Session id cannot be empty' });
       return null;
     }
     try {
-      const result = await invoke<CommandResponse<ModeTranscriptPayload>>('workflow_append_mode_transcript', {
+      const result = await invoke<CommandResponse<ModeTranscriptPayload>>('workflow_patch_mode_transcript', {
         sessionId: normalizedSessionId,
         mode,
-        lines,
+        replaceFromLineId: patch.replaceFromLineId ?? null,
+        appendedLines: patch.appendedLines,
       });
       if (!result.success || !result.data) {
-        set({ error: result.error || 'Failed to append workflow mode transcript' });
-        return null;
-      }
-      set((state) => {
-        const previous = state.modeTranscriptsBySession[normalizedSessionId]?.[mode];
-        const existingLines = previous?.lines ?? [];
-        return {
-          modeTranscriptsBySession: upsertTranscriptState(state.modeTranscriptsBySession, normalizedSessionId, mode, {
-            revision: result.data!.revision,
-            lines: [...cloneTranscriptLines(existingLines), ...cloneTranscriptLines(lines)],
-            loaded: true,
-            unread:
-              !!state.activeRootSessionId &&
-              (state.activeRootSessionId !== normalizedSessionId || state.activeMode !== mode),
-          }),
-        };
-      });
-      return result.data;
-    } catch (error) {
-      set({ error: error instanceof Error ? error.message : String(error) });
-      return null;
-    }
-  },
-
-  storeModeTranscript: async (sessionId, mode, lines) => {
-    const normalizedSessionId = sessionId.trim();
-    if (!normalizedSessionId) {
-      set({ error: 'Session id cannot be empty' });
-      return null;
-    }
-    try {
-      const result = await invoke<CommandResponse<ModeTranscriptPayload>>('workflow_store_mode_transcript', {
-        sessionId: normalizedSessionId,
-        mode,
-        lines,
-      });
-      if (!result.success || !result.data) {
-        set({ error: result.error || 'Failed to persist workflow mode transcript' });
+        set({ error: result.error || 'Failed to patch workflow mode transcript' });
         return null;
       }
       set((state) => ({
@@ -879,6 +863,36 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
     }
   },
 
+  markChatTurnFailed: async (error) => {
+    const sessionId = get().sessionId;
+    const normalizedError = error.trim();
+    if (!sessionId) {
+      set({ error: 'No workflow session available' });
+      return null;
+    }
+    if (!normalizedError) {
+      set({ error: 'Chat failure reason cannot be empty' });
+      return null;
+    }
+    try {
+      const result = await invoke<CommandResponse<WorkflowSession>>('workflow_mark_chat_turn_failed', {
+        sessionId,
+        error: normalizedError,
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to mark chat turn failed' });
+        return null;
+      }
+      applySession(set, result.data);
+      return result.data;
+    } catch (invokeError) {
+      set({
+        error: invokeError instanceof Error ? invokeError.message : String(invokeError),
+      });
+      return null;
+    }
+  },
+
   subscribeToUpdates: async () => {
     if (!get()._updatesUnlisten) {
       try {
@@ -937,10 +951,7 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
             set((state) => {
               const previous = state.modeTranscriptsBySession[payload.sessionId]?.[payload.mode];
               const existingLines = previous?.lines ?? [];
-              const nextLines =
-                payload.replaceFromLineId != null
-                  ? cloneTranscriptLines(payload.appendedLines)
-                  : [...cloneTranscriptLines(existingLines), ...cloneTranscriptLines(payload.appendedLines)];
+              const nextLines = applyTranscriptPatch(existingLines, payload);
               return {
                 modeTranscriptsBySession: upsertTranscriptState(
                   state.modeTranscriptsBySession,

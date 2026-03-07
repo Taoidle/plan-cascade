@@ -604,6 +604,8 @@
         },
         "phase": {
           "ready": "Ready",
+          "submitting": "Submitting",
+          "streaming": "Streaming",
           "running": "Running",
           "paused": "Paused",
           "completed": "Completed",
@@ -623,7 +625,8 @@
           "architecture_review": "Architecture Review",
           "generating_design_doc": "Generating Design Doc",
           "cancelled": "Cancelled",
-          "failed": "Failed"
+          "failed": "Failed",
+          "interrupted": "Interrupted"
         },
         "eventKind": {
           "session_opened": "Session opened",
@@ -661,6 +664,8 @@
           "mode_start_failed": "Mode start failed",
           "mode_session_link_failed": "Mode session link failed",
           "interrupted_by_restart": "Interrupted by restart",
+          "tool_permission": "Waiting for tool permission",
+          "user_pause": "Paused by user",
           "unknown_reason": "Unknown reason"
         }
       }

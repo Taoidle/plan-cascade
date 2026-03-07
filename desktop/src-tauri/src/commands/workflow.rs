@@ -15,7 +15,8 @@ use crate::services::workflow_kernel::{
     PlanSnapshotRehydrate, ResumeResult, TaskInterviewSnapshot, TaskSnapshotRehydrate,
     UserInputIntent, WorkflowKernelState, WorkflowKernelUpdatedEvent, WorkflowMode,
     WorkflowModeTranscriptUpdatedEvent, WorkflowSession, WorkflowSessionCatalogState,
-    WorkflowSessionCatalogUpdatedEvent, WorkflowSessionState, WorkflowStatus,
+    WorkflowSessionCatalogUpdatedEvent, WorkflowSessionMutation, WorkflowSessionState,
+    WorkflowStatus,
     WORKFLOW_KERNEL_UPDATED_CHANNEL, WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL,
     WORKFLOW_SESSION_CATALOG_UPDATED_CHANNEL,
 };
@@ -25,7 +26,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tauri::Emitter;
 
-fn build_kernel_update(
+pub(crate) fn build_kernel_update(
     session_state: WorkflowSessionState,
     source: &str,
 ) -> WorkflowKernelUpdatedEvent {
@@ -37,7 +38,7 @@ fn build_kernel_update(
     }
 }
 
-fn emit_kernel_update(
+pub(crate) fn emit_kernel_update(
     app: &tauri::AppHandle,
     session_state: WorkflowSessionState,
     source: &str,
@@ -49,7 +50,7 @@ fn emit_kernel_update(
     .map_err(|err| format!("Failed to emit workflow kernel update: {err}"))
 }
 
-async fn emit_session_catalog_update(
+pub(crate) async fn emit_session_catalog_update(
     app: &tauri::AppHandle,
     state: &WorkflowKernelState,
     source: &str,
@@ -64,28 +65,33 @@ async fn emit_session_catalog_update(
         .map_err(|err| format!("Failed to emit workflow session catalog update: {err}"))
 }
 
-fn build_mode_transcript_update(
+pub(crate) fn build_mode_transcript_update(
     transcript: &ModeTranscriptPayload,
+    replace_from_line_id: Option<u64>,
+    appended_lines: Vec<serde_json::Value>,
     source: &str,
 ) -> WorkflowModeTranscriptUpdatedEvent {
     WorkflowModeTranscriptUpdatedEvent {
         session_id: transcript.session_id.clone(),
         mode: transcript.mode,
         revision: transcript.revision,
-        appended_lines: transcript.lines.clone(),
-        replace_from_line_id: Some(0),
+        appended_lines,
+        replace_from_line_id,
+        lines: transcript.lines.clone(),
         source: source.to_string(),
     }
 }
 
-fn emit_mode_transcript_update(
+pub(crate) fn emit_mode_transcript_update(
     app: &tauri::AppHandle,
     transcript: &ModeTranscriptPayload,
+    replace_from_line_id: Option<u64>,
+    appended_lines: Vec<serde_json::Value>,
     source: &str,
 ) -> Result<(), String> {
     app.emit(
         WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL,
-        build_mode_transcript_update(transcript, source),
+        build_mode_transcript_update(transcript, replace_from_line_id, appended_lines, source),
     )
     .map_err(|err| format!("Failed to emit workflow mode transcript update: {err}"))
 }
@@ -118,7 +124,7 @@ fn session_phase_for_mode(session: &WorkflowSession, mode: WorkflowMode) -> Opti
     }
 }
 
-async fn emit_kernel_update_for_session(
+pub(crate) async fn emit_kernel_update_for_session(
     app: &tauri::AppHandle,
     state: &WorkflowKernelState,
     session_id: &str,
@@ -126,6 +132,23 @@ async fn emit_kernel_update_for_session(
 ) -> Result<(), String> {
     let session_state = state.get_session_state(session_id).await?;
     emit_kernel_update(app, session_state, source)
+}
+
+pub(crate) fn emit_workflow_session_mutation(
+    app: &tauri::AppHandle,
+    mutation: &WorkflowSessionMutation,
+    source: &str,
+) -> Result<(), String> {
+    for transcript_mutation in &mutation.transcript_mutations {
+        emit_mode_transcript_update(
+            app,
+            &transcript_mutation.transcript,
+            transcript_mutation.replace_from_line_id,
+            transcript_mutation.appended_lines.clone(),
+            source,
+        )?;
+    }
+    Ok(())
 }
 
 async fn link_mode_session_and_rehydrate(
@@ -885,7 +908,8 @@ pub async fn workflow_submit_input(
 ) -> Result<CommandResponse<WorkflowSession>, String> {
     let result = state.submit_input(&session_id, intent).await;
     Ok(match result {
-        Ok(session) => {
+        Ok(mutation) => {
+            let _ = emit_workflow_session_mutation(&app, &mutation, "workflow_submit_input");
             let _ = emit_kernel_update_for_session(
                 &app,
                 state.inner(),
@@ -894,7 +918,7 @@ pub async fn workflow_submit_input(
             )
             .await;
             let _ = emit_session_catalog_update(&app, state.inner(), "workflow_submit_input").await;
-            CommandResponse::ok(session)
+            CommandResponse::ok(mutation.session)
         }
         Err(error) => CommandResponse::err(error),
     })
@@ -913,7 +937,12 @@ pub async fn workflow_transition_and_submit_input(
         .transition_and_submit_input(&session_id, target_mode, handoff, intent)
         .await;
     Ok(match result {
-        Ok(session) => {
+        Ok(mutation) => {
+            let _ = emit_workflow_session_mutation(
+                &app,
+                &mutation,
+                "workflow_transition_and_submit_input",
+            );
             let _ = emit_kernel_update_for_session(
                 &app,
                 state.inner(),
@@ -925,6 +954,35 @@ pub async fn workflow_transition_and_submit_input(
                 &app,
                 state.inner(),
                 "workflow_transition_and_submit_input",
+            )
+            .await;
+            CommandResponse::ok(mutation.session)
+        }
+        Err(error) => CommandResponse::err(error),
+    })
+}
+
+#[tauri::command]
+pub async fn workflow_mark_chat_turn_failed(
+    session_id: String,
+    error: String,
+    state: tauri::State<'_, WorkflowKernelState>,
+    app: tauri::AppHandle,
+) -> Result<CommandResponse<WorkflowSession>, String> {
+    let result = state.mark_chat_turn_failed(&session_id, &error).await;
+    Ok(match result {
+        Ok(session) => {
+            let _ = emit_kernel_update_for_session(
+                &app,
+                state.inner(),
+                &session_id,
+                "workflow_mark_chat_turn_failed",
+            )
+            .await;
+            let _ = emit_session_catalog_update(
+                &app,
+                state.inner(),
+                "workflow_mark_chat_turn_failed",
             )
             .await;
             CommandResponse::ok(session)
@@ -1056,46 +1114,27 @@ pub async fn workflow_get_mode_transcript(
 }
 
 #[tauri::command]
-pub async fn workflow_store_mode_transcript(
+pub async fn workflow_patch_mode_transcript(
     session_id: String,
     mode: WorkflowMode,
-    lines: Vec<serde_json::Value>,
+    replace_from_line_id: Option<u64>,
+    appended_lines: Vec<serde_json::Value>,
     state: tauri::State<'_, WorkflowKernelState>,
     app: tauri::AppHandle,
 ) -> Result<CommandResponse<ModeTranscriptPayload>, String> {
-    let result = state.store_mode_transcript(&session_id, mode, lines).await;
-    Ok(match result {
-        Ok(payload) => {
-            let _ = emit_mode_transcript_update(&app, &payload, "workflow_store_mode_transcript");
-            CommandResponse::ok(payload)
-        }
-        Err(error) => CommandResponse::err(error),
-    })
-}
-
-#[tauri::command]
-pub async fn workflow_append_mode_transcript(
-    session_id: String,
-    mode: WorkflowMode,
-    lines: Vec<serde_json::Value>,
-    state: tauri::State<'_, WorkflowKernelState>,
-    app: tauri::AppHandle,
-) -> Result<CommandResponse<ModeTranscriptPayload>, String> {
-    let appended_lines = lines.clone();
+    let emitted_lines = appended_lines.clone();
     let result = state
-        .append_mode_transcript(&session_id, mode, lines)
+        .patch_mode_transcript(&session_id, mode, replace_from_line_id, appended_lines)
         .await;
     Ok(match result {
         Ok(payload) => {
-            let update = WorkflowModeTranscriptUpdatedEvent {
-                session_id: payload.session_id.clone(),
-                mode: payload.mode,
-                revision: payload.revision,
-                appended_lines,
-                replace_from_line_id: None,
-                source: "workflow_append_mode_transcript".to_string(),
-            };
-            let _ = app.emit(WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL, update);
+            let _ = emit_mode_transcript_update(
+                &app,
+                &payload,
+                replace_from_line_id,
+                emitted_lines,
+                "workflow_patch_mode_transcript",
+            );
             CommandResponse::ok(payload)
         }
         Err(error) => CommandResponse::err(error),
@@ -1294,40 +1333,6 @@ pub async fn workflow_recover_session(
         }
     }
 
-    if plan_interrupted {
-        let _ = state
-            .submit_input(
-                &session_id,
-                UserInputIntent {
-                    intent_type:
-                        crate::services::workflow_kernel::UserInputIntentType::SystemPhaseUpdate,
-                    content: "phase:failed".to_string(),
-                    metadata: json!({
-                        "mode": "plan",
-                        "phase": "failed",
-                        "reasonCode": "interrupted_by_restart"
-                    }),
-                },
-            )
-            .await;
-    }
-    if task_interrupted {
-        let _ = state
-            .submit_input(
-                &session_id,
-                UserInputIntent {
-                    intent_type:
-                        crate::services::workflow_kernel::UserInputIntentType::SystemPhaseUpdate,
-                    content: "phase:failed".to_string(),
-                    metadata: json!({
-                        "mode": "task",
-                        "phase": "failed",
-                        "reasonCode": "interrupted_by_restart"
-                    }),
-                },
-            )
-            .await;
-    }
     if !recovery_warnings.is_empty() {
         eprintln!(
             "[workflow_recover_session] recovered with warnings: {}",

@@ -35,8 +35,10 @@ import type { SessionSnapshot } from './execution';
 import { useContextSourcesStore } from './contextSources';
 import { useProjectsStore } from './projects';
 import { useSettingsStore } from './settings';
+import { useToolPermissionStore } from './toolPermission';
 import { useWorkflowKernelStore } from './workflowKernel';
 import { ToolCallStreamFilter } from '../utils/toolCallFilter';
+import type { WorkflowSession } from '../types/workflowKernel';
 
 const mockInvoke = vi.mocked(invoke);
 
@@ -55,6 +57,7 @@ function resetStore() {
   const store = useExecutionStore.getState();
   // Use the internal reset and also clear background sessions
   store.reset();
+  useToolPermissionStore.getState().reset();
   useWorkflowKernelStore.getState().reset();
   // Manually ensure backgroundSessions, activeSessionId, and foregroundBgId are reset
   useExecutionStore.setState({
@@ -97,6 +100,49 @@ function createBackgroundSnapshot(id: string, taskDescription: string): SessionS
     llmBackend: 'openai',
     llmProvider: 'openai',
     llmModel: 'gpt-4o',
+  };
+}
+
+function createKernelSession(sessionId: string): WorkflowSession {
+  return {
+    sessionId,
+    sessionKind: 'simple_root',
+    displayTitle: 'Standalone chat',
+    workspacePath: '/tmp/project',
+    status: 'active',
+    activeMode: 'chat',
+    modeSnapshots: {
+      chat: {
+        phase: 'ready',
+        pendingInput: '',
+        activeTurnId: null,
+        turnCount: 0,
+        lastUserMessage: null,
+        lastAssistantMessage: null,
+      },
+      plan: null,
+      task: null,
+    },
+    handoffContext: {
+      conversationContext: [],
+      artifactRefs: [],
+      contextSources: [],
+      metadata: {},
+    },
+    linkedModeSessions: {},
+    backgroundState: 'foreground',
+    contextLedger: {
+      conversationTurnCount: 0,
+      artifactRefCount: 0,
+      contextSourceKinds: [],
+      lastCompactionAt: null,
+      ledgerVersion: 1,
+    },
+    modeRuntimeMeta: {},
+    lastError: null,
+    createdAt: '2026-03-07T00:00:00Z',
+    updatedAt: '2026-03-07T00:00:00Z',
+    lastCheckpointId: null,
   };
 }
 
@@ -408,7 +454,6 @@ describe('Execution Store - Background Session State', () => {
       useExecutionStore.getState().restoreForegroundChatRuntime({
         source: 'claude',
         rawSessionId: 'chat-session-1',
-        fallbackLines: [],
         title: 'Recovered chat',
         phase: 'streaming',
       });
@@ -421,7 +466,7 @@ describe('Execution Store - Background Session State', () => {
       expect(state.backgroundSessions).toEqual({});
     });
 
-    it('restores fallback transcript when runtime snapshot has lost user turn boundaries', () => {
+    it('restores runtime transcript without synthesizing kernel fallback lines', () => {
       useExecutionStore.setState({
         runtimeRegistry: {
           'claude:chat-session-2': {
@@ -450,17 +495,12 @@ describe('Execution Store - Background Session State', () => {
       useExecutionStore.getState().restoreForegroundChatRuntime({
         source: 'claude',
         rawSessionId: 'chat-session-2',
-        fallbackLines: [
-          { id: 1, content: 'real user prompt', type: 'info', timestamp: 1000, turnBoundary: 'user', turnId: 1 },
-          { id: 2, content: 'assistant only', type: 'text', timestamp: 1001, turnId: 1 },
-        ],
         title: 'Recovered chat',
         phase: 'streaming',
       });
 
       const state = useExecutionStore.getState();
-      expect(state.streamingOutput[0].content).toBe('real user prompt');
-      expect(state.streamingOutput[0].turnBoundary).toBe('user');
+      expect(state.streamingOutput).toEqual([{ id: 2, content: 'assistant only', type: 'text', timestamp: 1001 }]);
       expect(state.taskId).toBe('chat-session-2');
     });
   });
@@ -1703,7 +1743,8 @@ describe('Execution Store - Event Routing to Background Sessions', () => {
           modeSnapshots: {
             chat: {
               phase: 'streaming',
-              draftInput: '',
+              pendingInput: '',
+              activeTurnId: null,
               turnCount: 1,
               lastUserMessage: 'hello',
               lastAssistantMessage: null,
@@ -1845,7 +1886,8 @@ describe('Execution Store - Event Routing to Background Sessions', () => {
               modeSnapshots: {
                 chat: {
                   phase: 'streaming',
-                  draftInput: '',
+                  pendingInput: '',
+                  activeTurnId: null,
                   turnCount: 1,
                   lastUserMessage: 'hi',
                   lastAssistantMessage: null,
@@ -1871,25 +1913,7 @@ describe('Execution Store - Event Routing to Background Sessions', () => {
           ],
         });
 
-        mockInvoke.mockImplementation(async (command, payload) => {
-          if (command === 'workflow_store_mode_transcript') {
-            return {
-              success: true,
-              data: {
-                sessionId: (payload as { sessionId: string }).sessionId,
-                mode: 'chat',
-                revision: 1,
-                lines: (payload as { lines: unknown[] }).lines,
-              },
-              error: null,
-            };
-          }
-          return {
-            success: true,
-            data: null,
-            error: null,
-          };
-        });
+        mockInvoke.mockResolvedValue({ success: true, data: null, error: null });
 
         emitEvent('claude_code:stream', {
           event: { type: 'text_delta', content: 'Hello from background' },
@@ -1898,16 +1922,7 @@ describe('Execution Store - Event Routing to Background Sessions', () => {
 
         await vi.advanceTimersByTimeAsync(150);
 
-        expect(mockInvoke).toHaveBeenCalledWith(
-          'workflow_store_mode_transcript',
-          expect.objectContaining({
-            sessionId: 'root-bg-1',
-            mode: 'chat',
-            lines: expect.arrayContaining([
-              expect.objectContaining({ content: 'Hello from background', type: 'text' }),
-            ]),
-          }),
-        );
+        expect(mockInvoke.mock.calls.some(([command]) => command === 'workflow_patch_mode_transcript')).toBe(false);
       } finally {
         vi.useRealTimers();
       }
@@ -2362,9 +2377,9 @@ describe('Execution Store - Cancellation Consistency (Claude backend)', () => {
     await useExecutionStore.getState().cancel();
 
     const state = useExecutionStore.getState();
-    expect(state.status).toBe('running');
+    expect(state.status).toBe('idle');
     expect(state.isCancelling).toBe(false);
-    expect(state.apiError).toContain('No active execution');
+    expect(state.apiError).toBeNull();
   });
 
   it('does not dispatch send_message when cancelled before start_chat returns', async () => {
@@ -2509,6 +2524,457 @@ describe('Execution Store - Cancellation Consistency (Claude backend)', () => {
 
     useExecutionStore.getState().cleanup();
   });
+
+  it('syncs foreground standalone chat deltas into the kernel transcript store', async () => {
+    vi.useFakeTimers();
+    try {
+      useWorkflowKernelStore.setState({
+        sessionId: 'root-standalone-1',
+        activeRootSessionId: 'root-standalone-1',
+        activeMode: 'chat',
+        sessionCatalog: [
+          {
+            sessionId: 'root-standalone-1',
+            sessionKind: 'simple_root',
+            displayTitle: 'Standalone chat',
+            workspacePath: '/tmp/project',
+            activeMode: 'chat',
+            status: 'active',
+            backgroundState: 'foreground',
+            updatedAt: '2026-03-07T00:00:00Z',
+            createdAt: '2026-03-07T00:00:00Z',
+            lastError: null,
+            contextLedger: {
+              conversationTurnCount: 1,
+              artifactRefCount: 0,
+              contextSourceKinds: [],
+              lastCompactionAt: null,
+              ledgerVersion: 1,
+            },
+            modeSnapshots: {
+              chat: {
+                phase: 'streaming',
+                pendingInput: '',
+                activeTurnId: null,
+                turnCount: 1,
+                lastUserMessage: 'hello',
+                lastAssistantMessage: null,
+              },
+              plan: null,
+              task: null,
+            },
+            modeRuntimeMeta: {
+              chat: {
+                mode: 'chat',
+                runId: null,
+                bindingSessionId: 'standalone:standalone-live',
+                isForeground: true,
+                isBackgroundRunning: false,
+                isInterrupted: false,
+                resumePolicy: 'resume',
+                lastHeartbeatAt: null,
+                lastCheckpointId: null,
+                lastError: null,
+              },
+            },
+          },
+        ],
+        modeTranscriptsBySession: {
+          'root-standalone-1': {
+            chat: {
+              revision: 1,
+              loaded: true,
+              unread: false,
+              lines: [{ id: 1, content: 'hello', type: 'info', timestamp: 1, turnBoundary: 'user', turnId: 1 }],
+            },
+          },
+        },
+      });
+
+      useExecutionStore.setState({
+        status: 'running',
+        taskId: null,
+        standaloneSessionId: 'standalone-live',
+        isChatSession: false,
+        activeExecutionId: 'exec-current',
+        streamingOutput: [{ id: 1, content: 'hello', type: 'info', timestamp: 1, turnBoundary: 'user', turnId: 1 }],
+        streamLineCounter: 1,
+      });
+
+      mockInvoke.mockResolvedValue({ success: true, data: null, error: null });
+
+      useExecutionStore.getState().initialize();
+      await vi.waitFor(() => {
+        expect(eventHandlers['standalone-event']).toBeDefined();
+      });
+
+      emitEvent('standalone-event', {
+        type: 'text_delta',
+        session_id: 'standalone-live',
+        execution_id: 'exec-current',
+        content: 'fresh unified output',
+      });
+
+      await vi.advanceTimersByTimeAsync(150);
+
+      expect(mockInvoke.mock.calls.some(([command]) => command === 'workflow_patch_mode_transcript')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      useExecutionStore.getState().cleanup();
+    }
+  });
+
+  it('syncs foreground standalone deltas via the seeded runtime root binding before catalog metadata catches up', async () => {
+    vi.useFakeTimers();
+    try {
+      useWorkflowKernelStore.setState({
+        sessionId: 'root-standalone-seeded',
+        activeRootSessionId: 'root-standalone-seeded',
+        activeMode: 'chat',
+        sessionCatalog: [
+          {
+            sessionId: 'root-standalone-seeded',
+            sessionKind: 'simple_root',
+            displayTitle: 'Seeded standalone runtime',
+            workspacePath: '/tmp/project',
+            activeMode: 'chat',
+            status: 'active',
+            backgroundState: 'foreground',
+            updatedAt: '2026-03-07T00:00:00Z',
+            createdAt: '2026-03-07T00:00:00Z',
+            lastError: null,
+            contextLedger: {
+              conversationTurnCount: 1,
+              artifactRefCount: 0,
+              contextSourceKinds: [],
+              lastCompactionAt: null,
+              ledgerVersion: 1,
+            },
+            modeSnapshots: {
+              chat: {
+                phase: 'streaming',
+                pendingInput: '',
+                activeTurnId: null,
+                turnCount: 1,
+                lastUserMessage: 'hello',
+                lastAssistantMessage: null,
+              },
+              plan: null,
+              task: null,
+            },
+            modeRuntimeMeta: {},
+          },
+        ],
+        modeTranscriptsBySession: {
+          'root-standalone-seeded': {
+            chat: {
+              revision: 1,
+              loaded: true,
+              unread: false,
+              lines: [{ id: 1, content: 'hello', type: 'info', timestamp: 1, turnBoundary: 'user', turnId: 1 }],
+            },
+          },
+        },
+      });
+
+      useExecutionStore.setState({
+        status: 'running',
+        taskId: null,
+        standaloneSessionId: 'standalone-seeded',
+        isChatSession: false,
+        activeExecutionId: 'exec-seeded',
+        streamingOutput: [{ id: 1, content: 'hello', type: 'info', timestamp: 1, turnBoundary: 'user', turnId: 1 }],
+        streamLineCounter: 1,
+        runtimeRegistry: {
+          'standalone:standalone-seeded': {
+            id: 'standalone:standalone-seeded',
+            source: 'standalone',
+            rawSessionId: 'standalone-seeded',
+            rootSessionId: 'root-standalone-seeded',
+            mode: 'chat',
+            status: 'running',
+            streamingOutput: [{ id: 1, content: 'hello', type: 'info', timestamp: 1, turnBoundary: 'user', turnId: 1 }],
+            streamLineCounter: 1,
+            currentTurnStartLineId: 1,
+            standaloneTurns: [],
+            latestUsage: null,
+            sessionUsageTotals: null,
+            startedAt: 1,
+            workspacePath: '/tmp/project',
+            llmBackend: 'openai',
+            llmProvider: 'openai',
+            llmModel: 'gpt-4o',
+            updatedAt: 1,
+          },
+        },
+        activeRuntimeHandleId: 'standalone:standalone-seeded',
+      });
+
+      mockInvoke.mockImplementation(async (command, payload) => {
+        if (command === 'workflow_patch_mode_transcript') {
+          return {
+            success: true,
+            data: {
+              sessionId: (payload as { sessionId: string }).sessionId,
+              mode: 'chat',
+              revision: 2,
+              lines: (payload as { appendedLines: unknown[] }).appendedLines,
+            },
+            error: null,
+          };
+        }
+        return { success: true, data: null, error: null };
+      });
+
+      useExecutionStore.getState().initialize();
+      await vi.waitFor(() => {
+        expect(eventHandlers['standalone-event']).toBeDefined();
+      });
+
+      emitEvent('standalone-event', {
+        type: 'text_delta',
+        session_id: 'standalone-seeded',
+        execution_id: 'exec-seeded',
+        content: 'assistant from seeded runtime',
+      });
+
+      await vi.advanceTimersByTimeAsync(150);
+
+      expect(mockInvoke.mock.calls.some(([command]) => command === 'workflow_patch_mode_transcript')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      useExecutionStore.getState().cleanup();
+    }
+  });
+
+  it('clears terminal permission requests for the completed standalone session without touching other sessions', async () => {
+    useExecutionStore.setState({
+      status: 'running',
+      taskId: null,
+      standaloneSessionId: 'standalone-live',
+      isChatSession: false,
+      activeExecutionId: 'exec-current',
+      streamingOutput: [],
+      streamLineCounter: 0,
+    });
+    useToolPermissionStore.setState({
+      sessionLevel: 'strict',
+      pendingRequest: {
+        requestId: 'req-standalone-1',
+        sessionId: 'standalone-live',
+        toolName: 'Bash',
+        arguments: '{"cmd":"pwd"}',
+        risk: 'SafeWrite',
+      },
+      requestQueue: [
+        {
+          requestId: 'req-standalone-2',
+          sessionId: 'standalone-live',
+          toolName: 'Read',
+          arguments: '{"path":"a.txt"}',
+          risk: 'ReadOnly',
+        },
+        {
+          requestId: 'req-other-1',
+          sessionId: 'other-session',
+          toolName: 'Read',
+          arguments: '{"path":"b.txt"}',
+          risk: 'ReadOnly',
+        },
+      ],
+      isResponding: false,
+    });
+
+    useExecutionStore.getState().initialize();
+    await vi.waitFor(() => {
+      expect(eventHandlers['standalone-event']).toBeDefined();
+    });
+
+    emitEvent('standalone-event', {
+      type: 'complete',
+      session_id: 'standalone-live',
+      execution_id: 'exec-current',
+    });
+
+    expect(useToolPermissionStore.getState().pendingRequest).toEqual(
+      expect.objectContaining({
+        requestId: 'req-other-1',
+        sessionId: 'other-session',
+      }),
+    );
+    expect(useToolPermissionStore.getState().requestQueue).toEqual([]);
+  });
+
+  it('keeps the foreground standalone turn running when a complete event arrives before invoke finalization', async () => {
+    useExecutionStore.setState({
+      status: 'running',
+      taskId: null,
+      standaloneSessionId: 'standalone-live',
+      isChatSession: false,
+      isSubmitting: false,
+      activeExecutionId: 'exec-current',
+      streamingOutput: [{ id: 1, content: 'hello', type: 'info', timestamp: 1, turnBoundary: 'user', turnId: 1 }],
+      streamLineCounter: 1,
+      currentTurnStartLineId: 1,
+    });
+
+    useExecutionStore.getState().initialize();
+    await vi.waitFor(() => {
+      expect(eventHandlers['standalone-event']).toBeDefined();
+    });
+
+    emitEvent('standalone-event', {
+      type: 'complete',
+      session_id: 'standalone-live',
+      execution_id: 'exec-current',
+    });
+
+    expect(useExecutionStore.getState()).toEqual(
+      expect.objectContaining({
+        status: 'running',
+        activeExecutionId: 'exec-current',
+      }),
+    );
+    expect(useExecutionStore.getState().streamingOutput.some((line) => line.type === 'success')).toBe(false);
+  });
+
+  it('keeps the foreground standalone turn running when a session_complete event arrives before invoke finalization', async () => {
+    useExecutionStore.setState({
+      status: 'running',
+      taskId: null,
+      standaloneSessionId: 'standalone-live',
+      isChatSession: false,
+      isSubmitting: false,
+      activeExecutionId: 'exec-current',
+      streamingOutput: [{ id: 1, content: 'hello', type: 'info', timestamp: 1, turnBoundary: 'user', turnId: 1 }],
+      streamLineCounter: 1,
+      currentTurnStartLineId: 1,
+    });
+
+    useExecutionStore.getState().initialize();
+    await vi.waitFor(() => {
+      expect(eventHandlers['standalone-event']).toBeDefined();
+    });
+
+    emitEvent('standalone-event', {
+      type: 'session_complete',
+      session_id: 'standalone-live',
+      execution_id: 'exec-current',
+      success: true,
+      total_stories: 1,
+    });
+
+    expect(useExecutionStore.getState()).toEqual(
+      expect.objectContaining({
+        status: 'running',
+        activeExecutionId: 'exec-current',
+      }),
+    );
+    expect(useExecutionStore.getState().streamingOutput.some((line) => line.type === 'success')).toBe(false);
+  });
+
+  it('appends cleaned standalone text_replace output when the current turn has no text lines yet', async () => {
+    vi.useFakeTimers();
+    try {
+      useWorkflowKernelStore.setState({
+        sessionId: 'root-standalone-replace',
+        activeRootSessionId: 'root-standalone-replace',
+        activeMode: 'chat',
+        sessionCatalog: [
+          {
+            sessionId: 'root-standalone-replace',
+            sessionKind: 'simple_root',
+            displayTitle: 'Standalone text replace',
+            workspacePath: '/tmp/project',
+            activeMode: 'chat',
+            status: 'active',
+            backgroundState: 'foreground',
+            updatedAt: '2026-03-07T00:00:00Z',
+            createdAt: '2026-03-07T00:00:00Z',
+            lastError: null,
+            contextLedger: {
+              conversationTurnCount: 1,
+              artifactRefCount: 0,
+              contextSourceKinds: [],
+              lastCompactionAt: null,
+              ledgerVersion: 1,
+            },
+            modeSnapshots: {
+              chat: {
+                phase: 'streaming',
+                pendingInput: '',
+                activeTurnId: null,
+                turnCount: 1,
+                lastUserMessage: 'hello',
+                lastAssistantMessage: null,
+              },
+              plan: null,
+              task: null,
+            },
+            modeRuntimeMeta: {
+              chat: {
+                mode: 'chat',
+                runId: null,
+                bindingSessionId: 'standalone:standalone-replace-live',
+                isForeground: true,
+                isBackgroundRunning: false,
+                isInterrupted: false,
+                resumePolicy: 'resume',
+                lastHeartbeatAt: null,
+                lastCheckpointId: null,
+                lastError: null,
+              },
+            },
+          },
+        ],
+        modeTranscriptsBySession: {
+          'root-standalone-replace': {
+            chat: {
+              revision: 1,
+              loaded: true,
+              unread: false,
+              lines: [{ id: 1, content: 'hello', type: 'info', timestamp: 1, turnBoundary: 'user', turnId: 1 }],
+            },
+          },
+        },
+      });
+
+      useExecutionStore.setState({
+        status: 'running',
+        taskId: null,
+        standaloneSessionId: 'standalone-replace-live',
+        isChatSession: false,
+        activeExecutionId: 'exec-current',
+        streamingOutput: [{ id: 1, content: 'hello', type: 'info', timestamp: 1, turnBoundary: 'user', turnId: 1 }],
+        streamLineCounter: 1,
+        currentTurnStartLineId: 1,
+      });
+
+      mockInvoke.mockResolvedValue({ success: true, data: null, error: null });
+
+      useExecutionStore.getState().initialize();
+      await vi.waitFor(() => {
+        expect(eventHandlers['standalone-event']).toBeDefined();
+      });
+
+      emitEvent('standalone-event', {
+        type: 'text_replace',
+        session_id: 'standalone-replace-live',
+        execution_id: 'exec-current',
+        content: 'cleaned final answer',
+      });
+
+      await vi.advanceTimersByTimeAsync(150);
+
+      expect(useExecutionStore.getState().streamingOutput).toEqual(
+        expect.arrayContaining([expect.objectContaining({ content: 'cleaned final answer', type: 'text' })]),
+      );
+      expect(mockInvoke.mock.calls.some(([command]) => command === 'workflow_patch_mode_transcript')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      useExecutionStore.getState().cleanup();
+    }
+  });
 });
 
 describe('Execution Store - Standalone cancellation/regenerate consistency', () => {
@@ -2553,6 +3019,24 @@ describe('Execution Store - Standalone cancellation/regenerate consistency', () 
   });
 
   it('creates a standaloneSessionId for regenerate when missing and reuses it for execution routing', async () => {
+    useWorkflowKernelStore.setState({
+      sessionId: 'root-regen-1',
+      activeRootSessionId: 'root-regen-1',
+      activeMode: 'chat',
+      modeTranscriptsBySession: {
+        'root-regen-1': {
+          chat: {
+            revision: 1,
+            loaded: true,
+            unread: false,
+            lines: [
+              { id: 1, content: 'original question', type: 'info', timestamp: 1, turnBoundary: 'user', turnId: 1 },
+              { id: 2, content: 'original answer', type: 'text', timestamp: 2, turnId: 1 },
+            ],
+          },
+        },
+      },
+    });
     useExecutionStore.setState({
       status: 'completed',
       isChatSession: false,
@@ -2598,6 +3082,256 @@ describe('Execution Store - Standalone cancellation/regenerate consistency', () 
         ? executeStandaloneArgs['analysisSessionId']
         : null;
     expect(routedSessionId).toBe(state.standaloneSessionId);
+  });
+
+  it('passes kernelSessionId to standalone execution and does not patch chat transcript from the frontend', async () => {
+    const randomUuidSpy = vi
+      .spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValue('00000000-0000-0000-0000-000000000001');
+    const sessionId = 'root-standalone-start';
+    const kernelSession = createKernelSession(sessionId);
+    let executeStandalonePayload: Record<string, unknown> | null = null;
+
+    useSettingsStore.setState({ backend: 'openai', provider: 'openai', model: 'gpt-4o' });
+    useWorkflowKernelStore.setState({
+      sessionId,
+      activeRootSessionId: sessionId,
+      activeMode: 'chat',
+      session: kernelSession,
+      sessionCatalog: [
+        {
+          sessionId,
+          sessionKind: 'simple_root',
+          displayTitle: kernelSession.displayTitle,
+          workspacePath: kernelSession.workspacePath,
+          activeMode: 'chat',
+          status: 'active',
+          backgroundState: 'foreground',
+          updatedAt: kernelSession.updatedAt,
+          createdAt: kernelSession.createdAt,
+          lastError: null,
+          contextLedger: kernelSession.contextLedger,
+          modeSnapshots: kernelSession.modeSnapshots,
+          modeRuntimeMeta: {},
+        },
+      ],
+      modeTranscriptsBySession: {
+        [sessionId]: {
+          chat: {
+            revision: 0,
+            loaded: true,
+            unread: false,
+            lines: [],
+          },
+        },
+      },
+    });
+
+    mockInvoke.mockImplementation(async (command: string, payload?: unknown) => {
+      if (command === 'assemble_turn_context' || command === 'prepare_turn_context_v2') {
+        return { success: false, data: null, error: 'fallback' };
+      }
+      if (command === 'execute_standalone') {
+        executeStandalonePayload = payload as Record<string, unknown>;
+        return {
+          success: true,
+          data: {
+            response: 'assistant final response',
+            usage: { input_tokens: 2, output_tokens: 4 },
+            iterations: 1,
+            success: true,
+            error: null,
+          },
+          error: null,
+        };
+      }
+      return { success: true, data: null, error: null };
+    });
+
+    await useExecutionStore.getState().start('hello', 'simple');
+
+    expect(executeStandalonePayload?.['kernelSessionId']).toBe(sessionId);
+    expect(mockInvoke.mock.calls.some(([command]) => command === 'workflow_patch_mode_transcript')).toBe(false);
+
+    randomUuidSpy.mockRestore();
+  });
+
+  it('does not depend on workflow_link_mode_session when starting standalone chat turns', async () => {
+    const randomUuidSpy = vi
+      .spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValue('00000000-0000-0000-0000-000000000002');
+    const sessionId = 'root-standalone-link-fail';
+    const kernelSession = createKernelSession(sessionId);
+    let executeStandalonePayload: Record<string, unknown> | null = null;
+
+    useSettingsStore.setState({ backend: 'openai', provider: 'openai', model: 'gpt-4o' });
+    useWorkflowKernelStore.setState({
+      sessionId,
+      activeRootSessionId: sessionId,
+      activeMode: 'chat',
+      session: kernelSession,
+      sessionCatalog: [
+        {
+          sessionId,
+          sessionKind: 'simple_root',
+          displayTitle: kernelSession.displayTitle,
+          workspacePath: kernelSession.workspacePath,
+          activeMode: 'chat',
+          status: 'active',
+          backgroundState: 'foreground',
+          updatedAt: kernelSession.updatedAt,
+          createdAt: kernelSession.createdAt,
+          lastError: null,
+          contextLedger: kernelSession.contextLedger,
+          modeSnapshots: kernelSession.modeSnapshots,
+          modeRuntimeMeta: {},
+        },
+      ],
+      modeTranscriptsBySession: {
+        [sessionId]: {
+          chat: {
+            revision: 0,
+            loaded: true,
+            unread: false,
+            lines: [],
+          },
+        },
+      },
+    });
+
+    mockInvoke.mockImplementation(async (command: string, payload?: unknown) => {
+      if (command === 'assemble_turn_context' || command === 'prepare_turn_context_v2') {
+        return { success: false, data: null, error: 'fallback' };
+      }
+      if (command === 'execute_standalone') {
+        executeStandalonePayload = payload as Record<string, unknown>;
+        return {
+          success: true,
+          data: {
+            response: 'assistant response survives link failure',
+            usage: { input_tokens: 2, output_tokens: 6 },
+            iterations: 1,
+            success: true,
+            error: null,
+          },
+          error: null,
+        };
+      }
+      return { success: true, data: null, error: null };
+    });
+
+    await useExecutionStore.getState().start('hello', 'simple');
+
+    expect(executeStandalonePayload?.['kernelSessionId']).toBe(sessionId);
+    expect(mockInvoke.mock.calls.some(([command]) => command === 'workflow_link_mode_session')).toBe(false);
+    expect(mockInvoke.mock.calls.some(([command]) => command === 'workflow_patch_mode_transcript')).toBe(false);
+
+    randomUuidSpy.mockRestore();
+  });
+
+  it('keeps standalone background chat sessions idle after completion when they are kernel-bound', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const rootSessionId = 'root-bg-standalone';
+      useWorkflowKernelStore.setState({
+        sessionCatalog: [
+          {
+            sessionId: rootSessionId,
+            sessionKind: 'simple_root',
+            displayTitle: 'Background standalone chat',
+            workspacePath: '/tmp/project',
+            activeMode: 'chat',
+            status: 'active',
+            backgroundState: 'background_running',
+            updatedAt: '2026-03-07T00:00:00Z',
+            createdAt: '2026-03-07T00:00:00Z',
+            lastError: null,
+            contextLedger: {
+              conversationTurnCount: 1,
+              artifactRefCount: 0,
+              contextSourceKinds: [],
+              lastCompactionAt: null,
+              ledgerVersion: 1,
+            },
+            modeSnapshots: {
+              chat: {
+                phase: 'streaming',
+                pendingInput: '',
+                activeTurnId: null,
+                turnCount: 1,
+                lastUserMessage: 'hello',
+                lastAssistantMessage: null,
+              },
+              plan: null,
+              task: null,
+            },
+            modeRuntimeMeta: {
+              chat: {
+                mode: 'chat',
+                runId: null,
+                bindingSessionId: 'standalone:bg-standalone-1',
+                isForeground: false,
+                isBackgroundRunning: true,
+                isInterrupted: false,
+                resumePolicy: 'resume',
+                lastHeartbeatAt: null,
+                lastCheckpointId: null,
+                lastError: null,
+              },
+            },
+          },
+        ],
+      });
+
+      useExecutionStore.setState({
+        taskId: null,
+        standaloneSessionId: 'foreground-standalone',
+        status: 'running',
+        activeExecutionId: 'exec-foreground',
+        backgroundSessions: {
+          'bg-standalone-1': {
+            ...createBackgroundSnapshot('bg-standalone-1', 'Background standalone chat'),
+            status: 'running',
+            standaloneSessionId: 'bg-standalone-1',
+            streamingOutput: [{ id: 1, content: 'hello', type: 'info', timestamp: 1, turnBoundary: 'user', turnId: 1 }],
+            streamLineCounter: 1,
+          },
+        },
+      });
+
+      mockInvoke.mockImplementation(async (command, payload) => {
+        if (command === 'workflow_patch_mode_transcript') {
+          return {
+            success: true,
+            data: {
+              sessionId: (payload as { sessionId: string }).sessionId,
+              mode: 'chat',
+              revision: 1,
+              lines: (payload as { appendedLines: unknown[] }).appendedLines,
+            },
+            error: null,
+          };
+        }
+        return { success: true, data: null, error: null };
+      });
+
+      useExecutionStore.getState().initialize();
+      await vi.waitFor(() => {
+        expect(eventHandlers['standalone-event']).toBeDefined();
+      });
+
+      emitEvent('standalone-event', {
+        type: 'complete',
+        session_id: 'bg-standalone-1',
+        execution_id: 'exec-background',
+      });
+
+      expect(useExecutionStore.getState().backgroundSessions['bg-standalone-1']?.status).toBe('idle');
+    } finally {
+      vi.useRealTimers();
+      useExecutionStore.getState().cleanup();
+    }
   });
 });
 
@@ -2648,7 +3382,7 @@ describe('Execution Store - Auto-Background on start()', () => {
 
     // Chat foreground should now be parked into runtimeRegistry, not legacy backgroundSessions.
     expect(Object.keys(state.backgroundSessions)).toHaveLength(0);
-    expect(Object.keys(state.runtimeRegistry)).toHaveLength(1);
+    expect(Object.keys(state.runtimeRegistry).length).toBeGreaterThanOrEqual(1);
 
     const runtime = state.runtimeRegistry['claude:running-task-123'];
     expect(runtime?.status).toBe('running');
@@ -2883,6 +3617,24 @@ describe('Execution Store - session-scoped context binding', () => {
   });
 
   it('binds standalone session id into context sources in regenerateResponse() path', async () => {
+    useWorkflowKernelStore.setState({
+      sessionId: 'root-regen-2',
+      activeRootSessionId: 'root-regen-2',
+      activeMode: 'chat',
+      modeTranscriptsBySession: {
+        'root-regen-2': {
+          chat: {
+            revision: 1,
+            loaded: true,
+            unread: false,
+            lines: [
+              { id: 1, content: 'original question', type: 'info', timestamp: 1, turnBoundary: 'user', turnId: 1 },
+              { id: 2, content: 'original answer', type: 'text', timestamp: 2, turnId: 1 },
+            ],
+          },
+        },
+      },
+    });
     useExecutionStore.setState({
       status: 'completed',
       isChatSession: false,

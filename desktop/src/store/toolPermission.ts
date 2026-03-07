@@ -25,6 +25,8 @@ interface ToolPermissionState {
   enqueueRequest: (request: ToolPermissionRequest) => void;
   /** Respond to the current permission request */
   respond: (requestId: string, response: PermissionResponseType) => Promise<void>;
+  /** Clear pending and queued requests for a specific session */
+  clearSessionRequests: (sessionId: string) => void;
   /** Clear all pending requests (on cancel/reset) */
   clearAll: () => void;
   /** Reset to default state */
@@ -90,6 +92,30 @@ export const useToolPermissionStore = create<ToolPermissionState>((set, get) => 
       set({
         pendingRequest: null,
         isResponding: false,
+      });
+    }
+  },
+
+  clearSessionRequests: (sessionId: string) => {
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId) return;
+
+    const { pendingRequest, requestQueue } = get();
+    const filteredQueue = requestQueue.filter((request) => request.sessionId !== normalizedSessionId);
+
+    if (pendingRequest?.sessionId === normalizedSessionId) {
+      const [nextPending, ...restQueue] = filteredQueue;
+      set({
+        pendingRequest: nextPending ?? null,
+        requestQueue: restQueue,
+        isResponding: false,
+      });
+      return;
+    }
+
+    if (filteredQueue.length !== requestQueue.length) {
+      set({
+        requestQueue: filteredQueue,
       });
     }
   },

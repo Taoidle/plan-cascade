@@ -174,7 +174,14 @@ function createWorkflowSession(overrides: Partial<WorkflowSessionCatalogItem> = 
       ledgerVersion: 1,
     },
     modeSnapshots: overrides.modeSnapshots ?? {
-      chat: { phase: 'ready', draftInput: '', turnCount: 3, lastUserMessage: null, lastAssistantMessage: null },
+      chat: {
+        phase: 'ready',
+        pendingInput: '',
+        activeTurnId: null,
+        turnCount: 3,
+        lastUserMessage: null,
+        lastAssistantMessage: null,
+      },
       plan: {
         phase: 'completed',
         planId: null,

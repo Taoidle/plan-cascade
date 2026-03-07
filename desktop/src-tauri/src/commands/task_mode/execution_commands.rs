@@ -188,6 +188,7 @@ async fn append_task_transcript_lines_for_linked_sessions(
                     revision: transcript.revision,
                     appended_lines: lines.clone(),
                     replace_from_line_id: None,
+                    lines: transcript.lines.clone(),
                     source: source.to_string(),
                 },
             );

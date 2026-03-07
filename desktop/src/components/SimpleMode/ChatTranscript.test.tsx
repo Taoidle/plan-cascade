@@ -104,4 +104,38 @@ describe('ChatTranscript render mode', () => {
 
     expect(screen.getByText('Invalid workflow card payload')).toBeInTheDocument();
   });
+
+  it('does not render the pending placeholder when explicitly disabled', () => {
+    const lines: StreamLine[] = [
+      {
+        id: 1,
+        content: 'user message',
+        type: 'info',
+        timestamp: 1,
+        turnId: 1,
+        turnBoundary: 'user',
+      },
+    ];
+
+    render(<ChatTranscript lines={lines} status="running" showPendingPlaceholder={false} />);
+
+    expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+  });
+
+  it('renders the pending placeholder for the last turn when enabled', () => {
+    const lines: StreamLine[] = [
+      {
+        id: 1,
+        content: 'user message',
+        type: 'info',
+        timestamp: 1,
+        turnId: 1,
+        turnBoundary: 'user',
+      },
+    ];
+
+    render(<ChatTranscript lines={lines} status="running" showPendingPlaceholder />);
+
+    expect(screen.getByText('Thinking...')).toBeInTheDocument();
+  });
 });

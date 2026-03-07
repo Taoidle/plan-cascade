@@ -5,7 +5,6 @@ import { useAgentsStore } from '../agents';
 import { useContextSourcesStore } from '../contextSources';
 import { useSettingsStore } from '../settings';
 import { useToolPermissionStore } from '../toolPermission';
-import { useWorkflowKernelStore } from '../workflowKernel';
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   isClaudeCodeBackend,
@@ -21,8 +20,9 @@ import {
   updateBackgroundSessionByTaskId,
 } from './sessionRouting';
 import { inferInjectedSourceKinds } from './contextAssembly';
-import { getNextTurnId } from '../../lib/conversationUtils';
-import type { ExecutionState, ExecutionStatus, NonCardStreamLineType, StandaloneTurn, StreamLine } from './types';
+import { getActiveKernelChatTranscript } from './kernelTranscript';
+import { buildActiveChatRuntimeRegistryPatch } from './runtimeRegistryActions';
+import type { ExecutionState, ExecutionStatus, StandaloneTurn, StreamLine } from './types';
 
 interface CommandResponse<T> {
   success: boolean;
@@ -55,15 +55,31 @@ interface BackendStandaloneExecutionResult {
 
 type SessionSource = 'claude' | 'standalone';
 
-async function appendActiveChatLinesToKernel(lines: StreamLine[]): Promise<void> {
-  const kernel = useWorkflowKernelStore.getState();
-  const rootSessionId = kernel.activeRootSessionId ?? kernel.sessionId;
-  if (!rootSessionId || lines.length === 0) return;
-  await kernel.appendModeTranscript(
-    rootSessionId,
-    'chat',
-    lines.map((line) => ({ ...line })),
-  );
+async function markKernelChatTurnFailed(sessionId: string | null, error: string): Promise<void> {
+  const normalizedSessionId = sessionId?.trim() ?? '';
+  const normalizedError = error.trim();
+  if (!normalizedSessionId || !normalizedError) return;
+  try {
+    await invoke<CommandResponse<unknown>>('workflow_mark_chat_turn_failed', {
+      sessionId: normalizedSessionId,
+      error: normalizedError,
+    });
+  } catch {
+    // best effort kernel sync
+  }
+}
+
+async function cancelKernelChatTurn(sessionId: string | null, reason = 'cancelled_by_user'): Promise<void> {
+  const normalizedSessionId = sessionId?.trim() ?? '';
+  if (!normalizedSessionId) return;
+  try {
+    await invoke<CommandResponse<unknown>>('workflow_cancel_operation', {
+      sessionId: normalizedSessionId,
+      reason,
+    });
+  } catch {
+    // best effort kernel sync
+  }
 }
 
 function resolveSessionScopedContext(sessionId: string | null, source: SessionSource): ContextSourceConfig | null {
@@ -117,13 +133,6 @@ interface StartActionDeps {
   getStandaloneContextTurnsLimit: () => number;
   trimStandaloneTurns: (turns: StandaloneTurn[], limit: number) => StandaloneTurn[];
   collectAssistantTextSince: (lines: StreamLine[], minExclusiveLineId: number) => string;
-  hasAssistantTextLineSince: (lines: StreamLine[], minExclusiveLineId: number) => boolean;
-  appendTextWithTypewriter: (
-    append: (chunk: string, type: NonCardStreamLineType) => void,
-    text: string,
-    chunkSize?: number,
-    delayMs?: number,
-  ) => Promise<void>;
   isBackendStandaloneExecutionResult: (data: unknown) => boolean;
   standaloneContextUnlimited: number;
 }
@@ -146,8 +155,6 @@ export function createStartAction(
     getStandaloneContextTurnsLimit,
     trimStandaloneTurns,
     collectAssistantTextSince,
-    hasAssistantTextLineSince,
-    appendTextWithTypewriter,
     isBackendStandaloneExecutionResult,
     standaloneContextUnlimited,
   } = deps;
@@ -167,9 +174,12 @@ export function createStartAction(
     const settingsSnapshot = useSettingsStore.getState();
     const backendSnapshot = String((settingsSnapshot as { backend?: unknown }).backend || '');
     const isClaudeBackend = isClaudeCodeBackend(backendSnapshot);
+    const kernelTranscriptSnapshot = getActiveKernelChatTranscript();
+    const activeKernelRootSessionId = kernelTranscriptSnapshot.rootSessionId;
+    const kernelChatLines = kernelTranscriptSnapshot.lines;
     const existingStandaloneTurns = get().standaloneTurns;
     const existingStandaloneSessionId = get().standaloneSessionId;
-    const preserveSimpleConversation = mode === 'simple' && get().streamingOutput.length > 0 && !isClaudeBackend;
+    const preserveSimpleConversation = mode === 'simple' && kernelChatLines.length > 0;
     const nextStandaloneSessionId =
       mode === 'simple' && !isClaudeBackend
         ? preserveSimpleConversation && existingStandaloneSessionId
@@ -195,8 +205,10 @@ export function createStartAction(
       currentBatch: 0,
       currentStoryId: null,
       progress: 0,
-      streamingOutput: preserveSimpleConversation ? get().streamingOutput : [],
-      streamLineCounter: preserveSimpleConversation ? get().streamLineCounter : 0,
+      streamingOutput: preserveSimpleConversation ? kernelChatLines : [],
+      streamLineCounter: preserveSimpleConversation
+        ? kernelChatLines.reduce((max, line) => Math.max(max, line.id), 0)
+        : 0,
       analysisCoverage: null,
       qualityGateResults: [],
       executionErrors: [],
@@ -220,21 +232,6 @@ export function createStartAction(
 
     get().addLog(`Starting execution in ${mode} mode...`);
     get().addLog(`Task: ${description}`);
-    if (mode === 'simple' && !isClaudeBackend) {
-      const turnId = getNextTurnId(get().streamingOutput);
-      const lineId = get().streamLineCounter + 1;
-      get().appendStreamLine(description, 'info', undefined, undefined, { turnId, turnBoundary: 'user' });
-      void appendActiveChatLinesToKernel([
-        {
-          id: lineId,
-          content: description,
-          type: 'info',
-          timestamp: Date.now(),
-          turnId,
-          turnBoundary: 'user',
-        },
-      ]);
-    }
 
     try {
       const settings = settingsSnapshot;
@@ -254,6 +251,17 @@ export function createStartAction(
 
         const sessionId = startResult.data.session_id;
         set({ taskId: sessionId, isSubmitting: false, isChatSession: true });
+        set((state: ExecutionState) =>
+          buildActiveChatRuntimeRegistryPatch(state, {
+            source: 'claude',
+            rawSessionId: sessionId,
+            rootSessionId: activeKernelRootSessionId,
+            workspacePath: settings.workspacePath || null,
+            llmBackend: settings.backend,
+            llmProvider: settings.provider,
+            llmModel: settings.model,
+          }),
+        );
         get().addLog(`Claude Code session started: ${sessionId}`);
 
         if (get().pendingCancelBeforeSessionReady) {
@@ -269,6 +277,7 @@ export function createStartAction(
               pendingCancelBeforeSessionReady: false,
               activeExecutionId: null,
             });
+            await cancelKernelChatTurn(activeKernelRootSessionId);
             get().addLog('Execution cancelled before first message dispatch.');
           } else {
             set({
@@ -278,6 +287,7 @@ export function createStartAction(
               activeExecutionId: null,
               apiError: null,
             });
+            await cancelKernelChatTurn(activeKernelRootSessionId);
             get().addLog(
               `Cancelled before dispatch${cancelResult.data?.reason ? `: ${cancelResult.data.reason}` : ''}.`,
             );
@@ -285,24 +295,10 @@ export function createStartAction(
           return;
         }
 
-        const turnId = getNextTurnId(get().streamingOutput);
-        const lineId = get().streamLineCounter + 1;
-        get().appendStreamLine(description, 'info', undefined, undefined, { turnId, turnBoundary: 'user' });
-        void appendActiveChatLinesToKernel([
-          {
-            id: lineId,
-            content: description,
-            type: 'info',
-            timestamp: Date.now(),
-            turnId,
-            turnBoundary: 'user',
-          },
-        ]);
-
         const claudeContextSources = resolveSessionScopedContext(sessionId, 'claude');
         const assembledPrompt = await buildClaudePromptWithContextEnvelope({
           query: description,
-          lines: get().streamingOutput,
+          lines: getActiveKernelChatTranscript().lines,
           projectPath,
           sessionId,
           contextSources: claudeContextSources,
@@ -314,7 +310,11 @@ export function createStartAction(
         get().clearAttachments();
 
         const sendResult = await invoke<CommandResponse<ClaudeSendMessageResponse | boolean>>('send_message', {
-          request: { session_id: sessionId, prompt: claudePrompt },
+          request: {
+            session_id: sessionId,
+            prompt: claudePrompt,
+            kernel_session_id: activeKernelRootSessionId,
+          },
         });
         if (!sendResult.success) {
           throw new Error(sendResult.error || 'Failed to send message');
@@ -340,6 +340,7 @@ export function createStartAction(
               pendingCancelBeforeSessionReady: false,
               activeExecutionId: null,
             });
+            await cancelKernelChatTurn(activeKernelRootSessionId);
             get().addLog('Execution cancelled after dispatch ACK.');
             return;
           }
@@ -350,6 +351,7 @@ export function createStartAction(
             activeExecutionId: null,
             apiError: cancelResult.error || cancelResult.data?.reason || 'Failed to cancel execution',
           });
+          await cancelKernelChatTurn(activeKernelRootSessionId);
           return;
         }
       } else {
@@ -361,6 +363,19 @@ export function createStartAction(
         const turnStartLineId = get().streamLineCounter;
         set({ currentTurnStartLineId: turnStartLineId });
         const standaloneSessionId = get().standaloneSessionId;
+        if (standaloneSessionId) {
+          set((state: ExecutionState) =>
+            buildActiveChatRuntimeRegistryPatch(state, {
+              source: 'standalone',
+              rawSessionId: standaloneSessionId,
+              rootSessionId: activeKernelRootSessionId,
+              workspacePath: settings.workspacePath || null,
+              llmBackend: settings.backend,
+              llmProvider: settings.provider,
+              llmModel: settings.model,
+            }),
+          );
+        }
         const permissionLevel = useToolPermissionStore.getState().sessionLevel;
         const contextTurnsLimit = getStandaloneContextTurnsLimit();
         const recentStandaloneTurns = trimStandaloneTurns(existingStandaloneTurns, contextTurnsLimit);
@@ -426,6 +441,7 @@ export function createStartAction(
           maxIterations: settings.maxIterations ?? undefined,
           maxConcurrentSubagents: settings.maxConcurrentSubagents || undefined,
           executionId: standaloneExecutionId,
+          kernelSessionId: activeKernelRootSessionId,
           pluginInvocations: pluginInvocations.length > 0 ? pluginInvocations : null,
           systemPrompt: activeAgent?.system_prompt ?? null,
           contextSources,
@@ -454,6 +470,7 @@ export function createStartAction(
             get().startedAt !== capturedStartedAt;
 
           if (sessionWasBackgrounded && standaloneSessionId) {
+            useToolPermissionStore.getState().clearSessionRequests(standaloneSessionId);
             const bgMatch = findBackgroundSessionByTaskId(get(), standaloneSessionId);
             if (bgMatch) {
               if (mode === 'simple') {
@@ -520,36 +537,6 @@ export function createStartAction(
 
           set({ isSubmitting: false });
 
-          let ensuredAssistantOutput = false;
-          const ensureAssistantResponseVisible = async () => {
-            if (ensuredAssistantOutput) return;
-
-            const hasStreamedAssistantText = hasAssistantTextLineSince(get().streamingOutput, turnStartLineId);
-            if (hasStreamedAssistantText) {
-              ensuredAssistantOutput = true;
-              return;
-            }
-
-            if (assistantTurnText) {
-              ensuredAssistantOutput = true;
-              await appendTextWithTypewriter((chunk, type) => get().appendStreamLine(chunk, type), assistantTurnText);
-              return;
-            }
-
-            const hasThinkingLines = get().streamingOutput.some(
-              (line) => line.id > turnStartLineId && line.type === 'thinking' && line.content.trim().length > 0,
-            );
-            if (hasThinkingLines) {
-              ensuredAssistantOutput = true;
-              return;
-            }
-
-            if (isSimpleStandalone) {
-              ensuredAssistantOutput = true;
-              get().appendStreamLine('No assistant response returned for this turn.', 'warning');
-            }
-          };
-
           const finalizeFromInvoke = async () => {
             const bgCheck =
               (standaloneSessionId && get().standaloneSessionId !== standaloneSessionId) ||
@@ -557,14 +544,15 @@ export function createStartAction(
             if (bgCheck) return;
 
             if (get().status !== 'running') {
-              if (get().status === 'completed') {
-                await ensureAssistantResponseVisible();
+              if (get().status === 'completed' || get().status === 'failed') {
                 get().saveToHistory();
               }
               return;
             }
             const succeeded = execution.success;
-            await ensureAssistantResponseVisible();
+            if (standaloneSessionId) {
+              useToolPermissionStore.getState().clearSessionRequests(standaloneSessionId);
+            }
 
             const duration = Date.now() - (get().startedAt || Date.now());
             const durationStr =
@@ -637,6 +625,7 @@ export function createStartAction(
         (nextStandaloneSessionId && get().standaloneSessionId !== nextStandaloneSessionId) ||
         get().startedAt !== capturedStartedAt;
       if (errSessionGone && nextStandaloneSessionId) {
+        useToolPermissionStore.getState().clearSessionRequests(nextStandaloneSessionId);
         set(appendToBackgroundSession(get(), nextStandaloneSessionId, `Error: ${errorMessage}`, 'error'));
         set(
           updateBackgroundSessionByTaskId(get(), nextStandaloneSessionId, () => ({
@@ -662,7 +651,11 @@ export function createStartAction(
           error: errorMessage,
         },
       });
+      if (nextStandaloneSessionId) {
+        useToolPermissionStore.getState().clearSessionRequests(nextStandaloneSessionId);
+      }
 
+      await markKernelChatTurnFailed(activeKernelRootSessionId, errorMessage);
       get().addLog(`Error: ${errorMessage}`);
       get().saveToHistory();
     }

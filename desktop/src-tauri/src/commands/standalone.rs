@@ -11,6 +11,9 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{mpsc, RwLock};
 
 use crate::commands::proxy::resolve_provider_proxy;
+use crate::commands::workflow::{
+    emit_kernel_update_for_session, emit_session_catalog_update, emit_workflow_session_mutation,
+};
 use crate::commands::webhook::WebhookState;
 use crate::models::orchestrator::{
     ExecuteWithSessionRequest, ExecutionProgress, ExecutionSession, ExecutionSessionSummary,
@@ -24,6 +27,7 @@ use crate::services::orchestrator::{
 };
 use crate::services::plugins::models::{PluginInvocation, ResolvedPluginInvocation};
 use crate::services::streaming::UnifiedStreamEvent;
+use crate::services::workflow_kernel::{ChatRuntimeDispatch, WorkflowKernelState};
 use crate::services::webhook::integration::dispatch_on_event as dispatch_webhook_on_event;
 use crate::state::AppState;
 use crate::storage::KeyringService;
@@ -1219,6 +1223,8 @@ pub async fn execute_standalone(
     baseUrl: Option<String>,
     analysis_session_id: Option<String>,
     analysisSessionId: Option<String>,
+    kernel_session_id: Option<String>,
+    kernelSessionId: Option<String>,
     execution_id: Option<String>,
     executionId: Option<String>,
     permission_level: Option<crate::services::orchestrator::permissions::PermissionLevel>,
@@ -1238,6 +1244,7 @@ pub async fn execute_standalone(
     app: AppHandle,
     app_state: State<'_, AppState>,
     standalone_state: State<'_, StandaloneState>,
+    workflow_state: State<'_, WorkflowKernelState>,
     knowledge_state: State<'_, super::knowledge::KnowledgeState>,
     file_changes_state: State<'_, super::file_changes::FileChangesState>,
     analytics_state: State<'_, super::analytics::AnalyticsState>,
@@ -1363,6 +1370,10 @@ pub async fn execute_standalone(
         .or(analysisSessionId)
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    let kernel_session_id = kernel_session_id
+        .or(kernelSessionId)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
     let execution_id = execution_id
         .or(executionId)
         .map(|s| s.trim().to_string())
@@ -1372,6 +1383,11 @@ pub async fn execute_standalone(
 
     // Clone session_id before it's moved into orchestrator_config
     let event_session_id = analysis_session_id.clone().unwrap_or_default();
+    if kernel_session_id.is_some() && event_session_id.is_empty() {
+        return Ok(CommandResponse::err(
+            "kernel_session_id requires a standalone analysis/session id".to_string(),
+        ));
+    }
 
     if let Some(memory_context) = build_explicit_memory_command_context(
         app_state.inner(),
@@ -1638,6 +1654,25 @@ pub async fn execute_standalone(
             .await;
     }
 
+    if let Some(kernel_session_id) = kernel_session_id.as_ref() {
+        if let Err(error) = workflow_state
+            .register_chat_runtime_dispatch(ChatRuntimeDispatch {
+                session_id: kernel_session_id.clone(),
+                backend_kind: "standalone".to_string(),
+                binding_session_id: format!("standalone:{}", event_session_id),
+                run_id: Some(execution_id.clone()),
+            })
+            .await
+        {
+            if !cleanup_session_id.is_empty() {
+                standalone_state
+                    .remove_orchestrator(&cleanup_session_id)
+                    .await;
+            }
+            return Ok(CommandResponse::err(error));
+        }
+    }
+
     let webhook_service = webhook_state.get_or_init(app_state.inner()).await.ok();
     let _ = webhook_state
         .start_worker_if_needed(app_state.inner())
@@ -1648,6 +1683,12 @@ pub async fn execute_standalone(
         None
     } else {
         Some(project_path.clone())
+    };
+    let workflow_kernel = workflow_state.inner().clone();
+    let workflow_binding_session_id = if event_session_id.is_empty() {
+        None
+    } else {
+        Some(format!("standalone:{}", event_session_id))
     };
 
     // Spawn task to forward events to frontend
@@ -1684,6 +1725,40 @@ pub async fn execute_standalone(
                 );
             }
             let _ = app_clone.emit("standalone-event", &payload);
+            if let Some(binding_session_id) = workflow_binding_session_id.as_ref() {
+                match workflow_kernel
+                    .sync_chat_runtime_event(binding_session_id, &event)
+                    .await
+                {
+                    Ok(Some(mutation)) => {
+                        let _ = emit_workflow_session_mutation(
+                            &app_clone,
+                            &mutation,
+                            "standalone.execute_standalone",
+                        );
+                        let _ = emit_kernel_update_for_session(
+                            &app_clone,
+                            &workflow_kernel,
+                            &mutation.session.session_id,
+                            "standalone.execute_standalone",
+                        )
+                        .await;
+                        let _ = emit_session_catalog_update(
+                            &app_clone,
+                            &workflow_kernel,
+                            "standalone.execute_standalone",
+                        )
+                        .await;
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        eprintln!(
+                            "[standalone] Failed to sync runtime event to workflow kernel: {}",
+                            error
+                        );
+                    }
+                }
+            }
         }
     });
 
@@ -2165,7 +2240,9 @@ pub async fn execute_standalone_with_session(
 pub async fn cancel_standalone_execution(
     session_id: String,
     standalone_state: State<'_, StandaloneState>,
+    workflow_state: State<'_, WorkflowKernelState>,
     permission_state: State<'_, super::permissions::PermissionState>,
+    app: AppHandle,
 ) -> Result<CommandResponse<bool>, String> {
     // Cancel any pending permission requests for this session
     permission_state
@@ -2185,6 +2262,35 @@ pub async fn cancel_standalone_execution(
                 .await
                 .is_none()
             {
+                if let Ok(Some(mutation)) = workflow_state
+                    .sync_chat_runtime_event(
+                        &format!("standalone:{}", session_id),
+                        &UnifiedStreamEvent::Error {
+                            message: "Execution cancelled".to_string(),
+                            code: Some("cancelled".to_string()),
+                        },
+                    )
+                    .await
+                {
+                    let _ = emit_workflow_session_mutation(
+                        &app,
+                        &mutation,
+                        "standalone.cancel_standalone_execution",
+                    );
+                    let _ = emit_kernel_update_for_session(
+                        &app,
+                        &workflow_state,
+                        &mutation.session.session_id,
+                        "standalone.cancel_standalone_execution",
+                    )
+                    .await;
+                    let _ = emit_session_catalog_update(
+                        &app,
+                        &workflow_state,
+                        "standalone.cancel_standalone_execution",
+                    )
+                    .await;
+                }
                 return Ok(CommandResponse::ok(true));
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -2207,9 +2313,34 @@ pub async fn cancel_standalone_execution(
 pub async fn pause_standalone_execution(
     session_id: String,
     standalone_state: State<'_, StandaloneState>,
+    workflow_state: State<'_, WorkflowKernelState>,
+    app: AppHandle,
 ) -> Result<CommandResponse<bool>, String> {
     if let Some(orchestrator) = standalone_state.get_orchestrator(&session_id).await {
         orchestrator.pause();
+        if let Ok(Some(mutation)) = workflow_state
+            .set_chat_user_pause_state(&format!("standalone:{}", session_id), true)
+            .await
+        {
+            let _ = emit_workflow_session_mutation(
+                &app,
+                &mutation,
+                "standalone.pause_standalone_execution",
+            );
+            let _ = emit_kernel_update_for_session(
+                &app,
+                &workflow_state,
+                &mutation.session.session_id,
+                "standalone.pause_standalone_execution",
+            )
+            .await;
+            let _ = emit_session_catalog_update(
+                &app,
+                &workflow_state,
+                "standalone.pause_standalone_execution",
+            )
+            .await;
+        }
         Ok(CommandResponse::ok(true))
     } else {
         Ok(CommandResponse::err(format!(
@@ -2224,9 +2355,34 @@ pub async fn pause_standalone_execution(
 pub async fn unpause_standalone_execution(
     session_id: String,
     standalone_state: State<'_, StandaloneState>,
+    workflow_state: State<'_, WorkflowKernelState>,
+    app: AppHandle,
 ) -> Result<CommandResponse<bool>, String> {
     if let Some(orchestrator) = standalone_state.get_orchestrator(&session_id).await {
         orchestrator.unpause();
+        if let Ok(Some(mutation)) = workflow_state
+            .set_chat_user_pause_state(&format!("standalone:{}", session_id), false)
+            .await
+        {
+            let _ = emit_workflow_session_mutation(
+                &app,
+                &mutation,
+                "standalone.unpause_standalone_execution",
+            );
+            let _ = emit_kernel_update_for_session(
+                &app,
+                &workflow_state,
+                &mutation.session.session_id,
+                "standalone.unpause_standalone_execution",
+            )
+            .await;
+            let _ = emit_session_catalog_update(
+                &app,
+                &workflow_state,
+                "standalone.unpause_standalone_execution",
+            )
+            .await;
+        }
         Ok(CommandResponse::ok(true))
     } else {
         Ok(CommandResponse::err(format!(

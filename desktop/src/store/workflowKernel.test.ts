@@ -52,7 +52,8 @@ function mockSession(sessionId: string): WorkflowSession {
     modeSnapshots: {
       chat: {
         phase: 'ready',
-        draftInput: '',
+        pendingInput: '',
+        activeTurnId: null,
         turnCount: 0,
         lastUserMessage: null,
         lastAssistantMessage: null,
@@ -134,70 +135,56 @@ describe('workflowKernel store', () => {
     });
   });
 
-  it('submits system_phase_update for task custom phases and applies returned snapshot', async () => {
+  it('marks chat turn failure and applies returned snapshot', async () => {
     const base = mockSession('kernel-2');
-    const taskSession: WorkflowSession = {
+    const chatSession: WorkflowSession = {
       ...base,
-      activeMode: 'task',
+      activeMode: 'chat',
       modeSnapshots: {
-        chat: null,
-        plan: null,
-        task: {
-          phase: 'idle',
-          prdId: null,
-          currentStoryId: null,
-          interviewSessionId: null,
-          pendingInterview: null,
-          completedStories: 0,
-          failedStories: 0,
+        chat: {
+          phase: 'submitting',
+          pendingInput: 'hello',
+          activeTurnId: 'turn-1',
+          turnCount: 1,
+          lastUserMessage: 'hello',
+          lastAssistantMessage: null,
         },
+        plan: null,
+        task: null,
       },
     };
-    const updatedTaskSession: WorkflowSession = {
-      ...taskSession,
+    const updatedChatSession: WorkflowSession = {
+      ...chatSession,
       modeSnapshots: {
-        ...taskSession.modeSnapshots,
-        task: {
-          ...taskSession.modeSnapshots.task!,
-          phase: 'requirement_analysis',
+        ...chatSession.modeSnapshots,
+        chat: {
+          ...chatSession.modeSnapshots.chat!,
+          phase: 'failed',
+          pendingInput: '',
+          activeTurnId: null,
         },
       },
+      lastError: 'send failed',
     };
 
     useWorkflowKernelStore.setState({
       sessionId: 'kernel-2',
-      activeMode: 'task',
-      session: taskSession,
+      activeMode: 'chat',
+      session: chatSession,
     });
 
     mockInvoke.mockResolvedValueOnce({
       success: true,
-      data: updatedTaskSession,
+      data: updatedChatSession,
       error: null,
     });
 
-    const result = await useWorkflowKernelStore.getState().submitInput({
-      type: 'system_phase_update',
-      content: 'phase:requirement_analysis',
-      metadata: {
-        mode: 'task',
-        phase: 'requirement_analysis',
-        reasonCode: 'phase_sync_test',
-      },
-    });
+    const result = await useWorkflowKernelStore.getState().markChatTurnFailed('send failed');
 
-    expect(result?.modeSnapshots.task?.phase).toBe('requirement_analysis');
-    expect(mockInvoke).toHaveBeenCalledWith('workflow_submit_input', {
+    expect(result?.modeSnapshots.chat?.phase).toBe('failed');
+    expect(mockInvoke).toHaveBeenCalledWith('workflow_mark_chat_turn_failed', {
       sessionId: 'kernel-2',
-      intent: {
-        type: 'system_phase_update',
-        content: 'phase:requirement_analysis',
-        metadata: {
-          mode: 'task',
-          phase: 'requirement_analysis',
-          reasonCode: 'phase_sync_test',
-        },
-      },
+      error: 'send failed',
     });
   });
 
@@ -241,24 +228,28 @@ describe('workflowKernel store', () => {
       mode: 'plan',
     });
 
-    const appended = await useWorkflowKernelStore
-      .getState()
-      .appendModeTranscript('kernel-3', 'plan', [{ id: 2, type: 'info', content: 'appended' }]);
+    const appended = await useWorkflowKernelStore.getState().patchModeTranscript('kernel-3', 'plan', {
+      replaceFromLineId: null,
+      appendedLines: [{ id: 2, type: 'info', content: 'appended' }],
+    });
     expect(appended?.revision).toBe(3);
-    expect(mockInvoke).toHaveBeenNthCalledWith(2, 'workflow_append_mode_transcript', {
+    expect(mockInvoke).toHaveBeenNthCalledWith(2, 'workflow_patch_mode_transcript', {
       sessionId: 'kernel-3',
       mode: 'plan',
-      lines: [{ id: 2, type: 'info', content: 'appended' }],
+      replaceFromLineId: null,
+      appendedLines: [{ id: 2, type: 'info', content: 'appended' }],
     });
 
-    const stored = await useWorkflowKernelStore
-      .getState()
-      .storeModeTranscript('kernel-3', 'plan', [{ id: 1, type: 'info', content: 'stored' }]);
+    const stored = await useWorkflowKernelStore.getState().patchModeTranscript('kernel-3', 'plan', {
+      replaceFromLineId: 0,
+      appendedLines: [{ id: 1, type: 'info', content: 'stored' }],
+    });
     expect(stored?.revision).toBe(4);
-    expect(mockInvoke).toHaveBeenNthCalledWith(3, 'workflow_store_mode_transcript', {
+    expect(mockInvoke).toHaveBeenNthCalledWith(3, 'workflow_patch_mode_transcript', {
       sessionId: 'kernel-3',
       mode: 'plan',
-      lines: [{ id: 1, type: 'info', content: 'stored' }],
+      replaceFromLineId: 0,
+      appendedLines: [{ id: 1, type: 'info', content: 'stored' }],
     });
     expect(useWorkflowKernelStore.getState().getCachedModeTranscript('kernel-3', 'plan').lines).toEqual([
       { id: 1, type: 'info', content: 'stored' },
@@ -470,6 +461,39 @@ describe('workflowKernel store', () => {
 
     expect(useWorkflowKernelStore.getState().getCachedModeTranscript('kernel-4', 'task').lines).toEqual([
       { id: 1, type: 'info', content: 'background update' },
+    ]);
+  });
+
+  it('applies transcript patch events using replaceFromLineId semantics', async () => {
+    await useWorkflowKernelStore.getState().subscribeToUpdates();
+    useWorkflowKernelStore.setState({
+      modeTranscriptsBySession: {
+        'kernel-5': {
+          chat: {
+            revision: 1,
+            loaded: true,
+            unread: false,
+            lines: [
+              { id: 1, type: 'info', content: 'user', turnBoundary: 'user', turnId: 1 },
+              { id: 2, type: 'text', content: 'old answer', turnId: 1 },
+            ],
+          },
+        },
+      },
+    });
+
+    emitTranscriptEvent({
+      sessionId: 'kernel-5',
+      mode: 'chat',
+      revision: 2,
+      appendedLines: [{ id: 1, type: 'info', content: 'edited user', turnBoundary: 'user', turnId: 1 }],
+      replaceFromLineId: 1,
+      lines: [{ id: 1, type: 'info', content: 'edited user', turnBoundary: 'user', turnId: 1 }],
+      source: 'test',
+    });
+
+    expect(useWorkflowKernelStore.getState().getCachedModeTranscript('kernel-5', 'chat').lines).toEqual([
+      { id: 1, type: 'info', content: 'edited user', turnBoundary: 'user', turnId: 1 },
     ]);
   });
 });

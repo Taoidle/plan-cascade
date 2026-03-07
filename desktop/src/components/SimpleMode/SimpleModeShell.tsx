@@ -41,7 +41,6 @@ import {
   type PromptTokenEstimateResult,
 } from './tokenBudget';
 import { resolvePromptTokenBudget } from '../../lib/promptTokenBudget';
-import { useSimpleModeController } from './useSimpleModeController';
 import { SimplePanelLayout } from './SimplePanelLayout';
 import { SimpleInputSection } from './SimpleInputSection';
 import { SimpleInputComposer } from './SimpleInputComposer';
@@ -93,6 +92,41 @@ const EMPTY_MODE_TRANSCRIPT = {
 
 const EMPTY_STREAM_LINES: StreamLine[] = [];
 
+function mapChatPhaseToExecutionStatus(
+  phase: ReturnType<typeof selectKernelChatRuntime>['normalizedPhase'],
+): ExecutionStatus {
+  switch (phase) {
+    case 'submitting':
+    case 'streaming':
+      return 'running';
+    case 'paused':
+      return 'paused';
+    case 'failed':
+      return 'failed';
+    default:
+      return 'idle';
+  }
+}
+
+function parseChatBindingSessionId(
+  bindingSessionId: string | null,
+): { source: 'claude' | 'standalone'; rawSessionId: string } | null {
+  if (!bindingSessionId) return null;
+  if (bindingSessionId.startsWith('claude:')) {
+    return {
+      source: 'claude',
+      rawSessionId: bindingSessionId.slice('claude:'.length),
+    };
+  }
+  if (bindingSessionId.startsWith('standalone:')) {
+    return {
+      source: 'standalone',
+      rawSessionId: bindingSessionId.slice('standalone:'.length),
+    };
+  }
+  return null;
+}
+
 function selectModeTranscriptLines(
   sessionId: string | null,
   mode: WorkflowMode,
@@ -128,16 +162,13 @@ function selectModeTranscriptDetailCount(
 export function SimpleModeShell() {
   const { t } = useTranslation('simpleMode');
   const { showToast } = useToast();
-  const simpleController = useSimpleModeController();
   const status = useExecutionStore((s) => s.status);
+  const activeExecutionId = useExecutionStore((s) => s.activeExecutionId);
   const executionIsCancelling = useExecutionStore((s) => s.isCancelling);
   const isSubmitting = useExecutionStore((s) => s.isSubmitting);
   const apiError = useExecutionStore((s) => s.apiError);
   const start = useExecutionStore((s) => s.start);
   const sendFollowUp = useExecutionStore((s) => s.sendFollowUp);
-  const pause = useExecutionStore((s) => s.pause);
-  const resume = useExecutionStore((s) => s.resume);
-  const cancel = useExecutionStore((s) => s.cancel);
   const reset = useExecutionStore((s) => s.reset);
   const initialize = useExecutionStore((s) => s.initialize);
   const cleanup = useExecutionStore((s) => s.cleanup);
@@ -214,13 +245,11 @@ export function SimpleModeShell() {
   const getWorkflowKernelCatalogState = useWorkflowKernelStore((s) => s.getSessionCatalogState);
   const resumeWorkflowKernelBackgroundRuns = useWorkflowKernelStore((s) => s.resumeBackgroundRuns);
   const getWorkflowKernelModeTranscript = useWorkflowKernelStore((s) => s.getModeTranscript);
-  const storeWorkflowKernelModeTranscript = useWorkflowKernelStore((s) => s.storeModeTranscript);
   const getCachedWorkflowKernelModeTranscript = useWorkflowKernelStore((s) => s.getCachedModeTranscript);
   const appendWorkflowKernelContextItems = useWorkflowKernelStore((s) => s.appendContextItems);
   const workflowSessionCatalog = useWorkflowKernelStore((s) => s.sessionCatalog);
   const transitionWorkflowKernelMode = useWorkflowKernelStore((s) => s.transitionMode);
   const transitionAndSubmitWorkflowKernelInput = useWorkflowKernelStore((s) => s.transitionAndSubmitInput);
-  const submitWorkflowKernelInput = useWorkflowKernelStore((s) => s.submitInput);
   const linkWorkflowKernelModeSession = useWorkflowKernelStore((s) => s.linkModeSession);
   const cancelWorkflowKernelOperation = useWorkflowKernelStore((s) => s.cancelOperation);
   const activeRootSessionId = useSimpleSessionStore((s) => s.activeRootSessionId);
@@ -229,8 +258,6 @@ export function SimpleModeShell() {
   const getModeDraft = useSimpleSessionStore((s) => s.getDraft);
   const setModeAttachments = useSimpleSessionStore((s) => s.setAttachments);
   const getModeAttachments = useSimpleSessionStore((s) => s.getAttachments);
-
-  const isRunning = simpleController.isRunning;
 
   useSimpleKernelSession({
     workspacePath,
@@ -305,7 +332,11 @@ export function SimpleModeShell() {
     let prevStatus = useExecutionStore.getState().status;
     const unsub = useExecutionStore.subscribe((state) => {
       if (prevStatus === 'running' && state.status !== 'running') {
-        const currentTurn = state.streamingOutput.filter((l) => l.type === 'info').length - 1;
+        const rootSessionId = useWorkflowKernelStore.getState().activeRootSessionId;
+        const transcriptLines = rootSessionId
+          ? (useWorkflowKernelStore.getState().getCachedModeTranscript(rootSessionId, 'chat').lines as StreamLine[])
+          : [];
+        const currentTurn = transcriptLines.filter((line) => line.type === 'info').length - 1;
         if (currentTurn >= 0) bridge.onTurnEnd(currentTurn);
       }
       prevStatus = state.status;
@@ -426,18 +457,36 @@ export function SimpleModeShell() {
   ]);
 
   // Tool permission state
-  const permissionRequest = useToolPermissionStore((s) => s.pendingRequest);
-  const permissionQueueSize = useToolPermissionStore((s) => s.requestQueue.length);
+  const pendingPermissionRequest = useToolPermissionStore((s) => s.pendingRequest);
+  const queuedPermissionRequests = useToolPermissionStore((s) => s.requestQueue);
   const isPermissionResponding = useToolPermissionStore((s) => s.isResponding);
   const respondPermission = useToolPermissionStore((s) => s.respond);
+  const kernelChatBinding = useMemo(
+    () => parseChatBindingSessionId(kernelChatRuntime.bindingSessionId),
+    [kernelChatRuntime.bindingSessionId],
+  );
+  const permissionSessionId =
+    kernelChatBinding?.rawSessionId || taskId || standaloneSessionId || activeExecutionId || '';
+  const permissionRequest =
+    pendingPermissionRequest && pendingPermissionRequest.sessionId === permissionSessionId
+      ? pendingPermissionRequest
+      : null;
+  const permissionQueueSize = permissionSessionId
+    ? queuedPermissionRequests.filter((request) => request.sessionId === permissionSessionId).length
+    : 0;
+  const chatExecutionUiActive = kernelChatRuntime.isBusy;
+  const chatExecutionStatusForUi = mapChatPhaseToExecutionStatus(kernelChatRuntime.normalizedPhase);
+  const executionStatusForUi: ExecutionStatus = workflowMode === 'chat' ? chatExecutionStatusForUi : status;
+  const showPendingChatPlaceholder = useMemo(
+    () =>
+      workflowMode === 'chat' &&
+      !permissionRequest &&
+      (kernelChatRuntime.normalizedPhase === 'submitting' || kernelChatRuntime.normalizedPhase === 'streaming'),
+    [kernelChatRuntime.normalizedPhase, permissionRequest, workflowMode],
+  );
   const permissionLevel = useToolPermissionStore((s) => s.sessionLevel);
   const setPermissionLevel = useToolPermissionStore((s) => s.setSessionLevel);
-  const permissionSessionId = taskId || standaloneSessionId || '';
-  const contextSessionId = taskId
-    ? `claude:${taskId}`
-    : standaloneSessionId
-      ? `standalone:${standaloneSessionId}`
-      : null;
+  const contextSessionId = kernelChatRuntime.bindingSessionId ?? null;
 
   useEffect(() => {
     if (!permissionSessionId) return;
@@ -536,8 +585,7 @@ export function SimpleModeShell() {
     sessionId: queueSessionId ?? '',
     workflowMode,
     maxQueuedChatMessages: MAX_QUEUED_CHAT_MESSAGES,
-    isRunning,
-    isSubmitting,
+    isRunning: workflowMode === 'chat' ? kernelChatRuntime.canQueue : chatExecutionUiActive,
     isAnalyzingStrategy,
     permissionRequest,
     isTaskWorkflowBusy:
@@ -562,7 +610,7 @@ export function SimpleModeShell() {
     handleModeSwitchDialogOpenChange,
   } = useSimpleModeSwitch({
     workflowMode,
-    isRunning,
+    isRunning: chatExecutionUiActive,
     workflowPhase,
     planPhase,
     isTaskWorkflowActive: isTaskWorkflowActiveForSwitchGuard,
@@ -603,12 +651,9 @@ export function SimpleModeShell() {
       const hasForegroundContent =
         beforeState.streamingOutput.length > 0 || !!beforeState.taskId || !!beforeState.standaloneSessionId;
       if (!hasForegroundContent) return null;
-
-      void storeWorkflowKernelModeTranscript(sessionId, mode, beforeState.streamingOutput);
-
       return parkForegroundRuntime();
     },
-    [parkForegroundRuntime, storeWorkflowKernelModeTranscript],
+    [parkForegroundRuntime],
   );
 
   const getLinkedChatRuntime = useCallback(
@@ -662,23 +707,16 @@ export function SimpleModeShell() {
         reset();
         return;
       }
-
-      const cachedLines = (
-        sessionId && typeof getCachedWorkflowKernelModeTranscript === 'function'
-          ? getCachedWorkflowKernelModeTranscript(sessionId, 'chat').lines
-          : []
-      ) as StreamLine[];
       const latestMeta = latestKernelChatMetaRef.current;
       restoreForegroundChatRuntime({
         source: linkedRuntime.source,
         rawSessionId: linkedRuntime.rawSessionId,
-        fallbackLines: cachedLines,
         title: latestMeta.title,
         phase: latestMeta.phase,
         lastError: latestMeta.lastError,
       });
     },
-    [getCachedWorkflowKernelModeTranscript, parseLinkedChatRuntime, reset, restoreForegroundChatRuntime],
+    [parseLinkedChatRuntime, reset, restoreForegroundChatRuntime],
   );
 
   const restoreForegroundModeView = useCallback(
@@ -741,12 +779,6 @@ export function SimpleModeShell() {
     workflowMode,
   ]);
 
-  const linkedChatRuntimeId = useMemo(() => {
-    if (taskId?.trim()) return `claude:${taskId.trim()}`;
-    if (standaloneSessionId?.trim()) return `standalone:${standaloneSessionId.trim()}`;
-    return null;
-  }, [standaloneSessionId, taskId]);
-
   const activeModeHasTranscriptContent = useWorkflowKernelStore(
     useCallback(
       (state: ReturnType<typeof useWorkflowKernelStore.getState>) =>
@@ -761,67 +793,6 @@ export function SimpleModeShell() {
       [workflowKernelSessionId, workflowMode],
     ),
   );
-
-  const lastSyncedChatLedgerTurnCountRef = useRef(0);
-  useEffect(() => {
-    lastSyncedChatLedgerTurnCountRef.current = 0;
-  }, [workflowKernelSessionId]);
-  useEffect(() => {
-    if (!workflowKernelSessionId || workflowMode !== 'chat') return;
-    if (status === 'running' || isSubmitting) return;
-
-    const conversationContext = buildConversationHistory().map((turn) => ({
-      user: turn.user,
-      assistant: turn.assistant,
-    }));
-    if (conversationContext.length === 0) return;
-    if (lastSyncedChatLedgerTurnCountRef.current === conversationContext.length) return;
-
-    lastSyncedChatLedgerTurnCountRef.current = conversationContext.length;
-    void appendWorkflowKernelContextItems('chat', {
-      conversationContext,
-      artifactRefs: [],
-      contextSources: ['chat_transcript_sync'],
-      metadata: {
-        source: 'simple_mode_chat_ledger_sync',
-        workspacePath,
-      },
-    });
-  }, [appendWorkflowKernelContextItems, isSubmitting, status, workflowKernelSessionId, workflowMode, workspacePath]);
-
-  const lastLinkedChatRuntimeRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!workflowKernelSessionId || !linkedChatRuntimeId) return;
-    if (lastLinkedChatRuntimeRef.current === linkedChatRuntimeId) return;
-    lastLinkedChatRuntimeRef.current = linkedChatRuntimeId;
-    void linkWorkflowKernelModeSession('chat', linkedChatRuntimeId);
-  }, [linkWorkflowKernelModeSession, linkedChatRuntimeId, workflowKernelSessionId]);
-
-  const lastReportedChatPhaseRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!workflowKernelSessionId) return;
-    const nextPhase =
-      status === 'running'
-        ? 'streaming'
-        : status === 'paused'
-          ? 'paused'
-          : status === 'completed'
-            ? 'completed'
-            : status === 'failed'
-              ? 'failed'
-              : 'ready';
-    if (lastReportedChatPhaseRef.current === nextPhase) return;
-    lastReportedChatPhaseRef.current = nextPhase;
-    void submitWorkflowKernelInput({
-      type: 'system_phase_update',
-      content: `phase:${nextPhase}`,
-      metadata: {
-        mode: 'chat',
-        phase: nextPhase,
-        source: 'simple_mode_chat_runtime_bridge',
-      },
-    });
-  }, [status, submitWorkflowKernelInput, workflowKernelSessionId]);
 
   const handleComposerSubmit = useCallback(async () => {
     const prompt = description.trim();
@@ -846,7 +817,7 @@ export function SimpleModeShell() {
       !planWorkflowCancelling &&
       !hasStructuredInterviewQuestion &&
       !hasStructuredPlanClarifyQuestion &&
-      ((workflowMode === 'chat' && isRunning) ||
+      ((workflowMode === 'chat' && kernelChatRuntime.canQueue) ||
         (workflowMode === 'task' && workflowPhase === 'executing') ||
         (workflowMode === 'plan' && planPhase === 'executing'));
 
@@ -888,7 +859,7 @@ export function SimpleModeShell() {
     workflowMode,
     workflowPhase,
     planPhase,
-    isRunning,
+    kernelChatRuntime.canQueue,
     executionIsCancelling,
     isAnalyzingStrategy,
     taskWorkflowCancelling,
@@ -1282,6 +1253,117 @@ export function SimpleModeShell() {
     t,
   ]);
 
+  const handlePauseChatExecution = useCallback(async () => {
+    const binding = parseChatBindingSessionId(kernelChatRuntime.bindingSessionId);
+    if (!binding || binding.source !== 'standalone') return;
+    try {
+      const result = await invoke<CommandResponse<boolean>>('pause_standalone_execution', {
+        sessionId: binding.rawSessionId,
+      });
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to pause execution');
+      }
+      useExecutionStore.setState({ status: 'paused', apiError: null });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      useExecutionStore.setState({ apiError: message });
+      showToast(message || t('chatToolbar.pause', { defaultValue: 'Pause failed' }), 'error');
+    }
+  }, [kernelChatRuntime.bindingSessionId, showToast, t]);
+
+  const handleResumeChatExecution = useCallback(async () => {
+    const binding = parseChatBindingSessionId(kernelChatRuntime.bindingSessionId);
+    if (!binding || binding.source !== 'standalone') return;
+    try {
+      const result = await invoke<CommandResponse<boolean>>('unpause_standalone_execution', {
+        sessionId: binding.rawSessionId,
+      });
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to resume execution');
+      }
+      useExecutionStore.setState({ status: 'running', apiError: null });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      useExecutionStore.setState({ apiError: message });
+      showToast(message || t('chatToolbar.resume', { defaultValue: 'Resume failed' }), 'error');
+    }
+  }, [kernelChatRuntime.bindingSessionId, showToast, t]);
+
+  const handleCancelChatExecution = useCallback(async () => {
+    if (executionIsCancelling) return;
+    const binding = parseChatBindingSessionId(kernelChatRuntime.bindingSessionId);
+    useExecutionStore.setState({
+      isCancelling: true,
+      apiError: null,
+    });
+
+    try {
+      if (!binding || (binding.source === 'claude' && !activeExecutionId)) {
+        useExecutionStore.setState({ pendingCancelBeforeSessionReady: true });
+        const cancelled = await cancelWorkflowKernelOperation('cancelled_by_user');
+        if (!cancelled) {
+          throw new Error('Failed to cancel chat turn');
+        }
+        useExecutionStore.setState({
+          status: 'idle',
+          isCancelling: false,
+          pendingCancelBeforeSessionReady: true,
+          activeExecutionId: null,
+        });
+        return;
+      }
+
+      if (binding.source === 'standalone') {
+        const result = await invoke<CommandResponse<boolean>>('cancel_standalone_execution', {
+          sessionId: binding.rawSessionId,
+        });
+        if (!result.success) {
+          throw new Error(result.error || 'Failed to cancel standalone execution');
+        }
+      } else {
+        const result = await invoke<CommandResponse<{ cancelled: boolean; reason?: string | null }>>(
+          'cancel_execution',
+          {
+            session_id: binding.rawSessionId,
+          },
+        );
+        if (!result.success) {
+          throw new Error(result.error || 'Failed to cancel execution');
+        }
+        if (!result.data?.cancelled) {
+          const cancelled = await cancelWorkflowKernelOperation(result.data?.reason || 'cancelled_by_user');
+          if (!cancelled) {
+            throw new Error(result.data?.reason || 'No active execution to cancel');
+          }
+        }
+      }
+
+      useToolPermissionStore.getState().clearSessionRequests(binding.rawSessionId);
+      useExecutionStore.setState({
+        status: 'idle',
+        isCancelling: false,
+        pendingCancelBeforeSessionReady: false,
+        activeExecutionId: null,
+        apiError: null,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      useExecutionStore.setState({
+        isCancelling: false,
+        pendingCancelBeforeSessionReady: false,
+        apiError: message,
+      });
+      showToast(message || t('workflow.cancelFailed', { defaultValue: 'Cancel failed' }), 'error');
+    }
+  }, [
+    activeExecutionId,
+    cancelWorkflowKernelOperation,
+    executionIsCancelling,
+    kernelChatRuntime.bindingSessionId,
+    showToast,
+    t,
+  ]);
+
   const kernelStatus = workflowKernelSession?.status ?? 'active';
   const kernelSessionMode = workflowKernelSession?.activeMode ?? workflowMode;
   const hasActiveKernelSession = kernelStatus === 'active';
@@ -1309,7 +1391,7 @@ export function SimpleModeShell() {
     !isStructuredWorkflowCancelling &&
     !hasStructuredInterviewQuestion &&
     !hasStructuredPlanClarifyQuestion &&
-    ((workflowMode === 'chat' && isRunning) ||
+    ((workflowMode === 'chat' && kernelChatRuntime.canQueue) ||
       (workflowMode === 'task' && isTaskWorkflowActive && effectiveTaskPhaseForInput === 'executing') ||
       (workflowMode === 'plan' && isPlanWorkflowActive && effectivePlanPhaseForInput === 'executing'));
   const inputBusy =
@@ -1317,13 +1399,15 @@ export function SimpleModeShell() {
     isAnalyzingStrategy ||
     isTaskWorkflowBusy ||
     isPlanWorkflowBusy ||
-    (isSubmitting && !canQueueWhileRunning);
+    (workflowMode === 'chat'
+      ? kernelChatRuntime.isBusy && !kernelChatRuntime.canQueue
+      : isSubmitting && !canQueueWhileRunning);
   const inputDisabled =
     (inputBusy && !canQueueWhileRunning) ||
     isStructuredWorkflowCancelling ||
     hasStructuredInterviewQuestion ||
     hasStructuredPlanClarifyQuestion ||
-    (!canQueueWhileRunning && workflowMode !== 'chat' && isRunning);
+    (!canQueueWhileRunning && workflowMode !== 'chat' && chatExecutionUiActive);
   const inputLoading = inputBusy && !canQueueWhileRunning;
   const handleClearActiveAgent = useCallback(() => {
     useAgentsStore.getState().clearActiveAgent();
@@ -1591,7 +1675,8 @@ export function SimpleModeShell() {
               <KernelTranscriptChatPane
                 sessionId={workflowKernelSessionId}
                 mode={workflowMode}
-                status={status}
+                status={executionStatusForUi}
+                showPendingPlaceholder={workflowMode === 'chat' ? showPendingChatPlaceholder : false}
                 scrollRef={chatScrollRef}
                 forceFullRender={isCapturing}
               />
@@ -1603,12 +1688,15 @@ export function SimpleModeShell() {
               modeSwitchLocked={!!modeSwitchBlockReason}
               modeSwitchLockReason={modeSwitchLockReasonText}
               onFilePick={() => inputBoxRef.current?.pickFile()}
-              isFilePickDisabled={inputBusy || isRunning || !!permissionRequest}
-              executionStatus={status}
+              isFilePickDisabled={inputBusy || (!!permissionRequest && !canQueueWhileRunning)}
+              executionStatus={executionStatusForUi}
+              canPause={workflowMode === 'chat' ? kernelChatRuntime.canPause : false}
+              canResume={workflowMode === 'chat' ? kernelChatRuntime.canResume : false}
+              canCancel={workflowMode === 'chat' ? kernelChatRuntime.canCancel : false}
               isCancelling={executionIsCancelling}
-              onPause={pause}
-              onResume={resume}
-              onCancel={cancel}
+              onPause={handlePauseChatExecution}
+              onResume={handleResumeChatExecution}
+              onCancel={handleCancelChatExecution}
               taskWorkflowActive={isTaskWorkflowActive}
               planWorkflowActive={isPlanWorkflowActive}
               isWorkflowCancelling={isStructuredWorkflowCancelling}
@@ -1633,7 +1721,7 @@ export function SimpleModeShell() {
                 t={t}
                 workflowMode={workflowMode}
                 workflowPhase={workflowPhase}
-                isRunning={isRunning}
+                isRunning={chatExecutionUiActive}
                 taskInterviewingPhase={taskInterviewingPhase}
                 planClarifyingPhase={planClarifyingPhase}
                 hasStructuredInterviewQuestion={hasStructuredInterviewQuestion}
@@ -1688,7 +1776,7 @@ export function SimpleModeShell() {
                 onTabChange={setRightPanelTab}
                 workflowMode={workflowMode}
                 workflowPhase={rightPanelPhase}
-                executionStatus={status}
+                executionStatus={executionStatusForUi}
                 workspacePath={workspacePath}
                 contextSessionId={contextSessionId}
               />
@@ -1721,12 +1809,14 @@ function KernelTranscriptChatPane({
   sessionId,
   mode,
   status,
+  showPendingPlaceholder,
   scrollRef,
   forceFullRender,
 }: {
   sessionId: string | null;
   mode: WorkflowMode;
   status: ExecutionStatus;
+  showPendingPlaceholder: boolean;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   forceFullRender: boolean;
 }) {
@@ -1736,7 +1826,15 @@ function KernelTranscriptChatPane({
       [sessionId, mode],
     ),
   );
-  return <ChatTranscript lines={lines} status={status} scrollRef={scrollRef} forceFullRender={forceFullRender} />;
+  return (
+    <ChatTranscript
+      lines={lines}
+      status={status}
+      showPendingPlaceholder={showPendingPlaceholder}
+      scrollRef={scrollRef}
+      forceFullRender={forceFullRender}
+    />
+  );
 }
 
 function KernelTranscriptRightPanel({

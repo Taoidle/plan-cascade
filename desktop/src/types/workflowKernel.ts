@@ -13,12 +13,10 @@ export type WorkflowSessionKind = 'simple_root';
 export type WorkflowBackgroundState = 'foreground' | 'background_idle' | 'background_running' | 'interrupted';
 
 export type ChatLifecyclePhase =
-  | 'idle'
   | 'ready'
   | 'submitting'
   | 'streaming'
   | 'paused'
-  | 'completed'
   | 'failed'
   | 'cancelled'
   | 'interrupted';
@@ -65,7 +63,8 @@ export interface HandoffContextBundle {
 
 export interface ChatState {
   phase: ChatLifecyclePhase | string;
-  draftInput: string;
+  pendingInput: string;
+  activeTurnId: string | null;
   turnCount: number;
   lastUserMessage: string | null;
   lastAssistantMessage: string | null;
@@ -165,8 +164,7 @@ export type UserInputIntentType =
   | 'task_configuration'
   | 'task_interview_answer'
   | 'task_prd_feedback'
-  | 'execution_control'
-  | 'system_phase_update';
+  | 'execution_control';
 
 export interface UserInputIntent {
   type: UserInputIntentType;
@@ -187,6 +185,12 @@ export interface PlanEditOperation {
   type: PlanEditOperationType;
   targetStepId?: string | null;
   payload?: Record<string, unknown> | null;
+}
+
+export interface ChatControlCapabilities {
+  canPause: boolean;
+  canResume: boolean;
+  canCancel: boolean;
 }
 
 export interface WorkflowSession {
@@ -219,6 +223,9 @@ export interface ModeRuntimeMeta {
   lastHeartbeatAt: string | null;
   lastCheckpointId: string | null;
   lastError: string | null;
+  backendKind?: string | null;
+  controlCapabilities?: ChatControlCapabilities | null;
+  blockReason?: string | null;
 }
 
 export interface WorkflowContextLedgerSummary {
@@ -257,6 +264,11 @@ export interface ModeTranscriptPayload {
   lines: unknown[];
 }
 
+export interface ModeTranscriptPatch {
+  replaceFromLineId?: number | null;
+  appendedLines: unknown[];
+}
+
 export interface ModeTranscriptState {
   revision: number;
   lines: unknown[];
@@ -276,6 +288,7 @@ export interface WorkflowModeTranscriptUpdatedEvent {
   revision: number;
   appendedLines: unknown[];
   replaceFromLineId?: number | null;
+  lines?: unknown[];
   source: string;
 }
 

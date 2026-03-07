@@ -50,7 +50,6 @@ import type {
   ExecutionResult,
   ExecutionState,
   ExecutionStatus,
-  NonCardStreamLineType,
   QualityGateResult,
   SessionSnapshot,
   StandaloneTurn,
@@ -453,50 +452,12 @@ function shouldPersistForegroundBeforeSwitch(state: ExecutionState): boolean {
   return false;
 }
 
-function hasAssistantTextLineSince(lines: StreamLine[], minExclusiveLineId: number): boolean {
-  return lines.some((line) => line.id > minExclusiveLineId && line.type === 'text' && line.content.trim().length > 0);
-}
-
 function collectAssistantTextSince(lines: StreamLine[], minExclusiveLineId: number): string {
   return lines
     .filter((line) => line.id > minExclusiveLineId && line.type === 'text' && line.content.trim().length > 0)
     .map((line) => line.content)
     .join('')
     .trim();
-}
-
-function appendTextWithTypewriter(
-  append: (content: string, type: NonCardStreamLineType) => void,
-  content: string,
-  chunkSize = 28,
-  delayMs = 14,
-): Promise<void> {
-  const text = content.trim();
-  if (!text) return Promise.resolve();
-  // Avoid very long UI replays blocking finalization; stream large payloads as a single line.
-  if (text.length > 4000) {
-    append(text, 'text');
-    return Promise.resolve();
-  }
-
-  return new Promise((resolve) => {
-    let cursor = 0;
-    const pushChunk = () => {
-      const next = text.slice(cursor, cursor + chunkSize);
-      if (!next) {
-        resolve();
-        return;
-      }
-      append(next, 'text');
-      cursor += next.length;
-      if (cursor >= text.length) {
-        resolve();
-        return;
-      }
-      globalThis.setTimeout(pushChunk, delayMs);
-    };
-    pushChunk();
-  });
 }
 
 function toAttachmentContextInputs(attachments: FileAttachmentData[]): AttachmentContextInput[] {
@@ -646,8 +607,6 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => {
     getStandaloneContextTurnsLimit,
     trimStandaloneTurns,
     collectAssistantTextSince,
-    hasAssistantTextLineSince,
-    appendTextWithTypewriter,
     isBackendStandaloneExecutionResult,
   });
   const startAction = createStartAction({
@@ -659,8 +618,6 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => {
     getStandaloneContextTurnsLimit,
     trimStandaloneTurns,
     collectAssistantTextSince,
-    hasAssistantTextLineSince,
-    appendTextWithTypewriter,
     isBackendStandaloneExecutionResult,
     standaloneContextUnlimited: STANDALONE_CONTEXT_UNLIMITED,
   });

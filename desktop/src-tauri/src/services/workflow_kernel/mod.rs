@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::RwLock;
 
+use crate::services::streaming::UnifiedStreamEvent;
 use crate::utils::paths::ensure_plan_cascade_dir;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -94,7 +95,10 @@ impl Default for HandoffContextBundle {
 #[serde(rename_all = "camelCase")]
 pub struct ChatState {
     pub phase: String,
-    pub draft_input: String,
+    #[serde(default, alias = "draftInput")]
+    pub pending_input: String,
+    #[serde(default)]
+    pub active_turn_id: Option<String>,
     pub turn_count: u64,
     pub last_user_message: Option<String>,
     pub last_assistant_message: Option<String>,
@@ -104,7 +108,8 @@ impl Default for ChatState {
     fn default() -> Self {
         Self {
             phase: "ready".to_string(),
-            draft_input: String::new(),
+            pending_input: String::new(),
+            active_turn_id: None,
             turn_count: 0,
             last_user_message: None,
             last_assistant_message: None,
@@ -270,6 +275,14 @@ struct WorkflowContextLedgerEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ChatControlCapabilities {
+    pub can_pause: bool,
+    pub can_resume: bool,
+    pub can_cancel: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ModeRuntimeMeta {
     pub mode: WorkflowMode,
     pub run_id: Option<String>,
@@ -281,6 +294,12 @@ pub struct ModeRuntimeMeta {
     pub last_heartbeat_at: Option<String>,
     pub last_checkpoint_id: Option<String>,
     pub last_error: Option<String>,
+    #[serde(default)]
+    pub backend_kind: Option<String>,
+    #[serde(default)]
+    pub control_capabilities: Option<ChatControlCapabilities>,
+    #[serde(default)]
+    pub block_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -423,7 +442,6 @@ pub enum UserInputIntentType {
     TaskInterviewAnswer,
     TaskPrdFeedback,
     ExecutionControl,
-    SystemPhaseUpdate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -546,7 +564,63 @@ pub struct WorkflowModeTranscriptUpdatedEvent {
     #[serde(default)]
     pub appended_lines: Vec<Value>,
     pub replace_from_line_id: Option<u64>,
+    #[serde(default)]
+    pub lines: Vec<Value>,
     pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowTranscriptMutation {
+    pub mode: WorkflowMode,
+    pub replace_from_line_id: Option<u64>,
+    #[serde(default)]
+    pub appended_lines: Vec<Value>,
+    pub transcript: ModeTranscriptPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowSessionMutation {
+    pub session: WorkflowSession,
+    #[serde(default)]
+    pub transcript_mutations: Vec<WorkflowTranscriptMutation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatRuntimeDispatch {
+    pub session_id: String,
+    pub backend_kind: String,
+    pub binding_session_id: String,
+    #[serde(default)]
+    pub run_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ChatRuntimeSyncState {
+    root_session_id: String,
+    backend_kind: String,
+    run_id: Option<String>,
+    next_line_id: u64,
+    pending_turn_lines: Vec<Value>,
+}
+
+impl ChatRuntimeSyncState {
+    fn new(
+        root_session_id: String,
+        backend_kind: String,
+        run_id: Option<String>,
+        next_line_id: u64,
+    ) -> Self {
+        Self {
+            root_session_id,
+            backend_kind,
+            run_id,
+            next_line_id,
+            pending_turn_lines: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -601,6 +675,7 @@ pub struct WorkflowKernelState {
     context_ledger_entries: Arc<RwLock<HashMap<String, Vec<WorkflowContextLedgerEntry>>>>,
     active_session_id: Arc<RwLock<Option<String>>>,
     attached_mode_runtimes: Arc<RwLock<HashMap<String, Vec<WorkflowMode>>>>,
+    chat_runtime_sync: Arc<RwLock<HashMap<String, ChatRuntimeSyncState>>>,
     storage_root: Arc<PathBuf>,
 }
 
@@ -621,6 +696,7 @@ impl WorkflowKernelState {
             context_ledger_entries: Arc::new(RwLock::new(HashMap::new())),
             active_session_id: Arc::new(RwLock::new(active_session_id)),
             attached_mode_runtimes: Arc::new(RwLock::new(HashMap::new())),
+            chat_runtime_sync: Arc::new(RwLock::new(HashMap::new())),
             storage_root: Arc::new(storage_root),
         }
     }
@@ -903,6 +979,10 @@ impl WorkflowKernelState {
             let mut attached_runtimes = self.attached_mode_runtimes.write().await;
             attached_runtimes.remove(session_id);
         }
+        {
+            let mut chat_runtime_sync = self.chat_runtime_sync.write().await;
+            chat_runtime_sync.retain(|_, state| state.root_session_id != session_id);
+        }
 
         let next_active = {
             let mut active_session_id = self.active_session_id.write().await;
@@ -949,7 +1029,7 @@ impl WorkflowKernelState {
                         matches!(phase, Some("submitting" | "streaming" | "paused"))
                     }
                     WorkflowMode::Plan | WorkflowMode::Task => {
-                        is_background_resume_candidate(phase.unwrap_or("idle"))
+                        is_background_resume_candidate_for_mode(mode, phase.unwrap_or("idle"))
                     }
                 };
                 if resumable {
@@ -980,6 +1060,534 @@ impl WorkflowKernelState {
             .get(session_id)
             .map(|modes| modes.contains(&mode))
             .unwrap_or(false)
+    }
+
+    pub async fn mark_chat_turn_failed(
+        &self,
+        session_id: &str,
+        error: &str,
+    ) -> Result<WorkflowSession, String> {
+        let normalized_error = error.trim();
+        if normalized_error.is_empty() {
+            return Err("Chat turn failure reason cannot be empty".to_string());
+        }
+
+        let updated_session = {
+            let mut sessions = self.sessions.write().await;
+            let session = sessions
+                .get_mut(session_id)
+                .ok_or_else(|| format!("Workflow session not found: {session_id}"))?;
+            session.mode_snapshots.ensure_mode(WorkflowMode::Chat);
+            session.active_mode = WorkflowMode::Chat;
+            session.status = WorkflowStatus::Active;
+            session.last_error = Some(normalized_error.to_string());
+
+            let chat = session.mode_snapshots.chat_mut();
+            chat.phase = "failed".to_string();
+            chat.active_turn_id = None;
+            session.updated_at = now_rfc3339();
+
+            if let Some(meta) = session.mode_runtime_meta.get_mut(&WorkflowMode::Chat) {
+                meta.block_reason = None;
+                meta.control_capabilities = Some(chat_control_capabilities(
+                    meta.backend_kind.as_deref(),
+                    &chat.phase,
+                    None,
+                ));
+            }
+            session.clone()
+        };
+
+        self.persist_session_record(session_id).await?;
+        Ok(updated_session)
+    }
+
+    pub async fn register_chat_runtime_dispatch(
+        &self,
+        dispatch: ChatRuntimeDispatch,
+    ) -> Result<WorkflowSession, String> {
+        let backend_kind = normalize_backend_kind(&dispatch.backend_kind)
+            .ok_or_else(|| format!("Unsupported chat backend '{}'", dispatch.backend_kind))?;
+        let binding_session_id = dispatch.binding_session_id.trim();
+        if binding_session_id.is_empty() {
+            return Err("Chat binding session id cannot be empty".to_string());
+        }
+        let normalized_run_id = dispatch
+            .run_id
+            .as_ref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned);
+
+        let linked_existing = self
+            .kernel_sessions_linked_to_mode_session(WorkflowMode::Chat, binding_session_id)
+            .await;
+        if linked_existing
+            .iter()
+            .any(|candidate| candidate.as_str() != dispatch.session_id)
+        {
+            return Err(format!(
+                "Chat binding session '{}' is already linked to another root session",
+                binding_session_id
+            ));
+        }
+
+        let next_line_id = self
+            .next_mode_transcript_line_id(&dispatch.session_id, WorkflowMode::Chat)
+            .await?;
+
+        let updated_session = {
+            let mut sessions = self.sessions.write().await;
+            let session = sessions
+                .get_mut(&dispatch.session_id)
+                .ok_or_else(|| format!("Workflow session not found: {}", dispatch.session_id))?;
+            session.mode_snapshots.ensure_mode(WorkflowMode::Chat);
+            session.active_mode = WorkflowMode::Chat;
+            session.status = WorkflowStatus::Active;
+            session
+                .linked_mode_sessions
+                .insert(WorkflowMode::Chat, binding_session_id.to_string());
+
+            let chat = session.mode_snapshots.chat_mut();
+            if chat.phase != "submitting" {
+                chat.phase = "submitting".to_string();
+            }
+
+            let capabilities = chat_control_capabilities(Some(backend_kind), &chat.phase, None);
+            session.mode_runtime_meta.insert(
+                WorkflowMode::Chat,
+                ModeRuntimeMeta {
+                    mode: WorkflowMode::Chat,
+                    run_id: normalized_run_id.clone(),
+                    binding_session_id: Some(binding_session_id.to_string()),
+                    is_foreground: false,
+                    is_background_running: false,
+                    is_interrupted: false,
+                    resume_policy: resume_policy_for_mode(WorkflowMode::Chat).to_string(),
+                    last_heartbeat_at: Some(now_rfc3339()),
+                    last_checkpoint_id: session.last_checkpoint_id.clone(),
+                    last_error: session.last_error.clone(),
+                    backend_kind: Some(backend_kind.to_string()),
+                    control_capabilities: Some(capabilities),
+                    block_reason: None,
+                },
+            );
+            session.updated_at = now_rfc3339();
+            session.clone()
+        };
+
+        {
+            let mut sync = self.chat_runtime_sync.write().await;
+            sync.insert(
+                binding_session_id.to_string(),
+                ChatRuntimeSyncState::new(
+                    dispatch.session_id.clone(),
+                    backend_kind.to_string(),
+                    normalized_run_id,
+                    next_line_id,
+                ),
+            );
+        }
+
+        self.mark_mode_runtime_attached(&dispatch.session_id, WorkflowMode::Chat)
+            .await;
+        self.persist_session_record(&dispatch.session_id).await?;
+        Ok(updated_session)
+    }
+
+    pub async fn sync_chat_runtime_event(
+        &self,
+        binding_session_id: &str,
+        event: &UnifiedStreamEvent,
+    ) -> Result<Option<WorkflowSessionMutation>, String> {
+        let normalized_binding_session_id = binding_session_id.trim();
+        if normalized_binding_session_id.is_empty() {
+            return Ok(None);
+        }
+
+        let route = {
+            let sync = self.chat_runtime_sync.read().await;
+            sync.get(normalized_binding_session_id).cloned()
+        };
+        let route = if let Some(route) = route {
+            route
+        } else {
+            let linked_sessions = self
+                .kernel_sessions_linked_to_mode_session(
+                    WorkflowMode::Chat,
+                    normalized_binding_session_id,
+                )
+                .await;
+            let Some(session_id) = linked_sessions.first().cloned() else {
+                return Ok(None);
+            };
+            let next_line_id = self
+                .next_mode_transcript_line_id(&session_id, WorkflowMode::Chat)
+                .await?;
+            let mut sync = self.chat_runtime_sync.write().await;
+            let fallback = ChatRuntimeSyncState::new(
+                session_id.clone(),
+                "standalone".to_string(),
+                None,
+                next_line_id,
+            );
+            sync.insert(normalized_binding_session_id.to_string(), fallback.clone());
+            fallback
+        };
+
+        let session_id = route.root_session_id.clone();
+        let chat_turn = {
+            let sessions = self.sessions.read().await;
+            let session = sessions
+                .get(&session_id)
+                .ok_or_else(|| format!("Workflow session not found: {session_id}"))?;
+            session
+                .mode_snapshots
+                .chat
+                .as_ref()
+                .cloned()
+                .unwrap_or_default()
+        };
+        let turn_id = chat_turn.turn_count.max(1);
+
+        let (replace_from_line_id, appended_lines, phase_override, block_reason_override, assistant_text) = {
+            let mut sync = self.chat_runtime_sync.write().await;
+            let state = sync
+                .get_mut(normalized_binding_session_id)
+                .ok_or_else(|| {
+                    format!(
+                        "Chat runtime binding '{}' is no longer registered",
+                        normalized_binding_session_id
+                    )
+                })?;
+
+            let had_pending_lines = !state.pending_turn_lines.is_empty();
+            let previous_assistant_text = extract_pending_assistant_text(&state.pending_turn_lines);
+            let mut phase_override: Option<String> = None;
+            let mut block_reason_override: Option<Option<String>> = None;
+
+            match event {
+                UnifiedStreamEvent::TextDelta { content } => {
+                    upsert_chat_pending_text_line(state, content, turn_id, false);
+                }
+                UnifiedStreamEvent::TextReplace { content } => {
+                    upsert_chat_pending_text_line(state, content, turn_id, true);
+                }
+                UnifiedStreamEvent::ThinkingDelta { content, .. } => {
+                    upsert_chat_pending_aux_line(state, "thinking", content, turn_id);
+                }
+                UnifiedStreamEvent::ToolStart {
+                    tool_name,
+                    arguments,
+                    ..
+                } => {
+                    let preview = format_tool_args_preview(tool_name, arguments.as_deref());
+                    let content = if preview.is_empty() {
+                        format!("[tool:{}]", tool_name)
+                    } else {
+                        format!("[tool:{}] {}", tool_name, preview)
+                    };
+                    append_chat_pending_line(state, "tool", content, turn_id);
+                }
+                UnifiedStreamEvent::ToolResult {
+                    tool_id,
+                    result,
+                    error,
+                } => {
+                    if let Some(error) = error.as_ref().filter(|value| !value.trim().is_empty()) {
+                        append_chat_pending_line(
+                            state,
+                            "error",
+                            format!("[tool_error:{}] {}", tool_id, error.trim()),
+                            turn_id,
+                        );
+                    } else if let Some(result) =
+                        result.as_ref().filter(|value| !value.trim().is_empty())
+                    {
+                        let preview = summarize_tool_result(result);
+                        append_chat_pending_line(
+                            state,
+                            "tool_result",
+                            format!("[tool_result:{}] {}", tool_id, preview),
+                            turn_id,
+                        );
+                    }
+                }
+                UnifiedStreamEvent::ToolPermissionRequest { .. } => {
+                    phase_override = Some("paused".to_string());
+                    block_reason_override = Some(Some("tool_permission".to_string()));
+                }
+                UnifiedStreamEvent::Complete { stop_reason } => {
+                    phase_override = Some(match stop_reason.as_deref() {
+                        Some("cancelled") => "cancelled".to_string(),
+                        _ => "ready".to_string(),
+                    });
+                    block_reason_override = Some(None);
+                }
+                UnifiedStreamEvent::Error { code, .. } => {
+                    phase_override = Some(match code.as_deref() {
+                        Some("cancelled") => "cancelled".to_string(),
+                        _ => "failed".to_string(),
+                    });
+                    block_reason_override = Some(None);
+                }
+                _ => return Ok(None),
+            }
+
+            let replace_from_line_id = if had_pending_lines {
+                state.pending_turn_lines.first().and_then(transcript_line_id)
+            } else {
+                None
+            };
+            let appended_lines = if had_pending_lines {
+                state.pending_turn_lines.clone()
+            } else if state.pending_turn_lines.is_empty() {
+                Vec::new()
+            } else {
+                state.pending_turn_lines.clone()
+            };
+            let assistant_text = extract_pending_assistant_text(&state.pending_turn_lines)
+                .or(previous_assistant_text);
+            if phase_override
+                .as_deref()
+                .map(is_chat_terminal_phase)
+                .unwrap_or(false)
+            {
+                state.pending_turn_lines.clear();
+            }
+
+            (
+                replace_from_line_id,
+                appended_lines,
+                phase_override,
+                block_reason_override.unwrap_or_else(|| block_reason_from_stream_event(event)),
+                assistant_text,
+            )
+        };
+
+        let phase = phase_override.unwrap_or_else(|| phase_from_stream_event(event).to_string());
+        self.sync_chat_phase(
+            &session_id,
+            &route.backend_kind,
+            normalized_binding_session_id,
+            phase,
+            route.run_id.clone(),
+            block_reason_override,
+            replace_from_line_id,
+            appended_lines,
+            assistant_text,
+        )
+        .await
+    }
+
+    pub async fn set_chat_user_pause_state(
+        &self,
+        binding_session_id: &str,
+        paused: bool,
+    ) -> Result<Option<WorkflowSessionMutation>, String> {
+        let normalized_binding_session_id = binding_session_id.trim();
+        if normalized_binding_session_id.is_empty() {
+            return Ok(None);
+        }
+
+        let route = {
+            let sync = self.chat_runtime_sync.read().await;
+            sync.get(normalized_binding_session_id).cloned()
+        };
+        let Some(route) = route else {
+            return Ok(None);
+        };
+
+        let (current_phase, replace_from_line_id, pending_lines) = {
+            let sessions = self.sessions.read().await;
+            let session = sessions
+                .get(&route.root_session_id)
+                .ok_or_else(|| format!("Workflow session not found: {}", route.root_session_id))?;
+            let current_phase = session
+                .mode_snapshots
+                .chat
+                .as_ref()
+                .map(|chat| chat.phase.clone())
+                .unwrap_or_else(|| "ready".to_string());
+            drop(sessions);
+
+            let sync = self.chat_runtime_sync.read().await;
+            let pending_lines = sync
+                .get(normalized_binding_session_id)
+                .map(|state| state.pending_turn_lines.clone())
+                .unwrap_or_default();
+            let replace_from_line_id = pending_lines.first().and_then(transcript_line_id);
+            (current_phase, replace_from_line_id, pending_lines)
+        };
+
+        let next_phase = if paused {
+            "paused".to_string()
+        } else if current_phase == "paused" {
+            "streaming".to_string()
+        } else {
+            current_phase
+        };
+
+        self.sync_chat_phase(
+            &route.root_session_id,
+            &route.backend_kind,
+            normalized_binding_session_id,
+            next_phase,
+            route.run_id.clone(),
+            if paused {
+                Some("user_pause".to_string())
+            } else {
+                None
+            },
+            replace_from_line_id,
+            pending_lines,
+            None,
+        )
+        .await
+    }
+
+    async fn sync_chat_phase(
+        &self,
+        session_id: &str,
+        backend_kind: &str,
+        binding_session_id: &str,
+        phase: String,
+        run_id: Option<String>,
+        block_reason: Option<String>,
+        replace_from_line_id: Option<u64>,
+        appended_lines: Vec<Value>,
+        assistant_text: Option<String>,
+    ) -> Result<Option<WorkflowSessionMutation>, String> {
+        let normalized_phase = normalize_chat_phase(&phase);
+        let should_clear_turn = is_chat_terminal_phase(normalized_phase.as_str());
+        let transcript_mutation = if appended_lines.is_empty() {
+            None
+        } else {
+            Some(
+                self.record_transcript_mutation(
+                    session_id,
+                    WorkflowMode::Chat,
+                    replace_from_line_id,
+                    appended_lines,
+                )
+                .await?,
+            )
+        };
+
+        let updated_session = {
+            let mut sessions = self.sessions.write().await;
+            let session = sessions
+                .get_mut(session_id)
+                .ok_or_else(|| format!("Workflow session not found: {session_id}"))?;
+            session.mode_snapshots.ensure_mode(WorkflowMode::Chat);
+            session.active_mode = WorkflowMode::Chat;
+            session.status = WorkflowStatus::Active;
+            session
+                .linked_mode_sessions
+                .insert(WorkflowMode::Chat, binding_session_id.to_string());
+
+            let last_error = match normalized_phase.as_str() {
+                "failed" => session.last_error.clone().or_else(|| {
+                    Some("chat_turn_failed".to_string())
+                }),
+                "cancelled" => Some("cancelled_by_user".to_string()),
+                "interrupted" => Some("interrupted_by_restart".to_string()),
+                _ => None,
+            };
+            session.last_error = last_error;
+
+            let chat = session.mode_snapshots.chat_mut();
+            chat.phase = normalized_phase.clone();
+            if should_clear_turn {
+                chat.active_turn_id = None;
+            }
+            if let Some(text) = assistant_text
+                .as_ref()
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+            {
+                chat.last_assistant_message = Some(text.to_string());
+            }
+
+            let capabilities = chat_control_capabilities(
+                Some(backend_kind),
+                &chat.phase,
+                block_reason.as_deref(),
+            );
+            session.mode_runtime_meta.insert(
+                WorkflowMode::Chat,
+                ModeRuntimeMeta {
+                    mode: WorkflowMode::Chat,
+                    run_id: run_id.clone(),
+                    binding_session_id: Some(binding_session_id.to_string()),
+                    is_foreground: false,
+                    is_background_running: false,
+                    is_interrupted: normalized_phase == "interrupted",
+                    resume_policy: resume_policy_for_mode(WorkflowMode::Chat).to_string(),
+                    last_heartbeat_at: Some(now_rfc3339()),
+                    last_checkpoint_id: session.last_checkpoint_id.clone(),
+                    last_error: session.last_error.clone(),
+                    backend_kind: Some(backend_kind.to_string()),
+                    control_capabilities: Some(capabilities),
+                    block_reason: block_reason.clone(),
+                },
+            );
+            session.updated_at = now_rfc3339();
+            session.clone()
+        };
+
+        self.persist_session_record(session_id).await?;
+        Ok(Some(WorkflowSessionMutation {
+            session: updated_session,
+            transcript_mutations: transcript_mutation.into_iter().collect(),
+        }))
+    }
+
+    async fn record_transcript_mutation(
+        &self,
+        session_id: &str,
+        mode: WorkflowMode,
+        replace_from_line_id: Option<u64>,
+        appended_lines: Vec<Value>,
+    ) -> Result<WorkflowTranscriptMutation, String> {
+        let transcript = self
+            .patch_mode_transcript(
+                session_id,
+                mode,
+                replace_from_line_id,
+                appended_lines.clone(),
+            )
+            .await?;
+        Ok(WorkflowTranscriptMutation {
+            mode,
+            replace_from_line_id,
+            appended_lines,
+            transcript,
+        })
+    }
+
+    async fn next_mode_transcript_line_id(
+        &self,
+        session_id: &str,
+        mode: WorkflowMode,
+    ) -> Result<u64, String> {
+        let record = self
+            .read_persisted_mode_transcript(session_id, mode)
+            .await
+            .unwrap_or_else(|_| PersistedModeTranscriptRecord {
+                session_id: session_id.to_string(),
+                mode,
+                revision: 0,
+                lines: Vec::new(),
+            });
+        let next_id = record
+            .lines
+            .iter()
+            .filter_map(transcript_line_id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        Ok(next_id)
     }
 
     pub async fn transition_mode(
@@ -1035,23 +1643,39 @@ impl WorkflowKernelState {
         &self,
         session_id: &str,
         intent: UserInputIntent,
-    ) -> Result<WorkflowSession, String> {
+    ) -> Result<WorkflowSessionMutation, String> {
         if !intent_has_valid_content(&intent) {
             return Err("Input content cannot be empty".to_string());
         }
 
-        let (active_mode, updated_session) = {
+        let active_mode = self.get_session(session_id).await?.active_mode;
+        let next_chat_line_id = if active_mode == WorkflowMode::Chat {
+            Some(
+                self.next_mode_transcript_line_id(session_id, WorkflowMode::Chat)
+                    .await?,
+            )
+        } else {
+            None
+        };
+
+        {
             let mut sessions = self.sessions.write().await;
             let session = sessions
                 .get_mut(session_id)
                 .ok_or_else(|| format!("Workflow session not found: {session_id}"))?;
-
-            let active_mode = session.active_mode;
-            apply_intent_to_mode_state(session, &intent);
+            if active_mode == WorkflowMode::Chat {
+                prepare_chat_turn_submission(
+                    session,
+                    &intent,
+                    next_chat_line_id.expect("chat next line id"),
+                );
+            } else {
+                apply_intent_to_mode_state(session, &intent);
+            }
             session.updated_at = now_rfc3339();
-            (active_mode, session.clone())
-        };
+        }
         let event_mode = resolve_intent_event_mode(active_mode, &intent);
+        let updated_session = self.get_session(session_id).await?;
 
         self.append_event(
             session_id,
@@ -1068,8 +1692,35 @@ impl WorkflowKernelState {
         self.create_checkpoint(session_id, "input_submitted")
             .await?;
         self.persist_session_record(session_id).await?;
+        let transcript_mutations = if active_mode == WorkflowMode::Chat {
+            let chat = updated_session
+                .mode_snapshots
+                .chat
+                .as_ref()
+                .cloned()
+                .unwrap_or_default();
+            let appended_line = build_chat_user_transcript_line(
+                next_chat_line_id.expect("chat next line id"),
+                chat.turn_count.max(1),
+                &intent.content,
+            );
+            vec![
+                self.record_transcript_mutation(
+                    session_id,
+                    WorkflowMode::Chat,
+                    None,
+                    vec![appended_line],
+                )
+                .await?,
+            ]
+        } else {
+            Vec::new()
+        };
 
-        Ok(updated_session)
+        Ok(WorkflowSessionMutation {
+            session: self.get_session(session_id).await?,
+            transcript_mutations,
+        })
     }
 
     pub async fn transition_and_submit_input(
@@ -1078,12 +1729,21 @@ impl WorkflowKernelState {
         target_mode: WorkflowMode,
         handoff: Option<HandoffContextBundle>,
         intent: UserInputIntent,
-    ) -> Result<WorkflowSession, String> {
+    ) -> Result<WorkflowSessionMutation, String> {
         if !intent_has_valid_content(&intent) {
             return Err("Input content cannot be empty".to_string());
         }
 
-        let (source_mode, updated_session) = {
+        let next_chat_line_id = if target_mode == WorkflowMode::Chat {
+            Some(
+                self.next_mode_transcript_line_id(session_id, WorkflowMode::Chat)
+                    .await?,
+            )
+        } else {
+            None
+        };
+
+        let source_mode = {
             let mut sessions = self.sessions.write().await;
             let mut ledger_map = self.context_ledger_entries.write().await;
             let session = sessions
@@ -1102,11 +1762,19 @@ impl WorkflowKernelState {
             session.active_mode = target_mode;
             session.status = WorkflowStatus::Active;
             session.last_error = None;
-            apply_intent_to_mode_state(session, &intent);
+            if target_mode == WorkflowMode::Chat {
+                prepare_chat_turn_submission(
+                    session,
+                    &intent,
+                    next_chat_line_id.expect("chat next line id"),
+                );
+            } else {
+                apply_intent_to_mode_state(session, &intent);
+            }
             session.updated_at = now_rfc3339();
-
-            (source_mode, session.clone())
+            source_mode
         };
+        let updated_session = self.get_session(session_id).await?;
 
         self.append_event(
             session_id,
@@ -1138,8 +1806,35 @@ impl WorkflowKernelState {
         self.create_checkpoint(session_id, "mode_transitioned_with_input")
             .await?;
         self.persist_session_record(session_id).await?;
+        let transcript_mutations = if target_mode == WorkflowMode::Chat {
+            let chat = updated_session
+                .mode_snapshots
+                .chat
+                .as_ref()
+                .cloned()
+                .unwrap_or_default();
+            let appended_line = build_chat_user_transcript_line(
+                next_chat_line_id.expect("chat next line id"),
+                chat.turn_count.max(1),
+                &intent.content,
+            );
+            vec![
+                self.record_transcript_mutation(
+                    session_id,
+                    WorkflowMode::Chat,
+                    None,
+                    vec![appended_line],
+                )
+                .await?,
+            ]
+        } else {
+            Vec::new()
+        };
 
-        Ok(updated_session)
+        Ok(WorkflowSessionMutation {
+            session: self.get_session(session_id).await?,
+            transcript_mutations,
+        })
     }
 
     pub async fn append_context_items(
@@ -1191,6 +1886,20 @@ impl WorkflowKernelState {
         let normalized_mode_session_id = mode_session_id.trim();
         if normalized_mode_session_id.is_empty() {
             return Err("Mode session id cannot be empty".to_string());
+        }
+        if mode == WorkflowMode::Chat {
+            let linked = self
+                .kernel_sessions_linked_to_mode_session(mode, normalized_mode_session_id)
+                .await;
+            if linked
+                .iter()
+                .any(|candidate| candidate.as_str() != session_id)
+            {
+                return Err(format!(
+                    "Chat binding session '{}' is already linked to another root session",
+                    normalized_mode_session_id
+                ));
+            }
         }
 
         let updated_session = {
@@ -1346,7 +2055,7 @@ impl WorkflowKernelState {
                     plan.background_status = Some(
                         if phase
                             .as_deref()
-                            .map(is_background_resume_candidate)
+                            .map(|value| is_background_resume_candidate_for_mode(WorkflowMode::Plan, value))
                             .unwrap_or(false)
                         {
                             "running".to_string()
@@ -1356,7 +2065,7 @@ impl WorkflowKernelState {
                     );
                     plan.resumable_from_checkpoint = phase
                         .as_deref()
-                        .map(is_background_resume_candidate)
+                        .map(|value| is_background_resume_candidate_for_mode(WorkflowMode::Plan, value))
                         .unwrap_or(false);
                     plan.last_checkpoint_id = session.last_checkpoint_id.clone();
                     if let Some(next_status) = status {
@@ -1419,7 +2128,7 @@ impl WorkflowKernelState {
                     task.background_status = Some(
                         if phase
                             .as_deref()
-                            .map(is_background_resume_candidate)
+                            .map(|value| is_background_resume_candidate_for_mode(WorkflowMode::Task, value))
                             .unwrap_or(false)
                         {
                             "running".to_string()
@@ -1429,7 +2138,7 @@ impl WorkflowKernelState {
                     );
                     task.resumable_from_checkpoint = phase
                         .as_deref()
-                        .map(is_background_resume_candidate)
+                        .map(|value| is_background_resume_candidate_for_mode(WorkflowMode::Task, value))
                         .unwrap_or(false);
                     task.last_checkpoint_id = session.last_checkpoint_id.clone();
                     if let Some(next_status) = status {
@@ -1533,7 +2242,7 @@ impl WorkflowKernelState {
                     if plan_snapshot
                         .phase
                         .as_deref()
-                        .map(is_background_resume_candidate)
+                        .map(|value| is_background_resume_candidate_for_mode(WorkflowMode::Plan, value))
                         .unwrap_or(false)
                     {
                         "running".to_string()
@@ -1544,7 +2253,7 @@ impl WorkflowKernelState {
                 plan.resumable_from_checkpoint = plan_snapshot
                     .phase
                     .as_deref()
-                    .map(is_background_resume_candidate)
+                    .map(|value| is_background_resume_candidate_for_mode(WorkflowMode::Plan, value))
                     .unwrap_or(false);
                 plan.last_checkpoint_id = session.last_checkpoint_id.clone();
             }
@@ -1587,7 +2296,7 @@ impl WorkflowKernelState {
                     if task_snapshot
                         .phase
                         .as_deref()
-                        .map(is_background_resume_candidate)
+                        .map(|value| is_background_resume_candidate_for_mode(WorkflowMode::Task, value))
                         .unwrap_or(false)
                     {
                         "running".to_string()
@@ -1598,7 +2307,7 @@ impl WorkflowKernelState {
                 task.resumable_from_checkpoint = task_snapshot
                     .phase
                     .as_deref()
-                    .map(is_background_resume_candidate)
+                    .map(|value| is_background_resume_candidate_for_mode(WorkflowMode::Task, value))
                     .unwrap_or(false);
                 task.last_checkpoint_id = session.last_checkpoint_id.clone();
             }
@@ -1750,17 +2459,29 @@ impl WorkflowKernelState {
                 .get_mut(session_id)
                 .ok_or_else(|| format!("Workflow session not found: {session_id}"))?;
 
-            session.status = WorkflowStatus::Cancelled;
             session.last_error = Some(cancel_reason.clone());
             session.updated_at = now_rfc3339();
             match session.active_mode {
                 WorkflowMode::Chat => {
-                    session.mode_snapshots.chat_mut().phase = "cancelled".to_string()
+                    session.status = WorkflowStatus::Active;
+                    let chat = session.mode_snapshots.chat_mut();
+                    chat.phase = "cancelled".to_string();
+                    chat.active_turn_id = None;
+                    if let Some(meta) = session.mode_runtime_meta.get_mut(&WorkflowMode::Chat) {
+                        meta.block_reason = None;
+                        meta.control_capabilities = Some(chat_control_capabilities(
+                            meta.backend_kind.as_deref(),
+                            &chat.phase,
+                            None,
+                        ));
+                    }
                 }
                 WorkflowMode::Plan => {
+                    session.status = WorkflowStatus::Cancelled;
                     session.mode_snapshots.plan_mut().phase = "cancelled".to_string()
                 }
                 WorkflowMode::Task => {
+                    session.status = WorkflowStatus::Cancelled;
                     session.mode_snapshots.task_mut().phase = "cancelled".to_string()
                 }
             }
@@ -1862,9 +2583,30 @@ impl WorkflowKernelState {
         session.mode_snapshots.ensure_mode(session.active_mode);
 
         if let Some(chat) = session.mode_snapshots.chat.as_mut() {
-            if chat.phase.trim().is_empty() {
+            let normalized_phase = normalize_chat_phase(&chat.phase);
+            if chat.phase != normalized_phase {
+                chat.phase = normalized_phase;
+                repaired.push("mode_snapshots.chat.phase".to_string());
+            } else if chat.phase.trim().is_empty() {
                 chat.phase = "ready".to_string();
                 repaired.push("mode_snapshots.chat.phase".to_string());
+            }
+            if chat.pending_input.trim().is_empty() {
+                chat.pending_input.clear();
+            }
+            if is_chat_terminal_phase(chat.phase.as_str()) {
+                chat.active_turn_id = None;
+            }
+            if session.active_mode == WorkflowMode::Chat
+                && matches!(
+                    session.status,
+                    WorkflowStatus::Completed
+                        | WorkflowStatus::Failed
+                        | WorkflowStatus::Cancelled
+                )
+            {
+                session.status = WorkflowStatus::Active;
+                repaired.push("status.chat_reset_to_active".to_string());
             }
         }
         if let Some(plan) = session.mode_snapshots.plan.as_mut() {
@@ -1899,6 +2641,23 @@ impl WorkflowKernelState {
             if task.last_checkpoint_id.is_none() {
                 task.last_checkpoint_id = session.last_checkpoint_id.clone();
             }
+        }
+        if let Some(meta) = session.mode_runtime_meta.get_mut(&WorkflowMode::Chat) {
+            meta.backend_kind = meta
+                .backend_kind
+                .as_ref()
+                .and_then(|value| normalize_backend_kind(value))
+                .map(ToOwned::to_owned);
+            meta.control_capabilities = Some(chat_control_capabilities(
+                meta.backend_kind.as_deref(),
+                session
+                    .mode_snapshots
+                    .chat
+                    .as_ref()
+                    .map(|chat| chat.phase.as_str())
+                    .unwrap_or("ready"),
+                meta.block_reason.as_deref(),
+            ));
         }
 
         repaired
@@ -2199,48 +2958,25 @@ impl WorkflowKernelState {
         mode: WorkflowMode,
         lines: Vec<Value>,
     ) -> Result<ModeTranscriptPayload, String> {
-        let _ = self.recover_session(session_id).await?;
-        let active_session_id = self.active_session_id().await;
-        {
-            let mut sessions = self.sessions.write().await;
-            let session = sessions
-                .get_mut(session_id)
-                .ok_or_else(|| format!("Workflow session not found: {session_id}"))?;
-            session.mode_snapshots.ensure_mode(mode);
-            session.updated_at = now_rfc3339();
-            self.refresh_session_derived_fields(session, active_session_id.as_deref());
-        }
-
-        let previous = self
-            .read_persisted_mode_transcript(session_id, mode)
+        self.patch_mode_transcript(session_id, mode, Some(0), lines)
             .await
-            .unwrap_or_else(|_| PersistedModeTranscriptRecord {
-                session_id: session_id.to_string(),
-                mode,
-                revision: 0,
-                lines: Vec::new(),
-            });
-        let record = PersistedModeTranscriptRecord {
-            session_id: session_id.to_string(),
-            mode,
-            revision: previous.revision.saturating_add(1),
-            lines,
-        };
-        self.persist_mode_transcript_record(&record).await?;
-        self.persist_session_record(session_id).await?;
-
-        Ok(ModeTranscriptPayload {
-            session_id: record.session_id,
-            mode: record.mode,
-            revision: record.revision,
-            lines: record.lines,
-        })
     }
 
     pub async fn append_mode_transcript(
         &self,
         session_id: &str,
         mode: WorkflowMode,
+        appended_lines: Vec<Value>,
+    ) -> Result<ModeTranscriptPayload, String> {
+        self.patch_mode_transcript(session_id, mode, None, appended_lines)
+            .await
+    }
+
+    pub async fn patch_mode_transcript(
+        &self,
+        session_id: &str,
+        mode: WorkflowMode,
+        replace_from_line_id: Option<u64>,
         appended_lines: Vec<Value>,
     ) -> Result<ModeTranscriptPayload, String> {
         let _ = self.recover_session(session_id).await?;
@@ -2265,7 +3001,28 @@ impl WorkflowKernelState {
                 lines: Vec::new(),
             });
         record.revision = record.revision.saturating_add(1);
-        record.lines.extend(appended_lines);
+
+        match replace_from_line_id {
+            None => record.lines.extend(appended_lines),
+            Some(0) => record.lines = appended_lines,
+            Some(target_line_id) => {
+                let replace_index = record
+                    .lines
+                    .iter()
+                    .position(|line| transcript_line_id(line) == Some(target_line_id))
+                    .ok_or_else(|| {
+                        format!(
+                            "Workflow transcript line '{}' not found for patch '{}:{}'",
+                            target_line_id,
+                            session_id,
+                            mode_storage_name(mode)
+                        )
+                    })?;
+                record.lines.truncate(replace_index);
+                record.lines.extend(appended_lines);
+            }
+        }
+
         self.persist_mode_transcript_record(&record).await?;
         self.persist_session_record(session_id).await?;
 
@@ -2323,29 +3080,331 @@ impl WorkflowKernelState {
     }
 }
 
-fn apply_intent_to_mode_state(session: &mut WorkflowSession, intent: &UserInputIntent) {
-    if intent.intent_type == UserInputIntentType::SystemPhaseUpdate {
-        if let Some(phase) = extract_phase_hint(intent) {
-            match resolve_intent_mode_hint(intent).unwrap_or(session.active_mode) {
-                WorkflowMode::Chat => session.mode_snapshots.chat_mut().phase = phase,
-                WorkflowMode::Plan => session.mode_snapshots.plan_mut().phase = phase,
-                WorkflowMode::Task => session.mode_snapshots.task_mut().phase = phase,
-            }
+fn transcript_line_id(value: &Value) -> Option<u64> {
+    value
+        .as_object()
+        .and_then(|object| object.get("id"))
+        .and_then(Value::as_u64)
+}
+
+fn transcript_line_content(value: &Value) -> Option<&str> {
+    value
+        .as_object()
+        .and_then(|object| object.get("content"))
+        .and_then(Value::as_str)
+}
+
+fn transcript_line_type(value: &Value) -> Option<&str> {
+    value
+        .as_object()
+        .and_then(|object| object.get("type"))
+        .and_then(Value::as_str)
+}
+
+fn prepare_chat_turn_submission(
+    session: &mut WorkflowSession,
+    intent: &UserInputIntent,
+    _next_line_id: u64,
+) {
+    session.mode_snapshots.ensure_mode(WorkflowMode::Chat);
+    session.active_mode = WorkflowMode::Chat;
+    session.status = WorkflowStatus::Active;
+    session.last_error = None;
+
+    let chat = session.mode_snapshots.chat_mut();
+    chat.turn_count = chat.turn_count.saturating_add(1);
+    chat.last_user_message = Some(intent.content.clone());
+    chat.phase = "submitting".to_string();
+    chat.pending_input.clear();
+    chat.active_turn_id = Some(uuid::Uuid::new_v4().to_string());
+    if chat.turn_count == 1 {
+        session.display_title = summarize_display_title(&intent.content);
+    }
+}
+
+fn build_chat_user_transcript_line(id: u64, turn_id: u64, content: &str) -> Value {
+    json!({
+        "id": id,
+        "type": "info",
+        "content": content,
+        "timestamp": chrono::Utc::now().timestamp_millis(),
+        "turnId": turn_id,
+        "turnBoundary": "user",
+    })
+}
+
+fn build_chat_runtime_line(
+    id: u64,
+    line_type: &str,
+    content: String,
+    turn_id: u64,
+) -> Value {
+    let mut object = serde_json::Map::new();
+    object.insert("id".to_string(), Value::Number(id.into()));
+    object.insert("type".to_string(), Value::String(line_type.to_string()));
+    object.insert("content".to_string(), Value::String(content));
+    object.insert(
+        "timestamp".to_string(),
+        Value::Number(chrono::Utc::now().timestamp_millis().into()),
+    );
+    object.insert("turnId".to_string(), Value::Number(turn_id.into()));
+    if line_type == "text" {
+        object.insert(
+            "turnBoundary".to_string(),
+            Value::String("assistant".to_string()),
+        );
+    }
+    Value::Object(object)
+}
+
+fn append_chat_pending_line(
+    state: &mut ChatRuntimeSyncState,
+    line_type: &str,
+    content: String,
+    turn_id: u64,
+) {
+    let line = build_chat_runtime_line(state.next_line_id, line_type, content, turn_id);
+    state.next_line_id = state.next_line_id.saturating_add(1);
+    state.pending_turn_lines.push(line);
+}
+
+fn upsert_chat_pending_text_line(
+    state: &mut ChatRuntimeSyncState,
+    content: &str,
+    turn_id: u64,
+    replace: bool,
+) {
+    if content.is_empty() {
+        return;
+    }
+    let existing = state
+        .pending_turn_lines
+        .iter_mut()
+        .rev()
+        .find(|line| transcript_line_type(line) == Some("text"));
+    if let Some(line) = existing {
+        if let Some(object) = line.as_object_mut() {
+            let next_content = if replace {
+                content.to_string()
+            } else {
+                format!(
+                    "{}{}",
+                    object
+                        .get("content")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                    content
+                )
+            };
+            object.insert("content".to_string(), Value::String(next_content));
+            object.insert(
+                "timestamp".to_string(),
+                Value::Number(chrono::Utc::now().timestamp_millis().into()),
+            );
         }
         return;
     }
 
-    match session.active_mode {
-        WorkflowMode::Chat => {
-            let chat = session.mode_snapshots.chat_mut();
-            chat.turn_count = chat.turn_count.saturating_add(1);
-            chat.last_user_message = Some(intent.content.clone());
-            chat.phase = "ready".to_string();
-            chat.draft_input.clear();
-            if chat.turn_count == 1 {
-                session.display_title = summarize_display_title(&intent.content);
+    append_chat_pending_line(state, "text", content.to_string(), turn_id);
+}
+
+fn upsert_chat_pending_aux_line(
+    state: &mut ChatRuntimeSyncState,
+    line_type: &str,
+    content: &str,
+    turn_id: u64,
+) {
+    if content.is_empty() {
+        return;
+    }
+    let existing = state
+        .pending_turn_lines
+        .iter_mut()
+        .rev()
+        .find(|line| transcript_line_type(line) == Some(line_type));
+    if let Some(line) = existing {
+        if let Some(object) = line.as_object_mut() {
+            let merged = format!(
+                "{}{}",
+                object
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+                content
+            );
+            object.insert("content".to_string(), Value::String(merged));
+            object.insert(
+                "timestamp".to_string(),
+                Value::Number(chrono::Utc::now().timestamp_millis().into()),
+            );
+        }
+        return;
+    }
+
+    append_chat_pending_line(state, line_type, content.to_string(), turn_id);
+}
+
+fn extract_pending_assistant_text(lines: &[Value]) -> Option<String> {
+    let text = lines
+        .iter()
+        .filter(|line| transcript_line_type(line) == Some("text"))
+        .filter_map(transcript_line_content)
+        .collect::<String>();
+    let normalized = text.trim();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized.to_string())
+    }
+}
+
+fn normalize_backend_kind(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "claude" | "claude_code" => Some("claude"),
+        "standalone" => Some("standalone"),
+        _ => None,
+    }
+}
+
+fn normalize_chat_phase(value: &str) -> String {
+    match value.trim() {
+        "idle" | "completed" => "ready".to_string(),
+        "running" => "streaming".to_string(),
+        "ready" | "submitting" | "streaming" | "paused" | "failed" | "cancelled"
+        | "interrupted" => value.trim().to_string(),
+        _ => "ready".to_string(),
+    }
+}
+
+fn is_chat_terminal_phase(phase: &str) -> bool {
+    matches!(phase, "ready" | "failed" | "cancelled" | "interrupted")
+}
+
+fn chat_control_capabilities(
+    backend_kind: Option<&str>,
+    phase: &str,
+    block_reason: Option<&str>,
+) -> ChatControlCapabilities {
+    let backend = normalize_backend_kind(backend_kind.unwrap_or_default()).unwrap_or("standalone");
+    let phase = normalize_chat_phase(phase);
+
+    let can_cancel = !is_chat_terminal_phase(&phase);
+    let can_pause = backend == "standalone" && matches!(phase.as_str(), "submitting" | "streaming");
+    let can_resume = backend == "standalone"
+        && phase == "paused"
+        && block_reason == Some("user_pause");
+
+    ChatControlCapabilities {
+        can_pause,
+        can_resume,
+        can_cancel,
+    }
+}
+
+fn block_reason_from_stream_event(event: &UnifiedStreamEvent) -> Option<String> {
+    match event {
+        UnifiedStreamEvent::ToolPermissionRequest { .. } => Some("tool_permission".to_string()),
+        _ => None,
+    }
+}
+
+fn phase_from_stream_event(event: &UnifiedStreamEvent) -> &'static str {
+    match event {
+        UnifiedStreamEvent::TextDelta { .. }
+        | UnifiedStreamEvent::TextReplace { .. }
+        | UnifiedStreamEvent::ThinkingDelta { .. }
+        | UnifiedStreamEvent::ToolStart { .. }
+        | UnifiedStreamEvent::ToolResult { .. } => "streaming",
+        UnifiedStreamEvent::ToolPermissionRequest { .. } => "paused",
+        UnifiedStreamEvent::Complete { stop_reason } => match stop_reason.as_deref() {
+            Some("cancelled") => "cancelled",
+            _ => "ready",
+        },
+        UnifiedStreamEvent::Error { code, .. } => match code.as_deref() {
+            Some("cancelled") => "cancelled",
+            _ => "failed",
+        },
+        _ => "ready",
+    }
+}
+
+fn summarize_tool_result(result: &str) -> String {
+    let trimmed = result.trim();
+    if trimmed.chars().count() > 500 {
+        let mut compact = trimmed.chars().take(500).collect::<String>();
+        compact.push_str("...");
+        compact
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn format_tool_args_preview(tool_name: &str, raw_args: Option<&str>) -> String {
+    let Some(raw_args) = raw_args.map(str::trim).filter(|value| !value.is_empty()) else {
+        return String::new();
+    };
+    let fallback = || {
+        if raw_args.chars().count() > 120 {
+            let mut compact = raw_args.chars().take(120).collect::<String>();
+            compact.push_str("...");
+            compact
+        } else {
+            raw_args.to_string()
+        }
+    };
+    let Ok(args) = serde_json::from_str::<serde_json::Map<String, Value>>(raw_args) else {
+        return fallback();
+    };
+    match tool_name {
+        "Read" | "Write" | "Edit" | "LS" => args
+            .get("file_path")
+            .or_else(|| args.get("path"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        "Bash" => truncate_for_preview(
+            args.get("command").and_then(Value::as_str).unwrap_or_default(),
+            120,
+        ),
+        "Glob" => {
+            let pattern = args.get("pattern").and_then(Value::as_str).unwrap_or_default();
+            let path = args.get("path").and_then(Value::as_str).unwrap_or_default();
+            if path.is_empty() {
+                pattern.to_string()
+            } else {
+                format!("{pattern} in {path}")
             }
         }
+        "Grep" => {
+            let pattern = args.get("pattern").and_then(Value::as_str).unwrap_or_default();
+            let path = args.get("path").and_then(Value::as_str).unwrap_or_default();
+            if path.is_empty() {
+                format!("/{pattern}/")
+            } else {
+                format!("/{pattern}/ in {path}")
+            }
+        }
+        "Task" => truncate_for_preview(
+            args.get("prompt").and_then(Value::as_str).unwrap_or_default(),
+            120,
+        ),
+        _ => truncate_for_preview(&Value::Object(args).to_string(), 120),
+    }
+}
+
+fn truncate_for_preview(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        value.to_string()
+    } else {
+        let mut compact = value.chars().take(max_chars).collect::<String>();
+        compact.push_str("...");
+        compact
+    }
+}
+
+fn apply_intent_to_mode_state(session: &mut WorkflowSession, intent: &UserInputIntent) {
+    match session.active_mode {
+        WorkflowMode::Chat => prepare_chat_turn_submission(session, intent, 0),
         WorkflowMode::Plan => {
             let plan = session.mode_snapshots.plan_mut();
             match intent.intent_type {
@@ -2626,8 +3685,11 @@ fn is_terminal_phase(phase: &str) -> bool {
     )
 }
 
-fn is_background_resume_candidate(phase: &str) -> bool {
-    !is_terminal_phase(phase)
+fn is_background_resume_candidate_for_mode(mode: WorkflowMode, phase: &str) -> bool {
+    match mode {
+        WorkflowMode::Chat => !is_chat_terminal_phase(&normalize_chat_phase(phase)),
+        WorkflowMode::Plan | WorkflowMode::Task => !is_terminal_phase(phase),
+    }
 }
 
 fn is_interrupted_phase(mode: WorkflowMode, phase: &str) -> bool {
@@ -2643,6 +3705,7 @@ fn mark_chat_runtime_interrupted(session: &mut WorkflowSession) -> bool {
     };
     if matches!(chat.phase.as_str(), "submitting" | "streaming" | "paused") {
         chat.phase = "interrupted".to_string();
+        chat.active_turn_id = None;
         session.last_error = Some("interrupted_by_restart".to_string());
         return true;
     }
@@ -2665,23 +3728,37 @@ fn build_mode_runtime_meta_map(
     [WorkflowMode::Chat, WorkflowMode::Plan, WorkflowMode::Task]
         .into_iter()
         .map(|mode| {
+            let existing = session.mode_runtime_meta.get(&mode);
             let phase = phase_for_mode(session, mode).unwrap_or(match mode {
                 WorkflowMode::Chat => "ready",
                 WorkflowMode::Plan | WorkflowMode::Task => "idle",
             });
             let binding_session_id = session.linked_mode_sessions.get(&mode).cloned();
             let run_id = match mode {
-                WorkflowMode::Chat => None,
+                WorkflowMode::Chat => existing.and_then(|meta| meta.run_id.clone()),
                 WorkflowMode::Plan => session
                     .mode_snapshots
                     .plan
                     .as_ref()
-                    .and_then(|state| state.run_id.clone()),
+                    .and_then(|state| state.run_id.clone())
+                    .or_else(|| existing.and_then(|meta| meta.run_id.clone())),
                 WorkflowMode::Task => session
                     .mode_snapshots
                     .task
                     .as_ref()
-                    .and_then(|state| state.run_id.clone()),
+                    .and_then(|state| state.run_id.clone())
+                    .or_else(|| existing.and_then(|meta| meta.run_id.clone())),
+            };
+            let backend_kind = existing.and_then(|meta| meta.backend_kind.clone());
+            let block_reason = existing.and_then(|meta| meta.block_reason.clone());
+            let control_capabilities = if mode == WorkflowMode::Chat {
+                Some(chat_control_capabilities(
+                    backend_kind.as_deref(),
+                    phase,
+                    block_reason.as_deref(),
+                ))
+            } else {
+                existing.and_then(|meta| meta.control_capabilities.clone())
             };
             (
                 mode,
@@ -2691,12 +3768,15 @@ fn build_mode_runtime_meta_map(
                     binding_session_id,
                     is_foreground: is_foreground_session && session.active_mode == mode,
                     is_background_running: !is_foreground_session
-                        && is_background_resume_candidate(phase),
+                        && is_background_resume_candidate_for_mode(mode, phase),
                     is_interrupted: is_interrupted_phase(mode, phase),
                     resume_policy: resume_policy_for_mode(mode).to_string(),
                     last_heartbeat_at: Some(session.updated_at.clone()),
                     last_checkpoint_id: session_last_checkpoint_id.clone(),
                     last_error: session.last_error.clone(),
+                    backend_kind,
+                    control_capabilities,
+                    block_reason,
                 },
             )
         })
@@ -2724,7 +3804,7 @@ fn derive_background_state(
         .into_iter()
         .any(|mode| {
             phase_for_mode(session, mode)
-                .map(is_background_resume_candidate)
+                .map(|phase| is_background_resume_candidate_for_mode(mode, phase))
                 .unwrap_or(false)
         });
     if is_running {
@@ -2734,77 +3814,12 @@ fn derive_background_state(
     }
 }
 
-fn extract_phase_hint(intent: &UserInputIntent) -> Option<String> {
-    if let Some(phase) = intent
-        .metadata
-        .as_object()
-        .and_then(|obj| obj.get("phase"))
-        .and_then(|value| value.as_str())
-    {
-        let normalized = phase.trim();
-        if !normalized.is_empty() {
-            return Some(normalized.to_string());
-        }
-    }
-
-    let content = intent.content.trim();
-    if content.is_empty() {
-        return None;
-    }
-
-    if let Some(rest) = content.strip_prefix("phase:") {
-        let normalized = rest.trim();
-        if !normalized.is_empty() {
-            return Some(normalized.to_string());
-        }
-    }
-
-    None
-}
-
 fn resolve_intent_event_mode(active_mode: WorkflowMode, intent: &UserInputIntent) -> WorkflowMode {
-    if intent.intent_type == UserInputIntentType::SystemPhaseUpdate {
-        return resolve_intent_mode_hint(intent).unwrap_or(active_mode);
-    }
     active_mode
 }
 
-fn resolve_intent_mode_hint(intent: &UserInputIntent) -> Option<WorkflowMode> {
-    let mode_hint = intent
-        .metadata
-        .as_object()
-        .and_then(|obj| obj.get("mode"))
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .and_then(parse_workflow_mode);
-    if mode_hint.is_some() {
-        return mode_hint;
-    }
-
-    let content = intent.content.trim();
-    if let Some(rest) = content.strip_prefix("mode:") {
-        return parse_workflow_mode(rest.trim());
-    }
-    None
-}
-
-fn parse_workflow_mode(value: &str) -> Option<WorkflowMode> {
-    match value {
-        "chat" => Some(WorkflowMode::Chat),
-        "plan" => Some(WorkflowMode::Plan),
-        "task" => Some(WorkflowMode::Task),
-        _ => None,
-    }
-}
-
 fn intent_has_valid_content(intent: &UserInputIntent) -> bool {
-    if !intent.content.trim().is_empty() {
-        return true;
-    }
-    if intent.intent_type == UserInputIntentType::SystemPhaseUpdate {
-        return extract_phase_hint(intent).is_some();
-    }
-    false
+    !intent.content.trim().is_empty()
 }
 
 fn default_reason_code() -> String {

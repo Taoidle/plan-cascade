@@ -204,19 +204,133 @@ pub struct ClaudeCodeAdapter {
     /// content_block_delta). When true, text from the Assistant event
     /// is skipped to avoid duplication.
     has_streamed_text: bool,
+    /// Raw streamed text observed for the current turn. Used to distinguish
+    /// genuine assistant prose from tool-call payloads that should not
+    /// suppress the final assistant/result text fallback.
+    streamed_text_buffer: String,
     /// Set to true when we receive any stream_event. When true, top-level
     /// content_block_delta events are skipped (they would be duplicates
     /// of what stream_event already provided).
     uses_stream_events: bool,
+    /// Tracks whether this turn already emitted a fallback text payload from
+    /// the assistant/result summary, so the final result does not duplicate it.
+    emitted_terminal_text_fallback: bool,
 }
 
 impl ClaudeCodeAdapter {
     pub fn new() -> Self {
         Self {
             has_streamed_text: false,
+            streamed_text_buffer: String::new(),
             uses_stream_events: false,
+            emitted_terminal_text_fallback: false,
         }
     }
+
+    fn note_streamed_text(&mut self, text: &str) {
+        self.has_streamed_text = true;
+        self.streamed_text_buffer.push_str(text);
+    }
+
+    fn visible_streamed_text_present(&self) -> bool {
+        streamed_text_has_visible_content(&self.streamed_text_buffer)
+    }
+
+    fn resolve_terminal_text_fallback(&mut self, candidate: &str) -> Option<String> {
+        let trimmed_candidate = candidate.trim();
+        if trimmed_candidate.is_empty() || self.emitted_terminal_text_fallback {
+            return None;
+        }
+
+        if self.visible_streamed_text_present() {
+            return None;
+        }
+
+        self.emitted_terminal_text_fallback = true;
+        Some(candidate.to_string())
+    }
+
+    fn reset_turn_state(&mut self) {
+        self.has_streamed_text = false;
+        self.streamed_text_buffer.clear();
+        self.uses_stream_events = false;
+        self.emitted_terminal_text_fallback = false;
+    }
+}
+
+fn streamed_text_has_visible_content(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let normalized = strip_tool_call_wrappers(trimmed);
+    let stripped = normalized.trim();
+    !stripped.is_empty()
+}
+
+fn strip_tool_call_wrappers(text: &str) -> String {
+    let mut remaining = text.trim().to_string();
+
+    loop {
+        let next = strip_one_tool_call_wrapper(&remaining);
+        if next == remaining {
+            return remaining;
+        }
+        remaining = next.trim().to_string();
+    }
+}
+
+fn strip_one_tool_call_wrapper(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    if let Some(rest) = strip_fenced_tool_call_block(trimmed) {
+        return rest.to_string();
+    }
+
+    if let Some(rest) = strip_bare_tool_call_block(trimmed) {
+        return rest.to_string();
+    }
+
+    trimmed.to_string()
+}
+
+fn strip_fenced_tool_call_block(text: &str) -> Option<&str> {
+    if !text.starts_with("```") {
+        return None;
+    }
+
+    let after_fence = &text[3..];
+    let after_fence_trimmed = after_fence.trim_start();
+    let normalized = after_fence_trimmed
+        .strip_prefix("tool_call")
+        .or_else(|| after_fence_trimmed.strip_prefix("json"))?;
+
+    let body = normalized.trim_start_matches([' ', '\r', '\n']);
+    if !looks_like_tool_json(body) {
+        return None;
+    }
+
+    let closing_index = text[3..].find("```")?;
+    let after_closing_index = 3 + closing_index + 3;
+    Some(&text[after_closing_index..])
+}
+
+fn strip_bare_tool_call_block(text: &str) -> Option<&str> {
+    let bare = text.strip_prefix("tool_call")?;
+    let body = bare.trim_start_matches([' ', ':', '\r', '\n']);
+    if !looks_like_tool_json(body) {
+        return None;
+    }
+    Some("")
+}
+
+fn looks_like_tool_json(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    trimmed.starts_with('{') && trimmed.contains("\"tool")
 }
 
 impl Default for ClaudeCodeAdapter {
@@ -258,7 +372,7 @@ impl StreamAdapter for ClaudeCodeAdapter {
                 match inner {
                     Some(StreamInnerEvent::ContentBlockDelta { delta }) => match delta {
                         StreamDelta::TextDelta { text } => {
-                            self.has_streamed_text = true;
+                            self.note_streamed_text(&text);
                             vec![UnifiedStreamEvent::TextDelta { content: text }]
                         }
                         StreamDelta::ThinkingDelta { thinking } => {
@@ -283,18 +397,15 @@ impl StreamAdapter for ClaudeCodeAdapter {
             ClaudeCodeEvent::Assistant { message, .. } => {
                 if let Some(msg) = message {
                     let mut events = vec![];
+                    let mut assistant_text_blocks: Vec<String> = Vec::new();
 
                     match msg.content {
                         ContentField::Blocks(blocks) => {
                             for block in blocks {
                                 match block {
                                     ContentBlock::Text { text } => {
-                                        // Only emit if we never received streaming text
-                                        // (fallback for CLIs without --include-partial-messages)
-                                        if !self.has_streamed_text && !text.is_empty() {
-                                            events.push(UnifiedStreamEvent::TextDelta {
-                                                content: text,
-                                            });
+                                        if !text.is_empty() {
+                                            assistant_text_blocks.push(text);
                                         }
                                     }
                                     ContentBlock::Thinking { thinking } => {
@@ -340,11 +451,18 @@ impl StreamAdapter for ClaudeCodeAdapter {
                             }
                         }
                         ContentField::Text(text) => {
-                            if !self.has_streamed_text && !text.is_empty() {
-                                events.push(UnifiedStreamEvent::TextDelta { content: text });
+                            if !text.is_empty() {
+                                assistant_text_blocks.push(text);
                             }
                         }
                         ContentField::Empty => {}
+                    }
+
+                    let assistant_text = assistant_text_blocks.join("");
+                    if let Some(fallback_text) = self.resolve_terminal_text_fallback(&assistant_text) {
+                        events.push(UnifiedStreamEvent::TextDelta {
+                            content: fallback_text,
+                        });
                     }
 
                     if let Some(u) = msg.usage {
@@ -387,7 +505,7 @@ impl StreamAdapter for ClaudeCodeAdapter {
                         vec![]
                     } else {
                         // Legacy mode (no --include-partial-messages)
-                        self.has_streamed_text = true;
+                        self.note_streamed_text(&text);
                         vec![UnifiedStreamEvent::TextDelta { content: text }]
                     }
                 }
@@ -424,15 +542,20 @@ impl StreamAdapter for ClaudeCodeAdapter {
 
             // ── result (end of turn) ──
             ClaudeCodeEvent::Result {
+                result,
                 stop_reason,
                 usage,
                 is_error,
                 ..
             } => {
-                // Reset for next turn
-                self.has_streamed_text = false;
-                self.uses_stream_events = false;
                 let mut events = vec![];
+                if let Some(fallback_text) =
+                    result.and_then(|content| self.resolve_terminal_text_fallback(&content))
+                {
+                    events.push(UnifiedStreamEvent::TextDelta {
+                        content: fallback_text,
+                    });
+                }
                 if is_error.unwrap_or(false) {
                     events.push(UnifiedStreamEvent::Error {
                         message: "Execution failed".to_string(),
@@ -449,6 +572,7 @@ impl StreamAdapter for ClaudeCodeAdapter {
                     });
                 }
                 events.push(UnifiedStreamEvent::Complete { stop_reason });
+                self.reset_turn_state();
                 events
             }
 
@@ -462,8 +586,7 @@ impl StreamAdapter for ClaudeCodeAdapter {
     }
 
     fn reset(&mut self) {
-        self.has_streamed_text = false;
-        self.uses_stream_events = false;
+        self.reset_turn_state();
     }
 }
 
@@ -696,5 +819,61 @@ mod tests {
             events
         );
         assert!(matches!(&events[0], UnifiedStreamEvent::Usage { .. }));
+    }
+
+    #[test]
+    fn test_assistant_text_emitted_when_streamed_text_was_only_tool_call_payload() {
+        let mut adapter = ClaudeCodeAdapter::new();
+
+        let streamed_tool_call = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"```tool_call\n{\"tool\":\"read_file\",\"path\":\"src/main.ts\"}\n```"}}}"#;
+        let events = adapter.adapt(streamed_tool_call).unwrap();
+        assert_eq!(events.len(), 1);
+
+        let assistant = r#"{"type":"assistant","message":{"model":"claude-opus-4-6","content":[{"type":"text","text":"I inspected the file and found the issue."}],"usage":{"input_tokens":3,"output_tokens":12}}}"#;
+        let events = adapter.adapt(assistant).unwrap();
+        assert!(
+            events.iter().any(
+                |event| matches!(event, UnifiedStreamEvent::TextDelta { content } if content == "I inspected the file and found the issue.")
+            ),
+            "Expected assistant fallback text when streamed content was only tool-call payload, got {:?}",
+            events
+        );
+    }
+
+    #[test]
+    fn test_result_text_emitted_when_streamed_text_was_only_tool_call_payload() {
+        let mut adapter = ClaudeCodeAdapter::new();
+
+        let streamed_tool_call = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"tool_call\n{\"tool\":\"bash\",\"command\":\"pwd\"}"}}}"#;
+        let events = adapter.adapt(streamed_tool_call).unwrap();
+        assert_eq!(events.len(), 1);
+
+        let result = r#"{"type":"result","subtype":"success","is_error":false,"result":"Workspace confirmed. The repository root is ready.","usage":{"input_tokens":5,"output_tokens":9}}"#;
+        let events = adapter.adapt(result).unwrap();
+        assert!(
+            events.iter().any(
+                |event| matches!(event, UnifiedStreamEvent::TextDelta { content } if content == "Workspace confirmed. The repository root is ready.")
+            ),
+            "Expected result fallback text when streamed content was only tool-call payload, got {:?}",
+            events
+        );
+        assert!(
+            events.iter().any(|event| matches!(event, UnifiedStreamEvent::Complete { .. })),
+            "Expected terminal complete event, got {:?}",
+            events
+        );
+    }
+
+    #[test]
+    fn test_tool_call_wrapper_stripping_preserves_visible_text() {
+        assert!(!streamed_text_has_visible_content(
+            "```tool_call\n{\"tool\":\"read_file\"}\n```"
+        ));
+        assert!(!streamed_text_has_visible_content(
+            "tool_call\n{\"tool\":\"bash\"}"
+        ));
+        assert!(streamed_text_has_visible_content(
+            "I checked the repo.\n```tool_call\n{\"tool\":\"read_file\"}\n```"
+        ));
     }
 }

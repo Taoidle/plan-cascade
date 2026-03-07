@@ -2,52 +2,29 @@
  * Context Bridge
  *
  * Utilities for sharing conversation context between Chat and Task modes.
- * Handles extracting conversation history from the execution store and
- * synthesizing Task outputs back into the conversation history.
+ * Uses workflow kernel transcript/context as the authoritative conversation source.
  */
 
-import { useExecutionStore, type StandaloneTurn } from '../store/execution';
 import { useWorkflowKernelStore } from '../store/workflowKernel';
 import { deriveConversationTurns } from './conversationUtils';
 import type { CrossModeConversationTurn } from '../types/crossModeContext';
 import type { StrategyAnalysis, TaskPrd } from '../store/taskMode';
 
 /**
- * Build conversation history from the current execution state.
- *
- * For Claude Code backend (isChatSession): extracts turns from streamingOutput
- * For Standalone backend: directly uses standaloneTurns
- *
- * Returns CrossModeConversationTurn[] for IPC serialization to Rust.
+ * Build conversation history from the active kernel chat transcript.
  */
 export function buildConversationHistory(): CrossModeConversationTurn[] {
   const kernelState = useWorkflowKernelStore.getState();
   const activeRootSessionId = kernelState.activeRootSessionId ?? kernelState.sessionId;
-  if (activeRootSessionId && kernelState.activeMode === 'chat') {
-    const transcriptLines = kernelState.getCachedModeTranscript(activeRootSessionId, 'chat').lines as Parameters<
-      typeof deriveConversationTurns
-    >[0];
-    if (transcriptLines.length > 0) {
-      return deriveConversationTurns(transcriptLines)
-        .filter((t) => t.assistantText.trim().length > 0)
-        .map((t) => ({ user: t.userContent, assistant: t.assistantText }));
-    }
+  if (!activeRootSessionId) {
+    return [];
   }
-
-  const execState = useExecutionStore.getState();
-
-  if (execState.isChatSession) {
-    // Claude Code backend: derive from streamingOutput
-    return deriveConversationTurns(execState.streamingOutput)
-      .filter((t) => t.assistantText.trim().length > 0)
-      .map((t) => ({ user: t.userContent, assistant: t.assistantText }));
-  }
-
-  // Standalone backend: directly use standaloneTurns
-  return execState.standaloneTurns.map((t) => ({
-    user: t.user,
-    assistant: t.assistant,
-  }));
+  const transcriptLines = kernelState.getCachedModeTranscript(activeRootSessionId, 'chat').lines as Parameters<
+    typeof deriveConversationTurns
+  >[0];
+  return deriveConversationTurns(transcriptLines)
+    .filter((t) => t.assistantText.trim().length > 0)
+    .map((t) => ({ user: t.userContent, assistant: t.assistantText }));
 }
 
 export function buildRootConversationHistory(): CrossModeConversationTurn[] {
@@ -73,8 +50,7 @@ export function buildRootConversationContextString(): string | undefined {
  * Synthesize a planning-phase turn into the conversation history.
  *
  * Called after strategy analysis + PRD generation completes.
- * Creates a StandaloneTurn summarizing the Task planning output
- * and appends it to the execution store's standaloneTurns.
+ * Returns a synthesized conversation turn for kernel handoff.
  */
 export function synthesizePlanningTurn(
   description: string,
@@ -130,16 +106,8 @@ export function synthesizeExecutionTurn(
 function appendSyntheticTurn(
   userMessage: string,
   assistantMessage: string,
-  metadata?: { source?: string; type?: string },
+  _metadata?: { source?: string; type?: string },
 ): CrossModeConversationTurn {
-  const turn: StandaloneTurn = {
-    user: userMessage,
-    assistant: assistantMessage,
-    createdAt: Date.now(),
-    metadata,
-  };
-  useExecutionStore.getState().appendStandaloneTurn(turn);
-
   return {
     user: userMessage,
     assistant: assistantMessage,

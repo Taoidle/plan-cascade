@@ -2271,6 +2271,7 @@ async fn append_plan_progress_transcript(app: &tauri::AppHandle, event: &PlanMod
                     revision: transcript.revision,
                     appended_lines: lines.clone(),
                     replace_from_line_id: None,
+                    lines: transcript.lines.clone(),
                     source: "plan_step_executor.progress_event".to_string(),
                 },
             );

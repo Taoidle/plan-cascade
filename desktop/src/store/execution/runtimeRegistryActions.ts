@@ -1,5 +1,4 @@
 import { ToolCallStreamFilter } from '../../utils/toolCallFilter';
-import { selectStableConversationLines } from '../../lib/conversationUtils';
 import { useWorkflowKernelStore } from '../workflowKernel';
 import { useSettingsStore, type Backend } from '../settings';
 import type { ExecutionRuntimeHandle, ExecutionState, ExecutionStatus } from './types';
@@ -9,7 +8,6 @@ interface RuntimeRegistryActions {
   restoreForegroundChatRuntime: (params: {
     source: 'claude' | 'standalone';
     rawSessionId: string;
-    fallbackLines: ExecutionState['streamingOutput'];
     title?: string | null;
     phase?: string | null;
     lastError?: string | null;
@@ -74,6 +72,93 @@ function cloneLines(lines: ExecutionState['streamingOutput']): ExecutionState['s
   return lines.map((line) => ({ ...line }));
 }
 
+function cloneUsage<T extends ExecutionRuntimeHandle['latestUsage']>(usage: T): T {
+  return usage ? ({ ...usage } as T) : usage;
+}
+
+function buildExecutionRuntimeHandle(params: {
+  source: 'claude' | 'standalone';
+  rawSessionId: string;
+  rootSessionId: string | null;
+  status: ExecutionStatus;
+  streamingOutput: ExecutionState['streamingOutput'];
+  streamLineCounter: number;
+  currentTurnStartLineId: number;
+  standaloneTurns: ExecutionState['standaloneTurns'];
+  latestUsage: ExecutionState['latestUsage'];
+  sessionUsageTotals: ExecutionState['sessionUsageTotals'];
+  startedAt: number | null;
+  workspacePath: string | null;
+  llmBackend: string;
+  llmProvider: string;
+  llmModel: string;
+  updatedAt?: number;
+}): ExecutionRuntimeHandle {
+  return {
+    id: buildExecutionRuntimeHandleId(params.source, params.rawSessionId),
+    source: params.source,
+    rawSessionId: params.rawSessionId,
+    rootSessionId: params.rootSessionId,
+    mode: 'chat',
+    status: params.status,
+    streamingOutput: cloneLines(params.streamingOutput),
+    streamLineCounter: params.streamLineCounter,
+    currentTurnStartLineId: params.currentTurnStartLineId,
+    standaloneTurns: [...params.standaloneTurns],
+    latestUsage: cloneUsage(params.latestUsage),
+    sessionUsageTotals: cloneUsage(params.sessionUsageTotals),
+    startedAt: params.startedAt,
+    workspacePath: params.workspacePath,
+    llmBackend: params.llmBackend,
+    llmProvider: params.llmProvider,
+    llmModel: params.llmModel,
+    updatedAt: params.updatedAt ?? Date.now(),
+  };
+}
+
+export function buildActiveChatRuntimeRegistryPatch(
+  state: Pick<
+    ExecutionState,
+    | 'runtimeRegistry'
+    | 'status'
+    | 'streamingOutput'
+    | 'streamLineCounter'
+    | 'currentTurnStartLineId'
+    | 'standaloneTurns'
+    | 'latestUsage'
+    | 'sessionUsageTotals'
+    | 'startedAt'
+  >,
+  params: {
+    source: 'claude' | 'standalone';
+    rawSessionId: string;
+    rootSessionId: string | null;
+    workspacePath: string | null;
+    llmBackend: string;
+    llmProvider: string;
+    llmModel: string;
+  },
+): Pick<ExecutionState, 'runtimeRegistry' | 'activeRuntimeHandleId'> {
+  const handle = buildExecutionRuntimeHandle({
+    ...params,
+    status: state.status,
+    streamingOutput: state.streamingOutput,
+    streamLineCounter: state.streamLineCounter,
+    currentTurnStartLineId: state.currentTurnStartLineId,
+    standaloneTurns: state.standaloneTurns,
+    latestUsage: state.latestUsage,
+    sessionUsageTotals: state.sessionUsageTotals,
+    startedAt: state.startedAt,
+  });
+  return {
+    runtimeRegistry: {
+      ...state.runtimeRegistry,
+      [handle.id]: handle,
+    },
+    activeRuntimeHandleId: handle.id,
+  };
+}
+
 function resolveRuntimeRootSessionId(): string | null {
   const kernel = useWorkflowKernelStore.getState();
   return kernel.activeRootSessionId ?? kernel.session?.sessionId ?? null;
@@ -86,31 +171,23 @@ function buildRuntimeHandleFromForeground(state: ExecutionState): ExecutionRunti
 
   const settingsState = useSettingsStore.getState();
   const rootSessionId = resolveRuntimeRootSessionId();
-  const fallbackLines = rootSessionId
-    ? (useWorkflowKernelStore.getState().getCachedModeTranscript(rootSessionId, 'chat')
-        .lines as ExecutionState['streamingOutput'])
-    : [];
-  const stableLines = selectStableConversationLines(state.streamingOutput, fallbackLines);
-  return {
-    id: buildExecutionRuntimeHandleId(source, rawSessionId),
+  return buildExecutionRuntimeHandle({
     source,
     rawSessionId,
     rootSessionId,
-    mode: 'chat',
     status: state.status,
-    streamingOutput: cloneLines(stableLines),
-    streamLineCounter: stableLines.reduce((max, line) => Math.max(max, line.id), 0),
+    streamingOutput: state.streamingOutput,
+    streamLineCounter: state.streamLineCounter,
     currentTurnStartLineId: state.currentTurnStartLineId,
-    standaloneTurns: [...state.standaloneTurns],
-    latestUsage: state.latestUsage ? { ...state.latestUsage } : null,
-    sessionUsageTotals: state.sessionUsageTotals ? { ...state.sessionUsageTotals } : null,
+    standaloneTurns: state.standaloneTurns,
+    latestUsage: state.latestUsage,
+    sessionUsageTotals: state.sessionUsageTotals,
     startedAt: state.startedAt,
     workspacePath: settingsState.workspacePath ?? null,
     llmBackend: settingsState.backend,
     llmProvider: settingsState.provider,
     llmModel: settingsState.model,
-    updatedAt: Date.now(),
-  };
+  });
 }
 
 export function createRuntimeRegistryActions(deps: RuntimeRegistryActionDeps): RuntimeRegistryActions {
@@ -142,12 +219,10 @@ export function createRuntimeRegistryActions(deps: RuntimeRegistryActionDeps): R
       return handle.id;
     },
 
-    restoreForegroundChatRuntime: ({ source, rawSessionId, fallbackLines, title, phase, lastError }) => {
+    restoreForegroundChatRuntime: ({ source, rawSessionId, title, phase, lastError }) => {
       const state = get();
       const handleId = buildExecutionRuntimeHandleId(source, rawSessionId);
       const matchedRuntime = state.runtimeRegistry[handleId] ?? null;
-      const lines = selectStableConversationLines(matchedRuntime?.streamingOutput ?? [], fallbackLines);
-      const nextStreamLineCounter = lines.reduce((max, line) => Math.max(max, line.id), 0);
       const nextStatus =
         phase === 'streaming' || phase === 'submitting'
           ? ('running' as ExecutionStatus)
@@ -161,8 +236,8 @@ export function createRuntimeRegistryActions(deps: RuntimeRegistryActionDeps): R
         ...buildResetForegroundPatch(),
         taskDescription: title || '',
         status: nextStatus,
-        streamingOutput: cloneLines(lines),
-        streamLineCounter: nextStreamLineCounter,
+        streamingOutput: matchedRuntime?.streamingOutput ? cloneLines(matchedRuntime.streamingOutput) : [],
+        streamLineCounter: matchedRuntime?.streamLineCounter ?? 0,
         currentTurnStartLineId: matchedRuntime?.currentTurnStartLineId ?? 0,
         taskId: source === 'claude' ? rawSessionId : null,
         isChatSession: source === 'claude',

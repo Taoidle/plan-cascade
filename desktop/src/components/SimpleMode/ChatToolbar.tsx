@@ -26,6 +26,9 @@ interface ChatToolbarProps {
   isFilePickDisabled: boolean;
   // Execution controls
   executionStatus: 'idle' | 'running' | 'paused' | 'completed' | 'failed';
+  canPause?: boolean;
+  canResume?: boolean;
+  canCancel?: boolean;
   isCancelling?: boolean;
   onPause: () => void;
   onResume: () => void;
@@ -54,6 +57,9 @@ export const ChatToolbar = memo(function ChatToolbar({
   onFilePick,
   isFilePickDisabled,
   executionStatus,
+  canPause = false,
+  canResume = false,
+  canCancel = false,
   isCancelling = false,
   onPause,
   onResume,
@@ -72,7 +78,8 @@ export const ChatToolbar = memo(function ChatToolbar({
 }: ChatToolbarProps) {
   const { t } = useTranslation('simpleMode');
 
-  const isExecuting = executionStatus === 'running' || executionStatus === 'paused';
+  const isExecuting =
+    canCancel || canPause || canResume || executionStatus === 'running' || executionStatus === 'paused';
 
   const modeSwitchTitle = modeSwitchLockReason || undefined;
 
@@ -152,7 +159,7 @@ export const ChatToolbar = memo(function ChatToolbar({
       {/* Center group: execution controls (chat running/paused OR task workflow active) */}
       {(isExecuting || taskWorkflowActive || planWorkflowActive) && (
         <div className="flex items-center gap-1">
-          {isExecuting && executionStatus === 'running' && (
+          {isExecuting && executionStatus === 'running' && canPause && (
             <button
               onClick={onPause}
               className={clsx(
@@ -167,7 +174,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               <PauseIcon className="w-4 h-4" />
             </button>
           )}
-          {isExecuting && executionStatus === 'paused' && (
+          {isExecuting && executionStatus === 'paused' && canResume && (
             <button
               onClick={onResume}
               className={clsx(
@@ -182,7 +189,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               <PlayIcon className="w-4 h-4" />
             </button>
           )}
-          {isExecuting && (
+          {isExecuting && canCancel && (
             <button
               onClick={onCancel}
               disabled={isCancelling}

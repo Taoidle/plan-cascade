@@ -9,6 +9,7 @@ interface PendingDelta {
 
 const pendingDeltas = new Map<string, PendingDelta>();
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
+const flushCallbacks = new Set<() => void>();
 const ROOT_DELTA_KEY = '__root__';
 
 export function getPending(subAgentId?: string, depth?: number): PendingDelta {
@@ -36,9 +37,17 @@ export function flushPendingDeltas(get: () => ExecutionState): void {
       delta.thinking = '';
     }
   }
+  const callbacks = Array.from(flushCallbacks);
+  flushCallbacks.clear();
+  for (const callback of callbacks) {
+    callback();
+  }
 }
 
-export function scheduleFlush(get: () => ExecutionState): void {
+export function scheduleFlush(get: () => ExecutionState, afterFlush?: (() => void) | null): void {
+  if (afterFlush) {
+    flushCallbacks.add(afterFlush);
+  }
   if (flushTimer) return;
   flushTimer = setTimeout(() => {
     flushTimer = null;
@@ -52,4 +61,5 @@ export function clearPendingDeltas(): void {
     flushTimer = null;
   }
   pendingDeltas.clear();
+  flushCallbacks.clear();
 }

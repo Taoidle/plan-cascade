@@ -282,16 +282,19 @@ vi.mock('../SimpleMode/TabbedRightPanel', () => ({
     workflowMode,
     workflowPhase,
     activeTab,
+    executionStatus,
   }: {
     workflowMode: string;
     workflowPhase: string;
     activeTab: string;
+    executionStatus?: string;
   }) => (
     <div
       data-testid="tabbed-right-panel"
       data-workflow-mode={workflowMode}
       data-workflow-phase={workflowPhase}
       data-active-tab={activeTab}
+      data-execution-status={executionStatus}
     />
   ),
 }));
@@ -302,13 +305,15 @@ vi.mock('../SimpleMode/ChatToolbar', () => ({
     onWorkflowModeChange,
     onToggleOutput,
     onExportImage,
+    executionStatus,
   }: {
     workflowMode: string;
     onWorkflowModeChange: (mode: 'chat' | 'plan' | 'task') => void;
     onToggleOutput: () => void;
     onExportImage: () => void;
+    executionStatus?: string;
   }) => (
-    <div data-testid="chat-toolbar">
+    <div data-testid="chat-toolbar" data-execution-status={executionStatus}>
       <div data-testid="toolbar-workflow-mode">{workflowMode}</div>
       <button data-testid="mode-chat" onClick={() => onWorkflowModeChange('chat')}>
         mode-chat
@@ -463,7 +468,8 @@ function createKernelSession(activeMode: 'chat' | 'plan' | 'task' = 'chat'): Wor
     modeSnapshots: {
       chat: {
         phase: 'ready',
-        draftInput: '',
+        pendingInput: '',
+        activeTurnId: null,
         turnCount: 0,
         lastUserMessage: null,
         lastAssistantMessage: null,
@@ -595,18 +601,14 @@ function resetStates() {
     appendContextItems: vi.fn(async function () {
       return storeHarness.getWorkflowKernelState().session;
     }),
-    appendModeTranscript: vi.fn(async (_sessionId: string, mode: 'chat' | 'plan' | 'task', lines: unknown[]) => ({
-      sessionId: 'kernel-session-1',
-      mode,
-      revision: 2,
-      lines,
-    })),
-    storeModeTranscript: vi.fn(async (_sessionId: string, mode: 'chat' | 'plan' | 'task', lines: unknown[]) => ({
-      sessionId: 'kernel-session-1',
-      mode,
-      revision: 1,
-      lines,
-    })),
+    patchModeTranscript: vi.fn(
+      async (_sessionId: string, mode: 'chat' | 'plan' | 'task', patch: { appendedLines: unknown[] }) => ({
+        sessionId: 'kernel-session-1',
+        mode,
+        revision: 2,
+        lines: patch.appendedLines,
+      }),
+    ),
     activateSession: vi.fn(async () => ({
       session: storeHarness.getWorkflowKernelState().session,
       events: [],
@@ -746,6 +748,44 @@ describe('SimpleMode', () => {
     expect(screen.getByText('Connection refused')).toBeInTheDocument();
   });
 
+  it('ignores stale permission requests from other sessions when computing chat running state', () => {
+    storeHarness.setExecutionState({
+      ...storeHarness.getExecutionState(),
+      status: 'completed',
+      standaloneSessionId: 'current-session',
+      activeExecutionId: 'stale-exec-id',
+    });
+    storeHarness.setToolPermissionState({
+      pendingRequest: {
+        requestId: 'req-other',
+        sessionId: 'other-session',
+        toolName: 'Bash',
+        arguments: '{"cmd":"pwd"}',
+        risk: 'SafeWrite',
+      },
+      requestQueue: [
+        {
+          requestId: 'req-other-queued',
+          sessionId: 'other-session',
+          toolName: 'Read',
+          arguments: '{"path":"foo.ts"}',
+          risk: 'ReadOnly',
+        },
+      ],
+      isResponding: false,
+      respond: vi.fn(async () => undefined),
+      sessionLevel: 'ask',
+      setSessionLevel: vi.fn(async () => undefined),
+    });
+
+    renderSimpleMode();
+
+    expect(screen.queryByTestId('tool-permission-overlay')).not.toBeInTheDocument();
+    expect(screen.getByTestId('composer-input')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-toolbar')).toHaveAttribute('data-execution-status', 'idle');
+    expect(screen.getByTestId('tabbed-right-panel')).toHaveAttribute('data-execution-status', 'idle');
+  });
+
   it('starts task workflow and links task session', async () => {
     renderSimpleMode();
 
@@ -781,9 +821,21 @@ describe('SimpleMode', () => {
   });
 
   it('requires confirmation to switch workflow mode while execution is running', async () => {
-    storeHarness.setExecutionState({
-      ...storeHarness.getExecutionState(),
-      status: 'running',
+    const kernelState = storeHarness.getWorkflowKernelState();
+    const kernelSession = kernelState.session as ReturnType<typeof createKernelSession>;
+    storeHarness.setWorkflowKernelState({
+      ...kernelState,
+      session: {
+        ...kernelSession,
+        activeMode: 'chat',
+        modeSnapshots: {
+          ...kernelSession.modeSnapshots,
+          chat: {
+            ...kernelSession.modeSnapshots.chat!,
+            phase: 'streaming',
+          },
+        },
+      },
     });
     renderSimpleMode();
 

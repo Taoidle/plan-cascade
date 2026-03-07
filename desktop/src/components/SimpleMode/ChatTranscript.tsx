@@ -32,6 +32,7 @@ interface ChatTranscriptProps {
   status: ExecutionStatus;
   scrollRef?: React.RefObject<HTMLDivElement | null>;
   forceFullRender?: boolean;
+  showPendingPlaceholder?: boolean;
 }
 
 interface TurnRowProps {
@@ -39,6 +40,7 @@ interface TurnRowProps {
   userLine: StreamLine;
   assistantLines: StreamLine[];
   status: ExecutionStatus;
+  showPendingPlaceholder: boolean;
   isLastTurn: boolean;
   editingLineId: number | null;
   isActionsDisabled: boolean;
@@ -49,7 +51,13 @@ interface TurnRowProps {
   onCopy: (content: string) => void;
 }
 
-export function ChatTranscript({ lines, status, scrollRef, forceFullRender = false }: ChatTranscriptProps) {
+export function ChatTranscript({
+  lines,
+  status,
+  scrollRef,
+  forceFullRender = false,
+  showPendingPlaceholder = status === 'running',
+}: ChatTranscriptProps) {
   const { t } = useTranslation('simpleMode');
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -151,7 +159,7 @@ export function ChatTranscript({ lines, status, scrollRef, forceFullRender = fal
   if (turns.length === 0 && !hasContent) {
     return (
       <div className="h-full flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">
-        {status === 'running'
+        {showPendingPlaceholder
           ? t('emptyChat.thinking', { defaultValue: 'Thinking...' })
           : t('emptyChat.startConversation', { defaultValue: 'Start a conversation on the right input box.' })}
       </div>
@@ -206,6 +214,7 @@ export function ChatTranscript({ lines, status, scrollRef, forceFullRender = fal
                       userLine={userLine}
                       assistantLines={resolveAssistantLines(turn)}
                       status={status}
+                      showPendingPlaceholder={showPendingPlaceholder}
                       isLastTurn={turn.turnIndex === lastTurnIndex}
                       editingLineId={editingLineId}
                       isActionsDisabled={isActionsDisabled}
@@ -232,6 +241,7 @@ export function ChatTranscript({ lines, status, scrollRef, forceFullRender = fal
                   userLine={userLine}
                   assistantLines={resolveAssistantLines(turn)}
                   status={status}
+                  showPendingPlaceholder={showPendingPlaceholder}
                   isLastTurn={turn.turnIndex === lastTurnIndex}
                   editingLineId={editingLineId}
                   isActionsDisabled={isActionsDisabled}
@@ -288,6 +298,7 @@ const TurnRow = memo(function TurnRow({
   userLine,
   assistantLines,
   status,
+  showPendingPlaceholder,
   isLastTurn,
   editingLineId,
   isActionsDisabled,
@@ -342,7 +353,7 @@ const TurnRow = memo(function TurnRow({
           onCopy={onCopy}
           onFork={() => useExecutionStore.getState().forkSessionAtTurn(userLine.id)}
         />
-      ) : status === 'running' && turn.turnIndex >= 0 && isLastTurn ? (
+      ) : showPendingPlaceholder && status === 'running' && turn.turnIndex >= 0 && isLastTurn ? (
         <div className="flex justify-start">
           <div className="px-4 py-2 rounded-2xl rounded-bl-sm bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-sm italic flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-primary-400 animate-pulse" />

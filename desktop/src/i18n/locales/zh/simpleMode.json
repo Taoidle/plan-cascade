@@ -604,6 +604,8 @@
         },
         "phase": {
           "ready": "就绪",
+          "submitting": "提交中",
+          "streaming": "生成中",
           "running": "运行中",
           "paused": "已暂停",
           "completed": "已完成",
@@ -623,7 +625,8 @@
           "architecture_review": "架构审查",
           "generating_design_doc": "生成设计文档",
           "cancelled": "已取消",
-          "failed": "失败"
+          "failed": "失败",
+          "interrupted": "已中断"
         },
         "eventKind": {
           "session_opened": "会话已创建",
@@ -661,6 +664,8 @@
           "mode_start_failed": "模式启动失败",
           "mode_session_link_failed": "模式会话关联失败",
           "interrupted_by_restart": "因重启中断",
+          "tool_permission": "等待工具权限",
+          "user_pause": "用户暂停",
           "unknown_reason": "未知原因"
         }
       }

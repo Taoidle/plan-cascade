@@ -1,16 +1,20 @@
 import type {
+  ChatControlCapabilities,
   PlanClarificationSnapshot,
   TaskInterviewSnapshot,
   WorkflowSession,
   WorkflowStatus,
 } from '../types/workflowKernel';
 import {
+  isChatPhaseBusy,
   isKernelLifecyclePhaseTerminal,
   isPlanPhaseBusy,
   isTaskPhaseBusy,
   isWorkflowModeActive,
+  normalizeChatPhase,
   normalizePlanPhase,
   normalizeTaskPhase,
+  type NormalizedChatPhase,
   type NormalizedPlanPhase,
   type NormalizedTaskPhase,
 } from './workflowPhaseModel';
@@ -35,7 +39,18 @@ export interface KernelPlanRuntime extends KernelRuntimeBase {
   pendingClarification: PlanClarificationSnapshot | null;
 }
 
-export type KernelChatRuntime = KernelRuntimeBase;
+export interface KernelChatRuntime extends KernelRuntimeBase {
+  normalizedPhase: NormalizedChatPhase;
+  isBusy: boolean;
+  canQueue: boolean;
+  canCancel: boolean;
+  canPause: boolean;
+  canResume: boolean;
+  blockReason: string | null;
+  bindingSessionId: string | null;
+  activeTurnId: string | null;
+  backendKind: string | null;
+}
 
 function normalizePendingPrompt(prompt: string | null | undefined): string | null {
   const normalized = prompt?.trim() ?? '';
@@ -51,18 +66,37 @@ export function isKernelRuntimeBusy(runtime: Pick<KernelRuntimeBase, 'phase' | '
 }
 
 export function selectKernelChatRuntime(session: WorkflowSession | null): KernelChatRuntime {
+  const phase = session?.modeSnapshots.chat?.phase ?? 'ready';
+  const normalizedPhase = normalizeChatPhase(phase);
+  const meta = session?.modeRuntimeMeta?.chat;
+  const capabilities: ChatControlCapabilities | null = meta?.controlCapabilities ?? null;
+  const isActive = isWorkflowModeActive({
+    mode: 'chat',
+    currentMode: session?.activeMode ?? 'chat',
+    isKernelSessionActive: session?.status === 'active',
+    phase,
+  });
+  const isBusy = isActive && isChatPhaseBusy(phase);
+  const blockReason = meta?.blockReason ?? null;
   return {
-    phase: session?.modeSnapshots.chat?.phase ?? 'ready',
-    linkedSessionId: session?.linkedModeSessions?.chat ?? null,
-    isActive: isWorkflowModeActive({
-      mode: 'chat',
-      currentMode: session?.activeMode ?? 'chat',
-      isKernelSessionActive: session?.status === 'active',
-      phase: session?.modeSnapshots.chat?.phase ?? 'ready',
-    }),
-    pendingPrompt: normalizePendingPrompt(session?.modeSnapshots.chat?.draftInput),
+    phase,
+    normalizedPhase,
+    linkedSessionId: meta?.bindingSessionId ?? session?.linkedModeSessions?.chat ?? null,
+    bindingSessionId: meta?.bindingSessionId ?? session?.linkedModeSessions?.chat ?? null,
+    isActive,
+    isBusy,
+    pendingPrompt: normalizePendingPrompt(session?.modeSnapshots.chat?.pendingInput),
+    canQueue: isBusy && blockReason !== 'tool_permission',
+    canCancel: isBusy && !!capabilities?.canCancel,
+    canPause: isBusy && !!capabilities?.canPause,
+    canResume: isBusy && !!capabilities?.canResume,
+    blockReason,
+    activeTurnId: session?.modeSnapshots.chat?.activeTurnId ?? null,
+    backendKind: meta?.backendKind ?? null,
   };
 }
+
+export const selectKernelChatRuntimeViewModel = selectKernelChatRuntime;
 
 export function selectKernelTaskRuntime(session: WorkflowSession | null): KernelTaskRuntime {
   const pendingInterview = session?.modeSnapshots.task?.pendingInterview ?? null;

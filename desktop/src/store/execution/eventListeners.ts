@@ -4,6 +4,7 @@ import { reportNonFatal } from '../../lib/nonFatal';
 import { ToolCallStreamFilter } from '../../utils/toolCallFilter';
 import { useModeStore } from '../mode';
 import { useSettingsStore } from '../settings';
+import { useToolPermissionStore } from '../toolPermission';
 import { useExecutionStore } from '../execution';
 import { useWorkflowKernelStore } from '../workflowKernel';
 import { formatToolArgs } from './messageDispatch';
@@ -29,15 +30,10 @@ import { selectStableConversationLines } from '../../lib/conversationUtils';
 let unlisteners: UnlistenFn[] = [];
 let listenerSetupVersion = 0;
 let lateEventDroppedCount = 0;
-const CHAT_TRANSCRIPT_SYNC_DEBOUNCE_MS = 100;
-const chatTranscriptSyncTimers = new Map<string, ReturnType<typeof setTimeout>>();
+type ChatRuntimeSource = 'claude' | 'standalone';
 
 export function resetExecutionEventListenerState(): void {
   lateEventDroppedCount = 0;
-  for (const timer of chatTranscriptSyncTimers.values()) {
-    clearTimeout(timer);
-  }
-  chatTranscriptSyncTimers.clear();
 }
 
 export function cleanupExecutionEventListeners(): void {
@@ -47,10 +43,6 @@ export function cleanupExecutionEventListeners(): void {
   }
   unlisteners = [];
   lateEventDroppedCount = 0;
-  for (const timer of chatTranscriptSyncTimers.values()) {
-    clearTimeout(timer);
-  }
-  chatTranscriptSyncTimers.clear();
 }
 
 interface UnifiedEventPayload {
@@ -200,14 +192,43 @@ function getCachedChatTranscript(rootSessionId: string | null): StreamLine[] {
   return useWorkflowKernelStore.getState().getCachedModeTranscript(rootSessionId, 'chat').lines as StreamLine[];
 }
 
+function resolveChatRuntimeSource(state: ExecutionState, rawSessionId: string): ChatRuntimeSource | null {
+  const normalizedRawSessionId = rawSessionId.trim();
+  if (!normalizedRawSessionId) return null;
+
+  if (state.taskId === normalizedRawSessionId) return 'claude';
+  if (state.standaloneSessionId === normalizedRawSessionId) return 'standalone';
+
+  const backgroundMatch = findBackgroundSessionByTaskId(state, normalizedRawSessionId);
+  if (backgroundMatch?.snapshot.taskId === normalizedRawSessionId) return 'claude';
+  if (backgroundMatch?.snapshot.standaloneSessionId === normalizedRawSessionId) return 'standalone';
+
+  if (state.runtimeRegistry[buildExecutionRuntimeHandleId('claude', normalizedRawSessionId)]) return 'claude';
+  if (state.runtimeRegistry[buildExecutionRuntimeHandleId('standalone', normalizedRawSessionId)]) return 'standalone';
+
+  const kernel = useWorkflowKernelStore.getState();
+  const linkedModeSessionId = kernel.session?.linkedModeSessions?.chat ?? null;
+  if (linkedModeSessionId === `claude:${normalizedRawSessionId}`) return 'claude';
+  if (linkedModeSessionId === `standalone:${normalizedRawSessionId}`) return 'standalone';
+
+  for (const item of kernel.sessionCatalog) {
+    const bindingSessionId = item.modeRuntimeMeta?.chat?.bindingSessionId ?? null;
+    if (bindingSessionId === `claude:${normalizedRawSessionId}`) return 'claude';
+    if (bindingSessionId === `standalone:${normalizedRawSessionId}`) return 'standalone';
+  }
+
+  return null;
+}
+
 function upsertBackgroundChatRuntime(
   state: ExecutionState,
   rawSessionId: string,
   updater: (runtime: ExecutionRuntimeHandle | null) => Partial<ExecutionRuntimeHandle>,
+  source: ChatRuntimeSource = 'claude',
 ): Partial<ExecutionState> {
-  const handleId = buildExecutionRuntimeHandleId('claude', rawSessionId);
+  const handleId = buildExecutionRuntimeHandleId(source, rawSessionId);
   const existing = state.runtimeRegistry[handleId] ?? null;
-  const rootSessionId = existing?.rootSessionId ?? resolveChatRootSessionId(rawSessionId, false);
+  const rootSessionId = existing?.rootSessionId ?? resolveChatRootSessionId(rawSessionId, source);
   if (!existing && !rootSessionId) return {};
   const baseLines = selectStableConversationLines(
     existing?.streamingOutput ?? [],
@@ -218,7 +239,7 @@ function upsertBackgroundChatRuntime(
   const patch = updater(existing);
   const base: ExecutionRuntimeHandle = existing ?? {
     id: handleId,
-    source: 'claude',
+    source,
     rawSessionId,
     rootSessionId,
     mode: 'chat',
@@ -255,33 +276,39 @@ function appendToBackgroundChatRuntime(
   rawSessionId: string,
   content: string,
   type: 'text' | 'tool' | 'error' | 'success',
+  source: ChatRuntimeSource = 'claude',
 ): Partial<ExecutionState> {
-  return upsertBackgroundChatRuntime(state, rawSessionId, (runtime) => {
-    const lines = runtime?.streamingOutput ?? [];
-    const last = lines.length > 0 ? lines[lines.length - 1] : null;
-    if ((type === 'text' || type === 'tool') && last && last.type === type) {
-      const updated = { ...last, content: last.content + content };
-      const nextLines = lines.slice();
-      nextLines[nextLines.length - 1] = updated;
+  return upsertBackgroundChatRuntime(
+    state,
+    rawSessionId,
+    (runtime) => {
+      const lines = runtime?.streamingOutput ?? [];
+      const last = lines.length > 0 ? lines[lines.length - 1] : null;
+      if ((type === 'text' || type === 'tool') && last && last.type === type) {
+        const updated = { ...last, content: last.content + content };
+        const nextLines = lines.slice();
+        nextLines[nextLines.length - 1] = updated;
+        return {
+          streamingOutput: nextLines,
+          streamLineCounter: runtime?.streamLineCounter ?? nextLines.length,
+        };
+      }
+      const nextId = (runtime?.streamLineCounter ?? 0) + 1;
       return {
-        streamingOutput: nextLines,
-        streamLineCounter: runtime?.streamLineCounter ?? nextLines.length,
+        streamingOutput: [
+          ...lines,
+          {
+            id: nextId,
+            content,
+            type,
+            timestamp: Date.now(),
+          },
+        ],
+        streamLineCounter: nextId,
       };
-    }
-    const nextId = (runtime?.streamLineCounter ?? 0) + 1;
-    return {
-      streamingOutput: [
-        ...lines,
-        {
-          id: nextId,
-          content,
-          type,
-          timestamp: Date.now(),
-        },
-      ],
-      streamLineCounter: nextId,
-    };
-  });
+    },
+    source,
+  );
 }
 
 function upsertForegroundChatRuntimeFromState(state: ExecutionState): Partial<ExecutionState> {
@@ -291,10 +318,7 @@ function upsertForegroundChatRuntimeFromState(state: ExecutionState): Partial<Ex
   const settings = useSettingsStore.getState();
   const handleId = buildExecutionRuntimeHandleId(source, rawSessionId);
   const rootSessionId =
-    state.runtimeRegistry[handleId]?.rootSessionId ??
-    (source === 'claude'
-      ? resolveChatRootSessionId(rawSessionId, true)
-      : useWorkflowKernelStore.getState().activeRootSessionId);
+    state.runtimeRegistry[handleId]?.rootSessionId ?? resolveChatRootSessionId(rawSessionId, source);
   const stableLines = selectStableConversationLines(
     state.streamingOutput,
     getCachedChatTranscript(rootSessionId ?? null),
@@ -327,71 +351,65 @@ function upsertForegroundChatRuntimeFromState(state: ExecutionState): Partial<Ex
   };
 }
 
-function resolveChatRootSessionId(rawSessionId: string, allowActiveFallback = false): string | null {
-  const modeSessionId = `claude:${rawSessionId}`;
-  const kernel = useWorkflowKernelStore.getState();
-  if (kernel.session?.linkedModeSessions?.chat === modeSessionId) {
-    return kernel.session.sessionId;
-  }
-  for (const item of kernel.sessionCatalog) {
-    const bindingSessionId = item.modeRuntimeMeta?.chat?.bindingSessionId ?? null;
-    if (bindingSessionId === modeSessionId) {
-      return item.sessionId;
+function resolveChatRootSessionId(rawSessionId: string, sourceHint?: ChatRuntimeSource | null): string | null {
+  const candidateSources: ChatRuntimeSource[] = sourceHint ? [sourceHint] : ['claude', 'standalone'];
+  const executionState = useExecutionStore.getState();
+  for (const source of candidateSources) {
+    const runtimeRootSessionId =
+      executionState.runtimeRegistry[buildExecutionRuntimeHandleId(source, rawSessionId)]?.rootSessionId ?? null;
+    if (runtimeRootSessionId) {
+      return runtimeRootSessionId;
     }
   }
-  return allowActiveFallback ? (kernel.activeRootSessionId ?? kernel.sessionId) : null;
-}
 
-function scheduleChatTranscriptSync(
-  rawSessionId: string,
-  getLines: () => StreamLine[],
-  options?: { allowActiveFallback?: boolean },
-): void {
-  const rootSessionId = resolveChatRootSessionId(rawSessionId, options?.allowActiveFallback ?? false);
-  if (!rootSessionId) return;
-
-  const existingTimer = chatTranscriptSyncTimers.get(rootSessionId);
-  if (existingTimer) {
-    clearTimeout(existingTimer);
+  const kernel = useWorkflowKernelStore.getState();
+  for (const source of candidateSources) {
+    const modeSessionId = `${source}:${rawSessionId}`;
+    if (kernel.session?.linkedModeSessions?.chat === modeSessionId) {
+      return kernel.session.sessionId;
+    }
+    for (const item of kernel.sessionCatalog) {
+      const bindingSessionId = item.modeRuntimeMeta?.chat?.bindingSessionId ?? null;
+      if (bindingSessionId === modeSessionId) {
+        return item.sessionId;
+      }
+    }
   }
 
-  const timer = setTimeout(() => {
-    chatTranscriptSyncTimers.delete(rootSessionId);
-    const stableLines = selectStableConversationLines(getLines(), getCachedChatTranscript(rootSessionId));
-    void useWorkflowKernelStore
-      .getState()
-      .storeModeTranscript(rootSessionId, 'chat', cloneStreamLines(stableLines))
-      .catch((error) => {
-        reportNonFatal('execution.syncChatTranscript', error);
-      });
-  }, CHAT_TRANSCRIPT_SYNC_DEBOUNCE_MS);
-
-  chatTranscriptSyncTimers.set(rootSessionId, timer);
+  const modeSessionIds = candidateSources.map((source) => `${source}:${rawSessionId}`);
+  reportNonFatal('execution.resolveChatRootSessionId.unresolved', new Error('Unresolved chat runtime root session'), {
+    rawSessionId,
+    modeSessionIds,
+  });
+  return null;
 }
 
 function scheduleForegroundChatTranscriptSync(rawSessionId: string, get: () => ExecutionState): void {
-  if (!get().isChatSession) return;
-  const runtimePatch = upsertForegroundChatRuntimeFromState(get());
+  const state = get();
+  const source = resolveChatRuntimeSource(state, rawSessionId);
+  if (!source) return;
+  const runtimePatch = upsertForegroundChatRuntimeFromState(state);
   if (Object.keys(runtimePatch).length > 0) {
     useExecutionStore.setState(runtimePatch);
   }
-  scheduleChatTranscriptSync(rawSessionId, () => useExecutionStore.getState().streamingOutput, {
-    allowActiveFallback: true,
-  });
 }
 
-function scheduleBackgroundChatTranscriptSync(rawSessionId: string, get: () => ExecutionState): void {
-  const handleId = buildExecutionRuntimeHandleId('claude', rawSessionId);
-  const runtime = get().runtimeRegistry[handleId];
+function clearPermissionRequestsForSession(rawSessionId?: string | null): void {
+  const normalizedRawSessionId = rawSessionId?.trim() ?? '';
+  if (!normalizedRawSessionId) return;
+  useToolPermissionStore.getState().clearSessionRequests(normalizedRawSessionId);
+}
+
+function scheduleBackgroundChatTranscriptSync(
+  rawSessionId: string,
+  get: () => ExecutionState,
+  sourceHint?: ChatRuntimeSource | null,
+): void {
+  const source = sourceHint ?? resolveChatRuntimeSource(get(), rawSessionId);
+  const handleId = source ? buildExecutionRuntimeHandleId(source, rawSessionId) : null;
+  const runtime = handleId ? get().runtimeRegistry[handleId] : null;
   const found = findBackgroundSessionByTaskId(get(), rawSessionId);
   if (!runtime && !found?.snapshot.isChatSession) return;
-  scheduleChatTranscriptSync(rawSessionId, () => {
-    const latestState = useExecutionStore.getState();
-    const latestRuntime = latestState.runtimeRegistry[handleId];
-    if (latestRuntime?.streamingOutput.length) return latestRuntime.streamingOutput;
-    const latestLegacy = findBackgroundSessionByTaskId(latestState, rawSessionId);
-    return latestLegacy?.snapshot.streamingOutput ?? found?.snapshot.streamingOutput ?? [];
-  });
 }
 
 function handleUnifiedExecutionEvent(
@@ -421,9 +439,11 @@ function handleUnifiedExecutionEvent(
   // their background snapshot instead of the foreground UI.
   if (payload.session_id && !isForegroundSession(state, payload.session_id)) {
     const bgSessionId = payload.session_id;
-    const handleId = buildExecutionRuntimeHandleId('claude', bgSessionId);
+    const runtimeSource = resolveChatRuntimeSource(get(), bgSessionId);
+    const handleId = runtimeSource ? buildExecutionRuntimeHandleId(runtimeSource, bgSessionId) : null;
     const hasRuntimeHandle =
-      Boolean(get().runtimeRegistry[handleId]) || Boolean(resolveChatRootSessionId(bgSessionId, false));
+      Boolean(handleId && get().runtimeRegistry[handleId]) ||
+      Boolean(resolveChatRootSessionId(bgSessionId, runtimeSource));
     switch (payload.type) {
       case 'text_delta': {
         const found = findBackgroundSessionByTaskId(get(), bgSessionId);
@@ -432,7 +452,13 @@ function handleUnifiedExecutionEvent(
         const filterResult = filter.processChunk(payload.content || '');
         if (filterResult.output) {
           if (hasRuntimeHandle) {
-            const runtimeUpd = appendToBackgroundChatRuntime(get(), bgSessionId, filterResult.output, 'text');
+            const runtimeUpd = appendToBackgroundChatRuntime(
+              get(),
+              bgSessionId,
+              filterResult.output,
+              'text',
+              runtimeSource ?? 'claude',
+            );
             if (Object.keys(runtimeUpd).length > 0) set(runtimeUpd);
           }
           if (found) {
@@ -442,7 +468,13 @@ function handleUnifiedExecutionEvent(
         }
         if (filterResult.toolIndicator) {
           if (hasRuntimeHandle) {
-            const runtimeUpd = appendToBackgroundChatRuntime(get(), bgSessionId, filterResult.toolIndicator, 'tool');
+            const runtimeUpd = appendToBackgroundChatRuntime(
+              get(),
+              bgSessionId,
+              filterResult.toolIndicator,
+              'tool',
+              runtimeSource ?? 'claude',
+            );
             if (Object.keys(runtimeUpd).length > 0) set(runtimeUpd);
           }
           if (found) {
@@ -450,13 +482,21 @@ function handleUnifiedExecutionEvent(
             if (Object.keys(legacyUpd).length > 0) set(legacyUpd);
           }
         }
-        scheduleBackgroundChatTranscriptSync(bgSessionId, get);
+        scheduleBackgroundChatTranscriptSync(bgSessionId, get, runtimeSource);
         break;
       }
       case 'tool_start':
         if (payload.tool_name) {
           if (hasRuntimeHandle) {
-            set(appendToBackgroundChatRuntime(get(), bgSessionId, `[tool] ${payload.tool_name} started`, 'tool'));
+            set(
+              appendToBackgroundChatRuntime(
+                get(),
+                bgSessionId,
+                `[tool] ${payload.tool_name} started`,
+                'tool',
+                runtimeSource ?? 'claude',
+              ),
+            );
           }
           const legacyUpd = appendToBackgroundSession(
             get(),
@@ -465,7 +505,7 @@ function handleUnifiedExecutionEvent(
             'tool',
           );
           if (Object.keys(legacyUpd).length > 0) set(legacyUpd);
-          scheduleBackgroundChatTranscriptSync(bgSessionId, get);
+          scheduleBackgroundChatTranscriptSync(bgSessionId, get, runtimeSource);
         }
         break;
       case 'tool_result': {
@@ -477,6 +517,7 @@ function handleUnifiedExecutionEvent(
               bgSessionId,
               `[tool] ${payload.tool_id || ''} ${isErr ? 'failed' : 'completed'}`,
               isErr ? 'error' : 'success',
+              runtimeSource ?? 'claude',
             ),
           );
         }
@@ -487,22 +528,27 @@ function handleUnifiedExecutionEvent(
           isErr ? 'error' : 'success',
         );
         if (Object.keys(legacyUpd).length > 0) set(legacyUpd);
-        scheduleBackgroundChatTranscriptSync(bgSessionId, get);
+        scheduleBackgroundChatTranscriptSync(bgSessionId, get, runtimeSource);
         break;
       }
       case 'error':
         if (payload.message) {
           if (hasRuntimeHandle) {
-            set(appendToBackgroundChatRuntime(get(), bgSessionId, payload.message, 'error'));
+            set(appendToBackgroundChatRuntime(get(), bgSessionId, payload.message, 'error', runtimeSource ?? 'claude'));
             set(
-              upsertBackgroundChatRuntime(get(), bgSessionId, () => ({
-                status: 'failed' as ExecutionStatus,
-              })),
+              upsertBackgroundChatRuntime(
+                get(),
+                bgSessionId,
+                () => ({
+                  status: 'failed' as ExecutionStatus,
+                }),
+                runtimeSource ?? 'claude',
+              ),
             );
           }
           set(appendToBackgroundSession(get(), bgSessionId, payload.message, 'error'));
           set(updateBackgroundSessionByTaskId(get(), bgSessionId, () => ({ status: 'failed' as ExecutionStatus })));
-          scheduleBackgroundChatTranscriptSync(bgSessionId, get);
+          scheduleBackgroundChatTranscriptSync(bgSessionId, get, runtimeSource);
         }
         break;
       case 'complete': {
@@ -518,20 +564,27 @@ function handleUnifiedExecutionEvent(
         const bgFoundAfter = findBackgroundSessionByTaskId(get(), bgSessionId);
         if (hasRuntimeHandle) {
           set(
-            upsertBackgroundChatRuntime(get(), bgSessionId, (runtime) => ({
-              status: runtime ? 'idle' : ('idle' as ExecutionStatus),
-            })),
+            upsertBackgroundChatRuntime(
+              get(),
+              bgSessionId,
+              (runtime) => ({
+                status: runtime ? 'idle' : ('idle' as ExecutionStatus),
+              }),
+              runtimeSource ?? 'claude',
+            ),
           );
         }
         if (bgFoundAfter) {
-          const nextStatus: ExecutionStatus = bgFoundAfter.snapshot.isChatSession ? 'idle' : 'completed';
+          const isBoundChatRuntime = Boolean(runtimeSource && resolveChatRootSessionId(bgSessionId, runtimeSource));
+          const nextStatus: ExecutionStatus =
+            bgFoundAfter.snapshot.isChatSession || isBoundChatRuntime ? 'idle' : 'completed';
           set(
             updateBackgroundSessionByTaskId(get(), bgSessionId, () => ({
               status: nextStatus,
             })),
           );
         }
-        scheduleBackgroundChatTranscriptSync(bgSessionId, get);
+        scheduleBackgroundChatTranscriptSync(bgSessionId, get, runtimeSource);
         break;
       }
       case 'tool_permission_request':
@@ -656,6 +709,9 @@ function handleUnifiedExecutionEvent(
         if (filterResult.toolIndicator) {
           get().appendStreamLine(filterResult.toolIndicator, 'tool');
         }
+        if (payload.session_id) {
+          scheduleForegroundChatTranscriptSync(payload.session_id, get);
+        }
       }
       break;
 
@@ -674,8 +730,8 @@ function handleUnifiedExecutionEvent(
       const textIndices = lines
         .map((l, i) => (l.type === 'text' && l.id > turnBoundary ? i : -1))
         .filter((i) => i >= 0);
+      const cleaned = payload.content || '';
       if (textIndices.length > 0) {
-        const cleaned = payload.content || '';
         const lastTextIdx = textIndices[textIndices.length - 1];
         const otherTextIndices = new Set(textIndices.slice(0, -1));
         if (cleaned) {
@@ -690,6 +746,18 @@ function handleUnifiedExecutionEvent(
           const allTextIndices = new Set(textIndices);
           set({ streamingOutput: lines.filter((_, i) => !allTextIndices.has(i)), foregroundDirty: true });
         }
+        if (payload.session_id) {
+          scheduleForegroundChatTranscriptSync(payload.session_id, get);
+        }
+      } else if (cleaned) {
+        // Some fallback-tool-call turns stream only raw tool-call syntax, which
+        // the frontend filter suppresses completely. When the backend later
+        // sends a cleaned TextReplace payload, treat it as a fresh assistant
+        // text line instead of dropping it.
+        get().appendStreamLine(cleaned, 'text');
+        if (payload.session_id) {
+          scheduleForegroundChatTranscriptSync(payload.session_id, get);
+        }
       }
       break;
     }
@@ -697,12 +765,18 @@ function handleUnifiedExecutionEvent(
     case 'thinking_start':
       if (useSettingsStore.getState().showReasoningOutput) {
         get().appendStreamLine('[thinking...]', 'thinking');
+        if (payload.session_id) {
+          scheduleForegroundChatTranscriptSync(payload.session_id, get);
+        }
       }
       break;
 
     case 'thinking_delta':
       if (useSettingsStore.getState().showReasoningOutput && payload.content) {
         get().appendStreamLine(payload.content, 'thinking');
+        if (payload.session_id) {
+          scheduleForegroundChatTranscriptSync(payload.session_id, get);
+        }
       }
       break;
 
@@ -713,6 +787,9 @@ function handleUnifiedExecutionEvent(
       if (payload.tool_name) {
         const argsPreview = formatToolArgs(payload.tool_name, payload.arguments);
         get().appendStreamLine(`[tool:${payload.tool_name}] ${argsPreview}`, 'tool');
+        if (payload.session_id) {
+          scheduleForegroundChatTranscriptSync(payload.session_id, get);
+        }
       }
       break;
 
@@ -727,6 +804,9 @@ function handleUnifiedExecutionEvent(
       } else if (payload.result) {
         const preview = payload.result.length > 500 ? payload.result.substring(0, 500) + '...' : payload.result;
         get().appendStreamLine(`[tool_result:${payload.tool_id || ''}] ${preview}`, 'tool_result');
+      }
+      if (payload.session_id && (payload.error || payload.result)) {
+        scheduleForegroundChatTranscriptSync(payload.session_id, get);
       }
       break;
 
@@ -750,8 +830,14 @@ function handleUnifiedExecutionEvent(
                 pending.text = '';
               }
               get().appendStreamLine(filterResult.toolIndicator, 'tool', subAgentId, depth);
+              if (payload.session_id) {
+                scheduleForegroundChatTranscriptSync(payload.session_id, get);
+              }
             }
-            scheduleFlush(get);
+            scheduleFlush(
+              get,
+              payload.session_id ? () => scheduleForegroundChatTranscriptSync(payload.session_id!, get) : null,
+            );
           }
           break;
         }
@@ -759,7 +845,10 @@ function handleUnifiedExecutionEvent(
           if (useSettingsStore.getState().showReasoningOutput && innerData.content) {
             const pending = getPending(subAgentId, depth);
             pending.thinking += innerData.content as string;
-            scheduleFlush(get);
+            scheduleFlush(
+              get,
+              payload.session_id ? () => scheduleForegroundChatTranscriptSync(payload.session_id!, get) : null,
+            );
           }
           break;
         }
@@ -1155,6 +1244,7 @@ function handleUnifiedExecutionEvent(
 
     case 'error':
       if (payload.message) {
+        clearPermissionRequestsForSession(payload.session_id);
         get().appendStreamLine(`[error] ${payload.message}`, 'error');
         get().addExecutionError({
           severity: 'error',
@@ -1162,14 +1252,26 @@ function handleUnifiedExecutionEvent(
           description: payload.message,
           suggestedFix: 'Check the error details and retry if needed.',
         });
+        if (payload.session_id) {
+          scheduleForegroundChatTranscriptSync(payload.session_id, get);
+        }
       }
       break;
 
     case 'complete': {
+      clearPermissionRequestsForSession(payload.session_id);
       // Flush any buffered content from the tool-call filter
       const flushedText = get().toolCallFilter.flush();
       if (flushedText) {
         get().appendStreamLine(flushedText, 'text');
+      }
+
+      const isForegroundStandaloneTurn =
+        !!payload.session_id && state.standaloneSessionId === payload.session_id && !state.isChatSession;
+
+      if (isForegroundStandaloneTurn) {
+        scheduleForegroundChatTranscriptSync(payload.session_id!, get);
+        break;
       }
 
       // For standalone one-shot execution, this is the final completion signal.
@@ -1200,6 +1302,9 @@ function handleUnifiedExecutionEvent(
         });
         get().appendStreamLine(`Completed (${durationStr})`, 'success');
         get().addLog('Execution completed');
+      }
+      if (payload.session_id) {
+        scheduleForegroundChatTranscriptSync(payload.session_id, get);
       }
       break;
     }
@@ -1289,6 +1394,13 @@ function handleUnifiedExecutionEvent(
 
     case 'session_complete':
       if (payload.success !== undefined) {
+        clearPermissionRequestsForSession(payload.session_id);
+        const isForegroundStandaloneTurn =
+          !!payload.session_id && state.standaloneSessionId === payload.session_id && !state.isChatSession;
+        if (isForegroundStandaloneTurn) {
+          scheduleForegroundChatTranscriptSync(payload.session_id!, get);
+          break;
+        }
         const completedStories = payload.success
           ? payload.total_stories || get().stories.length
           : get().stories.filter((s) => s.status === 'completed').length;
@@ -1371,7 +1483,7 @@ export async function setupExecutionEventListeners(
       if (!isForegroundSession(state, session_id)) {
         const hasRuntimeHandle =
           Boolean(get().runtimeRegistry[buildExecutionRuntimeHandleId('claude', session_id)]) ||
-          Boolean(resolveChatRootSessionId(session_id, false));
+          Boolean(resolveChatRootSessionId(session_id));
         switch (streamEvent.type) {
           case 'text_delta': {
             // Use the background snapshot's own ToolCallStreamFilter to keep
@@ -1440,6 +1552,7 @@ export async function setupExecutionEventListeners(
             break;
           }
           case 'error':
+            clearPermissionRequestsForSession(session_id);
             if (hasRuntimeHandle) {
               set(appendToBackgroundChatRuntime(get(), session_id, streamEvent.message, 'error'));
               set(upsertBackgroundChatRuntime(get(), session_id, () => ({ status: 'failed' as ExecutionStatus })));
@@ -1453,6 +1566,7 @@ export async function setupExecutionEventListeners(
             scheduleBackgroundChatTranscriptSync(session_id, get);
             break;
           case 'complete': {
+            clearPermissionRequestsForSession(session_id);
             // Flush the per-session tool-call filter
             const bgFound = findBackgroundSessionByTaskId(get(), session_id);
             if (bgFound) {
@@ -1515,12 +1629,14 @@ export async function setupExecutionEventListeners(
             // Flush accumulated text before appending tool indicator
             flushPendingDeltas(get);
             get().appendStreamLine(filterResult.toolIndicator, 'tool');
+            scheduleForegroundChatTranscriptSync(session_id, get);
           }
           if (filterResult.output) {
             getPending().text += filterResult.output;
-            scheduleFlush(get);
+            scheduleFlush(get, () => {
+              scheduleForegroundChatTranscriptSync(session_id, get);
+            });
           }
-          scheduleForegroundChatTranscriptSync(session_id, get);
           break;
         }
 
@@ -1533,7 +1649,9 @@ export async function setupExecutionEventListeners(
         case 'thinking_delta':
           if (useSettingsStore.getState().showReasoningOutput) {
             getPending().thinking += streamEvent.content;
-            scheduleFlush(get);
+            scheduleFlush(get, () => {
+              scheduleForegroundChatTranscriptSync(session_id, get);
+            });
           }
           break;
 
@@ -1555,6 +1673,7 @@ export async function setupExecutionEventListeners(
         }
 
         case 'error':
+          clearPermissionRequestsForSession(session_id);
           flushPendingDeltas(get);
           get().appendStreamLine(streamEvent.message, 'error');
           get().addExecutionError({
@@ -1584,6 +1703,7 @@ export async function setupExecutionEventListeners(
           break;
 
         case 'complete': {
+          clearPermissionRequestsForSession(session_id);
           flushPendingDeltas(get);
           // Flush any buffered content from the tool-call filter
           const ccFlushed = get().toolCallFilter.flush();
@@ -1655,7 +1775,7 @@ export async function setupExecutionEventListeners(
       if (!isForegroundSession(state, session_id)) {
         const hasRuntimeHandle =
           Boolean(get().runtimeRegistry[buildExecutionRuntimeHandleId('claude', session_id)]) ||
-          Boolean(resolveChatRootSessionId(session_id, false));
+          Boolean(resolveChatRootSessionId(session_id));
         if (update_type === 'started') {
           if (hasRuntimeHandle) {
             set(appendToBackgroundChatRuntime(get(), session_id, `[tool] ${execution.tool_name} started`, 'tool'));
@@ -1713,9 +1833,10 @@ export async function setupExecutionEventListeners(
       if (!isForegroundSession(state, session.id)) {
         const hasRuntimeHandle =
           Boolean(get().runtimeRegistry[buildExecutionRuntimeHandleId('claude', session.id)]) ||
-          Boolean(resolveChatRootSessionId(session.id, false));
+          Boolean(resolveChatRootSessionId(session.id));
         if (update_type === 'state_changed') {
           if (session.state === 'error') {
+            clearPermissionRequestsForSession(session.id);
             const errorMsg = session.error_message || 'Unknown error';
             if (hasRuntimeHandle) {
               set(appendToBackgroundChatRuntime(get(), session.id, `Session error: ${errorMsg}`, 'error'));
@@ -1729,6 +1850,7 @@ export async function setupExecutionEventListeners(
             );
             scheduleBackgroundChatTranscriptSync(session.id, get);
           } else if (session.state === 'cancelled') {
+            clearPermissionRequestsForSession(session.id);
             if (hasRuntimeHandle) {
               set(appendToBackgroundChatRuntime(get(), session.id, 'Session cancelled.', 'error'));
               set(upsertBackgroundChatRuntime(get(), session.id, () => ({ status: 'idle' as ExecutionStatus })));
@@ -1748,6 +1870,7 @@ export async function setupExecutionEventListeners(
       // ---- Foreground processing (existing logic) ----
       if (update_type === 'state_changed') {
         if (session.state === 'error') {
+          clearPermissionRequestsForSession(session.id);
           get().appendStreamLine(`Session error: ${session.error_message || 'Unknown error'}`, 'error');
           get().addExecutionError({
             severity: 'error',
@@ -1765,6 +1888,7 @@ export async function setupExecutionEventListeners(
           get().addLog(`Session error: ${session.error_message || 'Unknown error'}`);
           scheduleForegroundChatTranscriptSync(session.id, get);
         } else if (session.state === 'cancelled') {
+          clearPermissionRequestsForSession(session.id);
           get().appendStreamLine('Session cancelled.', 'warning');
           clearPendingDeltas();
           set({

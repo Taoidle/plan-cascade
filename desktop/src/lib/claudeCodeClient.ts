@@ -46,6 +46,7 @@ export interface StartChatResponse {
 export interface SendMessageRequest {
   session_id: string;
   prompt: string;
+  kernel_session_id?: string | null;
 }
 
 export interface SendMessageResponse {
@@ -298,8 +299,8 @@ export class ClaudeCodeClient {
    * Send a message to a session
    * Events will be emitted through the event system
    */
-  async sendMessage(sessionId: string, prompt: string): Promise<SendMessageResponse> {
-    const request: SendMessageRequest = { session_id: sessionId, prompt };
+  async sendMessage(sessionId: string, prompt: string, kernelSessionId?: string | null): Promise<SendMessageResponse> {
+    const request: SendMessageRequest = { session_id: sessionId, prompt, kernel_session_id: kernelSessionId ?? null };
     const result = await invoke<CommandResponse<SendMessageResponse>>('send_message', { request });
     if (!result.success || !result.data) {
       throw new Error(result.error || 'Failed to send message');

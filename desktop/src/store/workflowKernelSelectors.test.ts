@@ -14,7 +14,8 @@ function createSession(): WorkflowSession {
     modeSnapshots: {
       chat: {
         phase: 'streaming',
-        draftInput: 'draft',
+        pendingInput: 'draft',
+        activeTurnId: null,
         turnCount: 2,
         lastUserMessage: 'hi',
         lastAssistantMessage: null,

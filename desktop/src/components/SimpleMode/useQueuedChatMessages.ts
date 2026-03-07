@@ -20,7 +20,6 @@ interface UseQueuedChatMessagesParams {
   workflowMode: WorkflowMode;
   maxQueuedChatMessages: number;
   isRunning: boolean;
-  isSubmitting: boolean;
   isAnalyzingStrategy: boolean;
   permissionRequest: unknown;
   isTaskWorkflowBusy: boolean;
@@ -57,7 +56,6 @@ export function useQueuedChatMessages({
   workflowMode,
   maxQueuedChatMessages,
   isRunning,
-  isSubmitting,
   isAnalyzingStrategy,
   permissionRequest,
   isTaskWorkflowBusy,
@@ -264,14 +262,7 @@ export function useQueuedChatMessages({
 
   useEffect(() => {
     if (!sessionId || queuedChatMessages.length === 0) return;
-    if (
-      isRunning ||
-      isSubmitting ||
-      isAnalyzingStrategy ||
-      permissionRequest ||
-      isTaskWorkflowBusy ||
-      isPlanWorkflowBusy
-    ) {
+    if (isRunning || isAnalyzingStrategy || permissionRequest || isTaskWorkflowBusy || isPlanWorkflowBusy) {
       return;
     }
     if (queueDispatchInFlightRef.current) return;
@@ -391,7 +382,6 @@ export function useQueuedChatMessages({
     items,
     workflowMode,
     isRunning,
-    isSubmitting,
     isAnalyzingStrategy,
     permissionRequest,
     isTaskWorkflowBusy,

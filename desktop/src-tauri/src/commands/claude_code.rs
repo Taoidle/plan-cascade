@@ -15,6 +15,8 @@ use crate::models::response::CommandResponse;
 use crate::services::claude_code::{
     channels, ActiveSessionManager, ChatHandler, StreamEventPayload,
 };
+use crate::services::streaming::UnifiedStreamEvent;
+use crate::services::workflow_kernel::{ChatRuntimeDispatch, WorkflowKernelState};
 use crate::services::webhook::integration::dispatch_on_event as dispatch_webhook_on_event;
 use crate::state::AppState;
 
@@ -89,6 +91,7 @@ pub async fn send_message(
     request: SendMessageRequest,
     state: State<'_, ClaudeCodeState>,
     app_state: State<'_, AppState>,
+    workflow_state: State<'_, WorkflowKernelState>,
     webhook_state: State<'_, WebhookState>,
     app: AppHandle,
 ) -> Result<CommandResponse<SendMessageResponse>, String> {
@@ -111,9 +114,29 @@ pub async fn send_message(
                 execution_id,
                 receiver,
             } = stream;
+            if let Some(kernel_session_id) = request
+                .kernel_session_id
+                .as_ref()
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+            {
+                if let Err(error) = workflow_state
+                    .register_chat_runtime_dispatch(ChatRuntimeDispatch {
+                        session_id: kernel_session_id.to_string(),
+                        backend_kind: "claude".to_string(),
+                        binding_session_id: format!("claude:{}", request.session_id),
+                        run_id: Some(execution_id.clone()),
+                    })
+                    .await
+                {
+                    return Ok(CommandResponse::err(error));
+                }
+            }
             let mut rx = receiver;
             let session_id = request.session_id.clone();
+            let kernel_session_id = request.kernel_session_id.clone();
             let response_execution_id = execution_id.clone();
+            let workflow_kernel = workflow_state.inner().clone();
             eprintln!(
                 "[DEBUG] send_message: spawning event forwarder for session {} execution {}",
                 session_id, execution_id
@@ -146,6 +169,39 @@ pub async fn send_message(
                     if let Err(e) = app.emit(channels::STREAM, &payload) {
                         eprintln!("[WARN] Failed to emit stream event: {}", e);
                     }
+                    let binding_session_id = format!("claude:{}", session_id);
+                    match workflow_kernel
+                        .sync_chat_runtime_event(&binding_session_id, &payload.event)
+                        .await
+                    {
+                        Ok(Some(mutation)) => {
+                            let _ = crate::commands::workflow::emit_workflow_session_mutation(
+                                &app,
+                                &mutation,
+                                "claude_code.send_message",
+                            );
+                            let _ = crate::commands::workflow::emit_kernel_update_for_session(
+                                &app,
+                                &workflow_kernel,
+                                &mutation.session.session_id,
+                                "claude_code.send_message",
+                            )
+                            .await;
+                            let _ = crate::commands::workflow::emit_session_catalog_update(
+                                &app,
+                                &workflow_kernel,
+                                "claude_code.send_message",
+                            )
+                            .await;
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            eprintln!(
+                                "[WARN] Failed to sync Claude chat event to workflow kernel: {}",
+                                error
+                            );
+                        }
+                    }
                 }
                 eprintln!(
                     "[DEBUG] event forwarder ended after {} events for session {} execution {}",
@@ -156,7 +212,19 @@ pub async fn send_message(
                 execution_id: response_execution_id,
             }))
         }
-        Err(e) => Ok(CommandResponse::err(e.to_string())),
+        Err(e) => {
+            if let Some(kernel_session_id) = request
+                .kernel_session_id
+                .as_ref()
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+            {
+                let _ = workflow_state
+                    .mark_chat_turn_failed(kernel_session_id, &e.to_string())
+                    .await;
+            }
+            Ok(CommandResponse::err(e.to_string()))
+        }
     }
 }
 
@@ -167,19 +235,53 @@ pub async fn send_message(
 pub async fn cancel_execution(
     session_id: String,
     state: State<'_, ClaudeCodeState>,
+    workflow_state: State<'_, WorkflowKernelState>,
     permission_state: State<'_, super::permissions::PermissionState>,
+    app: AppHandle,
 ) -> Result<CommandResponse<CancelExecutionResponse>, String> {
     permission_state
         .gate
         .cancel_session_requests(&session_id)
         .await;
     match state.session_manager.cancel_session(&session_id).await {
-        Ok(execution_id) => Ok(CommandResponse::ok(CancelExecutionResponse {
-            cancelled: true,
-            session_id,
-            execution_id: Some(execution_id),
-            reason: None,
-        })),
+        Ok(execution_id) => {
+            let binding_session_id = format!("claude:{}", session_id);
+            if let Ok(Some(mutation)) = workflow_state
+                .sync_chat_runtime_event(
+                    &binding_session_id,
+                    &UnifiedStreamEvent::Error {
+                        message: "Execution cancelled".to_string(),
+                        code: Some("cancelled".to_string()),
+                    },
+                )
+                .await
+            {
+                let _ = crate::commands::workflow::emit_workflow_session_mutation(
+                    &app,
+                    &mutation,
+                    "claude_code.cancel_execution",
+                );
+                let _ = crate::commands::workflow::emit_kernel_update_for_session(
+                    &app,
+                    &workflow_state,
+                    &mutation.session.session_id,
+                    "claude_code.cancel_execution",
+                )
+                .await;
+                let _ = crate::commands::workflow::emit_session_catalog_update(
+                    &app,
+                    &workflow_state,
+                    "claude_code.cancel_execution",
+                )
+                .await;
+            }
+            Ok(CommandResponse::ok(CancelExecutionResponse {
+                cancelled: true,
+                session_id,
+                execution_id: Some(execution_id),
+                reason: None,
+            }))
+        }
         Err(crate::utils::error::AppError::NotFound(message)) => {
             Ok(CommandResponse::ok(CancelExecutionResponse {
                 cancelled: false,
@@ -288,6 +390,7 @@ mod tests {
         let request = SendMessageRequest {
             session_id: "test-session".to_string(),
             prompt: "Hello, Claude!".to_string(),
+            kernel_session_id: None,
         };
 
         assert_eq!(request.session_id, "test-session");

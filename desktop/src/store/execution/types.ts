@@ -459,7 +459,6 @@ export interface ExecutionState {
   restoreForegroundChatRuntime: (params: {
     source: 'claude' | 'standalone';
     rawSessionId: string;
-    fallbackLines: StreamLine[];
     title?: string | null;
     phase?: string | null;
     lastError?: string | null;

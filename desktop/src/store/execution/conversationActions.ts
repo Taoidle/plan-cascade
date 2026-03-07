@@ -1,22 +1,23 @@
 import { invoke } from '@tauri-apps/api/core';
-import { deriveConversationTurns, getNextTurnId, rebuildStandaloneTurns } from '../../lib/conversationUtils';
+import { deriveConversationTurns, rebuildStandaloneTurns } from '../../lib/conversationUtils';
 import { reportNonFatal } from '../../lib/nonFatal';
 import type { FileAttachmentData } from '../../types/attachment';
 import type { ContextSourceConfig } from '../../types/contextSources';
 import { useContextSourcesStore } from '../contextSources';
 import { useSettingsStore } from '../settings';
 import { useToolPermissionStore } from '../toolPermission';
-import { useWorkflowKernelStore } from '../workflowKernel';
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   isClaudeCodeBackend,
   resolveProviderBaseUrl,
   resolveStandaloneProvider,
 } from './providerUtils';
+import { buildReplacementUserLine, getActiveKernelChatTranscript, patchKernelChatTranscript } from './kernelTranscript';
 import { ensurePromptContent, extractPluginInvocationsFromPrompt } from './messageDispatch';
+import { buildActiveChatRuntimeRegistryPatch } from './runtimeRegistryActions';
 import { createStandaloneExecutionId, createStandaloneSessionId } from './sessionLifecycle';
 import { clearPendingDeltas } from './streamDeltas';
-import type { ExecutionState, NonCardStreamLineType, StandaloneTurn, StreamLine } from './types';
+import type { ExecutionState, StandaloneTurn, StreamLine } from './types';
 
 interface CommandResponse<T> {
   success: boolean;
@@ -45,33 +46,38 @@ interface BackendStandaloneExecutionResult {
 
 type SessionSource = 'claude' | 'standalone';
 
-async function appendActiveChatLinesToKernel(lines: StreamLine[]): Promise<void> {
-  const kernel = useWorkflowKernelStore.getState();
-  const rootSessionId = kernel.activeRootSessionId ?? kernel.sessionId;
-  if (!rootSessionId || lines.length === 0) return;
-  await kernel.appendModeTranscript(
-    rootSessionId,
-    'chat',
-    lines.map((line) => ({ ...line })),
-  );
-}
-
-async function storeActiveChatTranscriptInKernel(lines: StreamLine[]): Promise<void> {
-  const kernel = useWorkflowKernelStore.getState();
-  const rootSessionId = kernel.activeRootSessionId ?? kernel.sessionId;
-  if (!rootSessionId) return;
-  await kernel.storeModeTranscript(
-    rootSessionId,
-    'chat',
-    lines.map((line) => ({ ...line })),
-  );
-}
-
 function resolveSessionScopedContext(sessionId: string | null, source: SessionSource): ContextSourceConfig | null {
   const scopedSessionId = sessionId?.trim() ? `${source}:${sessionId.trim()}` : null;
   const store = useContextSourcesStore.getState();
   store.setMemorySessionId(scopedSessionId);
   return store.buildConfig() ?? null;
+}
+
+async function markKernelChatTurnFailed(sessionId: string | null, error: string): Promise<void> {
+  const normalizedSessionId = sessionId?.trim() ?? '';
+  const normalizedError = error.trim();
+  if (!normalizedSessionId || !normalizedError) return;
+  try {
+    await invoke<CommandResponse<unknown>>('workflow_mark_chat_turn_failed', {
+      sessionId: normalizedSessionId,
+      error: normalizedError,
+    });
+  } catch {
+    // best effort kernel sync
+  }
+}
+
+async function cancelKernelChatTurn(sessionId: string | null, reason = 'cancelled_by_user'): Promise<void> {
+  const normalizedSessionId = sessionId?.trim() ?? '';
+  if (!normalizedSessionId) return;
+  try {
+    await invoke<CommandResponse<unknown>>('workflow_cancel_operation', {
+      sessionId: normalizedSessionId,
+      reason,
+    });
+  } catch {
+    // best effort kernel sync
+  }
 }
 
 type ExecutionSetState = (
@@ -118,13 +124,6 @@ interface ConversationActionDeps {
   getStandaloneContextTurnsLimit: () => number;
   trimStandaloneTurns: (turns: StandaloneTurn[], limit: number) => StandaloneTurn[];
   collectAssistantTextSince: (lines: StreamLine[], minExclusiveLineId: number) => string;
-  hasAssistantTextLineSince: (lines: StreamLine[], minExclusiveLineId: number) => boolean;
-  appendTextWithTypewriter: (
-    append: (chunk: string, type: NonCardStreamLineType) => void,
-    text: string,
-    chunkSize?: number,
-    delayMs?: number,
-  ) => Promise<void>;
   isBackendStandaloneExecutionResult: (data: unknown) => boolean;
 }
 
@@ -145,31 +144,30 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
     getStandaloneContextTurnsLimit,
     trimStandaloneTurns,
     collectAssistantTextSince,
-    hasAssistantTextLineSince,
-    appendTextWithTypewriter,
     isBackendStandaloneExecutionResult,
   } = deps;
 
   return {
     sendFollowUp: async (prompt: string) => {
+      const kernelTranscript = getActiveKernelChatTranscript();
+      const kernelSessionId = kernelTranscript.rootSessionId;
       const sessionId = get().taskId;
       if (!sessionId || !get().isChatSession) {
         return;
       }
 
-      const turnId = getNextTurnId(get().streamingOutput);
-      const lineId = get().streamLineCounter + 1;
-      get().appendStreamLine(prompt, 'info', undefined, undefined, { turnId, turnBoundary: 'user' });
-      void appendActiveChatLinesToKernel([
-        {
-          id: lineId,
-          content: prompt,
-          type: 'info',
-          timestamp: Date.now(),
-          turnId,
-          turnBoundary: 'user',
-        },
-      ]);
+      const followUpSettings = useSettingsStore.getState();
+      set((state: ExecutionState) =>
+        buildActiveChatRuntimeRegistryPatch(state, {
+          source: 'claude',
+          rawSessionId: sessionId,
+          rootSessionId: kernelSessionId,
+          workspacePath: followUpSettings.workspacePath || null,
+          llmBackend: followUpSettings.backend,
+          llmProvider: followUpSettings.provider,
+          llmModel: followUpSettings.model,
+        }),
+      );
       get().toolCallFilter.reset();
 
       set({
@@ -181,12 +179,14 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
         apiError: null,
         result: null,
         foregroundDirty: true,
+        streamingOutput: kernelTranscript.lines,
+        streamLineCounter: kernelTranscript.lines.reduce((max, line) => Math.max(max, line.id), 0),
       });
 
       const followUpContextSources = resolveSessionScopedContext(sessionId, 'claude');
       const assembledPrompt = await buildClaudePromptWithContextEnvelope({
         query: prompt,
-        lines: get().streamingOutput,
+        lines: getActiveKernelChatTranscript().lines,
         projectPath: useSettingsStore.getState().workspacePath || '.',
         sessionId,
         contextSources: followUpContextSources,
@@ -205,7 +205,11 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
 
       try {
         const sendResult = await invoke<CommandResponse<ClaudeSendMessageResponse | boolean>>('send_message', {
-          request: { session_id: sessionId, prompt: enrichedPrompt },
+          request: {
+            session_id: sessionId,
+            prompt: enrichedPrompt,
+            kernel_session_id: kernelSessionId,
+          },
         });
         if (!sendResult.success) {
           throw new Error(sendResult.error || 'Failed to send follow-up');
@@ -229,6 +233,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
               pendingCancelBeforeSessionReady: false,
               activeExecutionId: null,
             });
+            await cancelKernelChatTurn(kernelSessionId);
             get().addLog('Execution cancelled after follow-up dispatch ACK.');
             return;
           }
@@ -239,6 +244,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
             activeExecutionId: null,
             apiError: cancelResult.error || cancelResult.data?.reason || 'Failed to cancel execution',
           });
+          await cancelKernelChatTurn(kernelSessionId);
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -249,13 +255,14 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
           activeExecutionId: null,
           apiError: errorMessage,
         });
+        await markKernelChatTurnFailed(kernelSessionId, errorMessage);
         get().addLog(`Error: ${errorMessage}`);
       }
     },
 
     cancel: async () => {
+      const kernelSessionId = getActiveKernelChatTranscript().rootSessionId;
       if (get().isCancelling) return;
-      if (get().status !== 'running' && get().status !== 'paused') return;
       set({ isCancelling: true, apiError: null });
 
       try {
@@ -284,6 +291,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
               duration: Date.now() - (get().startedAt || Date.now()),
             },
           });
+          await cancelKernelChatTurn(kernelSessionId);
           get().addLog('Execution cancelled');
           get().saveToHistory();
           import('../toolPermission').then(({ useToolPermissionStore }) => {
@@ -294,12 +302,14 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
 
         if (!taskId) {
           set({ pendingCancelBeforeSessionReady: true });
+          await cancelKernelChatTurn(kernelSessionId);
           get().addLog('Cancel requested before session was ready. Waiting for backend session initialization.');
           return;
         }
 
         if (!get().activeExecutionId) {
           set({ pendingCancelBeforeSessionReady: true });
+          await cancelKernelChatTurn(kernelSessionId);
           get().addLog(
             'Cancel requested before execution_id was ready. Deferring cancellation until dispatch completes.',
           );
@@ -313,7 +323,9 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
           throw new Error(cancelResult.error || 'Failed to cancel execution');
         }
         if (!cancelResult.data.cancelled) {
-          throw new Error(cancelResult.data.reason || 'No active execution to cancel');
+          await cancelKernelChatTurn(kernelSessionId, cancelResult.data.reason || 'cancelled_by_user');
+        } else {
+          await cancelKernelChatTurn(kernelSessionId);
         }
 
         clearPendingDeltas();
@@ -349,7 +361,8 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
     },
 
     regenerateResponse: async (userLineId: number) => {
-      const lines = get().streamingOutput;
+      const kernelTranscript = getActiveKernelChatTranscript();
+      const lines = kernelTranscript.lines;
       const turns = deriveConversationTurns(lines);
       const targetTurn = turns.find((t) => t.userLineId === userLineId);
       if (!targetTurn) return;
@@ -357,6 +370,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
       const userLineIndex = lines.findIndex((l) => l.id === userLineId);
       if (userLineIndex < 0) return;
 
+      const targetUserLine = lines[userLineIndex];
       const userContent = targetTurn.userContent;
       const truncatedLines = lines.slice(0, userLineIndex + 1);
       const linesForContext = lines.slice(0, userLineIndex);
@@ -376,16 +390,8 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
         }
 
         set({
-          streamingOutput: [
-            ...truncatedLines,
-            {
-              id: (truncatedLines.length > 0 ? truncatedLines[truncatedLines.length - 1].id : 0) + 1,
-              content: 'Regenerating response. Previous context will be lost.',
-              type: 'warning',
-              timestamp: Date.now(),
-            },
-          ],
-          streamLineCounter: (truncatedLines.length > 0 ? truncatedLines[truncatedLines.length - 1].id : 0) + 1,
+          streamingOutput: truncatedLines,
+          streamLineCounter: truncatedLines.length > 0 ? truncatedLines[truncatedLines.length - 1].id : 0,
           standaloneTurns: [],
           status: 'running',
           isCancelling: false,
@@ -398,15 +404,12 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
           result: null,
           foregroundDirty: true,
         });
-        void storeActiveChatTranscriptInKernel([
-          ...truncatedLines,
-          {
-            id: (truncatedLines.length > 0 ? truncatedLines[truncatedLines.length - 1].id : 0) + 1,
-            content: 'Regenerating response. Previous context will be lost.',
-            type: 'warning',
-            timestamp: Date.now(),
-          },
-        ]);
+        if (kernelTranscript.rootSessionId) {
+          await patchKernelChatTranscript(kernelTranscript.rootSessionId, {
+            replaceFromLineId: userLineId,
+            appendedLines: [targetUserLine],
+          });
+        }
 
         get().toolCallFilter.reset();
 
@@ -422,6 +425,17 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
 
           const sessionId = startResult.data.session_id;
           set({ taskId: sessionId, isChatSession: true, activeExecutionId: null });
+          set((state: ExecutionState) =>
+            buildActiveChatRuntimeRegistryPatch(state, {
+              source: 'claude',
+              rawSessionId: sessionId,
+              rootSessionId: kernelTranscript.rootSessionId,
+              workspacePath: settingsSnapshot.workspacePath || null,
+              llmBackend: settingsSnapshot.backend,
+              llmProvider: settingsSnapshot.provider,
+              llmModel: settingsSnapshot.model,
+            }),
+          );
 
           if (get().pendingCancelBeforeSessionReady) {
             const cancelResult = await invoke<CommandResponse<ClaudeCancelExecutionResponse>>('cancel_execution', {
@@ -435,6 +449,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
                 pendingCancelBeforeSessionReady: false,
                 activeExecutionId: null,
               });
+              await cancelKernelChatTurn(kernelTranscript.rootSessionId);
               get().addLog('Regeneration cancelled before dispatch.');
               return;
             }
@@ -445,13 +460,14 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
               activeExecutionId: null,
               apiError: cancelResult.error || cancelResult.data?.reason || 'Failed to cancel execution',
             });
+            await cancelKernelChatTurn(kernelTranscript.rootSessionId);
             return;
           }
 
           const regenContextSources = resolveSessionScopedContext(sessionId, 'claude');
           const assembledPrompt = await buildClaudePromptWithContextEnvelope({
             query: userContent,
-            lines: get().streamingOutput,
+            lines: getActiveKernelChatTranscript().lines,
             projectPath,
             sessionId,
             contextSources: regenContextSources,
@@ -466,7 +482,11 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
           get().clearAttachments();
 
           const sendResult = await invoke<CommandResponse<ClaudeSendMessageResponse | boolean>>('send_message', {
-            request: { session_id: sessionId, prompt: enrichedPrompt },
+            request: {
+              session_id: sessionId,
+              prompt: enrichedPrompt,
+              kernel_session_id: kernelTranscript.rootSessionId,
+            },
           });
           if (!sendResult.success) {
             throw new Error(sendResult.error || 'Failed to send regenerate request');
@@ -488,6 +508,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
                 pendingCancelBeforeSessionReady: false,
                 activeExecutionId: null,
               });
+              await cancelKernelChatTurn(kernelTranscript.rootSessionId);
               get().addLog('Regeneration cancelled after dispatch ACK.');
               return;
             }
@@ -498,6 +519,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
               activeExecutionId: null,
               apiError: cancelResult.error || cancelResult.data?.reason || 'Failed to cancel execution',
             });
+            await cancelKernelChatTurn(kernelTranscript.rootSessionId);
             return;
           }
         } catch (error) {
@@ -509,6 +531,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
             activeExecutionId: null,
             apiError: errorMessage,
           });
+          await markKernelChatTurnFailed(kernelTranscript.rootSessionId, errorMessage);
           get().addLog(`Regenerate error: ${errorMessage}`);
         }
       } else {
@@ -543,6 +566,17 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
         if (!existingStandaloneSessionId) {
           set({ standaloneSessionId });
         }
+        set((state: ExecutionState) =>
+          buildActiveChatRuntimeRegistryPatch(state, {
+            source: 'standalone',
+            rawSessionId: standaloneSessionId,
+            rootSessionId: kernelTranscript.rootSessionId,
+            workspacePath: settingsSnapshot.workspacePath || null,
+            llmBackend: settingsSnapshot.backend,
+            llmProvider: settingsSnapshot.provider,
+            llmModel: settingsSnapshot.model,
+          }),
+        );
         const regenContextSources = resolveSessionScopedContext(standaloneSessionId, 'standalone');
         const { cleanedPrompt, pluginInvocations } = extractPluginInvocationsFromPrompt(userContent);
         const normalizedPrompt = ensurePromptContent(cleanedPrompt, pluginInvocations.length);
@@ -576,6 +610,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
             maxIterations: settingsSnapshot.maxIterations ?? undefined,
             maxConcurrentSubagents: settingsSnapshot.maxConcurrentSubagents || undefined,
             executionId: standaloneExecutionId,
+            kernelSessionId: kernelTranscript.rootSessionId,
             pluginInvocations: pluginInvocations.length > 0 ? pluginInvocations : null,
             contextSources: regenContextSources,
             externalContextInjected: assembledContext.externalContextInjected,
@@ -591,6 +626,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
             const assistantResponse = execution.response?.trim() || '';
             const streamedAssistantText = collectAssistantTextSince(get().streamingOutput, turnStartLineId);
             const assistantTurnText = assistantResponse || streamedAssistantText;
+            useToolPermissionStore.getState().clearSessionRequests(standaloneSessionId);
 
             if (assistantTurnText) {
               const retentionLimit = getStandaloneContextTurnsLimit();
@@ -609,11 +645,6 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
               }));
             }
 
-            const hasStreamedText = hasAssistantTextLineSince(get().streamingOutput, turnStartLineId);
-            if (!hasStreamedText && assistantTurnText) {
-              await appendTextWithTypewriter((chunk, type) => get().appendStreamLine(chunk, type), assistantTurnText);
-            }
-
             if (get().status === 'running') {
               set({
                 status: execution.success ? 'completed' : 'failed',
@@ -624,6 +655,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          useToolPermissionStore.getState().clearSessionRequests(standaloneSessionId);
           set({
             status: 'failed',
             isCancelling: false,
@@ -631,6 +663,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
             activeExecutionId: null,
             apiError: errorMessage,
           });
+          await markKernelChatTurnFailed(kernelTranscript.rootSessionId, errorMessage);
           get().addLog(`Regenerate error: ${errorMessage}`);
         }
       }
@@ -639,7 +672,8 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
     },
 
     editAndResend: async (userLineId: number, newContent: string) => {
-      const lines = get().streamingOutput;
+      const kernelTranscript = getActiveKernelChatTranscript();
+      const lines = kernelTranscript.lines;
       const turns = deriveConversationTurns(lines);
       const targetTurn = turns.find((t) => t.userLineId === userLineId);
       if (!targetTurn) return;
@@ -647,20 +681,10 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
       const userLineIndex = lines.findIndex((l) => l.id === userLineId);
       if (userLineIndex < 0) return;
 
+      const targetUserLine = lines[userLineIndex];
       const truncatedLines = lines.slice(0, userLineIndex);
-      const newInfoId = (truncatedLines.length > 0 ? truncatedLines[truncatedLines.length - 1].id : 0) + 1;
-      const nextTurnId = getNextTurnId(truncatedLines);
-      const linesWithEditedMessage: StreamLine[] = [
-        ...truncatedLines,
-        {
-          id: newInfoId,
-          content: newContent,
-          type: 'info',
-          timestamp: Date.now(),
-          turnId: nextTurnId,
-          turnBoundary: 'user',
-        },
-      ];
+      const editedUserLine = buildReplacementUserLine(newContent, targetUserLine);
+      const linesWithEditedMessage: StreamLine[] = [...truncatedLines, editedUserLine];
 
       const rebuiltTurns = rebuildStandaloneTurns(truncatedLines);
 
@@ -678,16 +702,8 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
         }
 
         set({
-          streamingOutput: [
-            ...linesWithEditedMessage,
-            {
-              id: newInfoId + 1,
-              content: 'Regenerating response. Previous context will be lost.',
-              type: 'warning',
-              timestamp: Date.now(),
-            },
-          ],
-          streamLineCounter: newInfoId + 1,
+          streamingOutput: linesWithEditedMessage,
+          streamLineCounter: editedUserLine.id,
           standaloneTurns: [],
           status: 'running',
           isCancelling: false,
@@ -700,15 +716,12 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
           result: null,
           foregroundDirty: true,
         });
-        void storeActiveChatTranscriptInKernel([
-          ...linesWithEditedMessage,
-          {
-            id: newInfoId + 1,
-            content: 'Regenerating response. Previous context will be lost.',
-            type: 'warning',
-            timestamp: Date.now(),
-          },
-        ]);
+        if (kernelTranscript.rootSessionId) {
+          await patchKernelChatTranscript(kernelTranscript.rootSessionId, {
+            replaceFromLineId: userLineId,
+            appendedLines: [editedUserLine],
+          });
+        }
 
         get().toolCallFilter.reset();
 
@@ -737,6 +750,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
                 pendingCancelBeforeSessionReady: false,
                 activeExecutionId: null,
               });
+              await cancelKernelChatTurn(kernelTranscript.rootSessionId);
               get().addLog('Edit-and-resend cancelled before dispatch.');
               return;
             }
@@ -747,13 +761,14 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
               activeExecutionId: null,
               apiError: cancelResult.error || cancelResult.data?.reason || 'Failed to cancel execution',
             });
+            await cancelKernelChatTurn(kernelTranscript.rootSessionId);
             return;
           }
 
           const editContextSources = resolveSessionScopedContext(sessionId, 'claude');
           const assembledPrompt = await buildClaudePromptWithContextEnvelope({
             query: newContent,
-            lines: get().streamingOutput,
+            lines: getActiveKernelChatTranscript().lines,
             projectPath,
             sessionId,
             contextSources: editContextSources,
@@ -768,7 +783,11 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
           get().clearAttachments();
 
           const sendResult = await invoke<CommandResponse<ClaudeSendMessageResponse | boolean>>('send_message', {
-            request: { session_id: sessionId, prompt: enrichedPrompt },
+            request: {
+              session_id: sessionId,
+              prompt: enrichedPrompt,
+              kernel_session_id: kernelTranscript.rootSessionId,
+            },
           });
           if (!sendResult.success) {
             throw new Error(sendResult.error || 'Failed to send edited prompt');
@@ -790,6 +809,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
                 pendingCancelBeforeSessionReady: false,
                 activeExecutionId: null,
               });
+              await cancelKernelChatTurn(kernelTranscript.rootSessionId);
               get().addLog('Edit-and-resend cancelled after dispatch ACK.');
               return;
             }
@@ -800,6 +820,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
               activeExecutionId: null,
               apiError: cancelResult.error || cancelResult.data?.reason || 'Failed to cancel execution',
             });
+            await cancelKernelChatTurn(kernelTranscript.rootSessionId);
             return;
           }
         } catch (error) {
@@ -811,12 +832,13 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
             activeExecutionId: null,
             apiError: errorMessage,
           });
+          await markKernelChatTurnFailed(kernelTranscript.rootSessionId, errorMessage);
           get().addLog(`Edit and resend error: ${errorMessage}`);
         }
       } else {
         set({
           streamingOutput: linesWithEditedMessage,
-          streamLineCounter: newInfoId,
+          streamLineCounter: editedUserLine.id,
           standaloneTurns: rebuiltTurns,
           status: 'running',
           isCancelling: false,
@@ -845,6 +867,17 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
         if (!existingStandaloneSessionId) {
           set({ standaloneSessionId });
         }
+        set((state: ExecutionState) =>
+          buildActiveChatRuntimeRegistryPatch(state, {
+            source: 'standalone',
+            rawSessionId: standaloneSessionId,
+            rootSessionId: kernelTranscript.rootSessionId,
+            workspacePath: settingsSnapshot.workspacePath || null,
+            llmBackend: settingsSnapshot.backend,
+            llmProvider: settingsSnapshot.provider,
+            llmModel: settingsSnapshot.model,
+          }),
+        );
         const editContextSources = resolveSessionScopedContext(standaloneSessionId, 'standalone');
         const { cleanedPrompt, pluginInvocations } = extractPluginInvocationsFromPrompt(newContent);
         const normalizedPrompt = ensurePromptContent(cleanedPrompt, pluginInvocations.length);
@@ -878,6 +911,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
             maxIterations: settingsSnapshot.maxIterations ?? undefined,
             maxConcurrentSubagents: settingsSnapshot.maxConcurrentSubagents || undefined,
             executionId: standaloneExecutionId,
+            kernelSessionId: kernelTranscript.rootSessionId,
             pluginInvocations: pluginInvocations.length > 0 ? pluginInvocations : null,
             contextSources: editContextSources,
             externalContextInjected: assembledContext.externalContextInjected,
@@ -893,6 +927,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
             const assistantResponse = execution.response?.trim() || '';
             const streamedAssistantText = collectAssistantTextSince(get().streamingOutput, turnStartLineId);
             const assistantTurnText = assistantResponse || streamedAssistantText;
+            useToolPermissionStore.getState().clearSessionRequests(standaloneSessionId);
 
             if (assistantTurnText) {
               const retentionLimit = getStandaloneContextTurnsLimit();
@@ -911,11 +946,6 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
               }));
             }
 
-            const hasStreamedText = hasAssistantTextLineSince(get().streamingOutput, turnStartLineId);
-            if (!hasStreamedText && assistantTurnText) {
-              await appendTextWithTypewriter((chunk, type) => get().appendStreamLine(chunk, type), assistantTurnText);
-            }
-
             if (get().status === 'running') {
               set({
                 status: execution.success ? 'completed' : 'failed',
@@ -926,6 +956,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          useToolPermissionStore.getState().clearSessionRequests(standaloneSessionId);
           set({
             status: 'failed',
             isCancelling: false,
@@ -933,6 +964,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
             activeExecutionId: null,
             apiError: errorMessage,
           });
+          await markKernelChatTurnFailed(kernelTranscript.rootSessionId, errorMessage);
           get().addLog(`Edit and resend error: ${errorMessage}`);
         }
       }

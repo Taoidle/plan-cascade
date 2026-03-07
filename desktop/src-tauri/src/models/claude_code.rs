@@ -158,6 +158,8 @@ pub struct SendMessageRequest {
     pub session_id: String,
     /// The message content
     pub prompt: String,
+    /// Optional linked workflow kernel session for Simple chat SSOT sync
+    pub kernel_session_id: Option<String>,
 }
 
 /// Response when sending a message

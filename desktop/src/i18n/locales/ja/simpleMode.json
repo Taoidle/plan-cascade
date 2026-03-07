@@ -604,6 +604,8 @@
         },
         "phase": {
           "ready": "準備完了",
+          "submitting": "送信中",
+          "streaming": "生成中",
           "running": "実行中",
           "paused": "一時停止",
           "completed": "完了",
@@ -623,7 +625,8 @@
           "architecture_review": "アーキテクチャレビュー",
           "generating_design_doc": "設計ドキュメント生成中",
           "cancelled": "キャンセル済み",
-          "failed": "失敗"
+          "failed": "失敗",
+          "interrupted": "中断"
         },
         "eventKind": {
           "session_opened": "セッション開始",
@@ -661,6 +664,8 @@
           "mode_start_failed": "モード開始失敗",
           "mode_session_link_failed": "モードセッション関連付け失敗",
           "interrupted_by_restart": "再起動により中断",
+          "tool_permission": "ツール権限待ち",
+          "user_pause": "ユーザーにより一時停止",
           "unknown_reason": "不明な理由"
         }
       }

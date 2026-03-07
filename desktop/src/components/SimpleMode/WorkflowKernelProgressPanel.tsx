@@ -16,7 +16,7 @@ interface WorkflowKernelProgressPanelProps {
   workflowPhase: string;
 }
 
-const CHAT_PHASES = ['ready', 'running', 'paused', 'completed', 'failed', 'cancelled'];
+const CHAT_PHASES = ['ready', 'submitting', 'streaming', 'paused', 'failed', 'cancelled', 'interrupted'];
 const PLAN_PHASES = [
   'idle',
   'analyzing',
@@ -157,10 +157,15 @@ export function WorkflowKernelProgressPanel({ workflowMode, workflowPhase }: Wor
 
   const phaseList = getPhases(activeMode);
   const sessionStatus = session?.status ?? 'active';
-  const isCompletedState = activePhase === 'completed' || sessionStatus === 'completed';
+  const isChatMode = activeMode === 'chat';
+  const isCompletedState = !isChatMode && (activePhase === 'completed' || sessionStatus === 'completed');
   const isFailedState = activePhase === 'failed' || sessionStatus === 'failed';
   const isCancelledState = activePhase === 'cancelled' || sessionStatus === 'cancelled';
+  const isInterruptedState = activePhase === 'interrupted';
   const isTerminalState = isCompletedState || isFailedState || isCancelledState;
+  const isInProgressState = isChatMode
+    ? activePhase === 'submitting' || activePhase === 'streaming' || activePhase === 'paused'
+    : !isTerminalState;
   const rawPhaseIndex = phaseList.indexOf(activePhase);
   const phaseIndex = rawPhaseIndex >= 0 ? rawPhaseIndex : isTerminalState ? phaseList.length - 1 : 0;
   const recentEvents = useMemo(() => [...events].slice(-20).reverse(), [events]);
@@ -204,7 +209,11 @@ export function WorkflowKernelProgressPanel({ workflowMode, workflowPhase }: Wor
                           ? 'bg-red-500'
                           : isCancelledState
                             ? 'bg-amber-500'
-                            : 'bg-blue-500 animate-pulse'
+                            : isInterruptedState
+                              ? 'bg-slate-400'
+                              : isInProgressState
+                                ? 'bg-blue-500 animate-pulse'
+                                : 'bg-slate-300 dark:bg-slate-600'
                       : 'bg-gray-200 dark:bg-gray-700',
                 )}
               />
