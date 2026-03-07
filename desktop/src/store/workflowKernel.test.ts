@@ -260,7 +260,7 @@ describe('workflowKernel store', () => {
       mode: 'plan',
       lines: [{ id: 1, type: 'info', content: 'stored' }],
     });
-    expect(useSimpleSessionStore.getState().getModeLines('kernel-3', 'plan')).toEqual([
+    expect(useWorkflowKernelStore.getState().getCachedModeTranscript('kernel-3', 'plan').lines).toEqual([
       { id: 1, type: 'info', content: 'stored' },
     ]);
   });
@@ -456,7 +456,7 @@ describe('workflowKernel store', () => {
     });
   });
 
-  it('applies transcript events to the simple session cache', async () => {
+  it('applies transcript events to the workflow kernel transcript cache', async () => {
     await useWorkflowKernelStore.getState().subscribeToUpdates();
 
     emitTranscriptEvent({
@@ -468,7 +468,7 @@ describe('workflowKernel store', () => {
       source: 'test',
     });
 
-    expect(useSimpleSessionStore.getState().getModeLines('kernel-4', 'task')).toEqual([
+    expect(useWorkflowKernelStore.getState().getCachedModeTranscript('kernel-4', 'task').lines).toEqual([
       { id: 1, type: 'info', content: 'background update' },
     ]);
   });

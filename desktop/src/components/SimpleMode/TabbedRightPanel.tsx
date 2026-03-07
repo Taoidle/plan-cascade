@@ -13,7 +13,7 @@ import { GitPanel } from './GitPanel';
 import { ContextOpsPanel } from './ContextOpsPanel';
 import { WorkflowKernelProgressPanel } from './WorkflowKernelProgressPanel';
 import { StreamingOutput, ErrorState } from '../shared';
-import type { StreamLine } from '../../store/execution';
+import type { ExecutionStatus, StreamLine } from '../../store/execution';
 import type { AnalysisCoverageSnapshot } from '../../store/execution';
 import { useContextOpsStore } from '../../store/contextOps';
 import { useWorkflowObservabilityStore } from '../../store/workflowObservability';
@@ -28,8 +28,9 @@ interface TabbedRightPanelProps {
   workflowPhase: string;
   logs: string[];
   analysisCoverage: AnalysisCoverageSnapshot | null;
+  executionStatus: ExecutionStatus;
+  modeTranscriptLines: StreamLine[];
   // Git tab props
-  streamingOutput: StreamLine[];
   workspacePath: string | null;
   contextSessionId: string | null;
 }
@@ -41,7 +42,8 @@ export function TabbedRightPanel({
   workflowPhase,
   logs,
   analysisCoverage,
-  streamingOutput,
+  executionStatus,
+  modeTranscriptLines,
   workspacePath,
   contextSessionId,
 }: TabbedRightPanelProps) {
@@ -115,11 +117,18 @@ export function TabbedRightPanel({
             </div>
             <div className="min-h-0 flex-1 flex flex-col">
               <ExecutionLogsCard logs={logs} />
-              <StreamingOutput maxHeight="none" compact={false} showClear className="flex-1 min-h-0 px-2 pb-2" />
+              <StreamingOutput
+                maxHeight="none"
+                compact={false}
+                showClear={false}
+                className="flex-1 min-h-0 px-2 pb-2"
+                lines={modeTranscriptLines}
+                statusOverride={executionStatus}
+              />
             </div>
           </div>
         ) : effectiveActiveTab === 'git' ? (
-          <GitPanel streamingOutput={streamingOutput} workspacePath={workspacePath} />
+          <GitPanel streamingOutput={modeTranscriptLines} workspacePath={workspacePath} />
         ) : (
           <ContextOpsPanel projectPath={workspacePath} sessionId={contextSessionId} />
         )}

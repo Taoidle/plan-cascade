@@ -1,62 +1,37 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import type { FileAttachmentData } from '../types/attachment';
-import type {
-  ModeViewSnapshot,
-  WorkflowMode,
-  WorkflowSessionCatalogItem,
-  WorkflowSessionCatalogState,
-} from '../types/workflowKernel';
+import type { WorkflowMode, WorkflowSessionCatalogItem, WorkflowSessionCatalogState } from '../types/workflowKernel';
 
-type ModeViewMap = Partial<Record<WorkflowMode, ModeViewSnapshot>>;
 type DraftMap = Partial<Record<WorkflowMode, string>>;
 type AttachmentMap = Partial<Record<WorkflowMode, FileAttachmentData[]>>;
-type TranscriptRevisionMap = Partial<Record<WorkflowMode, number>>;
+type UnreadMap = Partial<Record<WorkflowMode, boolean>>;
 
 export interface SimpleSessionStore {
   activeRootSessionId: string | null;
   catalog: Record<string, WorkflowSessionCatalogItem>;
-  modeViews: Record<string, ModeViewMap>;
   drafts: Record<string, DraftMap>;
   attachmentsByMode: Record<string, AttachmentMap>;
-  transcriptRevisions: Record<string, TranscriptRevisionMap>;
+  unreadByMode: Record<string, UnreadMap>;
 
   setCatalogState: (state: WorkflowSessionCatalogState) => void;
   upsertCatalogItems: (items: WorkflowSessionCatalogItem[]) => void;
   setActiveRootSessionId: (sessionId: string | null) => void;
-  setModeLines: (sessionId: string, mode: WorkflowMode, lines: unknown[]) => void;
-  setModeTranscriptSnapshot: (sessionId: string, mode: WorkflowMode, lines: unknown[], revision: number) => void;
-  getModeLines: (sessionId: string | null, mode: WorkflowMode) => unknown[];
   setDraft: (sessionId: string, mode: WorkflowMode, value: string) => void;
   getDraft: (sessionId: string | null, mode: WorkflowMode) => string;
   setAttachments: (sessionId: string, mode: WorkflowMode, attachments: FileAttachmentData[]) => void;
   getAttachments: (sessionId: string | null, mode: WorkflowMode) => FileAttachmentData[];
   markModeUnread: (sessionId: string, mode: WorkflowMode, unread: boolean) => void;
+  isModeUnread: (sessionId: string | null, mode: WorkflowMode) => boolean;
   reset: () => void;
-}
-
-const DEFAULT_MODE_VIEW = (mode: WorkflowMode): ModeViewSnapshot => ({
-  mode,
-  lines: [],
-  draftInput: '',
-  queuedMessages: [],
-  attachments: [],
-  scrollAnchor: null,
-  lastLoadedAt: null,
-  hasUnreadBackgroundUpdates: false,
-});
-
-function getModeView(state: SimpleSessionStore, sessionId: string, mode: WorkflowMode): ModeViewSnapshot {
-  return state.modeViews[sessionId]?.[mode] ?? DEFAULT_MODE_VIEW(mode);
 }
 
 const DEFAULT_STATE = {
   activeRootSessionId: null as string | null,
   catalog: {} as Record<string, WorkflowSessionCatalogItem>,
-  modeViews: {} as Record<string, ModeViewMap>,
   drafts: {} as Record<string, DraftMap>,
   attachmentsByMode: {} as Record<string, AttachmentMap>,
-  transcriptRevisions: {} as Record<string, TranscriptRevisionMap>,
+  unreadByMode: {} as Record<string, UnreadMap>,
 };
 
 export const useSimpleSessionStore = create<SimpleSessionStore>()(
@@ -84,68 +59,6 @@ export const useSimpleSessionStore = create<SimpleSessionStore>()(
         set({ activeRootSessionId: sessionId });
       },
 
-      setModeLines: (sessionId, mode, lines) => {
-        const cloned = lines.map((line) =>
-          line && typeof line === 'object' ? ({ ...(line as Record<string, unknown>) } as unknown) : line,
-        );
-        set((state) => {
-          const previousRevision = state.transcriptRevisions[sessionId]?.[mode] ?? 0;
-          return {
-            modeViews: {
-              ...state.modeViews,
-              [sessionId]: {
-                ...state.modeViews[sessionId],
-                [mode]: {
-                  ...getModeView(state, sessionId, mode),
-                  lines: cloned,
-                  lastLoadedAt: Date.now(),
-                },
-              },
-            },
-            transcriptRevisions: {
-              ...state.transcriptRevisions,
-              [sessionId]: {
-                ...state.transcriptRevisions[sessionId],
-                [mode]: previousRevision + 1,
-              },
-            },
-          };
-        });
-      },
-
-      setModeTranscriptSnapshot: (sessionId, mode, lines, revision) => {
-        const cloned = lines.map((line) =>
-          line && typeof line === 'object' ? ({ ...(line as Record<string, unknown>) } as unknown) : line,
-        );
-        set((state) => ({
-          modeViews: {
-            ...state.modeViews,
-            [sessionId]: {
-              ...state.modeViews[sessionId],
-              [mode]: {
-                ...getModeView(state, sessionId, mode),
-                lines: cloned,
-                lastLoadedAt: Date.now(),
-              },
-            },
-          },
-          transcriptRevisions: {
-            ...state.transcriptRevisions,
-            [sessionId]: {
-              ...state.transcriptRevisions[sessionId],
-              [mode]: revision,
-            },
-          },
-        }));
-      },
-
-      getModeLines: (sessionId, mode) => {
-        if (!sessionId) return [];
-        return (get().modeViews[sessionId]?.[mode]?.lines ?? []).map((line) =>
-          line && typeof line === 'object' ? ({ ...(line as Record<string, unknown>) } as unknown) : line,
-        );
-      },
-
       setDraft: (sessionId, mode, value) => {
         set((state) => ({
           drafts: {
@@ -153,16 +66,6 @@ export const useSimpleSessionStore = create<SimpleSessionStore>()(
             [sessionId]: {
               ...state.drafts[sessionId],
               [mode]: value,
-            },
-          },
-          modeViews: {
-            ...state.modeViews,
-            [sessionId]: {
-              ...state.modeViews[sessionId],
-              [mode]: {
-                ...getModeView(state, sessionId, mode),
-                draftInput: value,
-              },
             },
           },
         }));
@@ -183,16 +86,6 @@ export const useSimpleSessionStore = create<SimpleSessionStore>()(
               [mode]: cloned,
             },
           },
-          modeViews: {
-            ...state.modeViews,
-            [sessionId]: {
-              ...state.modeViews[sessionId],
-              [mode]: {
-                ...getModeView(state, sessionId, mode),
-                attachments: cloned,
-              },
-            },
-          },
         }));
       },
 
@@ -203,17 +96,19 @@ export const useSimpleSessionStore = create<SimpleSessionStore>()(
 
       markModeUnread: (sessionId, mode, unread) => {
         set((state) => ({
-          modeViews: {
-            ...state.modeViews,
+          unreadByMode: {
+            ...state.unreadByMode,
             [sessionId]: {
-              ...state.modeViews[sessionId],
-              [mode]: {
-                ...getModeView(state, sessionId, mode),
-                hasUnreadBackgroundUpdates: unread,
-              },
+              ...state.unreadByMode[sessionId],
+              [mode]: unread,
             },
           },
         }));
+      },
+
+      isModeUnread: (sessionId, mode) => {
+        if (!sessionId) return false;
+        return get().unreadByMode[sessionId]?.[mode] ?? false;
       },
 
       reset: () => {
@@ -221,15 +116,30 @@ export const useSimpleSessionStore = create<SimpleSessionStore>()(
       },
     }),
     {
-      name: 'simple-session-store-v1',
+      name: 'simple-session-store-v2',
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         activeRootSessionId: state.activeRootSessionId,
-        modeViews: state.modeViews,
         drafts: state.drafts,
         attachmentsByMode: state.attachmentsByMode,
-        transcriptRevisions: state.transcriptRevisions,
+        unreadByMode: state.unreadByMode,
       }),
+      migrate: (persistedState) => {
+        if (!persistedState || typeof persistedState !== 'object') {
+          return DEFAULT_STATE;
+        }
+        const state = persistedState as Record<string, unknown>;
+        return {
+          activeRootSessionId:
+            typeof state.activeRootSessionId === 'string' || state.activeRootSessionId === null
+              ? (state.activeRootSessionId as string | null)
+              : null,
+          drafts: (state.drafts as Record<string, DraftMap> | undefined) ?? {},
+          attachmentsByMode: (state.attachmentsByMode as Record<string, AttachmentMap> | undefined) ?? {},
+          unreadByMode: (state.unreadByMode as Record<string, UnreadMap> | undefined) ?? {},
+          catalog: {},
+        };
+      },
     },
   ),
 );

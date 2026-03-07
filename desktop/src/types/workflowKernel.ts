@@ -257,21 +257,11 @@ export interface ModeTranscriptPayload {
   lines: unknown[];
 }
 
-export interface ModeViewSnapshot {
-  mode: WorkflowMode;
+export interface ModeTranscriptState {
+  revision: number;
   lines: unknown[];
-  draftInput: string;
-  queuedMessages: unknown[];
-  attachments: unknown[];
-  scrollAnchor: string | null;
-  lastLoadedAt: number | null;
-  hasUnreadBackgroundUpdates: boolean;
-}
-
-export interface SimpleRootSessionView {
-  sessionId: string;
-  activeMode: WorkflowMode;
-  modeViews: Partial<Record<WorkflowMode, ModeViewSnapshot>>;
+  loaded: boolean;
+  unread: boolean;
 }
 
 export interface WorkflowSessionCatalogUpdatedEvent {

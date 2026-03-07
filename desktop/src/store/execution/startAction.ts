@@ -5,6 +5,7 @@ import { useAgentsStore } from '../agents';
 import { useContextSourcesStore } from '../contextSources';
 import { useSettingsStore } from '../settings';
 import { useToolPermissionStore } from '../toolPermission';
+import { useWorkflowKernelStore } from '../workflowKernel';
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   isClaudeCodeBackend,
@@ -53,6 +54,17 @@ interface BackendStandaloneExecutionResult {
 }
 
 type SessionSource = 'claude' | 'standalone';
+
+async function appendActiveChatLinesToKernel(lines: StreamLine[]): Promise<void> {
+  const kernel = useWorkflowKernelStore.getState();
+  const rootSessionId = kernel.activeRootSessionId ?? kernel.sessionId;
+  if (!rootSessionId || lines.length === 0) return;
+  await kernel.appendModeTranscript(
+    rootSessionId,
+    'chat',
+    lines.map((line) => ({ ...line })),
+  );
+}
 
 function resolveSessionScopedContext(sessionId: string | null, source: SessionSource): ContextSourceConfig | null {
   const scopedSessionId = sessionId?.trim() ? `${source}:${sessionId.trim()}` : null;
@@ -210,7 +222,18 @@ export function createStartAction(
     get().addLog(`Task: ${description}`);
     if (mode === 'simple' && !isClaudeBackend) {
       const turnId = getNextTurnId(get().streamingOutput);
+      const lineId = get().streamLineCounter + 1;
       get().appendStreamLine(description, 'info', undefined, undefined, { turnId, turnBoundary: 'user' });
+      void appendActiveChatLinesToKernel([
+        {
+          id: lineId,
+          content: description,
+          type: 'info',
+          timestamp: Date.now(),
+          turnId,
+          turnBoundary: 'user',
+        },
+      ]);
     }
 
     try {
@@ -263,7 +286,18 @@ export function createStartAction(
         }
 
         const turnId = getNextTurnId(get().streamingOutput);
+        const lineId = get().streamLineCounter + 1;
         get().appendStreamLine(description, 'info', undefined, undefined, { turnId, turnBoundary: 'user' });
+        void appendActiveChatLinesToKernel([
+          {
+            id: lineId,
+            content: description,
+            type: 'info',
+            timestamp: Date.now(),
+            turnId,
+            turnBoundary: 'user',
+          },
+        ]);
 
         const claudeContextSources = resolveSessionScopedContext(sessionId, 'claude');
         const assembledPrompt = await buildClaudePromptWithContextEnvelope({

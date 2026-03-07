@@ -18,7 +18,7 @@ import { EdgeCollapseButton } from './EdgeCollapseButton';
 import { BottomStatusBar } from './BottomStatusBar';
 import { ChatToolbar } from './ChatToolbar';
 import { TabbedRightPanel } from './TabbedRightPanel';
-import { useExecutionStore } from '../../store/execution';
+import { useExecutionStore, type ExecutionStatus, type StreamLine } from '../../store/execution';
 import { useSettingsStore } from '../../store/settings';
 import { useWorkflowOrchestratorStore } from '../../store/workflowOrchestrator';
 import { usePlanOrchestratorStore } from '../../store/planOrchestrator';
@@ -55,7 +55,6 @@ import { useSimpleQueueRuntime } from './useSimpleQueueRuntime';
 import { useWorkflowQuestionSpecs } from './useWorkflowQuestionSpecs';
 import { buildSessionTreeViewModel } from './sessionTreeViewModel';
 import { buildConversationHistory } from '../../lib/contextBridge';
-import { selectStableConversationLines } from '../../lib/conversationUtils';
 import {
   cancelActiveWorkflow,
   submitWorkflowInputWithTracking,
@@ -85,6 +84,46 @@ const MAX_QUEUED_CHAT_MESSAGES = 20;
 const TOKEN_ESTIMATE_DEBOUNCE_MS = 180;
 const MIN_RIGHT_PANEL_WIDTH = 420;
 const MAX_RIGHT_PANEL_WIDTH = 960;
+const EMPTY_MODE_TRANSCRIPT = {
+  revision: 0,
+  lines: [],
+  loaded: false,
+  unread: false,
+} as const;
+
+const EMPTY_STREAM_LINES: StreamLine[] = [];
+
+function selectModeTranscriptLines(
+  sessionId: string | null,
+  mode: WorkflowMode,
+): (state: ReturnType<typeof useWorkflowKernelStore.getState>) => StreamLine[] {
+  return (state) => {
+    if (!sessionId) return EMPTY_STREAM_LINES;
+    const transcript =
+      typeof state.getCachedModeTranscript === 'function'
+        ? state.getCachedModeTranscript(sessionId, mode)
+        : (state.modeTranscriptsBySession?.[sessionId]?.[mode] ?? EMPTY_MODE_TRANSCRIPT);
+    return (transcript.lines as StreamLine[]) ?? EMPTY_STREAM_LINES;
+  };
+}
+
+function selectModeTranscriptHasContent(
+  sessionId: string | null,
+  mode: WorkflowMode,
+): (state: ReturnType<typeof useWorkflowKernelStore.getState>) => boolean {
+  return (state) => selectModeTranscriptLines(sessionId, mode)(state).length > 0;
+}
+
+function selectModeTranscriptDetailCount(
+  sessionId: string | null,
+  mode: WorkflowMode,
+): (state: ReturnType<typeof useWorkflowKernelStore.getState>) => number {
+  return (state) =>
+    selectModeTranscriptLines(
+      sessionId,
+      mode,
+    )(state).reduce((count, line) => (line.type !== 'text' && line.type !== 'info' ? count + 1 : count), 0);
+}
 
 export function SimpleModeShell() {
   const { t } = useTranslation('simpleMode');
@@ -92,7 +131,6 @@ export function SimpleModeShell() {
   const simpleController = useSimpleModeController();
   const status = useExecutionStore((s) => s.status);
   const executionIsCancelling = useExecutionStore((s) => s.isCancelling);
-  const connectionStatus = useExecutionStore((s) => s.connectionStatus);
   const isSubmitting = useExecutionStore((s) => s.isSubmitting);
   const apiError = useExecutionStore((s) => s.apiError);
   const start = useExecutionStore((s) => s.start);
@@ -106,16 +144,11 @@ export function SimpleModeShell() {
   const isAnalyzingStrategy = useExecutionStore((s) => s.isAnalyzingStrategy);
   const clearStrategyAnalysis = useExecutionStore((s) => s.clearStrategyAnalysis);
   const isChatSession = useExecutionStore((s) => s.isChatSession);
-  const streamingOutput = useExecutionStore((s) => s.streamingOutput);
-  const analysisCoverage = useExecutionStore((s) => s.analysisCoverage);
-  const logs = useExecutionStore((s) => s.logs);
   const history = useExecutionStore((s) => s.history);
   const clearHistory = useExecutionStore((s) => s.clearHistory);
   const deleteHistory = useExecutionStore((s) => s.deleteHistory);
   const renameHistory = useExecutionStore((s) => s.renameHistory);
   const restoreFromHistory = useExecutionStore((s) => s.restoreFromHistory);
-  const sessionUsageTotals = useExecutionStore((s) => s.sessionUsageTotals);
-  const turnUsageTotals = useExecutionStore((s) => s.turnUsageTotals);
   const taskId = useExecutionStore((s) => s.taskId);
   const standaloneSessionId = useExecutionStore((s) => s.standaloneSessionId);
   const attachments = useExecutionStore((s) => s.attachments);
@@ -182,6 +215,7 @@ export function SimpleModeShell() {
   const resumeWorkflowKernelBackgroundRuns = useWorkflowKernelStore((s) => s.resumeBackgroundRuns);
   const getWorkflowKernelModeTranscript = useWorkflowKernelStore((s) => s.getModeTranscript);
   const storeWorkflowKernelModeTranscript = useWorkflowKernelStore((s) => s.storeModeTranscript);
+  const getCachedWorkflowKernelModeTranscript = useWorkflowKernelStore((s) => s.getCachedModeTranscript);
   const appendWorkflowKernelContextItems = useWorkflowKernelStore((s) => s.appendContextItems);
   const workflowSessionCatalog = useWorkflowKernelStore((s) => s.sessionCatalog);
   const transitionWorkflowKernelMode = useWorkflowKernelStore((s) => s.transitionMode);
@@ -191,7 +225,6 @@ export function SimpleModeShell() {
   const cancelWorkflowKernelOperation = useWorkflowKernelStore((s) => s.cancelOperation);
   const activeRootSessionId = useSimpleSessionStore((s) => s.activeRootSessionId);
   const setSimpleCatalogState = useSimpleSessionStore((s) => s.setCatalogState);
-  const getModeLines = useSimpleSessionStore((s) => s.getModeLines);
   const setModeDraft = useSimpleSessionStore((s) => s.setDraft);
   const getModeDraft = useSimpleSessionStore((s) => s.getDraft);
   const setModeAttachments = useSimpleSessionStore((s) => s.setAttachments);
@@ -391,14 +424,6 @@ export function SimpleModeShell() {
     kernelPlanRuntime.linkedSessionId,
     recordInteractiveActionFailure,
   ]);
-
-  useEffect(() => {
-    if (workflowSessionCatalog.length === 0) return;
-    setSimpleCatalogState({
-      activeSessionId: workflowKernelSessionId ?? activeRootSessionId ?? null,
-      sessions: workflowSessionCatalog,
-    });
-  }, [activeRootSessionId, setSimpleCatalogState, workflowKernelSessionId, workflowSessionCatalog]);
 
   // Tool permission state
   const permissionRequest = useToolPermissionStore((s) => s.pendingRequest);
@@ -638,7 +663,11 @@ export function SimpleModeShell() {
         return;
       }
 
-      const cachedLines = (sessionId ? getModeLines(sessionId, 'chat') : []) as typeof streamingOutput;
+      const cachedLines = (
+        sessionId && typeof getCachedWorkflowKernelModeTranscript === 'function'
+          ? getCachedWorkflowKernelModeTranscript(sessionId, 'chat').lines
+          : []
+      ) as StreamLine[];
       const latestMeta = latestKernelChatMetaRef.current;
       restoreForegroundChatRuntime({
         source: linkedRuntime.source,
@@ -649,7 +678,7 @@ export function SimpleModeShell() {
         lastError: latestMeta.lastError,
       });
     },
-    [getModeLines, parseLinkedChatRuntime, reset, restoreForegroundChatRuntime],
+    [getCachedWorkflowKernelModeTranscript, parseLinkedChatRuntime, reset, restoreForegroundChatRuntime],
   );
 
   const restoreForegroundModeView = useCallback(
@@ -666,7 +695,6 @@ export function SimpleModeShell() {
 
   const previousModeViewRef = useRef<{ sessionId: string | null; mode: WorkflowMode } | null>(null);
   const loadedModeKeyRef = useRef<string | null>(null);
-  const foregroundChatSnapshotRef = useRef<Record<string, typeof streamingOutput>>({});
   useEffect(() => {
     loadedModeKeyRef.current = null;
     const hydrationKey = workflowKernelSessionId ? `${workflowKernelSessionId}:${workflowMode}` : null;
@@ -719,6 +747,21 @@ export function SimpleModeShell() {
     return null;
   }, [standaloneSessionId, taskId]);
 
+  const activeModeHasTranscriptContent = useWorkflowKernelStore(
+    useCallback(
+      (state: ReturnType<typeof useWorkflowKernelStore.getState>) =>
+        selectModeTranscriptHasContent(workflowKernelSessionId, workflowMode)(state),
+      [workflowKernelSessionId, workflowMode],
+    ),
+  );
+  const activeModeDetailLineCount = useWorkflowKernelStore(
+    useCallback(
+      (state: ReturnType<typeof useWorkflowKernelStore.getState>) =>
+        selectModeTranscriptDetailCount(workflowKernelSessionId, workflowMode)(state),
+      [workflowKernelSessionId, workflowMode],
+    ),
+  );
+
   const lastSyncedChatLedgerTurnCountRef = useRef(0);
   useEffect(() => {
     lastSyncedChatLedgerTurnCountRef.current = 0;
@@ -744,15 +787,7 @@ export function SimpleModeShell() {
         workspacePath,
       },
     });
-  }, [
-    appendWorkflowKernelContextItems,
-    isSubmitting,
-    status,
-    streamingOutput,
-    workflowKernelSessionId,
-    workflowMode,
-    workspacePath,
-  ]);
+  }, [appendWorkflowKernelContextItems, isSubmitting, status, workflowKernelSessionId, workflowMode, workspacePath]);
 
   const lastLinkedChatRuntimeRef = useRef<string | null>(null);
   useEffect(() => {
@@ -871,7 +906,8 @@ export function SimpleModeShell() {
 
   const handleNewTask = useCallback(() => {
     const hasContext =
-      (workflowKernelSession?.contextLedger.conversationTurnCount ?? 0) > 0 || streamingOutput.length > 0;
+      (workflowKernelSession?.contextLedger.conversationTurnCount ?? 0) > 0 ||
+      getCachedWorkflowKernelModeTranscript(workflowKernelSessionId, workflowMode).lines.length > 0;
 
     persistForegroundModeView(workflowKernelSessionId, workflowMode);
     resetWorkflow();
@@ -899,7 +935,7 @@ export function SimpleModeShell() {
     resetPlanWorkflow,
     openWorkflowKernelSession,
     persistForegroundModeView,
-    streamingOutput,
+    getCachedWorkflowKernelModeTranscript,
     showToast,
     t,
     workflowKernelSession?.contextLedger.conversationTurnCount,
@@ -1296,78 +1332,6 @@ export function SimpleModeShell() {
   const hoverPanelsEnabled = autoPanelHoverEnabled && supportsPointerHover;
   const isLeftPanelOpen = !sidebarCollapsed || leftPanelHoverExpanded;
   const isRightPanelOpen = rightPanelOpen || rightPanelHoverExpanded;
-  const currentForegroundRuntimeId = taskId?.trim()
-    ? `claude:${taskId.trim()}`
-    : standaloneSessionId?.trim()
-      ? `standalone:${standaloneSessionId.trim()}`
-      : null;
-  const cachedModeLines = useMemo(
-    () => (workflowKernelSessionId ? getModeLines(workflowKernelSessionId, workflowMode) : []),
-    [getModeLines, workflowKernelSessionId, workflowMode],
-  );
-  const stableForegroundChatLines = useMemo(
-    () =>
-      workflowMode === 'chat'
-        ? (selectStableConversationLines(
-            streamingOutput,
-            (cachedModeLines as typeof streamingOutput) ?? [],
-          ) as typeof streamingOutput)
-        : streamingOutput,
-    [cachedModeLines, streamingOutput, workflowMode],
-  );
-  useEffect(() => {
-    if (workflowMode !== 'chat') return;
-    if (!workflowKernelSessionId) return;
-    if (!(streamingOutput.length > 0 || stableForegroundChatLines.length > 0)) return;
-    const previousSnapshot = foregroundChatSnapshotRef.current[workflowKernelSessionId] ?? [];
-    const nextSnapshot = selectStableConversationLines(stableForegroundChatLines, previousSnapshot);
-    if (nextSnapshot.length === 0) return;
-    foregroundChatSnapshotRef.current[workflowKernelSessionId] = nextSnapshot.map((line) => ({ ...line }));
-  }, [stableForegroundChatLines, streamingOutput, workflowKernelSessionId, workflowMode]);
-  const shouldUseForegroundTranscript =
-    workflowMode === 'chat' &&
-    (streamingOutput.length > 0 ||
-      !!currentForegroundRuntimeId ||
-      isChatSession ||
-      status === 'running' ||
-      status === 'paused' ||
-      isSubmitting);
-  const preservedForegroundChatLines = useMemo(
-    () =>
-      workflowKernelSessionId && workflowMode === 'chat'
-        ? (foregroundChatSnapshotRef.current[workflowKernelSessionId] ?? [])
-        : [],
-    [workflowKernelSessionId, workflowMode],
-  );
-  const displayLines = useMemo(
-    () =>
-      shouldUseForegroundTranscript
-        ? stableForegroundChatLines.length > 0
-          ? stableForegroundChatLines
-          : preservedForegroundChatLines.length > 0
-            ? preservedForegroundChatLines
-            : ((cachedModeLines as typeof streamingOutput) ?? [])
-        : ((cachedModeLines as typeof streamingOutput) ?? []),
-    [cachedModeLines, preservedForegroundChatLines, shouldUseForegroundTranscript, stableForegroundChatLines],
-  );
-
-  useEffect(() => {
-    if (workflowMode !== 'chat') return;
-    if (!shouldUseForegroundTranscript) return;
-    if (streamingOutput.length > 0) return;
-    if (preservedForegroundChatLines.length === 0) return;
-    useExecutionStore.setState({
-      streamingOutput: preservedForegroundChatLines.map((line) => ({ ...line })),
-      streamLineCounter: preservedForegroundChatLines.reduce((max, line) => Math.max(max, line.id), 0),
-      foregroundDirty: true,
-    });
-  }, [preservedForegroundChatLines, shouldUseForegroundTranscript, streamingOutput, workflowMode]);
-
-  const detailLineCount = useMemo(
-    () => displayLines.filter((line) => line.type !== 'text' && line.type !== 'info').length,
-    [displayLines],
-  );
-
   const clearLeftHoverTimer = useCallback(() => {
     if (leftHoverTimerRef.current !== null) {
       window.clearTimeout(leftHoverTimerRef.current);
@@ -1624,8 +1588,9 @@ export function SimpleModeShell() {
             />
 
             <div className="flex-1 min-h-0">
-              <ChatTranscript
-                lines={displayLines}
+              <KernelTranscriptChatPane
+                sessionId={workflowKernelSessionId}
+                mode={workflowMode}
                 status={status}
                 scrollRef={chatScrollRef}
                 forceFullRender={isCapturing}
@@ -1649,12 +1614,12 @@ export function SimpleModeShell() {
               isWorkflowCancelling={isStructuredWorkflowCancelling}
               onCancelWorkflow={handleCancelStructuredWorkflow}
               onExportImage={handleExportImage}
-              isExportDisabled={displayLines.length === 0}
+              isExportDisabled={!activeModeHasTranscriptContent}
               isCapturing={isCapturing}
               rightPanelOpen={isRightPanelOpen}
               rightPanelTab={rightPanelTab}
               onToggleOutput={handleToggleOutput}
-              detailLineCount={detailLineCount}
+              detailLineCount={activeModeDetailLineCount}
             />
 
             <SimpleInputSection
@@ -1716,14 +1681,14 @@ export function SimpleModeShell() {
               />
             )}
             <div className="h-full" style={{ width: rightPanelWidth }}>
-              <TabbedRightPanel
+              <KernelTranscriptRightPanel
+                sessionId={workflowKernelSessionId}
+                mode={workflowMode}
                 activeTab={rightPanelTab}
                 onTabChange={setRightPanelTab}
                 workflowMode={workflowMode}
                 workflowPhase={rightPanelPhase}
-                logs={logs}
-                analysisCoverage={analysisCoverage}
-                streamingOutput={displayLines}
+                executionStatus={status}
                 workspacePath={workspacePath}
                 contextSessionId={contextSessionId}
               />
@@ -1733,14 +1698,11 @@ export function SimpleModeShell() {
       />
 
       {/* Bottom status bar */}
-      <BottomStatusBar
-        connectionStatus={connectionStatus}
+      <ExecutionAwareBottomStatusBar
         workspacePath={workspacePath}
         permissionLevel={permissionLevel}
         onPermissionLevelChange={(level) => setPermissionLevel(permissionSessionId, level)}
         sessionId={permissionSessionId}
-        turnUsage={turnUsageTotals}
-        sessionUsage={sessionUsageTotals}
         tokenEstimate={tokenEstimate}
         isEstimatingTokenBudget={isEstimatingTokenBudget}
       />
@@ -1752,6 +1714,107 @@ export function SimpleModeShell() {
         reason={modeSwitchLockReasonText}
       />
     </div>
+  );
+}
+
+function KernelTranscriptChatPane({
+  sessionId,
+  mode,
+  status,
+  scrollRef,
+  forceFullRender,
+}: {
+  sessionId: string | null;
+  mode: WorkflowMode;
+  status: ExecutionStatus;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  forceFullRender: boolean;
+}) {
+  const lines = useWorkflowKernelStore(
+    useCallback(
+      (state: ReturnType<typeof useWorkflowKernelStore.getState>) => selectModeTranscriptLines(sessionId, mode)(state),
+      [sessionId, mode],
+    ),
+  );
+  return <ChatTranscript lines={lines} status={status} scrollRef={scrollRef} forceFullRender={forceFullRender} />;
+}
+
+function KernelTranscriptRightPanel({
+  sessionId,
+  mode,
+  activeTab,
+  onTabChange,
+  workflowMode,
+  workflowPhase,
+  executionStatus,
+  workspacePath,
+  contextSessionId,
+}: {
+  sessionId: string | null;
+  mode: WorkflowMode;
+  activeTab: 'output' | 'git' | 'context';
+  onTabChange: (tab: 'output' | 'git' | 'context') => void;
+  workflowMode: 'chat' | 'plan' | 'task';
+  workflowPhase: string;
+  executionStatus: ExecutionStatus;
+  workspacePath: string | null;
+  contextSessionId: string | null;
+}) {
+  const lines = useWorkflowKernelStore(
+    useCallback(
+      (state: ReturnType<typeof useWorkflowKernelStore.getState>) => selectModeTranscriptLines(sessionId, mode)(state),
+      [sessionId, mode],
+    ),
+  );
+  const logs = useExecutionStore((s) => s.logs);
+  const analysisCoverage = useExecutionStore((s) => s.analysisCoverage);
+  return (
+    <TabbedRightPanel
+      activeTab={activeTab}
+      onTabChange={onTabChange}
+      workflowMode={workflowMode}
+      workflowPhase={workflowPhase}
+      logs={logs}
+      analysisCoverage={analysisCoverage}
+      executionStatus={executionStatus}
+      modeTranscriptLines={lines}
+      workspacePath={workspacePath}
+      contextSessionId={contextSessionId}
+    />
+  );
+}
+
+function ExecutionAwareBottomStatusBar({
+  workspacePath,
+  permissionLevel,
+  onPermissionLevelChange,
+  sessionId,
+  tokenEstimate,
+  isEstimatingTokenBudget,
+}: {
+  workspacePath: string | null;
+  permissionLevel: Parameters<typeof BottomStatusBar>[0]['permissionLevel'];
+  onPermissionLevelChange: (level: Parameters<typeof BottomStatusBar>[0]['permissionLevel']) => void;
+  sessionId: string;
+  tokenEstimate: PromptTokenEstimateResult | null;
+  isEstimatingTokenBudget: boolean;
+}) {
+  const connectionStatus = useExecutionStore((s) => s.connectionStatus);
+  const turnUsage = useExecutionStore((s) => s.turnUsageTotals);
+  const sessionUsage = useExecutionStore((s) => s.sessionUsageTotals);
+
+  return (
+    <BottomStatusBar
+      connectionStatus={connectionStatus}
+      workspacePath={workspacePath}
+      permissionLevel={permissionLevel}
+      onPermissionLevelChange={onPermissionLevelChange}
+      sessionId={sessionId}
+      turnUsage={turnUsage}
+      sessionUsage={sessionUsage}
+      tokenEstimate={tokenEstimate}
+      isEstimatingTokenBudget={isEstimatingTokenBudget}
+    />
   );
 }
 

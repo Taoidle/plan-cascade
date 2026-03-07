@@ -6,6 +6,7 @@ import type { ContextSourceConfig } from '../../types/contextSources';
 import { useContextSourcesStore } from '../contextSources';
 import { useSettingsStore } from '../settings';
 import { useToolPermissionStore } from '../toolPermission';
+import { useWorkflowKernelStore } from '../workflowKernel';
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   isClaudeCodeBackend,
@@ -43,6 +44,28 @@ interface BackendStandaloneExecutionResult {
 }
 
 type SessionSource = 'claude' | 'standalone';
+
+async function appendActiveChatLinesToKernel(lines: StreamLine[]): Promise<void> {
+  const kernel = useWorkflowKernelStore.getState();
+  const rootSessionId = kernel.activeRootSessionId ?? kernel.sessionId;
+  if (!rootSessionId || lines.length === 0) return;
+  await kernel.appendModeTranscript(
+    rootSessionId,
+    'chat',
+    lines.map((line) => ({ ...line })),
+  );
+}
+
+async function storeActiveChatTranscriptInKernel(lines: StreamLine[]): Promise<void> {
+  const kernel = useWorkflowKernelStore.getState();
+  const rootSessionId = kernel.activeRootSessionId ?? kernel.sessionId;
+  if (!rootSessionId) return;
+  await kernel.storeModeTranscript(
+    rootSessionId,
+    'chat',
+    lines.map((line) => ({ ...line })),
+  );
+}
 
 function resolveSessionScopedContext(sessionId: string | null, source: SessionSource): ContextSourceConfig | null {
   const scopedSessionId = sessionId?.trim() ? `${source}:${sessionId.trim()}` : null;
@@ -135,7 +158,18 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
       }
 
       const turnId = getNextTurnId(get().streamingOutput);
+      const lineId = get().streamLineCounter + 1;
       get().appendStreamLine(prompt, 'info', undefined, undefined, { turnId, turnBoundary: 'user' });
+      void appendActiveChatLinesToKernel([
+        {
+          id: lineId,
+          content: prompt,
+          type: 'info',
+          timestamp: Date.now(),
+          turnId,
+          turnBoundary: 'user',
+        },
+      ]);
       get().toolCallFilter.reset();
 
       set({
@@ -364,6 +398,15 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
           result: null,
           foregroundDirty: true,
         });
+        void storeActiveChatTranscriptInKernel([
+          ...truncatedLines,
+          {
+            id: (truncatedLines.length > 0 ? truncatedLines[truncatedLines.length - 1].id : 0) + 1,
+            content: 'Regenerating response. Previous context will be lost.',
+            type: 'warning',
+            timestamp: Date.now(),
+          },
+        ]);
 
         get().toolCallFilter.reset();
 
@@ -657,6 +700,15 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
           result: null,
           foregroundDirty: true,
         });
+        void storeActiveChatTranscriptInKernel([
+          ...linesWithEditedMessage,
+          {
+            id: newInfoId + 1,
+            content: 'Regenerating response. Previous context will be lost.',
+            type: 'warning',
+            timestamp: Date.now(),
+          },
+        ]);
 
         get().toolCallFilter.reset();
 

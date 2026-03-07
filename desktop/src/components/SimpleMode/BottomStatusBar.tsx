@@ -6,6 +6,7 @@
  * Migrated from the former top header bar.
  */
 
+import { memo } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { ConnectionStatus } from './ConnectionStatus';
@@ -37,7 +38,7 @@ function Divider() {
   return <span className="text-gray-300 dark:text-gray-700">|</span>;
 }
 
-export function BottomStatusBar({
+export const BottomStatusBar = memo(function BottomStatusBar({
   connectionStatus,
   workspacePath,
   permissionLevel,
@@ -149,4 +150,4 @@ export function BottomStatusBar({
       )}
     </div>
   );
-}
+});

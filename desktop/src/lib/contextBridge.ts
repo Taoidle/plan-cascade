@@ -21,6 +21,19 @@ import type { StrategyAnalysis, TaskPrd } from '../store/taskMode';
  * Returns CrossModeConversationTurn[] for IPC serialization to Rust.
  */
 export function buildConversationHistory(): CrossModeConversationTurn[] {
+  const kernelState = useWorkflowKernelStore.getState();
+  const activeRootSessionId = kernelState.activeRootSessionId ?? kernelState.sessionId;
+  if (activeRootSessionId && kernelState.activeMode === 'chat') {
+    const transcriptLines = kernelState.getCachedModeTranscript(activeRootSessionId, 'chat').lines as Parameters<
+      typeof deriveConversationTurns
+    >[0];
+    if (transcriptLines.length > 0) {
+      return deriveConversationTurns(transcriptLines)
+        .filter((t) => t.assistantText.trim().length > 0)
+        .map((t) => ({ user: t.userContent, assistant: t.assistantText }));
+    }
+  }
+
   const execState = useExecutionStore.getState();
 
   if (execState.isChatSession) {

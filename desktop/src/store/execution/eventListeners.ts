@@ -6,7 +6,6 @@ import { useModeStore } from '../mode';
 import { useSettingsStore } from '../settings';
 import { useExecutionStore } from '../execution';
 import { useWorkflowKernelStore } from '../workflowKernel';
-import { useSimpleSessionStore } from '../simpleSessionStore';
 import { formatToolArgs } from './messageDispatch';
 import { triggerMemoryExtraction } from './memoryPostProcess';
 import { clearPendingDeltas, flushPendingDeltas, getPending, scheduleFlush } from './streamDeltas';
@@ -198,7 +197,7 @@ function cloneStreamLines(lines: StreamLine[]): StreamLine[] {
 
 function getCachedChatTranscript(rootSessionId: string | null): StreamLine[] {
   if (!rootSessionId) return [];
-  return useSimpleSessionStore.getState().getModeLines(rootSessionId, 'chat') as StreamLine[];
+  return useWorkflowKernelStore.getState().getCachedModeTranscript(rootSessionId, 'chat').lines as StreamLine[];
 }
 
 function upsertBackgroundChatRuntime(
@@ -1521,6 +1520,7 @@ export async function setupExecutionEventListeners(
             getPending().text += filterResult.output;
             scheduleFlush(get);
           }
+          scheduleForegroundChatTranscriptSync(session_id, get);
           break;
         }
 
@@ -1541,6 +1541,7 @@ export async function setupExecutionEventListeners(
           flushPendingDeltas(get);
           get().appendStreamLine(`[tool] ${streamEvent.tool_name} started`, 'tool');
           get().addLog(`Tool started: ${streamEvent.tool_name}`);
+          scheduleForegroundChatTranscriptSync(session_id, get);
           break;
 
         case 'tool_result': {
@@ -1549,6 +1550,7 @@ export async function setupExecutionEventListeners(
             `[tool] ${streamEvent.tool_id} ${isError ? 'failed' : 'completed'}`,
             isError ? 'error' : 'success',
           );
+          scheduleForegroundChatTranscriptSync(session_id, get);
           break;
         }
 
@@ -1689,10 +1691,12 @@ export async function setupExecutionEventListeners(
       if (update_type === 'started') {
         get().addLog(`Tool started: ${execution.tool_name}`);
         get().appendStreamLine(`[tool] ${execution.tool_name} started`, 'tool');
+        scheduleForegroundChatTranscriptSync(session_id, get);
       } else if (update_type === 'completed') {
         const status = execution.success ? 'success' : 'failed';
         get().addLog(`Tool completed: ${execution.tool_name} (${status})`);
         get().appendStreamLine(`[tool] ${execution.tool_name} ${status}`, execution.success ? 'success' : 'error');
+        scheduleForegroundChatTranscriptSync(session_id, get);
       }
     });
     if (!registerListener(unlistenTool)) return;

@@ -19,13 +19,13 @@ describe('simpleSessionStore', () => {
     expect(store.getDraft('root-b', 'plan')).toBe('');
   });
 
-  it('stores transcript lines per root session and mode', () => {
+  it('tracks unread flags per root session and mode', () => {
     const store = useSimpleSessionStore.getState();
-    store.setModeLines('root-a', 'chat', [{ id: 1, content: 'chat' }]);
-    store.setModeLines('root-a', 'task', [{ id: 2, content: 'task' }]);
+    store.markModeUnread('root-a', 'chat', true);
+    store.markModeUnread('root-a', 'task', false);
 
-    expect(store.getModeLines('root-a', 'chat')).toEqual([{ id: 1, content: 'chat' }]);
-    expect(store.getModeLines('root-a', 'task')).toEqual([{ id: 2, content: 'task' }]);
-    expect(store.getModeLines('root-b', 'chat')).toEqual([]);
+    expect(store.isModeUnread('root-a', 'chat')).toBe(true);
+    expect(store.isModeUnread('root-a', 'task')).toBe(false);
+    expect(store.isModeUnread('root-b', 'chat')).toBe(false);
   });
 });

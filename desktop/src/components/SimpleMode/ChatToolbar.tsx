@@ -7,6 +7,7 @@
  * - Right: Output panel toggle with count badge
  */
 
+import { memo } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { FilePlusIcon, PauseIcon, PlayIcon, Cross2Icon, CameraIcon } from '@radix-ui/react-icons';
@@ -45,7 +46,7 @@ interface ChatToolbarProps {
   detailLineCount: number;
 }
 
-export function ChatToolbar({
+export const ChatToolbar = memo(function ChatToolbar({
   workflowMode,
   onWorkflowModeChange,
   modeSwitchLocked = false,
@@ -272,4 +273,4 @@ export function ChatToolbar({
       </div>
     </div>
   );
-}
+});

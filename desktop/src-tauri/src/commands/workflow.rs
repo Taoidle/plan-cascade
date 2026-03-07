@@ -1067,9 +1067,6 @@ pub async fn workflow_store_mode_transcript(
     Ok(match result {
         Ok(payload) => {
             let _ = emit_mode_transcript_update(&app, &payload, "workflow_store_mode_transcript");
-            let _ =
-                emit_session_catalog_update(&app, state.inner(), "workflow_store_mode_transcript")
-                    .await;
             CommandResponse::ok(payload)
         }
         Err(error) => CommandResponse::err(error),
@@ -1099,9 +1096,6 @@ pub async fn workflow_append_mode_transcript(
                 source: "workflow_append_mode_transcript".to_string(),
             };
             let _ = app.emit(WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL, update);
-            let _ =
-                emit_session_catalog_update(&app, state.inner(), "workflow_append_mode_transcript")
-                    .await;
             CommandResponse::ok(payload)
         }
         Err(error) => CommandResponse::err(error),

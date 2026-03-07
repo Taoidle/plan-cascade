@@ -1,4 +1,3 @@
-import { useExecutionStore } from './execution';
 import { useWorkflowKernelStore } from './workflowKernel';
 import type { StreamLine, StreamLineType } from './execution/types';
 import type { CardPayload } from '../types/workflowCard';
@@ -42,15 +41,8 @@ export function resolveRootSessionForMode(mode: WorkflowMode, modeSessionId?: st
   const kernel = useWorkflowKernelStore.getState();
   return (
     resolveRootSessionFromCurrentSession(kernel.session, mode, modeSessionId ?? null) ??
-    resolveRootSessionFromCatalog(kernel.sessionCatalog, mode, modeSessionId ?? null) ??
-    kernel.activeRootSessionId ??
-    kernel.sessionId
+    resolveRootSessionFromCatalog(kernel.sessionCatalog, mode, modeSessionId ?? null)
   );
-}
-
-function isTargetModeVisible(rootSessionId: string, mode: WorkflowMode): boolean {
-  const kernel = useWorkflowKernelStore.getState();
-  return kernel.activeRootSessionId === rootSessionId && kernel.activeMode === mode;
 }
 
 function buildStreamLineBase(
@@ -106,12 +98,12 @@ export async function routeModeCard(
 ): Promise<void> {
   const rootSessionId = resolveRootSessionForMode(mode, modeSessionId);
   if (!rootSessionId) {
-    useExecutionStore.getState().appendCard(payload);
+    console.warn('[workflow-kernel] dropping mode card without resolved root session', {
+      mode,
+      modeSessionId,
+      cardType: payload.cardType,
+    });
     return;
-  }
-  const shouldMirrorForeground = !modeSessionId || isTargetModeVisible(rootSessionId, mode);
-  if (shouldMirrorForeground) {
-    useExecutionStore.getState().appendCard(payload);
   }
 
   const line = buildCardLine(payload);
@@ -130,18 +122,12 @@ export async function routeModeStreamLine(
 ): Promise<void> {
   const rootSessionId = resolveRootSessionForMode(mode, options?.modeSessionId ?? null);
   if (!rootSessionId) {
-    useExecutionStore.getState().appendStreamLine(content, type, undefined, undefined, {
-      turnBoundary: options?.turnBoundary,
-      turnId: options?.turnId,
+    console.warn('[workflow-kernel] dropping mode stream line without resolved root session', {
+      mode,
+      modeSessionId: options?.modeSessionId ?? null,
+      type,
     });
     return;
-  }
-  const shouldMirrorForeground = !options?.modeSessionId || isTargetModeVisible(rootSessionId, mode);
-  if (shouldMirrorForeground) {
-    useExecutionStore.getState().appendStreamLine(content, type, undefined, undefined, {
-      turnBoundary: options?.turnBoundary,
-      turnId: options?.turnId,
-    });
   }
 
   const line = buildStreamLineBase(content, type, options?.turnBoundary, options?.turnId);

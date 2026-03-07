@@ -1,7 +1,6 @@
 import { ToolCallStreamFilter } from '../../utils/toolCallFilter';
 import { selectStableConversationLines } from '../../lib/conversationUtils';
 import { useWorkflowKernelStore } from '../workflowKernel';
-import { useSimpleSessionStore } from '../simpleSessionStore';
 import { useSettingsStore, type Backend } from '../settings';
 import type { ExecutionRuntimeHandle, ExecutionState, ExecutionStatus } from './types';
 
@@ -88,7 +87,8 @@ function buildRuntimeHandleFromForeground(state: ExecutionState): ExecutionRunti
   const settingsState = useSettingsStore.getState();
   const rootSessionId = resolveRuntimeRootSessionId();
   const fallbackLines = rootSessionId
-    ? (useSimpleSessionStore.getState().getModeLines(rootSessionId, 'chat') as ExecutionState['streamingOutput'])
+    ? (useWorkflowKernelStore.getState().getCachedModeTranscript(rootSessionId, 'chat')
+        .lines as ExecutionState['streamingOutput'])
     : [];
   const stableLines = selectStableConversationLines(state.streamingOutput, fallbackLines);
   return {

@@ -10,6 +10,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { CommandResponse } from '../lib/tauri';
 import type {
   HandoffContextBundle,
+  ModeTranscriptState,
   ModeTranscriptPayload,
   PlanEditOperation,
   ResumeResult,
@@ -23,8 +24,6 @@ import type {
   WorkflowSession,
   WorkflowSessionState,
 } from '../types/workflowKernel';
-import { useSimpleSessionStore } from './simpleSessionStore';
-import { selectStableConversationLines } from '../lib/conversationUtils';
 
 const WORKFLOW_KERNEL_UPDATED_CHANNEL = 'workflow-kernel-updated';
 const WORKFLOW_SESSION_CATALOG_UPDATED_CHANNEL = 'workflow-session-catalog-updated';
@@ -37,10 +36,39 @@ const DEFAULT_HANDOFF: HandoffContextBundle = {
   metadata: {},
 };
 
-function mergeStableTranscriptLines(sessionId: string, mode: WorkflowMode, incomingLines: unknown[]): unknown[] {
-  if (mode !== 'chat') return incomingLines;
-  const existingLines = useSimpleSessionStore.getState().getModeLines(sessionId, mode);
-  return selectStableConversationLines(incomingLines as never[], existingLines as never[]) as unknown[];
+type TranscriptMap = Record<string, Partial<Record<WorkflowMode, ModeTranscriptState>>>;
+const EMPTY_TRANSCRIPT_STATE: ModeTranscriptState = {
+  revision: 0,
+  lines: [],
+  loaded: false,
+  unread: false,
+};
+
+function cloneTranscriptLines(lines: unknown[]): unknown[] {
+  return lines.map((line) =>
+    line && typeof line === 'object' ? ({ ...(line as Record<string, unknown>) } as unknown) : line,
+  );
+}
+
+function upsertTranscriptState(
+  current: TranscriptMap,
+  sessionId: string,
+  mode: WorkflowMode,
+  next: Partial<ModeTranscriptState>,
+): TranscriptMap {
+  const previous = current[sessionId]?.[mode] ?? {
+    ...EMPTY_TRANSCRIPT_STATE,
+  };
+  return {
+    ...current,
+    [sessionId]: {
+      ...current[sessionId],
+      [mode]: {
+        ...previous,
+        ...next,
+      },
+    },
+  };
 }
 
 function normalizeHandoff(bundle?: HandoffContextBundle): HandoffContextBundle {
@@ -76,6 +104,7 @@ export interface WorkflowKernelStore {
   events: WorkflowSessionState['events'];
   checkpoints: WorkflowSessionState['checkpoints'];
   sessionCatalog: WorkflowSessionCatalogItem[];
+  modeTranscriptsBySession: TranscriptMap;
   revision: number;
   isLoading: boolean;
   error: string | null;
@@ -94,6 +123,7 @@ export interface WorkflowKernelStore {
   deleteSession: (sessionId: string) => Promise<WorkflowSessionCatalogState | null>;
   resumeBackgroundRuns: (sessionId?: string | null) => Promise<ResumeResult[]>;
   getModeTranscript: (sessionId: string, mode: WorkflowMode) => Promise<ModeTranscriptPayload | null>;
+  getCachedModeTranscript: (sessionId: string | null, mode: WorkflowMode) => ModeTranscriptState;
   appendContextItems: (targetMode: WorkflowMode, handoff: HandoffContextBundle) => Promise<WorkflowSession | null>;
   appendModeTranscript: (
     sessionId: string,
@@ -132,6 +162,7 @@ const DEFAULT_STATE = {
   events: [] as WorkflowSessionState['events'],
   checkpoints: [] as WorkflowSessionState['checkpoints'],
   sessionCatalog: [] as WorkflowSessionCatalogItem[],
+  modeTranscriptsBySession: {} as TranscriptMap,
   revision: 0,
   isLoading: false,
   error: null as string | null,
@@ -448,16 +479,26 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
         set({ error: result.error || 'Failed to load workflow mode transcript' });
         return null;
       }
-      const mergedLines = mergeStableTranscriptLines(normalizedSessionId, mode, result.data.lines);
-      useSimpleSessionStore
-        .getState()
-        .setModeTranscriptSnapshot(normalizedSessionId, mode, mergedLines, result.data.revision);
-      useSimpleSessionStore.getState().markModeUnread(normalizedSessionId, mode, false);
+      set((state) => ({
+        modeTranscriptsBySession: upsertTranscriptState(state.modeTranscriptsBySession, normalizedSessionId, mode, {
+          revision: result.data!.revision,
+          lines: cloneTranscriptLines(result.data!.lines),
+          loaded: true,
+          unread: false,
+        }),
+      }));
       return result.data;
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) });
       return null;
     }
+  },
+
+  getCachedModeTranscript: (sessionId, mode) => {
+    if (!sessionId) {
+      return EMPTY_TRANSCRIPT_STATE;
+    }
+    return get().modeTranscriptsBySession[sessionId]?.[mode] ?? EMPTY_TRANSCRIPT_STATE;
   },
 
   appendContextItems: async (targetMode, handoff) => {
@@ -501,6 +542,20 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
         set({ error: result.error || 'Failed to append workflow mode transcript' });
         return null;
       }
+      set((state) => {
+        const previous = state.modeTranscriptsBySession[normalizedSessionId]?.[mode];
+        const existingLines = previous?.lines ?? [];
+        return {
+          modeTranscriptsBySession: upsertTranscriptState(state.modeTranscriptsBySession, normalizedSessionId, mode, {
+            revision: result.data!.revision,
+            lines: [...cloneTranscriptLines(existingLines), ...cloneTranscriptLines(lines)],
+            loaded: true,
+            unread:
+              !!state.activeRootSessionId &&
+              (state.activeRootSessionId !== normalizedSessionId || state.activeMode !== mode),
+          }),
+        };
+      });
       return result.data;
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) });
@@ -524,10 +579,14 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
         set({ error: result.error || 'Failed to persist workflow mode transcript' });
         return null;
       }
-      const mergedLines = mergeStableTranscriptLines(normalizedSessionId, mode, result.data.lines);
-      useSimpleSessionStore
-        .getState()
-        .setModeTranscriptSnapshot(normalizedSessionId, mode, mergedLines, result.data.revision);
+      set((state) => ({
+        modeTranscriptsBySession: upsertTranscriptState(state.modeTranscriptsBySession, normalizedSessionId, mode, {
+          revision: result.data!.revision,
+          lines: cloneTranscriptLines(result.data!.lines),
+          loaded: true,
+          unread: false,
+        }),
+      }));
       return result.data;
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) });
@@ -875,21 +934,30 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
           (event) => {
             const payload = event.payload;
             if (!payload?.sessionId) return;
-
-            const store = useSimpleSessionStore.getState();
-            const existingLines = store.getModeLines(payload.sessionId, payload.mode);
-            const nextLines =
-              payload.replaceFromLineId != null ? payload.appendedLines : [...existingLines, ...payload.appendedLines];
-            const mergedLines = mergeStableTranscriptLines(payload.sessionId, payload.mode, nextLines);
-            store.setModeTranscriptSnapshot(payload.sessionId, payload.mode, mergedLines, payload.revision);
-
-            if (
-              get().activeRootSessionId &&
-              (get().activeRootSessionId !== payload.sessionId || get().activeMode !== payload.mode) &&
-              payload.appendedLines.length > 0
-            ) {
-              store.markModeUnread(payload.sessionId, payload.mode, true);
-            }
+            set((state) => {
+              const previous = state.modeTranscriptsBySession[payload.sessionId]?.[payload.mode];
+              const existingLines = previous?.lines ?? [];
+              const nextLines =
+                payload.replaceFromLineId != null
+                  ? cloneTranscriptLines(payload.appendedLines)
+                  : [...cloneTranscriptLines(existingLines), ...cloneTranscriptLines(payload.appendedLines)];
+              return {
+                modeTranscriptsBySession: upsertTranscriptState(
+                  state.modeTranscriptsBySession,
+                  payload.sessionId,
+                  payload.mode,
+                  {
+                    revision: payload.revision,
+                    lines: nextLines,
+                    loaded: true,
+                    unread:
+                      !!state.activeRootSessionId &&
+                      (state.activeRootSessionId !== payload.sessionId || state.activeMode !== payload.mode) &&
+                      payload.appendedLines.length > 0,
+                  },
+                ),
+              };
+            });
           },
         );
         set({ _transcriptUpdatesUnlisten: unlisten });

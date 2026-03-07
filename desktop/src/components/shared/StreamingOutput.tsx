@@ -12,7 +12,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo, memo } from '
 import { clsx } from 'clsx';
 import { ArrowDownIcon, Cross2Icon, GearIcon, CheckCircledIcon, CrossCircledIcon } from '@radix-ui/react-icons';
 import { useTranslation } from 'react-i18next';
-import { useExecutionStore, StreamLine, StreamLineType } from '../../store/execution';
+import { useExecutionStore, type ExecutionStatus, StreamLine, StreamLineType } from '../../store/execution';
 import { useModeStore } from '../../store/mode';
 import { MarkdownRenderer } from '../ClaudeCodeMode/MarkdownRenderer';
 import {
@@ -41,6 +41,12 @@ interface StreamingOutputProps {
   showClear?: boolean;
   /** Compact mode for SimpleMode (reduced padding, smaller text) */
   compact?: boolean;
+  /** Optional explicit transcript lines. When omitted, falls back to execution store. */
+  lines?: StreamLine[];
+  /** Optional explicit execution status. When omitted, falls back to execution store. */
+  statusOverride?: ExecutionStatus;
+  /** Optional explicit clear handler. When omitted, falls back to execution store. */
+  onClear?: () => void;
 }
 
 // ============================================================================
@@ -86,9 +92,15 @@ export function StreamingOutput({
   className,
   showClear = true,
   compact = false,
+  lines,
+  statusOverride,
+  onClear,
 }: StreamingOutputProps) {
   const isFillHeight = maxHeight === 'none';
-  const { streamingOutput, clearStreamingOutput, status } = useExecutionStore();
+  const execution = useExecutionStore();
+  const streamingOutput = lines ?? execution.streamingOutput;
+  const clearStreamingOutput = onClear ?? execution.clearStreamingOutput;
+  const status = statusOverride ?? execution.status;
   const mode = useModeStore((state) => state.mode);
   const isSimpleMode = mode === 'simple';
   const { t } = useTranslation('simpleMode');
@@ -749,10 +761,11 @@ export function buildDisplayBlocks(lines: StreamLine[], compactMode: boolean): D
 }
 
 /** Render a single DisplayBlock (non-group). Extracted for reuse in HistoricalBlockList. */
-function renderLineBlock(line: StreamLine, compact: boolean): React.ReactNode {
+function renderLineBlock(line: StreamLine, compact: boolean, keySuffix = ''): React.ReactNode {
+  const key = keySuffix ? `${line.id}-${keySuffix}` : `${line.id}`;
   if (line.type === 'text') {
     return (
-      <div key={line.id} className="text-gray-800 dark:text-gray-200">
+      <div key={key} className="text-gray-800 dark:text-gray-200">
         <MarkdownRenderer content={line.content} className={compact ? 'text-xs' : 'text-sm'} />
       </div>
     );
@@ -760,7 +773,7 @@ function renderLineBlock(line: StreamLine, compact: boolean): React.ReactNode {
 
   if (line.type === 'info') {
     return (
-      <div key={line.id} className="my-4 flex justify-end">
+      <div key={key} className="my-4 flex justify-end">
         <div
           className={clsx(
             'max-w-[80%] px-4 py-2 rounded-2xl rounded-br-sm',
@@ -776,32 +789,32 @@ function renderLineBlock(line: StreamLine, compact: boolean): React.ReactNode {
 
   if (line.type === 'thinking') {
     return (
-      <div key={line.id} className="text-gray-500 italic font-mono text-xs whitespace-pre-wrap">
+      <div key={key} className="text-gray-500 italic font-mono text-xs whitespace-pre-wrap">
         {line.content}
       </div>
     );
   }
 
   if (line.type === 'tool') {
-    return <ToolCallLine key={line.id} content={line.content} compact={compact} />;
+    return <ToolCallLine key={key} content={line.content} compact={compact} />;
   }
 
   if (line.type === 'sub_agent') {
-    return <SubAgentLine key={line.id} content={line.content} compact={compact} />;
+    return <SubAgentLine key={key} content={line.content} compact={compact} />;
   }
 
   if (line.type === 'analysis') {
-    return <AnalysisLine key={line.id} content={line.content} compact={compact} />;
+    return <AnalysisLine key={key} content={line.content} compact={compact} />;
   }
 
   if (line.type === 'tool_result') {
-    return <ToolResultLine key={line.id} content={line.content} compact={compact} />;
+    return <ToolResultLine key={key} content={line.content} compact={compact} />;
   }
 
   if (line.type === 'success') {
     return (
       <div
-        key={line.id}
+        key={key}
         className="mt-3 mb-1 flex items-center gap-2 py-2 px-3 rounded border border-green-200 dark:border-green-700/50 bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400 text-xs font-mono animate-[fadeIn_0.3s_ease-out]"
       >
         <CheckCircledIcon className="w-3.5 h-3.5 flex-shrink-0" />
@@ -813,7 +826,7 @@ function renderLineBlock(line: StreamLine, compact: boolean): React.ReactNode {
   if (line.type === 'error' && line.content.startsWith('Execution finished')) {
     return (
       <div
-        key={line.id}
+        key={key}
         className="mt-3 mb-1 flex items-center gap-2 py-2 px-3 rounded border border-red-200 dark:border-red-700/50 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400 text-xs font-mono animate-[fadeIn_0.3s_ease-out]"
       >
         <CrossCircledIcon className="w-3.5 h-3.5 flex-shrink-0" />
@@ -824,10 +837,7 @@ function renderLineBlock(line: StreamLine, compact: boolean): React.ReactNode {
 
   const prefix = LINE_TYPE_PREFIX[line.type];
   return (
-    <div
-      key={line.id}
-      className={clsx('leading-5 whitespace-pre-wrap break-all font-mono', LINE_TYPE_COLORS[line.type])}
-    >
+    <div key={key} className={clsx('leading-5 whitespace-pre-wrap break-all font-mono', LINE_TYPE_COLORS[line.type])}>
       {prefix && <span className="text-gray-600 select-none">{prefix}</span>}
       {line.content}
     </div>
@@ -844,11 +854,11 @@ const HistoricalBlockList = memo(function HistoricalBlockList({
 }) {
   return (
     <>
-      {blocks.map((block) => {
+      {blocks.map((block, index) => {
         if (block.kind === 'sub_agent_group') {
           return (
             <SubAgentGroupPanel
-              key={`sa-${block.subAgentId}-${block.lines[0]?.id}`}
+              key={`sa-${block.subAgentId}-${block.lines[0]?.id ?? 'none'}-${index}`}
               subAgentId={block.subAgentId}
               lines={block.lines}
               depth={block.depth}
@@ -859,7 +869,7 @@ const HistoricalBlockList = memo(function HistoricalBlockList({
         if (block.kind === 'group') {
           return (
             <EventGroupLine
-              key={block.groupId}
+              key={`${block.groupId}-${index}`}
               groupId={block.groupId}
               kind={block.groupKind}
               lines={block.lines}
@@ -867,7 +877,7 @@ const HistoricalBlockList = memo(function HistoricalBlockList({
             />
           );
         }
-        return renderLineBlock(block.line, compact);
+        return renderLineBlock(block.line, compact, `historical-${index}`);
       })}
     </>
   );
@@ -943,9 +953,9 @@ export function EventGroupLine({
 
       {expanded && (
         <div className="mt-2 space-y-1 border-t border-gray-200 dark:border-gray-700/40 pt-2">
-          {lines.map((line) => (
+          {lines.map((line, index) => (
             <div
-              key={`${groupId}-${line.id}`}
+              key={`${groupId}-${line.id}-${index}`}
               className={clsx('font-mono text-xs whitespace-pre-wrap break-all', LINE_TYPE_COLORS[line.type])}
             >
               {LINE_TYPE_PREFIX[line.type]}
@@ -1040,9 +1050,9 @@ export function SubAgentGroupPanel({
 
       {expanded && (
         <div className="mt-2 space-y-1 border-t border-gray-200 dark:border-gray-700/40 pt-2">
-          {lines.map((line) => (
+          {lines.map((line, index) => (
             <div
-              key={`sa-${subAgentId}-${line.id}`}
+              key={`sa-${subAgentId}-${line.id}-${index}`}
               className={clsx('font-mono text-xs whitespace-pre-wrap break-all', LINE_TYPE_COLORS[line.type])}
             >
               {LINE_TYPE_PREFIX[line.type]}
