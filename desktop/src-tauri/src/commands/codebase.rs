@@ -574,6 +574,7 @@ pub async fn codebase_add_context(
 
     let handoff = HandoffContextBundle {
         conversation_context: Vec::new(),
+        summary_items: Vec::new(),
         artifact_refs,
         context_sources,
         metadata,

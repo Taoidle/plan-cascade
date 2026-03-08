@@ -1,5 +1,6 @@
 import { deriveConversationTurns, type StreamLine } from '../../lib/conversationUtils';
 import type { ContextSourceConfig } from '../../types/contextSources';
+import type { HandoffContextBundle } from '../../types/workflowKernel';
 
 export interface ConversationTurnInput {
   role: 'user' | 'assistant';
@@ -107,6 +108,49 @@ export function buildHandoffManualBlock(
       ...points,
     ].join('\n'),
     priority: 110,
+  };
+}
+
+export function buildKernelEntryHandoffManualBlock(
+  handoff: HandoffContextBundle | null | undefined,
+): HandoffManualBlock | null {
+  if (!handoff) return null;
+
+  const sections: string[] = [];
+  const conversation = handoff.conversationContext
+    .map((turn) => `user: ${turn.user.trim()}\nassistant: ${turn.assistant.trim()}`)
+    .join('\n\n');
+  if (conversation.trim().length > 0) {
+    sections.push(`[conversation]\n${conversation}`);
+  }
+
+  const summaryItems = handoff.summaryItems ?? [];
+  if (summaryItems.length > 0) {
+    const summaries = summaryItems
+      .map((item) => `## [${item.sourceMode}:${item.kind}] ${item.title}\n${item.body}`)
+      .join('\n\n');
+    if (summaries.trim().length > 0) {
+      sections.push(`[summary-items]\n${summaries}`);
+    }
+  }
+
+  if ((handoff.artifactRefs ?? []).length > 0) {
+    sections.push(`[artifact-refs]\n${handoff.artifactRefs.join('\n')}`);
+  }
+  if ((handoff.contextSources ?? []).length > 0) {
+    sections.push(`[context-sources]\n${handoff.contextSources.join('\n')}`);
+  }
+  if (handoff.metadata && Object.keys(handoff.metadata).length > 0) {
+    sections.push(`[handoff-metadata]\n${JSON.stringify(handoff.metadata, null, 2)}`);
+  }
+
+  const content = sections.join('\n\n').trim();
+  if (!content) return null;
+  return {
+    id: 'handoff:kernel-entry',
+    title: 'Kernel Entry Handoff',
+    content,
+    priority: 120,
   };
 }
 

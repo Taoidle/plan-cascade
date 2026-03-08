@@ -90,7 +90,10 @@ export interface PlanOrchestratorState {
   _completionCardInjectedRunToken: number | null;
 
   // Actions
-  startPlanWorkflow: (description: string) => Promise<{ modeSessionId: string | null }>;
+  startPlanWorkflow: (
+    description: string,
+    kernelSessionId?: string | null,
+  ) => Promise<{ modeSessionId: string | null }>;
   submitClarification: (answer: PlanClarifyAnswerCardData) => Promise<{
     ok: boolean;
     errorCode?: string | null;
@@ -420,14 +423,18 @@ const DEFAULT_STATE = {
 export const usePlanOrchestratorStore = create<PlanOrchestratorState>((set, get) => ({
   ...DEFAULT_STATE,
 
-  startPlanWorkflow: async (description: string) =>
-    startPlanWorkflowFlow(description, {
-      get,
-      set,
-      buildPlanContextSources,
-      resolvePlanSessionId,
-      normalizeKernelPlanPhase,
-    }),
+  startPlanWorkflow: async (description: string, kernelSessionId?: string | null) =>
+    startPlanWorkflowFlow(
+      description,
+      {
+        get,
+        set,
+        buildPlanContextSources,
+        resolvePlanSessionId,
+        normalizeKernelPlanPhase,
+      },
+      kernelSessionId,
+    ),
 
   submitClarification: async (answer: PlanClarifyAnswerCardData) =>
     submitClarificationFlow(answer, {

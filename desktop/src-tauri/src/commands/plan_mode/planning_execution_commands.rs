@@ -314,9 +314,11 @@ pub async fn generate_plan(
             let plan_context = build_plan_conversation_context(
                 &app_state,
                 &knowledge_state,
+                Some(state.inner()),
                 kernel_state.inner(),
                 project_path.as_deref(),
                 Some(session_id.as_str()),
+                None,
                 conversation_context.as_deref(),
                 context_sources.as_ref(),
                 &description,
@@ -349,6 +351,9 @@ pub async fn generate_plan(
                         .ok_or_else(|| "No active plan mode session".to_string())?;
                     session.plan = Some(plan.clone());
                     session.phase = PlanModePhase::ReviewingPlan;
+                    if locale.is_some() {
+                        session.locale = locale.clone();
+                    }
                         session.clone()
                     };
                     persist_plan_session_best_effort(&state, &updated_session, "generate_plan.reviewing_plan")
@@ -361,6 +366,14 @@ pub async fn generate_plan(
                         "plan_mode.generate_plan",
                     )
                     .await;
+                    if let Some(summary) = build_plan_output_summary_item(&updated_session) {
+                        publish_plan_handoff_summary(
+                            kernel_state.inner(),
+                            updated_session.kernel_session_id.as_deref(),
+                            summary,
+                        )
+                        .await;
+                    }
 
                     Ok(CommandResponse::ok(plan))
                 }
@@ -470,6 +483,9 @@ pub async fn approve_plan(
         let was_resuming = session.phase == PlanModePhase::Executing;
         session.plan = Some(plan.clone());
         session.phase = PlanModePhase::Executing;
+        if locale.is_some() {
+            session.locale = locale.clone();
+        }
         session.execution_resume_payload = resume_payload.clone();
         if !was_resuming {
             session.step_attempts.clear();
@@ -508,9 +524,11 @@ pub async fn approve_plan(
     let execution_context_bundle = build_plan_conversation_context(
         &app_state,
         &knowledge_state,
+        Some(state.inner()),
         kernel_state.inner(),
         project_path.as_deref(),
         Some(session_id.as_str()),
+        None,
         conversation_context.as_deref(),
         context_sources.as_ref(),
         &task_description,
@@ -700,6 +718,14 @@ pub async fn approve_plan(
                 "plan_mode.approve_plan.completed",
             )
             .await;
+            if let Some(summary) = build_plan_execution_summary_item(&updated_session) {
+                publish_plan_handoff_summary(
+                    kernel_state.inner(),
+                    updated_session.kernel_session_id.as_deref(),
+                    summary,
+                )
+                .await;
+            }
             if let Some(completion_line) = build_plan_completion_transcript_line(&updated_session) {
                 append_plan_transcript_lines_for_linked_sessions(
                     &app_handle,
@@ -833,6 +859,9 @@ pub async fn retry_plan_step(
             .get_mut(&session_id)
             .ok_or_else(|| "No active plan mode session".to_string())?;
         session.phase = PlanModePhase::Executing;
+        if locale.is_some() {
+            session.locale = locale.clone();
+        }
         session
             .step_states
             .insert(normalized_step_id.clone(), StepExecutionState::Running);
@@ -869,9 +898,11 @@ pub async fn retry_plan_step(
     let execution_context_bundle = build_plan_conversation_context(
         &app_state,
         &knowledge_state,
+        Some(state.inner()),
         kernel_state.inner(),
         project_path.as_deref(),
         Some(session_id.as_str()),
+        None,
         conversation_context.as_deref(),
         context_sources.as_ref(),
         &task_description,
@@ -1015,6 +1046,14 @@ pub async fn retry_plan_step(
                 "plan_mode.retry_plan_step.completed",
             )
             .await;
+            if let Some(summary) = build_plan_execution_summary_item(&updated_session) {
+                publish_plan_handoff_summary(
+                    kernel_state.inner(),
+                    updated_session.kernel_session_id.as_deref(),
+                    summary,
+                )
+                .await;
+            }
             if let Some(completion_line) = build_plan_completion_transcript_line(&updated_session) {
                 append_plan_transcript_lines_for_linked_sessions(
                     &app_handle,

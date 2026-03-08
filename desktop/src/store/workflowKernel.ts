@@ -32,6 +32,7 @@ const WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL = 'workflow-mode-transcript-updat
 
 const DEFAULT_HANDOFF: HandoffContextBundle = {
   conversationContext: [],
+  summaryItems: [],
   artifactRefs: [],
   contextSources: [],
   metadata: {},
@@ -99,9 +100,38 @@ function normalizeHandoff(bundle?: HandoffContextBundle): HandoffContextBundle {
   if (!bundle) return DEFAULT_HANDOFF;
   return {
     conversationContext: bundle.conversationContext ?? [],
+    summaryItems: bundle.summaryItems ?? [],
     artifactRefs: bundle.artifactRefs ?? [],
     contextSources: bundle.contextSources ?? [],
     metadata: bundle.metadata ?? {},
+  };
+}
+
+function normalizeSession(session: WorkflowSession): WorkflowSession {
+  return {
+    ...session,
+    handoffContext: normalizeHandoff(session.handoffContext),
+    modeSnapshots: {
+      ...session.modeSnapshots,
+      chat: session.modeSnapshots.chat
+        ? {
+            ...session.modeSnapshots.chat,
+            entryHandoff: normalizeHandoff(session.modeSnapshots.chat.entryHandoff),
+          }
+        : null,
+      plan: session.modeSnapshots.plan
+        ? {
+            ...session.modeSnapshots.plan,
+            entryHandoff: normalizeHandoff(session.modeSnapshots.plan.entryHandoff),
+          }
+        : null,
+      task: session.modeSnapshots.task
+        ? {
+            ...session.modeSnapshots.task,
+            entryHandoff: normalizeHandoff(session.modeSnapshots.task.entryHandoff),
+          }
+        : null,
+    },
   };
 }
 
@@ -193,21 +223,23 @@ const DEFAULT_STATE = {
 };
 
 function applySession(set: (partial: Partial<WorkflowKernelStore>) => void, session: WorkflowSession) {
+  const normalizedSession = normalizeSession(session);
   set({
-    sessionId: session.sessionId,
-    activeRootSessionId: session.sessionId,
-    activeMode: session.activeMode,
-    session,
+    sessionId: normalizedSession.sessionId,
+    activeRootSessionId: normalizedSession.sessionId,
+    activeMode: normalizedSession.activeMode,
+    session: normalizedSession,
     error: null,
   });
 }
 
 function applySessionState(set: (partial: Partial<WorkflowKernelStore>) => void, sessionState: WorkflowSessionState) {
+  const normalizedSession = normalizeSession(sessionState.session);
   set({
-    sessionId: sessionState.session.sessionId,
-    activeRootSessionId: sessionState.session.sessionId,
-    activeMode: sessionState.session.activeMode,
-    session: sessionState.session,
+    sessionId: normalizedSession.sessionId,
+    activeRootSessionId: normalizedSession.sessionId,
+    activeMode: normalizedSession.activeMode,
+    session: normalizedSession,
     events: sessionState.events,
     checkpoints: sessionState.checkpoints,
     revision: sessionState.events.length + sessionState.checkpoints.length,
@@ -904,12 +936,13 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
 
           const currentSessionId = get().sessionId;
           if (currentSessionId && currentSessionId !== incomingSessionId) return;
+          const normalizedSession = normalizeSession(payload.sessionState.session);
 
           set({
             sessionId: incomingSessionId,
             activeRootSessionId: incomingSessionId,
-            activeMode: payload.sessionState.session.activeMode,
-            session: payload.sessionState.session,
+            activeMode: normalizedSession.activeMode,
+            session: normalizedSession,
             events: payload.sessionState.events,
             checkpoints: payload.sessionState.checkpoints,
             revision: payload.revision,

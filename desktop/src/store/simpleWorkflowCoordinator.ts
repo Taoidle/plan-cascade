@@ -35,8 +35,8 @@ export interface StartModeParams {
   linkModeSession: (mode: WorkflowMode, modeSessionId: string) => Promise<WorkflowSession | null>;
   cancelKernelOperation: (reason?: string) => Promise<WorkflowSession | null>;
   startChat: (prompt: string, source: 'simple') => Promise<void>;
-  startTaskWorkflow: (description: string) => Promise<{ modeSessionId: string | null }>;
-  startPlanWorkflow: (description: string) => Promise<{ modeSessionId: string | null }>;
+  startTaskWorkflow: (description: string, kernelSessionId: string | null) => Promise<{ modeSessionId: string | null }>;
+  startPlanWorkflow: (description: string, kernelSessionId: string | null) => Promise<{ modeSessionId: string | null }>;
 }
 
 export interface StartModeResult {
@@ -190,7 +190,7 @@ export async function startModeWithCompensation({
 
   try {
     if (mode === 'task') {
-      const { modeSessionId: taskModeSessionId } = await startTaskWorkflow(prompt);
+      const { modeSessionId: taskModeSessionId } = await startTaskWorkflow(prompt, kernelSession.sessionId);
       if (!taskModeSessionId) {
         await compensateStartFailure(mode, 'mode_start_failed', cancelKernelOperation);
         return { ok: false, errorCode: 'mode_start_failed', session: kernelSession };
@@ -208,7 +208,7 @@ export async function startModeWithCompensation({
     }
 
     if (mode === 'plan') {
-      const { modeSessionId: planModeSessionId } = await startPlanWorkflow(prompt);
+      const { modeSessionId: planModeSessionId } = await startPlanWorkflow(prompt, kernelSession.sessionId);
       if (!planModeSessionId) {
         await compensateStartFailure(mode, 'mode_start_failed', cancelKernelOperation);
         return { ok: false, errorCode: 'mode_start_failed', session: kernelSession };

@@ -745,6 +745,28 @@
         }
       }
     },
+    "modeHandoffCard": {
+      "title": "モード引き継ぎ",
+      "route": "{{source}} -> {{target}}",
+      "conversationTurns": "チャットターン {{count}} 件",
+      "artifacts": "アーティファクト",
+      "sources": "ソース",
+      "summaryKinds": {
+        "task_strategy": "タスク戦略",
+        "task_prd": "タスク PRD",
+        "task_execution": "タスク実行",
+        "plan_analysis": "プラン分析",
+        "plan_clarification": "プラン確認",
+        "plan_output": "プラン出力",
+        "plan_execution": "プラン実行"
+      },
+      "contextSources": {
+        "simple_mode": "シンプルモード",
+        "chat_fork": "チャット分岐",
+        "chat_history": "チャット履歴",
+        "simple_mode_chat_ledger_sync": "シンプルチャット台帳同期"
+      }
+    },
     "interview": {
       "questionTitle": "インタビュー質問",
       "questionNumber": "{{current}}/{{total}}",

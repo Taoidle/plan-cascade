@@ -7,6 +7,7 @@
 
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
+import i18n from '../i18n';
 import { useContextSourcesStore } from './contextSources';
 import type { CrossModeConversationTurn } from '../types/crossModeContext';
 
@@ -126,6 +127,7 @@ export interface PrdFeedbackApplyResult {
 /** Task mode session from Rust backend */
 export interface TaskModeSession {
   sessionId: string;
+  kernelSessionId?: string | null;
   description: string;
   status: TaskModeSessionStatus;
   strategyAnalysis: StrategyAnalysis | null;
@@ -237,7 +239,7 @@ export interface TaskModeState {
   _requestId: number;
 
   analyzeForMode: (description: string) => Promise<StrategyAnalysis | null>;
-  enterTaskMode: (description: string) => Promise<TaskModeSession | null>;
+  enterTaskMode: (description: string, kernelSessionId?: string | null) => Promise<TaskModeSession | null>;
   generatePrd: (
     conversationHistory?: CrossModeConversationTurn[],
     maxContextTokens?: number,
@@ -301,11 +303,17 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
     }
   },
 
-  enterTaskMode: async (description: string) => {
+  enterTaskMode: async (description: string, kernelSessionId?: string | null) => {
     const requestId = get()._requestId + 1;
     set({ isLoading: true, isCancelling: false, error: null, _requestId: requestId });
     try {
-      const result = await invoke<CommandResponse<TaskModeSession>>('enter_task_mode', { description });
+      const result = await invoke<CommandResponse<TaskModeSession>>('enter_task_mode', {
+        request: {
+          description,
+          kernelSessionId: normalizeSessionId(kernelSessionId),
+          locale: i18n.language || null,
+        },
+      });
       if (get()._requestId !== requestId) return null;
 
       if (!result.success || !result.data) {
@@ -370,6 +378,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
           baseUrl: finalBaseUrl || null,
           conversationHistory: conversationHistory && conversationHistory.length > 0 ? conversationHistory : null,
           maxContextTokens: maxContextTokens ?? null,
+          locale: i18n.language || null,
           contextSources,
           projectPath: settingsStore.workspacePath || null,
         },
@@ -421,6 +430,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
           workflowConfig: null,
           globalDefaultAgent: defaultAgent || null,
           phaseConfigs,
+          locale: i18n.language || null,
           contextSources,
           projectPath: settingsStore.workspacePath || null,
         },
@@ -485,7 +495,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
           baseUrl: finalBaseUrl || null,
           conversationHistory: conversationHistory && conversationHistory.length > 0 ? conversationHistory : null,
           maxContextTokens: maxContextTokens ?? null,
-          locale: null,
+          locale: i18n.language || null,
           contextSources,
           projectPath: settingsStore.workspacePath || null,
         },

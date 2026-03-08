@@ -36,6 +36,7 @@ interface SessionFlowDeps {
 export async function startPlanWorkflowFlow(
   description: string,
   deps: SessionFlowDeps,
+  kernelSessionId?: string | null,
 ): Promise<{ modeSessionId: string | null }> {
   const { get, set, buildPlanContextSources, normalizeKernelPlanPhase } = deps;
   const runToken = get()._runToken + 1;
@@ -63,6 +64,7 @@ export async function startPlanWorkflowFlow(
   const baseUrl = strategyAgent.baseUrl ?? (provider ? resolveProviderBaseUrl(provider, settings) : undefined);
   const projectPath = settings.workspacePath || undefined;
   const contextSources = buildPlanContextSources(null);
+  const resolvedKernelSessionId = kernelSessionId ?? useWorkflowKernelStore.getState().session?.sessionId ?? null;
 
   const enteredSession = await planStore.enterPlanMode(
     description,
@@ -73,6 +75,7 @@ export async function startPlanWorkflowFlow(
     contextSources,
     undefined,
     i18n.language,
+    resolvedKernelSessionId,
   );
   if (get()._runToken !== runToken) return { modeSessionId: null };
 

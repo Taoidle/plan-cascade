@@ -823,6 +823,7 @@ pub async fn workflow_resume_background_runs(
                                 workflow_config: payload.workflow_config,
                                 global_default_agent: payload.global_default_agent,
                                 phase_configs: payload.phase_configs,
+                                locale: task_session.locale.clone(),
                                 context_sources: payload.context_sources,
                                 project_path: payload.project_path,
                             },
@@ -882,7 +883,8 @@ pub async fn workflow_transition_mode(
         .transition_mode(&session_id, target_mode, handoff)
         .await;
     Ok(match result {
-        Ok(session) => {
+        Ok(mutation) => {
+            let _ = emit_workflow_session_mutation(&app, &mutation, "workflow_transition_mode");
             let _ = emit_kernel_update_for_session(
                 &app,
                 state.inner(),
@@ -892,7 +894,7 @@ pub async fn workflow_transition_mode(
             .await;
             let _ =
                 emit_session_catalog_update(&app, state.inner(), "workflow_transition_mode").await;
-            CommandResponse::ok(session)
+            CommandResponse::ok(mutation.session)
         }
         Err(error) => CommandResponse::err(error),
     })
@@ -1512,6 +1514,7 @@ mod tests {
     fn sample_plan_session(phase: PlanModePhase) -> PlanModeSession {
         PlanModeSession {
             session_id: "plan-session-1".to_string(),
+            kernel_session_id: Some("kernel-session-1".to_string()),
             description: "sample".to_string(),
             phase,
             analysis: None,
@@ -1537,6 +1540,7 @@ mod tests {
     fn sample_task_session(status: TaskModeStatus) -> crate::commands::task_mode::TaskModeSession {
         crate::commands::task_mode::TaskModeSession {
             session_id: "task-session-1".to_string(),
+            kernel_session_id: Some("kernel-session-1".to_string()),
             description: "sample".to_string(),
             status,
             strategy_analysis: None,

@@ -19,6 +19,7 @@ import { reportNonFatal } from '../lib/nonFatal';
 import {
   buildChatConversationTurns as buildChatConversationTurnsFromAssembly,
   buildHandoffManualBlock,
+  buildKernelEntryHandoffManualBlock,
   buildStandaloneContextConversationTurns as buildStandaloneContextConversationTurnsFromAssembly,
   buildStandaloneConversationMessage as buildStandaloneConversationMessageFromAssembly,
   inferInjectedSourceKinds,
@@ -38,6 +39,7 @@ import { createSessionTreeActions } from './execution/sessionTreeActions';
 import { createMiscActions } from './execution/miscActions';
 import { createRuntimeRegistryActions } from './execution/runtimeRegistryActions';
 import { createSessionPersistenceController } from './execution/sessionPersistence';
+import { useWorkflowKernelStore } from './workflowKernel';
 
 import type {
   AnalysisCoverageSnapshot,
@@ -256,16 +258,24 @@ async function buildStandaloneMessageWithContextEnvelope(params: {
   contextSources: ContextSourceConfig | null;
   addLog: (message: string) => void;
 }): Promise<{ message: string; injectedSourceKinds: string[]; externalContextInjected: boolean }> {
+  const kernelEntryHandoff = useWorkflowKernelStore.getState().session?.modeSnapshots.chat?.entryHandoff ?? null;
+  const kernelEntryBlock = buildKernelEntryHandoffManualBlock(kernelEntryHandoff);
   const fallbackMessage =
     trimStandaloneTurns(params.turns, params.contextTurnsLimit).length > 0
       ? buildStandaloneConversationMessage(params.turns, params.query, params.contextTurnsLimit)
       : params.query;
+  const fallbackMessageWithKernelEntry = kernelEntryBlock
+    ? `${kernelEntryBlock.title}:\n${kernelEntryBlock.content}\n\n${fallbackMessage}`
+    : fallbackMessage;
   const fallbackInjectedSourceKinds = inferInjectedSourceKinds({
     hasHistory: trimStandaloneTurns(params.turns, params.contextTurnsLimit).length > 0,
     contextSources: params.contextSources,
   });
   const conversationHistory = buildContextConversationTurns(params.turns, params.contextTurnsLimit);
   const handoffCapsule = buildHandoffManualBlock(conversationHistory);
+  const manualBlocks = [kernelEntryBlock, handoffCapsule].filter(
+    (value): value is NonNullable<typeof value> => value != null,
+  );
   const settings = useSettingsStore.getState();
   const hardLimit = await resolvePromptTokenBudget({
     backend: settings.backend,
@@ -283,7 +293,7 @@ async function buildStandaloneMessageWithContextEnvelope(params: {
     mode: 'standalone',
     conversation_history: conversationHistory,
     context_sources: params.contextSources ?? undefined,
-    manual_blocks: handoffCapsule ? [handoffCapsule] : undefined,
+    manual_blocks: manualBlocks.length > 0 ? manualBlocks : undefined,
     input_token_budget: inputTokenBudget,
     reserved_output_tokens: reservedOutputTokens,
     hard_limit: hardLimit,
@@ -307,12 +317,14 @@ async function buildStandaloneMessageWithContextEnvelope(params: {
       const total = result.data.budget?.input_token_budget;
       if (typeof used === 'number' && typeof total === 'number') {
         const fallbackTag = result.data.fallback_used ? ', fallback' : '';
-        const handoffTag = handoffCapsule ? ', handoff_capsule' : '';
+        const handoffTag = manualBlocks.length > 0 ? ', handoff_capsule' : '';
         params.addLog(
           `Context assembled (${used}/${total} tokens, trace=${result.data.trace_id}${fallbackTag}${handoffTag})`,
         );
       } else {
-        params.addLog(`Context assembled (trace=${result.data.trace_id}${handoffCapsule ? ', handoff_capsule' : ''})`);
+        params.addLog(
+          `Context assembled (trace=${result.data.trace_id}${manualBlocks.length > 0 ? ', handoff_capsule' : ''})`,
+        );
       }
       return {
         message: result.data.assembled_prompt,
@@ -325,7 +337,7 @@ async function buildStandaloneMessageWithContextEnvelope(params: {
       params.addLog(`Context assemble fallback to legacy path: ${result.error}`);
     }
     return {
-      message: fallbackMessage,
+      message: fallbackMessageWithKernelEntry,
       injectedSourceKinds: fallbackInjectedSourceKinds,
       externalContextInjected: fallbackInjectedSourceKinds.length > 0,
     };
@@ -333,7 +345,7 @@ async function buildStandaloneMessageWithContextEnvelope(params: {
     const message = error instanceof Error ? error.message : String(error);
     params.addLog(`Context assemble invocation failed, fallback to legacy path: ${message}`);
     return {
-      message: fallbackMessage,
+      message: fallbackMessageWithKernelEntry,
       injectedSourceKinds: fallbackInjectedSourceKinds,
       externalContextInjected: fallbackInjectedSourceKinds.length > 0,
     };
@@ -350,6 +362,11 @@ async function buildClaudePromptWithContextEnvelope(params: {
 }): Promise<string> {
   const conversationHistory = buildChatConversationTurnsFromAssembly(params.lines);
   const handoffCapsule = buildHandoffManualBlock(conversationHistory);
+  const kernelEntryHandoff = useWorkflowKernelStore.getState().session?.modeSnapshots.chat?.entryHandoff ?? null;
+  const kernelEntryBlock = buildKernelEntryHandoffManualBlock(kernelEntryHandoff);
+  const manualBlocks = [kernelEntryBlock, handoffCapsule].filter(
+    (value): value is NonNullable<typeof value> => value != null,
+  );
   const settings = useSettingsStore.getState();
   const hardLimit = await resolvePromptTokenBudget({
     backend: settings.backend,
@@ -366,7 +383,7 @@ async function buildClaudePromptWithContextEnvelope(params: {
     mode: 'chat',
     conversation_history: conversationHistory,
     context_sources: params.contextSources ?? undefined,
-    manual_blocks: handoffCapsule ? [handoffCapsule] : undefined,
+    manual_blocks: manualBlocks.length > 0 ? manualBlocks : undefined,
     input_token_budget: inputTokenBudget,
     reserved_output_tokens: reservedOutputTokens,
     hard_limit: hardLimit,
@@ -387,7 +404,7 @@ async function buildClaudePromptWithContextEnvelope(params: {
       };
       useContextOpsStore.getState().setLatestEnvelope(envelope);
       const fallbackTag = result.data.fallback_used ? ', fallback' : '';
-      const handoffTag = handoffCapsule ? ', handoff_capsule' : '';
+      const handoffTag = manualBlocks.length > 0 ? ', handoff_capsule' : '';
       params.addLog(`Context assembled (trace=${result.data.trace_id}${fallbackTag}${handoffTag})`);
       return result.data.assembled_prompt;
     }
@@ -398,7 +415,7 @@ async function buildClaudePromptWithContextEnvelope(params: {
     });
   }
 
-  return params.query;
+  return kernelEntryBlock ? `${kernelEntryBlock.title}:\n${kernelEntryBlock.content}\n\n${params.query}` : params.query;
 }
 
 function hasMeaningfulForegroundContent(state: ExecutionState): boolean {

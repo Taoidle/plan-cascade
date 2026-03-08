@@ -293,6 +293,7 @@ pub async fn approve_task_prd(
         workflow_config,
         global_default_agent,
         phase_configs,
+        locale,
         context_sources,
         project_path,
     } = request;
@@ -376,6 +377,9 @@ pub async fn approve_task_prd(
                 };
                 session.prd = Some(approved_prd);
                 session.status = TaskModeStatus::Executing;
+                if locale.is_some() {
+                    session.locale = locale.clone();
+                }
                 session.execution_resume_payload = resume_payload.clone();
                 updated_session = Some(session.clone());
                 drop(sessions);
@@ -759,6 +763,32 @@ pub async fn approve_task_prd(
                         "task_mode.approve_task_prd.execution_terminal",
                     )
                     .await;
+                    match &result {
+                        Ok(exec_result) => {
+                            super::publish_task_handoff_summary(
+                                &kernel_state_handle,
+                                snapshot.kernel_session_id.as_deref(),
+                                super::build_task_execution_summary_item(
+                                    snapshot,
+                                    Some(exec_result),
+                                    None,
+                                ),
+                            )
+                            .await;
+                        }
+                        Err(error) => {
+                            super::publish_task_handoff_summary(
+                                &kernel_state_handle,
+                                snapshot.kernel_session_id.as_deref(),
+                                super::build_task_execution_summary_item(
+                                    snapshot,
+                                    None,
+                                    Some(error.to_string()),
+                                ),
+                            )
+                            .await;
+                        }
+                    }
                 }
                 match &result {
                     Ok(exec_result) => {

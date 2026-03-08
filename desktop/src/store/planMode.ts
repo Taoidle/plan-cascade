@@ -58,6 +58,7 @@ export interface PlanModeState {
     contextSources?: ContextSourceConfig,
     conversationContext?: string,
     locale?: string,
+    kernelSessionId?: string | null,
   ) => Promise<PlanModeSession | null>;
   submitClarification: (
     answer: PlanClarifyAnswerCardData,
@@ -136,6 +137,7 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
     contextSources,
     conversationContext,
     locale,
+    kernelSessionId,
   ) => {
     const requestId = get()._requestId + 1;
     set({ isLoading: true, isCancelling: false, error: null, _requestId: requestId });
@@ -150,6 +152,7 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
       const result = await invoke<CommandResponse<PlanModeSession>>('enter_plan_mode', {
         request: {
           description,
+          kernelSessionId: normalizeSessionId(kernelSessionId),
           provider: provider || null,
           model: model || null,
           baseUrl: finalBaseUrl || null,

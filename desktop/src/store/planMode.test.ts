@@ -58,6 +58,7 @@ describe('planMode store', () => {
     expect(mockInvoke).toHaveBeenCalledWith('enter_plan_mode', {
       request: {
         description: 'Build auth flow',
+        kernelSessionId: null,
         provider: 'openai',
         model: 'gpt-4o',
         baseUrl: 'https://api.example.com',

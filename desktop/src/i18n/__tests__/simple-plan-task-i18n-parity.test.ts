@@ -129,6 +129,7 @@ describe('simple plan/task i18n parity', () => {
       path.join(projectRoot, 'src/components/SimpleMode/SimpleInputComposer.tsx'),
       path.join(projectRoot, 'src/components/SimpleMode/useQueuedChatMessages.ts'),
       path.join(projectRoot, 'src/components/SimpleMode/WorkflowCards/PlanCard.tsx'),
+      path.join(projectRoot, 'src/components/SimpleMode/WorkflowCards/ModeHandoffCard.tsx'),
     ];
 
     for (const guardedFile of guardedFiles) {
@@ -140,6 +141,8 @@ describe('simple plan/task i18n parity', () => {
     const sampleKeys = [
       { namespace: 'simpleMode', key: 'workflow.queue.clearAll' },
       { namespace: 'simpleMode', key: 'workflow.queue.autoSwitchFailed' },
+      { namespace: 'simpleMode', key: 'workflow.modeHandoffCard.title' },
+      { namespace: 'simpleMode', key: 'workflow.modeHandoffCard.summaryKinds.task_prd' },
       { namespace: 'planMode', key: 'plan.approveAndExecute' },
       { namespace: 'planMode', key: 'plan.validation.blockTitle' },
     ] as const;

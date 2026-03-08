@@ -69,9 +69,26 @@ pub struct ConversationTurn {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct HandoffSummaryItem {
+    pub id: String,
+    pub source_mode: WorkflowMode,
+    pub kind: String,
+    pub title: String,
+    pub body: String,
+    #[serde(default)]
+    pub artifact_refs: Vec<String>,
+    #[serde(default)]
+    pub metadata: serde_json::Map<String, Value>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HandoffContextBundle {
     #[serde(default)]
     pub conversation_context: Vec<ConversationTurn>,
+    #[serde(default)]
+    pub summary_items: Vec<HandoffSummaryItem>,
     #[serde(default)]
     pub artifact_refs: Vec<String>,
     #[serde(default)]
@@ -84,6 +101,7 @@ impl Default for HandoffContextBundle {
     fn default() -> Self {
         Self {
             conversation_context: Vec::new(),
+            summary_items: Vec::new(),
             artifact_refs: Vec::new(),
             context_sources: Vec::new(),
             metadata: serde_json::Map::new(),
@@ -99,6 +117,8 @@ pub struct ChatState {
     pub pending_input: String,
     #[serde(default)]
     pub active_turn_id: Option<String>,
+    #[serde(default)]
+    pub entry_handoff: HandoffContextBundle,
     pub turn_count: u64,
     pub last_user_message: Option<String>,
     pub last_assistant_message: Option<String>,
@@ -110,6 +130,7 @@ impl Default for ChatState {
             phase: "ready".to_string(),
             pending_input: String::new(),
             active_turn_id: None,
+            entry_handoff: HandoffContextBundle::default(),
             turn_count: 0,
             last_user_message: None,
             last_assistant_message: None,
@@ -140,6 +161,8 @@ pub struct PlanState {
     pub running_step_id: Option<String>,
     #[serde(default)]
     pub pending_clarification: Option<PlanClarificationSnapshot>,
+    #[serde(default)]
+    pub entry_handoff: HandoffContextBundle,
     pub retryable_steps: Vec<String>,
     pub plan_revision: u64,
     pub last_edit_operation: Option<String>,
@@ -160,6 +183,7 @@ impl Default for PlanState {
             plan_id: None,
             running_step_id: None,
             pending_clarification: None,
+            entry_handoff: HandoffContextBundle::default(),
             retryable_steps: Vec::new(),
             plan_revision: 0,
             last_edit_operation: None,
@@ -201,6 +225,8 @@ pub struct TaskState {
     pub interview_session_id: Option<String>,
     #[serde(default)]
     pub pending_interview: Option<TaskInterviewSnapshot>,
+    #[serde(default)]
+    pub entry_handoff: HandoffContextBundle,
     pub completed_stories: u64,
     pub failed_stories: u64,
     #[serde(default)]
@@ -221,6 +247,7 @@ impl Default for TaskState {
             current_story_id: None,
             interview_session_id: None,
             pending_interview: None,
+            entry_handoff: HandoffContextBundle::default(),
             completed_stories: 0,
             failed_stories: 0,
             run_id: None,
@@ -258,6 +285,7 @@ impl Default for WorkflowContextLedgerSummary {
 #[serde(rename_all = "snake_case")]
 enum WorkflowContextLedgerEntryKind {
     ConversationTurn,
+    SummaryItem,
     ArtifactRef,
     ContextSource,
     MetadataPatch,
@@ -738,6 +766,8 @@ impl WorkflowKernelState {
             updated_at: now,
             last_checkpoint_id: None,
         };
+        let initial_entry_handoff = session.handoff_context.clone();
+        set_mode_entry_handoff(&mut session, active_mode, initial_entry_handoff);
         self.refresh_session_derived_fields(&mut session, Some(session_id.as_str()));
 
         {
@@ -1599,8 +1629,8 @@ impl WorkflowKernelState {
         session_id: &str,
         target_mode: WorkflowMode,
         handoff: Option<HandoffContextBundle>,
-    ) -> Result<WorkflowSession, String> {
-        let (source_mode, updated_session) = {
+    ) -> Result<WorkflowSessionMutation, String> {
+        let source_mode = {
             let mut sessions = self.sessions.write().await;
             let mut ledger_map = self.context_ledger_entries.write().await;
             let session = sessions
@@ -1615,12 +1645,31 @@ impl WorkflowKernelState {
                 append_handoff_to_context_ledger(ledger, target_mode, incoming);
                 session.handoff_context = build_handoff_context_from_ledger(ledger);
             }
+            source_mode
+        };
+        let root_handoff = self
+            .handoff_context_for_kernel_session(session_id)
+            .await
+            .unwrap_or_default();
+        let entry_handoff = self
+            .derive_mode_entry_handoff(session_id, source_mode, target_mode, &root_handoff)
+            .await?;
+        let handoff_line_id = if is_handoff_context_empty(&entry_handoff) {
+            None
+        } else {
+            Some(self.next_mode_transcript_line_id(session_id, target_mode).await?)
+        };
+        let updated_session = {
+            let mut sessions = self.sessions.write().await;
+            let session = sessions
+                .get_mut(session_id)
+                .ok_or_else(|| format!("Workflow session not found: {session_id}"))?;
             session.active_mode = target_mode;
             session.status = WorkflowStatus::Active;
             session.last_error = None;
+            set_mode_entry_handoff(session, target_mode, entry_handoff.clone());
             session.updated_at = now_rfc3339();
-
-            (source_mode, session.clone())
+            session.clone()
         };
 
         self.append_event(
@@ -1630,9 +1679,10 @@ impl WorkflowKernelState {
             json!({
                 "sourceMode": source_mode,
                 "targetMode": target_mode,
-                "conversationTurns": updated_session.handoff_context.conversation_context.len(),
-                "artifactRefs": updated_session.handoff_context.artifact_refs.len(),
-                "contextSources": updated_session.handoff_context.context_sources.len()
+                "conversationTurns": entry_handoff.conversation_context.len(),
+                "summaryItems": entry_handoff.summary_items.len(),
+                "artifactRefs": entry_handoff.artifact_refs.len(),
+                "contextSources": entry_handoff.context_sources.len()
             }),
         )
         .await;
@@ -1640,7 +1690,28 @@ impl WorkflowKernelState {
             .await?;
         self.persist_session_record(session_id).await?;
 
-        Ok(updated_session)
+        let mut transcript_mutations = Vec::new();
+        if let Some(line_id) = handoff_line_id {
+            transcript_mutations.push(
+                self.record_transcript_mutation(
+                    session_id,
+                    target_mode,
+                    None,
+                    vec![build_mode_handoff_card_line(
+                        line_id,
+                        source_mode,
+                        target_mode,
+                        &entry_handoff,
+                    )],
+                )
+                .await?,
+            );
+        }
+
+        Ok(WorkflowSessionMutation {
+            session: updated_session,
+            transcript_mutations,
+        })
     }
 
     pub async fn submit_input(
@@ -1762,10 +1833,29 @@ impl WorkflowKernelState {
                 append_handoff_to_context_ledger(ledger, target_mode, incoming);
                 session.handoff_context = build_handoff_context_from_ledger(ledger);
             }
-
+            source_mode
+        };
+        let root_handoff = self
+            .handoff_context_for_kernel_session(session_id)
+            .await
+            .unwrap_or_default();
+        let entry_handoff = self
+            .derive_mode_entry_handoff(session_id, source_mode, target_mode, &root_handoff)
+            .await?;
+        let handoff_line_id = if is_handoff_context_empty(&entry_handoff) {
+            None
+        } else {
+            Some(self.next_mode_transcript_line_id(session_id, target_mode).await?)
+        };
+        {
+            let mut sessions = self.sessions.write().await;
+            let session = sessions
+                .get_mut(session_id)
+                .ok_or_else(|| format!("Workflow session not found: {session_id}"))?;
             session.active_mode = target_mode;
             session.status = WorkflowStatus::Active;
             session.last_error = None;
+            set_mode_entry_handoff(session, target_mode, entry_handoff.clone());
             if target_mode == WorkflowMode::Chat {
                 prepare_chat_turn_submission(
                     session,
@@ -1776,8 +1866,7 @@ impl WorkflowKernelState {
                 apply_intent_to_mode_state(session, &intent);
             }
             session.updated_at = now_rfc3339();
-            source_mode
-        };
+        }
         let updated_session = self.get_session(session_id).await?;
 
         self.append_event(
@@ -1787,9 +1876,10 @@ impl WorkflowKernelState {
             json!({
                 "sourceMode": source_mode,
                 "targetMode": target_mode,
-                "conversationTurns": updated_session.handoff_context.conversation_context.len(),
-                "artifactRefs": updated_session.handoff_context.artifact_refs.len(),
-                "contextSources": updated_session.handoff_context.context_sources.len(),
+                "conversationTurns": entry_handoff.conversation_context.len(),
+                "summaryItems": entry_handoff.summary_items.len(),
+                "artifactRefs": entry_handoff.artifact_refs.len(),
+                "contextSources": entry_handoff.context_sources.len(),
                 "atomicSubmit": true
             }),
         )
@@ -1810,7 +1900,24 @@ impl WorkflowKernelState {
         self.create_checkpoint(session_id, "mode_transitioned_with_input")
             .await?;
         self.persist_session_record(session_id).await?;
-        let transcript_mutations = if target_mode == WorkflowMode::Chat {
+        let mut transcript_mutations = Vec::new();
+        if let Some(line_id) = handoff_line_id {
+            transcript_mutations.push(
+                self.record_transcript_mutation(
+                    session_id,
+                    target_mode,
+                    None,
+                    vec![build_mode_handoff_card_line(
+                        line_id,
+                        source_mode,
+                        target_mode,
+                        &entry_handoff,
+                    )],
+                )
+                .await?,
+            );
+        }
+        if target_mode == WorkflowMode::Chat {
             let chat = updated_session
                 .mode_snapshots
                 .chat
@@ -1822,7 +1929,7 @@ impl WorkflowKernelState {
                 chat.turn_count.max(1),
                 &intent.content,
             );
-            vec![
+            transcript_mutations.push(
                 self.record_transcript_mutation(
                     session_id,
                     WorkflowMode::Chat,
@@ -1830,10 +1937,8 @@ impl WorkflowKernelState {
                     vec![appended_line],
                 )
                 .await?,
-            ]
-        } else {
-            Vec::new()
-        };
+            );
+        }
 
         Ok(WorkflowSessionMutation {
             session: self.get_session(session_id).await?,
@@ -1989,6 +2094,130 @@ impl WorkflowKernelState {
         sessions
             .get(&kernel_session_id)
             .map(|session| session.handoff_context.clone())
+    }
+
+    pub async fn handoff_context_for_kernel_session(
+        &self,
+        session_id: &str,
+    ) -> Option<HandoffContextBundle> {
+        let sessions = self.sessions.read().await;
+        sessions
+            .get(session_id)
+            .map(|session| session.handoff_context.clone())
+    }
+
+    pub async fn mode_entry_handoff_for_kernel_session(
+        &self,
+        session_id: &str,
+        mode: WorkflowMode,
+    ) -> Option<HandoffContextBundle> {
+        let sessions = self.sessions.read().await;
+        let session = sessions.get(session_id)?;
+        match mode {
+            WorkflowMode::Chat => session
+                .mode_snapshots
+                .chat
+                .as_ref()
+                .map(|chat| chat.entry_handoff.clone()),
+            WorkflowMode::Plan => session
+                .mode_snapshots
+                .plan
+                .as_ref()
+                .map(|plan| plan.entry_handoff.clone()),
+            WorkflowMode::Task => session
+                .mode_snapshots
+                .task
+                .as_ref()
+                .map(|task| task.entry_handoff.clone()),
+        }
+    }
+
+    async fn derive_mode_entry_handoff(
+        &self,
+        session_id: &str,
+        source_mode: WorkflowMode,
+        target_mode: WorkflowMode,
+        root_handoff: &HandoffContextBundle,
+    ) -> Result<HandoffContextBundle, String> {
+        if source_mode == WorkflowMode::Chat {
+            let transcript = self
+                .read_persisted_mode_transcript(session_id, WorkflowMode::Chat)
+                .await
+                .unwrap_or_else(|_| PersistedModeTranscriptRecord {
+                    session_id: session_id.to_string(),
+                    mode: WorkflowMode::Chat,
+                    revision: 0,
+                    lines: Vec::new(),
+                });
+            let conversation_context = derive_conversation_turns_from_transcript_lines(&transcript.lines);
+            return Ok(HandoffContextBundle {
+                conversation_context,
+                artifact_refs: root_handoff.artifact_refs.clone(),
+                context_sources: root_handoff.context_sources.clone(),
+                metadata: {
+                    let mut metadata = serde_json::Map::new();
+                    metadata.insert(
+                        "sourceMode".to_string(),
+                        Value::String(mode_storage_name(source_mode).to_string()),
+                    );
+                    metadata.insert(
+                        "targetMode".to_string(),
+                        Value::String(mode_storage_name(target_mode).to_string()),
+                    );
+                    metadata.insert(
+                        "strategy".to_string(),
+                        Value::String("chat_full_transcript".to_string()),
+                    );
+                    metadata.insert(
+                        "resolvedAt".to_string(),
+                        Value::String(now_rfc3339()),
+                    );
+                    metadata
+                },
+                summary_items: Vec::new(),
+            });
+        }
+
+        let summary_items = root_handoff
+            .summary_items
+            .iter()
+            .filter(|item| item.source_mode == source_mode)
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut artifact_refs = root_handoff.artifact_refs.clone();
+        for item in &summary_items {
+            for artifact_ref in &item.artifact_refs {
+                if !artifact_refs.iter().any(|existing| existing == artifact_ref) {
+                    artifact_refs.push(artifact_ref.clone());
+                }
+            }
+        }
+        Ok(HandoffContextBundle {
+            conversation_context: Vec::new(),
+            summary_items,
+            artifact_refs,
+            context_sources: root_handoff.context_sources.clone(),
+            metadata: {
+                let mut metadata = serde_json::Map::new();
+                metadata.insert(
+                    "sourceMode".to_string(),
+                    Value::String(mode_storage_name(source_mode).to_string()),
+                );
+                metadata.insert(
+                    "targetMode".to_string(),
+                    Value::String(mode_storage_name(target_mode).to_string()),
+                );
+                metadata.insert(
+                    "strategy".to_string(),
+                    Value::String("structured_summary".to_string()),
+                );
+                metadata.insert(
+                    "resolvedAt".to_string(),
+                    Value::String(now_rfc3339()),
+                );
+                metadata
+            },
+        })
     }
 
     pub async fn find_linked_task_session_by_interview_session(
@@ -3114,6 +3343,136 @@ fn transcript_line_type(value: &Value) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
+fn transcript_line_turn_boundary(value: &Value) -> Option<&str> {
+    value
+        .as_object()
+        .and_then(|object| object.get("turnBoundary"))
+        .and_then(Value::as_str)
+}
+
+fn transcript_line_turn_id(value: &Value) -> Option<u64> {
+    value
+        .as_object()
+        .and_then(|object| object.get("turnId"))
+        .and_then(Value::as_u64)
+}
+
+fn derive_conversation_turns_from_transcript_lines(lines: &[Value]) -> Vec<ConversationTurn> {
+    let mut turns = Vec::new();
+    let mut current_user: Option<String> = None;
+    let mut current_turn_id: Option<u64> = None;
+    let mut assistant_segments: Vec<String> = Vec::new();
+
+    for line in lines {
+        let content = transcript_line_content(line).unwrap_or_default().to_string();
+        match transcript_line_turn_boundary(line) {
+            Some("user") => {
+                if let Some(user) = current_user.take() {
+                    let assistant = assistant_segments.join("").trim().to_string();
+                    if !assistant.is_empty() {
+                        turns.push(ConversationTurn { user, assistant });
+                    }
+                }
+                current_user = Some(content);
+                current_turn_id = transcript_line_turn_id(line);
+                assistant_segments.clear();
+            }
+            _ => {
+                if transcript_line_type(line) != Some("text") {
+                    continue;
+                }
+                if current_user.is_none() {
+                    continue;
+                }
+                let line_turn_id = transcript_line_turn_id(line);
+                if current_turn_id.is_some() && line_turn_id != current_turn_id {
+                    continue;
+                }
+                assistant_segments.push(content);
+            }
+        }
+    }
+
+    if let Some(user) = current_user {
+        let assistant = assistant_segments.join("").trim().to_string();
+        if !assistant.is_empty() {
+            turns.push(ConversationTurn { user, assistant });
+        }
+    }
+
+    turns
+}
+
+fn is_handoff_context_empty(handoff: &HandoffContextBundle) -> bool {
+    handoff.conversation_context.is_empty()
+        && handoff.summary_items.is_empty()
+        && handoff.artifact_refs.is_empty()
+        && handoff.context_sources.is_empty()
+        && handoff.metadata.is_empty()
+}
+
+fn set_mode_entry_handoff(
+    session: &mut WorkflowSession,
+    mode: WorkflowMode,
+    handoff: HandoffContextBundle,
+) {
+    match mode {
+        WorkflowMode::Chat => {
+            session.mode_snapshots.chat_mut().entry_handoff = handoff;
+        }
+        WorkflowMode::Plan => {
+            session.mode_snapshots.plan_mut().entry_handoff = handoff;
+        }
+        WorkflowMode::Task => {
+            session.mode_snapshots.task_mut().entry_handoff = handoff;
+        }
+    }
+}
+
+fn build_mode_handoff_card_line(
+    id: u64,
+    source_mode: WorkflowMode,
+    target_mode: WorkflowMode,
+    handoff: &HandoffContextBundle,
+) -> Value {
+    let summary_items = handoff
+        .summary_items
+        .iter()
+        .map(|item| {
+            json!({
+                "id": item.id,
+                "sourceMode": item.source_mode,
+                "kind": item.kind,
+                "title": item.title,
+                "body": item.body,
+                "artifactRefs": item.artifact_refs,
+                "metadata": item.metadata,
+                "createdAt": item.created_at,
+            })
+        })
+        .collect::<Vec<_>>();
+    let payload = json!({
+        "cardType": "mode_handoff_card",
+        "cardId": format!("mode-handoff-{}-{}-{id}", mode_storage_name(source_mode), mode_storage_name(target_mode)),
+        "interactive": false,
+        "data": {
+            "sourceMode": mode_storage_name(source_mode),
+            "targetMode": mode_storage_name(target_mode),
+            "conversationTurnCount": handoff.conversation_context.len(),
+            "summaryItems": summary_items,
+            "artifactRefs": handoff.artifact_refs,
+            "contextSources": handoff.context_sources,
+        }
+    });
+    json!({
+        "id": id,
+        "type": "card",
+        "content": serde_json::to_string(&payload).unwrap_or_else(|_| payload.to_string()),
+        "timestamp": chrono::Utc::now().timestamp_millis(),
+        "cardPayload": payload,
+    })
+}
+
 fn prepare_chat_turn_submission(
     session: &mut WorkflowSession,
     intent: &UserInputIntent,
@@ -3592,6 +3951,33 @@ fn append_handoff_to_context_ledger(
         });
     }
 
+    for summary_item in handoff.summary_items {
+        let value = serde_json::to_value(&summary_item).unwrap_or_else(|_| {
+            json!({
+                "id": summary_item.id,
+                "sourceMode": summary_item.source_mode,
+                "kind": summary_item.kind,
+                "title": summary_item.title,
+                "body": summary_item.body,
+                "artifactRefs": summary_item.artifact_refs,
+                "metadata": summary_item.metadata,
+                "createdAt": summary_item.created_at,
+            })
+        });
+        if entries.iter().any(|entry| {
+            entry.kind == WorkflowContextLedgerEntryKind::SummaryItem && entry.value == value
+        }) {
+            continue;
+        }
+        entries.push(WorkflowContextLedgerEntry {
+            entry_id: uuid::Uuid::new_v4().to_string(),
+            created_at: now_rfc3339(),
+            mode: Some(mode),
+            kind: WorkflowContextLedgerEntryKind::SummaryItem,
+            value,
+        });
+    }
+
     for artifact_ref in handoff.artifact_refs {
         let normalized = artifact_ref.trim();
         if normalized.is_empty() {
@@ -3660,6 +4046,7 @@ fn build_handoff_context_from_ledger(
     entries: &[WorkflowContextLedgerEntry],
 ) -> HandoffContextBundle {
     let mut conversation_context = Vec::new();
+    let mut summary_items = Vec::new();
     let mut artifact_refs = Vec::new();
     let mut context_sources = Vec::new();
     let mut metadata = serde_json::Map::new();
@@ -3669,6 +4056,11 @@ fn build_handoff_context_from_ledger(
             WorkflowContextLedgerEntryKind::ConversationTurn => {
                 if let Ok(turn) = serde_json::from_value::<ConversationTurn>(entry.value.clone()) {
                     conversation_context.push(turn);
+                }
+            }
+            WorkflowContextLedgerEntryKind::SummaryItem => {
+                if let Ok(item) = serde_json::from_value::<HandoffSummaryItem>(entry.value.clone()) {
+                    summary_items.push(item);
                 }
             }
             WorkflowContextLedgerEntryKind::ArtifactRef => {
@@ -3693,6 +4085,7 @@ fn build_handoff_context_from_ledger(
 
     HandoffContextBundle {
         conversation_context,
+        summary_items,
         artifact_refs,
         context_sources,
         metadata,

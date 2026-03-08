@@ -31,6 +31,7 @@ pub async fn generate_task_prd(
         compiled_spec,
         conversation_history,
         max_context_tokens,
+        locale,
         context_sources,
         project_path,
     } = request;
@@ -95,6 +96,9 @@ pub async fn generate_task_prd(
                         if let Some(s) = sessions.get_mut(&session_id) {
                             s.status = TaskModeStatus::ReviewingPrd;
                             s.prd = Some(prd.clone());
+                            if locale.is_some() {
+                                s.locale = locale.clone();
+                            }
                             updated_session = Some(s.clone());
                         } else {
                             return Ok(CommandResponse::err(
@@ -117,6 +121,14 @@ pub async fn generate_task_prd(
                                 "task_mode.generate_task_prd.compiled_spec_reviewing",
                             )
                             .await;
+                            if let Some(prd) = snapshot.prd.as_ref() {
+                                super::publish_task_handoff_summary(
+                                    kernel_state.inner(),
+                                    snapshot.kernel_session_id.as_deref(),
+                                    super::build_task_prd_summary_item(snapshot, prd, "initial"),
+                                )
+                                .await;
+                            }
                         }
                         return Ok(CommandResponse::ok(prd));
                     }
@@ -209,7 +221,8 @@ pub async fn generate_task_prd(
             {
                 None
             } else {
-                super::handoff_context_for_task_session(kernel_state.inner(), &session_id).await
+                super::handoff_context_for_task_session(kernel_state.inner(), state.inner(), &session_id)
+                    .await
             };
             let history = conversation_history
                 .filter(|history| !history.is_empty())
@@ -320,6 +333,9 @@ pub async fn generate_task_prd(
                 if let Some(s) = sessions.get_mut(&session_id) {
                     s.status = TaskModeStatus::ReviewingPrd;
                     s.prd = Some(prd.clone());
+                    if locale.is_some() {
+                        s.locale = locale.clone();
+                    }
                     updated_session = Some(s.clone());
                 } else {
                     return Ok(CommandResponse::err(
@@ -337,6 +353,14 @@ pub async fn generate_task_prd(
                         "task_mode.generate_task_prd.reviewing_prd",
                     )
                     .await;
+                    if let Some(prd) = snapshot.prd.as_ref() {
+                        super::publish_task_handoff_summary(
+                            kernel_state.inner(),
+                            snapshot.kernel_session_id.as_deref(),
+                            super::build_task_prd_summary_item(snapshot, prd, "initial"),
+                        )
+                        .await;
+                    }
                 }
             }
 
@@ -956,7 +980,8 @@ Output language:
             {
                 None
             } else {
-                super::handoff_context_for_task_session(kernel_state.inner(), &session_id).await
+                super::handoff_context_for_task_session(kernel_state.inner(), state.inner(), &session_id)
+                    .await
             };
             let history = conversation_history
                 .filter(|history| !history.is_empty())
@@ -1075,6 +1100,9 @@ Output language:
                 }
                 session.prd = Some(updated_prd.clone());
                 session.status = TaskModeStatus::ReviewingPrd;
+                if locale.is_some() {
+                    session.locale = locale.clone();
+                }
                 let snapshot = session.clone();
                 drop(sessions);
                 persist_task_session_best_effort(
@@ -1091,6 +1119,14 @@ Output language:
                     "task_mode.apply_task_prd_feedback.reviewing_prd",
                 )
                 .await;
+                if let Some(prd) = snapshot.prd.as_ref() {
+                    super::publish_task_handoff_summary(
+                        kernel_state.inner(),
+                        snapshot.kernel_session_id.as_deref(),
+                        super::build_task_prd_summary_item(&snapshot, prd, "revised"),
+                    )
+                    .await;
+                }
             }
 
             CommandResponse::ok(PrdFeedbackApplyResult {

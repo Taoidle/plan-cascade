@@ -20,6 +20,7 @@ import { TurnChangeSummaryCard } from './TurnChangeSummaryCard';
 import { RequirementAnalysisCard } from './RequirementAnalysisCard';
 import { ArchitectureReviewCard } from './ArchitectureReviewCard';
 import { PersonaIndicatorCard } from './PersonaIndicatorCard';
+import { ModeHandoffCard } from './ModeHandoffCard';
 import { PlanAnalysisCard } from './PlanAnalysisCard';
 import { PlanCard } from './PlanCard';
 import { PlanStepUpdateCard } from './PlanStepUpdateCard';
@@ -57,6 +58,7 @@ import type {
   RequirementAnalysisCardData,
   ArchitectureReviewCardData,
   PersonaIndicatorData,
+  ModeHandoffCardData,
 } from '../../../types/workflowCard';
 
 export function WorkflowCardRenderer({ payload }: { payload: CardPayload }) {
@@ -97,6 +99,8 @@ export function WorkflowCardRenderer({ payload }: { payload: CardPayload }) {
       );
     case 'persona_indicator':
       return <PersonaIndicatorCard data={payload.data as PersonaIndicatorData} />;
+    case 'mode_handoff_card':
+      return <ModeHandoffCard data={payload.data as ModeHandoffCardData} />;
     // Plan Mode cards
     case 'plan_analysis_card':
       return <PlanAnalysisCard data={payload.data as PlanAnalysisCardData} />;

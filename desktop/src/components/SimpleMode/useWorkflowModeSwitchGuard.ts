@@ -1,6 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { TFunction } from 'i18next';
-import { buildConversationHistory } from '../../lib/contextBridge';
 import { switchModeSafely } from '../../store/simpleWorkflowCoordinator';
 import type { HandoffContextBundle, WorkflowMode, WorkflowSession } from '../../types/workflowKernel';
 import { resolveModeSwitchBlockReasonFromKernel, type ModeSwitchBlockReason } from '../../store/workflowPhaseModel';
@@ -21,7 +20,7 @@ interface UseWorkflowModeSwitchGuardParams {
     targetMode: WorkflowMode,
     handoff: HandoffContextBundle,
   ) => Promise<WorkflowSession | null>;
-  appendWorkflowKernelContextItems: (
+  appendWorkflowKernelContextItems?: (
     targetMode: WorkflowMode,
     handoff: HandoffContextBundle,
   ) => Promise<WorkflowSession | null>;
@@ -61,7 +60,6 @@ export function useWorkflowModeSwitchGuard({
   hasPlanClarifyQuestion,
   setWorkflowMode,
   transitionWorkflowKernelMode,
-  appendWorkflowKernelContextItems,
   showToast,
   t,
 }: UseWorkflowModeSwitchGuardParams): UseWorkflowModeSwitchGuardResult {
@@ -96,24 +94,17 @@ export function useWorkflowModeSwitchGuard({
   const applyWorkflowModeChange = useCallback(
     (newMode: WorkflowMode) => {
       if (newMode === workflowMode) return;
-
-      const conversationContext = buildConversationHistory().map((turn) => ({
-        user: turn.user,
-        assistant: turn.assistant,
-      }));
-      const hasConversationContext = conversationContext.length > 0;
-
-      if (newMode === 'task' && hasConversationContext) {
+      if (newMode === 'task') {
         showToast(
           t('contextBridge.switchToTaskWithContext', { defaultValue: 'Switching to Task mode with chat context' }),
           'info',
         );
-      } else if (newMode === 'plan' && hasConversationContext) {
+      } else if (newMode === 'plan') {
         showToast(
           t('contextBridge.switchToPlanWithContext', { defaultValue: 'Switching to Plan mode with chat context' }),
           'info',
         );
-      } else if (newMode === 'chat' && hasConversationContext) {
+      } else if (newMode === 'chat') {
         showToast(
           t('contextBridge.switchToChatWithTaskContext', { defaultValue: 'Switching to Chat mode with task context' }),
           'info',
@@ -121,29 +112,16 @@ export function useWorkflowModeSwitchGuard({
       }
 
       void (async () => {
-        if (workflowMode === 'chat' && hasConversationContext) {
-          await appendWorkflowKernelContextItems('chat', {
-            conversationContext,
-            artifactRefs: [],
-            contextSources: ['mode_switch_sync'],
-            metadata: {
-              source: 'simple_mode_switch_guard',
-              sourceMode: workflowMode,
-              targetMode: newMode,
-            },
-          });
-        }
-
         const transitioned = await switchModeSafely({
           targetMode: newMode,
           handoff: {
             conversationContext: [],
+            summaryItems: [],
             artifactRefs: [],
             contextSources: ['simple_mode'],
             metadata: {
               sourceMode: workflowMode,
               targetMode: newMode,
-              hasConversationContext,
               switchedAt: new Date().toISOString(),
             },
           },
@@ -163,7 +141,7 @@ export function useWorkflowModeSwitchGuard({
         setWorkflowMode(transitioned.activeMode);
       })();
     },
-    [appendWorkflowKernelContextItems, setWorkflowMode, showToast, t, transitionWorkflowKernelMode, workflowMode],
+    [setWorkflowMode, showToast, t, transitionWorkflowKernelMode, workflowMode],
   );
 
   const handleWorkflowModeChange = useCallback(

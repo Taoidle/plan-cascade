@@ -30,8 +30,8 @@ use crate::services::task_mode::context_provider::{
     ContextSourceConfig, MemorySourceConfig, SkillsSourceConfig,
 };
 use crate::services::workflow_kernel::{
-    PlanClarificationSnapshot, WorkflowKernelState, WorkflowKernelUpdatedEvent, WorkflowMode,
-    WORKFLOW_KERNEL_UPDATED_CHANNEL,
+    HandoffContextBundle, HandoffSummaryItem, PlanClarificationSnapshot, WorkflowKernelState,
+    WorkflowKernelUpdatedEvent, WorkflowMode, WORKFLOW_KERNEL_UPDATED_CHANNEL,
 };
 use crate::state::AppState;
 use crate::utils::paths::ensure_plan_cascade_dir;
@@ -390,6 +390,7 @@ pub(crate) async fn resolve_plan_provider_and_model(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EnterPlanModeRequest {
     pub description: String,
+    pub kernel_session_id: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
     pub base_url: Option<String>,
@@ -517,9 +518,11 @@ pub struct PlanContextBundle {
 async fn build_plan_conversation_context(
     app_state: &AppState,
     knowledge_state: &crate::commands::knowledge::KnowledgeState,
+    plan_state: Option<&PlanModeState>,
     kernel_state: &WorkflowKernelState,
     project_path: Option<&str>,
     session_id: Option<&str>,
+    kernel_session_id: Option<&str>,
     conversation_context: Option<&str>,
     context_sources: Option<&ContextSourceConfig>,
     query: &str,
@@ -534,9 +537,21 @@ async fn build_plan_conversation_context(
         .is_some()
     {
         None
-    } else if let Some(mode_session_id) = session_id {
-        kernel_state
-            .handoff_context_for_mode_session(WorkflowMode::Plan, mode_session_id)
+    } else if let Some(kernel_session_id) = kernel_session_id {
+        let entry_handoff = kernel_state
+            .mode_entry_handoff_for_kernel_session(kernel_session_id, WorkflowMode::Plan)
+            .await
+            .unwrap_or_default();
+        if is_handoff_context_empty(&entry_handoff) {
+            kernel_state
+                .handoff_context_for_kernel_session(kernel_session_id)
+                .await
+                .map(|handoff| render_plan_handoff_context(&handoff))
+        } else {
+            Some(render_plan_handoff_context(&entry_handoff))
+        }
+    } else if let (Some(plan_state), Some(mode_session_id)) = (plan_state, session_id) {
+        handoff_context_for_plan_session(kernel_state, plan_state, mode_session_id)
             .await
             .map(|handoff| render_plan_handoff_context(&handoff))
     } else {
@@ -640,7 +655,7 @@ async fn build_plan_conversation_context(
 }
 
 fn render_plan_handoff_context(
-    handoff: &crate::services::workflow_kernel::HandoffContextBundle,
+    handoff: &HandoffContextBundle,
 ) -> String {
     let mut sections = Vec::new();
 
@@ -658,6 +673,26 @@ fn render_plan_handoff_context(
         .join("\n\n");
     if !conversation_section.trim().is_empty() {
         sections.push(conversation_section);
+    }
+
+    if !handoff.summary_items.is_empty() {
+        let rendered = handoff
+            .summary_items
+            .iter()
+            .map(|item| {
+                format!(
+                    "## [{}:{}] {}\n{}",
+                    mode_label(item.source_mode),
+                    item.kind,
+                    item.title,
+                    item.body
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        if !rendered.trim().is_empty() {
+            sections.push(format!("[summary-items]\n{}", rendered));
+        }
     }
 
     if !handoff.artifact_refs.is_empty() {
@@ -681,6 +716,295 @@ fn render_plan_handoff_context(
     }
 
     sections.join("\n\n")
+}
+
+fn is_handoff_context_empty(handoff: &HandoffContextBundle) -> bool {
+    handoff.conversation_context.is_empty()
+        && handoff.summary_items.is_empty()
+        && handoff.artifact_refs.is_empty()
+        && handoff.context_sources.is_empty()
+        && handoff.metadata.is_empty()
+}
+
+pub(crate) async fn handoff_context_for_plan_session(
+    kernel_state: &WorkflowKernelState,
+    plan_state: &PlanModeState,
+    plan_session_id: &str,
+) -> Option<HandoffContextBundle> {
+    let plan_session = plan_state
+        .get_or_load_session_snapshot(plan_session_id)
+        .await
+        .ok()
+        .flatten()?;
+    let kernel_session_id = plan_session.kernel_session_id?;
+    let entry_handoff = kernel_state
+        .mode_entry_handoff_for_kernel_session(&kernel_session_id, WorkflowMode::Plan)
+        .await
+        .unwrap_or_default();
+    if !is_handoff_context_empty(&entry_handoff) {
+        return Some(entry_handoff);
+    }
+    kernel_state
+        .handoff_context_for_kernel_session(&kernel_session_id)
+        .await
+}
+
+pub(crate) async fn publish_plan_handoff_summary(
+    kernel_state: &WorkflowKernelState,
+    kernel_session_id: Option<&str>,
+    summary_item: HandoffSummaryItem,
+) {
+    let Some(kernel_session_id) = kernel_session_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+    let handoff = HandoffContextBundle {
+        summary_items: vec![summary_item],
+        ..HandoffContextBundle::default()
+    };
+    let _ = kernel_state
+        .append_context_items(kernel_session_id, WorkflowMode::Plan, handoff)
+        .await;
+}
+
+pub(crate) fn build_plan_analysis_summary_item(session: &PlanModeSession) -> Option<HandoffSummaryItem> {
+    let analysis = session.analysis.as_ref()?;
+    let locale_tag = normalize_locale(session.locale.as_deref());
+    let mut metadata = serde_json::Map::new();
+    metadata.insert(
+        "adapterName".to_string(),
+        serde_json::Value::String(analysis.adapter_name.clone()),
+    );
+    metadata.insert(
+        "estimatedSteps".to_string(),
+        serde_json::Value::Number((analysis.estimated_steps as u64).into()),
+    );
+    metadata.insert(
+        "needsClarification".to_string(),
+        serde_json::Value::Bool(analysis.needs_clarification),
+    );
+    Some(HandoffSummaryItem {
+        id: format!("plan-analysis-{}", session.session_id),
+        source_mode: WorkflowMode::Plan,
+        kind: "plan_analysis".to_string(),
+        title: match locale_tag {
+            "zh" => format!("{} 的计划分析", session.description),
+            "ja" => format!("{} のプラン分析", session.description),
+            _ => format!("Plan analysis for {}", session.description),
+        },
+        body: match locale_tag {
+            "zh" => format!(
+                "领域：{}\n复杂度：{}\n预计步骤数：{}\n是否需要澄清：{}\n建议方法：{}\n{}",
+                analysis.domain,
+                analysis.complexity,
+                analysis.estimated_steps,
+                analysis.needs_clarification,
+                analysis.suggested_approach,
+                analysis.reasoning
+            ),
+            "ja" => format!(
+                "ドメイン: {}\n複雑度: {}\n推定ステップ数: {}\n確認が必要: {}\n推奨アプローチ: {}\n{}",
+                analysis.domain,
+                analysis.complexity,
+                analysis.estimated_steps,
+                analysis.needs_clarification,
+                analysis.suggested_approach,
+                analysis.reasoning
+            ),
+            _ => format!(
+                "Domain: {}\nComplexity: {}\nEstimated steps: {}\nNeeds clarification: {}\nApproach: {}\n{}",
+                analysis.domain,
+                analysis.complexity,
+                analysis.estimated_steps,
+                analysis.needs_clarification,
+                analysis.suggested_approach,
+                analysis.reasoning
+            ),
+        },
+        artifact_refs: Vec::new(),
+        metadata,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    })
+}
+
+pub(crate) fn build_plan_clarification_summary_item(
+    session: &PlanModeSession,
+) -> Option<HandoffSummaryItem> {
+    if session.clarifications.is_empty() {
+        return None;
+    }
+    let locale_tag = normalize_locale(session.locale.as_deref());
+    let clarification_lines = session
+        .clarifications
+        .iter()
+        .map(|answer| {
+            format!(
+                "- {} => {}",
+                answer.question_text.trim(),
+                answer.answer.trim()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut metadata = serde_json::Map::new();
+    metadata.insert(
+        "clarificationCount".to_string(),
+        serde_json::Value::Number((session.clarifications.len() as u64).into()),
+    );
+    Some(HandoffSummaryItem {
+        id: format!("plan-clarification-{}", session.session_id),
+        source_mode: WorkflowMode::Plan,
+        kind: "plan_clarification".to_string(),
+        title: match locale_tag {
+            "zh" => format!("{} 的计划澄清", session.description),
+            "ja" => format!("{} のプラン確認", session.description),
+            _ => format!("Plan clarifications for {}", session.description),
+        },
+        body: clarification_lines,
+        artifact_refs: Vec::new(),
+        metadata,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    })
+}
+
+pub(crate) fn build_plan_output_summary_item(session: &PlanModeSession) -> Option<HandoffSummaryItem> {
+    let plan = session.plan.as_ref()?;
+    let locale_tag = normalize_locale(session.locale.as_deref());
+    let step_lines = plan
+        .steps
+        .iter()
+        .map(|step| format!("- {}: {}", step.id, step.title))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut metadata = serde_json::Map::new();
+    metadata.insert(
+        "stepCount".to_string(),
+        serde_json::Value::Number((plan.steps.len() as u64).into()),
+    );
+    metadata.insert(
+        "batchCount".to_string(),
+        serde_json::Value::Number((plan.batches.len() as u64).into()),
+    );
+    Some(HandoffSummaryItem {
+        id: format!("plan-output-{}", session.session_id),
+        source_mode: WorkflowMode::Plan,
+        kind: "plan_output".to_string(),
+        title: match locale_tag {
+            "zh" => format!("{} 的计划输出", session.description),
+            "ja" => format!("{} のプラン出力", session.description),
+            _ => format!("Plan output for {}", session.description),
+        },
+        body: match locale_tag {
+            "zh" => format!(
+                "计划标题：{}\n步骤数：{}\n批次数：{}\n{}",
+                plan.title,
+                plan.steps.len(),
+                plan.batches.len(),
+                step_lines
+            ),
+            "ja" => format!(
+                "プランタイトル: {}\nステップ数: {}\nバッチ数: {}\n{}",
+                plan.title,
+                plan.steps.len(),
+                plan.batches.len(),
+                step_lines
+            ),
+            _ => format!(
+                "Plan title: {}\nSteps: {}\nBatches: {}\n{}",
+                plan.title,
+                plan.steps.len(),
+                plan.batches.len(),
+                step_lines
+            ),
+        },
+        artifact_refs: Vec::new(),
+        metadata,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    })
+}
+
+pub(crate) fn build_plan_execution_summary_item(session: &PlanModeSession) -> Option<HandoffSummaryItem> {
+    let locale_tag = normalize_locale(session.locale.as_deref());
+    let progress = session.progress.as_ref();
+    let total_steps = progress
+        .map(|value| value.total_steps)
+        .or_else(|| session.plan.as_ref().map(|plan| plan.steps.len()))
+        .unwrap_or_default();
+    let steps_completed = progress.map(|value| value.steps_completed).unwrap_or_else(|| {
+        session
+            .step_states
+            .values()
+            .filter(|state| matches!(state, StepExecutionState::Completed { .. }))
+            .count()
+    });
+    let steps_failed = progress.map(|value| value.steps_failed).unwrap_or_else(|| {
+        session
+            .step_states
+            .values()
+            .filter(|state| matches!(state, StepExecutionState::Failed { .. }))
+            .count()
+    });
+    let terminal_state = match session.phase {
+        PlanModePhase::Completed => "completed",
+        PlanModePhase::Cancelled => "cancelled",
+        PlanModePhase::Failed => "failed",
+        _ => "partial",
+    };
+    let localized_terminal_state = localized_plan_terminal_state(locale_tag, terminal_state);
+    let mut metadata = serde_json::Map::new();
+    metadata.insert(
+        "terminalState".to_string(),
+        serde_json::Value::String(terminal_state.to_string()),
+    );
+    metadata.insert(
+        "stepsCompleted".to_string(),
+        serde_json::Value::Number((steps_completed as u64).into()),
+    );
+    metadata.insert(
+        "stepsFailed".to_string(),
+        serde_json::Value::Number((steps_failed as u64).into()),
+    );
+    metadata.insert(
+        "totalSteps".to_string(),
+        serde_json::Value::Number((total_steps as u64).into()),
+    );
+    Some(HandoffSummaryItem {
+        id: format!("plan-execution-{}", session.session_id),
+        source_mode: WorkflowMode::Plan,
+        kind: "plan_execution".to_string(),
+        title: match locale_tag {
+            "zh" => format!("{} 的计划执行：{}", session.description, localized_terminal_state),
+            "ja" => format!("{} のプラン実行: {}", session.description, localized_terminal_state),
+            _ => format!("Plan execution {} for {}", localized_terminal_state, session.description),
+        },
+        body: match locale_tag {
+            "zh" => format!(
+                "执行状态：{}\n已完成步骤：{}\n失败步骤：{}\n总步骤数：{}",
+                localized_terminal_state, steps_completed, steps_failed, total_steps
+            ),
+            "ja" => format!(
+                "実行状態: {}\n完了ステップ: {}\n失敗ステップ: {}\n総ステップ数: {}",
+                localized_terminal_state, steps_completed, steps_failed, total_steps
+            ),
+            _ => format!(
+                "Execution state: {}\nCompleted steps: {}\nFailed steps: {}\nTotal steps: {}",
+                localized_terminal_state, steps_completed, steps_failed, total_steps
+            ),
+        },
+        artifact_refs: Vec::new(),
+        metadata,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    })
+}
+
+fn mode_label(mode: WorkflowMode) -> &'static str {
+    match mode {
+        WorkflowMode::Chat => "chat",
+        WorkflowMode::Plan => "plan",
+        WorkflowMode::Task => "task",
+    }
 }
 
 // ============================================================================
@@ -723,6 +1047,29 @@ pub(crate) fn locale_instruction(locale_tag: &str) -> &'static str {
             "CRITICAL: Your final answer MUST be in Japanese. Keep code symbols, identifiers, and file paths unchanged."
         }
         _ => "CRITICAL: Your final answer MUST be in English. Keep code symbols, identifiers, and file paths unchanged.",
+    }
+}
+
+fn localized_plan_copy(
+    locale_tag: &str,
+    en: &'static str,
+    zh: &'static str,
+    ja: &'static str,
+) -> &'static str {
+    match locale_tag {
+        "zh" => zh,
+        "ja" => ja,
+        _ => en,
+    }
+}
+
+fn localized_plan_terminal_state(locale_tag: &str, terminal_state: &str) -> String {
+    match terminal_state {
+        "completed" => localized_plan_copy(locale_tag, "completed", "已完成", "完了").to_string(),
+        "cancelled" => localized_plan_copy(locale_tag, "cancelled", "已取消", "キャンセル済み").to_string(),
+        "failed" => localized_plan_copy(locale_tag, "failed", "失败", "失敗").to_string(),
+        "partial" => localized_plan_copy(locale_tag, "partial", "部分完成", "部分完了").to_string(),
+        _ => terminal_state.to_string(),
     }
 }
 
@@ -866,6 +1213,8 @@ mod tests {
     fn sample_plan_mode_session(session_id: &str) -> PlanModeSession {
         PlanModeSession {
             session_id: session_id.to_string(),
+            kernel_session_id: Some("kernel-session-1".to_string()),
+            locale: Some("en-US".to_string()),
             description: "sample".to_string(),
             phase: PlanModePhase::ReviewingPlan,
             analysis: None,

@@ -161,7 +161,11 @@ describe('TaskModeStore', () => {
       expect(useContextSourcesStore.getState().memorySessionId).toBe('session-123');
       expect(useTaskModeStore.getState().isLoading).toBe(false);
       expect(mockInvoke).toHaveBeenCalledWith('enter_task_mode', {
-        description: 'Build feature X',
+        request: {
+          description: 'Build feature X',
+          kernelSessionId: null,
+          locale: expect.any(String),
+        },
       });
     });
 

@@ -256,6 +256,7 @@ export interface PlanModeCardDataMap {
 /** Plan mode session from backend */
 export interface PlanModeSession {
   sessionId: string;
+  kernelSessionId?: string | null;
   description: string;
   phase: PlanModePhase;
   analysis: PlanAnalysisCardData | null;

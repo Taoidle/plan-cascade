@@ -28,7 +28,6 @@ import { useSpecInterviewStore, type InterviewQuestion } from './specInterview';
 import { useSettingsStore } from './settings';
 import { useWorkflowKernelStore } from './workflowKernel';
 import { selectKernelTaskRuntime } from './workflowKernelSelectors';
-import { synthesizePlanningTurn, synthesizeExecutionTurn } from '../lib/contextBridge';
 import { deriveGateOverallStatus } from '../lib/gateStatus';
 import { parseWorkflowConfigNatural } from '../lib/workflowConfigNaturalParser';
 import { failResult, okResult, type ActionResult } from '../types/actionResult';
@@ -134,7 +133,7 @@ interface WorkflowOrchestratorState {
   _completionCardInjectedRunToken: number | null;
 
   // Actions
-  startWorkflow: (description: string) => Promise<{ modeSessionId: string | null }>;
+  startWorkflow: (description: string, kernelSessionId?: string | null) => Promise<{ modeSessionId: string | null }>;
   confirmConfig: (overrides?: Partial<WorkflowConfig>) => Promise<ActionResult>;
   updateConfig: (updates: Partial<WorkflowConfig>) => void;
   overrideConfigNatural: (text: string) => void;
@@ -314,17 +313,8 @@ function normalizeExplorationCardData(data: ExplorationCardData): ExplorationCar
   };
 }
 
-function synthesizePlanningTurnForPrdPhase(taskDescription: string, strategyAnalysis: unknown, prd: TaskPrd) {
-  const turn = synthesizePlanningTurn(taskDescription, (strategyAnalysis as StrategyAnalysis | null) ?? null, prd);
-  void useWorkflowKernelStore.getState().appendContextItems('task', {
-    conversationContext: [turn],
-    artifactRefs: [],
-    contextSources: ['task_synthesized_planning'],
-    metadata: {
-      source: 'task_synthesized',
-      kind: 'planning',
-    },
-  });
+function synthesizePlanningTurnForPrdPhase(_taskDescription: string, _strategyAnalysis: unknown, _prd: TaskPrd) {
+  // Cross-mode task handoff is published by the backend into the kernel ledger.
 }
 
 function buildCompletionReportDataFromReport(report: ExecutionReport): CompletionReportCardData {
@@ -408,7 +398,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
    * Start the full workflow from a task description.
    * Phase transitions: idle → analyzing → configuring
    */
-  startWorkflow: async (description: string) => {
+  startWorkflow: async (description: string, kernelSessionId?: string | null) => {
     const runToken = get()._runToken + 1;
     let modeSessionId: string | null = null;
     // Add user message as 'info' StreamLine so it appears as a chat bubble in ChatTranscript
@@ -419,7 +409,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
     try {
       // 1. Enter task mode (creates session + runs strategy analysis)
-      const enteredSession = await useTaskModeStore.getState().enterTaskMode(description);
+      const enteredSession = await useTaskModeStore.getState().enterTaskMode(description, kernelSessionId);
       if (!isRunActive(get, runToken)) return { modeSessionId: null };
 
       const taskModeError = useTaskModeStore.getState().error;
@@ -1279,22 +1269,6 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
 
             injectCard('completion_report', completionData);
             set({ _completionCardInjectedRunToken: runToken, report: effectiveReport ?? null });
-
-            // Synthesize execution result into conversation history (Task → Chat writeback)
-            const turn = synthesizeExecutionTurn(
-              completionData.completed,
-              completionData.totalStories,
-              completionData.success,
-            );
-            void useWorkflowKernelStore.getState().appendContextItems('task', {
-              conversationContext: [turn],
-              artifactRefs: [],
-              contextSources: ['task_synthesized_execution'],
-              metadata: {
-                source: 'task_synthesized',
-                kind: 'execution',
-              },
-            });
           })();
           break;
         }

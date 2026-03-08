@@ -2,9 +2,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlanCardData, PlanModeProgressPayload } from '../types/planModeCard';
 
 const listenMock = vi.fn();
+const routedCards: Array<{ mode: string; payload: { cardType?: string; data?: Record<string, unknown> } }> = [];
 
 vi.mock('@tauri-apps/api/event', () => ({
   listen: (...args: unknown[]) => listenMock(...args),
+}));
+
+vi.mock('./modeTranscriptRouting', () => ({
+  routeModeCard: vi.fn(async (mode: string, payload: { cardType?: string; data?: Record<string, unknown> }) => {
+    routedCards.push({ mode, payload });
+  }),
+  routeModeStreamLine: vi.fn(async () => undefined),
 }));
 
 import { useExecutionStore } from './execution';
@@ -44,18 +52,16 @@ function payload(base: Partial<PlanModeProgressPayload>): PlanModeProgressPayloa
 }
 
 function extractPlanCompletionCards() {
-  return useExecutionStore
-    .getState()
-    .streamingOutput.filter((line) => line.type === 'card')
-    .map((line) => JSON.parse(line.content) as { cardType?: string; data?: Record<string, unknown> })
+  return routedCards
+    .filter((entry) => entry.mode === 'plan')
+    .map((entry) => entry.payload)
     .filter((card) => card.cardType === 'plan_completion_card');
 }
 
 function extractPlanStepUpdateCards() {
-  return useExecutionStore
-    .getState()
-    .streamingOutput.filter((line) => line.type === 'card')
-    .map((line) => JSON.parse(line.content) as { cardType?: string; data?: Record<string, unknown> })
+  return routedCards
+    .filter((entry) => entry.mode === 'plan')
+    .map((entry) => entry.payload)
     .filter((card) => card.cardType === 'plan_step_update');
 }
 
@@ -73,6 +79,7 @@ describe('planOrchestrator event handling', () => {
         return unlisten;
       },
     );
+    routedCards.length = 0;
 
     useExecutionStore.getState().reset();
     usePlanModeStore.getState().reset();
@@ -572,10 +579,7 @@ describe('planOrchestrator clarification recovery', () => {
     expect(usePlanOrchestratorStore.getState().phase).toBe('clarification_error');
     expect(usePlanOrchestratorStore.getState().pendingClarifyQuestion).toBeNull();
 
-    const cards = useExecutionStore
-      .getState()
-      .streamingOutput.filter((line) => line.type === 'card')
-      .map((line) => JSON.parse(line.content) as { cardType?: string });
+    const cards = routedCards.map((entry) => entry.payload);
     expect(cards.some((card) => card.cardType === 'plan_clarification_resolution')).toBe(true);
   });
 

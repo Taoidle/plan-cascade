@@ -745,6 +745,28 @@
         }
       }
     },
+    "modeHandoffCard": {
+      "title": "Mode Handoff",
+      "route": "{{source}} -> {{target}}",
+      "conversationTurns": "{{count}} chat turns",
+      "artifacts": "Artifacts",
+      "sources": "Sources",
+      "summaryKinds": {
+        "task_strategy": "Task Strategy",
+        "task_prd": "Task PRD",
+        "task_execution": "Task Execution",
+        "plan_analysis": "Plan Analysis",
+        "plan_clarification": "Plan Clarification",
+        "plan_output": "Plan Output",
+        "plan_execution": "Plan Execution"
+      },
+      "contextSources": {
+        "simple_mode": "Simple Mode",
+        "chat_fork": "Chat Fork",
+        "chat_history": "Chat History",
+        "simple_mode_chat_ledger_sync": "Simple Chat Ledger Sync"
+      }
+    },
     "interview": {
       "questionTitle": "Interview Question",
       "questionNumber": "{{current}}/{{total}}",

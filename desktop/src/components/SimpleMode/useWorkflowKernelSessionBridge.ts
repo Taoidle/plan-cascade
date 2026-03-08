@@ -92,6 +92,7 @@ export function useWorkflowKernelSessionBridge({
 
       const opened = await openWorkflowKernelSession('chat', {
         conversationContext: [],
+        summaryItems: [],
         artifactRefs: [],
         contextSources: ['simple_mode'],
         metadata: {

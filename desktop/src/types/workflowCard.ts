@@ -7,6 +7,7 @@
  */
 
 import type { GateResult, DimensionScore, GateStatus } from '../store/taskMode';
+import type { HandoffSummaryItem, WorkflowMode } from './workflowKernel';
 
 // ============================================================================
 // Phase & Card Type Enums
@@ -48,6 +49,7 @@ export type CardType =
   | 'requirement_analysis_card'
   | 'architecture_review_card'
   | 'persona_indicator'
+  | 'mode_handoff_card'
   // Plan Mode card types
   | 'plan_analysis_card'
   | 'plan_clarify_question'
@@ -90,6 +92,7 @@ export interface CardDataMap {
   requirement_analysis_card: RequirementAnalysisCardData;
   architecture_review_card: ArchitectureReviewCardData;
   persona_indicator: PersonaIndicatorData;
+  mode_handoff_card: ModeHandoffCardData;
   // Plan Mode card data (uses types from planModeCard.ts)
   plan_analysis_card: import('../types/planModeCard').PlanAnalysisCardData;
   plan_clarify_question: import('../types/planModeCard').PlanClarifyQuestionCardData;
@@ -390,4 +393,14 @@ export interface PersonaIndicatorData {
   displayName?: string;
   phase: string;
   model?: string;
+}
+
+export interface ModeHandoffCardData {
+  sourceMode: WorkflowMode;
+  targetMode: WorkflowMode;
+  conversationTurns: number;
+  summaryItems: HandoffSummaryItem[];
+  artifactRefs: string[];
+  contextSources: string[];
+  metadata: Record<string, unknown>;
 }

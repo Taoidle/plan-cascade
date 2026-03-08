@@ -4,6 +4,7 @@ import type { TaskPrd } from './taskMode';
 const listenMock = vi.fn();
 const invokeMock = vi.fn();
 const synthesizeExecutionTurnMock = vi.fn();
+const routedCards: Array<{ mode: string; payload: { cardType?: string; data?: Record<string, unknown> } }> = [];
 
 vi.mock('@tauri-apps/api/event', () => ({
   listen: (...args: unknown[]) => listenMock(...args),
@@ -11,6 +12,13 @@ vi.mock('@tauri-apps/api/event', () => ({
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
+}));
+
+vi.mock('./modeTranscriptRouting', () => ({
+  routeModeCard: vi.fn(async (mode: string, payload: { cardType?: string; data?: Record<string, unknown> }) => {
+    routedCards.push({ mode, payload });
+  }),
+  routeModeStreamLine: vi.fn(async () => undefined),
 }));
 
 vi.mock('../lib/contextBridge', () => ({
@@ -72,10 +80,9 @@ function progressPayload(
 }
 
 function extractCompletionReportCards() {
-  return useExecutionStore
-    .getState()
-    .streamingOutput.filter((line) => line.type === 'card')
-    .map((line) => JSON.parse(line.content) as { cardType?: string; data?: Record<string, unknown> })
+  return routedCards
+    .filter((entry) => entry.mode === 'task')
+    .map((entry) => entry.payload)
     .filter((card) => card.cardType === 'completion_report');
 }
 
@@ -98,6 +105,7 @@ describe('workflowOrchestrator task progress events', () => {
 
     // Design doc pre-step is best-effort; keep it cheap in tests.
     invokeMock.mockResolvedValue({ success: false, data: null, error: 'skip design doc' });
+    routedCards.length = 0;
 
     useExecutionStore.getState().reset();
     useTaskModeStore.getState().reset();
@@ -176,7 +184,7 @@ describe('workflowOrchestrator task progress events', () => {
     expect(workflowState.isCancelling).toBe(false);
   });
 
-  it('injects one completion card with report data and synthesizes matching summary', async () => {
+  it('injects one completion card with report data without frontend summary synthesis', async () => {
     const report = {
       sessionId: 'task-session',
       totalStories: 1,
@@ -223,7 +231,7 @@ describe('workflowOrchestrator task progress events', () => {
         duration: 1234,
       }),
     );
-    expect(synthesizeExecutionTurnMock).toHaveBeenCalledWith(1, 1, true);
+    expect(synthesizeExecutionTurnMock).not.toHaveBeenCalled();
   });
 
   it('injects one fallback completion card on report timeout and does not append late report card', async () => {
@@ -295,8 +303,7 @@ describe('workflowOrchestrator task progress events', () => {
 
     completionCards = extractCompletionReportCards();
     expect(completionCards).toHaveLength(1);
-    expect(synthesizeExecutionTurnMock).toHaveBeenCalledTimes(1);
-    expect(synthesizeExecutionTurnMock).toHaveBeenCalledWith(1, 1, true);
+    expect(synthesizeExecutionTurnMock).not.toHaveBeenCalled();
   });
 
   it('uses kernel linked task session id when local session id is missing', async () => {

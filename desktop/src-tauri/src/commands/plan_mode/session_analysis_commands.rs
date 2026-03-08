@@ -12,6 +12,7 @@ pub async fn enter_plan_mode(
 ) -> Result<CommandResponse<PlanModeSession>, String> {
     let EnterPlanModeRequest {
         description,
+        kernel_session_id,
         provider,
         model,
         base_url,
@@ -25,9 +26,17 @@ pub async fn enter_plan_mode(
         return Ok(CommandResponse::err("Task description cannot be empty"));
     }
 
+    let normalized_kernel_session_id = kernel_session_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
     // Create initial session
     let mut session = PlanModeSession {
         session_id: uuid::Uuid::new_v4().to_string(),
+        kernel_session_id: normalized_kernel_session_id.clone(),
+        locale: locale.clone(),
         description: description.clone(),
         phase: PlanModePhase::Analyzing,
         analysis: None,
@@ -88,6 +97,14 @@ pub async fn enter_plan_mode(
                         "plan_mode.enter_plan_mode",
                     )
                     .await;
+                    if let Some(summary) = build_plan_analysis_summary_item(&session) {
+                        publish_plan_handoff_summary(
+                            kernel_state.inner(),
+                            session.kernel_session_id.as_deref(),
+                            summary,
+                        )
+                        .await;
+                    }
 
                     return Ok(CommandResponse::ok(session));
                 }
@@ -100,9 +117,11 @@ pub async fn enter_plan_mode(
             let plan_context = build_plan_conversation_context(
                 &app_state,
                 &knowledge_state,
+                None,
                 kernel_state.inner(),
                 project_path.as_deref(),
-                Some(session_id.as_str()),
+                None,
+                normalized_kernel_session_id.as_deref(),
                 conversation_context.as_deref(),
                 context_sources.as_ref(),
                 &description,
@@ -185,6 +204,14 @@ pub async fn enter_plan_mode(
                 "plan_mode.enter_plan_mode",
             )
             .await;
+            if let Some(summary) = build_plan_analysis_summary_item(&session) {
+                publish_plan_handoff_summary(
+                    kernel_state.inner(),
+                    session.kernel_session_id.as_deref(),
+                    summary,
+                )
+                .await;
+            }
 
             Ok(CommandResponse::ok(session))
         } => result,
@@ -279,9 +306,11 @@ pub async fn submit_plan_clarification(
             let plan_context = build_plan_conversation_context(
                 &app_state,
                 &knowledge_state,
+                Some(state.inner()),
                 kernel_state.inner(),
                 project_path.as_deref(),
                 Some(session_id.as_str()),
+                None,
                 conversation_context.as_deref(),
                 context_sources.as_ref(),
                 &description,
@@ -330,6 +359,9 @@ pub async fn submit_plan_clarification(
     }
 
     session.clarifications = clarifications;
+    if locale.is_some() {
+        session.locale = locale.clone();
+    }
     match next_question {
         Some(q) => {
             session.current_question = Some(q);
@@ -351,6 +383,16 @@ pub async fn submit_plan_clarification(
         "plan_mode.submit_plan_clarification",
     )
     .await;
+    if matches!(updated_session.phase, PlanModePhase::Planning) {
+        if let Some(summary) = build_plan_clarification_summary_item(&updated_session) {
+            publish_plan_handoff_summary(
+                kernel_state.inner(),
+                updated_session.kernel_session_id.as_deref(),
+                summary,
+            )
+            .await;
+        }
+    }
 
     Ok(CommandResponse::ok(updated_session))
 }

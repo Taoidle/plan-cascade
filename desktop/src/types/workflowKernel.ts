@@ -54,8 +54,20 @@ export interface ConversationTurn {
   assistant: string;
 }
 
+export interface HandoffSummaryItem {
+  id: string;
+  sourceMode: WorkflowMode;
+  kind: string;
+  title: string;
+  body: string;
+  artifactRefs: string[];
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface HandoffContextBundle {
   conversationContext: ConversationTurn[];
+  summaryItems?: HandoffSummaryItem[];
   artifactRefs: string[];
   contextSources: string[];
   metadata: Record<string, unknown>;
@@ -68,6 +80,7 @@ export interface ChatState {
   turnCount: number;
   lastUserMessage: string | null;
   lastAssistantMessage: string | null;
+  entryHandoff?: HandoffContextBundle;
 }
 
 export interface PlanClarificationSnapshot {
@@ -92,6 +105,7 @@ export interface PlanState {
   backgroundStatus?: string | null;
   resumableFromCheckpoint?: boolean;
   lastCheckpointId?: string | null;
+  entryHandoff?: HandoffContextBundle;
 }
 
 export interface TaskInterviewSnapshot {
@@ -119,6 +133,7 @@ export interface TaskState {
   backgroundStatus?: string | null;
   resumableFromCheckpoint?: boolean;
   lastCheckpointId?: string | null;
+  entryHandoff?: HandoffContextBundle;
 }
 
 export type ModeState =

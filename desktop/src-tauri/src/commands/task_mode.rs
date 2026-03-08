@@ -21,7 +21,9 @@ use tokio_util::sync::CancellationToken;
 use crate::models::CommandResponse;
 use crate::services::design::GenerateResult;
 use crate::services::knowledge::pipeline::ScopedDocumentRef;
-use crate::services::strategy::analyzer::{analyze_task_for_mode, StrategyAnalysis};
+use crate::services::strategy::analyzer::{
+    analyze_task_for_mode, ExecutionMode, RiskLevel, StrategyAnalysis,
+};
 use crate::services::task_mode::agent_resolver::AgentResolver;
 use crate::services::task_mode::batch_executor::{
     BatchExecutionProgress, BatchExecutionResult, BatchExecutor, ExecutableStory, ExecutionBatch,
@@ -33,8 +35,8 @@ use crate::services::task_mode::exploration::{
 };
 use crate::services::task_mode::prd_generator;
 use crate::services::workflow_kernel::{
-    HandoffContextBundle, WorkflowKernelState, WorkflowKernelUpdatedEvent, WorkflowMode,
-    WorkflowStatus, WORKFLOW_KERNEL_UPDATED_CHANNEL,
+    HandoffContextBundle, HandoffSummaryItem, WorkflowKernelState, WorkflowKernelUpdatedEvent,
+    WorkflowMode, WorkflowStatus, WORKFLOW_KERNEL_UPDATED_CHANNEL,
 };
 
 use crate::state::AppState;
@@ -133,6 +135,12 @@ pub struct TaskPrd {
 pub struct TaskModeSession {
     /// Unique session ID
     pub session_id: String,
+    /// Kernel root session ID for cross-mode handoff lookups
+    #[serde(default)]
+    pub kernel_session_id: Option<String>,
+    /// Preferred locale for user-visible summaries
+    #[serde(default)]
+    pub locale: Option<String>,
     /// Task description
     pub description: String,
     /// Current status
@@ -283,6 +291,14 @@ pub struct TaskWorkflowConfig {
     pub impl_agent_override: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EnterTaskModeRequest {
+    pub description: String,
+    pub kernel_session_id: Option<String>,
+    pub locale: Option<String>,
+}
+
 /// Request payload for `generate_task_prd`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -295,6 +311,7 @@ pub struct GenerateTaskPrdRequest {
     pub compiled_spec: Option<serde_json::Value>,
     pub conversation_history: Option<Vec<ConversationTurnInput>>,
     pub max_context_tokens: Option<usize>,
+    pub locale: Option<String>,
     pub context_sources: Option<crate::services::task_mode::context_provider::ContextSourceConfig>,
     pub project_path: Option<String>,
 }
@@ -327,6 +344,7 @@ pub struct ApproveTaskPrdRequest {
     pub workflow_config: Option<TaskWorkflowConfig>,
     pub global_default_agent: Option<String>,
     pub phase_configs: Option<HashMap<String, PhaseConfigInput>>,
+    pub locale: Option<String>,
     pub context_sources: Option<crate::services::task_mode::context_provider::ContextSourceConfig>,
     pub project_path: Option<String>,
 }
@@ -873,10 +891,29 @@ fn injection_phase_to_context_phase(
 
 pub(crate) async fn handoff_context_for_task_session(
     kernel_state: &WorkflowKernelState,
+    task_state: &TaskModeState,
     task_session_id: &str,
 ) -> Option<HandoffContextBundle> {
+    let task_session = task_state
+        .get_or_load_session_snapshot(task_session_id)
+        .await
+        .ok()
+        .flatten()?;
+    let kernel_session_id = task_session.kernel_session_id?;
+    let entry_handoff = kernel_state
+        .mode_entry_handoff_for_kernel_session(&kernel_session_id, WorkflowMode::Task)
+        .await
+        .unwrap_or_default();
+    if !entry_handoff.conversation_context.is_empty()
+        || !entry_handoff.summary_items.is_empty()
+        || !entry_handoff.artifact_refs.is_empty()
+        || !entry_handoff.context_sources.is_empty()
+        || !entry_handoff.metadata.is_empty()
+    {
+        return Some(entry_handoff);
+    }
     kernel_state
-        .handoff_context_for_mode_session(WorkflowMode::Task, task_session_id)
+        .handoff_context_for_kernel_session(&kernel_session_id)
         .await
 }
 
@@ -895,6 +932,26 @@ pub(crate) fn conversation_history_from_task_handoff(
 
 pub(crate) fn render_task_handoff_context(handoff: &HandoffContextBundle) -> Option<String> {
     let mut sections = Vec::new();
+
+    if !handoff.summary_items.is_empty() {
+        let rendered = handoff
+            .summary_items
+            .iter()
+            .map(|item| {
+                format!(
+                    "## [{}:{}] {}\n{}",
+                    mode_label(item.source_mode),
+                    item.kind,
+                    item.title,
+                    item.body
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        if !rendered.trim().is_empty() {
+            sections.push(format!("[summary-items]\n{}", rendered));
+        }
+    }
 
     if !handoff.artifact_refs.is_empty() {
         sections.push(format!(
@@ -923,14 +980,242 @@ pub(crate) fn render_task_handoff_context(handoff: &HandoffContextBundle) -> Opt
     }
 }
 
+pub(crate) fn render_task_entry_handoff_context(handoff: &HandoffContextBundle) -> Option<String> {
+    let mut sections = Vec::new();
+    let conversation = handoff
+        .conversation_context
+        .iter()
+        .map(|turn| format!("user: {}\nassistant: {}", turn.user.trim(), turn.assistant.trim()))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    if !conversation.trim().is_empty() {
+        sections.push(conversation);
+    }
+    if let Some(rest) = render_task_handoff_context(handoff) {
+        sections.push(rest);
+    }
+    if sections.is_empty() {
+        None
+    } else {
+        Some(sections.join("\n\n"))
+    }
+}
+
 pub(crate) async fn conversation_history_for_task_session(
     kernel_state: &WorkflowKernelState,
+    task_state: &TaskModeState,
     task_session_id: &str,
 ) -> Vec<ConversationTurnInput> {
-    handoff_context_for_task_session(kernel_state, task_session_id)
+    handoff_context_for_task_session(kernel_state, task_state, task_session_id)
         .await
         .map(|handoff| conversation_history_from_task_handoff(&handoff))
         .unwrap_or_default()
+}
+
+pub(crate) async fn publish_task_handoff_summary(
+    kernel_state: &WorkflowKernelState,
+    kernel_session_id: Option<&str>,
+    summary_item: HandoffSummaryItem,
+) {
+    let Some(kernel_session_id) = kernel_session_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+    let handoff = HandoffContextBundle {
+        summary_items: vec![summary_item],
+        ..HandoffContextBundle::default()
+    };
+    let _ = kernel_state
+        .append_context_items(kernel_session_id, WorkflowMode::Task, handoff)
+        .await;
+}
+
+pub(crate) fn build_task_prd_summary_item(
+    session: &TaskModeSession,
+    prd: &TaskPrd,
+    stage: &'static str,
+) -> HandoffSummaryItem {
+    let locale_tag = normalize_locale(session.locale.as_deref());
+    let story_lines = prd
+        .stories
+        .iter()
+        .map(|story| format!("- {}: {} [{}]", story.id, story.title, story.priority))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let localized_stage = localized_task_prd_stage(locale_tag, stage);
+    let mut metadata = serde_json::Map::new();
+    metadata.insert("stage".to_string(), serde_json::Value::String(stage.to_string()));
+    metadata.insert(
+        "storyCount".to_string(),
+        serde_json::Value::Number((prd.stories.len() as u64).into()),
+    );
+    metadata.insert(
+        "batchCount".to_string(),
+        serde_json::Value::Number((prd.batches.len() as u64).into()),
+    );
+    HandoffSummaryItem {
+        id: format!("task-prd-{}-{}", stage, session.session_id),
+        source_mode: WorkflowMode::Task,
+        kind: "task_prd".to_string(),
+        title: match locale_tag {
+            "zh" => format!("{} 的任务 PRD（{}）", session.description, localized_stage),
+            "ja" => format!("{} のタスクPRD（{}）", session.description, localized_stage),
+            _ => format!("Task PRD ({localized_stage}) for {}", session.description),
+        },
+        body: match locale_tag {
+            "zh" => format!(
+                "PRD 标题：{}\n故事数：{}\n批次数：{}\n{}",
+                prd.title,
+                prd.stories.len(),
+                prd.batches.len(),
+                story_lines
+            ),
+            "ja" => format!(
+                "PRD タイトル: {}\nストーリー数: {}\nバッチ数: {}\n{}",
+                prd.title,
+                prd.stories.len(),
+                prd.batches.len(),
+                story_lines
+            ),
+            _ => format!(
+                "PRD title: {}\nStories: {}\nBatches: {}\n{}",
+                prd.title,
+                prd.stories.len(),
+                prd.batches.len(),
+                story_lines
+            ),
+        },
+        artifact_refs: Vec::new(),
+        metadata,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    }
+}
+
+pub(crate) fn build_task_execution_summary_item(
+    session: &TaskModeSession,
+    execution_result: Option<&BatchExecutionResult>,
+    terminal_error: Option<String>,
+) -> HandoffSummaryItem {
+    let locale_tag = normalize_locale(session.locale.as_deref());
+    let (completed, failed, total, success, cancelled) = execution_result
+        .map(|result| {
+            (
+                result.completed,
+                result.failed,
+                result.total_stories,
+                result.success,
+                result.cancelled,
+            )
+        })
+        .unwrap_or_else(|| {
+            let total = session
+                .prd
+                .as_ref()
+                .map(|prd| prd.stories.len())
+                .unwrap_or_default();
+            let progress = session.progress.as_ref();
+            (
+                progress.map(|value| value.stories_completed).unwrap_or_default(),
+                progress.map(|value| value.stories_failed).unwrap_or_default(),
+                total,
+                matches!(session.status, TaskModeStatus::Completed),
+                matches!(session.status, TaskModeStatus::Cancelled),
+            )
+        });
+    let terminal_state = if cancelled {
+        "cancelled"
+    } else if terminal_error.is_some() || matches!(session.status, TaskModeStatus::Failed) {
+        "failed"
+    } else if success {
+        "completed"
+    } else {
+        "partial"
+    };
+    let localized_terminal_state = localized_task_terminal_state(locale_tag, terminal_state);
+    let mut metadata = serde_json::Map::new();
+    metadata.insert(
+        "terminalState".to_string(),
+        serde_json::Value::String(terminal_state.to_string()),
+    );
+    metadata.insert(
+        "completedStories".to_string(),
+        serde_json::Value::Number((completed as u64).into()),
+    );
+    metadata.insert(
+        "failedStories".to_string(),
+        serde_json::Value::Number((failed as u64).into()),
+    );
+    metadata.insert(
+        "totalStories".to_string(),
+        serde_json::Value::Number((total as u64).into()),
+    );
+    if let Some(error) = terminal_error
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        metadata.insert(
+            "error".to_string(),
+            serde_json::Value::String(error.trim().to_string()),
+        );
+    }
+    HandoffSummaryItem {
+        id: format!("task-execution-{}", session.session_id),
+        source_mode: WorkflowMode::Task,
+        kind: "task_execution".to_string(),
+        title: match locale_tag {
+            "zh" => format!("{} 的任务执行：{}", session.description, localized_terminal_state),
+            "ja" => format!("{} のタスク実行: {}", session.description, localized_terminal_state),
+            _ => format!("Task execution {} for {}", localized_terminal_state, session.description),
+        },
+        body: terminal_error
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .map(|error| {
+                match locale_tag {
+                    "zh" => format!(
+                        "执行状态：{}\n已完成故事：{}\n失败故事：{}\n总故事数：{}\n错误：{}",
+                        localized_terminal_state, completed, failed, total, error
+                    ),
+                    "ja" => format!(
+                        "実行状態: {}\n完了ストーリー: {}\n失敗ストーリー: {}\n総ストーリー数: {}\nエラー: {}",
+                        localized_terminal_state, completed, failed, total, error
+                    ),
+                    _ => format!(
+                        "Execution state: {}\nCompleted stories: {}\nFailed stories: {}\nTotal stories: {}\nError: {}",
+                        localized_terminal_state, completed, failed, total, error
+                    ),
+                }
+            })
+            .unwrap_or_else(|| {
+                match locale_tag {
+                    "zh" => format!(
+                        "执行状态：{}\n已完成故事：{}\n失败故事：{}\n总故事数：{}",
+                        localized_terminal_state, completed, failed, total
+                    ),
+                    "ja" => format!(
+                        "実行状態: {}\n完了ストーリー: {}\n失敗ストーリー: {}\n総ストーリー数: {}",
+                        localized_terminal_state, completed, failed, total
+                    ),
+                    _ => format!(
+                        "Execution state: {}\nCompleted stories: {}\nFailed stories: {}\nTotal stories: {}",
+                        localized_terminal_state, completed, failed, total
+                    ),
+                }
+            }),
+        artifact_refs: Vec::new(),
+        metadata,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    }
+}
+
+fn mode_label(mode: WorkflowMode) -> &'static str {
+    match mode {
+        WorkflowMode::Chat => "chat",
+        WorkflowMode::Plan => "plan",
+        WorkflowMode::Task => "task",
+    }
 }
 
 async fn assemble_enriched_context_v2(
@@ -1253,6 +1538,52 @@ fn locale_instruction(locale_tag: &str) -> &'static str {
             "CRITICAL: Your final answer MUST be in Japanese. Keep code symbols, identifiers, and file paths unchanged."
         }
         _ => "CRITICAL: Your final answer MUST be in English. Keep code symbols, identifiers, and file paths unchanged.",
+    }
+}
+
+fn localized_task_copy(
+    locale_tag: &str,
+    en: &'static str,
+    zh: &'static str,
+    ja: &'static str,
+) -> &'static str {
+    match locale_tag {
+        "zh" => zh,
+        "ja" => ja,
+        _ => en,
+    }
+}
+
+fn localized_task_execution_mode(locale_tag: &str, mode: &ExecutionMode) -> &'static str {
+    match mode {
+        ExecutionMode::Chat => localized_task_copy(locale_tag, "Chat", "对话", "チャット"),
+        ExecutionMode::Task => localized_task_copy(locale_tag, "Task", "任务", "タスク"),
+    }
+}
+
+fn localized_task_risk_level(locale_tag: &str, risk_level: &RiskLevel) -> &'static str {
+    match risk_level {
+        RiskLevel::Low => localized_task_copy(locale_tag, "Low", "低", "低"),
+        RiskLevel::Medium => localized_task_copy(locale_tag, "Medium", "中", "中"),
+        RiskLevel::High => localized_task_copy(locale_tag, "High", "高", "高"),
+    }
+}
+
+fn localized_task_prd_stage(locale_tag: &str, stage: &str) -> String {
+    match stage {
+        "initial" => localized_task_copy(locale_tag, "Initial", "初稿", "初版").to_string(),
+        "revised" => localized_task_copy(locale_tag, "Revised", "修订版", "改訂版").to_string(),
+        _ => stage.to_string(),
+    }
+}
+
+fn localized_task_terminal_state(locale_tag: &str, terminal_state: &str) -> String {
+    match terminal_state {
+        "completed" => localized_task_copy(locale_tag, "completed", "已完成", "完了").to_string(),
+        "failed" => localized_task_copy(locale_tag, "failed", "失败", "失敗").to_string(),
+        "cancelled" => localized_task_copy(locale_tag, "cancelled", "已取消", "キャンセル済み").to_string(),
+        "partial" => localized_task_copy(locale_tag, "partial", "部分完成", "部分完了").to_string(),
+        _ => terminal_state.to_string(),
     }
 }
 
@@ -2373,6 +2704,8 @@ mod tests {
     fn test_task_mode_session_serialization() {
         let session = TaskModeSession {
             session_id: "test-123".to_string(),
+            kernel_session_id: Some("kernel-session-1".to_string()),
+            locale: Some("en-US".to_string()),
             description: "Build a feature".to_string(),
             status: TaskModeStatus::Initialized,
             strategy_analysis: None,
@@ -2391,6 +2724,8 @@ mod tests {
     fn sample_task_mode_session(session_id: &str) -> TaskModeSession {
         TaskModeSession {
             session_id: session_id.to_string(),
+            kernel_session_id: Some("kernel-session-1".to_string()),
+            locale: Some("en-US".to_string()),
             description: "sample".to_string(),
             status: TaskModeStatus::ReviewingPrd,
             strategy_analysis: None,
@@ -2463,6 +2798,7 @@ mod tests {
     fn render_task_handoff_context_includes_non_conversation_sections() {
         let handoff = HandoffContextBundle {
             conversation_context: Vec::new(),
+            summary_items: Vec::new(),
             artifact_refs: vec!["spec.md".to_string()],
             context_sources: vec!["chat_transcript_sync".to_string()],
             metadata: serde_json::Map::from_iter([(

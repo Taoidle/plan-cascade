@@ -478,6 +478,12 @@ impl StepExecutionState {
 pub struct PlanModeSession {
     /// Unique session identifier
     pub session_id: String,
+    /// Kernel root session ID for cross-mode handoff lookups
+    #[serde(default)]
+    pub kernel_session_id: Option<String>,
+    /// Preferred locale for user-visible summaries
+    #[serde(default)]
+    pub locale: Option<String>,
     /// User's task description
     pub description: String,
     /// Current phase

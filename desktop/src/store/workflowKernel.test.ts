@@ -440,6 +440,7 @@ describe('workflowKernel store', () => {
       targetMode: 'chat',
       handoff: {
         conversationContext: [{ user: 'U', assistant: 'A' }],
+        summaryItems: [],
         artifactRefs: [],
         contextSources: ['chat_transcript_sync'],
         metadata: { source: 'test' },

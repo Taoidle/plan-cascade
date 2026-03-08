@@ -17,8 +17,11 @@ interface UseSimpleInputRoutingParams {
   isAnalyzingStrategy: boolean;
   start: (prompt: string, source: 'simple') => Promise<void>;
   sendFollowUp: (prompt: string) => Promise<void>;
-  startWorkflow: (description: string) => Promise<{ modeSessionId: string | null }>;
-  startPlanWorkflow: (description: string) => Promise<{ modeSessionId: string | null }>;
+  startWorkflow: (description: string, kernelSessionId?: string | null) => Promise<{ modeSessionId: string | null }>;
+  startPlanWorkflow: (
+    description: string,
+    kernelSessionId?: string | null,
+  ) => Promise<{ modeSessionId: string | null }>;
   overrideConfigNatural: (text: string) => void;
   addPrdFeedback: (feedback: string) => Promise<ActionResult>;
   submitPlanClarification: (answer: {
@@ -37,7 +40,7 @@ interface UseSimpleInputRoutingParams {
   hasStructuredPlanClarifyQuestion: boolean;
   linkWorkflowKernelModeSession: (mode: WorkflowMode, modeSessionId: string) => Promise<WorkflowSession | null>;
   cancelWorkflowKernelOperation: (reason?: string) => Promise<WorkflowSession | null>;
-  appendWorkflowKernelContextItems: (
+  appendWorkflowKernelContextItems?: (
     targetMode: WorkflowMode,
     handoff: HandoffContextBundle,
   ) => Promise<WorkflowSession | null>;
@@ -84,7 +87,6 @@ export function useSimpleInputRouting({
   hasStructuredPlanClarifyQuestion,
   linkWorkflowKernelModeSession,
   cancelWorkflowKernelOperation,
-  appendWorkflowKernelContextItems,
   transitionAndSubmitWorkflowKernelInput,
 }: UseSimpleInputRoutingParams): UseSimpleInputRoutingResult {
   const handleStart = useCallback(
@@ -97,6 +99,7 @@ export function useSimpleInputRouting({
 
       const handoff: HandoffContextBundle = {
         conversationContext: [],
+        summaryItems: [],
         artifactRefs: [],
         contextSources: ['simple_mode'],
         metadata: {
@@ -139,21 +142,6 @@ export function useSimpleInputRouting({
       if (!prompt || isSubmitting) return;
       if (inputPrompt === undefined) {
         setDescription('');
-      }
-
-      if (workflowMode === 'chat') {
-        const conversationContext = useWorkflowKernelStore.getState().session?.handoffContext.conversationContext ?? [];
-        if (conversationContext.length > 0) {
-          await appendWorkflowKernelContextItems('chat', {
-            conversationContext,
-            artifactRefs: [],
-            contextSources: ['chat_mode_follow_up'],
-            metadata: {
-              source: 'simple_input_follow_up',
-              mode: workflowMode,
-            },
-          });
-        }
       }
 
       if (workflowMode === 'task') {
@@ -257,7 +245,6 @@ export function useSimpleInputRouting({
       hasStructuredInterviewQuestion,
       isSubmitting,
       overrideConfigNatural,
-      appendWorkflowKernelContextItems,
       planClarifyingPhase,
       planPendingQuestion,
       planPhase,

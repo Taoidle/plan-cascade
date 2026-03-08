@@ -18,7 +18,7 @@ export function useSimpleModeSwitch(params: {
     targetMode: WorkflowMode,
     handoff: HandoffContextBundle,
   ) => Promise<WorkflowSession | null>;
-  appendWorkflowKernelContextItems: (
+  appendWorkflowKernelContextItems?: (
     targetMode: WorkflowMode,
     handoff: HandoffContextBundle,
   ) => Promise<WorkflowSession | null>;

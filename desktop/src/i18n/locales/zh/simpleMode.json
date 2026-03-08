@@ -745,6 +745,28 @@
         }
       }
     },
+    "modeHandoffCard": {
+      "title": "模式交接",
+      "route": "{{source}} -> {{target}}",
+      "conversationTurns": "{{count}} 轮对话",
+      "artifacts": "工件",
+      "sources": "来源",
+      "summaryKinds": {
+        "task_strategy": "任务策略",
+        "task_prd": "任务 PRD",
+        "task_execution": "任务执行",
+        "plan_analysis": "计划分析",
+        "plan_clarification": "计划澄清",
+        "plan_output": "计划输出",
+        "plan_execution": "计划执行"
+      },
+      "contextSources": {
+        "simple_mode": "简单模式",
+        "chat_fork": "对话分支",
+        "chat_history": "对话历史",
+        "simple_mode_chat_ledger_sync": "简单对话台账同步"
+      }
+    },
     "interview": {
       "questionTitle": "访谈问题",
       "questionNumber": "{{current}}/{{total}}",

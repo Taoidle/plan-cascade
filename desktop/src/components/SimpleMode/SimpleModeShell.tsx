@@ -55,7 +55,6 @@ import { useSimpleKernelSession } from './useSimpleKernelSession';
 import { useSimpleQueueRuntime } from './useSimpleQueueRuntime';
 import { useWorkflowQuestionSpecs } from './useWorkflowQuestionSpecs';
 import { buildSessionTreeViewModel, normalizeSidebarSessionTitle } from './sessionTreeViewModel';
-import { buildConversationHistory } from '../../lib/contextBridge';
 import {
   cancelActiveWorkflow,
   submitWorkflowInputWithTracking,
@@ -249,7 +248,6 @@ export function SimpleModeShell() {
   const resumeWorkflowKernelBackgroundRuns = useWorkflowKernelStore((s) => s.resumeBackgroundRuns);
   const getWorkflowKernelModeTranscript = useWorkflowKernelStore((s) => s.getModeTranscript);
   const getCachedWorkflowKernelModeTranscript = useWorkflowKernelStore((s) => s.getCachedModeTranscript);
-  const appendWorkflowKernelContextItems = useWorkflowKernelStore((s) => s.appendContextItems);
   const workflowSessionCatalog = useWorkflowKernelStore((s) => s.sessionCatalog);
   const transitionWorkflowKernelMode = useWorkflowKernelStore((s) => s.transitionMode);
   const transitionAndSubmitWorkflowKernelInput = useWorkflowKernelStore((s) => s.transitionAndSubmitInput);
@@ -530,7 +528,6 @@ export function SimpleModeShell() {
     hasStructuredPlanClarifyQuestion,
     linkWorkflowKernelModeSession,
     cancelWorkflowKernelOperation,
-    appendWorkflowKernelContextItems,
     transitionAndSubmitWorkflowKernelInput,
   });
 
@@ -538,26 +535,11 @@ export function SimpleModeShell() {
   const switchWorkflowModeForQueue = useCallback(
     async (targetMode: WorkflowMode): Promise<boolean> => {
       if (targetMode === workflowMode) return true;
-      const conversationContext = buildConversationHistory().map((turn) => ({
-        user: turn.user,
-        assistant: turn.assistant,
-      }));
-      if (workflowMode === 'chat' && conversationContext.length > 0) {
-        await appendWorkflowKernelContextItems('chat', {
-          conversationContext,
-          artifactRefs: [],
-          contextSources: ['queue_mode_switch_sync'],
-          metadata: {
-            source: 'queued_message_dispatch',
-            sourceMode: workflowMode,
-            targetMode,
-          },
-        });
-      }
       const transitioned = await switchModeSafely({
         targetMode,
         handoff: {
           conversationContext: [],
+          summaryItems: [],
           artifactRefs: [],
           contextSources: ['simple_mode'],
           metadata: {
@@ -572,7 +554,7 @@ export function SimpleModeShell() {
       setWorkflowMode(targetMode);
       return true;
     },
-    [appendWorkflowKernelContextItems, workflowMode, transitionWorkflowKernelMode],
+    [workflowMode, transitionWorkflowKernelMode],
   );
 
   const {
@@ -622,7 +604,6 @@ export function SimpleModeShell() {
     hasPlanClarifyQuestion,
     setWorkflowMode,
     transitionWorkflowKernelMode,
-    appendWorkflowKernelContextItems,
     showToast,
     t,
   });
@@ -891,6 +872,7 @@ export function SimpleModeShell() {
     setDescription('');
     void openWorkflowKernelSession('chat', {
       conversationContext: [],
+      summaryItems: [],
       artifactRefs: [],
       contextSources: ['simple_mode'],
       metadata: {
@@ -987,6 +969,7 @@ export function SimpleModeShell() {
       setDescription('');
       void openWorkflowKernelSession('chat', {
         conversationContext: [],
+        summaryItems: [],
         artifactRefs: [],
         contextSources: ['simple_mode'],
         metadata: {
@@ -1077,6 +1060,7 @@ export function SimpleModeShell() {
       setDescription('');
       await openWorkflowKernelSession('chat', {
         conversationContext: [],
+        summaryItems: [],
         artifactRefs: [],
         contextSources: ['simple_mode'],
         metadata: {
@@ -1169,6 +1153,7 @@ export function SimpleModeShell() {
       setDescription('');
       await openWorkflowKernelSession('chat', {
         conversationContext: [],
+        summaryItems: [],
         artifactRefs: [],
         contextSources: ['simple_mode'],
         metadata: {
@@ -1219,6 +1204,7 @@ export function SimpleModeShell() {
     setDescription('');
     await openWorkflowKernelSession('chat', {
       conversationContext: [],
+      summaryItems: [],
       artifactRefs: [],
       contextSources: ['simple_mode'],
       metadata: {
