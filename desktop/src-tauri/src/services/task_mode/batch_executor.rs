@@ -74,6 +74,9 @@ pub struct ExecutionConfig {
     /// Whether retry is enabled
     #[serde(default = "default_retry_enabled")]
     pub retry_enabled: bool,
+    /// Whether story quality gates are enabled.
+    #[serde(default = "default_quality_gates_enabled")]
+    pub quality_gates_enabled: bool,
     /// DoR gate mode (Soft = warning only, Hard = blocking)
     #[serde(default = "default_dor_mode")]
     pub dor_mode: GateMode,
@@ -103,6 +106,10 @@ fn default_retry_enabled() -> bool {
     true
 }
 
+fn default_quality_gates_enabled() -> bool {
+    true
+}
+
 fn default_dor_mode() -> GateMode {
     GateMode::Hard
 }
@@ -117,6 +124,7 @@ impl Default for ExecutionConfig {
             max_parallel: default_max_parallel(),
             max_retries: default_max_retries(),
             retry_enabled: default_retry_enabled(),
+            quality_gates_enabled: default_quality_gates_enabled(),
             dor_mode: default_dor_mode(),
             dod_mode: default_dod_mode(),
             skip_verification: false,
@@ -283,6 +291,10 @@ pub struct TaskModeProgressEvent {
     pub agent_name: Option<String>,
     /// Quality gate results (if gates have been run)
     pub gate_results: Option<Vec<PipelineGateResult>>,
+    /// Backend-authored gate summary for UI rendering.
+    pub gate_summary: Option<TaskGateSummary>,
+    /// Task tool permission request routed through the unified permission UI.
+    pub permission_request: Option<TaskToolPermissionRequest>,
     /// Error message (if any)
     pub error: Option<String>,
     /// Overall progress percentage (0-100)
@@ -306,6 +318,8 @@ impl TaskModeProgressEvent {
             story_status: None,
             agent_name: None,
             gate_results: None,
+            gate_summary: None,
+            permission_request: None,
             error: None,
             progress_pct,
         }
@@ -329,6 +343,8 @@ impl TaskModeProgressEvent {
             story_status: Some("running".to_string()),
             agent_name: Some(agent_name.to_string()),
             gate_results: None,
+            gate_summary: None,
+            permission_request: None,
             error: None,
             progress_pct,
         }
@@ -353,6 +369,8 @@ impl TaskModeProgressEvent {
             story_status: Some("completed".to_string()),
             agent_name: Some(agent_name.to_string()),
             gate_results: Some(gate_results),
+            gate_summary: None,
+            permission_request: None,
             error: None,
             progress_pct,
         }
@@ -378,6 +396,8 @@ impl TaskModeProgressEvent {
             story_status: Some("failed".to_string()),
             agent_name: Some(agent_name.to_string()),
             gate_results,
+            gate_summary: None,
+            permission_request: None,
             error: Some(error.to_string()),
             progress_pct,
         }
@@ -394,6 +414,8 @@ impl TaskModeProgressEvent {
             story_status: None,
             agent_name: None,
             gate_results: None,
+            gate_summary: None,
+            permission_request: None,
             error: None,
             progress_pct,
         }
@@ -415,6 +437,8 @@ impl TaskModeProgressEvent {
             story_status: None,
             agent_name: None,
             gate_results: None,
+            gate_summary: None,
+            permission_request: None,
             error: None,
             progress_pct,
         }
@@ -431,6 +455,8 @@ impl TaskModeProgressEvent {
             story_status: None,
             agent_name: None,
             gate_results: None,
+            gate_summary: None,
+            permission_request: None,
             error: Some(error.to_string()),
             progress_pct: 0.0,
         }
@@ -459,6 +485,109 @@ pub struct BatchExecutionResult {
     pub agent_assignments: HashMap<String, AgentAssignment>,
     /// Whether execution was cancelled
     pub cancelled: bool,
+}
+
+/// Backend-authored task gate summary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskGateSummary {
+    pub overall_status: String,
+    pub blocking_status: String,
+    pub soft_failed_gate_count: usize,
+    pub gate_source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskToolPermissionRequest {
+    pub request_id: String,
+    pub session_id: String,
+    pub tool_name: String,
+    pub arguments: String,
+    pub risk: String,
+}
+
+fn task_gate_summary_from_results(
+    gate_results: &[PipelineGateResult],
+    pipeline_result: Option<&PipelineResult>,
+    dor_mode: GateMode,
+    dod_mode: GateMode,
+) -> TaskGateSummary {
+    let mut blocking_failed = 0usize;
+    let mut soft_failed = 0usize;
+
+    for gate in gate_results {
+        if gate.passed {
+            continue;
+        }
+
+        let mode = match gate.gate_id.as_str() {
+            "dor" => dor_mode,
+            "dod" => dod_mode,
+            _ => pipeline_result
+                .and_then(|result| {
+                    result
+                        .phase_results
+                        .iter()
+                        .find(|phase_result| phase_result.phase == gate.phase)
+                        .map(|phase_result| phase_result.mode)
+                })
+                .unwrap_or(GateMode::Hard),
+        };
+
+        if mode == GateMode::Hard {
+            blocking_failed += 1;
+        } else {
+            soft_failed += 1;
+        }
+    }
+
+    let overall_status = if blocking_failed > 0 {
+        "failed"
+    } else if soft_failed > 0 {
+        "passed"
+    } else if !gate_results.is_empty()
+        && gate_results.iter().all(|gate| {
+            matches!(
+                gate.status,
+                crate::models::quality_gates::GateStatus::Skipped
+            )
+        })
+    {
+        "skipped"
+    } else {
+        "passed"
+    };
+
+    let gate_source = {
+        let has_llm = gate_results.iter().any(|gate| {
+            matches!(gate.gate_id.as_str(), "ai_verify" | "code_review")
+                && !gate.gate_name.to_ascii_lowercase().contains("heuristic")
+        });
+        let has_heuristic = gate_results
+            .iter()
+            .any(|gate| gate.gate_name.to_ascii_lowercase().contains("heuristic"));
+        if has_llm && has_heuristic {
+            "mixed"
+        } else if has_llm {
+            "llm"
+        } else if has_heuristic {
+            "fallback_heuristic"
+        } else {
+            "skipped"
+        }
+    };
+
+    TaskGateSummary {
+        overall_status: overall_status.to_string(),
+        blocking_status: if blocking_failed > 0 {
+            "failed".to_string()
+        } else {
+            "passed".to_string()
+        },
+        soft_failed_gate_count: soft_failed,
+        gate_source: gate_source.to_string(),
+    }
 }
 
 // ============================================================================
@@ -755,9 +884,16 @@ impl BatchExecutor {
             .values()
             .filter(|s| s.is_failed())
             .count();
+        let terminal = state
+            .story_states
+            .values()
+            .filter(|s| s.is_terminal())
+            .count();
 
         BatchExecutionResult {
-            success: failed == 0 && !self.cancellation_token.is_cancelled(),
+            success: failed == 0
+                && terminal == state.story_states.len()
+                && !self.cancellation_token.is_cancelled(),
             total_stories: state.story_states.len(),
             completed,
             failed,
@@ -936,6 +1072,7 @@ impl BatchExecutor {
                 let pp = project_path.clone();
                 let max_retries = self.config.max_retries;
                 let retry_enabled = self.config.retry_enabled;
+                let quality_gates_enabled = self.config.quality_gates_enabled;
                 let dor_mode = self.config.dor_mode;
                 let dod_mode = self.config.dod_mode;
                 let plugin_gates = self.config.plugin_quality_gates.clone();
@@ -955,16 +1092,18 @@ impl BatchExecutor {
                 ));
 
                 // Spawn parallel execution for this story
+                let agent_name_for_task = agent_name.clone();
                 let handle = tokio::spawn(async move {
                     Self::execute_story_with_retry(
                         &sid,
                         batch_index,
                         tb,
                         &story,
-                        &agent_name,
+                        &agent_name_for_task,
                         &pp,
                         max_retries,
                         retry_enabled,
+                        quality_gates_enabled,
                         dor_mode,
                         dod_mode,
                         plugin_gates.clone(),
@@ -978,12 +1117,39 @@ impl BatchExecutor {
                     .await
                 });
 
-                handles.push(handle);
+                handles.push((s_id, agent_name, handle));
             }
 
             // Await all parallel stories in this batch
-            for handle in handles {
-                let _ = handle.await;
+            for (story_id, agent_name, handle) in handles {
+                if let Err(error) = handle.await {
+                    let panic_message = if error.is_panic() {
+                        "Story execution task panicked"
+                    } else {
+                        "Story execution task was cancelled unexpectedly"
+                    };
+                    {
+                        let mut state = self.state.write().await;
+                        state.story_states.insert(
+                            story_id.clone(),
+                            StoryExecutionState::Failed {
+                                reason: format!("{panic_message}: {error}"),
+                                attempts: 1,
+                                last_agent: agent_name.clone(),
+                            },
+                        );
+                    }
+                    emit_event(TaskModeProgressEvent::story_failed(
+                        session_id,
+                        batch.index,
+                        total_batches,
+                        &story_id,
+                        &agent_name,
+                        &format!("{panic_message}: {error}"),
+                        None,
+                        0.0,
+                    ));
+                }
             }
 
             stories_processed = {
@@ -1041,6 +1207,7 @@ impl BatchExecutor {
         project_path: &std::path::Path,
         max_retries: u32,
         retry_enabled: bool,
+        quality_gates_enabled: bool,
         dor_mode: GateMode,
         dod_mode: GateMode,
         plugin_quality_gates: Vec<crate::services::plugins::models::PluginQualityGate>,
@@ -1107,16 +1274,24 @@ impl BatchExecutor {
                         );
                     }
 
-                    emit(TaskModeProgressEvent::story_failed(
+                    let dor_gate_results = vec![dor_result];
+                    let mut event = TaskModeProgressEvent::story_failed(
                         session_id,
                         batch_index,
                         total_batches,
                         story_id,
                         &current_agent,
                         &failure_reason,
-                        Some(vec![dor_result]),
+                        Some(dor_gate_results.clone()),
                         0.0,
+                    );
+                    event.gate_summary = Some(task_gate_summary_from_results(
+                        &dor_gate_results,
+                        None,
+                        dor_mode,
+                        dod_mode,
                     ));
+                    emit(event);
                     return;
                 }
                 GateMode::Soft => {
@@ -1215,14 +1390,52 @@ impl BatchExecutor {
                 continue;
             }
 
+            if !quality_gates_enabled {
+                let duration_ms = story_start.elapsed().as_millis() as u64;
+                let gate_results = vec![
+                    dor_gate_result.clone(),
+                    PipelineGateResult::skipped(
+                        "quality_gates_disabled",
+                        "Quality Gates",
+                        GatePhase::Validation,
+                        "Quality gates disabled by workflow configuration",
+                    ),
+                ];
+                {
+                    let mut s = state.write().await;
+                    s.story_states.insert(
+                        story_id.to_string(),
+                        StoryExecutionState::Completed {
+                            agent: current_agent.clone(),
+                            duration_ms,
+                            gate_result: None,
+                        },
+                    );
+                }
+
+                let mut event = TaskModeProgressEvent::story_completed(
+                    session_id,
+                    batch_index,
+                    total_batches,
+                    story_id,
+                    &current_agent,
+                    gate_results.clone(),
+                    0.0,
+                );
+                event.gate_summary = Some(task_gate_summary_from_results(
+                    &gate_results,
+                    None,
+                    dor_mode,
+                    dod_mode,
+                ));
+                emit(event);
+                return;
+            }
+
             // Run quality gate pipeline with registered gates
             let pipeline_config = PipelineConfig::new(project_path.to_path_buf());
             let mut pipeline = GatePipeline::new(pipeline_config);
 
-            // Register FormatGate for automated code formatting validation.
-            // If the pipeline has a cache, share it with FormatGate so that
-            // after successful formatting the cache is invalidated (preventing
-            // stale results for subsequent typecheck/test/lint gates).
             let format_path = project_path.to_path_buf();
             let format_cache = pipeline.cache().cloned();
             pipeline.register_gate(
@@ -1236,7 +1449,6 @@ impl BatchExecutor {
                 }),
             );
 
-            // Register ValidationGate executors for typecheck, test, and lint
             pipeline.register_gate(
                 "typecheck",
                 ValidationGate::create_executor("typecheck", project_path.to_path_buf()),
@@ -1250,7 +1462,6 @@ impl BatchExecutor {
                 ValidationGate::create_executor("lint", project_path.to_path_buf()),
             );
 
-            // Obtain git diff for AI quality gates
             let (diff_content, diff_warning): (String, Option<PipelineGateResult>) = {
                 let diff_output = tokio::process::Command::new("git")
                     .args(["diff", "HEAD"])
@@ -1308,7 +1519,6 @@ impl BatchExecutor {
                 }
             };
 
-            // Register AI Verification gate (PostValidation phase)
             if !diff_content.is_empty() {
                 let verify_diff = diff_content.clone();
                 let verify_provider = llm_provider.clone();
@@ -1321,7 +1531,6 @@ impl BatchExecutor {
                     }),
                 );
 
-                // Register Code Review gate (PostValidation phase)
                 let review_diff = diff_content.clone();
                 let review_provider = llm_provider.clone();
                 pipeline.register_gate(
@@ -1334,7 +1543,6 @@ impl BatchExecutor {
                 );
             }
 
-            // Register plugin-provided domain quality gates
             for gate_def in &plugin_quality_gates {
                 let cmd = gate_def.command.clone();
                 let gate_id = gate_def.gate_id.clone();
@@ -1357,7 +1565,6 @@ impl BatchExecutor {
                         let proj_path = proj_path.clone();
                         let diff = diff.clone();
                         Box::pin(async move {
-                            // Write diff to temp file for gate command
                             let diff_file =
                                 std::env::temp_dir().join(format!("gate-{}.diff", gate_id));
                             let _ = tokio::fs::write(&diff_file, &diff).await;
@@ -1382,7 +1589,6 @@ impl BatchExecutor {
                                 .await;
                             let duration_ms = start.elapsed().as_millis() as u64;
 
-                            // Clean up temp file
                             let _ = tokio::fs::remove_file(&diff_file).await;
 
                             if shell_result.exit_code == 0 {
@@ -1500,20 +1706,27 @@ impl BatchExecutor {
                                 StoryExecutionState::Completed {
                                     agent: current_agent.clone(),
                                     duration_ms,
-                                    gate_result: Some(pipeline_result),
+                                    gate_result: Some(pipeline_result.clone()),
                                 },
                             );
                         }
 
-                        emit(TaskModeProgressEvent::story_completed(
+                        let mut event = TaskModeProgressEvent::story_completed(
                             session_id,
                             batch_index,
                             total_batches,
                             story_id,
                             &current_agent,
-                            gate_results,
+                            gate_results.clone(),
                             0.0, // Progress will be recalculated by caller
+                        );
+                        event.gate_summary = Some(task_gate_summary_from_results(
+                            &gate_results,
+                            Some(&pipeline_result),
+                            dor_mode,
+                            dod_mode,
                         ));
+                        emit(event);
                         return;
                     } else {
                         // Pipeline gates failed
@@ -1564,16 +1777,25 @@ impl BatchExecutor {
             );
         }
 
-        emit(TaskModeProgressEvent::story_failed(
+        let mut event = TaskModeProgressEvent::story_failed(
             session_id,
             batch_index,
             total_batches,
             story_id,
             &current_agent,
             &last_error,
-            last_gate_results,
+            last_gate_results.clone(),
             0.0,
-        ));
+        );
+        if let Some(ref gate_results) = last_gate_results {
+            event.gate_summary = Some(task_gate_summary_from_results(
+                gate_results,
+                None,
+                dor_mode,
+                dod_mode,
+            ));
+        }
+        emit(event);
     }
 }
 

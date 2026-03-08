@@ -244,6 +244,7 @@ async fn link_mode_session_and_rehydrate(
                     snapshot.completed_stories,
                     snapshot.failed_stories,
                     map_task_status_to_kernel_status(&task_session.status),
+                    None,
                 )
                 .await
                 .map_err(|error| {
@@ -799,6 +800,12 @@ pub async fn workflow_resume_background_runs(
                             resumed_results.push(next);
                             continue;
                         };
+                        if task_session.cancel_requested {
+                            next.resumed = false;
+                            next.reason = "cancel_requested".to_string();
+                            resumed_results.push(next);
+                            continue;
+                        }
                         let payload = match serde_json::from_value::<TaskExecutionResumePayload>(
                             payload_value,
                         ) {
@@ -830,6 +837,7 @@ pub async fn workflow_resume_background_runs(
                             task_mode_state.clone(),
                             state.clone(),
                             app_state.clone(),
+                            permission_state.clone(),
                             knowledge_state.clone(),
                             plugin_state.clone(),
                         )
@@ -1325,6 +1333,7 @@ pub async fn workflow_recover_session(
                     snapshot.completed_stories,
                     snapshot.failed_stories,
                     next_status,
+                    None,
                 )
                 .await;
             task_snapshot = Some(snapshot);
@@ -1517,6 +1526,7 @@ mod tests {
             kernel_session_id: Some("kernel-session-1".to_string()),
             description: "sample".to_string(),
             phase,
+            locale: Some("en-US".to_string()),
             analysis: None,
             clarifications: Vec::new(),
             current_question: None,
@@ -1543,6 +1553,7 @@ mod tests {
             kernel_session_id: Some("kernel-session-1".to_string()),
             description: "sample".to_string(),
             status,
+            locale: Some("en-US".to_string()),
             strategy_analysis: None,
             prd: None,
             exploration_result: None,
@@ -1560,6 +1571,7 @@ mod tests {
                 ]),
             }),
             execution_resume_payload: None,
+            cancel_requested: false,
             created_at: "2026-03-05T00:00:00Z".to_string(),
         }
     }

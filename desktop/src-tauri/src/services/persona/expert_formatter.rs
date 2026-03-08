@@ -6,6 +6,7 @@
 //!
 //! This separation improves reasoning quality by decoupling thinking from formatting.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
@@ -207,39 +208,120 @@ fn extract_response_text(
 
 /// Extract JSON from an LLM response string.
 ///
-/// Handles markdown code fences and extracts the JSON object/array.
+/// Extraction order:
+/// 1. fenced code blocks
+/// 2. raw full-string JSON
+/// 3. balanced object extraction
+/// 4. balanced array extraction
 fn extract_json_from_response(response_text: &str) -> String {
     let trimmed = response_text.trim();
 
-    // Try to extract from markdown code fences
-    if let Some(start) = trimmed.find("```") {
-        let after_fence = &trimmed[start + 3..];
-        let content_start = if let Some(nl) = after_fence.find('\n') {
-            nl + 1
-        } else {
-            0
-        };
-        let content = &after_fence[content_start..];
-        if let Some(end) = content.find("```") {
-            return content[..end].trim().to_string();
+    for fenced in extract_fenced_blocks(trimmed) {
+        let candidate = fenced.trim();
+        if looks_like_json(candidate) {
+            return candidate.to_string();
         }
     }
 
-    // Try to find JSON array [ ... ]
-    if let (Some(start), Some(end)) = (trimmed.find('['), trimmed.rfind(']')) {
-        if start <= end {
-            return trimmed[start..=end].to_string();
-        }
+    if looks_like_json(trimmed) {
+        return trimmed.to_string();
     }
 
-    // Try to find JSON object { ... }
-    if let (Some(start), Some(end)) = (trimmed.find('{'), trimmed.rfind('}')) {
-        if start <= end {
-            return trimmed[start..=end].to_string();
-        }
+    if let Some(candidate) = extract_balanced_json(trimmed, '{', '}') {
+        return candidate;
+    }
+    if let Some(candidate) = extract_balanced_json(trimmed, '[', ']') {
+        return candidate;
     }
 
     trimmed.to_string()
+}
+
+fn extract_fenced_blocks(input: &str) -> Vec<String> {
+    let mut remaining = input;
+    let mut blocks = Vec::new();
+
+    while let Some(start) = remaining.find("```") {
+        let after_start = &remaining[start + 3..];
+        let body_start = after_start.find('\n').map(|idx| idx + 1).unwrap_or(0);
+        let body = &after_start[body_start..];
+        if let Some(end) = body.find("```") {
+            blocks.push(body[..end].trim().to_string());
+            remaining = &body[end + 3..];
+        } else {
+            break;
+        }
+    }
+
+    blocks
+}
+
+fn looks_like_json(candidate: &str) -> bool {
+    let trimmed = candidate.trim();
+    (trimmed.starts_with('{') && trimmed.ends_with('}'))
+        || (trimmed.starts_with('[') && trimmed.ends_with(']'))
+}
+
+fn extract_balanced_json(input: &str, open: char, close: char) -> Option<String> {
+    let chars: Vec<(usize, char)> = input.char_indices().collect();
+    let mut queue = VecDeque::new();
+
+    for (idx, (_, ch)) in chars.iter().enumerate() {
+        if *ch == open {
+            queue.push_back(idx);
+        }
+    }
+
+    while let Some(start_idx) = queue.pop_front() {
+        if let Some(candidate) = balanced_slice_from_index(&chars, input, start_idx, open, close) {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+fn balanced_slice_from_index(
+    chars: &[(usize, char)],
+    input: &str,
+    start_idx: usize,
+    open: char,
+    close: char,
+) -> Option<String> {
+    let start_byte = chars.get(start_idx)?.0;
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for (byte_idx, ch) in chars.iter().skip(start_idx) {
+        if in_string {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            match ch {
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_string = true,
+            value if *value == open => depth += 1,
+            value if *value == close => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    let end = byte_idx + ch.len_utf8();
+                    return Some(input[start_byte..end].trim().to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -275,5 +357,23 @@ Some trailing text"#;
     fn test_extract_json_raw() {
         let input = r#"{"key": "value"}"#;
         assert_eq!(extract_json_from_response(input), r#"{"key": "value"}"#);
+    }
+
+    #[test]
+    fn test_extract_json_prefers_full_object_over_nested_array() {
+        let input = r#"{"analysis":"ok","items":[{"id":"1"},{"id":"2"}]}"#;
+        assert_eq!(
+            extract_json_from_response(input),
+            r#"{"analysis":"ok","items":[{"id":"1"},{"id":"2"}]}"#
+        );
+    }
+
+    #[test]
+    fn test_extract_json_balanced_object_from_mixed_text() {
+        let input = r#"Result: {"analysis":"ok","items":[{"id":"1","text":"[nested]"}]} trailing"#;
+        assert_eq!(
+            extract_json_from_response(input),
+            r#"{"analysis":"ok","items":[{"id":"1","text":"[nested]"}]}"#
+        );
     }
 }

@@ -88,8 +88,16 @@
       "running": "Running",
       "passed": "Passed",
       "failed": "Failed",
-      "skipped": "Skipped"
+      "skipped": "Skipped",
+      "warning": "Warning"
     },
+    "source": {
+      "llm": "LLM verification",
+      "fallback_heuristic": "Heuristic fallback",
+      "skipped": "Skipped",
+      "mixed": "Mixed"
+    },
+    "softFailures": "{{count}} soft failures",
     "codeReview": {
       "title": "Code Review Scores",
       "totalScore": "Total: {{score}} / 100",

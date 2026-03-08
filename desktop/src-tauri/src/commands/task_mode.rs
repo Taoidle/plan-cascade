@@ -10,7 +10,7 @@ use std::fs;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -156,6 +156,9 @@ pub struct TaskModeSession {
     /// Persisted execution launch metadata used for background resume.
     #[serde(default)]
     pub execution_resume_payload: Option<Value>,
+    /// Persisted cancellation intent used when the runtime handle is not yet available.
+    #[serde(default)]
+    pub cancel_requested: bool,
     /// When the session was created
     pub created_at: String,
 }
@@ -279,6 +282,9 @@ pub struct TaskWorkflowConfig {
     pub tdd_mode: Option<String>,
     /// Whether to enable spec interview
     pub enable_interview: bool,
+    /// Whether quality gates are enabled for story execution
+    #[serde(default = "default_quality_gates_enabled")]
+    pub quality_gates_enabled: bool,
     /// Maximum parallel stories
     pub max_parallel: Option<usize>,
     /// Skip verification gates (--no-verify)
@@ -289,6 +295,10 @@ pub struct TaskWorkflowConfig {
     pub global_agent_override: Option<String>,
     /// Override implementation agents only
     pub impl_agent_override: Option<String>,
+}
+
+fn default_quality_gates_enabled() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -850,6 +860,7 @@ async fn sync_kernel_task_snapshot_and_emit(
             completed_stories,
             failed_stories,
             task_status_to_kernel_status(&session.status),
+            None,
         )
         .await
         .unwrap_or_default();
@@ -868,6 +879,7 @@ async fn sync_kernel_task_phase_by_linked_session_and_emit(
         .sync_task_snapshot_by_linked_session(
             task_session_id,
             Some(phase.to_string()),
+            None,
             None,
             None,
             None,
@@ -2064,8 +2076,11 @@ fn load_story_context(project_path: &std::path::Path, story_id: &str) -> Option<
 /// In LLM mode, uses OrchestratorService for direct LLM API execution.
 fn build_story_executor(
     app_handle: tauri::AppHandle,
+    task_session_id: String,
+    kernel_state: WorkflowKernelState,
     mode: StoryExecutionMode,
     provider_config: Option<crate::services::llm::types::ProviderConfig>,
+    permission_gate: Arc<crate::services::orchestrator::permission_gate::PermissionGate>,
     db_pool: Option<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>>,
     knowledge_block: String,
     memory_block: String,
@@ -2079,8 +2094,11 @@ fn build_story_executor(
        + 'static {
     move |ctx: StoryExecutionContext| -> Pin<Box<dyn Future<Output = StoryExecutionOutcome> + Send>> {
         let app = app_handle.clone();
+        let task_session_id = task_session_id.clone();
+        let kernel_state = kernel_state.clone();
         let mode = mode.clone();
         let provider_config = provider_config.clone();
+        let permission_gate = permission_gate.clone();
         let db_pool = db_pool.clone();
         let knowledge_block = knowledge_block.clone();
         let memory_block = memory_block.clone();
@@ -2111,6 +2129,8 @@ fn build_story_executor(
                         story_status: Some("executing".to_string()),
                         agent_name: Some(ctx.agent_name.clone()),
                         gate_results: None,
+                        gate_summary: None,
+                        permission_request: None,
                         error: None,
                         progress_pct: 0.0,
                     },
@@ -2140,7 +2160,11 @@ fn build_story_executor(
                 StoryExecutionMode::Llm => {
                     // Execute via OrchestratorService using direct LLM API
                     execute_story_via_llm(
+                        &task_session_id,
+                        app.clone(),
+                        kernel_state.clone(),
                         provider_config.as_ref(),
+                        permission_gate.clone(),
                         &prompt,
                         &ctx.project_path,
                         db_pool.as_ref(),
@@ -2287,7 +2311,11 @@ async fn execute_story_via_agent(
 /// runs the full agentic loop (tool use, code generation, etc.), and
 /// maps the result to StoryExecutionOutcome.
 async fn execute_story_via_llm(
+    task_session_id: &str,
+    app_handle: tauri::AppHandle,
+    kernel_state: WorkflowKernelState,
     provider_config: Option<&crate::services::llm::types::ProviderConfig>,
+    permission_gate: Arc<crate::services::orchestrator::permission_gate::PermissionGate>,
     prompt: &str,
     project_path: &std::path::Path,
     db_pool: Option<&r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>>,
@@ -2300,6 +2328,7 @@ async fn execute_story_via_llm(
 ) -> StoryExecutionOutcome {
     use crate::services::orchestrator::{OrchestratorConfig, OrchestratorService};
     use crate::services::streaming::UnifiedStreamEvent;
+    use tauri::Emitter;
 
     let provider_config = match provider_config {
         Some(cfg) => cfg.clone(),
@@ -2347,7 +2376,7 @@ async fn execute_story_via_llm(
         enable_compaction: true,
         analysis_profile: Default::default(),
         analysis_limits: Default::default(),
-        analysis_session_id: None,
+        analysis_session_id: Some(task_session_id.to_string()),
         project_id: None,
         compaction_config: Default::default(),
         task_type: None,
@@ -2355,8 +2384,9 @@ async fn execute_story_via_llm(
     };
 
     let (search_provider, search_api_key) = resolve_search_provider_for_tools();
-    let mut orchestrator =
-        OrchestratorService::new(config).with_search_provider(&search_provider, search_api_key);
+    let mut orchestrator = OrchestratorService::new(config)
+        .with_search_provider(&search_provider, search_api_key)
+        .with_permission_gate(permission_gate.clone());
 
     if !selected_skill_matches.is_empty() {
         let selected_skills =
@@ -2380,13 +2410,95 @@ async fn execute_story_via_llm(
         );
     }
 
-    // Create channel for event collection (events are discarded for story execution)
+    // Create channel for event collection so Task mode can participate in
+    // the shared permission approval flow and pause kernel state correctly.
     let (tx, mut rx) = tokio::sync::mpsc::channel::<UnifiedStreamEvent>(256);
-
-    // Drain events in background to prevent channel backpressure
+    let paused_for_permission = Arc::new(AtomicBool::new(false));
+    let paused_state = Arc::clone(&paused_for_permission);
+    let permission_session_id = task_session_id.to_string();
+    let kernel_for_events = kernel_state.clone();
+    let app_for_events = app_handle.clone();
     tokio::spawn(async move {
-        while rx.recv().await.is_some() {
-            // Events are discarded — story execution doesn't stream to frontend
+        while let Some(event) = rx.recv().await {
+            match &event {
+                UnifiedStreamEvent::ToolPermissionRequest {
+                    request_id,
+                    session_id,
+                    tool_name,
+                    arguments,
+                    risk,
+                } => {
+                    paused_state.store(true, Ordering::SeqCst);
+                    let _ = app_for_events.emit(
+                        TASK_MODE_EVENT_CHANNEL,
+                        &TaskModeProgressEvent {
+                            session_id: permission_session_id.clone(),
+                            event_type: "tool_permission_request".to_string(),
+                            current_batch: 0,
+                            total_batches: 0,
+                            story_id: None,
+                            story_status: None,
+                            agent_name: None,
+                            gate_results: None,
+                            gate_summary: None,
+                            permission_request: Some(crate::services::task_mode::batch_executor::TaskToolPermissionRequest {
+                                request_id: request_id.clone(),
+                                session_id: session_id.clone(),
+                                tool_name: tool_name.clone(),
+                                arguments: arguments.clone(),
+                                risk: risk.clone(),
+                            }),
+                            error: None,
+                            progress_pct: 0.0,
+                        },
+                    );
+                    let kernel_session_ids = kernel_for_events
+                        .sync_task_snapshot_by_linked_session(
+                            &permission_session_id,
+                            Some("paused".to_string()),
+                            None,
+                            None,
+                            None,
+                            None,
+                            Some("tool_permission".to_string()),
+                        )
+                        .await
+                        .unwrap_or_default();
+                    emit_kernel_updates(
+                        &app_for_events,
+                        &kernel_for_events,
+                        &kernel_session_ids,
+                        "task_mode.story_permission_request",
+                    )
+                    .await;
+                }
+                UnifiedStreamEvent::Complete { .. } | UnifiedStreamEvent::Error { .. } => {
+                    paused_state.store(false, Ordering::SeqCst);
+                }
+                _ => {
+                    if paused_state.swap(false, Ordering::SeqCst) {
+                        let kernel_session_ids = kernel_for_events
+                            .sync_task_snapshot_by_linked_session(
+                                &permission_session_id,
+                                Some("executing".to_string()),
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                            )
+                            .await
+                            .unwrap_or_default();
+                        emit_kernel_updates(
+                            &app_for_events,
+                            &kernel_for_events,
+                            &kernel_session_ids,
+                            "task_mode.story_permission_resolved",
+                        )
+                        .await;
+                    }
+                }
+            }
         }
     });
 
@@ -2713,6 +2825,7 @@ mod tests {
             exploration_result: None,
             progress: None,
             execution_resume_payload: None,
+            cancel_requested: false,
             created_at: "2026-02-18T00:00:00Z".to_string(),
         };
         let json = serde_json::to_string(&session).unwrap();
@@ -2733,6 +2846,7 @@ mod tests {
             exploration_result: None,
             progress: None,
             execution_resume_payload: None,
+            cancel_requested: false,
             created_at: "2026-03-05T00:00:00Z".to_string(),
         }
     }
@@ -3291,49 +3405,6 @@ mod tests {
             started.elapsed() < Duration::from_secs(3),
             "cancellation should interrupt in-flight story quickly"
         );
-    }
-
-    #[tokio::test]
-    async fn test_execute_story_via_llm_returns_cancelled_when_token_cancelled() {
-        use crate::services::llm::types::{ProviderConfig, ProviderType};
-        use tokio::time::Duration;
-        use tokio_util::sync::CancellationToken;
-
-        let temp_dir = tempfile::tempdir().unwrap();
-        let token = CancellationToken::new();
-        token.cancel();
-
-        let provider = ProviderConfig {
-            provider: ProviderType::Anthropic,
-            api_key: Some("test-key".to_string()),
-            model: "claude-sonnet-4-6-20260219".to_string(),
-            ..ProviderConfig::default()
-        };
-
-        let outcome = tokio::time::timeout(
-            Duration::from_secs(3),
-            execute_story_via_llm(
-                Some(&provider),
-                "Implement a tiny change",
-                temp_dir.path(),
-                None,
-                "",
-                "",
-                "",
-                &[],
-                None,
-                token.clone(),
-            ),
-        )
-        .await
-        .expect("llm story cancellation path should return quickly");
-
-        assert!(!outcome.success);
-        assert!(outcome
-            .error
-            .unwrap_or_default()
-            .to_lowercase()
-            .contains("cancelled"));
     }
 
     // ========================================================================

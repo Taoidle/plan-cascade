@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import i18n from '../../../i18n';
 import { resolvePersonaDisplayName } from '../../../lib/personaI18n';
+import { failResult, okResult, type ActionResult } from '../../../types/actionResult';
 import type { RequirementAnalysisCardData } from '../../../types/workflowCard';
 import { useSettingsStore } from '../../settings';
 import { useSpecInterviewStore } from '../../specInterview';
@@ -16,9 +17,14 @@ interface RequirementPhaseDeps {
   _unused?: never;
 }
 
-export async function runRequirementPhase(runtime: WorkflowPhaseRuntime, _deps: RequirementPhaseDeps): Promise<void> {
+export async function runRequirementPhase(
+  runtime: WorkflowPhaseRuntime,
+  _deps: RequirementPhaseDeps,
+): Promise<ActionResult> {
   const { set, get, runToken, isRunActive, resolveTaskSessionId } = runtime;
-  if (!isRunActive(get, runToken)) return;
+  if (!isRunActive(get, runToken)) {
+    return failResult('stale_run_token', 'Requirement analysis superseded');
+  }
 
   const { config, taskDescription, explorationResult } = get() as {
     config: { flowLevel: 'quick' | 'standard' | 'full' };
@@ -35,15 +41,17 @@ export async function runRequirementPhase(runtime: WorkflowPhaseRuntime, _deps: 
         defaultValue: 'No active task session found.',
       }),
     );
-    return;
+    return failResult('session_missing', 'No active task session');
   }
 
-  if (config.flowLevel === 'quick') return;
+  if (config.flowLevel === 'quick') return okResult();
 
   set({ phase: 'requirement_analysis' });
 
   const { resolvePhaseAgent, formatModelDisplay } = await import('../../../lib/phaseAgentResolver');
-  if (!isRunActive(get, runToken)) return;
+  if (!isRunActive(get, runToken)) {
+    return failResult('stale_run_token', 'Requirement analysis superseded');
+  }
   const reqResolved = resolvePhaseAgent('plan_requirements');
 
   injectCard('persona_indicator', {
@@ -87,27 +95,29 @@ export async function runRequirementPhase(runtime: WorkflowPhaseRuntime, _deps: 
         projectPath,
       },
     });
-    if (!isRunActive(get, runToken)) return;
+    if (!isRunActive(get, runToken)) {
+      return failResult('stale_run_token', 'Requirement analysis superseded');
+    }
 
     if (result.success && result.data) {
       set({ requirementAnalysis: result.data });
       injectCard('requirement_analysis_card', result.data);
-    } else {
-      injectInfo(
-        i18n.t('workflow.orchestrator.requirementAnalysisFailed', {
-          ns: 'simpleMode',
-          defaultValue: 'Requirement analysis could not be completed. Continuing...',
-        }),
-        'warning',
-      );
+      return okResult();
     }
-  } catch {
-    injectInfo(
+
+    const message =
+      result.error ||
       i18n.t('workflow.orchestrator.requirementAnalysisFailed', {
         ns: 'simpleMode',
-        defaultValue: 'Requirement analysis could not be completed. Continuing...',
-      }),
-      'warning',
-    );
+        defaultValue: 'Requirement analysis could not be completed.',
+      });
+    set({ phase: 'failed', error: message });
+    injectError(i18n.t('workflow.orchestrator.requirementAnalysisFailed', { ns: 'simpleMode' }), message);
+    return failResult('requirement_analysis_failed', message);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    set({ phase: 'failed', error: message });
+    injectError(i18n.t('workflow.orchestrator.requirementAnalysisFailed', { ns: 'simpleMode' }), message);
+    return failResult('requirement_analysis_failed', message);
   }
 }

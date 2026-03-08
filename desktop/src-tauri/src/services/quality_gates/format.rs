@@ -128,6 +128,14 @@ impl FormatGate {
                     )
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                    if Self::is_missing_formatter_output(&command, &stderr) {
+                        return PipelineGateResult::skipped(
+                            "format",
+                            "Format Gate",
+                            GatePhase::PreValidation,
+                            &format!("Formatter '{}' is not available for this project", command),
+                        );
+                    }
                     PipelineGateResult::failed(
                         "format",
                         "Format Gate",
@@ -143,14 +151,23 @@ impl FormatGate {
             }
             Ok(Err(e)) => {
                 let duration_ms = start.elapsed().as_millis() as u64;
-                PipelineGateResult::failed(
-                    "format",
-                    "Format Gate",
-                    GatePhase::PreValidation,
-                    duration_ms,
-                    format!("Failed to execute formatter: {}", e),
-                    vec![],
-                )
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    PipelineGateResult::skipped(
+                        "format",
+                        "Format Gate",
+                        GatePhase::PreValidation,
+                        &format!("Formatter '{}' is not installed", command),
+                    )
+                } else {
+                    PipelineGateResult::failed(
+                        "format",
+                        "Format Gate",
+                        GatePhase::PreValidation,
+                        duration_ms,
+                        format!("Failed to execute formatter: {}", e),
+                        vec![],
+                    )
+                }
             }
             Err(_) => {
                 let duration_ms = start.elapsed().as_millis() as u64;
@@ -170,14 +187,20 @@ impl FormatGate {
     fn get_formatter_command(&self, project_type: ProjectType) -> Option<(String, Vec<String>)> {
         match project_type {
             ProjectType::Rust => Some(("cargo".to_string(), vec!["fmt".to_string()])),
-            ProjectType::NodeJs => Some((
-                "npx".to_string(),
-                vec![
-                    "prettier".to_string(),
-                    "--write".to_string(),
-                    ".".to_string(),
-                ],
-            )),
+            ProjectType::NodeJs => {
+                if !self.has_node_formatter_config() {
+                    return None;
+                }
+                Some((
+                    "npx".to_string(),
+                    vec![
+                        "--no-install".to_string(),
+                        "prettier".to_string(),
+                        "--write".to_string(),
+                        ".".to_string(),
+                    ],
+                ))
+            }
             ProjectType::Python => Some((
                 "ruff".to_string(),
                 vec!["format".to_string(), ".".to_string()],
@@ -185,6 +208,40 @@ impl FormatGate {
             ProjectType::Go => Some(("gofmt".to_string(), vec!["-w".to_string(), ".".to_string()])),
             ProjectType::Unknown => None,
         }
+    }
+
+    fn has_node_formatter_config(&self) -> bool {
+        let config_candidates = [
+            ".prettierrc",
+            ".prettierrc.json",
+            ".prettierrc.js",
+            ".prettierrc.cjs",
+            ".prettierrc.yaml",
+            ".prettierrc.yml",
+            "prettier.config.js",
+            "prettier.config.cjs",
+            "prettier.config.mjs",
+        ];
+        if config_candidates
+            .iter()
+            .any(|candidate| self.project_path.join(candidate).exists())
+        {
+            return true;
+        }
+
+        let package_json = self.project_path.join("package.json");
+        let Ok(contents) = std::fs::read_to_string(package_json) else {
+            return false;
+        };
+        contents.contains("\"prettier\"")
+    }
+
+    fn is_missing_formatter_output(command: &str, stderr: &str) -> bool {
+        let normalized = stderr.to_ascii_lowercase();
+        normalized.contains("not found")
+            || normalized.contains("could not determine executable to run")
+            || normalized.contains("command not found")
+            || (command == "npx" && normalized.contains("prettier"))
     }
 }
 

@@ -3,6 +3,7 @@ import i18n from '../../../i18n';
 import type { TaskPrd } from '../../taskMode';
 import { useSettingsStore } from '../../settings';
 import { resolvePersonaDisplayName } from '../../../lib/personaI18n';
+import { failResult, okResult, type ActionResult } from '../../../types/actionResult';
 import type { ArchitectureReviewCardData } from '../../../types/workflowCard';
 import {
   injectWorkflowCard as injectCard,
@@ -11,17 +12,15 @@ import {
 } from '../cardInjection';
 import type { WorkflowPhaseRuntime } from './runtime';
 
-interface ArchitecturePhaseDeps {
-  runDesignDocAndExecutionPhase: (runtime: WorkflowPhaseRuntime, prd: TaskPrd) => Promise<void>;
-}
-
 export async function runArchitecturePhase(
   runtime: WorkflowPhaseRuntime,
   prd: TaskPrd,
-  deps: ArchitecturePhaseDeps,
-): Promise<void> {
+  _deps: { _unused?: never },
+): Promise<ActionResult> {
   const { set, get, runToken, isRunActive, resolveTaskSessionId } = runtime;
-  if (!isRunActive(get, runToken)) return;
+  if (!isRunActive(get, runToken)) {
+    return failResult('stale_run_token', 'Architecture review superseded');
+  }
 
   const { architectureReviewRound, explorationResult } = get() as {
     architectureReviewRound: number;
@@ -37,7 +36,7 @@ export async function runArchitecturePhase(
         defaultValue: 'No active task session found.',
       }),
     );
-    return;
+    return failResult('session_missing', 'No active task session');
   }
 
   if (architectureReviewRound >= 3) {
@@ -48,12 +47,14 @@ export async function runArchitecturePhase(
       }),
       'warning',
     );
-    return;
+    return okResult();
   }
 
   set({ phase: 'architecture_review', architectureReviewRound: architectureReviewRound + 1 });
   const { resolvePhaseAgent, formatModelDisplay } = await import('../../../lib/phaseAgentResolver');
-  if (!isRunActive(get, runToken)) return;
+  if (!isRunActive(get, runToken)) {
+    return failResult('stale_run_token', 'Architecture review superseded');
+  }
   const archResolved = resolvePhaseAgent('plan_architecture');
 
   injectCard('persona_indicator', {
@@ -93,30 +94,29 @@ export async function runArchitecturePhase(
         projectPath,
       },
     });
-    if (!isRunActive(get, runToken)) return;
+    if (!isRunActive(get, runToken)) {
+      return failResult('stale_run_token', 'Architecture review superseded');
+    }
 
     if (result.success && result.data) {
       set({ architectureReview: result.data });
       injectCard('architecture_review_card', result.data, true);
-      return;
+      return okResult();
     }
 
-    injectInfo(
+    const message =
+      result.error ||
       i18n.t('workflow.orchestrator.architectureReviewFailed', {
         ns: 'simpleMode',
-        defaultValue: 'Architecture review could not be completed. Continuing...',
-      }),
-      'warning',
-    );
-    await deps.runDesignDocAndExecutionPhase(runtime, prd);
-  } catch {
-    injectInfo(
-      i18n.t('workflow.orchestrator.architectureReviewFailed', {
-        ns: 'simpleMode',
-        defaultValue: 'Architecture review could not be completed. Continuing...',
-      }),
-      'warning',
-    );
-    await deps.runDesignDocAndExecutionPhase(runtime, prd);
+        defaultValue: 'Architecture review could not be completed.',
+      });
+    set({ phase: 'failed', error: message });
+    injectError(i18n.t('workflow.orchestrator.architectureReviewFailed', { ns: 'simpleMode' }), message);
+    return failResult('architecture_review_failed', message);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    set({ phase: 'failed', error: message });
+    injectError(i18n.t('workflow.orchestrator.architectureReviewFailed', { ns: 'simpleMode' }), message);
+    return failResult('architecture_review_failed', message);
   }
 }

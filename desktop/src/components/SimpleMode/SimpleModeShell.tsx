@@ -71,6 +71,7 @@ import {
 import {
   isPlanPhaseBusy,
   isTaskPhaseBusy,
+  isTaskPhaseTerminal,
   isWorkflowModeActive,
   markUnknownPhaseForReporting,
 } from '../../store/workflowPhaseModel';
@@ -467,7 +468,9 @@ export function SimpleModeShell() {
     [kernelChatRuntime.bindingSessionId],
   );
   const permissionSessionId =
-    kernelChatBinding?.rawSessionId || taskId || standaloneSessionId || activeExecutionId || '';
+    (workflowMode === 'task'
+      ? kernelTaskRuntime.linkedSessionId
+      : kernelChatBinding?.rawSessionId || standaloneSessionId || activeExecutionId) || '';
   const permissionRequest =
     pendingPermissionRequest && pendingPermissionRequest.sessionId === permissionSessionId
       ? pendingPermissionRequest
@@ -493,6 +496,15 @@ export function SimpleModeShell() {
     if (!permissionSessionId) return;
     void setPermissionLevel(permissionSessionId, permissionLevel);
   }, [permissionSessionId, permissionLevel, setPermissionLevel]);
+
+  useEffect(() => {
+    if (workflowMode !== 'task') return;
+    const sessionId = kernelTaskRuntime.linkedSessionId?.trim();
+    if (!sessionId) return;
+    if (isTaskPhaseTerminal(kernelTaskRuntime.phase)) {
+      useToolPermissionStore.getState().clearSessionRequests(sessionId);
+    }
+  }, [kernelTaskRuntime.linkedSessionId, kernelTaskRuntime.phase, workflowMode]);
 
   const {
     handleStart,
@@ -1256,7 +1268,7 @@ export function SimpleModeShell() {
         workflowMode,
         taskWorkflowCancelling,
         planWorkflowCancelling,
-        isTaskExecuting: workflowKernelTaskPhase === 'executing',
+        isTaskExecuting: kernelTaskRuntime.isBusy,
         isPlanExecuting: workflowKernelPlanPhase === 'executing',
         cancelKernelOperation: cancelWorkflowKernelOperation,
         cancelTaskWorkflow: cancelWorkflow,
@@ -1271,9 +1283,9 @@ export function SimpleModeShell() {
     workflowMode,
     cancelPlanWorkflow,
     cancelWorkflow,
+    kernelTaskRuntime.isBusy,
     taskWorkflowCancelling,
     planWorkflowCancelling,
-    workflowKernelTaskPhase,
     workflowKernelPlanPhase,
     showToast,
     t,

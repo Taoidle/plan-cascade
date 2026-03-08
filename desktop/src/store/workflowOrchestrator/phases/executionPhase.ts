@@ -156,7 +156,32 @@ export async function runDesignDocAndExecutionPhase(
   try {
     await deps.subscribeToProgressEvents(set, get, runToken);
     if (!isRunActive(get, runToken)) return;
-    const approved = await useTaskModeStore.getState().approvePrd(prd, effectiveSessionId);
+    const workflowConfig = (
+      get() as {
+        config: {
+          flowLevel: 'quick' | 'standard' | 'full';
+          tddMode: 'off' | 'flexible' | 'strict';
+          specInterviewEnabled: boolean;
+          qualityGatesEnabled: boolean;
+          maxParallel: number;
+          skipVerification: boolean;
+          skipReview: boolean;
+          globalAgentOverride: string | null;
+          implAgentOverride: string | null;
+        };
+      }
+    ).config;
+    const approved = await useTaskModeStore.getState().approvePrd(prd, effectiveSessionId, {
+      flowLevel: workflowConfig.flowLevel,
+      tddMode: workflowConfig.tddMode,
+      enableInterview: workflowConfig.specInterviewEnabled,
+      qualityGatesEnabled: workflowConfig.qualityGatesEnabled,
+      maxParallel: workflowConfig.maxParallel,
+      skipVerification: workflowConfig.skipVerification,
+      skipReview: workflowConfig.skipReview,
+      globalAgentOverride: workflowConfig.globalAgentOverride,
+      implAgentOverride: workflowConfig.implAgentOverride,
+    });
     if (!isRunActive(get, runToken)) return;
 
     const taskModeError = useTaskModeStore.getState().error;

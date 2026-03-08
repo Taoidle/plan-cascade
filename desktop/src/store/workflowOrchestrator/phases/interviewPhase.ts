@@ -13,7 +13,7 @@ import type { WorkflowPhaseRuntime } from './runtime';
 
 interface InterviewPhaseDeps {
   mapInterviewQuestion: (question: InterviewQuestion, index: number, total: number) => InterviewQuestionCardData;
-  runRequirementPhase: (runtime: WorkflowPhaseRuntime) => Promise<void>;
+  runRequirementPhase: (runtime: WorkflowPhaseRuntime) => Promise<ActionResult>;
   runPrdPhase: (runtime: WorkflowPhaseRuntime) => Promise<ActionResult>;
 }
 
@@ -133,9 +133,12 @@ export async function runInterviewPhase(
     }),
     'warning',
   );
-  await deps.runRequirementPhase(runtime);
+  const requirementResult = await deps.runRequirementPhase(runtime);
   if (!isRunActive(get, runToken)) {
     return failResult('stale_run_token', 'Configuration request was superseded');
+  }
+  if (!requirementResult.ok) {
+    return requirementResult;
   }
 
   return deps.runPrdPhase(runtime);

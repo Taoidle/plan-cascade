@@ -33,6 +33,7 @@ export type TaskLifecyclePhase =
   | 'architecture_review'
   | 'generating_design_doc'
   | 'executing'
+  | 'paused'
   | 'completed'
   | 'failed'
   | 'cancelled';

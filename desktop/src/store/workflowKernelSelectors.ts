@@ -31,6 +31,8 @@ export interface KernelTaskRuntime extends KernelRuntimeBase {
   isBusy: boolean;
   pendingInterview: TaskInterviewSnapshot | null;
   interviewId: string | null;
+  canCancel: boolean;
+  blockReason: string | null;
 }
 
 export interface KernelPlanRuntime extends KernelRuntimeBase {
@@ -102,6 +104,8 @@ export function selectKernelTaskRuntime(session: WorkflowSession | null): Kernel
   const pendingInterview = session?.modeSnapshots.task?.pendingInterview ?? null;
   const phase = session?.modeSnapshots.task?.phase ?? 'idle';
   const normalizedPhase = normalizeTaskPhase(phase);
+  const meta = session?.modeRuntimeMeta?.task;
+  const capabilities: ChatControlCapabilities | null = meta?.controlCapabilities ?? null;
   const isActive = isWorkflowModeActive({
     mode: 'task',
     currentMode: session?.activeMode ?? 'chat',
@@ -117,6 +121,8 @@ export function selectKernelTaskRuntime(session: WorkflowSession | null): Kernel
     pendingPrompt: normalizePendingPrompt(pendingInterview?.question),
     pendingInterview,
     interviewId: pendingInterview?.interviewId ?? null,
+    canCancel: isActive && !isKernelPhaseTerminal(phase) && !!capabilities?.canCancel,
+    blockReason: meta?.blockReason ?? null,
   };
 }
 

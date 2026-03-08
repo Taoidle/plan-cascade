@@ -4,7 +4,9 @@ use crate::services::workflow_kernel::{
     WorkflowMode, WorkflowModeTranscriptUpdatedEvent, WorkflowSessionCatalogUpdatedEvent,
     WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL, WORKFLOW_SESSION_CATALOG_UPDATED_CHANNEL,
 };
+use futures_util::FutureExt;
 use serde_json::{json, Value};
+use std::panic::AssertUnwindSafe;
 
 fn transcript_timestamp() -> u64 {
     std::time::SystemTime::now()
@@ -29,28 +31,6 @@ fn build_card_transcript_line(card_type: &str, data: Value, interactive: bool) -
         "timestamp": timestamp,
         "cardPayload": card_payload,
     })
-}
-
-fn gate_overall_status(
-    gate_results: &[crate::services::quality_gates::pipeline::PipelineGateResult],
-) -> &'static str {
-    if gate_results.iter().any(|gate| {
-        matches!(
-            gate.status,
-            crate::models::quality_gates::GateStatus::Failed
-        )
-    }) {
-        "failed"
-    } else if gate_results.iter().all(|gate| {
-        matches!(
-            gate.status,
-            crate::models::quality_gates::GateStatus::Skipped
-        )
-    }) {
-        "skipped"
-    } else {
-        "passed"
-    }
 }
 
 fn build_task_progress_transcript_lines(
@@ -116,7 +96,10 @@ fn build_task_progress_transcript_lines(
                         json!({
                             "storyId": story_id,
                             "storyTitle": story_title,
-                            "overallStatus": gate_overall_status(gate_results),
+                            "overallStatus": event.gate_summary.as_ref().map(|summary| summary.overall_status.clone()).unwrap_or_else(|| "passed".to_string()),
+                            "blockingStatus": event.gate_summary.as_ref().map(|summary| summary.blocking_status.clone()).unwrap_or_else(|| "passed".to_string()),
+                            "softFailedGateCount": event.gate_summary.as_ref().map(|summary| summary.soft_failed_gate_count).unwrap_or(0),
+                            "gateSource": event.gate_summary.as_ref().map(|summary| summary.gate_source.clone()).unwrap_or_else(|| "skipped".to_string()),
                             "gates": gate_results,
                             "codeReviewScores": [],
                         }),
@@ -280,6 +263,7 @@ pub async fn approve_task_prd(
     state: tauri::State<'_, TaskModeState>,
     kernel_state: tauri::State<'_, WorkflowKernelState>,
     app_state: tauri::State<'_, AppState>,
+    permission_state: tauri::State<'_, crate::commands::permissions::PermissionState>,
     knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
     plugin_state: tauri::State<'_, crate::commands::plugins::PluginState>,
 ) -> Result<CommandResponse<bool>, String> {
@@ -354,6 +338,7 @@ pub async fn approve_task_prd(
     // Build execution config from workflow config overrides
     let mut config = ExecutionConfig::default();
     if let Some(ref wc) = workflow_config {
+        config.quality_gates_enabled = wc.quality_gates_enabled;
         if let Some(max_p) = wc.max_parallel {
             config.max_parallel = max_p;
         }
@@ -381,6 +366,7 @@ pub async fn approve_task_prd(
                     session.locale = locale.clone();
                 }
                 session.execution_resume_payload = resume_payload.clone();
+                session.cancel_requested = false;
                 updated_session = Some(session.clone());
                 drop(sessions);
                 if let Some(snapshot) = updated_session.as_ref() {
@@ -442,6 +428,9 @@ pub async fn approve_task_prd(
                 } else {
                     None
                 };
+            let llm_provider = provider_config
+                .as_ref()
+                .map(|cfg| crate::services::task_mode::prd_generator::create_provider(cfg.clone()));
 
             // Determine execution mode:
             // - If explicitly specified, use that
@@ -568,261 +557,334 @@ pub async fn approve_task_prd(
 
             // Spawn background tokio task for batch execution
             let exec_config = config;
+            let permission_gate = permission_state.gate.clone();
             tokio::spawn(async move {
-                let executor = if let Some(progress) = resume_progress.clone() {
-                    BatchExecutor::new_with_resume_state(
-                        stories_for_exec,
-                        exec_config,
-                        cancellation_token,
-                        BatchExecutorResumeState {
-                            story_statuses: progress.story_statuses,
-                        },
-                    )
-                } else {
-                    BatchExecutor::new(stories_for_exec, exec_config, cancellation_token)
-                };
-                let resolver = match &phase_configs {
-                    Some(configs) if !configs.is_empty() => AgentResolver::new(
-                        build_agents_config_from_frontend(configs, global_default_agent.as_deref()),
-                    ),
-                    _ => AgentResolver::with_defaults(),
-                };
-
-                // Create emit callback that sends events via Tauri AppHandle
-                let app_for_emit = app_handle.clone();
-                let kernel_for_emit = kernel_state_handle.clone();
-                let sid_for_emit = sid.clone();
-                let completed_counter = Arc::new(AtomicU64::new(0));
-                let failed_counter = Arc::new(AtomicU64::new(0));
-                let current_story = Arc::new(Mutex::new(None::<String>));
-                let sessions_for_emit = sessions_arc.clone();
-                let state_for_emit = state_for_persist.clone();
-                let story_titles_for_emit = story_titles.clone();
-                let emit = move |event: TaskModeProgressEvent| {
-                    let _ = app_for_emit.emit(TASK_MODE_EVENT_CHANNEL, &event);
-
-                    match event.event_type.as_str() {
-                        "story_started" => {
-                            if let Ok(mut story) = current_story.lock() {
-                                *story = event.story_id.clone();
-                            }
-                        }
-                        "story_completed" => {
-                            completed_counter.fetch_add(1, Ordering::Relaxed);
-                            if let Ok(mut story) = current_story.lock() {
-                                *story = None;
-                            }
-                        }
-                        "story_failed" => {
-                            failed_counter.fetch_add(1, Ordering::Relaxed);
-                            if let Ok(mut story) = current_story.lock() {
-                                *story = None;
-                            }
-                        }
-                        _ => {}
-                    }
-
-                    let phase = match event.event_type.as_str() {
-                        "execution_completed" => "completed",
-                        "execution_cancelled" => "cancelled",
-                        "error" => "failed",
-                        _ => "executing",
-                    };
-                    let status = match event.event_type.as_str() {
-                        "execution_completed" => Some(WorkflowStatus::Completed),
-                        "execution_cancelled" => Some(WorkflowStatus::Cancelled),
-                        "error" => Some(WorkflowStatus::Failed),
-                        _ => None,
-                    };
-                    let current_story_id = if event.event_type == "story_started" {
-                        event.story_id.clone()
-                    } else if event.event_type == "story_completed"
-                        || event.event_type == "story_failed"
-                    {
-                        None
+                let sid_for_worker = sid.clone();
+                let sessions_arc_for_worker = sessions_arc.clone();
+                let permission_gate_for_worker = permission_gate.clone();
+                let app_handle_for_worker = app_handle.clone();
+                let state_for_persist_for_worker = state_for_persist.clone();
+                let kernel_state_handle_for_worker = kernel_state_handle.clone();
+                let story_titles_for_worker = story_titles.clone();
+                let tokens_arc_for_worker = tokens_arc.clone();
+                let worker = async move {
+                    let executor = if let Some(progress) = resume_progress.clone() {
+                        BatchExecutor::new_with_resume_state(
+                            stories_for_exec,
+                            exec_config,
+                            cancellation_token,
+                            BatchExecutorResumeState {
+                                story_statuses: progress.story_statuses,
+                            },
+                        )
                     } else {
-                        current_story.lock().ok().and_then(|story| story.clone())
+                        BatchExecutor::new(stories_for_exec, exec_config, cancellation_token)
                     };
-                    let completed = completed_counter.load(Ordering::Relaxed);
-                    let failed = failed_counter.load(Ordering::Relaxed);
-                    let kernel_for_emit = kernel_for_emit.clone();
-                    let app_for_emit = app_for_emit.clone();
-                    let sid_for_emit = sid_for_emit.clone();
-                    let sessions_for_emit = sessions_for_emit.clone();
-                    let state_for_emit = state_for_emit.clone();
-                    let event_for_persist = event.clone();
-                    let story_titles_for_emit = story_titles_for_emit.clone();
-                    tokio::spawn(async move {
+                    let executor = if let Some(provider) = llm_provider.clone() {
+                        executor.with_llm_provider(provider)
+                    } else {
+                        executor
+                    };
+                    let resolver = match &phase_configs {
+                        Some(configs) if !configs.is_empty() => AgentResolver::new(
+                            build_agents_config_from_frontend(
+                                configs,
+                                global_default_agent.as_deref(),
+                            ),
+                        ),
+                        _ => AgentResolver::with_defaults(),
+                    };
+
+                    // Create emit callback that sends events via Tauri AppHandle
+                    let app_for_emit = app_handle_for_worker.clone();
+                    let kernel_for_emit = kernel_state_handle_for_worker.clone();
+                    let sid_for_emit = sid_for_worker.clone();
+                    let completed_counter = Arc::new(AtomicU64::new(0));
+                    let failed_counter = Arc::new(AtomicU64::new(0));
+                    let current_story = Arc::new(Mutex::new(None::<String>));
+                    let sessions_for_emit = sessions_arc_for_worker.clone();
+                    let state_for_emit = state_for_persist_for_worker.clone();
+                    let story_titles_for_emit = story_titles_for_worker.clone();
+                    let emit = move |event: TaskModeProgressEvent| {
+                        let _ = app_for_emit.emit(TASK_MODE_EVENT_CHANNEL, &event);
+
+                        match event.event_type.as_str() {
+                            "story_started" => {
+                                if let Ok(mut story) = current_story.lock() {
+                                    *story = event.story_id.clone();
+                                }
+                            }
+                            "story_completed" => {
+                                completed_counter.fetch_add(1, Ordering::Relaxed);
+                                if let Ok(mut story) = current_story.lock() {
+                                    *story = None;
+                                }
+                            }
+                            "story_failed" => {
+                                failed_counter.fetch_add(1, Ordering::Relaxed);
+                                if let Ok(mut story) = current_story.lock() {
+                                    *story = None;
+                                }
+                            }
+                            _ => {}
+                        }
+
+                        let phase = match event.event_type.as_str() {
+                            "execution_completed" => "completed",
+                            "execution_cancelled" => "cancelled",
+                            "error" => "failed",
+                            _ => "executing",
+                        };
+                        let status = match event.event_type.as_str() {
+                            "execution_completed" => Some(WorkflowStatus::Completed),
+                            "execution_cancelled" => Some(WorkflowStatus::Cancelled),
+                            "error" => Some(WorkflowStatus::Failed),
+                            _ => None,
+                        };
+                        let current_story_id = if event.event_type == "story_started" {
+                            event.story_id.clone()
+                        } else if event.event_type == "story_completed"
+                            || event.event_type == "story_failed"
                         {
-                            let mut sessions = sessions_for_emit.write().await;
-                            if let Some(session) = sessions.get_mut(&sid_for_emit) {
-                                apply_progress_event_to_session(session, &event_for_persist);
-                                let snapshot = session.clone();
-                                drop(sessions);
-                                persist_task_session_best_effort(
-                                    &state_for_emit,
-                                    &snapshot,
-                                    "approve_task_prd.progress_event",
+                            None
+                        } else {
+                            current_story.lock().ok().and_then(|story| story.clone())
+                        };
+                        let completed = completed_counter.load(Ordering::Relaxed);
+                        let failed = failed_counter.load(Ordering::Relaxed);
+                        let kernel_for_emit = kernel_for_emit.clone();
+                        let app_for_emit = app_for_emit.clone();
+                        let sid_for_emit = sid_for_emit.clone();
+                        let sessions_for_emit = sessions_for_emit.clone();
+                        let state_for_emit = state_for_emit.clone();
+                        let event_for_persist = event.clone();
+                        let story_titles_for_emit = story_titles_for_emit.clone();
+                        tokio::spawn(async move {
+                            {
+                                let mut sessions = sessions_for_emit.write().await;
+                                if let Some(session) = sessions.get_mut(&sid_for_emit) {
+                                    apply_progress_event_to_session(session, &event_for_persist);
+                                    let snapshot = session.clone();
+                                    drop(sessions);
+                                    persist_task_session_best_effort(
+                                        &state_for_emit,
+                                        &snapshot,
+                                        "approve_task_prd.progress_event",
+                                    )
+                                    .await;
+                                }
+                            }
+                            let kernel_session_ids = kernel_for_emit
+                                .sync_task_snapshot_by_linked_session(
+                                    &sid_for_emit,
+                                    Some(phase.to_string()),
+                                    current_story_id,
+                                    Some(completed),
+                                    Some(failed),
+                                    status,
+                                    None,
+                                )
+                                .await
+                                .unwrap_or_default();
+                            emit_kernel_updates(
+                                &app_for_emit,
+                                &kernel_for_emit,
+                                &kernel_session_ids,
+                                "task_mode.approve_task_prd.progress_event",
+                            )
+                            .await;
+                            append_task_transcript_lines_for_linked_sessions(
+                                &app_for_emit,
+                                &kernel_for_emit,
+                                &sid_for_emit,
+                                build_task_progress_transcript_lines(
+                                    &event_for_persist,
+                                    &story_titles_for_emit,
+                                ),
+                                "task_mode.approve_task_prd.progress_event",
+                            )
+                            .await;
+                        });
+                    };
+
+                    let project_path = std::path::PathBuf::from(project_path_str.clone());
+
+                    // Create story executor that delegates to the appropriate backend.
+                    // In CLI mode, spawns external CLI tools. In LLM mode, uses OrchestratorService.
+                    let permission_gate_for_story = permission_gate_for_worker.clone();
+                    let story_executor = build_story_executor(
+                        app_handle_for_worker.clone(),
+                        sid_for_worker.clone(),
+                        kernel_state_handle_for_worker.clone(),
+                        mode,
+                        provider_config,
+                        permission_gate_for_story,
+                        db_pool,
+                        knowledge_block,
+                        memory_block,
+                        skills_block,
+                        selected_skill_matches,
+                        knowledge_tool_params,
+                    );
+
+                    let result = executor
+                        .execute(&sid_for_worker, &resolver, project_path, emit, story_executor)
+                        .await;
+
+                    // Update session state based on result
+                    let mut kernel_snapshot: Option<TaskModeSession> = None;
+                    let mut sessions = sessions_arc_for_worker.write().await;
+                    if let Some(session) = sessions.get_mut(&sid_for_worker) {
+                        match &result {
+                            Ok(exec_result) => {
+                                // Update progress
+                                session.progress = Some(executor.get_progress().await);
+                                session.cancel_requested = false;
+
+                                if exec_result.cancelled {
+                                    session.status = TaskModeStatus::Cancelled;
+                                } else if exec_result.success {
+                                    session.status = TaskModeStatus::Completed;
+                                } else {
+                                    session.status = TaskModeStatus::Failed;
+                                }
+
+                                // Store the result
+                                let mut results = results_arc.write().await;
+                                results.insert(sid_for_worker.clone(), exec_result.clone());
+                                kernel_snapshot = Some(session.clone());
+                            }
+                            Err(_) => {
+                                session.status = TaskModeStatus::Failed;
+                                session.cancel_requested = false;
+                                kernel_snapshot = Some(session.clone());
+                            }
+                        }
+                    }
+                    drop(sessions);
+                    permission_gate_for_worker
+                        .cancel_session_requests(&sid_for_worker)
+                        .await;
+                    if let Some(snapshot) = kernel_snapshot.as_ref() {
+                        persist_task_session_best_effort(
+                            &state_for_persist_for_worker,
+                            snapshot,
+                            "approve_task_prd.execution_terminal",
+                        )
+                        .await;
+                        sync_kernel_task_snapshot_and_emit(
+                            &app_handle_for_worker,
+                            &kernel_state_handle_for_worker,
+                            snapshot,
+                            None,
+                            "task_mode.approve_task_prd.execution_terminal",
+                        )
+                        .await;
+                        match &result {
+                            Ok(exec_result) => {
+                                super::publish_task_handoff_summary(
+                                    &kernel_state_handle_for_worker,
+                                    snapshot.kernel_session_id.as_deref(),
+                                    super::build_task_execution_summary_item(
+                                        snapshot,
+                                        Some(exec_result),
+                                        None,
+                                    ),
+                                )
+                                .await;
+                            }
+                            Err(error) => {
+                                super::publish_task_handoff_summary(
+                                    &kernel_state_handle_for_worker,
+                                    snapshot.kernel_session_id.as_deref(),
+                                    super::build_task_execution_summary_item(
+                                        snapshot,
+                                        None,
+                                        Some(error.to_string()),
+                                    ),
                                 )
                                 .await;
                             }
                         }
-                        let kernel_session_ids = kernel_for_emit
-                            .sync_task_snapshot_by_linked_session(
-                                &sid_for_emit,
-                                Some(phase.to_string()),
-                                current_story_id,
-                                Some(completed),
-                                Some(failed),
-                                status,
-                            )
-                            .await
-                            .unwrap_or_default();
-                        emit_kernel_updates(
-                            &app_for_emit,
-                            &kernel_for_emit,
-                            &kernel_session_ids,
-                            "task_mode.approve_task_prd.progress_event",
-                        )
-                        .await;
-                        append_task_transcript_lines_for_linked_sessions(
-                            &app_for_emit,
-                            &kernel_for_emit,
-                            &sid_for_emit,
-                            build_task_progress_transcript_lines(
-                                &event_for_persist,
-                                &story_titles_for_emit,
-                            ),
-                            "task_mode.approve_task_prd.progress_event",
-                        )
-                        .await;
-                    });
-                };
-
-                let project_path = std::path::PathBuf::from(project_path_str.clone());
-
-                // Create story executor that delegates to the appropriate backend.
-                // In CLI mode, spawns external CLI tools. In LLM mode, uses OrchestratorService.
-                let story_executor = build_story_executor(
-                    app_handle.clone(),
-                    mode,
-                    provider_config,
-                    db_pool,
-                    knowledge_block,
-                    memory_block,
-                    skills_block,
-                    selected_skill_matches,
-                    knowledge_tool_params,
-                );
-
-                let result = executor
-                    .execute(&sid, &resolver, project_path, emit, story_executor)
-                    .await;
-
-                // Update session state based on result
-                let mut kernel_snapshot: Option<TaskModeSession> = None;
-                let mut sessions = sessions_arc.write().await;
-                if let Some(session) = sessions.get_mut(&sid) {
-                    match &result {
-                        Ok(exec_result) => {
-                            // Update progress
-                            session.progress = Some(executor.get_progress().await);
-
-                            if exec_result.cancelled {
-                                session.status = TaskModeStatus::Cancelled;
-                            } else if exec_result.success {
-                                session.status = TaskModeStatus::Completed;
-                            } else {
-                                session.status = TaskModeStatus::Failed;
-                            }
-
-                            // Store the result
-                            let mut results = results_arc.write().await;
-                            results.insert(sid.clone(), exec_result.clone());
-                            kernel_snapshot = Some(session.clone());
-                        }
-                        Err(_) => {
-                            session.status = TaskModeStatus::Failed;
-                            kernel_snapshot = Some(session.clone());
-                        }
                     }
-                }
-                drop(sessions);
-                if let Some(snapshot) = kernel_snapshot.as_ref() {
-                    persist_task_session_best_effort(
-                        &state_for_persist,
-                        snapshot,
-                        "approve_task_prd.execution_terminal",
-                    )
-                    .await;
-                    sync_kernel_task_snapshot_and_emit(
-                        &app_handle,
-                        &kernel_state_handle,
-                        snapshot,
-                        None,
-                        "task_mode.approve_task_prd.execution_terminal",
-                    )
-                    .await;
                     match &result {
                         Ok(exec_result) => {
-                            super::publish_task_handoff_summary(
-                                &kernel_state_handle,
-                                snapshot.kernel_session_id.as_deref(),
-                                super::build_task_execution_summary_item(
-                                    snapshot,
-                                    Some(exec_result),
-                                    None,
-                                ),
+                            append_task_transcript_lines_for_linked_sessions(
+                                &app_handle_for_worker,
+                                &kernel_state_handle_for_worker,
+                                &sid_for_worker,
+                                vec![build_task_completion_transcript_line(exec_result)],
+                                "task_mode.approve_task_prd.execution_terminal",
                             )
                             .await;
                         }
                         Err(error) => {
-                            super::publish_task_handoff_summary(
-                                &kernel_state_handle,
-                                snapshot.kernel_session_id.as_deref(),
-                                super::build_task_execution_summary_item(
-                                    snapshot,
-                                    None,
-                                    Some(error.to_string()),
-                                ),
+                            append_task_transcript_lines_for_linked_sessions(
+                                &app_handle_for_worker,
+                                &kernel_state_handle_for_worker,
+                                &sid_for_worker,
+                                vec![build_card_transcript_line(
+                                    "workflow_error",
+                                    json!({
+                                        "title": "Execution Error",
+                                        "description": error.to_string(),
+                                        "suggestedFix": Value::Null,
+                                    }),
+                                    false,
+                                )],
+                                "task_mode.approve_task_prd.execution_terminal",
                             )
                             .await;
                         }
                     }
-                }
-                match &result {
-                    Ok(exec_result) => {
-                        append_task_transcript_lines_for_linked_sessions(
-                            &app_handle,
-                            &kernel_state_handle,
-                            &sid,
-                            vec![build_task_completion_transcript_line(exec_result)],
-                            "task_mode.approve_task_prd.execution_terminal",
-                        )
-                        .await;
-                    }
-                    Err(error) => {
-                        append_task_transcript_lines_for_linked_sessions(
-                            &app_handle,
-                            &kernel_state_handle,
-                            &sid,
-                            vec![build_card_transcript_line(
-                                "workflow_error",
-                                json!({
-                                    "title": "Execution Error",
-                                    "description": error.to_string(),
-                                    "suggestedFix": Value::Null,
-                                }),
-                                false,
-                            )],
-                            "task_mode.approve_task_prd.execution_terminal",
-                        )
-                        .await;
-                    }
-                }
 
-                let mut tokens = tokens_arc.write().await;
-                tokens.remove(&sid);
+                    let mut tokens = tokens_arc_for_worker.write().await;
+                    tokens.remove(&sid_for_worker);
+                };
+
+                if AssertUnwindSafe(worker).catch_unwind().await.is_err() {
+                    let panic_message = "Task execution panicked";
+                    let mut kernel_snapshot: Option<TaskModeSession> = None;
+                    let mut sessions = sessions_arc.write().await;
+                    if let Some(session) = sessions.get_mut(&sid) {
+                        session.status = TaskModeStatus::Failed;
+                        session.cancel_requested = false;
+                        kernel_snapshot = Some(session.clone());
+                    }
+                    drop(sessions);
+
+                    permission_gate.cancel_session_requests(&sid).await;
+                    let panic_event = TaskModeProgressEvent::error(&sid, panic_message);
+                    let _ = app_handle.emit(TASK_MODE_EVENT_CHANNEL, &panic_event);
+
+                    if let Some(snapshot) = kernel_snapshot.as_ref() {
+                        persist_task_session_best_effort(
+                            &state_for_persist,
+                            snapshot,
+                            "approve_task_prd.execution_panic",
+                        )
+                        .await;
+                        sync_kernel_task_snapshot_and_emit(
+                            &app_handle,
+                            &kernel_state_handle,
+                            snapshot,
+                            Some("failed"),
+                            "task_mode.approve_task_prd.execution_panic",
+                        )
+                        .await;
+                        append_task_transcript_lines_for_linked_sessions(
+                            &app_handle,
+                            &kernel_state_handle,
+                            &sid,
+                            build_task_progress_transcript_lines(&panic_event, &story_titles),
+                            "task_mode.approve_task_prd.execution_panic",
+                        )
+                        .await;
+                    }
+
+                    let mut tokens = tokens_arc.write().await;
+                    tokens.remove(&sid);
+                }
             });
 
             Ok(CommandResponse::ok(true))
@@ -880,11 +942,12 @@ pub async fn cancel_task_execution(
     session_id: String,
     state: tauri::State<'_, TaskModeState>,
     kernel_state: tauri::State<'_, WorkflowKernelState>,
+    permission_state: tauri::State<'_, crate::commands::permissions::PermissionState>,
     app_handle: tauri::AppHandle,
 ) -> Result<CommandResponse<bool>, String> {
     let session_snapshot = {
-        let sessions = state.sessions.read().await;
-        let session = match sessions.get(&session_id) {
+        let mut sessions = state.sessions.write().await;
+        let session = match sessions.get_mut(&session_id) {
             Some(s) => s,
             _ => {
                 return Ok(CommandResponse::err(
@@ -895,28 +958,57 @@ pub async fn cancel_task_execution(
         if session.status != TaskModeStatus::Executing {
             return Ok(CommandResponse::err("No execution in progress to cancel"));
         }
-        session.clone()
+        session.cancel_requested = true;
+        let snapshot = session.clone();
+        drop(sessions);
+        persist_task_session_best_effort(
+            &state,
+            &snapshot,
+            "task_mode.cancel_task_execution.requested",
+        )
+        .await;
+        snapshot
     };
 
     // Trigger the cancellation token
     let ct = state.cancellation_tokens.read().await;
     if let Some(token) = ct.get(&session_id) {
         token.cancel();
-    } else {
-        return Ok(CommandResponse::err("No execution in progress to cancel"));
     }
+    drop(ct);
+
+    permission_state
+        .gate
+        .cancel_session_requests(&session_id)
+        .await;
 
     sync_kernel_task_snapshot_and_emit(
         &app_handle,
         kernel_state.inner(),
         &session_snapshot,
-        Some("executing"),
+        Some("cancelled"),
         "task_mode.cancel_task_execution.requested",
     )
     .await;
 
-    // Note: The background task will update session.status to Cancelled
-    // when it detects the cancellation token.
+    let _ = app_handle.emit(
+        TASK_MODE_EVENT_CHANNEL,
+        TaskModeProgressEvent {
+            session_id,
+            event_type: "permission_requests_cleared".to_string(),
+            current_batch: 0,
+            total_batches: 0,
+            story_id: None,
+            story_status: None,
+            agent_name: None,
+            gate_results: None,
+            gate_summary: None,
+            permission_request: None,
+            error: None,
+            progress_pct: 0.0,
+        },
+    );
+
     Ok(CommandResponse::ok(true))
 }
 

@@ -19,6 +19,7 @@ export const TASK_PHASES = [
   'architecture_review',
   'generating_design_doc',
   'executing',
+  'paused',
   'completed',
   'failed',
   'cancelled',
@@ -64,6 +65,7 @@ const TASK_BUSY_PHASES = new Set<TaskPhase>([
   'generating_prd',
   'generating_design_doc',
   'executing',
+  'paused',
 ]);
 const PLAN_BUSY_PHASES = new Set<PlanPhase>(['analyzing', 'planning', 'executing']);
 const TERMINAL_PHASES = new Set<string>(['idle', 'completed', 'failed', 'cancelled']);

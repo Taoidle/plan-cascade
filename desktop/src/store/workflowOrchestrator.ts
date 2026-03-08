@@ -20,6 +20,7 @@ import {
   type TaskPrd,
   type StrategyAnalysis,
   type GateResult,
+  type GateStatus,
   type ExecutionReport,
   type StoryQualityGateResults,
   type PrdFeedbackApplySummary,
@@ -28,7 +29,6 @@ import { useSpecInterviewStore, type InterviewQuestion } from './specInterview';
 import { useSettingsStore } from './settings';
 import { useWorkflowKernelStore } from './workflowKernel';
 import { selectKernelTaskRuntime } from './workflowKernelSelectors';
-import { deriveGateOverallStatus } from '../lib/gateStatus';
 import { parseWorkflowConfigNatural } from '../lib/workflowConfigNaturalParser';
 import { failResult, okResult, type ActionResult } from '../types/actionResult';
 import { applyArchitectureModifications } from './workflowOrchestrator/architectureModifications';
@@ -529,9 +529,7 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
           { flowLevel: config.flowLevel },
           {
             mapInterviewQuestion,
-            runRequirementPhase: async (runtime) => {
-              await runRequirementPhase(runtime, {});
-            },
+            runRequirementPhase: async (runtime) => runRequirementPhase(runtime, {}),
             runPrdPhase: async (runtime) =>
               runPrdPhase(runtime, {
                 toPrdCardData,
@@ -544,9 +542,12 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
         }
       } else {
         // Skip interview, run requirement analysis then generate PRD
-        await runRequirementPhase(phaseRuntime, {});
+        const requirementResult = await runRequirementPhase(phaseRuntime, {});
         if (!isRunActive(get, runToken)) {
           return failResult('stale_run_token', 'Configuration request was superseded');
+        }
+        if (!requirementResult.ok) {
+          return requirementResult;
         }
         const prdResult = await runPrdPhase(phaseRuntime, {
           toPrdCardData,
@@ -662,8 +663,9 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       if (compiled) {
         // Advance to requirement analysis then PRD generation
         const phaseRuntime = buildPhaseRuntime(set, get, runToken);
-        await runRequirementPhase(phaseRuntime, {});
+        const requirementResult = await runRequirementPhase(phaseRuntime, {});
         if (!isRunActive(get, runToken)) return;
+        if (!requirementResult.ok) return;
         await runPrdPhase(phaseRuntime, {
           toPrdCardData,
           synthesizePlanningTurn: synthesizePlanningTurnForPrdPhase,
@@ -706,8 +708,9 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       'warning',
     );
     const phaseRuntime = buildPhaseRuntime(set, get, runToken);
-    await runRequirementPhase(phaseRuntime, {});
+    const requirementResult = await runRequirementPhase(phaseRuntime, {});
     if (!isRunActive(get, runToken)) return;
+    if (!requirementResult.ok) return;
     await runPrdPhase(phaseRuntime, {
       toPrdCardData,
       synthesizePlanningTurn: synthesizePlanningTurnForPrdPhase,
@@ -755,8 +758,9 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       if (!isRunActive(get, runToken)) return;
       if (compiled) {
         const phaseRuntime = buildPhaseRuntime(set, get, runToken);
-        await runRequirementPhase(phaseRuntime, {});
+        const requirementResult = await runRequirementPhase(phaseRuntime, {});
         if (!isRunActive(get, runToken)) return;
+        if (!requirementResult.ok) return;
         await runPrdPhase(phaseRuntime, {
           toPrdCardData,
           synthesizePlanningTurn: synthesizePlanningTurnForPrdPhase,
@@ -798,8 +802,9 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       'warning',
     );
     const phaseRuntime = buildPhaseRuntime(set, get, runToken);
-    await runRequirementPhase(phaseRuntime, {});
+    const requirementResult = await runRequirementPhase(phaseRuntime, {});
     if (!isRunActive(get, runToken)) return;
+    if (!requirementResult.ok) return;
     await runPrdPhase(phaseRuntime, {
       toPrdCardData,
       synthesizePlanningTurn: synthesizePlanningTurnForPrdPhase,
@@ -834,15 +839,10 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     // Non-quick flow: run architecture review (interactive — returns after injecting card)
     if (state.config.flowLevel !== 'quick') {
       const phaseRuntime = buildPhaseRuntime(set, get, runToken);
-      await runArchitecturePhase(phaseRuntime, prd, {
-        runDesignDocAndExecutionPhase: async (runtime, runtimePrd) =>
-          runDesignDocAndExecutionPhase(runtime, runtimePrd, {
-            subscribeToProgressEvents: subscribeToTaskProgressFromRuntime,
-          }),
-      });
+      const architectureResult = await runArchitecturePhase(phaseRuntime, prd, {});
       // Architecture review is interactive — user clicks Accept/Revise in the card.
       // The continuation happens in approveArchitecture() action.
-      if (get().phase === 'failed') {
+      if (!architectureResult.ok || get().phase === 'failed') {
         return failResult('architecture_review_failed', get().error || 'Architecture review failed');
       }
       return okResult();
@@ -987,11 +987,12 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
   cancelWorkflow: async () => {
     const { phase, sessionId, _runToken } = get();
     const effectiveSessionId = resolveTaskSessionId(get, set);
+    const kernelTaskRuntime = selectKernelTaskRuntime(useWorkflowKernelStore.getState().session);
     if (!sessionId && effectiveSessionId) {
       set({ sessionId: effectiveSessionId });
     }
 
-    if (phase === 'executing' && effectiveSessionId) {
+    if (effectiveSessionId && (kernelTaskRuntime.isBusy || phase === 'executing' || phase === 'paused')) {
       if (get().isCancelling) return;
       set({ isCancelling: true, error: null });
       const cancelled = await useTaskModeStore.getState().cancelExecution(effectiveSessionId);
@@ -1101,6 +1102,19 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
       storyStatus: string | null;
       agentName: string | null;
       gateResults: GateResult[] | null;
+      gateSummary: {
+        overallStatus: GateStatus;
+        blockingStatus: 'passed' | 'failed';
+        softFailedGateCount: number;
+        gateSource: 'llm' | 'fallback_heuristic' | 'skipped' | 'mixed';
+      } | null;
+      permissionRequest: {
+        requestId: string;
+        sessionId: string;
+        toolName: string;
+        arguments: string;
+        risk: 'ReadOnly' | 'SafeWrite' | 'Dangerous';
+      } | null;
       error: string | null;
       progressPct: number;
     }>('task-mode-progress', (event) => {
@@ -1127,7 +1141,10 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
           ...state.qualityGateResults,
           [payload.storyId]: {
             storyId: payload.storyId,
-            overallStatus: deriveGateOverallStatus(payload.gateResults),
+            overallStatus: payload.gateSummary?.overallStatus ?? 'passed',
+            blockingStatus: payload.gateSummary?.blockingStatus ?? 'passed',
+            softFailedGateCount: payload.gateSummary?.softFailedGateCount ?? 0,
+            gateSource: payload.gateSummary?.gateSource ?? 'skipped',
             gates: payload.gateResults,
           },
         };
@@ -1190,7 +1207,10 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
             injectCard('gate_result', {
               storyId: payload.storyId,
               storyTitle: storyTitle ?? payload.storyId,
-              overallStatus: deriveGateOverallStatus(payload.gateResults),
+              overallStatus: payload.gateSummary?.overallStatus ?? 'passed',
+              blockingStatus: payload.gateSummary?.blockingStatus ?? 'passed',
+              softFailedGateCount: payload.gateSummary?.softFailedGateCount ?? 0,
+              gateSource: payload.gateSummary?.gateSource ?? 'skipped',
               gates: payload.gateResults,
               codeReviewScores: [],
             } as GateResultCardData);
@@ -1216,12 +1236,35 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
             injectCard('gate_result', {
               storyId: payload.storyId,
               storyTitle: storyTitle ?? payload.storyId,
-              overallStatus: deriveGateOverallStatus(payload.gateResults),
+              overallStatus: payload.gateSummary?.overallStatus ?? 'failed',
+              blockingStatus: payload.gateSummary?.blockingStatus ?? 'failed',
+              softFailedGateCount: payload.gateSummary?.softFailedGateCount ?? 0,
+              gateSource: payload.gateSummary?.gateSource ?? 'skipped',
               gates: payload.gateResults,
               codeReviewScores: [],
             } as GateResultCardData);
           }
           set(orchestratorPatch as Partial<WorkflowOrchestratorState>);
+          break;
+        }
+
+        case 'tool_permission_request': {
+          if (payload.permissionRequest) {
+            void import('./toolPermission').then(({ useToolPermissionStore }) => {
+              useToolPermissionStore.getState().enqueueRequest(payload.permissionRequest!);
+            });
+          }
+          break;
+        }
+
+        case 'permission_requests_cleared': {
+          const sessionId =
+            state.sessionId ?? selectKernelTaskRuntime(useWorkflowKernelStore.getState().session).linkedSessionId;
+          if (sessionId) {
+            void import('./toolPermission').then(({ useToolPermissionStore }) => {
+              useToolPermissionStore.getState().clearSessionRequests(sessionId);
+            });
+          }
           break;
         }
 

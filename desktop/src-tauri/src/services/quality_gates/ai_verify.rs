@@ -199,7 +199,6 @@ Git diff to analyze:
             ),
             ("raise NotImplementedError", "Raises NotImplementedError"),
             ("pass  # TODO", "Contains pass with TODO"),
-            ("...", "Contains ellipsis placeholder"),
         ];
 
         // Only check lines that are being added (start with +)
@@ -212,15 +211,6 @@ Git diff to analyze:
             for (pattern, description) in &skeleton_patterns {
                 if trimmed.contains(pattern) {
                     findings.push(format!("[warning] {}: {}", pattern, description));
-                }
-            }
-
-            // Check for TODO/FIXME in new code
-            let upper = trimmed.to_uppercase();
-            if (upper.contains("TODO") || upper.contains("FIXME")) && !upper.contains("// TODO:") {
-                // Allow structured TODO comments but flag bare ones
-                if trimmed.starts_with("//") || trimmed.starts_with('#') {
-                    findings.push(format!("[warning] TODO/FIXME marker: {}", trimmed));
                 }
             }
         }

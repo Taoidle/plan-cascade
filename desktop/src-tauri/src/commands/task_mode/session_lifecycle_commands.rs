@@ -67,6 +67,7 @@ pub async fn enter_task_mode(
         exploration_result: None,
         progress: None,
         execution_resume_payload: None,
+        cancel_requested: false,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
 

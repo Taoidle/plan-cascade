@@ -11,15 +11,31 @@ import type { GateStatus } from '../../../store/taskMode';
 
 export function GateResultCard({ data }: { data: GateResultCardData }) {
   const { t } = useTranslation('simpleMode');
-  const isPassed = data.overallStatus === 'passed';
+  const { t: tTask } = useTranslation('taskMode');
+  const blockingStatus = data.blockingStatus ?? (data.overallStatus === 'failed' ? 'failed' : 'passed');
+  const softFailedGateCount = data.softFailedGateCount ?? 0;
+  const gateSource = data.gateSource ?? 'skipped';
+  const isWarning = blockingStatus === 'passed' && softFailedGateCount > 0;
+  const isPassed = blockingStatus === 'passed' && !isWarning;
+  const statusTone = isPassed ? 'passed' : isWarning ? 'warning' : 'failed';
+  const overallStatusLabel = isWarning
+    ? tTask('qualityGates.status.warning', { defaultValue: 'Warning' })
+    : tTask(`qualityGates.status.${data.overallStatus}`, {
+        defaultValue: t(`workflow.gates.${data.overallStatus}`, { defaultValue: data.overallStatus }),
+      });
+  const gateSourceLabel = tTask(`qualityGates.source.${gateSource}`, {
+    defaultValue: gateSource,
+  });
 
   return (
     <div
       className={clsx(
         'rounded-lg border px-3 py-2',
-        isPassed
+        statusTone === 'passed'
           ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20'
-          : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20',
+          : statusTone === 'warning'
+            ? 'border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20'
+            : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20',
       )}
     >
       <div className="flex items-center justify-between">
@@ -28,7 +44,11 @@ export function GateResultCard({ data }: { data: GateResultCardData }) {
           <span
             className={clsx(
               'text-xs font-medium',
-              isPassed ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300',
+              statusTone === 'passed'
+                ? 'text-green-700 dark:text-green-300'
+                : statusTone === 'warning'
+                  ? 'text-amber-700 dark:text-amber-300'
+                  : 'text-red-700 dark:text-red-300',
             )}
           >
             {t('workflow.gates.qualityGate', { title: data.storyTitle })}
@@ -37,14 +57,27 @@ export function GateResultCard({ data }: { data: GateResultCardData }) {
         <span
           className={clsx(
             'text-2xs px-1.5 py-0.5 rounded font-medium',
-            isPassed
+            statusTone === 'passed'
               ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
-              : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400',
+              : statusTone === 'warning'
+                ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+                : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400',
           )}
         >
-          {data.overallStatus}
+          {overallStatusLabel}
         </span>
       </div>
+
+      {(softFailedGateCount > 0 || gateSource !== 'skipped') && (
+        <div className="mt-1 text-2xs text-gray-600 dark:text-gray-300">
+          {isWarning
+            ? tTask('qualityGates.softFailures', {
+                defaultValue: '{{count}} soft failures',
+                count: softFailedGateCount,
+              })
+            : gateSourceLabel}
+        </div>
+      )}
 
       {/* Individual gates */}
       {data.gates.length > 0 && (
@@ -53,9 +86,9 @@ export function GateResultCard({ data }: { data: GateResultCardData }) {
             <span
               key={gate.gateId}
               className={clsx('text-2xs px-1.5 py-0.5 rounded', gateStatusColor(gate.status))}
-              title={gate.message || gate.gateName}
+              title={[localizePhase(tTask, gate.phase), gate.message || gate.gateName].filter(Boolean).join(' · ')}
             >
-              {gate.gateName}: {gate.status}
+              {localizeGateName(tTask, gate.gateId, gate.gateName)}: {localizeStatus(tTask, gate.status)}
             </span>
           ))}
         </div>
@@ -102,6 +135,12 @@ function StatusIcon({ status }: { status: GateStatus }) {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
         </svg>
       );
+    case 'skipped':
+      return (
+        <svg className={clsx(cls, 'text-amber-500')} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14" />
+        </svg>
+      );
     default:
       return (
         <svg className={clsx(cls, 'text-gray-400')} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -117,11 +156,33 @@ function gateStatusColor(status: GateStatus): string {
       return 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400';
     case 'failed':
       return 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400';
+    case 'skipped':
+      return 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400';
     case 'running':
       return 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400';
-    case 'skipped':
-      return 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400';
     default:
       return 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400';
   }
+}
+
+function localizeStatus(tTask: ReturnType<typeof useTranslation>['t'], status: GateStatus): string {
+  return tTask(`qualityGates.status.${status}`, { defaultValue: status });
+}
+
+function localizePhase(tTask: ReturnType<typeof useTranslation>['t'], phase: string): string {
+  const phaseKey =
+    phase === 'pre_validation' ? 'preValidation' : phase === 'post_validation' ? 'postValidation' : 'validation';
+  return tTask(`qualityGates.phase.${phaseKey}`, { defaultValue: phase });
+}
+
+function localizeGateName(tTask: ReturnType<typeof useTranslation>['t'], gateId: string, fallback: string): string {
+  const key =
+    gateId === 'typecheck'
+      ? 'typeCheck'
+      : gateId === 'ai_verify'
+        ? 'aiVerify'
+        : gateId === 'code_review'
+          ? 'codeReview'
+          : gateId;
+  return tTask(`qualityGates.gate.${key}`, { defaultValue: fallback });
 }

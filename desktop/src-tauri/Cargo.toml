@@ -170,6 +170,7 @@ futures = { version = "0.3", optional = true }
 [dev-dependencies]
 # Testing
 tempfile = "3"
+tauri = { version = "2", features = ["test"] }
 
 [features]
 default = ["custom-protocol"]
@@ -182,7 +183,7 @@ browser = ["dep:chromiumoxide", "dep:futures"]
 openai-api-rs = { path = "vendor/openai-api-rs" }
 
 [profile.release]
-panic = "abort"
+panic = "unwind"
 codegen-units = 1
 lto = true
 opt-level = "s"

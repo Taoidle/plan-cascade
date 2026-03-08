@@ -88,8 +88,16 @@
       "running": "执行中",
       "passed": "通过",
       "failed": "失败",
-      "skipped": "跳过"
+      "skipped": "跳过",
+      "warning": "警告"
     },
+    "source": {
+      "llm": "LLM 校验",
+      "fallback_heuristic": "启发式降级",
+      "skipped": "已跳过",
+      "mixed": "混合来源"
+    },
+    "softFailures": "{{count}} 个软失败",
     "codeReview": {
       "title": "代码审查评分",
       "totalScore": "总分：{{score}} / 100",

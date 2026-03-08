@@ -2328,6 +2328,7 @@ impl WorkflowKernelState {
         completed_stories: Option<u64>,
         failed_stories: Option<u64>,
         status: Option<WorkflowStatus>,
+        block_reason: Option<String>,
     ) -> Result<Vec<String>, String> {
         let linked_kernel_sessions = self
             .kernel_sessions_linked_to_mode_session(WorkflowMode::Task, task_session_id)
@@ -2341,53 +2342,98 @@ impl WorkflowKernelState {
             for kernel_session_id in &linked_kernel_sessions {
                 if let Some(session) = sessions.get_mut(kernel_session_id) {
                     session.mode_snapshots.ensure_mode(WorkflowMode::Task);
-                    let task = session.mode_snapshots.task_mut();
-                    if let Some(next_phase) = phase
-                        .as_ref()
-                        .map(|value| value.trim())
-                        .filter(|value| !value.is_empty())
-                    {
-                        task.phase = next_phase.to_string();
-                    }
-                    if let Some(story_id) = current_story_id
-                        .as_ref()
-                        .map(|value| value.trim())
-                        .filter(|value| !value.is_empty())
-                    {
-                        task.current_story_id = Some(story_id.to_string());
-                    }
-                    if let Some(completed) = completed_stories {
-                        task.completed_stories = completed;
-                    }
-                    if let Some(failed) = failed_stories {
-                        task.failed_stories = failed;
-                    }
-                    task.background_status = Some(
-                        if phase
+                    let (
+                        run_id,
+                        task_phase,
+                        background_status,
+                    ) = {
+                        let task = session.mode_snapshots.task_mut();
+                        if let Some(next_phase) = phase
+                            .as_ref()
+                            .map(|value| value.trim())
+                            .filter(|value| !value.is_empty())
+                        {
+                            task.phase = next_phase.to_string();
+                        }
+                        if let Some(story_id) = current_story_id
+                            .as_ref()
+                            .map(|value| value.trim())
+                            .filter(|value| !value.is_empty())
+                        {
+                            task.current_story_id = Some(story_id.to_string());
+                        }
+                        if let Some(completed) = completed_stories {
+                            task.completed_stories = completed;
+                        }
+                        if let Some(failed) = failed_stories {
+                            task.failed_stories = failed;
+                        }
+                        task.background_status = Some(
+                            if phase
+                                .as_deref()
+                                .map(|value| {
+                                    is_background_resume_candidate_for_mode(
+                                        WorkflowMode::Task,
+                                        value,
+                                    )
+                                })
+                                .unwrap_or(false)
+                            {
+                                "running".to_string()
+                            } else {
+                                "idle".to_string()
+                            },
+                        );
+                        task.resumable_from_checkpoint = phase
                             .as_deref()
                             .map(|value| {
                                 is_background_resume_candidate_for_mode(WorkflowMode::Task, value)
                             })
-                            .unwrap_or(false)
-                        {
-                            "running".to_string()
-                        } else {
-                            "idle".to_string()
-                        },
-                    );
-                    task.resumable_from_checkpoint = phase
-                        .as_deref()
-                        .map(|value| {
-                            is_background_resume_candidate_for_mode(WorkflowMode::Task, value)
-                        })
-                        .unwrap_or(false);
-                    task.last_checkpoint_id = session.last_checkpoint_id.clone();
+                            .unwrap_or(false);
+                        task.last_checkpoint_id = session.last_checkpoint_id.clone();
+                        if phase.as_deref() != Some("interviewing") {
+                            task.pending_interview = None;
+                        }
+                        (
+                            task.run_id.clone(),
+                            task.phase.clone(),
+                            task.background_status.clone(),
+                        )
+                    };
                     if let Some(next_status) = status {
                         session.status = next_status;
                     }
-                    if phase.as_deref() != Some("interviewing") {
-                        task.pending_interview = None;
-                    }
+                    let capabilities = ChatControlCapabilities {
+                        can_pause: false,
+                        can_resume: false,
+                        can_cancel: !matches!(
+                            task_phase.as_str(),
+                            "completed" | "failed" | "cancelled" | "idle"
+                        ),
+                    };
+                    session.mode_runtime_meta.insert(
+                        WorkflowMode::Task,
+                        ModeRuntimeMeta {
+                            mode: WorkflowMode::Task,
+                            run_id,
+                            binding_session_id: session
+                                .linked_mode_sessions
+                                .get(&WorkflowMode::Task)
+                                .cloned(),
+                            is_foreground: false,
+                            is_background_running: background_status
+                                .as_deref()
+                                .is_some_and(|value| value == "running"),
+                            is_interrupted: task_phase == "interrupted",
+                            resume_policy: resume_policy_for_mode(WorkflowMode::Task).to_string(),
+                            last_heartbeat_at: Some(now_rfc3339()),
+                            last_checkpoint_id: session.last_checkpoint_id.clone(),
+                            last_error: session.last_error.clone(),
+                            backend_kind: Some("task_mode".to_string()),
+                            control_capabilities: Some(capabilities),
+                            block_reason: block_reason.clone(),
+                        },
+                    );
                     session.updated_at = now_rfc3339();
                 }
             }
@@ -4352,6 +4398,7 @@ mod tests {
                         user: "hello".to_string(),
                         assistant: "hi".to_string(),
                     }],
+                    summary_items: Vec::new(),
                     artifact_refs: vec!["artifact.md".to_string()],
                     context_sources: vec!["chat_history".to_string()],
                     metadata: serde_json::Map::new(),
@@ -4404,6 +4451,7 @@ mod tests {
                 user: "Need auth".to_string(),
                 assistant: "Let's design it".to_string(),
             }],
+            summary_items: Vec::new(),
             artifact_refs: vec!["spec.md".to_string()],
             context_sources: vec!["chat_transcript_sync".to_string()],
             metadata: serde_json::Map::from_iter([(
@@ -4449,51 +4497,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn system_phase_update_respects_explicit_mode_hint() {
-        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
-        let kernel = WorkflowKernelState::new_with_storage_dir(temp_dir.path().to_path_buf());
-
-        let session = kernel
-            .open_session(Some(WorkflowMode::Chat), None)
-            .await
-            .expect("open session");
-        let session_id = session.session_id.clone();
-
-        let updated = kernel
-            .submit_input(
-                &session_id,
-                UserInputIntent {
-                    intent_type: UserInputIntentType::SystemPhaseUpdate,
-                    content: String::new(),
-                    metadata: json!({
-                        "mode": "plan",
-                        "phase": "executing"
-                    }),
-                },
-            )
-            .await
-            .expect("submit system phase");
-
-        assert_eq!(updated.active_mode, WorkflowMode::Chat);
-        assert_eq!(
-            updated
-                .mode_snapshots
-                .plan
-                .as_ref()
-                .map(|plan| plan.phase.as_str()),
-            Some("executing")
-        );
-        assert_eq!(
-            updated
-                .mode_snapshots
-                .chat
-                .as_ref()
-                .map(|chat| chat.phase.as_str()),
-            Some("ready")
-        );
-    }
-
-    #[tokio::test]
     async fn transition_and_submit_input_is_atomic() {
         let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let kernel = WorkflowKernelState::new_with_storage_dir(temp_dir.path().to_path_buf());
@@ -4518,9 +4521,10 @@ mod tests {
             .await
             .expect("atomic transition+submit");
 
-        assert_eq!(updated.active_mode, WorkflowMode::Plan);
+        assert_eq!(updated.session.active_mode, WorkflowMode::Plan);
         assert_eq!(
             updated
+                .session
                 .mode_snapshots
                 .plan
                 .as_ref()
@@ -4738,16 +4742,16 @@ mod tests {
         let session_id = session.session_id.clone();
 
         kernel
-            .submit_input(
+            .sync_chat_phase(
                 &session_id,
-                UserInputIntent {
-                    intent_type: UserInputIntentType::SystemPhaseUpdate,
-                    content: "phase:streaming".to_string(),
-                    metadata: json!({
-                        "mode": "chat",
-                        "phase": "streaming",
-                    }),
-                },
+                "standalone",
+                "chat-binding",
+                "streaming".to_string(),
+                Some("run-1".to_string()),
+                None,
+                None,
+                Vec::new(),
+                None,
             )
             .await
             .expect("set chat streaming phase");

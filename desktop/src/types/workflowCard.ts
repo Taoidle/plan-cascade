@@ -26,6 +26,7 @@ export type WorkflowPhase =
   | 'architecture_review'
   | 'generating_design_doc'
   | 'executing'
+  | 'paused'
   | 'completed'
   | 'failed'
   | 'cancelled';
@@ -205,6 +206,9 @@ export interface GateResultCardData {
   storyId: string;
   storyTitle: string;
   overallStatus: GateStatus;
+  blockingStatus?: 'passed' | 'failed';
+  softFailedGateCount?: number;
+  gateSource?: 'llm' | 'fallback_heuristic' | 'skipped' | 'mixed';
   gates: GateResult[];
   codeReviewScores: DimensionScore[];
 }

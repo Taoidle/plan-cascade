@@ -119,6 +119,18 @@ export interface PrdFeedbackApplySummary {
   warnings: string[];
 }
 
+export interface TaskWorkflowConfigPayload {
+  flowLevel: 'quick' | 'standard' | 'full';
+  tddMode: 'off' | 'flexible' | 'strict';
+  enableInterview: boolean;
+  qualityGatesEnabled: boolean;
+  maxParallel: number;
+  skipVerification: boolean;
+  skipReview: boolean;
+  globalAgentOverride: string | null;
+  implAgentOverride: string | null;
+}
+
 export interface PrdFeedbackApplyResult {
   prd: TaskPrd;
   summary: PrdFeedbackApplySummary;
@@ -191,6 +203,9 @@ export interface DimensionScore {
 export interface StoryQualityGateResults {
   storyId: string;
   overallStatus: GateStatus;
+  blockingStatus?: 'passed' | 'failed';
+  softFailedGateCount?: number;
+  gateSource?: 'llm' | 'fallback_heuristic' | 'skipped' | 'mixed';
   gates: GateResult[];
   codeReviewScores?: DimensionScore[];
   totalScore?: number;
@@ -248,7 +263,11 @@ export interface TaskModeState {
     overrideBaseUrl?: string,
     sessionId?: string | null,
   ) => Promise<TaskPrd | null>;
-  approvePrd: (prd: TaskPrd, sessionId?: string | null) => Promise<boolean>;
+  approvePrd: (
+    prd: TaskPrd,
+    sessionId?: string | null,
+    workflowConfig?: TaskWorkflowConfigPayload | null,
+  ) => Promise<boolean>;
   applyPrdFeedback: (
     feedback: string,
     conversationHistory?: CrossModeConversationTurn[],
@@ -399,7 +418,7 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
     }
   },
 
-  approvePrd: async (prd: TaskPrd, sessionId?: string | null) => {
+  approvePrd: async (prd: TaskPrd, sessionId?: string | null, workflowConfig?: TaskWorkflowConfigPayload | null) => {
     const resolvedSessionId = resolveSessionId(sessionId);
     if (!resolvedSessionId) {
       set({ error: 'No active session' });
@@ -427,7 +446,19 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
           model: model || null,
           baseUrl: baseUrl || null,
           executionMode: null,
-          workflowConfig: null,
+          workflowConfig: workflowConfig
+            ? {
+                flowLevel: workflowConfig.flowLevel,
+                tddMode: workflowConfig.tddMode,
+                enableInterview: workflowConfig.enableInterview,
+                qualityGatesEnabled: workflowConfig.qualityGatesEnabled,
+                maxParallel: workflowConfig.maxParallel,
+                skipVerification: workflowConfig.skipVerification,
+                skipReview: workflowConfig.skipReview,
+                globalAgentOverride: workflowConfig.globalAgentOverride,
+                implAgentOverride: workflowConfig.implAgentOverride,
+              }
+            : null,
           globalDefaultAgent: defaultAgent || null,
           phaseConfigs,
           locale: i18n.language || null,
