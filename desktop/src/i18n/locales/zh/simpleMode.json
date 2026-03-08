@@ -111,6 +111,12 @@
     "currentFork": "（当前）",
     "clearAllSessions": "清空所有会话",
     "clearAllSessionsConfirm": "确定删除所有会话和历史记录吗？此操作不可撤销。",
+    "selectSessions": "多选",
+    "cancelSelection": "取消",
+    "selectionCount": "已选择 {{count}} 个",
+    "deleteSelected": "批量删除",
+    "bulkDeleteSessionConfirm": "确定永久删除已选择的 {{count}} 个会话吗？此操作不可撤销。",
+    "selectSession": "选择会话 {{title}}",
     "noWorkspace": "无工作区",
     "sort": {
       "label": "路径排序",

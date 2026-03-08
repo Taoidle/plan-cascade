@@ -38,6 +38,12 @@ vi.mock('react-i18next', () => ({
         'sidebar.removeDirectory': 'Remove from sidebar',
         'sidebar.newTaskInDir': 'New task in this directory',
         'sidebar.clearAllSessions': 'Clear All Sessions',
+        'sidebar.selectSessions': 'Select',
+        'sidebar.cancelSelection': 'Cancel',
+        'sidebar.selectionCount': '{{count}} selected',
+        'sidebar.deleteSelected': 'Delete Selected',
+        'sidebar.bulkDeleteSessionConfirm': 'Delete {{count}} selected sessions permanently? This cannot be undone.',
+        'sidebar.selectSession': 'Select session {{title}}',
         'sidebar.sort.label': 'Sort paths',
         'sidebar.sort.recent': 'Sort: Recent',
         'sidebar.sort.name': 'Sort: Name',
@@ -52,7 +58,10 @@ vi.mock('react-i18next', () => ({
         'sidebar.time.justNow': 'just now',
         'sidebar.noWorkspace': 'No Workspace',
       };
-      return translations[key] || options?.defaultValue || key;
+      const template = translations[key] || options?.defaultValue || key;
+      return template.replace(/\{\{(\w+)\}\}/g, (_, name) =>
+        String((options as Record<string, unknown> | undefined)?.[name] ?? ''),
+      );
     },
     i18n: { language: 'en' },
   }),
@@ -346,6 +355,50 @@ describe('WorkspaceTreeSidebar', () => {
     fireEvent.click(screen.getByTitle('Archive session'));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(onArchiveWorkflowSession).not.toHaveBeenCalled();
+  });
+
+  it('supports multi-select bulk delete across live and history sessions', () => {
+    const onDeleteWorkflowSession = vi.fn();
+    const onDelete = vi.fn();
+
+    render(
+      <WorkspaceTreeSidebar
+        {...defaultProps}
+        onDelete={onDelete}
+        workflowSessions={[createWorkflowSession({ sessionId: 'root-live', displayTitle: 'Ship auth' })]}
+        history={[createHistoryItem({ id: 'history-1', title: 'Past chat', workspacePath: '/repo/app' })]}
+        activeWorkflowSessionId="root-live"
+        onDeleteWorkflowSession={onDeleteWorkflowSession}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+    fireEvent.click(screen.getByLabelText('Select session Ship auth'));
+    fireEvent.click(screen.getByLabelText('Select session Past chat'));
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Selected' }));
+    expect(screen.getByText('Delete 2 selected sessions permanently? This cannot be undone.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    expect(onDeleteWorkflowSession).toHaveBeenCalledWith('root-live');
+    expect(onDelete).toHaveBeenCalledWith('history-1');
+    expect(screen.queryByLabelText('Select session Ship auth')).not.toBeInTheDocument();
+  });
+
+  it('cancels multi-select mode without deleting sessions', () => {
+    render(
+      <WorkspaceTreeSidebar
+        {...defaultProps}
+        workflowSessions={[createWorkflowSession({ sessionId: 'root-live', displayTitle: 'Ship auth' })]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+    expect(screen.getByLabelText('Select session Ship auth')).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Cancel' })[0]);
+    expect(screen.queryByLabelText('Select session Ship auth')).not.toBeInTheDocument();
   });
 
   it('toggles a path group open and closed without changing workspace', () => {

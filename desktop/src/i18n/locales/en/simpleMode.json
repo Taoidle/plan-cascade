@@ -111,6 +111,12 @@
     "currentFork": "(current)",
     "clearAllSessions": "Clear All Sessions",
     "clearAllSessionsConfirm": "Delete all sessions and history? This cannot be undone.",
+    "selectSessions": "Select",
+    "cancelSelection": "Cancel",
+    "selectionCount": "{{count}} selected",
+    "deleteSelected": "Delete Selected",
+    "bulkDeleteSessionConfirm": "Delete {{count}} selected sessions permanently? This cannot be undone.",
+    "selectSession": "Select session {{title}}",
     "noWorkspace": "No Workspace",
     "sort": {
       "label": "Sort paths",

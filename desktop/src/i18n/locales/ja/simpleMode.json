@@ -111,6 +111,12 @@
     "currentFork": "（現在）",
     "clearAllSessions": "すべてのセッションを削除",
     "clearAllSessionsConfirm": "すべてのセッションと履歴を削除しますか？この操作は元に戻せません。",
+    "selectSessions": "複数選択",
+    "cancelSelection": "キャンセル",
+    "selectionCount": "{{count}} 件を選択中",
+    "deleteSelected": "選択を削除",
+    "bulkDeleteSessionConfirm": "選択した {{count}} 件のセッションを完全に削除しますか？この操作は元に戻せません。",
+    "selectSession": "セッション {{title}} を選択",
     "noWorkspace": "ワークスペースなし",
     "sort": {
       "label": "パスの並び替え",

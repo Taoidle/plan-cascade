@@ -457,6 +457,9 @@ function modeBadgeLabel(mode: SessionTreeItem['mode']): string | null {
 function SessionTreeRow({
   item,
   nowMs,
+  selectionMode,
+  isSelected,
+  onToggleSelect,
   onActivateLive,
   onRestoreHistory,
   onRestoreArchived,
@@ -466,6 +469,9 @@ function SessionTreeRow({
 }: {
   item: SessionTreeItem;
   nowMs: number;
+  selectionMode: boolean;
+  isSelected: boolean;
+  onToggleSelect: (target: SessionManageTarget) => void;
   onActivateLive?: (id: string) => void;
   onRestoreHistory: (id: string) => void;
   onRestoreArchived?: (id: string) => void;
@@ -474,8 +480,20 @@ function SessionTreeRow({
   onRequestDelete: (target: SessionManageTarget) => void;
 }) {
   const { t } = useTranslation('simpleMode');
+  const selectionTarget = useMemo<SessionManageTarget>(
+    () => ({
+      kind: item.kind,
+      sourceSessionId: item.sourceSessionId,
+      title: item.title,
+    }),
+    [item.kind, item.sourceSessionId, item.title],
+  );
 
   const handleActivate = useCallback(() => {
+    if (selectionMode) {
+      onToggleSelect(selectionTarget);
+      return;
+    }
     if (item.kind === 'live') {
       onActivateLive?.(item.sourceSessionId);
       return;
@@ -485,7 +503,7 @@ function SessionTreeRow({
       return;
     }
     onRestoreHistory(item.sourceSessionId);
-  }, [item, onActivateLive, onRestoreArchived, onRestoreHistory]);
+  }, [item, onActivateLive, onRestoreArchived, onRestoreHistory, onToggleSelect, selectionMode, selectionTarget]);
 
   const handleArchive = useCallback(
     (event: React.MouseEvent) => {
@@ -530,7 +548,7 @@ function SessionTreeRow({
   return (
     <div
       className={clsx(
-        'group flex items-center gap-2 py-1.5 pr-2 rounded-md cursor-pointer transition-colors',
+        'group relative flex items-center gap-2 py-1.5 pr-2 rounded-md cursor-pointer transition-colors',
         item.isActive
           ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800'
           : 'hover:bg-gray-50 dark:hover:bg-gray-800 border border-transparent',
@@ -544,9 +562,34 @@ function SessionTreeRow({
       }}
       title={item.workspacePath || item.title}
     >
+      {selectionMode ? (
+        <label
+          className="shrink-0 flex items-center"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+        >
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+            checked={isSelected}
+            onChange={() => onToggleSelect(selectionTarget)}
+            aria-label={t('sidebar.selectSession', {
+              defaultValue: 'Select session {{title}}',
+              title: item.title,
+            })}
+          />
+        </label>
+      ) : null}
       <span className={clsx('w-2 h-2 rounded-full shrink-0', statusDotClass(item.status))} />
 
-      <div className="flex-1 min-w-0">
+      <div
+        className={clsx(
+          'flex-1 min-w-0 transition-[padding] duration-150',
+          !selectionMode && 'group-hover:pr-28 group-focus-within:pr-28',
+        )}
+      >
         <div className="flex items-center gap-1 min-w-0">
           <p className="min-w-0 flex-1 text-xs text-gray-900 dark:text-white truncate">{item.title}</p>
           {item.mode && (
@@ -580,48 +623,51 @@ function SessionTreeRow({
         </div>
       </div>
 
-      {(item.kind === 'history' || item.kind === 'live' || item.kind === 'archived') && (
-        <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-          {item.kind === 'live' && (
+      {!selectionMode && (item.kind === 'history' || item.kind === 'live' || item.kind === 'archived') && (
+        <div className="pointer-events-none absolute inset-y-0 right-2 flex items-center">
+          <div className="absolute inset-y-0 -left-10 right-0 bg-gradient-to-l from-white via-white/95 to-transparent dark:from-gray-900 dark:via-gray-900/95 dark:to-transparent opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100" />
+          <div className="pointer-events-auto relative flex items-center gap-0.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+            {item.kind === 'live' && (
+              <button
+                type="button"
+                className="text-2xs px-1.5 py-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-700/50"
+                onClick={handleArchive}
+                title={t('sidebar.archiveSession', { defaultValue: 'Archive session' })}
+              >
+                {t('sidebar.archiveAction', { defaultValue: 'archive' })}
+              </button>
+            )}
+            {item.kind === 'archived' && (
+              <button
+                type="button"
+                className="text-2xs px-1.5 py-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-700/50"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onRestoreArchived?.(item.sourceSessionId);
+                }}
+                title={t('sidebar.restoreSession', { defaultValue: 'Restore session' })}
+              >
+                {t('sidebar.restoreAction', { defaultValue: 'restore' })}
+              </button>
+            )}
             <button
               type="button"
               className="text-2xs px-1.5 py-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-700/50"
-              onClick={handleArchive}
-              title={t('sidebar.archiveSession', { defaultValue: 'Archive session' })}
+              onClick={handleRename}
+              title={t('sidebar.rename')}
             >
-              {t('sidebar.archiveAction', { defaultValue: 'archive' })}
+              {t('sidebar.rename')}
             </button>
-          )}
-          {item.kind === 'archived' && (
             <button
               type="button"
-              className="text-2xs px-1.5 py-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-700/50"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onRestoreArchived?.(item.sourceSessionId);
-              }}
-              title={t('sidebar.restoreSession', { defaultValue: 'Restore session' })}
+              className="p-0.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/30"
+              onClick={handleDelete}
+              title={t('sidebar.deleteSession', { defaultValue: 'Delete session' })}
             >
-              {t('sidebar.restoreAction', { defaultValue: 'restore' })}
+              <Cross2Icon className="w-3 h-3" />
             </button>
-          )}
-          <button
-            type="button"
-            className="text-2xs px-1.5 py-0.5 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-700/50"
-            onClick={handleRename}
-            title={t('sidebar.rename')}
-          >
-            {t('sidebar.rename')}
-          </button>
-          <button
-            type="button"
-            className="p-0.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/30"
-            onClick={handleDelete}
-            title={t('sidebar.deleteSession', { defaultValue: 'Delete session' })}
-          >
-            <Cross2Icon className="w-3 h-3" />
-          </button>
+          </div>
         </div>
       )}
     </div>
@@ -633,6 +679,9 @@ function PathGroupNode({
   nowMs,
   isActive,
   isExpanded,
+  selectionMode,
+  selectedSessionIds,
+  onToggleSelect,
   onToggle,
   onUnpin,
   onNewTaskInPath,
@@ -647,6 +696,9 @@ function PathGroupNode({
   nowMs: number;
   isActive: boolean;
   isExpanded: boolean;
+  selectionMode: boolean;
+  selectedSessionIds: Set<string>;
+  onToggleSelect: (target: SessionManageTarget) => void;
   onToggle: () => void;
   onUnpin?: (() => void) | null;
   onNewTaskInPath: () => void;
@@ -748,6 +800,9 @@ function PathGroupNode({
               key={item.id}
               item={item}
               nowMs={nowMs}
+              selectionMode={selectionMode}
+              isSelected={selectedSessionIds.has(item.id)}
+              onToggleSelect={onToggleSelect}
               onActivateLive={onActivateLive}
               onRestoreHistory={onRestoreHistory}
               onRestoreArchived={onRestoreArchived}
@@ -829,6 +884,9 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
   const [renameTarget, setRenameTarget] = useState<SessionManageTarget | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<SessionManageTarget | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(() => new Set());
+  const [bulkDeleteTargets, setBulkDeleteTargets] = useState<SessionManageTarget[] | null>(null);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -1053,22 +1111,91 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
     setDeleteTarget(target);
   }, []);
 
+  const allSessionTargets = useMemo(
+    () =>
+      effectivePathGroups.flatMap((group) =>
+        group.children.map((item) => ({
+          id: item.id,
+          target: {
+            kind: item.kind,
+            sourceSessionId: item.sourceSessionId,
+            title: item.title,
+          } satisfies SessionManageTarget,
+        })),
+      ),
+    [effectivePathGroups],
+  );
+
+  useEffect(() => {
+    const validIds = new Set(allSessionTargets.map((item) => item.id));
+    setSelectedSessionIds((prev) => {
+      const next = new Set(Array.from(prev).filter((id) => validIds.has(id)));
+      if (next.size === prev.size) return prev;
+      return next;
+    });
+  }, [allSessionTargets]);
+
+  useEffect(() => {
+    if (!selectionMode && selectedSessionIds.size > 0) {
+      setSelectedSessionIds(new Set());
+    }
+  }, [selectionMode, selectedSessionIds]);
+
+  const handleToggleSelect = useCallback((target: SessionManageTarget) => {
+    setSelectedSessionIds((prev) => {
+      const next = new Set(prev);
+      const itemId = `${target.kind}:${target.sourceSessionId}`;
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+      return next;
+    });
+  }, []);
+
+  const selectedTargets = useMemo(
+    () => allSessionTargets.filter((item) => selectedSessionIds.has(item.id)).map((item) => item.target),
+    [allSessionTargets, selectedSessionIds],
+  );
+
+  const handleStartSelection = useCallback(() => {
+    setSelectionMode(true);
+  }, []);
+
+  const handleCancelSelection = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedSessionIds(new Set());
+  }, []);
+
+  const handleRequestBulkDelete = useCallback(() => {
+    if (selectedTargets.length === 0) return;
+    setBulkDeleteTargets(selectedTargets);
+  }, [selectedTargets]);
+
   const handleCloseDeleteDialog = useCallback((open: boolean) => {
     if (open) return;
     setDeleteTarget(null);
+    setBulkDeleteTargets(null);
   }, []);
 
   const handleConfirmDelete = useCallback(() => {
-    if (!deleteTarget) return;
+    const targets = bulkDeleteTargets ?? (deleteTarget ? [deleteTarget] : []);
+    if (targets.length === 0) return;
 
-    if (deleteTarget.kind === 'history') {
-      onDelete(deleteTarget.sourceSessionId);
-    } else {
-      onDeleteWorkflowSession?.(deleteTarget.sourceSessionId);
+    for (const target of targets) {
+      if (target.kind === 'history') {
+        onDelete(target.sourceSessionId);
+      } else {
+        onDeleteWorkflowSession?.(target.sourceSessionId);
+      }
     }
 
     setDeleteTarget(null);
-  }, [deleteTarget, onDelete, onDeleteWorkflowSession]);
+    setBulkDeleteTargets(null);
+    setSelectionMode(false);
+    setSelectedSessionIds(new Set());
+  }, [bulkDeleteTargets, deleteTarget, onDelete, onDeleteWorkflowSession]);
 
   return (
     <div className="h-full min-h-0 flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
@@ -1123,6 +1250,9 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
                       nowMs={relativeTimeNow}
                       isActive={isActive}
                       isExpanded={expandedPaths.has(group.normalizedPath)}
+                      selectionMode={selectionMode}
+                      selectedSessionIds={selectedSessionIds}
+                      onToggleSelect={handleToggleSelect}
                       onToggle={() => toggleDirectory(group.normalizedPath)}
                       onUnpin={
                         group.path && pinnedDirectories.includes(group.path) ? () => handleUnpin(group.path!) : null
@@ -1144,16 +1274,56 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
           </div>
           {(history.length > 0 || workflowSessions.length > 0) && (
             <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-700">
-              <button
-                onClick={onClearAllSessions ?? onClear}
-                className={clsx(
-                  'w-full text-xs px-2 py-1.5 rounded-md transition-colors',
-                  'text-red-600 dark:text-red-400',
-                  'hover:bg-red-50 dark:hover:bg-red-900/20',
-                )}
-              >
-                {t('sidebar.clearAllSessions', { defaultValue: t('sidebar.clearAll') })}
-              </button>
+              {selectionMode ? (
+                <div className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 text-2xs text-gray-500 dark:text-gray-400">
+                    {t('sidebar.selectionCount', {
+                      count: selectedTargets.length,
+                      defaultValue: `${selectedTargets.length} selected`,
+                    })}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleCancelSelection}
+                    className="shrink-0 rounded-md px-2 py-1.5 text-xs text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+                  >
+                    {t('sidebar.cancelSelection', { defaultValue: 'Cancel' })}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRequestBulkDelete}
+                    disabled={selectedTargets.length === 0}
+                    className={clsx(
+                      'shrink-0 rounded-md px-2 py-1.5 text-xs transition-colors',
+                      selectedTargets.length === 0
+                        ? 'cursor-not-allowed text-gray-400 dark:text-gray-500'
+                        : 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',
+                    )}
+                  >
+                    {t('sidebar.deleteSelected', { defaultValue: 'Delete Selected' })}
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleStartSelection}
+                    className="shrink-0 rounded-md px-2 py-1.5 text-xs text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+                  >
+                    {t('sidebar.selectSessions', { defaultValue: 'Select' })}
+                  </button>
+                  <button
+                    onClick={onClearAllSessions ?? onClear}
+                    className={clsx(
+                      'min-w-0 flex-1 text-xs px-2 py-1.5 rounded-md transition-colors',
+                      'text-red-600 dark:text-red-400',
+                      'hover:bg-red-50 dark:hover:bg-red-900/20',
+                    )}
+                  >
+                    {t('sidebar.clearAllSessions', { defaultValue: t('sidebar.clearAll') })}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1291,7 +1461,7 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
         </Dialog.Portal>
       </Dialog.Root>
 
-      <Dialog.Root open={deleteTarget !== null} onOpenChange={handleCloseDeleteDialog}>
+      <Dialog.Root open={deleteTarget !== null || bulkDeleteTargets !== null} onOpenChange={handleCloseDeleteDialog}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[90] bg-black/40 backdrop-blur-[1px]" />
           <Dialog.Content className="fixed left-1/2 top-1/2 z-[100] w-[min(92vw,460px)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-700 dark:bg-gray-900">
@@ -1299,12 +1469,25 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
               {t('sidebar.deleteSession', { defaultValue: 'Delete session' })}
             </Dialog.Title>
             <Dialog.Description className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-              {t('sidebar.deleteSessionConfirm', {
-                defaultValue: 'Delete this session permanently? This cannot be undone.',
-              })}
+              {bulkDeleteTargets
+                ? t('sidebar.bulkDeleteSessionConfirm', {
+                    count: bulkDeleteTargets.length,
+                    defaultValue: `Delete ${bulkDeleteTargets.length} selected sessions permanently? This cannot be undone.`,
+                  })
+                : t('sidebar.deleteSessionConfirm', {
+                    defaultValue: 'Delete this session permanently? This cannot be undone.',
+                  })}
             </Dialog.Description>
             <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
-              {deleteTarget?.title ?? ''}
+              {bulkDeleteTargets ? (
+                <div className="space-y-1">
+                  {bulkDeleteTargets.map((target) => (
+                    <div key={`${target.kind}:${target.sourceSessionId}`}>{target.title}</div>
+                  ))}
+                </div>
+              ) : (
+                (deleteTarget?.title ?? '')
+              )}
             </div>
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
