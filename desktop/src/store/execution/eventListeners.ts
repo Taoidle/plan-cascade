@@ -8,7 +8,6 @@ import { useToolPermissionStore } from '../toolPermission';
 import { useExecutionStore } from '../execution';
 import { useWorkflowKernelStore } from '../workflowKernel';
 import { formatToolArgs } from './messageDispatch';
-import { triggerMemoryExtraction } from './memoryPostProcess';
 import { clearPendingDeltas, flushPendingDeltas, getPending, scheduleFlush } from './streamDeltas';
 import {
   appendToBackgroundSession,
@@ -1755,9 +1754,6 @@ export async function setupExecutionEventListeners(
             });
             get().addLog('Execution completed');
             get().saveToHistory();
-          }
-          if (get().streamingOutput.length > 20) {
-            void triggerMemoryExtraction(get());
           }
           scheduleForegroundChatTranscriptSync(session_id, get);
           break;

@@ -16,8 +16,7 @@ use crate::services::workflow_kernel::{
     UserInputIntent, WorkflowKernelState, WorkflowKernelUpdatedEvent, WorkflowMode,
     WorkflowModeTranscriptUpdatedEvent, WorkflowSession, WorkflowSessionCatalogState,
     WorkflowSessionCatalogUpdatedEvent, WorkflowSessionMutation, WorkflowSessionState,
-    WorkflowStatus,
-    WORKFLOW_KERNEL_UPDATED_CHANNEL, WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL,
+    WorkflowStatus, WORKFLOW_KERNEL_UPDATED_CHANNEL, WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL,
     WORKFLOW_SESSION_CATALOG_UPDATED_CHANNEL,
 };
 use crate::{commands::plan_mode::PlanModeState, commands::spec_interview::SpecInterviewState};
@@ -979,12 +978,9 @@ pub async fn workflow_mark_chat_turn_failed(
                 "workflow_mark_chat_turn_failed",
             )
             .await;
-            let _ = emit_session_catalog_update(
-                &app,
-                state.inner(),
-                "workflow_mark_chat_turn_failed",
-            )
-            .await;
+            let _ =
+                emit_session_catalog_update(&app, state.inner(), "workflow_mark_chat_turn_failed")
+                    .await;
             CommandResponse::ok(session)
         }
         Err(error) => CommandResponse::err(error),

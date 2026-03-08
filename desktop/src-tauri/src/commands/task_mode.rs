@@ -34,8 +34,7 @@ use crate::services::task_mode::exploration::{
 use crate::services::task_mode::prd_generator;
 use crate::services::workflow_kernel::{
     HandoffContextBundle, WorkflowKernelState, WorkflowKernelUpdatedEvent, WorkflowMode,
-    WorkflowStatus,
-    WORKFLOW_KERNEL_UPDATED_CHANNEL,
+    WorkflowStatus, WORKFLOW_KERNEL_UPDATED_CHANNEL,
 };
 
 use crate::state::AppState;

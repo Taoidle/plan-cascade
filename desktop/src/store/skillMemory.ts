@@ -20,6 +20,7 @@ import type {
   MemoryEntry,
   MemoryCategory,
   MemoryScope,
+  MemoryStatus,
   MemoryStats,
   MemoryReviewCandidate,
   MemoryReviewDecision,
@@ -89,7 +90,7 @@ export type MemoryCategoryFilter = MemoryCategory | 'all';
 
 /** Tab selection in the management dialog */
 export type SkillMemoryTab = 'skills' | 'memory';
-export type MemoryDialogView = 'active' | 'pending';
+export type MemoryDialogView = 'active' | 'pending' | 'rejected';
 
 interface OpenDialogOptions {
   memoryViewMode?: MemoryDialogView;
@@ -120,6 +121,17 @@ function createEmptyMemoryPipelineSnapshot(rootSessionId: string): MemoryPipelin
     traceId: null,
     reviewSource: null,
   };
+}
+
+function statusesForMemoryView(mode: MemoryDialogView): MemoryStatus[] {
+  switch (mode) {
+    case 'pending':
+      return ['pending_review'];
+    case 'rejected':
+      return ['rejected'];
+    default:
+      return ['active'];
+  }
 }
 
 interface SkillMemoryState {
@@ -486,7 +498,11 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
   loadMemories: async (projectPath: string) => {
     set({ memoriesLoading: true, memoriesError: null, memoryPage: 0 });
     try {
-      const { memoryCategoryFilter, memoryPageSize, memoryScope, memorySessionId } = get();
+      const { memoryCategoryFilter, memoryPageSize, memoryScope, memorySessionId, memoryViewMode } = get();
+      if (memoryViewMode === 'pending') {
+        set({ memories: [], memoriesLoading: false, memoryHasMore: false });
+        return;
+      }
       if (memoryScope === 'session' && !memorySessionId?.trim()) {
         set({
           memoriesError: tSkillMemory(
@@ -504,7 +520,7 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         projectPath,
         categories: category ? [category] : null,
         scopes: memoryScopesForRequest(memoryScope, memorySessionId),
-        statuses: ['active'],
+        statuses: statusesForMemoryView(memoryViewMode),
         offset: 0,
         limit: memoryPageSize,
         sessionId: memorySessionId,
@@ -539,7 +555,11 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
   },
 
   loadMoreMemories: async (projectPath: string) => {
-    const { memoryPage, memoryPageSize, memories, memoryCategoryFilter, memoryScope, memorySessionId } = get();
+    const { memoryPage, memoryPageSize, memories, memoryCategoryFilter, memoryScope, memorySessionId, memoryViewMode } =
+      get();
+    if (memoryViewMode === 'pending') {
+      return;
+    }
     if (memoryScope === 'session' && !memorySessionId?.trim()) {
       return;
     }
@@ -550,7 +570,7 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         projectPath,
         categories: category ? [category] : null,
         scopes: memoryScopesForRequest(memoryScope, memorySessionId),
-        statuses: ['active'],
+        statuses: statusesForMemoryView(memoryViewMode),
         offset: nextPage * memoryPageSize,
         limit: memoryPageSize,
         sessionId: memorySessionId,
@@ -572,7 +592,11 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
 
   loadMemoryStats: async (projectPath: string) => {
     try {
-      const { memoryScope, memorySessionId } = get();
+      const { memoryScope, memorySessionId, memoryViewMode } = get();
+      if (memoryViewMode === 'pending') {
+        set({ memoryStats: null });
+        return;
+      }
       if (memoryScope === 'session' && !memorySessionId?.trim()) {
         set({ memoryStats: null });
         return;
@@ -580,7 +604,7 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
       const response = await invoke<CommandResponse<MemoryStats>>('memory_stats_v2', {
         projectPath,
         scopes: memoryScopesForRequest(memoryScope, memorySessionId),
-        statuses: ['active'],
+        statuses: statusesForMemoryView(memoryViewMode),
         sessionId: memorySessionId,
       });
       if (response.success && response.data) {
@@ -710,7 +734,11 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
 
   searchMemories: async (projectPath: string, query: string) => {
     set({ memoriesLoading: true, memorySearchQuery: query });
-    const { memoryScope, memorySessionId } = get();
+    const { memoryScope, memorySessionId, memoryViewMode } = get();
+    if (memoryViewMode === 'pending') {
+      set({ memoriesLoading: false, memories: [], memoryHasMore: false });
+      return;
+    }
     if (memoryScope === 'session' && !memorySessionId?.trim()) {
       set({
         memoriesError: tSkillMemory(
@@ -737,7 +765,7 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         scopes: memoryScopesForRequest(memoryScope, memorySessionId),
         includeIds: [],
         excludeIds: [],
-        statuses: ['active'],
+        statuses: statusesForMemoryView(memoryViewMode),
         sessionId: memorySessionId,
         topKTotal: 50,
         minImportance: 0.1,
@@ -836,7 +864,9 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
           ? tSkillMemory('skillPanel.toasts.memoryApproveSuccess', `Approved ${updated} memory candidates`)
           : decision === 'reject'
             ? tSkillMemory('skillPanel.toasts.memoryRejectSuccess', `Rejected ${updated} memory candidates`)
-            : tSkillMemory('skillPanel.toasts.memoryArchiveSuccess', `Archived ${updated} memory candidates`);
+            : decision === 'restore'
+              ? tSkillMemory('skillPanel.toasts.memoryRestoreSuccess', `Restored ${updated} memory candidates`)
+              : tSkillMemory('skillPanel.toasts.memoryArchiveSuccess', `Archived ${updated} memory candidates`);
       get().showToast(successMessage, 'success');
       await Promise.all([
         get().loadPendingMemoryCandidates(projectPath),

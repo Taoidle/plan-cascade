@@ -459,7 +459,9 @@ impl StreamAdapter for ClaudeCodeAdapter {
                     }
 
                     let assistant_text = assistant_text_blocks.join("");
-                    if let Some(fallback_text) = self.resolve_terminal_text_fallback(&assistant_text) {
+                    if let Some(fallback_text) =
+                        self.resolve_terminal_text_fallback(&assistant_text)
+                    {
                         events.push(UnifiedStreamEvent::TextDelta {
                             content: fallback_text,
                         });
@@ -858,7 +860,9 @@ mod tests {
             events
         );
         assert!(
-            events.iter().any(|event| matches!(event, UnifiedStreamEvent::Complete { .. })),
+            events
+                .iter()
+                .any(|event| matches!(event, UnifiedStreamEvent::Complete { .. })),
             "Expected terminal complete event, got {:?}",
             events
         );

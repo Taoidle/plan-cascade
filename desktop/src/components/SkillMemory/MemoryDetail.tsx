@@ -12,7 +12,7 @@ import { clsx } from 'clsx';
 import { Cross2Icon, Pencil1Icon, TrashIcon } from '@radix-ui/react-icons';
 import { CategoryBadge } from './CategoryBadge';
 import { ImportanceBar } from './ImportanceBar';
-import type { MemoryEntry, MemoryCategory } from '../../types/skillMemory';
+import type { MemoryEntry, MemoryCategory, MemoryReviewDecision } from '../../types/skillMemory';
 import { MEMORY_CATEGORIES } from '../../types/skillMemory';
 
 interface MemoryDetailProps {
@@ -28,10 +28,11 @@ interface MemoryDetailProps {
     },
   ) => void;
   onDelete: (id: string) => void;
+  onReviewDecision?: (id: string, decision: MemoryReviewDecision) => void;
   className?: string;
 }
 
-export function MemoryDetail({ memory, onClose, onUpdate, onDelete, className }: MemoryDetailProps) {
+export function MemoryDetail({ memory, onClose, onUpdate, onDelete, onReviewDecision, className }: MemoryDetailProps) {
   const { t } = useTranslation('simpleMode');
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(memory.content);
@@ -89,6 +90,11 @@ export function MemoryDetail({ memory, onClose, onUpdate, onDelete, className }:
           <div className="flex items-center gap-2 mb-1">
             <CategoryBadge category={editing ? editCategory : memory.category} />
             <ImportanceBar value={editing ? editImportance : memory.importance} showLabel className="flex-1" />
+            {memory.status === 'rejected' && (
+              <span className="text-2xs px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300">
+                {t('skillPanel.rejectedMemories', { defaultValue: 'Rejected' })}
+              </span>
+            )}
           </div>
           <p className="text-2xs text-gray-500 dark:text-gray-400">
             {t('skillPanel.createdAt')}: {new Date(memory.created_at).toLocaleDateString()}
@@ -291,6 +297,29 @@ export function MemoryDetail({ memory, onClose, onUpdate, onDelete, className }:
                 {t('skillPanel.accessCount')}: {memory.access_count}
               </p>
             </div>
+
+            {memory.status === 'rejected' && onReviewDecision && (
+              <div className="flex flex-wrap gap-2 pt-2">
+                <button
+                  onClick={() => onReviewDecision(memory.id, 'restore')}
+                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                >
+                  {t('skillPanel.restore', { defaultValue: 'Restore to Review' })}
+                </button>
+                <button
+                  onClick={() => onReviewDecision(memory.id, 'approve')}
+                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                >
+                  {t('skillPanel.approve', { defaultValue: 'Approve' })}
+                </button>
+                <button
+                  onClick={() => onReviewDecision(memory.id, 'archive')}
+                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-slate-100 text-slate-700 dark:bg-slate-900/30 dark:text-slate-300"
+                >
+                  {t('skillPanel.archive', { defaultValue: 'Archive' })}
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>

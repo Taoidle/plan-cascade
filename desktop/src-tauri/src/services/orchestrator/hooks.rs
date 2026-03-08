@@ -576,6 +576,14 @@ pub struct MemoryHookConfig {
     pub injection_enabled: bool,
     /// Whether automatic extraction should run from lifecycle hooks.
     pub extraction_enabled: bool,
+    /// Workflow root session id used by frontend status routing.
+    pub root_session_id: Option<String>,
+    /// Review mode for extracted memories.
+    pub review_mode: Option<String>,
+    /// Optional explicit LLM reviewer in `llm:provider:model` form.
+    pub review_agent_ref: Option<String>,
+    /// App handle for emitting pipeline status events and resolving app state.
+    pub app_handle: Option<tauri::AppHandle>,
     /// Allowed scope names: `project`, `global`, `session`.
     pub selected_scopes: Vec<String>,
     /// Allowed categories. Empty means all categories.
@@ -591,6 +599,10 @@ impl Default for MemoryHookConfig {
         Self {
             injection_enabled: true,
             extraction_enabled: true,
+            root_session_id: None,
+            review_mode: None,
+            review_agent_ref: None,
+            app_handle: None,
             selected_scopes: vec![],
             selected_categories: vec![],
             selected_memory_ids: vec![],
@@ -707,6 +719,10 @@ pub fn register_memory_hooks_with_config(
     } else {
         Some(memory_hook_config.selected_categories.clone())
     };
+    let extraction_root_session_id = memory_hook_config.root_session_id.clone();
+    let extraction_review_mode = memory_hook_config.review_mode.clone();
+    let extraction_review_agent_ref = memory_hook_config.review_agent_ref.clone();
+    let extraction_app_handle = memory_hook_config.app_handle.clone();
     let selected_ids: HashSet<String> =
         memory_hook_config.selected_memory_ids.into_iter().collect();
     let excluded_ids: HashSet<String> =
@@ -837,10 +853,22 @@ pub fn register_memory_hooks_with_config(
     hooks.register_on_session_end(Box::new(move |ctx, summary| {
         let store = store_clone2.clone();
         let provider = provider_clone.clone();
+        let root_session_id = extraction_root_session_id.clone();
+        let review_mode = extraction_review_mode.clone();
+        let review_agent_ref = extraction_review_agent_ref.clone();
+        let app_handle = extraction_app_handle.clone();
         Box::pin(async move {
             let project_path = ctx.project_path.to_string_lossy().to_string();
             if !extraction_enabled {
                 maybe_generate_skill_from_session(provider.clone(), &store, &ctx, &summary, &project_path).await;
+                return Ok(());
+            }
+
+            if !summary.success {
+                tracing::info!(
+                    "[hooks] Memory extraction skipped (source=orchestrator_hook, unsuccessful session): session={}",
+                    ctx.session_id
+                );
                 return Ok(());
             }
 
@@ -871,90 +899,28 @@ pub fn register_memory_hooks_with_config(
                 return Ok(());
             }
 
-            // Load existing memories from unified V2 table to inform extraction dedup.
-            let scan_tuning = memory_query_tuning_v2(MemoryQueryPresetV2::HookExtractionScan);
-            let all_existing = list_memory_entries_unified_v2(
-                &store,
-                UnifiedMemoryQueryRequestV2 {
-                    project_path: project_path.clone(),
-                    query: String::new(),
-                    scopes: vec![
-                        MemoryScopeV2::Project,
-                        MemoryScopeV2::Global,
-                        MemoryScopeV2::Session,
-                    ],
-                    categories: vec![],
-                    include_ids: vec![],
-                    exclude_ids: vec![],
-                    session_id: Some(ctx.session_id.clone()),
-                    top_k_total: scan_tuning.top_k_total,
-                    min_importance: scan_tuning.min_importance,
-                    per_scope_budget: scan_tuning.per_scope_budget,
-                    intent: crate::services::memory::retrieval::MemorySearchIntent::Default,
-                    enable_semantic: false,
-                    enable_lexical: false,
-                    statuses: vec![MemoryStatusV2::Active],
-                },
-            )
-            .await
-            .unwrap_or_default();
-
-            if let Some(ref llm) = provider {
-                match crate::services::memory::extraction::run_session_extraction(
-                    llm.as_ref(),
-                    &project_path,
-                    &summary.task_description,
-                    &summary.files_read,
-                    &summary.key_findings,
-                    &summary.conversation_content,
-                    Some(&ctx.session_id),
-                    &all_existing,
+            if let Some(app) = app_handle.as_ref() {
+                if let Err(error) = crate::commands::memory::extract_session_memories_internal(
+                    app,
+                    project_path.clone(),
+                    summary.task_description.clone(),
+                    summary.conversation_content.clone(),
+                    Some(ctx.session_id.clone()),
+                    root_session_id.clone().or_else(|| Some(ctx.session_id.clone())),
+                    review_mode.clone(),
+                    review_agent_ref.clone(),
                 )
                 .await
                 {
-                    Ok(new_memories) => {
-                        let mut inserted = 0u32;
-                        let mut merged = 0u32;
-                        for entry in new_memories {
-                            match store.upsert_memory(entry) {
-                                Ok(crate::services::memory::store::UpsertResult::Inserted(_)) => inserted += 1,
-                                Ok(crate::services::memory::store::UpsertResult::Merged { .. }) => merged += 1,
-                                Ok(crate::services::memory::store::UpsertResult::Skipped { .. }) => {}
-                                Err(e) => {
-                                    tracing::info!(
-                                        "[hooks] Memory upsert failed: session={}, error={}",
-                                        ctx.session_id, e,
-                                    );
-                                }
-                            }
-                        }
-                        tracing::info!(
-                            "[hooks] LLM memory extraction (source=orchestrator_hook): session={}, inserted={}, merged={}",
-                            ctx.session_id, inserted, merged,
-                        );
-                    }
-                    Err(e) => {
-                        tracing::info!(
-                            "[hooks] LLM extraction failed, falling back to rule-based (source=orchestrator_hook): session={}, error={}",
-                            ctx.session_id, e,
-                        );
-                        rule_based_memory_extraction(
-                            &store,
-                            &ctx,
-                            &summary,
-                            &project_path,
-                            &all_existing,
-                        );
-                    }
+                    tracing::info!(
+                        "[hooks] Unified memory extraction failed (source=orchestrator_hook): session={}, error={}",
+                        ctx.session_id, error,
+                    );
                 }
             } else {
-                // ── Rule-based fallback (no LLM provider) ──
-                rule_based_memory_extraction(
-                    &store,
-                    &ctx,
-                    &summary,
-                    &project_path,
-                    &all_existing,
+                tracing::warn!(
+                    "[hooks] Memory extraction skipped: missing app handle (session={})",
+                    ctx.session_id
                 );
             }
 

@@ -127,7 +127,7 @@ export type MemoryCategory = 'preference' | 'convention' | 'pattern' | 'correcti
 export type MemoryScope = 'project' | 'global' | 'session';
 export type MemoryStatus = 'active' | 'pending_review' | 'rejected' | 'archived';
 export type MemoryRiskTier = 'low' | 'medium' | 'high';
-export type MemoryReviewDecision = 'approve' | 'reject' | 'archive';
+export type MemoryReviewDecision = 'approve' | 'reject' | 'archive' | 'restore';
 export type MemoryPipelinePhase = 'idle' | 'extracting' | 'reviewing' | 'ready' | 'pending' | 'error';
 export type MemoryPipelineReviewSource = 'manual_review' | 'auto_llm_review' | 'auto_approve' | 'routing_rule' | null;
 

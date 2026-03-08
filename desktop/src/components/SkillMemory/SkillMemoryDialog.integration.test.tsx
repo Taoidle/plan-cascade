@@ -120,4 +120,34 @@ describe('SkillMemoryDialog integration', () => {
     expect(screen.getByText(/mixed/i)).toBeInTheDocument();
     expect(screen.getByText(/Degraded reason/i)).toBeInTheDocument();
   });
+
+  it('shows rejected memories with restore actions', () => {
+    useSkillMemoryStore.setState({
+      activeTab: 'memory',
+      memories: [
+        {
+          id: 'mem-rejected-1',
+          project_path: '/tmp/project',
+          category: 'fact',
+          content: 'Do not use the legacy API client',
+          keywords: ['legacy', 'api'],
+          importance: 0.7,
+          access_count: 0,
+          source_session_id: 'standalone:abc',
+          source_context: 'test',
+          status: 'rejected',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          last_accessed_at: new Date().toISOString(),
+        },
+      ],
+      memoryHasMore: false,
+    });
+    render(<SkillMemoryDialog />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rejected' }));
+    expect(screen.getByText(/Do not use the legacy API client/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Restore Selected' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Restore to Review' })).toBeInTheDocument();
+  });
 });

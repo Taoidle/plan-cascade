@@ -639,13 +639,21 @@ async fn build_plan_conversation_context(
     bundle
 }
 
-fn render_plan_handoff_context(handoff: &crate::services::workflow_kernel::HandoffContextBundle) -> String {
+fn render_plan_handoff_context(
+    handoff: &crate::services::workflow_kernel::HandoffContextBundle,
+) -> String {
     let mut sections = Vec::new();
 
     let conversation_section = handoff
         .conversation_context
         .iter()
-        .map(|turn| format!("user: {}\nassistant: {}", turn.user.trim(), turn.assistant.trim()))
+        .map(|turn| {
+            format!(
+                "user: {}\nassistant: {}",
+                turn.user.trim(),
+                turn.assistant.trim()
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n\n");
     if !conversation_section.trim().is_empty() {

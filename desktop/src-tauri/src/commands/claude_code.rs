@@ -16,8 +16,8 @@ use crate::services::claude_code::{
     channels, ActiveSessionManager, ChatHandler, StreamEventPayload,
 };
 use crate::services::streaming::UnifiedStreamEvent;
-use crate::services::workflow_kernel::{ChatRuntimeDispatch, WorkflowKernelState};
 use crate::services::webhook::integration::dispatch_on_event as dispatch_webhook_on_event;
+use crate::services::workflow_kernel::{ChatRuntimeDispatch, WorkflowKernelState};
 use crate::state::AppState;
 
 /// State for Claude Code services

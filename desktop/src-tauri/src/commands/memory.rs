@@ -3,7 +3,7 @@
 //! Tauri commands for managing project memories (cross-session persistent knowledge).
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::models::response::CommandResponse;
 use crate::services::memory::extraction::{
@@ -162,6 +162,9 @@ fn parse_memory_review_decision_v2(value: &str) -> Result<MemoryReviewDecisionV2
         "approve" | "approved" | "active" => Ok(MemoryReviewDecisionV2::Approve),
         "reject" | "rejected" => Ok(MemoryReviewDecisionV2::Reject),
         "archive" | "archived" => Ok(MemoryReviewDecisionV2::Archive),
+        "restore" | "restored" | "reopen" | "pending_review" | "pending" => {
+            Ok(MemoryReviewDecisionV2::Restore)
+        }
         _ => Err(format!("Invalid review decision: {}", value)),
     }
 }
@@ -848,14 +851,8 @@ pub struct MemoryExtractionResult {
     pub skipped_count: usize,
 }
 
-/// Extract memories from a completed session using LLM analysis.
-///
-/// Called by the frontend after a session completes. Uses the configured
-/// LLM provider to analyze the conversation and extract persistent memories.
-/// Silently returns zero results if no provider is configured or on any error.
-#[tauri::command]
-pub async fn extract_session_memories(
-    app: AppHandle,
+pub(crate) async fn extract_session_memories_internal(
+    app: &AppHandle,
     project_path: String,
     task_description: String,
     conversation_summary: String,
@@ -863,8 +860,9 @@ pub async fn extract_session_memories(
     root_session_id: Option<String>,
     review_mode: Option<String>,
     review_agent_ref: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<CommandResponse<MemoryExtractionResult>, String> {
+) -> Result<MemoryExtractionResult, String> {
+    let state = app.state::<AppState>();
+    let app_state: &AppState = state.inner();
     let zero_result = MemoryExtractionResult {
         extracted_count: 0,
         inserted_count: 0,
@@ -881,16 +879,14 @@ pub async fn extract_session_memories(
         .map(ToOwned::to_owned)
         .or_else(|| normalized_runtime_session_id.clone());
     let Some(root_session_id) = normalized_root_session_id else {
-        return Ok(CommandResponse::ok(zero_result));
+        return Ok(zero_result);
     };
     let parsed_review_mode = parse_memory_review_mode(review_mode.as_deref());
 
     if !env_flag_enabled("UNIFIED_SESSION_EXTRACTION", true) {
-        eprintln!(
-            "[memory-extraction] Skipped: UNIFIED_SESSION_EXTRACTION is disabled (source=chat_frontend)"
-        );
+        eprintln!("[memory-extraction] Skipped: UNIFIED_SESSION_EXTRACTION is disabled");
         emit_memory_pipeline_status(
-            &app,
+            app,
             MemoryPipelineStatusEvent {
                 root_session_id,
                 runtime_session_id: normalized_runtime_session_id,
@@ -903,12 +899,12 @@ pub async fn extract_session_memories(
                 review_source: None,
             },
         );
-        return Ok(CommandResponse::ok(zero_result));
+        return Ok(zero_result);
     }
 
     if let Some(ref sid) = session_id {
         let marker_key = extraction_marker_key(sid);
-        let already_extracted = state
+        let already_extracted = app_state
             .with_database(|db| Ok(db.get_setting(&marker_key)?.is_some()))
             .await
             .unwrap_or(false);
@@ -918,7 +914,7 @@ pub async fn extract_session_memories(
                 sid
             );
             emit_memory_pipeline_status(
-                &app,
+                app,
                 MemoryPipelineStatusEvent {
                     root_session_id,
                     runtime_session_id: normalized_runtime_session_id,
@@ -931,18 +927,17 @@ pub async fn extract_session_memories(
                     review_source: None,
                 },
             );
-            return Ok(CommandResponse::ok(zero_result));
+            return Ok(zero_result);
         }
     }
 
-    // Skip short conversations
     if conversation_summary.len() < 50 {
         eprintln!(
             "[memory-extraction] Skipped: conversation too short ({} chars < 50)",
             conversation_summary.len()
         );
         emit_memory_pipeline_status(
-            &app,
+            app,
             MemoryPipelineStatusEvent {
                 root_session_id,
                 runtime_session_id: normalized_runtime_session_id,
@@ -955,11 +950,11 @@ pub async fn extract_session_memories(
                 review_source: None,
             },
         );
-        return Ok(CommandResponse::ok(zero_result));
+        return Ok(zero_result);
     }
 
     emit_memory_pipeline_status(
-        &app,
+        app,
         MemoryPipelineStatusEvent {
             root_session_id: root_session_id.clone(),
             runtime_session_id: normalized_runtime_session_id.clone(),
@@ -973,16 +968,12 @@ pub async fn extract_session_memories(
         },
     );
 
-    // Resolve LLM provider from app config + keyring
-    let provider = match resolve_provider_for_agent_ref(&state, None).await {
+    let provider = match resolve_provider_for_agent_ref(app_state, None).await {
         Ok(p) => p,
         Err(e) => {
-            eprintln!(
-                "[memory-extraction] Provider resolution failed (source=chat_frontend): {}",
-                e
-            );
+            eprintln!("[memory-extraction] Provider resolution failed: {}", e);
             emit_memory_pipeline_status(
-                &app,
+                app,
                 MemoryPipelineStatusEvent {
                     root_session_id,
                     runtime_session_id: normalized_runtime_session_id,
@@ -995,12 +986,11 @@ pub async fn extract_session_memories(
                     review_source: None,
                 },
             );
-            return Ok(CommandResponse::ok(zero_result));
+            return Ok(zero_result);
         }
     };
 
-    // Load existing memories to avoid duplicates
-    let existing_memories = state
+    let existing_memories = app_state
         .with_memory_store(|store| store.list_memories(&project_path, None, 0, 200))
         .await
         .unwrap_or_default();
@@ -1008,8 +998,8 @@ pub async fn extract_session_memories(
     let candidates = match run_session_extraction_candidates(
         provider.as_ref(),
         &task_description,
-        &[], // files_read not available from frontend trigger
-        &[], // key_findings not available from frontend trigger
+        &[],
+        &[],
         &conversation_summary,
         session_id.as_deref(),
         &existing_memories,
@@ -1018,12 +1008,9 @@ pub async fn extract_session_memories(
     {
         Ok(candidates) => candidates,
         Err(e) => {
-            eprintln!(
-                "[memory-extraction] Session extraction failed (source=chat_frontend): {}",
-                e
-            );
+            eprintln!("[memory-extraction] Session extraction failed: {}", e);
             emit_memory_pipeline_status(
-                &app,
+                app,
                 MemoryPipelineStatusEvent {
                     root_session_id,
                     runtime_session_id: normalized_runtime_session_id,
@@ -1036,18 +1023,16 @@ pub async fn extract_session_memories(
                     review_source: None,
                 },
             );
-            return Ok(CommandResponse::ok(zero_result));
+            return Ok(zero_result);
         }
     };
 
     let extracted_count = candidates.len();
     if extracted_count == 0 {
-        mark_session_extraction_done(&state, session_id.as_deref()).await;
-        eprintln!(
-            "[memory-extraction] LLM response parsed but yielded 0 entries (source=chat_frontend)"
-        );
+        mark_session_extraction_done(app_state, session_id.as_deref()).await;
+        eprintln!("[memory-extraction] LLM response parsed but yielded 0 entries");
         emit_memory_pipeline_status(
-            &app,
+            app,
             MemoryPipelineStatusEvent {
                 root_session_id,
                 runtime_session_id: normalized_runtime_session_id,
@@ -1060,11 +1045,11 @@ pub async fn extract_session_memories(
                 review_source: None,
             },
         );
-        return Ok(CommandResponse::ok(zero_result));
+        return Ok(zero_result);
     }
 
     emit_memory_pipeline_status(
-        &app,
+        app,
         MemoryPipelineStatusEvent {
             root_session_id: root_session_id.clone(),
             runtime_session_id: normalized_runtime_session_id.clone(),
@@ -1082,7 +1067,7 @@ pub async fn extract_session_memories(
     );
 
     let reviewed_candidates = review_candidates(
-        &state,
+        app_state,
         &project_path,
         &candidates,
         parsed_review_mode,
@@ -1116,51 +1101,65 @@ pub async fn extract_session_memories(
             PipelineDecision::PendingReview => pending_count += 1,
         }
         let entry = candidate_to_entry(&project_path, reviewed.scope, reviewed.candidate.clone());
-        match state
-            .with_memory_store(|store| store.upsert_memory(entry.clone()))
+        match app_state
+            .with_memory_store(|store| store.upsert_memory(entry))
             .await
         {
             Ok(UpsertResult::Inserted(inserted)) => {
                 inserted_count += 1;
-                if let Err(error) = apply_pipeline_decision(&state, &inserted.id, reviewed.decision, reviewed.review_source).await
+                if let Err(error) = apply_pipeline_decision(
+                    app_state,
+                    &inserted.id,
+                    reviewed.decision,
+                    reviewed.review_source,
+                )
+                .await
                 {
-                    eprintln!("[memory-extraction] Failed to apply review decision: {}", error);
+                    eprintln!(
+                        "[memory-extraction] Failed to apply review decision: {}",
+                        error
+                    );
                     skipped_count += 1;
                 }
             }
             Ok(UpsertResult::Merged { merged, .. }) => {
                 merged_count += 1;
                 if matches!(reviewed.decision, PipelineDecision::Approve) {
-                    let _ = apply_pipeline_decision(&state, &merged.id, reviewed.decision, reviewed.review_source).await;
+                    let _ = apply_pipeline_decision(
+                        app_state,
+                        &merged.id,
+                        reviewed.decision,
+                        reviewed.review_source,
+                    )
+                    .await;
                 }
             }
             Ok(UpsertResult::Skipped { .. }) => skipped_count += 1,
             Err(e) => {
-                eprintln!(
-                    "[memory-extraction] Upsert failed (source=chat_frontend): {}",
-                    e
-                );
+                eprintln!("[memory-extraction] Upsert failed: {}", e);
                 skipped_count += 1;
             }
         }
     }
 
     eprintln!(
-        "[memory-extraction] Done (source=chat_frontend): extracted={}, inserted={}, merged={}, skipped={}",
-        extracted_count,
-        inserted_count,
-        merged_count,
-        skipped_count
+        "[memory-extraction] Done: extracted={}, inserted={}, merged={}, skipped={}",
+        extracted_count, inserted_count, merged_count, skipped_count
     );
 
-    mark_session_extraction_done(&state, session_id.as_deref()).await;
+    mark_session_extraction_done(app_state, session_id.as_deref()).await;
 
     emit_memory_pipeline_status(
-        &app,
+        app,
         MemoryPipelineStatusEvent {
             root_session_id,
             runtime_session_id: normalized_runtime_session_id,
-            phase: if pending_count > 0 { "pending" } else { "ready" }.to_string(),
+            phase: if pending_count > 0 {
+                "pending"
+            } else {
+                "ready"
+            }
+            .to_string(),
             counts: MemoryPipelineCounts {
                 extracted: extracted_count,
                 approved: approved_count,
@@ -1181,12 +1180,38 @@ pub async fn extract_session_memories(
         },
     );
 
-    Ok(CommandResponse::ok(MemoryExtractionResult {
+    Ok(MemoryExtractionResult {
         extracted_count,
         inserted_count,
         merged_count,
         skipped_count,
-    }))
+    })
+}
+
+/// Extract memories from a completed session using LLM analysis.
+#[tauri::command]
+pub async fn extract_session_memories(
+    app: AppHandle,
+    project_path: String,
+    task_description: String,
+    conversation_summary: String,
+    session_id: Option<String>,
+    root_session_id: Option<String>,
+    review_mode: Option<String>,
+    review_agent_ref: Option<String>,
+) -> Result<CommandResponse<MemoryExtractionResult>, String> {
+    let result = extract_session_memories_internal(
+        &app,
+        project_path,
+        task_description,
+        conversation_summary,
+        session_id,
+        root_session_id,
+        review_mode,
+        review_agent_ref,
+    )
+    .await?;
+    Ok(CommandResponse::ok(result))
 }
 
 /// Resolve the LLM provider for memory extraction from app settings.
@@ -1295,7 +1320,12 @@ fn parse_memory_agent_ref(value: &str) -> Option<(String, String)> {
 }
 
 fn parse_memory_review_mode(value: Option<&str>) -> MemoryReviewMode {
-    match value.unwrap_or("llm_review").trim().to_ascii_lowercase().as_str() {
+    match value
+        .unwrap_or("llm_review")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "auto_approve" => MemoryReviewMode::AutoApprove,
         "manual_only" => MemoryReviewMode::ManualOnly,
         _ => MemoryReviewMode::LlmReview,
@@ -1404,7 +1434,15 @@ fn looks_global_candidate(candidate: &ExtractedMemoryCandidate) -> bool {
         "always use ",
         "never use ",
     ];
-    let project_markers = ["/", "src/", "tests/", "workspace", "repo", "repository", "project"];
+    let project_markers = [
+        "/",
+        "src/",
+        "tests/",
+        "workspace",
+        "repo",
+        "repository",
+        "project",
+    ];
     candidate.category == MemoryCategory::Preference
         && global_markers.iter().any(|marker| text.contains(marker))
         && !project_markers.iter().any(|marker| text.contains(marker))
@@ -1429,7 +1467,10 @@ fn looks_project_candidate(candidate: &ExtractedMemoryCandidate) -> bool {
     let text = candidate.content.to_ascii_lowercase();
     matches!(
         candidate.category,
-        MemoryCategory::Convention | MemoryCategory::Pattern | MemoryCategory::Correction | MemoryCategory::Fact
+        MemoryCategory::Convention
+            | MemoryCategory::Pattern
+            | MemoryCategory::Correction
+            | MemoryCategory::Fact
     ) || [
         "src/",
         "package.json",
@@ -1472,7 +1513,8 @@ async fn review_candidates(
             .iter()
             .cloned()
             .map(|candidate| ReviewedCandidate {
-                scope: route_scope(&candidate).unwrap_or(candidate.suggested_scope.unwrap_or(MemoryScopeV2::Project)),
+                scope: route_scope(&candidate)
+                    .unwrap_or(candidate.suggested_scope.unwrap_or(MemoryScopeV2::Project)),
                 candidate,
                 decision: PipelineDecision::Approve,
                 review_source: "auto_approve",
@@ -1482,7 +1524,8 @@ async fn review_candidates(
             .iter()
             .cloned()
             .map(|candidate| ReviewedCandidate {
-                scope: route_scope(&candidate).unwrap_or(candidate.suggested_scope.unwrap_or(MemoryScopeV2::Project)),
+                scope: route_scope(&candidate)
+                    .unwrap_or(candidate.suggested_scope.unwrap_or(MemoryScopeV2::Project)),
                 candidate,
                 decision: PipelineDecision::PendingReview,
                 review_source: "manual_review",
@@ -1496,8 +1539,9 @@ async fn review_candidates(
                         .iter()
                         .cloned()
                         .map(|candidate| ReviewedCandidate {
-                            scope: route_scope(&candidate)
-                                .unwrap_or(candidate.suggested_scope.unwrap_or(MemoryScopeV2::Project)),
+                            scope: route_scope(&candidate).unwrap_or(
+                                candidate.suggested_scope.unwrap_or(MemoryScopeV2::Project),
+                            ),
                             candidate,
                             decision: PipelineDecision::PendingReview,
                             review_source: "manual_review",
@@ -1505,19 +1549,22 @@ async fn review_candidates(
                         .collect()
                 }
             };
-            run_llm_review(provider.as_ref(), project_path, candidates).await.unwrap_or_else(|_| {
-                candidates
-                    .iter()
-                    .cloned()
-                    .map(|candidate| ReviewedCandidate {
-                        scope: route_scope(&candidate)
-                            .unwrap_or(candidate.suggested_scope.unwrap_or(MemoryScopeV2::Project)),
-                        candidate,
-                        decision: PipelineDecision::PendingReview,
-                        review_source: "manual_review",
-                    })
-                    .collect()
-            })
+            run_llm_review(provider.as_ref(), project_path, candidates)
+                .await
+                .unwrap_or_else(|_| {
+                    candidates
+                        .iter()
+                        .cloned()
+                        .map(|candidate| ReviewedCandidate {
+                            scope: route_scope(&candidate).unwrap_or(
+                                candidate.suggested_scope.unwrap_or(MemoryScopeV2::Project),
+                            ),
+                            candidate,
+                            decision: PipelineDecision::PendingReview,
+                            review_source: "manual_review",
+                        })
+                        .collect()
+                })
         }
     }
 }
@@ -1579,10 +1626,15 @@ Candidates:\n{}",
         .or_else(|| text.trim().strip_prefix("```"))
         .unwrap_or(text.trim());
     let json_str = json_str.strip_suffix("```").unwrap_or(json_str).trim();
-    let decisions: Vec<serde_json::Value> = serde_json::from_str(json_str).map_err(|error| error.to_string())?;
+    let decisions: Vec<serde_json::Value> =
+        serde_json::from_str(json_str).map_err(|error| error.to_string())?;
     let mut results = Vec::new();
     for item in decisions {
-        let Some(index) = item.get("index").and_then(|value| value.as_u64()).map(|value| value as usize) else {
+        let Some(index) = item
+            .get("index")
+            .and_then(|value| value.as_u64())
+            .map(|value| value as usize)
+        else {
             continue;
         };
         let Some(candidate) = candidates.get(index).cloned() else {

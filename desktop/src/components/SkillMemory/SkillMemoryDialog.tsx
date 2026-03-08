@@ -404,6 +404,7 @@ function MemoryTab() {
   const [selectedMemory, setSelectedMemory] = useState<MemoryEntry | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [selectedPendingIds, setSelectedPendingIds] = useState<Set<string>>(new Set());
+  const [selectedRejectedIds, setSelectedRejectedIds] = useState<Set<string>>(new Set());
   const [showWhyMemory, setShowWhyMemory] = useState(false);
   const diagnostics = latestEnvelope?.diagnostics;
   const memorySources = useMemo(
@@ -446,17 +447,23 @@ function MemoryTab() {
   // Reload when category filter changes
   useEffect(() => {
     if (workspacePath) {
-      if (memorySearchQuery.trim()) {
-        searchMemories(workspacePath, memorySearchQuery);
+      if (memoryViewMode === 'pending') {
+        void loadPendingMemoryCandidates(workspacePath);
       } else {
-        loadMemories(workspacePath);
+        if (memorySearchQuery.trim()) {
+          void searchMemories(workspacePath, memorySearchQuery);
+        } else {
+          void loadMemories(workspacePath);
+        }
+        void loadMemoryStats(workspacePath);
       }
-      loadPendingMemoryCandidates(workspacePath);
+      void loadPendingMemoryCandidates(workspacePath);
     }
-  }, [memoryCategoryFilter, memoryScope, activeSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [memoryCategoryFilter, memoryScope, activeSessionId, memoryViewMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setSelectedPendingIds(new Set());
+    setSelectedRejectedIds(new Set());
   }, [memoryScope, pendingMemoryCandidates.length, memoryViewMode]);
 
   const pipelineStatusLabel = useMemo(() => {
@@ -607,10 +614,15 @@ function MemoryTab() {
   }, [pendingMemoryCandidates, selectedPendingIds.size]);
 
   const handleReviewPending = useCallback(
-    async (ids: string[], decision: 'approve' | 'reject' | 'archive') => {
+    async (ids: string[], decision: 'approve' | 'reject' | 'archive' | 'restore') => {
       if (!workspacePath || ids.length === 0) return;
       await reviewPendingMemoryCandidates(workspacePath, ids, decision);
       setSelectedPendingIds((prev) => {
+        const next = new Set(prev);
+        ids.forEach((id) => next.delete(id));
+        return next;
+      });
+      setSelectedRejectedIds((prev) => {
         const next = new Set(prev);
         ids.forEach((id) => next.delete(id));
         return next;
@@ -646,6 +658,11 @@ function MemoryTab() {
         }}
         onDelete={(id) => {
           deleteMemory(id);
+          setSelectedMemory(null);
+        }}
+        onReviewDecision={(id, decision) => {
+          if (!workspacePath) return;
+          void handleReviewPending([id], decision);
           setSelectedMemory(null);
         }}
       />
@@ -757,6 +774,17 @@ function MemoryTab() {
             {t('skillPanel.pendingReview', { defaultValue: 'Pending Review' })} ({pendingMemoryCandidates.length})
           </button>
           <button
+            onClick={() => setMemoryViewMode('rejected')}
+            className={clsx(
+              'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
+              memoryViewMode === 'rejected'
+                ? 'bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300'
+                : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
+            )}
+          >
+            {t('skillPanel.rejectedMemories', { defaultValue: 'Rejected' })}
+          </button>
+          <button
             onClick={() => setShowWhyMemory((value) => !value)}
             className={clsx(
               'ml-auto px-2 py-1 rounded-md text-2xs font-medium transition-colors',
@@ -825,7 +853,7 @@ function MemoryTab() {
         </div>
 
         {/* Category filter + action buttons */}
-        {memoryViewMode === 'active' ? (
+        {memoryViewMode !== 'pending' ? (
           <div className="flex items-center gap-1 flex-wrap">
             <button
               onClick={() => handleCategoryFilter('all')}
@@ -852,30 +880,91 @@ function MemoryTab() {
                 {getCategoryLabel(cat)}
               </button>
             ))}
-            <button
-              onClick={() => setShowAddForm(true)}
-              className={clsx(
-                'ml-auto p-1 rounded-md transition-colors',
-                'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
-                'hover:bg-gray-100 dark:hover:bg-gray-800',
-              )}
-              title={t('skillPanel.addMemory')}
-            >
-              <PlusIcon className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={handleClearAll}
-              disabled={memories.length === 0}
-              className={clsx(
-                'p-1 rounded-md transition-colors',
-                memories.length === 0
-                  ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
-                  : 'text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20',
-              )}
-              title={t('skillPanel.clearAll')}
-            >
-              <TrashIcon className="w-3.5 h-3.5" />
-            </button>
+            {memoryViewMode === 'active' ? (
+              <>
+                <button
+                  onClick={() => setShowAddForm(true)}
+                  className={clsx(
+                    'ml-auto p-1 rounded-md transition-colors',
+                    'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
+                    'hover:bg-gray-100 dark:hover:bg-gray-800',
+                  )}
+                  title={t('skillPanel.addMemory')}
+                >
+                  <PlusIcon className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={handleClearAll}
+                  disabled={memories.length === 0}
+                  className={clsx(
+                    'p-1 rounded-md transition-colors',
+                    memories.length === 0
+                      ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                      : 'text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20',
+                  )}
+                  title={t('skillPanel.clearAll')}
+                >
+                  <TrashIcon className="w-3.5 h-3.5" />
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => {
+                    if (selectedRejectedIds.size >= memories.length && memories.length > 0) {
+                      setSelectedRejectedIds(new Set());
+                      return;
+                    }
+                    setSelectedRejectedIds(new Set(memories.map((memory) => memory.id)));
+                  }}
+                  disabled={memories.length === 0}
+                  className={clsx(
+                    'ml-auto px-2 py-1 rounded-md text-2xs font-medium transition-colors',
+                    selectedRejectedIds.size >= memories.length && memories.length > 0
+                      ? 'bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300'
+                      : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
+                  )}
+                >
+                  {t('skillPanel.selectAll', { defaultValue: 'Select All' })}
+                </button>
+                <button
+                  onClick={() => void handleReviewPending(Array.from(selectedRejectedIds), 'restore')}
+                  disabled={selectedRejectedIds.size === 0}
+                  className={clsx(
+                    'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
+                    selectedRejectedIds.size === 0
+                      ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                      : 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
+                  )}
+                >
+                  {t('skillPanel.restoreSelected', { defaultValue: 'Restore Selected' })}
+                </button>
+                <button
+                  onClick={() => void handleReviewPending(Array.from(selectedRejectedIds), 'approve')}
+                  disabled={selectedRejectedIds.size === 0}
+                  className={clsx(
+                    'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
+                    selectedRejectedIds.size === 0
+                      ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                      : 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
+                  )}
+                >
+                  {t('skillPanel.approveSelected', { defaultValue: 'Approve Selected' })}
+                </button>
+                <button
+                  onClick={() => void handleReviewPending(Array.from(selectedRejectedIds), 'archive')}
+                  disabled={selectedRejectedIds.size === 0}
+                  className={clsx(
+                    'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
+                    selectedRejectedIds.size === 0
+                      ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                      : 'bg-slate-100 dark:bg-slate-900/30 text-slate-700 dark:text-slate-300',
+                  )}
+                >
+                  {t('skillPanel.archiveSelected', { defaultValue: 'Archive Selected' })}
+                </button>
+              </>
+            )}
             <button
               onClick={() => void handleRunMaintenance()}
               className={clsx(
@@ -954,7 +1043,7 @@ function MemoryTab() {
       </div>
 
       {/* Stats bar */}
-      {memoryViewMode === 'active' && memoryStats && (
+      {memoryViewMode !== 'pending' && memoryStats && (
         <div className="px-3 py-1.5 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2 text-2xs text-gray-500 dark:text-gray-400">
           <span>{t('skillPanel.totalMemories', { count: memoryStats.total_count })}</span>
           <span className="text-gray-300 dark:text-gray-600">|</span>
@@ -984,9 +1073,21 @@ function MemoryTab() {
         </div>
       )}
 
+      {memoryViewMode === 'rejected' && (
+        <div className="px-3 py-1.5 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2 text-2xs text-gray-500 dark:text-gray-400">
+          <span>
+            {t('skillPanel.rejectedMemories', { defaultValue: 'Rejected' })}: {memories.length}
+          </span>
+          <span className="text-gray-300 dark:text-gray-600">|</span>
+          <span>
+            {t('skillPanel.selectedCount', { defaultValue: 'Selected' })}: {selectedRejectedIds.size}
+          </span>
+        </div>
+      )}
+
       {/* Memory list */}
       <div className="flex-1 overflow-y-auto">
-        {memoryViewMode === 'active' && memoriesLoading && memories.length === 0 ? (
+        {memoryViewMode !== 'pending' && memoriesLoading && memories.length === 0 ? (
           <div className="flex items-center justify-center py-8">
             <span className="text-xs text-gray-400">{t('skillPanel.loading')}</span>
           </div>
@@ -995,6 +1096,13 @@ function MemoryTab() {
             title={t('skillPanel.noMemoriesFound')}
             description={t('skillPanel.noMemoriesFoundHint')}
             action={{ label: t('skillPanel.addMemory'), onClick: () => setShowAddForm(true) }}
+          />
+        ) : memoryViewMode === 'rejected' && memories.length === 0 ? (
+          <EmptyState
+            title={t('skillPanel.noRejectedMemories', { defaultValue: 'No rejected memories' })}
+            description={t('skillPanel.noRejectedMemoriesHint', {
+              defaultValue: 'Rejected memories will stay here until you restore or archive them.',
+            })}
           />
         ) : memoryViewMode === 'active' ? (
           <div className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -1033,6 +1141,66 @@ function MemoryTab() {
                 )}
               </button>
             ))}
+          </div>
+        ) : memoryViewMode === 'rejected' ? (
+          <div className="divide-y divide-gray-100 dark:divide-gray-800">
+            {memories.map((memory) => {
+              const checked = selectedRejectedIds.has(memory.id);
+              return (
+                <div key={memory.id} className="px-4 py-3">
+                  <div className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() =>
+                        setSelectedRejectedIds((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(memory.id)) {
+                            next.delete(memory.id);
+                          } else {
+                            next.add(memory.id);
+                          }
+                          return next;
+                        })
+                      }
+                      className="mt-0.5 w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500"
+                    />
+                    <button className="min-w-0 flex-1 text-left" onClick={() => setSelectedMemory(memory)}>
+                      <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                        <CategoryBadge category={memory.category} compact />
+                        <span className="text-2xs px-1 py-0.5 rounded bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300">
+                          {t('skillPanel.rejectedMemories', { defaultValue: 'Rejected' })}
+                        </span>
+                        <span className="ml-auto text-2xs text-gray-400 dark:text-gray-500 shrink-0">
+                          {new Date(memory.updated_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-700 dark:text-gray-300 line-clamp-2">{memory.content}</p>
+                    </button>
+                    <div className="flex flex-col gap-1">
+                      <button
+                        onClick={() => void handleReviewPending([memory.id], 'restore')}
+                        className="px-2 py-0.5 rounded text-2xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                      >
+                        {t('skillPanel.restore', { defaultValue: 'Restore to Review' })}
+                      </button>
+                      <button
+                        onClick={() => void handleReviewPending([memory.id], 'approve')}
+                        className="px-2 py-0.5 rounded text-2xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                      >
+                        {t('skillPanel.approve', { defaultValue: 'Approve' })}
+                      </button>
+                      <button
+                        onClick={() => void handleReviewPending([memory.id], 'archive')}
+                        className="px-2 py-0.5 rounded text-2xs font-medium bg-slate-100 text-slate-700 dark:bg-slate-900/30 dark:text-slate-300"
+                      >
+                        {t('skillPanel.archive', { defaultValue: 'Archive' })}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         ) : pendingMemoryCandidatesLoading && pendingMemoryCandidates.length === 0 ? (
           <div className="flex items-center justify-center py-8">
@@ -1154,7 +1322,7 @@ function MemoryTab() {
         )}
 
         {/* Load more */}
-        {memoryViewMode === 'active' && memoryHasMore && memories.length > 0 && (
+        {memoryViewMode !== 'pending' && memoryHasMore && memories.length > 0 && (
           <div className="p-3 text-center">
             <button
               onClick={handleLoadMore}

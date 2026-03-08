@@ -10,10 +10,10 @@
 //! - Delete: "forget that...", "stop remembering...", "delete memory about..."
 //! - Query:  "what do you remember about...", "what are my preferences..."
 
+use crate::services::memory::query_v2::MemoryScopeV2;
 use crate::services::memory::store::{
     build_session_project_path, MemoryCategory, MemoryEntry, NewMemoryEntry, GLOBAL_PROJECT_PATH,
 };
-use crate::services::memory::query_v2::MemoryScopeV2;
 use crate::utils::error::{AppError, AppResult};
 
 /// Explicit memory commands detected from user messages
@@ -384,13 +384,14 @@ Rules:
         Ok(candidates
             .into_iter()
             .map(|candidate| {
-                let effective_project_path = match candidate.suggested_scope.unwrap_or(MemoryScopeV2::Project) {
-                    MemoryScopeV2::Global => GLOBAL_PROJECT_PATH.to_string(),
-                    MemoryScopeV2::Session => session_id
-                        .and_then(build_session_project_path)
-                        .unwrap_or_else(|| project_path.to_string()),
-                    MemoryScopeV2::Project => project_path.to_string(),
-                };
+                let effective_project_path =
+                    match candidate.suggested_scope.unwrap_or(MemoryScopeV2::Project) {
+                        MemoryScopeV2::Global => GLOBAL_PROJECT_PATH.to_string(),
+                        MemoryScopeV2::Session => session_id
+                            .and_then(build_session_project_path)
+                            .unwrap_or_else(|| project_path.to_string()),
+                        MemoryScopeV2::Project => project_path.to_string(),
+                    };
 
                 NewMemoryEntry {
                     project_path: effective_project_path,

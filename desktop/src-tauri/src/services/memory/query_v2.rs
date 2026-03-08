@@ -202,6 +202,7 @@ pub enum MemoryReviewDecisionV2 {
     Approve,
     Reject,
     Archive,
+    Restore,
 }
 
 impl MemoryReviewDecisionV2 {
@@ -210,6 +211,7 @@ impl MemoryReviewDecisionV2 {
             MemoryReviewDecisionV2::Approve => "active",
             MemoryReviewDecisionV2::Reject => "rejected",
             MemoryReviewDecisionV2::Archive => "archived",
+            MemoryReviewDecisionV2::Restore => "pending_review",
         }
     }
 
@@ -218,6 +220,7 @@ impl MemoryReviewDecisionV2 {
             MemoryReviewDecisionV2::Approve => "approve",
             MemoryReviewDecisionV2::Reject => "reject",
             MemoryReviewDecisionV2::Archive => "archive",
+            MemoryReviewDecisionV2::Restore => "restore",
         }
     }
 }

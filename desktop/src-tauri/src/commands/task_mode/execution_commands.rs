@@ -31,16 +31,22 @@ fn build_card_transcript_line(card_type: &str, data: Value, interactive: bool) -
     })
 }
 
-fn gate_overall_status(gate_results: &[crate::services::quality_gates::pipeline::PipelineGateResult]) -> &'static str {
-    if gate_results
-        .iter()
-        .any(|gate| matches!(gate.status, crate::models::quality_gates::GateStatus::Failed))
-    {
+fn gate_overall_status(
+    gate_results: &[crate::services::quality_gates::pipeline::PipelineGateResult],
+) -> &'static str {
+    if gate_results.iter().any(|gate| {
+        matches!(
+            gate.status,
+            crate::models::quality_gates::GateStatus::Failed
+        )
+    }) {
         "failed"
-    } else if gate_results
-        .iter()
-        .all(|gate| matches!(gate.status, crate::models::quality_gates::GateStatus::Skipped))
-    {
+    } else if gate_results.iter().all(|gate| {
+        matches!(
+            gate.status,
+            crate::models::quality_gates::GateStatus::Skipped
+        )
+    }) {
         "skipped"
     } else {
         "passed"
@@ -97,7 +103,9 @@ fn build_task_progress_transcript_lines(
                 false,
             )];
 
-            if let (Some(story_id), Some(gate_results)) = (event.story_id.as_ref(), event.gate_results.as_ref()) {
+            if let (Some(story_id), Some(gate_results)) =
+                (event.story_id.as_ref(), event.gate_results.as_ref())
+            {
                 if !gate_results.is_empty() {
                     let story_title = story_titles
                         .get(story_id)

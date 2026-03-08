@@ -729,7 +729,9 @@ impl WorkflowKernelState {
             handoff_context: build_handoff_context_from_ledger(&ledger_entries),
             linked_mode_sessions: HashMap::new(),
             background_state: WorkflowBackgroundState::Foreground,
-            context_ledger: build_context_ledger_summary(&build_handoff_context_from_ledger(&ledger_entries)),
+            context_ledger: build_context_ledger_summary(&build_handoff_context_from_ledger(
+                &ledger_entries,
+            )),
             mode_runtime_meta: HashMap::new(),
             last_error: None,
             created_at: now.clone(),
@@ -915,10 +917,7 @@ impl WorkflowKernelState {
         self.get_session_catalog_state().await
     }
 
-    pub async fn restore_session(
-        &self,
-        session_id: &str,
-    ) -> Result<WorkflowSessionState, String> {
+    pub async fn restore_session(&self, session_id: &str) -> Result<WorkflowSessionState, String> {
         {
             let mut sessions = self.sessions.write().await;
             let session = sessions
@@ -1250,16 +1249,20 @@ impl WorkflowKernelState {
         };
         let turn_id = chat_turn.turn_count.max(1);
 
-        let (replace_from_line_id, appended_lines, phase_override, block_reason_override, assistant_text) = {
+        let (
+            replace_from_line_id,
+            appended_lines,
+            phase_override,
+            block_reason_override,
+            assistant_text,
+        ) = {
             let mut sync = self.chat_runtime_sync.write().await;
-            let state = sync
-                .get_mut(normalized_binding_session_id)
-                .ok_or_else(|| {
-                    format!(
-                        "Chat runtime binding '{}' is no longer registered",
-                        normalized_binding_session_id
-                    )
-                })?;
+            let state = sync.get_mut(normalized_binding_session_id).ok_or_else(|| {
+                format!(
+                    "Chat runtime binding '{}' is no longer registered",
+                    normalized_binding_session_id
+                )
+            })?;
 
             let had_pending_lines = !state.pending_turn_lines.is_empty();
             let previous_assistant_text = extract_pending_assistant_text(&state.pending_turn_lines);
@@ -1335,7 +1338,10 @@ impl WorkflowKernelState {
             }
 
             let replace_from_line_id = if had_pending_lines {
-                state.pending_turn_lines.first().and_then(transcript_line_id)
+                state
+                    .pending_turn_lines
+                    .first()
+                    .and_then(transcript_line_id)
             } else {
                 None
             };
@@ -1487,9 +1493,10 @@ impl WorkflowKernelState {
                 .insert(WorkflowMode::Chat, binding_session_id.to_string());
 
             let last_error = match normalized_phase.as_str() {
-                "failed" => session.last_error.clone().or_else(|| {
-                    Some("chat_turn_failed".to_string())
-                }),
+                "failed" => session
+                    .last_error
+                    .clone()
+                    .or_else(|| Some("chat_turn_failed".to_string())),
                 "cancelled" => Some("cancelled_by_user".to_string()),
                 "interrupted" => Some("interrupted_by_restart".to_string()),
                 _ => None,
@@ -1509,11 +1516,8 @@ impl WorkflowKernelState {
                 chat.last_assistant_message = Some(text.to_string());
             }
 
-            let capabilities = chat_control_capabilities(
-                Some(backend_kind),
-                &chat.phase,
-                block_reason.as_deref(),
-            );
+            let capabilities =
+                chat_control_capabilities(Some(backend_kind), &chat.phase, block_reason.as_deref());
             session.mode_runtime_meta.insert(
                 WorkflowMode::Chat,
                 ModeRuntimeMeta {
@@ -2055,7 +2059,9 @@ impl WorkflowKernelState {
                     plan.background_status = Some(
                         if phase
                             .as_deref()
-                            .map(|value| is_background_resume_candidate_for_mode(WorkflowMode::Plan, value))
+                            .map(|value| {
+                                is_background_resume_candidate_for_mode(WorkflowMode::Plan, value)
+                            })
                             .unwrap_or(false)
                         {
                             "running".to_string()
@@ -2065,7 +2071,9 @@ impl WorkflowKernelState {
                     );
                     plan.resumable_from_checkpoint = phase
                         .as_deref()
-                        .map(|value| is_background_resume_candidate_for_mode(WorkflowMode::Plan, value))
+                        .map(|value| {
+                            is_background_resume_candidate_for_mode(WorkflowMode::Plan, value)
+                        })
                         .unwrap_or(false);
                     plan.last_checkpoint_id = session.last_checkpoint_id.clone();
                     if let Some(next_status) = status {
@@ -2128,7 +2136,9 @@ impl WorkflowKernelState {
                     task.background_status = Some(
                         if phase
                             .as_deref()
-                            .map(|value| is_background_resume_candidate_for_mode(WorkflowMode::Task, value))
+                            .map(|value| {
+                                is_background_resume_candidate_for_mode(WorkflowMode::Task, value)
+                            })
                             .unwrap_or(false)
                         {
                             "running".to_string()
@@ -2138,7 +2148,9 @@ impl WorkflowKernelState {
                     );
                     task.resumable_from_checkpoint = phase
                         .as_deref()
-                        .map(|value| is_background_resume_candidate_for_mode(WorkflowMode::Task, value))
+                        .map(|value| {
+                            is_background_resume_candidate_for_mode(WorkflowMode::Task, value)
+                        })
                         .unwrap_or(false);
                     task.last_checkpoint_id = session.last_checkpoint_id.clone();
                     if let Some(next_status) = status {
@@ -2242,7 +2254,9 @@ impl WorkflowKernelState {
                     if plan_snapshot
                         .phase
                         .as_deref()
-                        .map(|value| is_background_resume_candidate_for_mode(WorkflowMode::Plan, value))
+                        .map(|value| {
+                            is_background_resume_candidate_for_mode(WorkflowMode::Plan, value)
+                        })
                         .unwrap_or(false)
                     {
                         "running".to_string()
@@ -2296,7 +2310,9 @@ impl WorkflowKernelState {
                     if task_snapshot
                         .phase
                         .as_deref()
-                        .map(|value| is_background_resume_candidate_for_mode(WorkflowMode::Task, value))
+                        .map(|value| {
+                            is_background_resume_candidate_for_mode(WorkflowMode::Task, value)
+                        })
                         .unwrap_or(false)
                     {
                         "running".to_string()
@@ -2600,9 +2616,7 @@ impl WorkflowKernelState {
             if session.active_mode == WorkflowMode::Chat
                 && matches!(
                     session.status,
-                    WorkflowStatus::Completed
-                        | WorkflowStatus::Failed
-                        | WorkflowStatus::Cancelled
+                    WorkflowStatus::Completed | WorkflowStatus::Failed | WorkflowStatus::Cancelled
                 )
             {
                 session.status = WorkflowStatus::Active;
@@ -2841,14 +2855,12 @@ impl WorkflowKernelState {
         };
         let context_ledger_entries = {
             let map = self.context_ledger_entries.read().await;
-            map.get(session_id)
-                .cloned()
-                .unwrap_or_else(|| {
-                    build_context_ledger_entries_from_handoff(
-                        Some(session.active_mode),
-                        &session.handoff_context,
-                    )
-                })
+            map.get(session_id).cloned().unwrap_or_else(|| {
+                build_context_ledger_entries_from_handoff(
+                    Some(session.active_mode),
+                    &session.handoff_context,
+                )
+            })
         };
 
         let record = PersistedSessionRecord {
@@ -2913,8 +2925,9 @@ impl WorkflowKernelState {
 
         let transcript_dir = self.storage_root.join("transcripts").join(session_id);
         if transcript_dir.exists() {
-            fs::remove_dir_all(&transcript_dir)
-                .map_err(|error| format!("Failed to remove workflow transcript directory: {error}"))?;
+            fs::remove_dir_all(&transcript_dir).map_err(|error| {
+                format!("Failed to remove workflow transcript directory: {error}")
+            })?;
         }
 
         Ok(())
@@ -3133,12 +3146,7 @@ fn build_chat_user_transcript_line(id: u64, turn_id: u64, content: &str) -> Valu
     })
 }
 
-fn build_chat_runtime_line(
-    id: u64,
-    line_type: &str,
-    content: String,
-    turn_id: u64,
-) -> Value {
+fn build_chat_runtime_line(id: u64, line_type: &str, content: String, turn_id: u64) -> Value {
     let mut object = serde_json::Map::new();
     object.insert("id".to_string(), Value::Number(id.into()));
     object.insert("type".to_string(), Value::String(line_type.to_string()));
@@ -3297,9 +3305,8 @@ fn chat_control_capabilities(
 
     let can_cancel = !is_chat_terminal_phase(&phase);
     let can_pause = backend == "standalone" && matches!(phase.as_str(), "submitting" | "streaming");
-    let can_resume = backend == "standalone"
-        && phase == "paused"
-        && block_reason == Some("user_pause");
+    let can_resume =
+        backend == "standalone" && phase == "paused" && block_reason == Some("user_pause");
 
     ChatControlCapabilities {
         can_pause,
@@ -3370,11 +3377,16 @@ fn format_tool_args_preview(tool_name: &str, raw_args: Option<&str>) -> String {
             .unwrap_or_default()
             .to_string(),
         "Bash" => truncate_for_preview(
-            args.get("command").and_then(Value::as_str).unwrap_or_default(),
+            args.get("command")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
             120,
         ),
         "Glob" => {
-            let pattern = args.get("pattern").and_then(Value::as_str).unwrap_or_default();
+            let pattern = args
+                .get("pattern")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             let path = args.get("path").and_then(Value::as_str).unwrap_or_default();
             if path.is_empty() {
                 pattern.to_string()
@@ -3383,7 +3395,10 @@ fn format_tool_args_preview(tool_name: &str, raw_args: Option<&str>) -> String {
             }
         }
         "Grep" => {
-            let pattern = args.get("pattern").and_then(Value::as_str).unwrap_or_default();
+            let pattern = args
+                .get("pattern")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             let path = args.get("path").and_then(Value::as_str).unwrap_or_default();
             if path.is_empty() {
                 format!("/{pattern}/")
@@ -3392,7 +3407,9 @@ fn format_tool_args_preview(tool_name: &str, raw_args: Option<&str>) -> String {
             }
         }
         "Task" => truncate_for_preview(
-            args.get("prompt").and_then(Value::as_str).unwrap_or_default(),
+            args.get("prompt")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
             120,
         ),
         _ => truncate_for_preview(&Value::Object(args).to_string(), 120),
@@ -3541,7 +3558,11 @@ fn build_context_ledger_entries_from_handoff(
     handoff_context: &HandoffContextBundle,
 ) -> Vec<WorkflowContextLedgerEntry> {
     let mut entries = Vec::new();
-    append_handoff_to_context_ledger(&mut entries, mode.unwrap_or(WorkflowMode::Chat), handoff_context.clone());
+    append_handoff_to_context_ledger(
+        &mut entries,
+        mode.unwrap_or(WorkflowMode::Chat),
+        handoff_context.clone(),
+    );
     entries
 }
 
@@ -3551,10 +3572,12 @@ fn append_handoff_to_context_ledger(
     handoff: HandoffContextBundle,
 ) {
     for turn in handoff.conversation_context {
-        let value = serde_json::to_value(&turn).unwrap_or_else(|_| json!({
-            "user": turn.user,
-            "assistant": turn.assistant,
-        }));
+        let value = serde_json::to_value(&turn).unwrap_or_else(|_| {
+            json!({
+                "user": turn.user,
+                "assistant": turn.assistant,
+            })
+        });
         if entries.iter().any(|entry| {
             entry.kind == WorkflowContextLedgerEntryKind::ConversationTurn && entry.value == value
         }) {
@@ -3633,7 +3656,9 @@ fn append_handoff_to_context_ledger(
     });
 }
 
-fn build_handoff_context_from_ledger(entries: &[WorkflowContextLedgerEntry]) -> HandoffContextBundle {
+fn build_handoff_context_from_ledger(
+    entries: &[WorkflowContextLedgerEntry],
+) -> HandoffContextBundle {
     let mut conversation_context = Vec::new();
     let mut artifact_refs = Vec::new();
     let mut context_sources = Vec::new();

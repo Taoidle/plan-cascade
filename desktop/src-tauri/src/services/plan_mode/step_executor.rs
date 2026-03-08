@@ -2136,8 +2136,8 @@ fn output_format_label(format: &OutputFormat) -> &'static str {
 
 fn build_plan_progress_transcript_lines(event: &PlanModeProgressEvent) -> Vec<Value> {
     match event.event_type.as_str() {
-        "batch_started" | "step_started" | "step_failed" | "step_retrying" | "batch_blocked" => vec![
-            build_card_transcript_line(
+        "batch_started" | "step_started" | "step_failed" | "step_retrying" | "batch_blocked" => {
+            vec![build_card_transcript_line(
                 "plan_step_update",
                 json!({
                     "eventType": event.event_type,
@@ -2171,8 +2171,8 @@ fn build_plan_progress_transcript_lines(event: &PlanModeProgressEvent) -> Vec<Va
                     })),
                 }),
                 false,
-            ),
-        ],
+            )]
+        }
         "step_completed" => {
             let mut lines = vec![build_card_transcript_line(
                 "plan_step_update",

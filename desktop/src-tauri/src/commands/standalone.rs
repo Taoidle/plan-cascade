@@ -11,10 +11,10 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{mpsc, RwLock};
 
 use crate::commands::proxy::resolve_provider_proxy;
+use crate::commands::webhook::WebhookState;
 use crate::commands::workflow::{
     emit_kernel_update_for_session, emit_session_catalog_update, emit_workflow_session_mutation,
 };
-use crate::commands::webhook::WebhookState;
 use crate::models::orchestrator::{
     ExecuteWithSessionRequest, ExecutionProgress, ExecutionSession, ExecutionSessionSummary,
     ExecutionStatus, ResumeExecutionRequest, StandaloneStatus,
@@ -27,8 +27,8 @@ use crate::services::orchestrator::{
 };
 use crate::services::plugins::models::{PluginInvocation, ResolvedPluginInvocation};
 use crate::services::streaming::UnifiedStreamEvent;
-use crate::services::workflow_kernel::{ChatRuntimeDispatch, WorkflowKernelState};
 use crate::services::webhook::integration::dispatch_on_event as dispatch_webhook_on_event;
+use crate::services::workflow_kernel::{ChatRuntimeDispatch, WorkflowKernelState};
 use crate::state::AppState;
 use crate::storage::KeyringService;
 use crate::utils::paths::ensure_plan_cascade_dir;
@@ -177,6 +177,11 @@ fn build_llm_provider_from_config(config: &ProviderConfig) -> Option<Arc<dyn Llm
 
 fn build_memory_hook_config(
     context_sources: Option<&crate::services::task_mode::context_provider::ContextSourceConfig>,
+    app: &AppHandle,
+    root_session_id: Option<&str>,
+    auto_extract_enabled: bool,
+    review_mode: Option<String>,
+    review_agent_ref: Option<String>,
 ) -> Option<crate::services::orchestrator::hooks::MemoryHookConfig> {
     let memory = context_sources?.memory.as_ref()?;
     let selected_categories: Vec<crate::services::memory::store::MemoryCategory> = memory
@@ -187,7 +192,11 @@ fn build_memory_hook_config(
 
     Some(crate::services::orchestrator::hooks::MemoryHookConfig {
         injection_enabled: memory.enabled,
-        extraction_enabled: false,
+        extraction_enabled: memory.enabled && auto_extract_enabled,
+        root_session_id: root_session_id.map(ToOwned::to_owned),
+        review_mode,
+        review_agent_ref,
+        app_handle: Some(app.clone()),
         selected_scopes: memory.selected_scopes.clone(),
         selected_categories,
         selected_memory_ids: memory.selected_memory_ids.clone(),
@@ -1235,6 +1244,12 @@ pub async fn execute_standalone(
     max_total_tokens: Option<u32>,
     max_iterations: Option<u32>,
     max_concurrent_subagents: Option<u32>,
+    memory_auto_extract_enabled: Option<bool>,
+    memoryAutoExtractEnabled: Option<bool>,
+    memory_review_mode: Option<String>,
+    memoryReviewMode: Option<String>,
+    memory_review_agent_ref: Option<String>,
+    memoryReviewAgentRef: Option<String>,
     plugin_invocations: Option<Vec<PluginInvocation>>,
     pluginInvocations: Option<Vec<PluginInvocation>>,
     context_sources: Option<crate::services::task_mode::context_provider::ContextSourceConfig>,
@@ -1381,6 +1396,11 @@ pub async fn execute_standalone(
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let effective_permission_level = permission_level.or(permissionLevel).unwrap_or_default();
+    let memory_auto_extract_enabled = memory_auto_extract_enabled
+        .or(memoryAutoExtractEnabled)
+        .unwrap_or(true);
+    let memory_review_mode = memory_review_mode.or(memoryReviewMode);
+    let memory_review_agent_ref = memory_review_agent_ref.or(memoryReviewAgentRef);
 
     // Clone session_id before it's moved into orchestrator_config
     let event_session_id = analysis_session_id.clone().unwrap_or_default();
@@ -1562,7 +1582,14 @@ pub async fn execute_standalone(
     // Wire memory hooks for automatic memory loading and extraction
     if let Ok(memory_store) = app_state.get_memory_store_arc().await {
         let loaded_memories = std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new()));
-        let mut memory_hook_config = build_memory_hook_config(context_sources.as_ref());
+        let mut memory_hook_config = build_memory_hook_config(
+            context_sources.as_ref(),
+            &app,
+            kernel_session_id.as_deref(),
+            memory_auto_extract_enabled,
+            memory_review_mode.clone(),
+            memory_review_agent_ref.clone(),
+        );
         if external_context_injected && injected_source_kinds.contains("memory") {
             if let Some(config) = memory_hook_config.as_mut() {
                 config.injection_enabled = false;
