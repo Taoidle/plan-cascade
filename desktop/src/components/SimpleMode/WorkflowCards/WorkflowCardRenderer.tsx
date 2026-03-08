@@ -72,7 +72,7 @@ export function WorkflowCardRenderer({ payload }: { payload: CardPayload }) {
     case 'interview_answer':
       return <InterviewAnswerCard data={payload.data as InterviewAnswerCardData} />;
     case 'prd_card':
-      return <PrdCard data={payload.data as PrdCardData} interactive={payload.interactive} />;
+      return <PrdCard data={payload.data as PrdCardData} interactive={payload.interactive} cardId={payload.cardId} />;
     case 'design_doc_card':
       return <DesignDocCard data={payload.data as DesignDocCardData} />;
     case 'execution_update':
@@ -95,7 +95,11 @@ export function WorkflowCardRenderer({ payload }: { payload: CardPayload }) {
       return <RequirementAnalysisCard data={payload.data as RequirementAnalysisCardData} />;
     case 'architecture_review_card':
       return (
-        <ArchitectureReviewCard data={payload.data as ArchitectureReviewCardData} interactive={payload.interactive} />
+        <ArchitectureReviewCard
+          data={payload.data as ArchitectureReviewCardData}
+          interactive={payload.interactive}
+          cardId={payload.cardId}
+        />
       );
     case 'persona_indicator':
       return <PersonaIndicatorCard data={payload.data as PersonaIndicatorData} />;

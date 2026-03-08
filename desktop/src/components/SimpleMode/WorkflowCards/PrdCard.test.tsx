@@ -15,6 +15,10 @@ const orchestratorHarness = vi.hoisted(() => ({
 
 const kernelHarness = vi.hoisted(() => ({
   session: null as WorkflowSession | null,
+  taskTranscriptLines: [] as Array<{
+    type: string;
+    cardPayload?: { interactive?: boolean; cardType?: string; cardId?: string };
+  }>,
 }));
 
 vi.mock('react-i18next', () => ({
@@ -33,8 +37,16 @@ vi.mock('../../../store/workflowOrchestrator', () => ({
 }));
 
 vi.mock('../../../store/workflowKernel', () => ({
-  useWorkflowKernelStore: (selector: (state: { session: WorkflowSession | null }) => unknown) =>
-    selector({ session: kernelHarness.session }),
+  useWorkflowKernelStore: (
+    selector: (state: {
+      session: WorkflowSession | null;
+      getCachedModeTranscript: (sessionId: string, mode: 'task') => { lines: typeof kernelHarness.taskTranscriptLines };
+    }) => unknown,
+  ) =>
+    selector({
+      session: kernelHarness.session,
+      getCachedModeTranscript: () => ({ lines: kernelHarness.taskTranscriptLines }),
+    }),
 }));
 
 vi.mock('../../../store/simpleWorkflowCoordinator', () => ({
@@ -96,6 +108,7 @@ describe('PrdCard interactive gating', () => {
   beforeEach(() => {
     orchestratorHarness.state.phase = 'reviewing_prd';
     kernelHarness.session = null;
+    kernelHarness.taskTranscriptLines = [];
   });
 
   it('enables actions when kernel phase is reviewing_prd', () => {
@@ -119,15 +132,47 @@ describe('PrdCard interactive gating', () => {
           ],
           batches: [{ index: 0, storyIds: ['story-1'] }],
           isEditable: true,
+          primaryAction: 'submit_architecture_review',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('workflow.prd.submitArchitectureReview')).toBeInTheDocument();
+  });
+
+  it('shows approve and execute label when PRD is already ready for execution', () => {
+    kernelHarness.session = createTaskKernelSession('reviewing_prd');
+
+    render(
+      <PrdCard
+        interactive
+        data={{
+          title: 'PRD',
+          description: 'desc',
+          stories: [
+            {
+              id: 'story-1',
+              title: 'Story 1',
+              description: 'desc',
+              priority: 'high',
+              dependencies: [],
+              acceptanceCriteria: ['done'],
+            },
+          ],
+          batches: [{ index: 0, storyIds: ['story-1'] }],
+          isEditable: true,
+          primaryAction: 'approve_and_execute',
+          revisionSource: 'architecture_updated',
         }}
       />,
     );
 
     expect(screen.getByText('workflow.prd.approveAndExecute')).toBeInTheDocument();
+    expect(screen.getByText('workflow.prd.architectureUpdated')).toBeInTheDocument();
   });
 
-  it('disables actions when kernel phase is not reviewing_prd even if orchestrator phase says reviewing_prd', () => {
-    orchestratorHarness.state.phase = 'reviewing_prd';
+  it('disables actions when neither orchestrator nor kernel phase is reviewing_prd', () => {
+    orchestratorHarness.state.phase = 'executing';
     kernelHarness.session = createTaskKernelSession('executing');
 
     render(
@@ -148,11 +193,12 @@ describe('PrdCard interactive gating', () => {
           ],
           batches: [{ index: 0, storyIds: ['story-1'] }],
           isEditable: true,
+          primaryAction: 'submit_architecture_review',
         }}
       />,
     );
 
-    expect(screen.queryByText('workflow.prd.approveAndExecute')).toBeNull();
+    expect(screen.queryByText('workflow.prd.submitArchitectureReview')).toBeNull();
   });
 
   it('keeps approve action retryable when approval fails', async () => {
@@ -182,11 +228,12 @@ describe('PrdCard interactive gating', () => {
           ],
           batches: [{ index: 0, storyIds: ['story-1'] }],
           isEditable: true,
+          primaryAction: 'submit_architecture_review',
         }}
       />,
     );
 
-    const approveButton = screen.getByText('workflow.prd.approveAndExecute');
+    const approveButton = screen.getByText('workflow.prd.submitArchitectureReview');
     await user.click(approveButton);
 
     await waitFor(() => {

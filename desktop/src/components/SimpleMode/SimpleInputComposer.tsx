@@ -90,6 +90,7 @@ export function SimpleInputComposer({
     <div className="p-4 space-y-3">
       {hasStructuredInterviewQuestion && taskPendingQuestion && (
         <InterviewInputPanel
+          key={taskPendingQuestion.questionId}
           question={taskPendingQuestion}
           onSubmit={onStructuredInterviewSubmit}
           onSkip={onSkipInterviewQuestion}

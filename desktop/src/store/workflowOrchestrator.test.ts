@@ -86,6 +86,13 @@ function extractCompletionReportCards() {
     .filter((card) => card.cardType === 'completion_report');
 }
 
+function extractCards(cardType: string) {
+  return routedCards
+    .filter((entry) => entry.mode === 'task')
+    .map((entry) => entry.payload)
+    .filter((card) => card.cardType === cardType);
+}
+
 describe('workflowOrchestrator task progress events', () => {
   let progressListener: ((event: { payload: ReturnType<typeof progressPayload> }) => void) | null = null;
   const unlisten = vi.fn();
@@ -365,7 +372,140 @@ describe('workflowOrchestrator task progress events', () => {
 
     await useWorkflowOrchestratorStore.getState().approvePrd(TEST_PRD);
 
-    expect(approvePrd).toHaveBeenCalledWith(TEST_PRD, 'linked-task-session');
+    expect(approvePrd).toHaveBeenCalledWith(TEST_PRD, 'linked-task-session', {
+      flowLevel: 'quick',
+      tddMode: 'off',
+      enableInterview: false,
+      qualityGatesEnabled: true,
+      maxParallel: 4,
+      skipVerification: false,
+      skipReview: false,
+      globalAgentOverride: null,
+      implAgentOverride: null,
+    });
     expect(useWorkflowOrchestratorStore.getState().sessionId).toBe('linked-task-session');
+  });
+
+  it('submits standard-flow PRD to architecture review before execution', async () => {
+    const approvePrd = vi.fn().mockResolvedValue(true);
+    const architectureReview = {
+      personaRole: 'SoftwareArchitect',
+      analysis: 'Architecture review completed.',
+      concerns: [],
+      suggestions: ['Consider splitting the implementation flow.'],
+      prdModifications: [
+        {
+          operationId: 'op-1',
+          type: 'update_story',
+          targetStoryId: 'story-1',
+          payload: {
+            description: 'Updated by architecture review',
+          },
+          preview: 'Update Story 1',
+          reason: 'Reduce ambiguity',
+          confidence: 0.91,
+        },
+      ],
+      approved: false,
+    };
+
+    useTaskModeStore.setState({
+      approvePrd,
+    } as unknown as ReturnType<typeof useTaskModeStore.getState>);
+    useWorkflowOrchestratorStore.setState({
+      phase: 'reviewing_prd',
+      sessionId: 'task-session',
+      editablePrd: TEST_PRD,
+      _runToken: 9,
+      prdReviewStage: 'pre_architecture_review',
+      config: {
+        flowLevel: 'standard',
+        tddMode: 'off',
+        maxParallel: 4,
+        qualityGatesEnabled: true,
+        specInterviewEnabled: false,
+        skipVerification: false,
+        skipReview: false,
+        globalAgentOverride: null,
+        implAgentOverride: null,
+      },
+    } as unknown as ReturnType<typeof useWorkflowOrchestratorStore.getState>);
+    invokeMock.mockResolvedValueOnce({
+      success: true,
+      data: architectureReview,
+      error: null,
+    });
+
+    const result = await useWorkflowOrchestratorStore.getState().approvePrd(TEST_PRD);
+
+    expect(result.ok).toBe(true);
+    expect(approvePrd).not.toHaveBeenCalled();
+    expect(useWorkflowOrchestratorStore.getState().phase).toBe('architecture_review');
+    expect(useWorkflowOrchestratorStore.getState().architectureReview).toEqual(architectureReview);
+    expect(extractCards('architecture_review_card')).toHaveLength(1);
+  });
+
+  it('applies architecture modifications and reinjects an executable PRD card', async () => {
+    const selectedModifications = [
+      {
+        operationId: 'op-1',
+        type: 'update_story' as const,
+        targetStoryId: 'story-1',
+        payload: {
+          title: 'Story 1 (Revised)',
+          description: 'Architecture-adjusted implementation plan',
+        },
+        preview: 'Update Story 1',
+        reason: 'Clarify scope',
+        confidence: 0.88,
+      },
+    ];
+
+    useWorkflowOrchestratorStore.setState({
+      phase: 'architecture_review',
+      editablePrd: TEST_PRD,
+      architectureReview: {
+        personaRole: 'SoftwareArchitect',
+        analysis: 'Needs a small PRD revision.',
+        concerns: [],
+        suggestions: ['Tighten the story scope.'],
+        prdModifications: selectedModifications,
+        approved: false,
+      },
+      prdReviewStage: 'pre_architecture_review',
+      config: {
+        flowLevel: 'standard',
+        tddMode: 'off',
+        maxParallel: 4,
+        qualityGatesEnabled: true,
+        specInterviewEnabled: false,
+        skipVerification: false,
+        skipReview: false,
+        globalAgentOverride: null,
+        implAgentOverride: null,
+      },
+    } as unknown as ReturnType<typeof useWorkflowOrchestratorStore.getState>);
+
+    const result = await useWorkflowOrchestratorStore.getState().approveArchitecture(false, selectedModifications);
+
+    expect(result.ok).toBe(true);
+    expect(useWorkflowOrchestratorStore.getState().phase).toBe('reviewing_prd');
+    expect(useWorkflowOrchestratorStore.getState().prdReviewStage).toBe('ready_for_execution');
+    expect(useWorkflowOrchestratorStore.getState().editablePrd?.stories[0]).toEqual(
+      expect.objectContaining({
+        id: 'story-1',
+        title: 'Story 1 (Revised)',
+        description: 'Architecture-adjusted implementation plan',
+      }),
+    );
+
+    const prdCards = extractCards('prd_card');
+    expect(prdCards).toHaveLength(1);
+    expect(prdCards[0]?.data).toEqual(
+      expect.objectContaining({
+        primaryAction: 'approve_and_execute',
+        revisionSource: 'architecture_updated',
+      }),
+    );
   });
 });

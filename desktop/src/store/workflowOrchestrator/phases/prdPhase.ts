@@ -13,7 +13,13 @@ import {
 import type { WorkflowPhaseRuntime } from './runtime';
 
 interface PrdPhaseDeps {
-  toPrdCardData: (prd: TaskPrd) => PrdCardData;
+  toPrdCardData: (
+    prd: TaskPrd,
+    options?: {
+      primaryAction?: PrdCardData['primaryAction'];
+      revisionSource?: PrdCardData['revisionSource'];
+    },
+  ) => PrdCardData;
   synthesizePlanningTurn: (taskDescription: string, strategyAnalysis: unknown, prd: TaskPrd) => void;
 }
 
@@ -49,7 +55,11 @@ export async function runPrdPhase(runtime: WorkflowPhaseRuntime, deps: PrdPhaseD
   injectInfo(i18n.t('workflow.orchestrator.generatingPrd', { ns: 'simpleMode' }), 'info');
 
   try {
-    const state = get() as { taskDescription: string; strategyAnalysis: unknown };
+    const state = get() as {
+      taskDescription: string;
+      strategyAnalysis: unknown;
+      config: { flowLevel: 'quick' | 'standard' | 'full' };
+    };
     const settings = useSettingsStore.getState();
     const maxContextTokens = settings.maxTotalTokens ?? 200_000;
     const prd = await useTaskModeStore
@@ -82,8 +92,13 @@ export async function runPrdPhase(runtime: WorkflowPhaseRuntime, deps: PrdPhaseD
 
     deps.synthesizePlanningTurn(state.taskDescription, state.strategyAnalysis, prd);
 
-    set({ phase: 'reviewing_prd', editablePrd: prd });
-    injectCard('prd_card', deps.toPrdCardData(prd), true);
+    const primaryAction = state.config.flowLevel === 'quick' ? 'approve_and_execute' : 'submit_architecture_review';
+    set({
+      phase: 'reviewing_prd',
+      editablePrd: prd,
+      prdReviewStage: state.config.flowLevel === 'quick' ? 'ready_for_execution' : 'pre_architecture_review',
+    });
+    injectCard('prd_card', deps.toPrdCardData(prd, { primaryAction }), true);
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

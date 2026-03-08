@@ -173,6 +173,8 @@ export interface PrdCardData {
   stories: PrdStoryData[];
   batches: PrdBatchData[];
   isEditable: boolean;
+  primaryAction?: 'submit_architecture_review' | 'approve_and_execute';
+  revisionSource?: 'architecture_updated';
 }
 
 export interface PrdStoryData {

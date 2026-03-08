@@ -90,6 +90,9 @@ interface WorkflowOrchestratorState {
   /** Working copy of PRD during review phase */
   editablePrd: TaskPrd | null;
 
+  /** Whether the current PRD still needs architecture review or is ready to execute. */
+  prdReviewStage: 'pre_architecture_review' | 'ready_for_execution';
+
   /** Currently pending interview question */
   pendingInterviewQuestion: InterviewQuestionCardData | null;
 
@@ -178,6 +181,7 @@ const DEFAULT_STATE = {
   strategyAnalysis: null as StrategyAnalysis | null,
   explorationResult: null as ExplorationCardData | null,
   editablePrd: null as TaskPrd | null,
+  prdReviewStage: 'pre_architecture_review' as const,
   pendingInterviewQuestion: null as InterviewQuestionCardData | null,
   currentBatch: 0,
   totalBatches: 0,
@@ -281,7 +285,13 @@ function buildConfigCardData(config: WorkflowConfig, isOverridden: boolean): Con
   };
 }
 
-function toPrdCardData(prd: TaskPrd): PrdCardData {
+function toPrdCardData(
+  prd: TaskPrd,
+  options?: {
+    primaryAction?: PrdCardData['primaryAction'];
+    revisionSource?: PrdCardData['revisionSource'];
+  },
+): PrdCardData {
   return {
     title: prd.title,
     description: prd.description,
@@ -298,6 +308,8 @@ function toPrdCardData(prd: TaskPrd): PrdCardData {
       storyIds: b.storyIds,
     })),
     isEditable: true,
+    primaryAction: options?.primaryAction,
+    revisionSource: options?.revisionSource,
   };
 }
 
@@ -836,8 +848,9 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
     set({ editablePrd: prd });
 
-    // Non-quick flow: run architecture review (interactive — returns after injecting card)
-    if (state.config.flowLevel !== 'quick') {
+    // Standard/full flow requires architecture review before execution
+    // only for the initial PRD review pass.
+    if (state.config.flowLevel !== 'quick' && state.prdReviewStage !== 'ready_for_execution') {
       const phaseRuntime = buildPhaseRuntime(set, get, runToken);
       const architectureResult = await runArchitecturePhase(phaseRuntime, prd, {});
       // Architecture review is interactive — user clicks Accept/Revise in the card.
@@ -905,8 +918,20 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       return failResult('prd_feedback_apply_failed', message);
     }
 
-    set({ editablePrd: result.prd, phase: 'reviewing_prd', error: null });
-    injectCard('prd_card', toPrdCardData(result.prd), true);
+    set({
+      editablePrd: result.prd,
+      phase: 'reviewing_prd',
+      error: null,
+      prdReviewStage: get().prdReviewStage,
+    });
+    injectCard(
+      'prd_card',
+      toPrdCardData(result.prd, {
+        primaryAction:
+          get().prdReviewStage === 'ready_for_execution' ? 'approve_and_execute' : 'submit_architecture_review',
+      }),
+      true,
+    );
     injectInfo(buildPrdFeedbackSummaryMessage(result.summary), 'info');
     return okResult();
   },
@@ -917,18 +942,23 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     selectedModifications: ArchitectureReviewCardData['prdModifications'],
   ) => {
     const runToken = get()._runToken;
-    const { phase, editablePrd, config } = get();
+    const { phase, editablePrd, config, architectureReview } = get();
     if (phase !== 'architecture_review') {
       return failResult('invalid_phase', `Cannot approve architecture in phase '${phase}'`);
     }
 
     if (acceptAsIs || selectedModifications.length === 0) {
-      // Accept architecture as-is — proceed to design doc + execution
+      const ignoringArchitectureSuggestions = !!architectureReview?.prdModifications.length;
       injectInfo(
-        i18n.t('workflow.orchestrator.architectureApproved', {
-          ns: 'simpleMode',
-          defaultValue: 'Architecture review accepted. Generating design document...',
-        }),
+        ignoringArchitectureSuggestions
+          ? i18n.t('workflow.orchestrator.architectureBypassed', {
+              ns: 'simpleMode',
+              defaultValue: 'Ignoring architecture suggestions and continuing to execution...',
+            })
+          : i18n.t('workflow.orchestrator.architectureApproved', {
+              ns: 'simpleMode',
+              defaultValue: 'Architecture review accepted. Generating design document...',
+            }),
         'success',
       );
 
@@ -961,8 +991,27 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
       try {
         const patchedPrd = applyArchitectureModifications(editablePrd, selectedModifications, config.maxParallel);
-        set({ phase: 'reviewing_prd', editablePrd: patchedPrd });
-        injectCard('prd_card', toPrdCardData(patchedPrd), true);
+        set({
+          phase: 'reviewing_prd',
+          editablePrd: patchedPrd,
+          prdReviewStage: 'ready_for_execution',
+          error: null,
+        });
+        injectCard(
+          'prd_card',
+          toPrdCardData(patchedPrd, {
+            primaryAction: 'approve_and_execute',
+            revisionSource: 'architecture_updated',
+          }),
+          true,
+        );
+        injectInfo(
+          i18n.t('workflow.orchestrator.architectureChangesApplied', {
+            ns: 'simpleMode',
+            defaultValue: 'Applied architecture suggestions. Review the updated PRD before execution.',
+          }),
+          'success',
+        );
         return okResult();
       } catch (e) {
         injectInfo(
@@ -972,8 +1021,14 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
           }),
           'warning',
         );
-        set({ phase: 'reviewing_prd' });
-        injectCard('prd_card', toPrdCardData(editablePrd), true);
+        set({ phase: 'reviewing_prd', prdReviewStage: 'ready_for_execution' });
+        injectCard(
+          'prd_card',
+          toPrdCardData(editablePrd, {
+            primaryAction: 'approve_and_execute',
+          }),
+          true,
+        );
         if (e instanceof Error) {
           set({ error: e.message });
           return failResult('architecture_apply_failed', e.message);

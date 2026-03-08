@@ -13,8 +13,8 @@ import { useWorkflowOrchestratorStore } from '../../../store/workflowOrchestrato
 import { useWorkflowKernelStore } from '../../../store/workflowKernel';
 import { submitWorkflowActionIntentViaCoordinator } from '../../../store/simpleWorkflowCoordinator';
 import type { ArchitectureReviewCardData } from '../../../types/workflowCard';
+import type { StreamLine } from '../../../store/execution';
 import { reportInteractiveActionFailure } from '../../../lib/workflowObservability';
-
 const severityColors = {
   high: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800',
   medium: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
@@ -24,9 +24,11 @@ const severityColors = {
 export function ArchitectureReviewCard({
   data,
   interactive = false,
+  cardId,
 }: {
   data: ArchitectureReviewCardData;
   interactive?: boolean;
+  cardId?: string;
 }) {
   const { t } = useTranslation('simpleMode');
   const [expanded, setExpanded] = useState(false);
@@ -34,7 +36,22 @@ export function ArchitectureReviewCard({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const approveArchitecture = useWorkflowOrchestratorStore((s) => s.approveArchitecture);
+  const orchestratorPhase = useWorkflowOrchestratorStore((s) => s.phase);
   const workflowSession = useWorkflowKernelStore((s) => s.session);
+  const latestInteractiveArchitectureCardId = useWorkflowKernelStore((state) => {
+    const rootSessionId = state.session?.sessionId;
+    if (!rootSessionId) return null;
+    const lines = state.getCachedModeTranscript(rootSessionId, 'task').lines as StreamLine[];
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const line = lines[index];
+      if (line.type !== 'card' || !line.cardPayload?.interactive) continue;
+      if (line.cardPayload.cardType === 'architecture_review_card') {
+        return line.cardPayload.cardId;
+      }
+    }
+    return null;
+  });
+  const hasModifications = data.prdModifications.length > 0;
 
   const toggleMod = (index: number) => {
     setSelectedMods((prev) => {
@@ -45,7 +62,7 @@ export function ArchitectureReviewCard({
     });
   };
 
-  const handleAccept = async () => {
+  const handleContinueExecution = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
     setSubmitError(null);
@@ -55,8 +72,8 @@ export function ArchitectureReviewCard({
           mode: 'task',
           type: 'execution_control',
           source: 'architecture_review_card',
-          action: 'approve_architecture_review',
-          content: 'architecture_review:approve',
+          action: hasModifications ? 'bypass_architecture_changes' : 'continue_after_architecture_review',
+          content: hasModifications ? 'architecture_review:bypass_changes' : 'architecture_review:continue',
           metadata: {
             concernCount: data.concerns.length,
             suggestionCount: data.suggestions.length,
@@ -68,12 +85,13 @@ export function ArchitectureReviewCard({
       }
       const result = await approveArchitecture?.(true, []);
       if (result && !result.ok) {
-        const message = result.message || 'Failed to approve architecture review';
+        const message = result.message || 'Failed to continue after architecture review';
         setSubmitError(message);
         await reportInteractiveActionFailure({
           card: 'architecture_review_card',
-          action: 'approve_architecture_review',
-          errorCode: result.errorCode || 'architecture_approve_failed',
+          action: hasModifications ? 'bypass_architecture_changes' : 'continue_after_architecture_review',
+          errorCode:
+            result.errorCode || (hasModifications ? 'architecture_bypass_failed' : 'architecture_continue_failed'),
           message,
           session: workflowSession,
         });
@@ -83,7 +101,7 @@ export function ArchitectureReviewCard({
     }
   };
 
-  const handleRevise = async () => {
+  const handleApplyModifications = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
     setSubmitError(null);
@@ -94,8 +112,8 @@ export function ArchitectureReviewCard({
           mode: 'task',
           type: 'execution_control',
           source: 'architecture_review_card',
-          action: 'request_architecture_changes',
-          content: 'architecture_review:request_changes',
+          action: 'apply_architecture_changes',
+          content: 'architecture_review:apply_changes',
           metadata: {
             selectedModificationCount: selected.length,
             totalModificationCount: data.prdModifications.length,
@@ -110,7 +128,7 @@ export function ArchitectureReviewCard({
         setSubmitError(message);
         await reportInteractiveActionFailure({
           card: 'architecture_review_card',
-          action: 'request_architecture_changes',
+          action: 'apply_architecture_changes',
           errorCode: result.errorCode || 'architecture_apply_failed',
           message,
           session: workflowSession,
@@ -123,7 +141,16 @@ export function ArchitectureReviewCard({
 
   const isKernelTaskActive = workflowSession?.status === 'active' && workflowSession.activeMode === 'task';
   const kernelTaskPhase = workflowSession?.modeSnapshots.task?.phase ?? 'idle';
-  const isInteractive = interactive && kernelTaskPhase === 'architecture_review' && isKernelTaskActive && !isSubmitting;
+  const isLatestCard =
+    !cardId || !latestInteractiveArchitectureCardId || latestInteractiveArchitectureCardId === cardId;
+  const isArchitectureReviewActive =
+    orchestratorPhase === 'architecture_review' || kernelTaskPhase === 'architecture_review';
+  const isInteractive =
+    interactive &&
+    isArchitectureReviewActive &&
+    isLatestCard &&
+    !isSubmitting &&
+    (orchestratorPhase === 'architecture_review' || isKernelTaskActive);
 
   return (
     <div className="rounded-lg border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-900/20 overflow-hidden">
@@ -243,26 +270,28 @@ export function ArchitectureReviewCard({
         {/* Action buttons (interactive mode only) */}
         {isInteractive && (
           <div className="pt-2 flex items-center gap-2 border-t border-cyan-200 dark:border-cyan-800">
-            <button
-              onClick={handleAccept}
-              disabled={isSubmitting}
-              className="text-2xs px-3 py-1 rounded bg-green-600 hover:bg-green-700 text-white transition-colors"
-            >
-              {isSubmitting
-                ? t('workflow.common.processing', { defaultValue: 'Processing...' })
-                : t('workflow.architectureReview.approve')}
-            </button>
-            {data.prdModifications.length > 0 && (
+            {hasModifications && (
               <button
-                onClick={handleRevise}
+                onClick={handleApplyModifications}
                 disabled={isSubmitting}
                 className="text-2xs px-3 py-1 rounded bg-amber-600 hover:bg-amber-700 text-white transition-colors"
               >
                 {isSubmitting
                   ? t('workflow.common.processing', { defaultValue: 'Processing...' })
-                  : t('workflow.architectureReview.requestChanges')}
+                  : t('workflow.architectureReview.applyModifications')}
               </button>
             )}
+            <button
+              onClick={handleContinueExecution}
+              disabled={isSubmitting}
+              className="text-2xs px-3 py-1 rounded bg-green-600 hover:bg-green-700 text-white transition-colors"
+            >
+              {isSubmitting
+                ? t('workflow.common.processing', { defaultValue: 'Processing...' })
+                : hasModifications
+                  ? t('workflow.architectureReview.bypassAndExecute')
+                  : t('workflow.architectureReview.continueExecution')}
+            </button>
             {submitError && <span className="text-2xs text-rose-600 dark:text-rose-300">{submitError}</span>}
           </div>
         )}

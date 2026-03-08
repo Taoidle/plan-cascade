@@ -14,6 +14,7 @@ use crate::services::llm::types::{LlmRequestOptions, Message};
 use crate::services::persona::{PersonaRegistry, PersonaRole};
 use crate::services::task_mode::batch_executor::ExecutableStory;
 use crate::services::task_mode::calculate_batches;
+use crate::services::tools::extract_text_without_tool_calls;
 
 /// Default maximum parallel stories per batch for PRD generation.
 const DEFAULT_MAX_PARALLEL: usize = 4;
@@ -135,6 +136,10 @@ fn extract_response_text(
 fn extract_json_from_response(response_text: &str) -> String {
     let trimmed = response_text.trim();
 
+    if is_valid_story_array_json(trimmed) {
+        return trimmed.to_string();
+    }
+
     // Try to extract from markdown code fences (```json ... ``` or ``` ... ```)
     if let Some(start) = trimmed.find("```") {
         let after_fence = &trimmed[start + 3..];
@@ -146,19 +151,123 @@ fn extract_json_from_response(response_text: &str) -> String {
         };
         let content = &after_fence[content_start..];
         if let Some(end) = content.find("```") {
-            return content[..end].trim().to_string();
+            let fenced = content[..end].trim();
+            if is_valid_story_array_json(fenced) {
+                return fenced.to_string();
+            }
         }
     }
 
-    // Try to find the first [ and last ] for a raw JSON array
-    if let (Some(start), Some(end)) = (trimmed.find('['), trimmed.rfind(']')) {
-        if start <= end {
-            return trimmed[start..=end].to_string();
-        }
+    // Try to locate a balanced JSON array within mixed text.
+    if let Some(array) = find_first_valid_json_array(trimmed) {
+        return array;
     }
 
     // Return as-is
     trimmed.to_string()
+}
+
+fn is_valid_story_array_json(candidate: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(candidate)
+        .map(|value| value.is_array())
+        .unwrap_or(false)
+}
+
+fn find_first_valid_json_array(text: &str) -> Option<String> {
+    let mut in_string = false;
+    let mut escaping = false;
+    let mut depth = 0usize;
+    let mut start: Option<usize> = None;
+
+    for (idx, ch) in text.char_indices() {
+        if in_string {
+            if escaping {
+                escaping = false;
+                continue;
+            }
+            match ch {
+                '\\' => escaping = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_string = true,
+            '[' => {
+                if depth == 0 {
+                    start = Some(idx);
+                }
+                depth += 1;
+            }
+            ']' => {
+                if depth == 0 {
+                    continue;
+                }
+                depth -= 1;
+                if depth == 0 {
+                    if let Some(array_start) = start.take() {
+                        let candidate = text[array_start..=idx].trim();
+                        if is_valid_story_array_json(candidate) {
+                            return Some(candidate.to_string());
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn looks_like_tool_call_output(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("[tool_call]")
+        || lower.contains("[/tool_call]")
+        || lower.contains("```tool_call")
+        || lower.contains("<tool_call>")
+        || lower.contains("[tool]")
+}
+
+fn strip_tool_call_artifacts(text: &str) -> String {
+    let mut cleaned = text.to_string();
+    loop {
+        let lower = cleaned.to_ascii_lowercase();
+        let Some(start) = lower.find("[tool_call]") else {
+            break;
+        };
+        let suffix = &cleaned[start + "[TOOL_CALL]".len()..];
+        let suffix_lower = &lower[start + "[TOOL_CALL]".len()..];
+        if let Some(end_offset) = suffix_lower.find("[/tool_call]") {
+            let end = start + "[TOOL_CALL]".len() + end_offset + "[/TOOL_CALL]".len();
+            cleaned.replace_range(start..end, "");
+        } else {
+            cleaned.truncate(start);
+            break;
+        }
+        if cleaned.trim().is_empty() {
+            break;
+        }
+    }
+    extract_text_without_tool_calls(&cleaned)
+}
+
+fn sanitize_conversation_history(history: &[ConversationTurnInput]) -> Vec<ConversationTurnInput> {
+    history
+        .iter()
+        .filter_map(|turn| {
+            let assistant = strip_tool_call_artifacts(&turn.assistant).trim().to_string();
+            if assistant.is_empty() {
+                return None;
+            }
+            Some(ConversationTurnInput {
+                user: turn.user.trim().to_string(),
+                assistant,
+            })
+        })
+        .collect()
 }
 
 /// Parse LLM response text into a Vec<TaskStory>.
@@ -169,7 +278,20 @@ pub fn parse_stories_from_response(response_text: &str) -> Result<Vec<TaskStory>
         return Err("LLM returned empty response (no text content)".to_string());
     }
 
-    let json_str = extract_json_from_response(response_text);
+    let cleaned_response = strip_tool_call_artifacts(response_text);
+    let effective_response = cleaned_response.trim();
+    if effective_response.is_empty() && looks_like_tool_call_output(response_text) {
+        return Err(
+            "LLM returned tool-call output instead of the required PRD JSON stories array"
+                .to_string(),
+        );
+    }
+
+    let json_str = extract_json_from_response(if effective_response.is_empty() {
+        response_text
+    } else {
+        effective_response
+    });
 
     if json_str.trim().is_empty() {
         return Err(format!(
@@ -252,10 +374,11 @@ pub async fn generate_prd_with_llm(
 ) -> Result<TaskPrd, String> {
     let system_prompt = build_prd_system_prompt();
     let user_message = build_prd_user_message(task_description);
+    let sanitized_history = sanitize_conversation_history(conversation_history);
 
     // Build messages with compacted conversation history
     let mut messages =
-        compact_conversation_history(&provider, conversation_history, max_context_tokens).await;
+        compact_conversation_history(&provider, &sanitized_history, max_context_tokens).await;
 
     // Inject exploration context (project structure awareness) before the PRD request
     if let Some(ctx) = exploration_context {
@@ -847,6 +970,43 @@ Hope this helps!"#;
     }
 
     #[test]
+    fn test_parse_json_ignores_tool_call_blocks_and_extracts_real_story_array() {
+        let response = r#"[TOOL_CALL]
+{tool => "glob", args => {"path" => "desktop/src-tauri"}}
+[/TOOL_CALL]
+
+[
+    {
+        "id": "story-001",
+        "title": "Actual story",
+        "description": "Use the real JSON array",
+        "priority": "high",
+        "dependencies": [],
+        "acceptanceCriteria": ["Parses correctly"]
+    }
+]"#;
+
+        let stories = parse_stories_from_response(response).unwrap();
+        assert_eq!(stories.len(), 1);
+        assert_eq!(stories[0].title, "Actual story");
+    }
+
+    #[test]
+    fn test_parse_tool_call_only_response_returns_specific_error() {
+        let response = r#"[TOOL_CALL]
+{tool => "grep", args => {"pattern" => "plan_mode"}}
+[/TOOL_CALL]"#;
+
+        let result = parse_stories_from_response(response);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .contains("tool-call output instead of the required PRD JSON stories array")
+        );
+    }
+
+    #[test]
     fn test_parse_empty_array_returns_error() {
         let json = "[]";
         let result = parse_stories_from_response(json);
@@ -1397,6 +1557,28 @@ Hope this helps!"#;
 
         assert_eq!(prd.stories.len(), 1);
         assert_eq!(prd.stories[0].title, "Setup OAuth");
+    }
+
+    #[test]
+    fn test_sanitize_conversation_history_removes_tool_call_only_turns() {
+        let history = vec![
+            ConversationTurnInput {
+                user: "Find project files".to_string(),
+                assistant: "[TOOL_CALL]\n{tool => \"glob\"}\n[/TOOL_CALL]".to_string(),
+            },
+            ConversationTurnInput {
+                user: "Summarize the result".to_string(),
+                assistant: "Found the relevant files and summarized the structure.".to_string(),
+            },
+        ];
+
+        let sanitized = sanitize_conversation_history(&history);
+        assert_eq!(sanitized.len(), 1);
+        assert_eq!(sanitized[0].user, "Summarize the result");
+        assert_eq!(
+            sanitized[0].assistant,
+            "Found the relevant files and summarized the structure."
+        );
     }
 
     #[test]

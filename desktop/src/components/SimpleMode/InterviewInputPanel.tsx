@@ -75,6 +75,7 @@ function TextInput({ question, onSubmit, onSkip, loading }: InterviewInputPanelP
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    setValue('');
     inputRef.current?.focus();
   }, [question.questionId]);
 
@@ -140,6 +141,7 @@ function TextareaInput({ question, onSubmit, onSkip, loading }: InterviewInputPa
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
+    setValue('');
     textareaRef.current?.focus();
   }, [question.questionId]);
 
@@ -250,6 +252,12 @@ function SingleSelectInput({ question, onSubmit, onSkip, loading }: InterviewInp
   const [showCustom, setShowCustom] = useState(false);
   const [customValue, setCustomValue] = useState('');
   const customInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setSelected(null);
+    setShowCustom(false);
+    setCustomValue('');
+  }, [question.questionId]);
 
   useEffect(() => {
     if (showCustom) customInputRef.current?.focus();
@@ -368,6 +376,12 @@ function MultiSelectInput({ question, onSubmit, onSkip, loading }: InterviewInpu
   const [showCustom, setShowCustom] = useState(false);
   const [customValue, setCustomValue] = useState('');
   const customInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setSelected(new Set());
+    setShowCustom(false);
+    setCustomValue('');
+  }, [question.questionId]);
 
   useEffect(() => {
     if (showCustom) customInputRef.current?.focus();

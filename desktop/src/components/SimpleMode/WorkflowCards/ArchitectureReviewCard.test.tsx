@@ -6,6 +6,7 @@ import type { TaskLifecyclePhase } from '../../../types/workflowKernel';
 
 const orchestratorHarness = vi.hoisted(() => ({
   state: {
+    phase: 'architecture_review',
     approveArchitecture: vi.fn().mockResolvedValue({
       ok: false,
       errorCode: 'architecture_apply_failed',
@@ -16,6 +17,10 @@ const orchestratorHarness = vi.hoisted(() => ({
 
 const kernelHarness = vi.hoisted(() => ({
   session: null as WorkflowSession | null,
+  taskTranscriptLines: [] as Array<{
+    type: string;
+    cardPayload?: { interactive?: boolean; cardType?: string; cardId?: string };
+  }>,
 }));
 
 vi.mock('react-i18next', () => ({
@@ -34,8 +39,16 @@ vi.mock('../../../store/workflowOrchestrator', () => ({
 }));
 
 vi.mock('../../../store/workflowKernel', () => ({
-  useWorkflowKernelStore: (selector: (state: { session: WorkflowSession | null }) => unknown) =>
-    selector({ session: kernelHarness.session }),
+  useWorkflowKernelStore: (
+    selector: (state: {
+      session: WorkflowSession | null;
+      getCachedModeTranscript: (sessionId: string, mode: 'task') => { lines: typeof kernelHarness.taskTranscriptLines };
+    }) => unknown,
+  ) =>
+    selector({
+      session: kernelHarness.session,
+      getCachedModeTranscript: () => ({ lines: kernelHarness.taskTranscriptLines }),
+    }),
 }));
 
 vi.mock('../../../store/simpleWorkflowCoordinator', () => ({
@@ -95,6 +108,7 @@ function createTaskKernelSession(phase: TaskLifecyclePhase): WorkflowSession {
 
 describe('ArchitectureReviewCard', () => {
   beforeEach(() => {
+    orchestratorHarness.state.phase = 'architecture_review';
     orchestratorHarness.state.approveArchitecture.mockReset();
     orchestratorHarness.state.approveArchitecture.mockResolvedValue({
       ok: false,
@@ -102,6 +116,7 @@ describe('ArchitectureReviewCard', () => {
       message: 'cannot apply architecture changes',
     });
     kernelHarness.session = createTaskKernelSession('architecture_review');
+    kernelHarness.taskTranscriptLines = [];
   });
 
   it('keeps architecture actions retryable when backend action fails', async () => {
@@ -120,15 +135,77 @@ describe('ArchitectureReviewCard', () => {
       />,
     );
 
-    const approveButton = screen.getByText('workflow.architectureReview.approve');
-    await user.click(approveButton);
+    const continueButton = screen.getByText('workflow.architectureReview.continueExecution');
+    await user.click(continueButton);
 
     await waitFor(() => {
       expect(screen.getByText('cannot apply architecture changes')).toBeInTheDocument();
     });
-    expect(approveButton).toBeEnabled();
+    expect(continueButton).toBeEnabled();
 
-    await user.click(screen.getByText('workflow.architectureReview.approve'));
+    await user.click(screen.getByText('workflow.architectureReview.continueExecution'));
     expect(orchestratorHarness.state.approveArchitecture).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows apply and bypass actions when architecture review has PRD modifications', () => {
+    render(
+      <ArchitectureReviewCard
+        interactive
+        data={{
+          personaRole: 'SoftwareArchitect',
+          analysis: 'analysis',
+          concerns: [],
+          suggestions: ['one'],
+          prdModifications: [
+            {
+              operationId: 'mod-1',
+              type: 'update_story',
+              targetStoryId: 'story-1',
+              payload: { title: 'Updated story' },
+              preview: 'Update story title',
+              reason: 'Clarify scope',
+              confidence: 0.9,
+            },
+          ],
+          approved: false,
+        }}
+      />,
+    );
+
+    expect(screen.getByText('workflow.architectureReview.applyModifications')).toBeInTheDocument();
+    expect(screen.getByText('workflow.architectureReview.bypassAndExecute')).toBeInTheDocument();
+    expect(screen.queryByText('workflow.architectureReview.continueExecution')).toBeNull();
+  });
+
+  it('still shows architecture actions when kernel session is unavailable but orchestrator is reviewing architecture', () => {
+    kernelHarness.session = null;
+    orchestratorHarness.state.phase = 'architecture_review';
+
+    render(
+      <ArchitectureReviewCard
+        interactive
+        data={{
+          personaRole: 'SoftwareArchitect',
+          analysis: 'analysis',
+          concerns: [],
+          suggestions: ['one'],
+          prdModifications: [
+            {
+              operationId: 'mod-1',
+              type: 'update_story',
+              targetStoryId: 'story-1',
+              payload: { title: 'Updated story' },
+              preview: 'Update story title',
+              reason: 'Clarify scope',
+              confidence: 0.9,
+            },
+          ],
+          approved: false,
+        }}
+      />,
+    );
+
+    expect(screen.getByText('workflow.architectureReview.applyModifications')).toBeInTheDocument();
+    expect(screen.getByText('workflow.architectureReview.bypassAndExecute')).toBeInTheDocument();
   });
 });

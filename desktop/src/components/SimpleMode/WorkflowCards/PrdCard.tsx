@@ -15,8 +15,9 @@ import type { TaskStory } from '../../../store/taskMode';
 import { useWorkflowKernelStore } from '../../../store/workflowKernel';
 import { submitWorkflowActionIntentViaCoordinator } from '../../../store/simpleWorkflowCoordinator';
 import { reportInteractiveActionFailure } from '../../../lib/workflowObservability';
+import type { StreamLine } from '../../../store/execution';
 
-export function PrdCard({ data, interactive }: { data: PrdCardData; interactive: boolean }) {
+export function PrdCard({ data, interactive, cardId }: { data: PrdCardData; interactive: boolean; cardId?: string }) {
   const { t } = useTranslation('simpleMode');
   const [expandedStories, setExpandedStories] = useState<Set<string>>(new Set());
   const [isEditing, setIsEditing] = useState(false);
@@ -25,11 +26,32 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
   const approvePrd = useWorkflowOrchestratorStore((s) => s.approvePrd);
   const editablePrd = useWorkflowOrchestratorStore((s) => s.editablePrd);
   const updateEditableStory = useWorkflowOrchestratorStore((s) => s.updateEditableStory);
+  const orchestratorPhase = useWorkflowOrchestratorStore((s) => s.phase);
   const workflowSession = useWorkflowKernelStore((s) => s.session);
+  const latestInteractivePrdCardId = useWorkflowKernelStore((state) => {
+    const rootSessionId = state.session?.sessionId;
+    if (!rootSessionId) return null;
+    const lines = state.getCachedModeTranscript(rootSessionId, 'task').lines as StreamLine[];
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const line = lines[index];
+      if (line.type !== 'card' || !line.cardPayload?.interactive) continue;
+      if (line.cardPayload.cardType === 'prd_card') {
+        return line.cardPayload.cardId;
+      }
+    }
+    return null;
+  });
 
   const isKernelTaskActive = workflowSession?.status === 'active' && workflowSession.activeMode === 'task';
   const kernelTaskPhase = workflowSession?.modeSnapshots.task?.phase ?? 'idle';
-  const isActive = interactive && kernelTaskPhase === 'reviewing_prd' && isKernelTaskActive;
+  const isLatestCard = !cardId || !latestInteractivePrdCardId || latestInteractivePrdCardId === cardId;
+  const isReviewingPrd = orchestratorPhase === 'reviewing_prd' || kernelTaskPhase === 'reviewing_prd';
+  const isActive = interactive && isReviewingPrd && isKernelTaskActive && isLatestCard;
+  const primaryAction = data.primaryAction ?? 'approve_and_execute';
+  const primaryActionLabel =
+    primaryAction === 'submit_architecture_review'
+      ? t('workflow.prd.submitArchitectureReview')
+      : t('workflow.prd.approveAndExecute');
 
   // When editing, read stories from the live editablePrd; otherwise use the snapshot card data
   const displayStories: PrdStoryData[] = isEditing && editablePrd ? editablePrd.stories : data.stories;
@@ -56,12 +78,15 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
           mode: 'task',
           type: 'execution_control',
           source: 'prd_card',
-          action: 'approve_prd',
-          content: 'approve_prd',
+          action:
+            primaryAction === 'submit_architecture_review' ? 'submit_architecture_review' : 'approve_prd_execution',
+          content:
+            primaryAction === 'submit_architecture_review' ? 'submit_architecture_review' : 'approve_prd_execution',
           metadata: {
             storyCount: data.stories.length,
             batchCount: data.batches.length,
             isEdited: !!editablePrd,
+            primaryAction,
           },
         });
       } catch {
@@ -74,8 +99,13 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
           setSubmitError(message);
           await reportInteractiveActionFailure({
             card: 'prd_card',
-            action: 'approve_prd',
-            errorCode: result.errorCode || 'approve_prd_failed',
+            action:
+              primaryAction === 'submit_architecture_review' ? 'submit_architecture_review' : 'approve_prd_execution',
+            errorCode:
+              result.errorCode ||
+              (primaryAction === 'submit_architecture_review'
+                ? 'submit_architecture_review_failed'
+                : 'approve_prd_execution_failed'),
             message,
             session: workflowSession,
           });
@@ -84,7 +114,16 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
         setIsApproving(false);
       }
     })();
-  }, [approvePrd, data.batches.length, data.stories.length, editablePrd, isActive, isApproving, workflowSession]);
+  }, [
+    approvePrd,
+    data.batches.length,
+    data.stories.length,
+    editablePrd,
+    isActive,
+    isApproving,
+    primaryAction,
+    workflowSession,
+  ]);
 
   // Group stories by batch
   const storyBatchMap = new Map<string, number>();
@@ -100,9 +139,16 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
           <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
             {t('workflow.prd.title')}
           </span>
-          <span className="text-2xs text-emerald-600 dark:text-emerald-400">
-            {t('workflow.prd.storiesAndBatches', { stories: data.stories.length, batches: data.batches.length })}
-          </span>
+          <div className="flex items-center gap-2">
+            {data.revisionSource === 'architecture_updated' && (
+              <span className="text-2xs px-1.5 py-0.5 rounded bg-cyan-200 dark:bg-cyan-800 text-cyan-700 dark:text-cyan-300">
+                {t('workflow.prd.architectureUpdated')}
+              </span>
+            )}
+            <span className="text-2xs text-emerald-600 dark:text-emerald-400">
+              {t('workflow.prd.storiesAndBatches', { stories: data.stories.length, batches: data.batches.length })}
+            </span>
+          </div>
         </div>
         <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200 mt-1">{data.title}</p>
         {data.description && (
@@ -169,7 +215,7 @@ export function PrdCard({ data, interactive }: { data: PrdCardData; interactive:
             disabled={isApproving}
             className="px-3 py-1.5 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
           >
-            {t('workflow.prd.approveAndExecute')}
+            {primaryActionLabel}
           </button>
           <button
             onClick={() => setIsEditing(!isEditing)}
