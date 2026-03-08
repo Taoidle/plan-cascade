@@ -675,9 +675,168 @@ Write("prd.json", json.dumps(prd, indent=2))
 echo "✓ Flow/TDD configuration written to PRD"
 ```
 
-## Step 5.5: Display Unified Review
+## Step 5.4: Decision Conflict Check (Passive)
 
-**CRITICAL**: Use Bash to display the unified PRD + Design Document review:
+After design_doc.json is generated, check new decisions against existing project decisions:
+
+```bash
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/memory-doctor.py" \
+  --mode passive \
+  --new-decisions design_doc.json \
+  --project-root "$(pwd)"
+```
+
+Exit code handling:
+- **Exit 0**: No issues found or no existing decisions to compare — proceed silently to Step 5.5
+- **Exit 1**: Decision conflicts or duplicates detected — follow the resolution steps below
+- **Exit 2** (or script crash/traceback): Infrastructure error (e.g., no LLM provider). Log the warning and proceed to Step 5.5. This check is advisory and must not block PRD generation.
+
+If exit code is 1:
+1. Display the diagnosis report to the user
+2. Use `AskUserQuestion` to ask the user how to resolve each issue:
+   - **Deprecate** — Mark the older/conflicting decision as deprecated (recommended for conflicts and superseded)
+   - **Merge** — Combine duplicate decisions into one (recommended for duplicates)
+   - **Skip** — Keep both decisions as-is
+3. Apply the user's choices using the memory-doctor `--apply` command:
+
+   **CRITICAL**: Construct a JSON array of the user's choices and save it to `_doctor_actions.json`. Each entry must include the full diagnosis context with `decision_a` and `decision_b` dicts (including `id` and `_source` fields) as returned by the diagnosis report:
+
+   ```json
+   [
+     {
+       "action": "deprecate",
+       "diagnosis": {
+         "type": "conflict",
+         "decision_a": {"id": "ADR-F003", "_source": "path/to/design_doc.json"},
+         "decision_b": {"id": "ADR-F012", "_source": "other/design_doc.json"},
+         "source_a": "path/to/design_doc.json",
+         "source_b": "other/design_doc.json"
+       }
+     },
+     {
+       "action": "merge",
+       "diagnosis": {
+         "type": "duplicate",
+         "decision_a": {"id": "ADR-F005", "_source": "path/to/design_doc.json"},
+         "decision_b": {"id": "ADR-F009", "_source": "other/design_doc.json"},
+         "source_a": "path/to/design_doc.json",
+         "source_b": "other/design_doc.json"
+       }
+     }
+   ]
+   ```
+
+   Then run the apply command:
+   ```bash
+   uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/memory-doctor.py" \
+     --apply _doctor_actions.json \
+     --project-root "$(pwd)"
+   ```
+
+   Clean up the temporary file:
+   ```bash
+   rm -f _doctor_actions.json
+   ```
+
+   Note: Entries where the user chose **Skip** should be omitted from the actions array entirely.
+
+## Step 5.45: Generate Markdown Documents
+
+**CRITICAL**: Generate human-readable Markdown files from the finalized JSON:
+
+```bash
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/render-plan-docs.py" \
+  --mode hybrid \
+  --project-root "$(pwd)"
+```
+
+This produces:
+- `prd.md` — Human-readable PRD with stories, acceptance criteria, execution batches
+- `design_doc.md` — Technical design with components, patterns, and full ADR details
+
+These files are programmatically generated from JSON (not LLM) and stay in sync.
+If the script fails, log a warning and continue — the Markdown files are supplementary.
+
+## Step 5.5: Confirm Architectural Decisions
+
+Before the unified review, display a decision summary and confirm with the user. This ensures any modifications during confirmation are reflected in the unified review displayed afterward.
+
+### 5.5.1: Display Decision Summary
+
+Read `design_doc.json` and for each decision with status "accepted" or "proposed", display:
+
+```
+============================================================
+ARCHITECTURAL DECISIONS — Summary
+============================================================
+
+[ADR-F001] Decision Title
+  Context:      <context>
+  Decision:     <decision>
+  Rationale:    <rationale>
+  Alternatives: <alt1>, <alt2>
+
+[ADR-F002] ...
+
+Total: N decisions
+============================================================
+```
+
+### 5.5.2: Confirmation Flow
+
+**If `NO_CONFIRM_MODE` is true** (i.e., `--no-confirm` was passed):
+- Skip interactive confirmation entirely
+- Auto-accept all decisions: set every decision's status to "accepted" in `design_doc.json`
+- Log: `"Auto-accepted N architectural decisions (--no-confirm mode)"`
+- Proceed to Step 5.6
+
+**Otherwise** (interactive mode — the default):
+
+Use `AskUserQuestion` with these options:
+
+```
+Question: "These N architectural decisions will be used as the baseline for future conflict detection. Do you accept them?"
+
+Options:
+  1. "Accept All (Recommended)" — Accept all decisions as-is
+  2. "Review Individually" — Review and confirm each decision one by one
+  3. "Discuss" — Chat about specific decisions before confirming
+```
+
+**If user selects "Accept All"**: Set all decision statuses to "accepted" in `design_doc.json`. Proceed to Step 5.6.
+
+**If user selects "Discuss"**: Let the user discuss freely. After the discussion, repeat Step 5.5.2 (re-ask the question).
+
+**If user selects "Review Individually"**: For each decision, use `AskUserQuestion`:
+
+```
+Question: "[ADR-F001] <title>
+  Context: <context>
+  Decision: <decision>
+  Rationale: <rationale>"
+
+Options:
+  1. "Accept" — Accept this decision
+  2. "Reject" — Remove this decision
+  3. "Modify" — Edit this decision before accepting
+  4. "Discuss" — Chat about this decision
+```
+
+- **Accept**: Mark status as "accepted"
+- **Reject**: Mark status as "rejected"
+- **Modify**: Let the user describe changes, update the decision in `design_doc.json`, then re-confirm this specific ADR
+- **Discuss**: Let the user chat, then re-ask for this specific ADR
+
+After all decisions are reviewed, re-run Step 5.45 to regenerate the Markdown files:
+```bash
+uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/render-plan-docs.py" \
+  --mode hybrid \
+  --project-root "$(pwd)"
+```
+
+## Step 5.6: Display Unified Review
+
+**CRITICAL**: Use Bash to display the unified PRD + Design Document review. This is displayed after ADR confirmation so it reflects any decision modifications made during Step 5.5:
 
 ```bash
 uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/unified-review.py" --mode hybrid
@@ -700,7 +859,7 @@ If the script is not available, display a manual summary showing:
 
 ## Step 6: Confirm Generation Complete and Show Next Steps
 
-After displaying the unified review, confirm and show how to proceed:
+After displaying the unified review, show how to proceed:
 
 ```
 PRD and Design Document generated successfully!
@@ -708,6 +867,8 @@ PRD and Design Document generated successfully!
 Files created:
   - prd.json          (product requirements document)
   - design_doc.json   (technical design document)
+  - prd.md            (human-readable PRD)
+  - design_doc.md     (human-readable technical design)
 
 ============================================================
 EXECUTION CONFIGURATION
