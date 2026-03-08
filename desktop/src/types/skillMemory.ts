@@ -128,6 +128,8 @@ export type MemoryScope = 'project' | 'global' | 'session';
 export type MemoryStatus = 'active' | 'pending_review' | 'rejected' | 'archived';
 export type MemoryRiskTier = 'low' | 'medium' | 'high';
 export type MemoryReviewDecision = 'approve' | 'reject' | 'archive';
+export type MemoryPipelinePhase = 'idle' | 'extracting' | 'reviewing' | 'ready' | 'pending' | 'error';
+export type MemoryPipelineReviewSource = 'manual_review' | 'auto_llm_review' | 'auto_approve' | 'routing_rule' | null;
 
 /** All valid memory categories */
 export const MEMORY_CATEGORIES: MemoryCategory[] = ['preference', 'convention', 'pattern', 'correction', 'fact'];
@@ -195,6 +197,50 @@ export interface MemoryExtractionResult {
   inserted_count: number;
   merged_count: number;
   skipped_count: number;
+}
+
+export interface MemoryPipelineSnapshot {
+  rootSessionId: string;
+  runtimeSessionId: string | null;
+  phase: MemoryPipelinePhase;
+  lastRunAt: string | null;
+  extractedCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  pendingCount: number;
+  injectedCount: number;
+  resolvedScopes: {
+    global: number;
+    project: number;
+    session: number;
+  };
+  requiresReviewModel: boolean;
+  messageKey: string | null;
+  traceId: string | null;
+  reviewSource: MemoryPipelineReviewSource;
+}
+
+export interface MemoryPipelineStatusEvent {
+  rootSessionId: string;
+  runtimeSessionId: string | null;
+  phase: MemoryPipelinePhase;
+  counts: {
+    extracted: number;
+    approved: number;
+    rejected: number;
+    pending: number;
+    injected: number;
+    scopes: {
+      global: number;
+      project: number;
+      session: number;
+    };
+  };
+  requiresReviewModel: boolean;
+  messageKey?: string | null;
+  traceId?: string | null;
+  timestamp: string;
+  reviewSource?: MemoryPipelineReviewSource;
 }
 
 // ============================================================================

@@ -13,6 +13,7 @@
 use crate::services::memory::store::{
     build_session_project_path, MemoryCategory, MemoryEntry, NewMemoryEntry, GLOBAL_PROJECT_PATH,
 };
+use crate::services::memory::query_v2::MemoryScopeV2;
 use crate::utils::error::{AppError, AppResult};
 
 /// Explicit memory commands detected from user messages
@@ -136,6 +137,19 @@ fn trim_command_payload(text: &str) -> &str {
 /// LLM-driven memory extractor
 pub struct MemoryExtractor;
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExtractedMemoryCandidate {
+    pub category: MemoryCategory,
+    pub content: String,
+    pub keywords: Vec<String>,
+    pub importance: f32,
+    pub source_session_id: Option<String>,
+    pub source_context: String,
+    pub suggested_scope: Option<MemoryScopeV2>,
+    pub evidence_snippets: Vec<String>,
+    pub confidence: f32,
+}
+
 impl MemoryExtractor {
     /// Character threshold above which a conversation should be summarized
     /// before memory extraction. ~6000 chars ≈ 2000 tokens.
@@ -250,7 +264,9 @@ Return a JSON array:
     "content": "concise factual statement",
     "keywords": ["keyword1", "keyword2"],
     "importance": 0.0-1.0,
-    "scope": "project|global|session"
+    "suggested_scope": "project|global|session|null",
+    "evidence_snippets": ["short supporting quote"],
+    "confidence": 0.0-1.0
   }}
 ]
 
@@ -261,8 +277,10 @@ Rules:
 - "correction": mistakes to avoid (e.g., "editing executor.rs requires cargo check due to type complexity")
 - "fact": general project facts (e.g., "frontend uses Zustand for state management")
 - importance: 0.9+ for explicit user instructions, 0.5-0.8 for discovered patterns, 0.3-0.5 for general facts
-- scope: "global" for cross-project user-level preferences (communication language, coding style, tool preferences, personal habits); "project" for project-specific info (default); "session" for details useful only in this specific session
+- suggested_scope: "global" for cross-project user-level preferences (communication language, coding style, tool preferences, personal habits); "project" for project-specific info; "session" for details useful only in this specific session; use null when unsure
 - Preferences about the user themselves (not the project) should be "global"
+- evidence_snippets: include 1-3 short factual snippets from the conversation that justify the memory
+- confidence: 0.9+ only when the conversation is explicit, 0.5-0.8 for inferred but well-supported facts
 - Return empty array [] if nothing worth extracting"#,
             task = task_description,
             files = files_section,
@@ -277,11 +295,10 @@ Rules:
     /// Expects a JSON array of objects with category, content, keywords, importance.
     /// Tolerant of markdown code blocks wrapping the JSON.
     /// Returns a parse error when the top-level payload is not valid JSON array.
-    pub fn parse_extraction_response(
+    pub fn parse_extraction_candidates(
         response: &str,
-        project_path: &str,
         session_id: Option<&str>,
-    ) -> AppResult<Vec<NewMemoryEntry>> {
+    ) -> AppResult<Vec<ExtractedMemoryCandidate>> {
         // Strip markdown code blocks if present
         let json_str = response
             .trim()
@@ -313,6 +330,21 @@ Rules:
                             .collect()
                     })
                     .unwrap_or_default();
+                let evidence_snippets: Vec<String> = item
+                    .get("evidence_snippets")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.trim().to_string()))
+                            .filter(|s| !s.is_empty())
+                            .take(3)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let confidence = item
+                    .get("confidence")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.5) as f32;
 
                 let category = MemoryCategory::from_str(category_str).ok()?;
 
@@ -320,32 +352,57 @@ Rules:
                     return None;
                 }
 
-                // Route to global/project/session scope based on LLM output.
-                let scope = item
-                    .get("scope")
+                let suggested_scope = item
+                    .get("suggested_scope")
+                    .or_else(|| item.get("scope"))
                     .and_then(|v| v.as_str())
-                    .unwrap_or("project");
-                let effective_project_path = match scope {
-                    "global" => GLOBAL_PROJECT_PATH.to_string(),
-                    "session" => session_id
-                        .and_then(build_session_project_path)
-                        .unwrap_or_else(|| project_path.to_string()),
-                    _ => project_path.to_string(),
-                };
+                    .and_then(MemoryScopeV2::from_str);
 
-                Some(NewMemoryEntry {
-                    project_path: effective_project_path,
+                Some(ExtractedMemoryCandidate {
                     category,
                     content,
                     keywords,
                     importance: importance.clamp(0.0, 1.0),
                     source_session_id: session_id.map(|s| s.to_string()),
-                    source_context: Some("llm_extract:auto_v2".to_string()),
+                    source_context: "llm_extract:auto_v3".to_string(),
+                    suggested_scope,
+                    evidence_snippets,
+                    confidence: confidence.clamp(0.0, 1.0),
                 })
             })
             .collect();
 
         Ok(entries)
+    }
+
+    pub fn parse_extraction_response(
+        response: &str,
+        project_path: &str,
+        session_id: Option<&str>,
+    ) -> AppResult<Vec<NewMemoryEntry>> {
+        let candidates = Self::parse_extraction_candidates(response, session_id)?;
+        Ok(candidates
+            .into_iter()
+            .map(|candidate| {
+                let effective_project_path = match candidate.suggested_scope.unwrap_or(MemoryScopeV2::Project) {
+                    MemoryScopeV2::Global => GLOBAL_PROJECT_PATH.to_string(),
+                    MemoryScopeV2::Session => session_id
+                        .and_then(build_session_project_path)
+                        .unwrap_or_else(|| project_path.to_string()),
+                    MemoryScopeV2::Project => project_path.to_string(),
+                };
+
+                NewMemoryEntry {
+                    project_path: effective_project_path,
+                    category: candidate.category,
+                    content: candidate.content,
+                    keywords: candidate.keywords,
+                    importance: candidate.importance,
+                    source_session_id: candidate.source_session_id,
+                    source_context: Some(candidate.source_context),
+                }
+            })
+            .collect())
     }
 }
 
@@ -422,6 +479,79 @@ pub async fn run_session_extraction(
         .ok_or_else(|| AppError::command("memory extraction llm returned empty content"))?;
 
     MemoryExtractor::parse_extraction_response(&response_text, project_path, session_id)
+}
+
+/// Run LLM-driven session memory extraction and keep the richer candidate payload
+/// for downstream routing and review.
+pub async fn run_session_extraction_candidates(
+    provider: &dyn crate::services::llm::provider::LlmProvider,
+    task_description: &str,
+    files_read: &[String],
+    key_findings: &[String],
+    conversation_content: &str,
+    session_id: Option<&str>,
+    existing_memories: &[MemoryEntry],
+) -> AppResult<Vec<ExtractedMemoryCandidate>> {
+    use crate::services::llm::types::{LlmRequestOptions, Message};
+    use std::time::Duration;
+
+    const LLM_TIMEOUT_SECS: u64 = 30;
+
+    let effective_summary = if conversation_content.len() > MemoryExtractor::SUMMARIZE_THRESHOLD {
+        let summarize_prompt =
+            MemoryExtractor::build_summarization_prompt(task_description, conversation_content);
+        let summarize_call = provider.send_message(
+            vec![Message::user(summarize_prompt)],
+            None,
+            vec![],
+            LlmRequestOptions {
+                temperature_override: Some(0.2),
+                ..Default::default()
+            },
+        );
+        match tokio::time::timeout(Duration::from_secs(LLM_TIMEOUT_SECS), summarize_call).await {
+            Ok(Ok(resp)) => resp
+                .content
+                .unwrap_or_else(|| conversation_content.to_string()),
+            Ok(Err(_)) | Err(_) => conversation_content.to_string(),
+        }
+    } else {
+        conversation_content.to_string()
+    };
+
+    let extraction_prompt = MemoryExtractor::build_extraction_prompt(
+        task_description,
+        files_read,
+        key_findings,
+        &effective_summary,
+        existing_memories,
+    );
+    let extract_call = provider.send_message(
+        vec![Message::user(extraction_prompt)],
+        None,
+        vec![],
+        LlmRequestOptions {
+            temperature_override: Some(0.2),
+            ..Default::default()
+        },
+    );
+    let extraction_response =
+        match tokio::time::timeout(Duration::from_secs(LLM_TIMEOUT_SECS), extract_call).await {
+            Ok(Ok(resp)) => resp,
+            Ok(Err(e)) => {
+                return Err(AppError::command(format!(
+                    "memory extraction llm call failed: {}",
+                    e
+                )))
+            }
+            Err(_) => return Err(AppError::command("memory extraction llm call timed out")),
+        };
+
+    let response_text = extraction_response
+        .content
+        .ok_or_else(|| AppError::command("memory extraction llm returned empty content"))?;
+
+    MemoryExtractor::parse_extraction_candidates(&response_text, session_id)
 }
 
 /// Execute explicit memory commands (`remember` / `forget` / `query`) before

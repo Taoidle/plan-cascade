@@ -144,6 +144,18 @@
       "session": "New session"
     }
   },
+  "bottomBar": {
+    "memory": {
+      "extracting": "Extracting",
+      "reviewing": "Reviewing",
+      "pending": "Pending {{count}}",
+      "injected": "Injected {{count}}",
+      "empty": "No memory",
+      "requiresReviewModel": "Config review",
+      "error": "Error",
+      "tooltip": "Extracted {{extracted}}, approved {{approved}}, rejected {{rejected}}, pending {{pending}}, injected {{injected}}. Scopes G {{global}} / P {{project}} / S {{session}}."
+    }
+  },
   "skillPanel": {
     "title": "Skills & Memory",
     "globalEnableHint": "Global skill enable/disable",
@@ -203,6 +215,11 @@
     "clearAllConfirmSession": "Delete all memories for this session? This cannot be undone.",
     "activeMemories": "Active",
     "pendingReview": "Pending Review",
+    "panelSummary": {
+      "idle": "Memory pipeline ready",
+      "pending": "{{count}} memories pending review",
+      "injected": "{{count}} memories injected"
+    },
     "selectAll": "Select All",
     "approveSelected": "Approve Selected",
     "rejectSelected": "Reject Selected",
@@ -217,6 +234,31 @@
     "noActiveReference": "No active reference loaded in this scope/category.",
     "approve": "Approve",
     "reject": "Reject",
+    "pipeline": {
+      "title": "Automatic memory pipeline",
+      "extracted": "Extracted {{count}}",
+      "approved": "Approved {{count}}",
+      "rejected": "Rejected {{count}}",
+      "pending": "Pending {{count}}",
+      "scopeSummary": "G {{global}} / P {{project}} / S {{session}}",
+      "reviewSource": "Review source",
+      "reviewSources": {
+        "manual_review": "Manual review",
+        "auto_llm_review": "LLM review",
+        "auto_approve": "Auto approve",
+        "routing_rule": "Routing rule"
+      },
+      "status": {
+        "extracting": "Extracting memories",
+        "reviewing": "Reviewing memories",
+        "pending": "{{count}} pending review",
+        "injected": "{{count}} injected",
+        "empty": "No memories extracted",
+        "requiresReviewModel": "Review model required",
+        "error": "Pipeline error",
+        "ready": "Pipeline ready"
+      }
+    },
     "toggleSkill": "Toggle {{name}}",
     "sourceFilters": {
       "all": "All",

@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { reportNonFatal } from '../../lib/nonFatal';
 import { useSettingsStore } from '../settings';
+import { useWorkflowKernelStore } from '../workflowKernel';
 import { buildHistorySessionId } from './sessionLifecycle';
 import type { ExecutionState } from './types';
 
@@ -26,6 +27,8 @@ export async function triggerMemoryExtraction(state: ExecutionState): Promise<vo
   try {
     const projectPath = useSettingsStore.getState().workspacePath;
     if (!projectPath) return;
+    const { memorySettings } = useSettingsStore.getState();
+    if (!memorySettings.autoExtractEnabled) return;
 
     const taskDescription = state.taskDescription;
     if (!taskDescription) return;
@@ -51,11 +54,15 @@ export async function triggerMemoryExtraction(state: ExecutionState): Promise<vo
     if (conversationSummary.length < 50) return;
 
     const sessionId = buildHistorySessionId(state.taskId, state.standaloneSessionId) || undefined;
+    const rootSessionId = useWorkflowKernelStore.getState().sessionId || undefined;
     const result = await invoke<{ success: boolean; data?: { extracted_count: number } }>('extract_session_memories', {
       projectPath,
       taskDescription,
       conversationSummary,
       sessionId: sessionId || null,
+      rootSessionId: rootSessionId || null,
+      reviewMode: memorySettings.reviewMode,
+      reviewAgentRef: memorySettings.reviewAgentRef || null,
     });
 
     if (result?.success && result.data && result.data.extracted_count > 0) {

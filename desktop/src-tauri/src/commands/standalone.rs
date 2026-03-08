@@ -187,6 +187,7 @@ fn build_memory_hook_config(
 
     Some(crate::services::orchestrator::hooks::MemoryHookConfig {
         injection_enabled: memory.enabled,
+        extraction_enabled: false,
         selected_scopes: memory.selected_scopes.clone(),
         selected_categories,
         selected_memory_ids: memory.selected_memory_ids.clone(),

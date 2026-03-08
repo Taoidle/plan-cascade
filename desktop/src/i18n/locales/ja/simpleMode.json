@@ -144,6 +144,18 @@
       "session": "新しいセッション"
     }
   },
+  "bottomBar": {
+    "memory": {
+      "extracting": "抽出中",
+      "reviewing": "レビュー中",
+      "pending": "保留 {{count}}",
+      "injected": "注入 {{count}}",
+      "empty": "メモリなし",
+      "requiresReviewModel": "レビュー設定",
+      "error": "エラー",
+      "tooltip": "抽出 {{extracted}}、承認 {{approved}}、却下 {{rejected}}、保留 {{pending}}、注入 {{injected}}。スコープ G {{global}} / P {{project}} / S {{session}}。"
+    }
+  },
   "skillPanel": {
     "title": "スキルとメモリ",
     "globalEnableHint": "グローバルのスキル有効/無効",
@@ -203,6 +215,11 @@
     "clearAllConfirmSession": "このセッションのすべてのメモリを削除しますか？元に戻せません。",
     "activeMemories": "有効",
     "pendingReview": "レビュー待ち",
+    "panelSummary": {
+      "idle": "メモリパイプライン準備完了",
+      "pending": "{{count}} 件がレビュー待ち",
+      "injected": "{{count}} 件を注入済み"
+    },
     "selectAll": "すべて選択",
     "approveSelected": "選択項目を承認",
     "rejectSelected": "選択項目を却下",
@@ -217,6 +234,31 @@
     "noActiveReference": "このスコープ/カテゴリには有効な参照メモリがありません。",
     "approve": "承認",
     "reject": "却下",
+    "pipeline": {
+      "title": "自動メモリパイプライン",
+      "extracted": "抽出 {{count}}",
+      "approved": "承認 {{count}}",
+      "rejected": "却下 {{count}}",
+      "pending": "保留 {{count}}",
+      "scopeSummary": "G {{global}} / P {{project}} / S {{session}}",
+      "reviewSource": "レビューソース",
+      "reviewSources": {
+        "manual_review": "手動レビュー",
+        "auto_llm_review": "LLM レビュー",
+        "auto_approve": "自動承認",
+        "routing_rule": "ルーティング規則"
+      },
+      "status": {
+        "extracting": "メモリを抽出中",
+        "reviewing": "メモリをレビュー中",
+        "pending": "{{count}} 件がレビュー待ち",
+        "injected": "{{count}} 件を注入済み",
+        "empty": "抽出されたメモリはありません",
+        "requiresReviewModel": "レビューモデルの設定が必要です",
+        "error": "パイプラインエラー",
+        "ready": "パイプライン準備完了"
+      }
+    },
     "toggleSkill": "{{name}} を切り替え",
     "sourceFilters": {
       "all": "すべて",

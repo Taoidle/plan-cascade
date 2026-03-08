@@ -8,6 +8,7 @@
     "agents": "エージェント",
     "quality": "品質ゲート",
     "phases": "フェーズエージェント",
+    "memory": "メモリ",
     "importExport": "インポート/エクスポート",
     "lsp": "LSPサーバー",
     "plugins": "プラグイン",
@@ -255,6 +256,39 @@
       "tavily": "Tavily（APIキーが必要）",
       "brave": "Brave Search（APIキーが必要）",
       "help": "WebSearchツールの検索プロバイダー。TavilyとBraveはAPIキーが必要です（上記のそれぞれのプロバイダー名で設定してください）。"
+    }
+  },
+
+  "memory": {
+    "title": "メモリ",
+    "description": "永続メモリの自動抽出、レビュー、注入を設定します。",
+    "extraction": {
+      "title": "抽出",
+      "description": "自動抽出は Simple の成功セッション終了後に実行され、候補メモリを生成します。",
+      "autoExtract": "成功セッション後にメモリを自動抽出する",
+      "autoExtractDescription": "有効にすると、成功した Simple 会話で自動的にメモリ抽出が走ります。",
+      "successOnly": "成功セッションのみ",
+      "successOnlyDescription": "このバージョンでは失敗またはキャンセルされたセッションからは抽出しません。"
+    },
+    "review": {
+      "title": "レビュー",
+      "description": "抽出された候補メモリを注入前にどう承認するかを制御します。",
+      "modeLabel": "レビューモード",
+      "modeDescription": "既定は LLM レビューです。自動承認または手動レビューのみへ切り替えられます。",
+      "agentLabel": "レビューモデル",
+      "agentDescription": "空欄の場合はグローバルの provider/model を継承します。専用モデルを使いたい場合はここで指定します。",
+      "inheritGlobal": "グローバル既定モデルを使用",
+      "modes": {
+        "llm_review": "LLM レビュー",
+        "auto_approve": "自動承認",
+        "manual_only": "手動のみ"
+      }
+    },
+    "injection": {
+      "title": "注入",
+      "description": "メモリは kernel SSOT には入らず、コンテキスト入力としてのみ使われます。",
+      "activeOnly": "active メモリのみ注入",
+      "activeOnlyDescription": "pending_review のメモリは通常のコンテキスト注入には含まれません。"
     }
   },
 

@@ -8,6 +8,7 @@
 
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import i18n from '../i18n';
 import { reportNonFatal } from '../lib/nonFatal';
 import { useContextSourcesStore } from './contextSources';
@@ -22,6 +23,8 @@ import type {
   MemoryStats,
   MemoryReviewCandidate,
   MemoryReviewDecision,
+  MemoryPipelineSnapshot,
+  MemoryPipelineStatusEvent,
   SkillMatch,
   SkillSourceLabel,
 } from '../types/skillMemory';
@@ -86,6 +89,38 @@ export type MemoryCategoryFilter = MemoryCategory | 'all';
 
 /** Tab selection in the management dialog */
 export type SkillMemoryTab = 'skills' | 'memory';
+export type MemoryDialogView = 'active' | 'pending';
+
+interface OpenDialogOptions {
+  memoryViewMode?: MemoryDialogView;
+  memoryScope?: MemoryScope;
+  memorySessionId?: string | null;
+}
+
+const EMPTY_SCOPE_COUNTS = {
+  global: 0,
+  project: 0,
+  session: 0,
+} as const;
+
+function createEmptyMemoryPipelineSnapshot(rootSessionId: string): MemoryPipelineSnapshot {
+  return {
+    rootSessionId,
+    runtimeSessionId: null,
+    phase: 'idle',
+    lastRunAt: null,
+    extractedCount: 0,
+    approvedCount: 0,
+    rejectedCount: 0,
+    pendingCount: 0,
+    injectedCount: 0,
+    resolvedScopes: { ...EMPTY_SCOPE_COUNTS },
+    requiresReviewModel: false,
+    messageKey: null,
+    traceId: null,
+    reviewSource: null,
+  };
+}
 
 interface SkillMemoryState {
   // --- Skills State ---
@@ -107,11 +142,14 @@ interface SkillMemoryState {
   memoryCategoryFilter: MemoryCategoryFilter;
   memoryScope: MemoryScope;
   memorySessionId: string | null;
+  memoryViewMode: MemoryDialogView;
   memoryPage: number;
   memoryPageSize: number;
   memoryHasMore: boolean;
   pendingMemoryCandidates: MemoryReviewCandidate[];
   pendingMemoryCandidatesLoading: boolean;
+  memoryPipelineByRootSession: Record<string, MemoryPipelineSnapshot>;
+  _memoryPipelineUnlisten: UnlistenFn | null;
 
   // --- UI State ---
   panelOpen: boolean;
@@ -166,10 +204,15 @@ interface SkillMemoryState {
   setMemoryCategoryFilter: (filter: MemoryCategoryFilter) => void;
   setMemoryScope: (scope: MemoryScope) => void;
   setMemorySessionId: (sessionId: string | null) => void;
+  setMemoryViewMode: (mode: MemoryDialogView) => void;
+  upsertMemoryPipelineSnapshot: (payload: MemoryPipelineStatusEvent) => void;
+  syncInjectedMemoryCount: (rootSessionId: string | null, injectedCount: number) => void;
+  subscribeToMemoryPipeline: () => Promise<void>;
+  unsubscribeFromMemoryPipeline: () => void;
 
   // --- UI Actions ---
   togglePanel: () => void;
-  openDialog: (tab?: SkillMemoryTab) => void;
+  openDialog: (tab?: SkillMemoryTab, options?: OpenDialogOptions) => void;
   closeDialog: () => void;
   setActiveTab: (tab: SkillMemoryTab) => void;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
@@ -199,11 +242,14 @@ const defaultState = {
   memoryCategoryFilter: 'all' as MemoryCategoryFilter,
   memoryScope: 'project' as MemoryScope,
   memorySessionId: null as string | null,
+  memoryViewMode: 'active' as MemoryDialogView,
   memoryPage: 0,
   memoryPageSize: 20,
   memoryHasMore: true,
   pendingMemoryCandidates: [] as MemoryReviewCandidate[],
   pendingMemoryCandidatesLoading: false,
+  memoryPipelineByRootSession: {} as Record<string, MemoryPipelineSnapshot>,
+  _memoryPipelineUnlisten: null as UnlistenFn | null,
 
   panelOpen: false,
   dialogOpen: false,
@@ -827,12 +873,93 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
   setMemoryCategoryFilter: (filter: MemoryCategoryFilter) => set({ memoryCategoryFilter: filter }),
   setMemoryScope: (scope: MemoryScope) => set({ memoryScope: scope, memoryPage: 0, memoryHasMore: true }),
   setMemorySessionId: (sessionId: string | null) => set({ memorySessionId: sessionId }),
+  setMemoryViewMode: (mode: MemoryDialogView) => set({ memoryViewMode: mode }),
+  upsertMemoryPipelineSnapshot: (payload) =>
+    set((state) => {
+      if (!payload.rootSessionId?.trim()) {
+        return state;
+      }
+      const previous =
+        state.memoryPipelineByRootSession[payload.rootSessionId] ??
+        createEmptyMemoryPipelineSnapshot(payload.rootSessionId);
+      return {
+        memoryPipelineByRootSession: {
+          ...state.memoryPipelineByRootSession,
+          [payload.rootSessionId]: {
+            ...previous,
+            runtimeSessionId: payload.runtimeSessionId ?? previous.runtimeSessionId,
+            phase: payload.phase,
+            lastRunAt: payload.timestamp,
+            extractedCount: payload.counts.extracted,
+            approvedCount: payload.counts.approved,
+            rejectedCount: payload.counts.rejected,
+            pendingCount: payload.counts.pending,
+            injectedCount: payload.counts.injected,
+            resolvedScopes: {
+              global: payload.counts.scopes.global,
+              project: payload.counts.scopes.project,
+              session: payload.counts.scopes.session,
+            },
+            requiresReviewModel: payload.requiresReviewModel,
+            messageKey: payload.messageKey ?? previous.messageKey,
+            traceId: payload.traceId ?? previous.traceId,
+            reviewSource: payload.reviewSource ?? previous.reviewSource,
+          },
+        },
+      };
+    }),
+  syncInjectedMemoryCount: (rootSessionId, injectedCount) =>
+    set((state) => {
+      const normalizedRootSessionId = rootSessionId?.trim();
+      if (!normalizedRootSessionId) return state;
+      const previous =
+        state.memoryPipelineByRootSession[normalizedRootSessionId] ??
+        createEmptyMemoryPipelineSnapshot(normalizedRootSessionId);
+      if (previous.injectedCount === injectedCount) {
+        return state;
+      }
+      return {
+        memoryPipelineByRootSession: {
+          ...state.memoryPipelineByRootSession,
+          [normalizedRootSessionId]: {
+            ...previous,
+            injectedCount,
+          },
+        },
+      };
+    }),
+  subscribeToMemoryPipeline: async () => {
+    if (get()._memoryPipelineUnlisten) return;
+    try {
+      const unlisten = await listen<MemoryPipelineStatusEvent>('memory:pipeline-status', (event) => {
+        if (!event.payload) return;
+        get().upsertMemoryPipelineSnapshot(event.payload);
+      });
+      set({ _memoryPipelineUnlisten: unlisten });
+    } catch (error) {
+      reportNonFatal('skillMemory.subscribeToMemoryPipeline', error);
+    }
+  },
+  unsubscribeFromMemoryPipeline: () => {
+    const current = get()._memoryPipelineUnlisten;
+    if (current) {
+      current();
+      set({ _memoryPipelineUnlisten: null });
+    }
+  },
 
   // --- UI Actions ---
 
   togglePanel: () => set((state) => ({ panelOpen: !state.panelOpen })),
 
-  openDialog: (tab?: SkillMemoryTab) => set({ dialogOpen: true, activeTab: tab ?? get().activeTab }),
+  openDialog: (tab, options) =>
+    set({
+      dialogOpen: true,
+      activeTab: tab ?? get().activeTab,
+      ...(options?.memoryViewMode ? { memoryViewMode: options.memoryViewMode } : {}),
+      ...(options?.memoryScope ? { memoryScope: options.memoryScope } : {}),
+      ...(options && 'memorySessionId' in options ? { memorySessionId: options.memorySessionId ?? null } : {}),
+    }),
 
   closeDialog: () => set({ dialogOpen: false }),
 
@@ -843,7 +970,10 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
 
   clearToast: () => set({ toastMessage: null }),
 
-  reset: () => set(defaultState),
+  reset: () => {
+    get().unsubscribeFromMemoryPipeline();
+    set(defaultState);
+  },
 }));
 
 export default useSkillMemoryStore;

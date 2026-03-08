@@ -574,6 +574,8 @@ pub fn register_skill_hooks(
 pub struct MemoryHookConfig {
     /// Whether memory entries should be injected into the prompt.
     pub injection_enabled: bool,
+    /// Whether automatic extraction should run from lifecycle hooks.
+    pub extraction_enabled: bool,
     /// Allowed scope names: `project`, `global`, `session`.
     pub selected_scopes: Vec<String>,
     /// Allowed categories. Empty means all categories.
@@ -588,6 +590,7 @@ impl Default for MemoryHookConfig {
     fn default() -> Self {
         Self {
             injection_enabled: true,
+            extraction_enabled: true,
             selected_scopes: vec![],
             selected_categories: vec![],
             selected_memory_ids: vec![],
@@ -698,6 +701,7 @@ pub fn register_memory_hooks_with_config(
 ) {
     let memory_hook_config = memory_hook_config.unwrap_or_default();
     let injection_enabled = memory_hook_config.injection_enabled;
+    let extraction_enabled = memory_hook_config.extraction_enabled;
     let allowed_categories = if memory_hook_config.selected_categories.is_empty() {
         None
     } else {
@@ -835,6 +839,10 @@ pub fn register_memory_hooks_with_config(
         let provider = provider_clone.clone();
         Box::pin(async move {
             let project_path = ctx.project_path.to_string_lossy().to_string();
+            if !extraction_enabled {
+                maybe_generate_skill_from_session(provider.clone(), &store, &ctx, &summary, &project_path).await;
+                return Ok(());
+            }
 
             // Skip extraction for trivial sessions
             if summary.total_turns < 3 || summary.conversation_content.len() < 100 {

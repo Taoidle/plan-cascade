@@ -27,6 +27,12 @@ interface BottomStatusBarProps {
   sessionUsage: { input_tokens: number; output_tokens: number } | null;
   tokenEstimate: PromptTokenEstimateResult | null;
   isEstimatingTokenBudget: boolean;
+  memoryStatus: {
+    label: string;
+    title: string;
+    tone: 'neutral' | 'info' | 'success' | 'warning' | 'danger';
+  } | null;
+  onMemoryStatusClick: (() => void) | null;
 }
 
 function formatNumber(value: number | null | undefined): string {
@@ -48,6 +54,8 @@ export const BottomStatusBar = memo(function BottomStatusBar({
   sessionUsage,
   tokenEstimate,
   isEstimatingTokenBudget,
+  memoryStatus,
+  onMemoryStatusClick,
 }: BottomStatusBarProps) {
   const { t } = useTranslation('simpleMode');
   const turn = turnUsage || { input_tokens: 0, output_tokens: 0 };
@@ -83,6 +91,28 @@ export const BottomStatusBar = memo(function BottomStatusBar({
             <IndexStatus compact />
             <DocsIndexStatus compact />
           </div>
+        </>
+      )}
+      {memoryStatus && (
+        <>
+          <Divider />
+          <button
+            type="button"
+            onClick={onMemoryStatusClick ?? undefined}
+            title={memoryStatus.title}
+            className={clsx(
+              'hidden lg:inline-flex items-center px-1.5 py-0.5 rounded text-2xs transition-colors',
+              memoryStatus.tone === 'warning' && 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300',
+              memoryStatus.tone === 'success' &&
+                'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300',
+              memoryStatus.tone === 'danger' && 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300',
+              memoryStatus.tone === 'info' && 'bg-sky-50 dark:bg-sky-900/20 text-sky-700 dark:text-sky-300',
+              memoryStatus.tone === 'neutral' && 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300',
+              onMemoryStatusClick && 'hover:brightness-95',
+            )}
+          >
+            {memoryStatus.label}
+          </button>
         </>
       )}
       {hasUsage && (

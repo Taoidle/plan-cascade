@@ -8,6 +8,7 @@
     "agents": "代理",
     "quality": "质量门禁",
     "phases": "阶段代理",
+    "memory": "记忆",
     "importExport": "导入/导出",
     "lsp": "LSP 服务器",
     "plugins": "插件",
@@ -255,6 +256,39 @@
       "tavily": "Tavily（需要API密钥）",
       "brave": "Brave搜索（需要API密钥）",
       "help": "WebSearch工具的搜索提供商。Tavily和Brave需要API密钥（在上方相应的提供商名称下配置）。"
+    }
+  },
+
+  "memory": {
+    "title": "记忆",
+    "description": "配置持久记忆的自动提取、审核与注入。",
+    "extraction": {
+      "title": "提取",
+      "description": "自动提取会在 Simple 成功会话结束后运行，并生成待治理的记忆候选。",
+      "autoExtract": "成功会话后自动提取记忆",
+      "autoExtractDescription": "开启后，成功完成的 Simple 对话会自动触发记忆提取。",
+      "successOnly": "仅成功会话",
+      "successOnlyDescription": "当前版本不会从失败或取消的会话中提取记忆。"
+    },
+    "review": {
+      "title": "审核",
+      "description": "控制提取出的记忆候选如何在注入前被批准。",
+      "modeLabel": "审核模式",
+      "modeDescription": "默认使用 LLM 审核。你也可以切换为自动通过或纯手动审核。",
+      "agentLabel": "审核模型",
+      "agentDescription": "留空则继承全局 provider/model；如需单独的记忆审核模型，可在这里指定。",
+      "inheritGlobal": "使用全局默认模型",
+      "modes": {
+        "llm_review": "LLM 审核",
+        "auto_approve": "自动通过",
+        "manual_only": "仅手动审核"
+      }
+    },
+    "injection": {
+      "title": "注入",
+      "description": "记忆不会并入 kernel SSOT，只会作为上下文输入参与装配。",
+      "activeOnly": "仅注入 active 记忆",
+      "activeOnlyDescription": "pending_review 状态的记忆不会进入正常上下文注入。"
     }
   },
 

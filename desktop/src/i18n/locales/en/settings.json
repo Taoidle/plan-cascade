@@ -8,6 +8,7 @@
     "agents": "Agents",
     "quality": "Quality Gates",
     "phases": "Phase Agents",
+    "memory": "Memory",
     "importExport": "Import/Export",
     "lsp": "LSP Servers",
     "plugins": "Plugins",
@@ -255,6 +256,39 @@
       "tavily": "Tavily (API key required)",
       "brave": "Brave Search (API key required)",
       "help": "Search provider for the WebSearch tool. Tavily and Brave require API keys (configure above under their respective provider names)."
+    }
+  },
+
+  "memory": {
+    "title": "Memory",
+    "description": "Configure automatic extraction, review, and injection for persistent memories.",
+    "extraction": {
+      "title": "Extraction",
+      "description": "Automatic extraction runs after successful Simple sessions and prepares candidate memories for governance.",
+      "autoExtract": "Automatically extract memories after successful sessions",
+      "autoExtractDescription": "When enabled, successful Simple conversations trigger memory extraction automatically.",
+      "successOnly": "Successful sessions only",
+      "successOnlyDescription": "Failed or cancelled sessions are not extracted in this version."
+    },
+    "review": {
+      "title": "Review",
+      "description": "Control how extracted memory candidates are approved before they can be injected back into future context.",
+      "modeLabel": "Review mode",
+      "modeDescription": "LLM review is the default. Switch to auto-approve or manual-only when you want stricter or faster behavior.",
+      "agentLabel": "Review model",
+      "agentDescription": "Leave this empty to inherit the global provider/model. Pick a dedicated model if memory review needs different behavior.",
+      "inheritGlobal": "Use global default model",
+      "modes": {
+        "llm_review": "LLM review",
+        "auto_approve": "Auto approve",
+        "manual_only": "Manual only"
+      }
+    },
+    "injection": {
+      "title": "Injection",
+      "description": "Injected memory remains separate from kernel SSOT and only participates as context input.",
+      "activeOnly": "Inject active memories only",
+      "activeOnlyDescription": "Pending-review memories are not injected into normal context assembly."
     }
   },
 

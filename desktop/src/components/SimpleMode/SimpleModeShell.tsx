@@ -29,6 +29,8 @@ import { useToolPermissionStore } from '../../store/toolPermission';
 import { useAgentsStore } from '../../store/agents';
 import { useWorkflowObservabilityStore } from '../../store/workflowObservability';
 import { useSimpleSessionStore } from '../../store/simpleSessionStore';
+import { useSkillMemoryStore } from '../../store/skillMemory';
+import { useContextOpsStore } from '../../store/contextOps';
 import { createFileChangeCardBridge } from '../../lib/fileChangeCardBridge';
 import { listenOpenAIChanges } from '../../lib/simpleModeNavigation';
 import { useToast } from '../shared/Toast';
@@ -1830,6 +1832,7 @@ export function SimpleModeShell() {
         permissionLevel={permissionLevel}
         onPermissionLevelChange={(level) => setPermissionLevel(permissionSessionId, level)}
         sessionId={permissionSessionId}
+        rootSessionId={workflowKernelSessionId}
         tokenEstimate={tokenEstimate}
         isEstimatingTokenBudget={isEstimatingTokenBudget}
       />
@@ -1929,6 +1932,7 @@ function ExecutionAwareBottomStatusBar({
   permissionLevel,
   onPermissionLevelChange,
   sessionId,
+  rootSessionId,
   tokenEstimate,
   isEstimatingTokenBudget,
 }: {
@@ -1936,12 +1940,90 @@ function ExecutionAwareBottomStatusBar({
   permissionLevel: Parameters<typeof BottomStatusBar>[0]['permissionLevel'];
   onPermissionLevelChange: (level: Parameters<typeof BottomStatusBar>[0]['permissionLevel']) => void;
   sessionId: string;
+  rootSessionId: string | null;
   tokenEstimate: PromptTokenEstimateResult | null;
   isEstimatingTokenBudget: boolean;
 }) {
+  const { t } = useTranslation('simpleMode');
   const connectionStatus = useExecutionStore((s) => s.connectionStatus);
   const turnUsage = useExecutionStore((s) => s.turnUsageTotals);
   const sessionUsage = useExecutionStore((s) => s.sessionUsageTotals);
+  const latestEnvelope = useContextOpsStore((s) => s.latestEnvelope);
+  const openDialog = useSkillMemoryStore((s) => s.openDialog);
+  const subscribeToMemoryPipeline = useSkillMemoryStore((s) => s.subscribeToMemoryPipeline);
+  const syncInjectedMemoryCount = useSkillMemoryStore((s) => s.syncInjectedMemoryCount);
+  const memoryPipelineSnapshot = useSkillMemoryStore((s) =>
+    rootSessionId ? (s.memoryPipelineByRootSession[rootSessionId] ?? null) : null,
+  );
+
+  useEffect(() => {
+    void subscribeToMemoryPipeline();
+  }, [subscribeToMemoryPipeline]);
+
+  useEffect(() => {
+    syncInjectedMemoryCount(rootSessionId, latestEnvelope?.diagnostics?.effective_memory_ids?.length ?? 0);
+  }, [latestEnvelope?.diagnostics?.effective_memory_ids, rootSessionId, syncInjectedMemoryCount]);
+
+  const memoryStatus = useMemo(() => {
+    if (!rootSessionId || !memoryPipelineSnapshot) return null;
+    const snapshot = memoryPipelineSnapshot;
+    const label = snapshot.requiresReviewModel
+      ? t('bottomBar.memory.requiresReviewModel', { defaultValue: 'Config review' })
+      : snapshot.phase === 'extracting'
+        ? t('bottomBar.memory.extracting', { defaultValue: 'Extracting' })
+        : snapshot.phase === 'reviewing'
+          ? t('bottomBar.memory.reviewing', { defaultValue: 'Reviewing' })
+          : snapshot.phase === 'error'
+            ? t('bottomBar.memory.error', { defaultValue: 'Error' })
+            : snapshot.pendingCount > 0
+              ? t('bottomBar.memory.pending', {
+                  count: snapshot.pendingCount,
+                  defaultValue: 'Pending {{count}}',
+                })
+              : snapshot.injectedCount > 0
+                ? t('bottomBar.memory.injected', {
+                    count: snapshot.injectedCount,
+                    defaultValue: 'Injected {{count}}',
+                  })
+                : snapshot.lastRunAt
+                  ? t('bottomBar.memory.empty', { defaultValue: 'No memory' })
+                  : null;
+    if (!label) return null;
+    return {
+      label,
+      title: t('bottomBar.memory.tooltip', {
+        extracted: snapshot.extractedCount,
+        approved: snapshot.approvedCount,
+        rejected: snapshot.rejectedCount,
+        pending: snapshot.pendingCount,
+        injected: snapshot.injectedCount,
+        global: snapshot.resolvedScopes.global,
+        project: snapshot.resolvedScopes.project,
+        session: snapshot.resolvedScopes.session,
+        defaultValue:
+          'Extracted {{extracted}}, approved {{approved}}, rejected {{rejected}}, pending {{pending}}, injected {{injected}}. Scopes G {{global}} / P {{project}} / S {{session}}.',
+      }),
+      tone:
+        snapshot.phase === 'error'
+          ? 'danger'
+          : snapshot.requiresReviewModel || snapshot.pendingCount > 0
+            ? 'warning'
+            : snapshot.injectedCount > 0
+              ? 'success'
+              : snapshot.phase === 'extracting' || snapshot.phase === 'reviewing'
+                ? 'info'
+                : 'neutral',
+    } as const;
+  }, [memoryPipelineSnapshot, rootSessionId, t]);
+
+  const handleMemoryStatusClick = useCallback(() => {
+    if (!memoryStatus) return;
+    openDialog('memory', {
+      memoryViewMode: memoryPipelineSnapshot && memoryPipelineSnapshot.pendingCount > 0 ? 'pending' : 'active',
+      memoryScope: sessionId.trim() ? 'session' : 'project',
+      memorySessionId: sessionId.trim() ? sessionId : null,
+    });
+  }, [memoryPipelineSnapshot, memoryStatus, openDialog, sessionId]);
 
   return (
     <BottomStatusBar
@@ -1954,6 +2036,8 @@ function ExecutionAwareBottomStatusBar({
       sessionUsage={sessionUsage}
       tokenEstimate={tokenEstimate}
       isEstimatingTokenBudget={isEstimatingTokenBudget}
+      memoryStatus={memoryStatus}
+      onMemoryStatusClick={memoryStatus ? handleMemoryStatusClick : null}
     />
   );
 }

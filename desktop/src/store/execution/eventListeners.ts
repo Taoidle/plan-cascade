@@ -1732,9 +1732,6 @@ export async function setupExecutionEventListeners(
               estimatedTimeRemaining: 0,
             });
             get().addLog('Response complete — ready for follow-up');
-            if (get().streamingOutput.length > 20) {
-              void triggerMemoryExtraction(get());
-            }
           } else {
             // Non-chat execution: show result view
             const completedStories = get().stories.filter((s) => s.status === 'completed').length;
@@ -1758,6 +1755,9 @@ export async function setupExecutionEventListeners(
             });
             get().addLog('Execution completed');
             get().saveToHistory();
+          }
+          if (get().streamingOutput.length > 20) {
+            void triggerMemoryExtraction(get());
           }
           scheduleForegroundChatTranscriptSync(session_id, get);
           break;

@@ -18,6 +18,7 @@ import { useSkillMemoryStore, type SkillSourceFilter, type MemoryCategoryFilter 
 import { useSettingsStore } from '../../store/settings';
 import { useExecutionStore } from '../../store/execution';
 import { useContextOpsStore } from '../../store/contextOps';
+import { useWorkflowKernelStore } from '../../store/workflowKernel';
 import { SkillRow } from '../SimpleMode/SkillRow';
 import { SkillDetail } from './SkillDetail';
 import { MemoryDetail } from './MemoryDetail';
@@ -366,6 +367,7 @@ function MemoryTab() {
   const { t } = useTranslation('simpleMode');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
   const latestEnvelope = useContextOpsStore((s) => s.latestEnvelope);
+  const rootSessionId = useWorkflowKernelStore((s) => s.sessionId);
   const taskId = useExecutionStore((s) => s.taskId);
   const standaloneSessionId = useExecutionStore((s) => s.standaloneSessionId);
   const foregroundOriginSessionId = useExecutionStore((s) => s.foregroundOriginSessionId);
@@ -374,11 +376,13 @@ function MemoryTab() {
   const memorySearchQuery = useSkillMemoryStore((s) => s.memorySearchQuery);
   const memoryCategoryFilter = useSkillMemoryStore((s) => s.memoryCategoryFilter);
   const memoryScope = useSkillMemoryStore((s) => s.memoryScope);
+  const memoryViewMode = useSkillMemoryStore((s) => s.memoryViewMode);
   const memoryHasMore = useSkillMemoryStore((s) => s.memoryHasMore);
   const setMemorySearchQuery = useSkillMemoryStore((s) => s.setMemorySearchQuery);
   const setMemoryCategoryFilter = useSkillMemoryStore((s) => s.setMemoryCategoryFilter);
   const setMemoryScope = useSkillMemoryStore((s) => s.setMemoryScope);
   const setMemorySessionId = useSkillMemoryStore((s) => s.setMemorySessionId);
+  const setMemoryViewMode = useSkillMemoryStore((s) => s.setMemoryViewMode);
   const loadMemories = useSkillMemoryStore((s) => s.loadMemories);
   const loadMoreMemories = useSkillMemoryStore((s) => s.loadMoreMemories);
   const searchMemories = useSkillMemoryStore((s) => s.searchMemories);
@@ -393,10 +397,12 @@ function MemoryTab() {
   const loadPendingMemoryCandidates = useSkillMemoryStore((s) => s.loadPendingMemoryCandidates);
   const reviewPendingMemoryCandidates = useSkillMemoryStore((s) => s.reviewPendingMemoryCandidates);
   const runMaintenance = useSkillMemoryStore((s) => s.runMaintenance);
+  const memoryPipelineSnapshot = useSkillMemoryStore((s) =>
+    rootSessionId ? (s.memoryPipelineByRootSession[rootSessionId] ?? null) : null,
+  );
 
   const [selectedMemory, setSelectedMemory] = useState<MemoryEntry | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [memoryViewMode, setMemoryViewMode] = useState<'active' | 'pending'>('active');
   const [selectedPendingIds, setSelectedPendingIds] = useState<Set<string>>(new Set());
   const [showWhyMemory, setShowWhyMemory] = useState(false);
   const diagnostics = latestEnvelope?.diagnostics;
@@ -452,6 +458,38 @@ function MemoryTab() {
   useEffect(() => {
     setSelectedPendingIds(new Set());
   }, [memoryScope, pendingMemoryCandidates.length, memoryViewMode]);
+
+  const pipelineStatusLabel = useMemo(() => {
+    if (!memoryPipelineSnapshot) return null;
+    if (memoryPipelineSnapshot.requiresReviewModel) {
+      return t('skillPanel.pipeline.status.requiresReviewModel', { defaultValue: 'Review model required' });
+    }
+    if (memoryPipelineSnapshot.phase === 'extracting') {
+      return t('skillPanel.pipeline.status.extracting', { defaultValue: 'Extracting memories' });
+    }
+    if (memoryPipelineSnapshot.phase === 'reviewing') {
+      return t('skillPanel.pipeline.status.reviewing', { defaultValue: 'Reviewing memories' });
+    }
+    if (memoryPipelineSnapshot.phase === 'error') {
+      return t('skillPanel.pipeline.status.error', { defaultValue: 'Pipeline error' });
+    }
+    if (memoryPipelineSnapshot.pendingCount > 0) {
+      return t('skillPanel.pipeline.status.pending', {
+        count: memoryPipelineSnapshot.pendingCount,
+        defaultValue: '{{count}} pending review',
+      });
+    }
+    if (memoryPipelineSnapshot.injectedCount > 0) {
+      return t('skillPanel.pipeline.status.injected', {
+        count: memoryPipelineSnapshot.injectedCount,
+        defaultValue: '{{count}} injected',
+      });
+    }
+    if (memoryPipelineSnapshot.extractedCount === 0 && memoryPipelineSnapshot.lastRunAt) {
+      return t('skillPanel.pipeline.status.empty', { defaultValue: 'No memories extracted' });
+    }
+    return t('skillPanel.pipeline.status.ready', { defaultValue: 'Pipeline ready' });
+  }, [memoryPipelineSnapshot, t]);
 
   const activeMemoryIndex = useMemo(() => {
     const grouped = new Map<string, MemoryEntry[]>();
@@ -618,6 +656,59 @@ function MemoryTab() {
     <div className="flex flex-col h-full">
       {/* Toolbar: scope + mode + filters */}
       <div className="p-3 border-b border-gray-200 dark:border-gray-700 space-y-2">
+        {memoryPipelineSnapshot && (
+          <div className="rounded-md border border-sky-200 dark:border-sky-900 bg-sky-50/70 dark:bg-sky-900/10 p-2 text-2xs text-sky-800 dark:text-sky-200">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium">
+                {t('skillPanel.pipeline.title', { defaultValue: 'Automatic memory pipeline' })}
+              </span>
+              <span>{pipelineStatusLabel}</span>
+            </div>
+            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sky-700 dark:text-sky-300">
+              <span>
+                {t('skillPanel.pipeline.extracted', {
+                  count: memoryPipelineSnapshot.extractedCount,
+                  defaultValue: 'Extracted {{count}}',
+                })}
+              </span>
+              <span>
+                {t('skillPanel.pipeline.approved', {
+                  count: memoryPipelineSnapshot.approvedCount,
+                  defaultValue: 'Approved {{count}}',
+                })}
+              </span>
+              <span>
+                {t('skillPanel.pipeline.rejected', {
+                  count: memoryPipelineSnapshot.rejectedCount,
+                  defaultValue: 'Rejected {{count}}',
+                })}
+              </span>
+              <span>
+                {t('skillPanel.pipeline.pending', {
+                  count: memoryPipelineSnapshot.pendingCount,
+                  defaultValue: 'Pending {{count}}',
+                })}
+              </span>
+              <span>
+                {t('skillPanel.pipeline.scopeSummary', {
+                  global: memoryPipelineSnapshot.resolvedScopes.global,
+                  project: memoryPipelineSnapshot.resolvedScopes.project,
+                  session: memoryPipelineSnapshot.resolvedScopes.session,
+                  defaultValue: 'G {{global}} / P {{project}} / S {{session}}',
+                })}
+              </span>
+            </div>
+            <div className="mt-1 text-sky-700 dark:text-sky-300">
+              {t('skillPanel.pipeline.reviewSource', { defaultValue: 'Review source' })}:{' '}
+              {memoryPipelineSnapshot.reviewSource
+                ? t(`skillPanel.pipeline.reviewSources.${memoryPipelineSnapshot.reviewSource}`, {
+                    defaultValue: memoryPipelineSnapshot.reviewSource,
+                  })
+                : t('skillPanel.none', { defaultValue: 'none' })}
+            </div>
+          </div>
+        )}
+
         {/* Scope filter */}
         <div className="flex items-center gap-1 flex-wrap">
           {memoryScopeOptions.map((option) => {

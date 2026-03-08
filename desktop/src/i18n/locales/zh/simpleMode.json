@@ -144,6 +144,18 @@
       "session": "新会话"
     }
   },
+  "bottomBar": {
+    "memory": {
+      "extracting": "提取中",
+      "reviewing": "审核中",
+      "pending": "待审 {{count}}",
+      "injected": "已注入 {{count}}",
+      "empty": "无记忆",
+      "requiresReviewModel": "配置审核",
+      "error": "异常",
+      "tooltip": "已提取 {{extracted}}，已通过 {{approved}}，已拒绝 {{rejected}}，待审 {{pending}}，已注入 {{injected}}。作用域 G {{global}} / P {{project}} / S {{session}}。"
+    }
+  },
   "skillPanel": {
     "title": "技能与记忆",
     "globalEnableHint": "全局技能启用/禁用",
@@ -203,6 +215,11 @@
     "clearAllConfirmSession": "确定删除当前会话的所有记忆？此操作不可撤销。",
     "activeMemories": "已生效",
     "pendingReview": "待审核",
+    "panelSummary": {
+      "idle": "记忆流水线已就绪",
+      "pending": "{{count}} 条记忆待审核",
+      "injected": "已注入 {{count}} 条记忆"
+    },
     "selectAll": "全选",
     "approveSelected": "批准所选",
     "rejectSelected": "拒绝所选",
@@ -217,6 +234,31 @@
     "noActiveReference": "当前作用域/类别下没有已生效参考记忆。",
     "approve": "批准",
     "reject": "拒绝",
+    "pipeline": {
+      "title": "自动记忆流水线",
+      "extracted": "已提取 {{count}}",
+      "approved": "已通过 {{count}}",
+      "rejected": "已拒绝 {{count}}",
+      "pending": "待审 {{count}}",
+      "scopeSummary": "G {{global}} / P {{project}} / S {{session}}",
+      "reviewSource": "审核来源",
+      "reviewSources": {
+        "manual_review": "人工审核",
+        "auto_llm_review": "LLM 审核",
+        "auto_approve": "自动通过",
+        "routing_rule": "路由规则"
+      },
+      "status": {
+        "extracting": "正在提取记忆",
+        "reviewing": "正在审核记忆",
+        "pending": "{{count}} 条待审核",
+        "injected": "已注入 {{count}} 条",
+        "empty": "未提取到记忆",
+        "requiresReviewModel": "需要配置审核模型",
+        "error": "流水线异常",
+        "ready": "流水线已就绪"
+      }
+    },
     "toggleSkill": "切换 {{name}}",
     "sourceFilters": {
       "all": "全部",

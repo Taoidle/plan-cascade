@@ -16,7 +16,8 @@ export type StandaloneContextTurns = 2 | 4 | 6 | 8 | 10 | 20 | 50 | 100 | 200 | 
 export type GlmEndpoint = 'standard' | 'coding' | 'international' | 'international-coding';
 export type MinimaxEndpoint = 'international' | 'china';
 export type QwenEndpoint = 'china' | 'singapore' | 'us';
-const SETTINGS_PERSIST_VERSION = 4;
+export type MemoryReviewMode = 'llm_review' | 'auto_approve' | 'manual_only';
+const SETTINGS_PERSIST_VERSION = 5;
 const EXECUTION_PHASE_IDS = ['planning', 'implementation', 'retry', 'refactor', 'review'] as const;
 
 function normalizeProviderKey(provider: string): string {
@@ -42,6 +43,14 @@ interface QualityGates {
 export interface PhaseAgentConfig {
   defaultAgent: string;
   fallbackChain: string[];
+}
+
+export interface MemorySettings {
+  autoExtractEnabled: boolean;
+  reviewMode: MemoryReviewMode;
+  reviewAgentRef: string;
+  injectActiveOnly: true;
+  extractSuccessfulSessionsOnly: true;
 }
 
 interface SettingsState {
@@ -116,6 +125,9 @@ interface SettingsState {
   // Phase agent configs
   phaseConfigs: Record<string, PhaseAgentConfig>;
 
+  // Memory pipeline settings
+  memorySettings: MemorySettings;
+
   // Actions
   setBackend: (backend: Backend) => void;
   setProvider: (provider: string) => void;
@@ -143,6 +155,8 @@ interface SettingsState {
   // Phase agent actions
   setPhaseConfigs: (configs: Record<string, PhaseAgentConfig>) => void;
   updatePhaseConfig: (phaseId: string, config: Partial<PhaseAgentConfig>) => void;
+  setMemorySettings: (settings: MemorySettings) => void;
+  updateMemorySettings: (patch: Partial<MemorySettings>) => void;
 
   // Chat UI actions
   setShowLineNumbers: (show: boolean) => void;
@@ -264,6 +278,15 @@ const defaultSettings = {
     refactor: { defaultAgent: '', fallbackChain: ['claude-code'] },
     review: { defaultAgent: '', fallbackChain: ['codex'] },
   } as Record<string, PhaseAgentConfig>,
+
+  // Memory pipeline
+  memorySettings: {
+    autoExtractEnabled: true,
+    reviewMode: 'llm_review' as MemoryReviewMode,
+    reviewAgentRef: '',
+    injectActiveOnly: true as const,
+    extractSuccessfulSessionsOnly: true as const,
+  } as MemorySettings,
 };
 
 function applyV2ForcedDefaults(state: Partial<SettingsState>): Partial<SettingsState> {
@@ -295,6 +318,28 @@ function applyV3ForcedDefaults(state: Partial<SettingsState>): Partial<SettingsS
   delete (nextState as Record<string, unknown>).simpleKernelSot;
   delete (nextState as Record<string, unknown>).typedCardPipeline;
   return nextState;
+}
+
+function ensureMemorySettings(settings: Partial<SettingsState>): MemorySettings {
+  const current = (settings.memorySettings ?? {}) as Partial<MemorySettings>;
+  return {
+    autoExtractEnabled:
+      typeof current.autoExtractEnabled === 'boolean'
+        ? current.autoExtractEnabled
+        : defaultSettings.memorySettings.autoExtractEnabled,
+    reviewMode:
+      current.reviewMode === 'auto_approve' ||
+      current.reviewMode === 'manual_only' ||
+      current.reviewMode === 'llm_review'
+        ? current.reviewMode
+        : defaultSettings.memorySettings.reviewMode,
+    reviewAgentRef:
+      typeof current.reviewAgentRef === 'string'
+        ? current.reviewAgentRef
+        : defaultSettings.memorySettings.reviewAgentRef,
+    injectActiveOnly: true,
+    extractSuccessfulSessionsOnly: true,
+  };
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -395,6 +440,16 @@ export const useSettingsStore = create<SettingsState>()(
             [phaseId]: { ...state.phaseConfigs[phaseId], ...config },
           },
         })),
+      setMemorySettings: (memorySettings) => set({ memorySettings: ensureMemorySettings({ memorySettings }) }),
+      updateMemorySettings: (patch) =>
+        set((state) => ({
+          memorySettings: ensureMemorySettings({
+            memorySettings: {
+              ...state.memorySettings,
+              ...patch,
+            },
+          }),
+        })),
 
       setOnboardingCompleted: (onboardingCompleted) => set({ onboardingCompleted }),
       setTourCompleted: (tourCompleted) => set({ tourCompleted }),
@@ -454,15 +509,24 @@ export const useSettingsStore = create<SettingsState>()(
       migrate: (persistedState, version) => {
         const state = (persistedState ?? {}) as Partial<SettingsState>;
         if (version < 2) {
-          return applyV3ForcedDefaults(state);
+          return {
+            ...applyV3ForcedDefaults(state),
+            memorySettings: ensureMemorySettings(state),
+          };
         }
         if (version < 3) {
-          return applyV3ForcedDefaults(state);
+          return {
+            ...applyV3ForcedDefaults(state),
+            memorySettings: ensureMemorySettings(state),
+          };
         }
         const nextState = { ...state } as Record<string, unknown>;
         delete nextState.simpleKernelSot;
         delete nextState.typedCardPipeline;
-        return nextState as Partial<SettingsState>;
+        return {
+          ...(nextState as Partial<SettingsState>),
+          memorySettings: ensureMemorySettings(state),
+        };
       },
       partialize: (state) => {
         return Object.fromEntries(Object.entries(state).filter(([key]) => key !== 'apiKey')) as Partial<SettingsState>;
@@ -492,6 +556,7 @@ export const useSettingsStore = create<SettingsState>()(
           }
         }
         mergedState.phaseConfigs = storedPhases;
+        mergedState.memorySettings = ensureMemorySettings(mergedState);
         return mergedState;
       },
       onRehydrateStorage: () => (state) => {

@@ -34,6 +34,7 @@ import { NetworkSection } from './NetworkSection';
 import { WebhookSection } from './WebhookSection';
 import { RemoteSection } from './RemoteSection';
 import { A2aSection } from './A2aSection';
+import { MemorySection } from './MemorySection';
 
 interface SettingsDialogProps {
   open: boolean;
@@ -53,6 +54,7 @@ type SettingsTab =
   | 'agents'
   | 'quality'
   | 'phases'
+  | 'memory'
   | 'a2a'
   | 'import-export';
 
@@ -96,6 +98,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     { id: 'agents', label: t('tabs.agents') },
     { id: 'quality', label: t('tabs.quality') },
     { id: 'phases', label: t('tabs.phases') },
+    { id: 'memory', label: t('tabs.memory', 'Memory') },
     { id: 'a2a', label: t('tabs.a2a', 'A2A Agents') },
     { id: 'import-export', label: t('tabs.importExport') },
   ];
@@ -214,6 +217,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               </Tabs.Content>
               <Tabs.Content value="phases" className="outline-none">
                 <PhaseAgentSection />
+              </Tabs.Content>
+              <Tabs.Content value="memory" className="outline-none">
+                <MemorySection />
               </Tabs.Content>
               <Tabs.Content value="a2a" className="outline-none">
                 <A2aSection />

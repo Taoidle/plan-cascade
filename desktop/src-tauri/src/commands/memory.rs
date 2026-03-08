@@ -3,10 +3,12 @@
 //! Tauri commands for managing project memories (cross-session persistent knowledge).
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::models::response::CommandResponse;
-use crate::services::memory::extraction::run_session_extraction;
+use crate::services::memory::extraction::{
+    run_session_extraction_candidates, ExtractedMemoryCandidate,
+};
 use crate::services::memory::maintenance::MemoryMaintenance;
 use crate::services::memory::query_policy_v2::{memory_query_tuning_v2, MemoryQueryPresetV2};
 use crate::services::memory::query_v2::{
@@ -27,6 +29,61 @@ use crate::state::AppState;
 
 const EXTRACTION_SESSION_MARKER_PREFIX: &str = "memory_extracted_session:";
 const DEFAULT_SESSION_SCOPE_TTL_DAYS: i64 = 14;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MemoryReviewMode {
+    LlmReview,
+    AutoApprove,
+    ManualOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PipelineDecision {
+    Approve,
+    Reject,
+    PendingReview,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct MemoryPipelineScopeCounts {
+    global: usize,
+    project: usize,
+    session: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct MemoryPipelineCounts {
+    extracted: usize,
+    approved: usize,
+    rejected: usize,
+    pending: usize,
+    injected: usize,
+    scopes: MemoryPipelineScopeCounts,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MemoryPipelineStatusEvent {
+    root_session_id: String,
+    runtime_session_id: Option<String>,
+    phase: String,
+    counts: MemoryPipelineCounts,
+    requires_review_model: bool,
+    message_key: Option<String>,
+    trace_id: Option<String>,
+    timestamp: String,
+    review_source: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ReviewedCandidate {
+    candidate: ExtractedMemoryCandidate,
+    scope: MemoryScopeV2,
+    decision: PipelineDecision,
+    review_source: &'static str,
+}
 
 fn env_flag_enabled(name: &str, default: bool) -> bool {
     std::env::var(name)
@@ -798,10 +855,14 @@ pub struct MemoryExtractionResult {
 /// Silently returns zero results if no provider is configured or on any error.
 #[tauri::command]
 pub async fn extract_session_memories(
+    app: AppHandle,
     project_path: String,
     task_description: String,
     conversation_summary: String,
     session_id: Option<String>,
+    root_session_id: Option<String>,
+    review_mode: Option<String>,
+    review_agent_ref: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<CommandResponse<MemoryExtractionResult>, String> {
     let zero_result = MemoryExtractionResult {
@@ -810,10 +871,37 @@ pub async fn extract_session_memories(
         merged_count: 0,
         skipped_count: 0,
     };
+    let normalized_runtime_session_id = session_id
+        .as_deref()
+        .and_then(crate::services::memory::store::normalize_memory_session_id);
+    let normalized_root_session_id = root_session_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| normalized_runtime_session_id.clone());
+    let Some(root_session_id) = normalized_root_session_id else {
+        return Ok(CommandResponse::ok(zero_result));
+    };
+    let parsed_review_mode = parse_memory_review_mode(review_mode.as_deref());
 
     if !env_flag_enabled("UNIFIED_SESSION_EXTRACTION", true) {
         eprintln!(
             "[memory-extraction] Skipped: UNIFIED_SESSION_EXTRACTION is disabled (source=chat_frontend)"
+        );
+        emit_memory_pipeline_status(
+            &app,
+            MemoryPipelineStatusEvent {
+                root_session_id,
+                runtime_session_id: normalized_runtime_session_id,
+                phase: "ready".to_string(),
+                counts: MemoryPipelineCounts::default(),
+                requires_review_model: false,
+                message_key: Some("disabled".to_string()),
+                trace_id: None,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                review_source: None,
+            },
         );
         return Ok(CommandResponse::ok(zero_result));
     }
@@ -829,6 +917,20 @@ pub async fn extract_session_memories(
                 "[memory-extraction] Skipped: session already extracted (session_id={})",
                 sid
             );
+            emit_memory_pipeline_status(
+                &app,
+                MemoryPipelineStatusEvent {
+                    root_session_id,
+                    runtime_session_id: normalized_runtime_session_id,
+                    phase: "ready".to_string(),
+                    counts: MemoryPipelineCounts::default(),
+                    requires_review_model: false,
+                    message_key: Some("already_extracted".to_string()),
+                    trace_id: None,
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                    review_source: None,
+                },
+            );
             return Ok(CommandResponse::ok(zero_result));
         }
     }
@@ -839,16 +941,59 @@ pub async fn extract_session_memories(
             "[memory-extraction] Skipped: conversation too short ({} chars < 50)",
             conversation_summary.len()
         );
+        emit_memory_pipeline_status(
+            &app,
+            MemoryPipelineStatusEvent {
+                root_session_id,
+                runtime_session_id: normalized_runtime_session_id,
+                phase: "ready".to_string(),
+                counts: MemoryPipelineCounts::default(),
+                requires_review_model: false,
+                message_key: Some("conversation_too_short".to_string()),
+                trace_id: None,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                review_source: None,
+            },
+        );
         return Ok(CommandResponse::ok(zero_result));
     }
 
+    emit_memory_pipeline_status(
+        &app,
+        MemoryPipelineStatusEvent {
+            root_session_id: root_session_id.clone(),
+            runtime_session_id: normalized_runtime_session_id.clone(),
+            phase: "extracting".to_string(),
+            counts: MemoryPipelineCounts::default(),
+            requires_review_model: false,
+            message_key: Some("extracting".to_string()),
+            trace_id: None,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            review_source: None,
+        },
+    );
+
     // Resolve LLM provider from app config + keyring
-    let provider = match resolve_extraction_provider(&state).await {
+    let provider = match resolve_provider_for_agent_ref(&state, None).await {
         Ok(p) => p,
         Err(e) => {
             eprintln!(
                 "[memory-extraction] Provider resolution failed (source=chat_frontend): {}",
                 e
+            );
+            emit_memory_pipeline_status(
+                &app,
+                MemoryPipelineStatusEvent {
+                    root_session_id,
+                    runtime_session_id: normalized_runtime_session_id,
+                    phase: "error".to_string(),
+                    counts: MemoryPipelineCounts::default(),
+                    requires_review_model: false,
+                    message_key: Some("extraction_provider_missing".to_string()),
+                    trace_id: None,
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                    review_source: None,
+                },
             );
             return Ok(CommandResponse::ok(zero_result));
         }
@@ -860,9 +1005,8 @@ pub async fn extract_session_memories(
         .await
         .unwrap_or_default();
 
-    let entries = match run_session_extraction(
+    let candidates = match run_session_extraction_candidates(
         provider.as_ref(),
-        &project_path,
         &task_description,
         &[], // files_read not available from frontend trigger
         &[], // key_findings not available from frontend trigger
@@ -872,37 +1016,124 @@ pub async fn extract_session_memories(
     )
     .await
     {
-        Ok(entries) => entries,
+        Ok(candidates) => candidates,
         Err(e) => {
             eprintln!(
                 "[memory-extraction] Session extraction failed (source=chat_frontend): {}",
                 e
             );
+            emit_memory_pipeline_status(
+                &app,
+                MemoryPipelineStatusEvent {
+                    root_session_id,
+                    runtime_session_id: normalized_runtime_session_id,
+                    phase: "error".to_string(),
+                    counts: MemoryPipelineCounts::default(),
+                    requires_review_model: false,
+                    message_key: Some("extraction_failed".to_string()),
+                    trace_id: None,
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                    review_source: None,
+                },
+            );
             return Ok(CommandResponse::ok(zero_result));
         }
     };
 
-    let extracted_count = entries.len();
+    let extracted_count = candidates.len();
     if extracted_count == 0 {
         mark_session_extraction_done(&state, session_id.as_deref()).await;
         eprintln!(
             "[memory-extraction] LLM response parsed but yielded 0 entries (source=chat_frontend)"
         );
+        emit_memory_pipeline_status(
+            &app,
+            MemoryPipelineStatusEvent {
+                root_session_id,
+                runtime_session_id: normalized_runtime_session_id,
+                phase: "ready".to_string(),
+                counts: MemoryPipelineCounts::default(),
+                requires_review_model: false,
+                message_key: Some("no_memories".to_string()),
+                trace_id: None,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                review_source: None,
+            },
+        );
         return Ok(CommandResponse::ok(zero_result));
     }
 
-    // Upsert each memory entry
+    emit_memory_pipeline_status(
+        &app,
+        MemoryPipelineStatusEvent {
+            root_session_id: root_session_id.clone(),
+            runtime_session_id: normalized_runtime_session_id.clone(),
+            phase: "reviewing".to_string(),
+            counts: MemoryPipelineCounts {
+                extracted: extracted_count,
+                ..Default::default()
+            },
+            requires_review_model: false,
+            message_key: Some("reviewing".to_string()),
+            trace_id: None,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            review_source: None,
+        },
+    );
+
+    let reviewed_candidates = review_candidates(
+        &state,
+        &project_path,
+        &candidates,
+        parsed_review_mode,
+        review_agent_ref.as_deref(),
+    )
+    .await;
+
     let mut inserted_count = 0usize;
     let mut merged_count = 0usize;
     let mut skipped_count = 0usize;
+    let mut approved_count = 0usize;
+    let mut rejected_count = 0usize;
+    let mut pending_count = 0usize;
+    let mut scope_counts = MemoryPipelineScopeCounts::default();
+    let mut requires_review_model = false;
+    let mut last_review_source: Option<String> = None;
 
-    for entry in entries {
+    for reviewed in reviewed_candidates {
+        requires_review_model |= reviewed.review_source == "manual_review"
+            && matches!(parsed_review_mode, MemoryReviewMode::LlmReview)
+            && reviewed.decision == PipelineDecision::PendingReview;
+        last_review_source = Some(reviewed.review_source.to_string());
+        match reviewed.scope {
+            MemoryScopeV2::Global => scope_counts.global += 1,
+            MemoryScopeV2::Project => scope_counts.project += 1,
+            MemoryScopeV2::Session => scope_counts.session += 1,
+        }
+        match reviewed.decision {
+            PipelineDecision::Approve => approved_count += 1,
+            PipelineDecision::Reject => rejected_count += 1,
+            PipelineDecision::PendingReview => pending_count += 1,
+        }
+        let entry = candidate_to_entry(&project_path, reviewed.scope, reviewed.candidate.clone());
         match state
             .with_memory_store(|store| store.upsert_memory(entry.clone()))
             .await
         {
-            Ok(UpsertResult::Inserted(_)) => inserted_count += 1,
-            Ok(UpsertResult::Merged { .. }) => merged_count += 1,
+            Ok(UpsertResult::Inserted(inserted)) => {
+                inserted_count += 1;
+                if let Err(error) = apply_pipeline_decision(&state, &inserted.id, reviewed.decision, reviewed.review_source).await
+                {
+                    eprintln!("[memory-extraction] Failed to apply review decision: {}", error);
+                    skipped_count += 1;
+                }
+            }
+            Ok(UpsertResult::Merged { merged, .. }) => {
+                merged_count += 1;
+                if matches!(reviewed.decision, PipelineDecision::Approve) {
+                    let _ = apply_pipeline_decision(&state, &merged.id, reviewed.decision, reviewed.review_source).await;
+                }
+            }
             Ok(UpsertResult::Skipped { .. }) => skipped_count += 1,
             Err(e) => {
                 eprintln!(
@@ -924,6 +1155,32 @@ pub async fn extract_session_memories(
 
     mark_session_extraction_done(&state, session_id.as_deref()).await;
 
+    emit_memory_pipeline_status(
+        &app,
+        MemoryPipelineStatusEvent {
+            root_session_id,
+            runtime_session_id: normalized_runtime_session_id,
+            phase: if pending_count > 0 { "pending" } else { "ready" }.to_string(),
+            counts: MemoryPipelineCounts {
+                extracted: extracted_count,
+                approved: approved_count,
+                rejected: rejected_count,
+                pending: pending_count,
+                injected: 0,
+                scopes: scope_counts,
+            },
+            requires_review_model,
+            message_key: Some(if pending_count > 0 {
+                "pending_review".to_string()
+            } else {
+                "ready".to_string()
+            }),
+            trace_id: None,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            review_source: last_review_source,
+        },
+    );
+
     Ok(CommandResponse::ok(MemoryExtractionResult {
         extracted_count,
         inserted_count,
@@ -937,8 +1194,9 @@ pub async fn extract_session_memories(
 /// Uses the default_provider/default_model from AppConfig and retrieves
 /// the API key from the OS keyring. Returns an error if no provider is
 /// configured or no API key is found (except for Ollama).
-async fn resolve_extraction_provider(
+async fn resolve_provider_for_agent_ref(
     state: &AppState,
+    agent_ref: Option<&str>,
 ) -> Result<Box<dyn crate::services::llm::provider::LlmProvider>, String> {
     use crate::commands::standalone::{get_api_key_with_aliases, normalize_provider_name};
     use crate::services::llm::types::{ProviderConfig, ProviderType};
@@ -949,7 +1207,12 @@ async fn resolve_extraction_provider(
         .await
         .map_err(|e| format!("Config not initialized: {}", e))?;
 
-    let canonical = normalize_provider_name(&app_config.default_provider)
+    let parsed_agent = agent_ref.and_then(parse_memory_agent_ref);
+    let configured_provider = parsed_agent
+        .as_ref()
+        .map(|(provider, _)| provider.clone())
+        .unwrap_or_else(|| app_config.default_provider.clone());
+    let canonical = normalize_provider_name(&configured_provider)
         .ok_or_else(|| format!("Unknown provider: {}", app_config.default_provider))?;
 
     let provider_type = match canonical {
@@ -993,14 +1256,17 @@ async fn resolve_extraction_provider(
         .ok()
         .flatten();
 
-    let resolved_model = {
-        let model = app_config.model_for_provider(canonical);
-        if model.is_empty() {
-            app_config.default_model.clone()
-        } else {
-            model
-        }
-    };
+    let resolved_model = parsed_agent
+        .map(|(_, model)| model)
+        .filter(|model| !model.trim().is_empty())
+        .unwrap_or_else(|| {
+            let model = app_config.model_for_provider(canonical);
+            if model.is_empty() {
+                app_config.default_model.clone()
+            } else {
+                model
+            }
+        });
 
     let config = ProviderConfig {
         provider: provider_type.clone(),
@@ -1014,6 +1280,26 @@ async fn resolve_extraction_provider(
     };
 
     Ok(create_extraction_provider(config))
+}
+
+fn parse_memory_agent_ref(value: &str) -> Option<(String, String)> {
+    let trimmed = value.trim();
+    let without_prefix = trimmed.strip_prefix("llm:")?;
+    let mut parts = without_prefix.splitn(2, ':');
+    let provider = parts.next()?.trim();
+    let model = parts.next()?.trim();
+    if provider.is_empty() || model.is_empty() {
+        return None;
+    }
+    Some((provider.to_string(), model.to_string()))
+}
+
+fn parse_memory_review_mode(value: Option<&str>) -> MemoryReviewMode {
+    match value.unwrap_or("llm_review").trim().to_ascii_lowercase().as_str() {
+        "auto_approve" => MemoryReviewMode::AutoApprove,
+        "manual_only" => MemoryReviewMode::ManualOnly,
+        _ => MemoryReviewMode::LlmReview,
+    }
 }
 
 /// Create an LLM provider instance from a ProviderConfig.
@@ -1032,6 +1318,302 @@ fn create_extraction_provider(
         ProviderType::Minimax => Box::new(MinimaxProvider::new(config)),
         ProviderType::Ollama => Box::new(OllamaProvider::new(config)),
     }
+}
+
+fn emit_memory_pipeline_status(app: &AppHandle, payload: MemoryPipelineStatusEvent) {
+    let _ = app.emit("memory:pipeline-status", payload);
+}
+
+fn candidate_to_entry(
+    project_path: &str,
+    scope: MemoryScopeV2,
+    candidate: ExtractedMemoryCandidate,
+) -> NewMemoryEntry {
+    let effective_project_path = match scope {
+        MemoryScopeV2::Global => GLOBAL_PROJECT_PATH.to_string(),
+        MemoryScopeV2::Session => candidate
+            .source_session_id
+            .as_deref()
+            .and_then(build_session_project_path)
+            .unwrap_or_else(|| project_path.to_string()),
+        MemoryScopeV2::Project => project_path.to_string(),
+    };
+    let scope_label = scope.as_str();
+    let source_context = format!(
+        "{};scope={};confidence={:.2}",
+        candidate.source_context, scope_label, candidate.confidence
+    );
+    NewMemoryEntry {
+        project_path: effective_project_path,
+        category: candidate.category,
+        content: candidate.content,
+        keywords: candidate.keywords,
+        importance: candidate.importance,
+        source_session_id: candidate.source_session_id,
+        source_context: Some(source_context),
+    }
+}
+
+async fn apply_pipeline_decision(
+    state: &AppState,
+    memory_id: &str,
+    decision: PipelineDecision,
+    review_source: &str,
+) -> Result<(), String> {
+    let (status, audit_decision) = match decision {
+        PipelineDecision::Approve => ("active", "approve"),
+        PipelineDecision::Reject => ("rejected", "reject"),
+        PipelineDecision::PendingReview => ("pending_review", "pending_review"),
+    };
+    let memory_id = memory_id.to_string();
+    let review_source = review_source.to_string();
+    state
+        .with_database(move |db| {
+            let conn = db.get_connection()?;
+            conn.execute(
+                "UPDATE memory_entries_v2
+                 SET status = ?2,
+                     conflict_flag = CASE WHEN ?2 = 'pending_review' THEN conflict_flag ELSE 0 END,
+                     updated_at = datetime('now')
+                 WHERE id = ?1",
+                rusqlite::params![memory_id, status],
+            )?;
+            let _ = conn.execute(
+                "INSERT INTO memory_review_audit_v2 (memory_id, decision, operator, created_at)
+                 VALUES (?1, ?2, ?3, datetime('now'))",
+                rusqlite::params![memory_id, audit_decision, review_source],
+            );
+            Ok(())
+        })
+        .await
+        .map_err(|error| error.to_string())
+}
+
+fn looks_global_candidate(candidate: &ExtractedMemoryCandidate) -> bool {
+    let text = candidate.content.to_ascii_lowercase();
+    let global_markers = [
+        "prefer ",
+        "prefers ",
+        "use chinese",
+        "use japanese",
+        "use english",
+        "respond in ",
+        "tool preference",
+        "coding style",
+        "formatting preference",
+        "always use ",
+        "never use ",
+    ];
+    let project_markers = ["/", "src/", "tests/", "workspace", "repo", "repository", "project"];
+    candidate.category == MemoryCategory::Preference
+        && global_markers.iter().any(|marker| text.contains(marker))
+        && !project_markers.iter().any(|marker| text.contains(marker))
+}
+
+fn looks_session_candidate(candidate: &ExtractedMemoryCandidate) -> bool {
+    let text = candidate.content.to_ascii_lowercase();
+    [
+        "for this session",
+        "for this task",
+        "current task",
+        "temporary",
+        "for now",
+        "this conversation",
+        "current blocker",
+    ]
+    .iter()
+    .any(|marker| text.contains(marker))
+}
+
+fn looks_project_candidate(candidate: &ExtractedMemoryCandidate) -> bool {
+    let text = candidate.content.to_ascii_lowercase();
+    matches!(
+        candidate.category,
+        MemoryCategory::Convention | MemoryCategory::Pattern | MemoryCategory::Correction | MemoryCategory::Fact
+    ) || [
+        "src/",
+        "package.json",
+        "cargo.toml",
+        "workflow",
+        "commandresponse",
+        "zustand",
+        "repository",
+        "project",
+        "workspace",
+        "module",
+        "component",
+    ]
+    .iter()
+    .any(|marker| text.contains(marker))
+}
+
+fn route_scope(candidate: &ExtractedMemoryCandidate) -> Option<MemoryScopeV2> {
+    if looks_global_candidate(candidate) {
+        return Some(MemoryScopeV2::Global);
+    }
+    if looks_session_candidate(candidate) {
+        return Some(MemoryScopeV2::Session);
+    }
+    if looks_project_candidate(candidate) {
+        return Some(MemoryScopeV2::Project);
+    }
+    candidate.suggested_scope
+}
+
+async fn review_candidates(
+    state: &AppState,
+    project_path: &str,
+    candidates: &[ExtractedMemoryCandidate],
+    review_mode: MemoryReviewMode,
+    review_agent_ref: Option<&str>,
+) -> Vec<ReviewedCandidate> {
+    match review_mode {
+        MemoryReviewMode::AutoApprove => candidates
+            .iter()
+            .cloned()
+            .map(|candidate| ReviewedCandidate {
+                scope: route_scope(&candidate).unwrap_or(candidate.suggested_scope.unwrap_or(MemoryScopeV2::Project)),
+                candidate,
+                decision: PipelineDecision::Approve,
+                review_source: "auto_approve",
+            })
+            .collect(),
+        MemoryReviewMode::ManualOnly => candidates
+            .iter()
+            .cloned()
+            .map(|candidate| ReviewedCandidate {
+                scope: route_scope(&candidate).unwrap_or(candidate.suggested_scope.unwrap_or(MemoryScopeV2::Project)),
+                candidate,
+                decision: PipelineDecision::PendingReview,
+                review_source: "manual_review",
+            })
+            .collect(),
+        MemoryReviewMode::LlmReview => {
+            let provider = match resolve_provider_for_agent_ref(state, review_agent_ref).await {
+                Ok(provider) => provider,
+                Err(_) => {
+                    return candidates
+                        .iter()
+                        .cloned()
+                        .map(|candidate| ReviewedCandidate {
+                            scope: route_scope(&candidate)
+                                .unwrap_or(candidate.suggested_scope.unwrap_or(MemoryScopeV2::Project)),
+                            candidate,
+                            decision: PipelineDecision::PendingReview,
+                            review_source: "manual_review",
+                        })
+                        .collect()
+                }
+            };
+            run_llm_review(provider.as_ref(), project_path, candidates).await.unwrap_or_else(|_| {
+                candidates
+                    .iter()
+                    .cloned()
+                    .map(|candidate| ReviewedCandidate {
+                        scope: route_scope(&candidate)
+                            .unwrap_or(candidate.suggested_scope.unwrap_or(MemoryScopeV2::Project)),
+                        candidate,
+                        decision: PipelineDecision::PendingReview,
+                        review_source: "manual_review",
+                    })
+                    .collect()
+            })
+        }
+    }
+}
+
+async fn run_llm_review(
+    provider: &dyn crate::services::llm::provider::LlmProvider,
+    project_path: &str,
+    candidates: &[ExtractedMemoryCandidate],
+) -> Result<Vec<ReviewedCandidate>, String> {
+    use crate::services::llm::types::{LlmRequestOptions, Message};
+
+    let payload = candidates
+        .iter()
+        .enumerate()
+        .map(|(index, candidate)| {
+            serde_json::json!({
+                "index": index,
+                "category": candidate.category.as_str(),
+                "content": candidate.content,
+                "importance": candidate.importance,
+                "keywords": candidate.keywords,
+                "suggested_scope": candidate.suggested_scope.map(|scope| scope.as_str()),
+                "confidence": candidate.confidence,
+                "evidence_snippets": candidate.evidence_snippets,
+            })
+        })
+        .collect::<Vec<_>>();
+    let prompt = format!(
+        "You are reviewing extracted memories for a coding assistant.\n\
+Return a JSON array with one object per candidate.\n\
+Each object must contain: index, decision (approve|reject|pending_review), scope (global|project|session).\n\
+Use global only for stable cross-project user preferences.\n\
+Use project for repository-specific conventions, architecture, or workflow facts.\n\
+Use session for temporary task-local facts that should not persist broadly.\n\
+Reject noisy, duplicate, or weak memories.\n\
+Repository path: {}\n\
+Candidates:\n{}",
+        project_path,
+        serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?
+    );
+    let response = provider
+        .send_message(
+            vec![Message::user(prompt)],
+            None,
+            vec![],
+            LlmRequestOptions {
+                temperature_override: Some(0.1),
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    let text = response
+        .content
+        .ok_or_else(|| "memory review returned empty content".to_string())?;
+    let json_str = text
+        .trim()
+        .strip_prefix("```json")
+        .or_else(|| text.trim().strip_prefix("```"))
+        .unwrap_or(text.trim());
+    let json_str = json_str.strip_suffix("```").unwrap_or(json_str).trim();
+    let decisions: Vec<serde_json::Value> = serde_json::from_str(json_str).map_err(|error| error.to_string())?;
+    let mut results = Vec::new();
+    for item in decisions {
+        let Some(index) = item.get("index").and_then(|value| value.as_u64()).map(|value| value as usize) else {
+            continue;
+        };
+        let Some(candidate) = candidates.get(index).cloned() else {
+            continue;
+        };
+        let scope = item
+            .get("scope")
+            .and_then(|value| value.as_str())
+            .and_then(MemoryScopeV2::from_str)
+            .or_else(|| route_scope(&candidate))
+            .unwrap_or(candidate.suggested_scope.unwrap_or(MemoryScopeV2::Project));
+        let decision = match item
+            .get("decision")
+            .and_then(|value| value.as_str())
+            .unwrap_or("pending_review")
+        {
+            "approve" => PipelineDecision::Approve,
+            "reject" => PipelineDecision::Reject,
+            _ => PipelineDecision::PendingReview,
+        };
+        results.push(ReviewedCandidate {
+            candidate,
+            scope,
+            decision,
+            review_source: "auto_llm_review",
+        });
+    }
+    if results.len() != candidates.len() {
+        return Err("memory review did not return decisions for all candidates".to_string());
+    }
+    Ok(results)
 }
 
 fn extraction_marker_key(session_id: &str) -> String {

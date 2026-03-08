@@ -15,6 +15,7 @@ import { clsx } from 'clsx';
 import { ChevronRightIcon, GearIcon } from '@radix-ui/react-icons';
 import { useSkillMemoryStore } from '../../store/skillMemory';
 import { useSettingsStore } from '../../store/settings';
+import { useWorkflowKernelStore } from '../../store/workflowKernel';
 import { SkillRow } from './SkillRow';
 import { MemoryRow } from './MemoryRow';
 import type { SkillSummary } from '../../types/skillMemory';
@@ -71,6 +72,7 @@ function CollapsibleSection({
 export function SkillMemoryPanel() {
   const { t } = useTranslation('simpleMode');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
+  const rootSessionId = useWorkflowKernelStore((s) => s.sessionId);
 
   const skills = useSkillMemoryStore((s) => s.skills);
   const skillsLoading = useSkillMemoryStore((s) => s.skillsLoading);
@@ -80,6 +82,9 @@ export function SkillMemoryPanel() {
   const loadMemories = useSkillMemoryStore((s) => s.loadMemories);
   const toggleSkill = useSkillMemoryStore((s) => s.toggleSkill);
   const openDialog = useSkillMemoryStore((s) => s.openDialog);
+  const memoryPipelineSnapshot = useSkillMemoryStore((s) =>
+    rootSessionId ? (s.memoryPipelineByRootSession[rootSessionId] ?? null) : null,
+  );
 
   // Fallback loading for direct panel usage (sidebar preloads on mount).
   useEffect(() => {
@@ -128,7 +133,21 @@ export function SkillMemoryPanel() {
         <div className="min-w-0">
           <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{t('skillPanel.title')}</span>
           <p className="text-2xs text-gray-400 dark:text-gray-500">
-            {t('skillPanel.globalEnableHint', { defaultValue: 'Global skill enable/disable' })}
+            {memoryPipelineSnapshot
+              ? memoryPipelineSnapshot.pendingCount > 0
+                ? t('skillPanel.panelSummary.pending', {
+                    count: memoryPipelineSnapshot.pendingCount,
+                    defaultValue: '{{count}} memories pending review',
+                  })
+                : memoryPipelineSnapshot.injectedCount > 0
+                  ? t('skillPanel.panelSummary.injected', {
+                      count: memoryPipelineSnapshot.injectedCount,
+                      defaultValue: '{{count}} memories injected',
+                    })
+                  : t('skillPanel.panelSummary.idle', {
+                      defaultValue: 'Memory pipeline ready',
+                    })
+              : t('skillPanel.globalEnableHint', { defaultValue: 'Global skill enable/disable' })}
           </p>
         </div>
         <button
