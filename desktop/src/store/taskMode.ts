@@ -86,6 +86,31 @@ export interface StrategyAnalysis {
   };
 }
 
+export type StrategyRecommendationSource = 'deterministic' | 'llm_enhanced' | 'fallback_deterministic';
+
+export interface RecommendedWorkflowConfig {
+  flowLevel: 'quick' | 'standard' | 'full';
+  tddMode: 'off' | 'flexible' | 'strict';
+  specInterviewEnabled: boolean;
+  qualityGatesEnabled: boolean;
+  maxParallel: number;
+  skipVerification: boolean;
+  skipReview: boolean;
+  globalAgentOverride: string | null;
+  implAgentOverride: string | null;
+}
+
+export interface TaskStrategyRecommendation {
+  analysis: StrategyAnalysis;
+  recommendedConfig: RecommendedWorkflowConfig;
+  recommendationSource: StrategyRecommendationSource;
+  reasoning: string;
+  confidence: number;
+  configRationale: string[];
+}
+
+export type TaskConfigConfirmationState = 'pending' | 'confirmed';
+
 /** A story in the task PRD */
 export interface TaskStory {
   id: string;
@@ -143,6 +168,9 @@ export interface TaskModeSession {
   description: string;
   status: TaskModeSessionStatus;
   strategyAnalysis: StrategyAnalysis | null;
+  strategyRecommendation: TaskStrategyRecommendation | null;
+  configConfirmationState: TaskConfigConfirmationState;
+  confirmedConfig: TaskWorkflowConfigPayload | null;
   prd: TaskPrd | null;
   progress: BatchExecutionProgress | null;
   createdAt: string;
@@ -255,6 +283,10 @@ export interface TaskModeState {
 
   analyzeForMode: (description: string) => Promise<StrategyAnalysis | null>;
   enterTaskMode: (description: string, kernelSessionId?: string | null) => Promise<TaskModeSession | null>;
+  confirmTaskConfiguration: (
+    workflowConfig: TaskWorkflowConfigPayload,
+    sessionId?: string | null,
+  ) => Promise<TaskModeSession | null>;
   generatePrd: (
     conversationHistory?: CrossModeConversationTurn[],
     maxContextTokens?: number,
@@ -326,11 +358,16 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
     const requestId = get()._requestId + 1;
     set({ isLoading: true, isCancelling: false, error: null, _requestId: requestId });
     try {
+      const { resolvePhaseAgent } = await import('../lib/phaseAgentResolver');
+      const strategyResolved = resolvePhaseAgent('plan_strategy');
       const result = await invoke<CommandResponse<TaskModeSession>>('enter_task_mode', {
         request: {
           description,
           kernelSessionId: normalizeSessionId(kernelSessionId),
           locale: i18n.language || null,
+          provider: strategyResolved.provider || null,
+          model: strategyResolved.model || null,
+          baseUrl: strategyResolved.baseUrl || null,
         },
       });
       if (get()._requestId !== requestId) return null;
@@ -353,6 +390,47 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
         };
       }
       return session;
+    } catch (e) {
+      if (get()._requestId !== requestId) return null;
+      set({ isLoading: false, error: String(e) });
+      return null;
+    }
+  },
+
+  confirmTaskConfiguration: async (workflowConfig: TaskWorkflowConfigPayload, sessionId?: string | null) => {
+    const resolvedSessionId = resolveSessionId(sessionId);
+    if (!resolvedSessionId) {
+      set({ error: 'No active session' });
+      return null;
+    }
+
+    const requestId = get()._requestId + 1;
+    set({ isLoading: true, error: null, _requestId: requestId });
+
+    try {
+      const result = await invoke<CommandResponse<TaskModeSession>>('confirm_task_configuration', {
+        request: {
+          sessionId: resolvedSessionId,
+          workflowConfig: {
+            flowLevel: workflowConfig.flowLevel,
+            tddMode: workflowConfig.tddMode,
+            enableInterview: workflowConfig.enableInterview,
+            qualityGatesEnabled: workflowConfig.qualityGatesEnabled,
+            maxParallel: workflowConfig.maxParallel,
+            skipVerification: workflowConfig.skipVerification,
+            skipReview: workflowConfig.skipReview,
+            globalAgentOverride: workflowConfig.globalAgentOverride,
+            implAgentOverride: workflowConfig.implAgentOverride,
+          },
+        },
+      });
+      if (get()._requestId !== requestId) return null;
+      if (!result.success || !result.data) {
+        set({ isLoading: false, error: result.error ?? 'Failed to confirm task configuration' });
+        return null;
+      }
+      set({ isLoading: false });
+      return result.data;
     } catch (e) {
       if (get()._requestId !== requestId) return null;
       set({ isLoading: false, error: String(e) });

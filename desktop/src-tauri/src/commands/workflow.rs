@@ -243,6 +243,9 @@ async fn link_mode_session_and_rehydrate(
                     snapshot.current_story_id.clone(),
                     snapshot.completed_stories,
                     snapshot.failed_stories,
+                    snapshot.strategy_recommendation.clone(),
+                    snapshot.config_confirmation_state,
+                    snapshot.confirmed_config.clone(),
                     map_task_status_to_kernel_status(&task_session.status),
                     None,
                 )
@@ -408,6 +411,9 @@ fn map_task_session_to_rehydrate(
         failed_stories,
         interview_session_id,
         pending_interview,
+        strategy_recommendation: session.strategy_recommendation.clone(),
+        config_confirmation_state: Some(session.config_confirmation_state),
+        confirmed_config: session.confirmed_config.clone(),
     }
 }
 
@@ -1332,6 +1338,9 @@ pub async fn workflow_recover_session(
                     snapshot.current_story_id.clone(),
                     snapshot.completed_stories,
                     snapshot.failed_stories,
+                    snapshot.strategy_recommendation.clone(),
+                    snapshot.config_confirmation_state,
+                    snapshot.confirmed_config.clone(),
                     next_status,
                     None,
                 )
@@ -1555,6 +1564,9 @@ mod tests {
             status,
             locale: Some("en-US".to_string()),
             strategy_analysis: None,
+            strategy_recommendation: None,
+            config_confirmation_state: crate::commands::task_mode::TaskConfigConfirmationState::Pending,
+            confirmed_config: None,
             prd: None,
             exploration_result: None,
             progress: Some(BatchExecutionProgress {

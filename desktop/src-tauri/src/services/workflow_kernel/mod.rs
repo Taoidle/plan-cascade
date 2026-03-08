@@ -18,6 +18,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::RwLock;
 
+use crate::commands::task_mode::{TaskConfigConfirmationState, TaskWorkflowConfig};
+use crate::services::strategy::analyzer::TaskStrategyRecommendation;
 use crate::services::streaming::UnifiedStreamEvent;
 use crate::utils::paths::ensure_plan_cascade_dir;
 
@@ -230,6 +232,12 @@ pub struct TaskState {
     pub completed_stories: u64,
     pub failed_stories: u64,
     #[serde(default)]
+    pub strategy_recommendation: Option<TaskStrategyRecommendation>,
+    #[serde(default)]
+    pub config_confirmation_state: TaskConfigConfirmationState,
+    #[serde(default)]
+    pub confirmed_config: Option<TaskWorkflowConfig>,
+    #[serde(default)]
     pub run_id: Option<String>,
     #[serde(default)]
     pub background_status: Option<String>,
@@ -250,6 +258,9 @@ impl Default for TaskState {
             entry_handoff: HandoffContextBundle::default(),
             completed_stories: 0,
             failed_stories: 0,
+            strategy_recommendation: None,
+            config_confirmation_state: TaskConfigConfirmationState::Pending,
+            confirmed_config: None,
             run_id: None,
             background_status: None,
             resumable_from_checkpoint: false,
@@ -666,6 +677,9 @@ pub struct TaskSnapshotRehydrate {
     pub failed_stories: Option<u64>,
     pub interview_session_id: Option<String>,
     pub pending_interview: Option<TaskInterviewSnapshot>,
+    pub strategy_recommendation: Option<TaskStrategyRecommendation>,
+    pub config_confirmation_state: Option<TaskConfigConfirmationState>,
+    pub confirmed_config: Option<TaskWorkflowConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2327,6 +2341,9 @@ impl WorkflowKernelState {
         current_story_id: Option<String>,
         completed_stories: Option<u64>,
         failed_stories: Option<u64>,
+        strategy_recommendation: Option<TaskStrategyRecommendation>,
+        config_confirmation_state: Option<TaskConfigConfirmationState>,
+        confirmed_config: Option<TaskWorkflowConfig>,
         status: Option<WorkflowStatus>,
         block_reason: Option<String>,
     ) -> Result<Vec<String>, String> {
@@ -2367,6 +2384,15 @@ impl WorkflowKernelState {
                         }
                         if let Some(failed) = failed_stories {
                             task.failed_stories = failed;
+                        }
+                        if let Some(recommendation) = strategy_recommendation.clone() {
+                            task.strategy_recommendation = Some(recommendation);
+                        }
+                        if let Some(confirmation_state) = config_confirmation_state {
+                            task.config_confirmation_state = confirmation_state;
+                        }
+                        if let Some(config) = confirmed_config.clone() {
+                            task.confirmed_config = Some(config);
                         }
                         task.background_status = Some(
                             if phase
@@ -2571,6 +2597,15 @@ impl WorkflowKernelState {
                 }
                 if let Some(failed_stories) = task_snapshot.failed_stories {
                     task.failed_stories = failed_stories;
+                }
+                if let Some(strategy_recommendation) = task_snapshot.strategy_recommendation {
+                    task.strategy_recommendation = Some(strategy_recommendation);
+                }
+                if let Some(config_confirmation_state) = task_snapshot.config_confirmation_state {
+                    task.config_confirmation_state = config_confirmation_state;
+                }
+                if let Some(confirmed_config) = task_snapshot.confirmed_config {
+                    task.confirmed_config = Some(confirmed_config);
                 }
                 if let Some(interview_session_id) = task_snapshot
                     .interview_session_id
@@ -4650,6 +4685,9 @@ mod tests {
                 question_number: 1,
                 total_questions: 4,
             }),
+            strategy_recommendation: None,
+            config_confirmation_state: None,
+            confirmed_config: None,
         };
 
         let updated = kernel

@@ -22,7 +22,8 @@ use crate::models::CommandResponse;
 use crate::services::design::GenerateResult;
 use crate::services::knowledge::pipeline::ScopedDocumentRef;
 use crate::services::strategy::analyzer::{
-    analyze_task_for_mode, ExecutionMode, RiskLevel, StrategyAnalysis,
+    analyze_task_for_mode, build_deterministic_recommendation, ExecutionMode, RiskLevel,
+    StrategyAnalysis, StrategyRecommendationSource, TaskStrategyRecommendation,
 };
 use crate::services::task_mode::agent_resolver::AgentResolver;
 use crate::services::task_mode::batch_executor::{
@@ -147,6 +148,15 @@ pub struct TaskModeSession {
     pub status: TaskModeStatus,
     /// Strategy analysis result
     pub strategy_analysis: Option<StrategyAnalysis>,
+    /// Authoritative startup recommendation for strategy and workflow config.
+    #[serde(default)]
+    pub strategy_recommendation: Option<TaskStrategyRecommendation>,
+    /// Whether task configuration is still pending user confirmation.
+    #[serde(default)]
+    pub config_confirmation_state: TaskConfigConfirmationState,
+    /// User-confirmed workflow config that will drive subsequent phases.
+    #[serde(default)]
+    pub confirmed_config: Option<TaskWorkflowConfig>,
     /// Generated PRD
     pub prd: Option<TaskPrd>,
     /// Project exploration result
@@ -161,6 +171,14 @@ pub struct TaskModeSession {
     pub cancel_requested: bool,
     /// When the session was created
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskConfigConfirmationState {
+    #[default]
+    Pending,
+    Confirmed,
 }
 
 /// A quality dimension score for a single story (e.g., correctness, readability).
@@ -297,6 +315,13 @@ pub struct TaskWorkflowConfig {
     pub impl_agent_override: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConfirmTaskConfigurationRequest {
+    pub session_id: String,
+    pub workflow_config: TaskWorkflowConfig,
+}
+
 fn default_quality_gates_enabled() -> bool {
     true
 }
@@ -307,6 +332,9 @@ pub struct EnterTaskModeRequest {
     pub description: String,
     pub kernel_session_id: Option<String>,
     pub locale: Option<String>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub base_url: Option<String>,
 }
 
 /// Request payload for `generate_task_prd`.
@@ -859,6 +887,9 @@ async fn sync_kernel_task_snapshot_and_emit(
             current_story_id,
             completed_stories,
             failed_stories,
+            session.strategy_recommendation.clone(),
+            Some(session.config_confirmation_state),
+            session.confirmed_config.clone(),
             task_status_to_kernel_status(&session.status),
             None,
         )
@@ -879,6 +910,9 @@ async fn sync_kernel_task_phase_by_linked_session_and_emit(
         .sync_task_snapshot_by_linked_session(
             task_session_id,
             Some(phase.to_string()),
+            None,
+            None,
+            None,
             None,
             None,
             None,
@@ -1342,7 +1376,9 @@ pub use execution_commands::{
     get_task_execution_status,
 };
 pub use generation_commands::{apply_task_prd_feedback, explore_project, generate_task_prd};
-pub use session_lifecycle_commands::{enter_task_mode, exit_task_mode};
+pub use session_lifecycle_commands::{
+    confirm_task_configuration, enter_task_mode, exit_task_mode,
+};
 
 /// Resolve an LLM provider from frontend parameters and OS keyring.
 ///
@@ -2460,6 +2496,9 @@ async fn execute_story_via_llm(
                             None,
                             None,
                             None,
+                            None,
+                            None,
+                            None,
                             Some("tool_permission".to_string()),
                         )
                         .await
@@ -2481,6 +2520,9 @@ async fn execute_story_via_llm(
                             .sync_task_snapshot_by_linked_session(
                                 &permission_session_id,
                                 Some("executing".to_string()),
+                                None,
+                                None,
+                                None,
                                 None,
                                 None,
                                 None,
@@ -2821,6 +2863,9 @@ mod tests {
             description: "Build a feature".to_string(),
             status: TaskModeStatus::Initialized,
             strategy_analysis: None,
+            strategy_recommendation: None,
+            config_confirmation_state: TaskConfigConfirmationState::Pending,
+            confirmed_config: None,
             prd: None,
             exploration_result: None,
             progress: None,
@@ -2842,6 +2887,9 @@ mod tests {
             description: "sample".to_string(),
             status: TaskModeStatus::ReviewingPrd,
             strategy_analysis: None,
+            strategy_recommendation: None,
+            config_confirmation_state: TaskConfigConfirmationState::Pending,
+            confirmed_config: None,
             prd: None,
             exploration_result: None,
             progress: None,

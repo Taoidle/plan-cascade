@@ -1,7 +1,10 @@
 import type {
   ChatControlCapabilities,
   PlanClarificationSnapshot,
+  TaskConfigConfirmationState,
   TaskInterviewSnapshot,
+  TaskStrategyRecommendationSnapshot,
+  TaskWorkflowConfigSnapshot,
   WorkflowSession,
   WorkflowStatus,
 } from '../types/workflowKernel';
@@ -33,6 +36,9 @@ export interface KernelTaskRuntime extends KernelRuntimeBase {
   interviewId: string | null;
   canCancel: boolean;
   blockReason: string | null;
+  strategyRecommendation: TaskStrategyRecommendationSnapshot | null;
+  configConfirmationState: TaskConfigConfirmationState;
+  confirmedConfig: TaskWorkflowConfigSnapshot | null;
 }
 
 export interface KernelPlanRuntime extends KernelRuntimeBase {
@@ -123,6 +129,9 @@ export function selectKernelTaskRuntime(session: WorkflowSession | null): Kernel
     interviewId: pendingInterview?.interviewId ?? null,
     canCancel: isActive && !isKernelPhaseTerminal(phase) && !!capabilities?.canCancel,
     blockReason: meta?.blockReason ?? null,
+    strategyRecommendation: session?.modeSnapshots.task?.strategyRecommendation ?? null,
+    configConfirmationState: session?.modeSnapshots.task?.configConfirmationState ?? 'pending',
+    confirmedConfig: session?.modeSnapshots.task?.confirmedConfig ?? null,
   };
 }
 

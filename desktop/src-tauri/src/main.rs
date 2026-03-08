@@ -226,6 +226,7 @@ fn main() {
             plan_cascade_desktop::commands::strategy::enhance_strategy_with_llm,
             // Task Mode commands
             plan_cascade_desktop::commands::task_mode::session_lifecycle_commands::enter_task_mode,
+            plan_cascade_desktop::commands::task_mode::session_lifecycle_commands::confirm_task_configuration,
             plan_cascade_desktop::commands::task_mode::generation_commands::explore_project,
             plan_cascade_desktop::commands::task_mode::generation_commands::generate_task_prd,
             plan_cascade_desktop::commands::task_mode::generation_commands::apply_task_prd_feedback,

@@ -10,11 +10,15 @@ pub async fn enter_task_mode(
     state: tauri::State<'_, TaskModeState>,
     kernel_state: tauri::State<'_, WorkflowKernelState>,
     app_handle: tauri::AppHandle,
+    app_state: tauri::State<'_, AppState>,
 ) -> Result<CommandResponse<TaskModeSession>, String> {
     let EnterTaskModeRequest {
         description,
         kernel_session_id,
         locale,
+        provider,
+        model,
+        base_url,
     } = request;
     if description.trim().is_empty() {
         return Ok(CommandResponse::err("Task description cannot be empty"));
@@ -52,8 +56,22 @@ pub async fn enter_task_mode(
         .map(|handoff| format!("{description}\n\nCross-mode context:\n{handoff}"))
         .unwrap_or_else(|| description.clone());
 
-    // Run strategy analysis
+    // Run strategy analysis with deterministic baseline and optional LLM enhancement.
     let analysis = analyze_task_for_mode(&analysis_input, None);
+    let mut recommendation = build_deterministic_recommendation(analysis.clone());
+    if let Some(enhanced) = build_task_strategy_recommendation(
+        &analysis_input,
+        &analysis,
+        locale.as_deref(),
+        provider.as_deref(),
+        model.as_deref(),
+        base_url.as_deref(),
+        &app_state,
+    )
+    .await
+    {
+        recommendation = enhanced;
+    }
     let locale_tag = normalize_locale(locale.as_deref());
 
     let session = TaskModeSession {
@@ -62,7 +80,10 @@ pub async fn enter_task_mode(
         locale: locale.clone(),
         description: description.clone(),
         status: TaskModeStatus::Initialized,
-        strategy_analysis: Some(analysis),
+        strategy_analysis: Some(recommendation.analysis.clone()),
+        strategy_recommendation: Some(recommendation.clone()),
+        config_confirmation_state: TaskConfigConfirmationState::Pending,
+        confirmed_config: None,
         prd: None,
         exploration_result: None,
         progress: None,
@@ -133,6 +154,47 @@ pub async fn enter_task_mode(
     Ok(CommandResponse::ok(session))
 }
 
+#[tauri::command]
+pub async fn confirm_task_configuration(
+    request: ConfirmTaskConfigurationRequest,
+    state: tauri::State<'_, TaskModeState>,
+    kernel_state: tauri::State<'_, WorkflowKernelState>,
+    app_handle: tauri::AppHandle,
+) -> Result<CommandResponse<TaskModeSession>, String> {
+    let session_id = request.session_id.trim();
+    if session_id.is_empty() {
+        return Ok(CommandResponse::err("Session ID cannot be empty"));
+    }
+
+    let updated_session = {
+        let mut sessions = state.sessions.write().await;
+        let session = match sessions.get_mut(session_id) {
+            Some(session) => session,
+            None => return Ok(CommandResponse::err("Invalid session ID or no active session")),
+        };
+        session.confirmed_config = Some(request.workflow_config.clone());
+        session.config_confirmation_state = TaskConfigConfirmationState::Confirmed;
+        session.clone()
+    };
+
+    persist_task_session_best_effort(
+        &state,
+        &updated_session,
+        "confirm_task_configuration.confirmed",
+    )
+    .await;
+    sync_kernel_task_snapshot_and_emit(
+        &app_handle,
+        kernel_state.inner(),
+        &updated_session,
+        Some("configuring"),
+        "task_mode.confirm_task_configuration",
+    )
+    .await;
+
+    Ok(CommandResponse::ok(updated_session))
+}
+
 /// Exit task mode and clean up session state.
 #[tauri::command]
 pub async fn exit_task_mode(
@@ -173,4 +235,84 @@ pub async fn exit_task_mode(
     }
 
     Ok(CommandResponse::ok(true))
+}
+
+async fn build_task_strategy_recommendation(
+    analysis_input: &str,
+    analysis: &StrategyAnalysis,
+    locale: Option<&str>,
+    provider_override: Option<&str>,
+    model_override: Option<&str>,
+    base_url_override: Option<&str>,
+    app_state: &tauri::State<'_, AppState>,
+) -> Option<TaskStrategyRecommendation> {
+    let config = app_state.inner().get_config().await.ok()?;
+    let provider = provider_override.unwrap_or(config.default_provider.trim()).trim();
+    if provider.is_empty() {
+        return None;
+    }
+    let model = model_override
+        .map(str::to_string)
+        .unwrap_or_else(|| config.model_for_provider(provider));
+    let resolved_model = if model.trim().is_empty() {
+        config.default_model.clone()
+    } else {
+        model
+    };
+    if resolved_model.trim().is_empty() {
+        return None;
+    }
+
+    let llm = match resolve_llm_provider(
+        provider,
+        &resolved_model,
+        None,
+        base_url_override.map(str::to_string),
+        app_state,
+    )
+    .await
+    {
+        Ok(llm) => llm,
+        Err(error) => {
+            let mut fallback = build_deterministic_recommendation(analysis.clone());
+            fallback.recommendation_source = StrategyRecommendationSource::FallbackDeterministic;
+            fallback.reasoning = format!(
+                "{}\n\nLLM enhancement unavailable: {}",
+                fallback.reasoning, error
+            );
+            return Some(fallback);
+        }
+    };
+
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        crate::services::strategy::enhance_strategy_analysis(
+            llm,
+            analysis_input,
+            analysis,
+            normalize_locale(locale),
+        ),
+    )
+    .await
+    {
+        Ok(Ok(recommendation)) => Some(recommendation),
+        Ok(Err(error)) => {
+            let mut fallback = build_deterministic_recommendation(analysis.clone());
+            fallback.recommendation_source = StrategyRecommendationSource::FallbackDeterministic;
+            fallback.reasoning = format!(
+                "{}\n\nLLM enhancement failed: {}",
+                fallback.reasoning, error
+            );
+            Some(fallback)
+        }
+        Err(_) => {
+            let mut fallback = build_deterministic_recommendation(analysis.clone());
+            fallback.recommendation_source = StrategyRecommendationSource::FallbackDeterministic;
+            fallback.reasoning = format!(
+                "{}\n\nLLM enhancement timed out after 30 seconds.",
+                fallback.reasoning
+            );
+            Some(fallback)
+        }
+    }
 }

@@ -527,15 +527,33 @@
     "strategy": {
       "title": "戦略分析",
       "confidence": "{{pct}}% 信頼度",
+      "modelBadge": "モデル: {{model}}",
       "risk": "リスク",
       "stories": "ストーリー数",
       "parallel": "並列度",
       "highParallelization": "高並列化ポテンシャル — 複数のストーリーを同時に実行可能",
       "highRisk": "高リスク — TDDモードと完全な品質ゲートの有効化を推奨",
-      "manyStories": "推定 {{count}} ストーリー — 最大並列エージェント数の増加を推奨"
+      "manyStories": "推定 {{count}} ストーリー — 最大並列エージェント数の増加を推奨",
+      "values": {
+        "strategy": {
+          "chat": "チャット",
+          "task": "タスク"
+        },
+        "risk": {
+          "low": "低",
+          "medium": "中",
+          "high": "高"
+        },
+        "parallel": {
+          "none": "なし",
+          "moderate": "中程度",
+          "significant": "高"
+        }
+      }
     },
     "config": {
       "title": "設定",
+      "aiRecommended": "AI 推奨",
       "customized": "カスタム済み",
       "flow": "フロー",
       "tdd": "TDD",
@@ -563,7 +581,19 @@
       "nlPlaceholder": "例：「6個の並列エージェントを使用してTDDを有効にする」",
       "apply": "適用",
       "backToForm": "フォームに戻る",
-      "applied": "適用済み"
+      "applied": "適用済み",
+      "values": {
+        "flowLevel": {
+          "quick": "クイック",
+          "standard": "スタンダード",
+          "full": "フル"
+        },
+        "tddMode": {
+          "off": "オフ",
+          "flexible": "フレキシブル",
+          "strict": "ストリクト"
+        }
+      }
     },
     "designDoc": {
       "title": "設計ドキュメント",

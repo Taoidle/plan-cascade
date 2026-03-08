@@ -6,7 +6,7 @@
 use crate::models::CommandResponse;
 use crate::services::strategy::analyzer::{
     AnalysisContext, ExecutionStrategy, StrategyAnalysis, StrategyAnalyzer, StrategyDecision,
-    StrategyOption,
+    StrategyOption, TaskStrategyRecommendation,
 };
 use crate::services::strategy::classifier::{IntentClassifier, IntentResult};
 use crate::state::AppState;
@@ -143,7 +143,7 @@ pub async fn analyze_task_for_mode(
 /// * `app_state` - Tauri application state
 ///
 /// # Returns
-/// `CommandResponse<StrategyAnalysis>` with the LLM-enhanced analysis.
+/// `CommandResponse<TaskStrategyRecommendation>` with the LLM-enhanced recommendation.
 #[tauri::command]
 pub async fn enhance_strategy_with_llm(
     description: String,
@@ -154,7 +154,7 @@ pub async fn enhance_strategy_with_llm(
     base_url: Option<String>,
     locale: Option<String>,
     app_state: tauri::State<'_, AppState>,
-) -> Result<CommandResponse<StrategyAnalysis>, String> {
+) -> Result<CommandResponse<TaskStrategyRecommendation>, String> {
     if description.trim().is_empty() {
         return Ok(CommandResponse::err("Task description cannot be empty"));
     }

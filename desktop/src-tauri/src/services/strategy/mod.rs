@@ -15,8 +15,9 @@ pub mod classifier;
 pub mod llm_analyzer;
 
 pub use analyzer::{
-    analyze_task_for_mode, Benefit, DimensionScores, ExecutionMode, ExecutionStrategy, RiskLevel,
-    StrategyAnalysis, StrategyAnalyzer, StrategyDecision,
+    analyze_task_for_mode, build_deterministic_recommendation, Benefit, DimensionScores,
+    ExecutionMode, ExecutionStrategy, RecommendedWorkflowConfig, RiskLevel, StrategyAnalysis,
+    StrategyAnalyzer, StrategyDecision, StrategyRecommendationSource, TaskStrategyRecommendation,
 };
 pub use classifier::{Intent, IntentClassifier, IntentResult};
 pub use llm_analyzer::enhance_strategy_analysis;

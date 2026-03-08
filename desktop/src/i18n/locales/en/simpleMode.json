@@ -527,15 +527,33 @@
     "strategy": {
       "title": "Strategy Analysis",
       "confidence": "{{pct}}% confidence",
+      "modelBadge": "Model: {{model}}",
       "risk": "Risk",
       "stories": "Stories",
       "parallel": "Parallel",
       "highParallelization": "High parallelization potential — multiple stories can execute concurrently",
       "highRisk": "High risk — consider enabling TDD mode and full quality gates",
-      "manyStories": "{{count}} estimated stories — consider increasing max parallel agents"
+      "manyStories": "{{count}} estimated stories — consider increasing max parallel agents",
+      "values": {
+        "strategy": {
+          "chat": "Chat",
+          "task": "Task"
+        },
+        "risk": {
+          "low": "Low",
+          "medium": "Medium",
+          "high": "High"
+        },
+        "parallel": {
+          "none": "None",
+          "moderate": "Moderate",
+          "significant": "Significant"
+        }
+      }
     },
     "config": {
       "title": "Configuration",
+      "aiRecommended": "AI Recommended",
       "customized": "customized",
       "flow": "Flow",
       "tdd": "TDD",
@@ -563,7 +581,19 @@
       "nlPlaceholder": "e.g., \"use 6 parallel agents and enable TDD\"",
       "apply": "Apply",
       "backToForm": "Back to form",
-      "applied": "Applied"
+      "applied": "Applied",
+      "values": {
+        "flowLevel": {
+          "quick": "Quick",
+          "standard": "Standard",
+          "full": "Full"
+        },
+        "tddMode": {
+          "off": "Off",
+          "flexible": "Flexible",
+          "strict": "Strict"
+        }
+      }
     },
     "designDoc": {
       "title": "Design Document",

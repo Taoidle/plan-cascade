@@ -11,6 +11,9 @@ import type { StrategyCardData } from '../../../types/workflowCard';
 export function StrategyCard({ data }: { data: StrategyCardData }) {
   const { t } = useTranslation('simpleMode');
   const confidencePct = Math.round(data.confidence * 100);
+  const localizedStrategy = localizeStrategyValue(t, data.strategy);
+  const localizedRisk = localizeStrategyRisk(t, data.riskLevel);
+  const localizedParallel = localizeStrategyParallel(t, data.parallelizationBenefit);
 
   return (
     <div className="rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 overflow-hidden">
@@ -23,7 +26,7 @@ export function StrategyCard({ data }: { data: StrategyCardData }) {
           <div className="flex items-center gap-2">
             {data.model && (
               <span className="text-2xs px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-500 dark:text-blue-400">
-                {data.model}
+                {t('workflow.strategy.modelBadge', { model: data.model })}
               </span>
             )}
             <span
@@ -45,9 +48,7 @@ export function StrategyCard({ data }: { data: StrategyCardData }) {
       <div className="px-3 py-2 space-y-2">
         {/* Strategy name */}
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-indigo-800 dark:text-indigo-200">
-            {data.strategy.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
-          </span>
+          <span className="text-sm font-semibold text-indigo-800 dark:text-indigo-200">{localizedStrategy}</span>
         </div>
 
         {/* Reasoning */}
@@ -55,7 +56,7 @@ export function StrategyCard({ data }: { data: StrategyCardData }) {
 
         {/* Dimension bars */}
         <div className="grid grid-cols-3 gap-2">
-          <DimensionPill label={t('workflow.strategy.risk')} value={data.riskLevel} color={riskColor(data.riskLevel)} />
+          <DimensionPill label={t('workflow.strategy.risk')} value={localizedRisk} color={riskColor(data.riskLevel)} />
           <DimensionPill
             label={t('workflow.strategy.stories')}
             value={String(data.estimatedStories)}
@@ -63,7 +64,7 @@ export function StrategyCard({ data }: { data: StrategyCardData }) {
           />
           <DimensionPill
             label={t('workflow.strategy.parallel')}
-            value={data.parallelizationBenefit}
+            value={localizedParallel}
             color={benefitColor(data.parallelizationBenefit)}
           />
         </div>
@@ -96,6 +97,24 @@ export function StrategyCard({ data }: { data: StrategyCardData }) {
       </div>
     </div>
   );
+}
+
+function localizeStrategyValue(t: ReturnType<typeof useTranslation>['t'], strategy: string): string {
+  const key = `workflow.strategy.values.strategy.${strategy}`;
+  const localized = t(key);
+  return localized === key ? strategy.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : localized;
+}
+
+function localizeStrategyRisk(t: ReturnType<typeof useTranslation>['t'], level: string): string {
+  const key = `workflow.strategy.values.risk.${level}`;
+  const localized = t(key);
+  return localized === key ? level : localized;
+}
+
+function localizeStrategyParallel(t: ReturnType<typeof useTranslation>['t'], benefit: string): string {
+  const key = `workflow.strategy.values.parallel.${benefit}`;
+  const localized = t(key);
+  return localized === key ? benefit : localized;
 }
 
 function DimensionPill({ label, value, color }: { label: string; value: string; color: string }) {

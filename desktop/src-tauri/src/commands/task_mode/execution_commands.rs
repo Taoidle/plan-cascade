@@ -681,6 +681,9 @@ pub async fn approve_task_prd(
                                     current_story_id,
                                     Some(completed),
                                     Some(failed),
+                                    None,
+                                    None,
+                                    None,
                                     status,
                                     None,
                                 )

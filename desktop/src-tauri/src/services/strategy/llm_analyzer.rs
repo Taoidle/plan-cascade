@@ -13,8 +13,9 @@ use crate::services::llm::provider::LlmProvider;
 use crate::services::llm::types::{LlmRequestOptions, Message};
 
 use super::analyzer::{
-    Benefit, DimensionScores, ExecutionMode, ExecutionStrategy, RiskLevel, StrategyAnalysis,
-    StrategyDecision,
+    build_deterministic_recommendation, Benefit, DimensionScores, ExecutionMode,
+    ExecutionStrategy, RecommendedWorkflowConfig, RiskLevel, StrategyAnalysis,
+    StrategyDecision, StrategyRecommendationSource, TaskStrategyRecommendation,
 };
 
 // ============================================================================
@@ -38,7 +39,19 @@ Respond with ONLY valid JSON matching this schema:
   "riskLevel": "low" | "medium" | "high",
   "parallelizationBenefit": "none" | "moderate" | "significant",
   "hasDependencies": true/false,
-  "functionalAreas": ["area1", "area2", ...]
+  "functionalAreas": ["area1", "area2", ...],
+  "recommendedConfig": {
+    "flowLevel": "quick" | "standard" | "full",
+    "tddMode": "off" | "flexible" | "strict",
+    "specInterviewEnabled": true/false,
+    "qualityGatesEnabled": true/false,
+    "maxParallel": 1-8,
+    "skipVerification": true/false,
+    "skipReview": true/false,
+    "globalAgentOverride": string|null,
+    "implAgentOverride": string|null
+  },
+  "configRationale": "Explain why these config values are recommended"
 }
 
 No markdown fences, no explanatory text. Just the raw JSON object."#;
@@ -59,6 +72,22 @@ struct LlmStrategyResponse {
     parallelization_benefit: String,
     has_dependencies: bool,
     functional_areas: Vec<String>,
+    recommended_config: Option<LlmRecommendedWorkflowConfig>,
+    config_rationale: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LlmRecommendedWorkflowConfig {
+    flow_level: Option<String>,
+    tdd_mode: Option<String>,
+    spec_interview_enabled: Option<bool>,
+    quality_gates_enabled: Option<bool>,
+    max_parallel: Option<usize>,
+    skip_verification: Option<bool>,
+    skip_review: Option<bool>,
+    global_agent_override: Option<String>,
+    impl_agent_override: Option<String>,
 }
 
 // Also support snake_case variants from LLMs
@@ -73,7 +102,18 @@ impl LlmStrategyResponse {
             .replace("\"risk_level\"", "\"riskLevel\"")
             .replace("\"parallelization_benefit\"", "\"parallelizationBenefit\"")
             .replace("\"has_dependencies\"", "\"hasDependencies\"")
-            .replace("\"functional_areas\"", "\"functionalAreas\"");
+            .replace("\"functional_areas\"", "\"functionalAreas\"")
+            .replace("\"recommended_config\"", "\"recommendedConfig\"")
+            .replace("\"config_rationale\"", "\"configRationale\"")
+            .replace("\"flow_level\"", "\"flowLevel\"")
+            .replace("\"tdd_mode\"", "\"tddMode\"")
+            .replace("\"spec_interview_enabled\"", "\"specInterviewEnabled\"")
+            .replace("\"quality_gates_enabled\"", "\"qualityGatesEnabled\"")
+            .replace("\"max_parallel\"", "\"maxParallel\"")
+            .replace("\"skip_verification\"", "\"skipVerification\"")
+            .replace("\"skip_review\"", "\"skipReview\"")
+            .replace("\"global_agent_override\"", "\"globalAgentOverride\"")
+            .replace("\"impl_agent_override\"", "\"implAgentOverride\"");
 
         serde_json::from_str(&normalized).map_err(|e| {
             format!(
@@ -99,7 +139,7 @@ pub async fn enhance_strategy_analysis(
     description: &str,
     keyword_analysis: &StrategyAnalysis,
     locale: &str,
-) -> Result<StrategyAnalysis, String> {
+) -> Result<TaskStrategyRecommendation, String> {
     let user_message = build_user_message(description, keyword_analysis);
     let messages = vec![Message::user(&user_message)];
 
@@ -134,7 +174,7 @@ pub async fn enhance_strategy_analysis(
 
     match parse_strategy_response(&response_text) {
         Ok(llm_response) => {
-            return Ok(build_enhanced_analysis(llm_response, keyword_analysis));
+            return Ok(build_enhanced_recommendation(llm_response, keyword_analysis));
         }
         Err(first_error) => {
             debug!(error = %first_error, "llm_analyzer: first attempt parse failed, retrying with repair prompt");
@@ -153,7 +193,7 @@ pub async fn enhance_strategy_analysis(
             let retry_text = extract_response_text(&retry_response)?;
 
             match parse_strategy_response(&retry_text) {
-                Ok(llm_response) => Ok(build_enhanced_analysis(llm_response, keyword_analysis)),
+                Ok(llm_response) => Ok(build_enhanced_recommendation(llm_response, keyword_analysis)),
                 Err(second_error) => Err(format!(
                     "Failed to parse LLM strategy response after retry. \
                      First error: {}. Retry error: {}",
@@ -176,13 +216,15 @@ fn build_user_message(description: &str, keyword_analysis: &StrategyAnalysis) ->
          - Recommended mode: {}\n\
          - Estimated stories: {}\n\
          - Risk level: {:?}\n\
-         - Confidence: {:.0}%\n\n\
+         - Confidence: {:.0}%\n\
+         - Current reasoning: {}\n\n\
          Provide your analysis as JSON.",
         description,
         keyword_analysis.recommended_mode,
         keyword_analysis.estimated_stories,
         keyword_analysis.risk_level,
         keyword_analysis.confidence * 100.0,
+        keyword_analysis.reasoning,
     )
 }
 
@@ -280,14 +322,88 @@ fn parse_strategy_response(response_text: &str) -> Result<LlmStrategyResponse, S
 // Analysis Building
 // ============================================================================
 
-/// Build an enhanced StrategyAnalysis from the LLM response.
+fn normalize_flow_level(raw: Option<&str>, baseline: &RecommendedWorkflowConfig) -> String {
+    match raw.unwrap_or_default().trim().to_lowercase().as_str() {
+        "quick" => "quick".to_string(),
+        "standard" => "standard".to_string(),
+        "full" => "full".to_string(),
+        _ => baseline.flow_level.clone(),
+    }
+}
+
+fn normalize_tdd_mode(raw: Option<&str>, baseline: &RecommendedWorkflowConfig) -> String {
+    match raw.unwrap_or_default().trim().to_lowercase().as_str() {
+        "off" => "off".to_string(),
+        "flexible" => "flexible".to_string(),
+        "strict" => "strict".to_string(),
+        _ => baseline.tdd_mode.clone(),
+    }
+}
+
+fn clamp_max_parallel(value: Option<usize>, baseline: &RecommendedWorkflowConfig) -> usize {
+    value.unwrap_or(baseline.max_parallel).clamp(1, 8)
+}
+
+fn normalize_agent_override(value: Option<&str>) -> Option<String> {
+    let normalized = value?.trim();
+    if normalized.is_empty() {
+        return None;
+    }
+    let value = normalized;
+    if value.starts_with("llm:") {
+        return Some(value.to_string());
+    }
+    match value {
+        "claude-sonnet" | "claude-opus" | "claude-haiku" | "claude-code" | "codex" | "aider" => {
+            Some(value.to_string())
+        }
+        _ => None,
+    }
+}
+
+fn merge_recommended_config(
+    llm_config: Option<&LlmRecommendedWorkflowConfig>,
+    baseline: &RecommendedWorkflowConfig,
+) -> RecommendedWorkflowConfig {
+    let mut merged = baseline.clone();
+    if let Some(config) = llm_config {
+        merged.flow_level = normalize_flow_level(config.flow_level.as_deref(), baseline);
+        merged.tdd_mode = normalize_tdd_mode(config.tdd_mode.as_deref(), baseline);
+        merged.spec_interview_enabled = config
+            .spec_interview_enabled
+            .unwrap_or(baseline.spec_interview_enabled);
+        merged.quality_gates_enabled = config
+            .quality_gates_enabled
+            .unwrap_or(baseline.quality_gates_enabled);
+        merged.max_parallel = clamp_max_parallel(config.max_parallel, baseline);
+        merged.skip_verification = config.skip_verification.unwrap_or(baseline.skip_verification);
+        merged.skip_review = config.skip_review.unwrap_or(baseline.skip_review);
+        merged.global_agent_override =
+            normalize_agent_override(config.global_agent_override.as_deref());
+        merged.impl_agent_override = normalize_agent_override(config.impl_agent_override.as_deref());
+    }
+
+    if merged.flow_level == "quick" {
+        merged.spec_interview_enabled = false;
+    }
+    if !merged.quality_gates_enabled {
+        merged.skip_verification = true;
+        merged.skip_review = true;
+    }
+
+    merged
+}
+
+/// Build an enhanced TaskStrategyRecommendation from the LLM response.
 ///
 /// Maps the LLM's string-based strategy/risk/benefit to the typed enums,
-/// and reconstructs the StrategyDecision substructure.
-fn build_enhanced_analysis(
+/// reconstructs the StrategyDecision substructure, and merges the
+/// recommended workflow config on top of the deterministic baseline.
+fn build_enhanced_recommendation(
     llm: LlmStrategyResponse,
     keyword_analysis: &StrategyAnalysis,
-) -> StrategyAnalysis {
+) -> TaskStrategyRecommendation {
+    let baseline = build_deterministic_recommendation(keyword_analysis.clone());
     let strategy = match llm.strategy.as_str() {
         "direct" => ExecutionStrategy::Direct,
         "hybrid_auto" => ExecutionStrategy::HybridAuto,
@@ -368,7 +484,7 @@ fn build_enhanced_analysis(
         dimension_scores: dimension_scores.clone(),
     };
 
-    StrategyAnalysis {
+    let analysis = StrategyAnalysis {
         functional_areas: llm.functional_areas,
         estimated_stories,
         has_dependencies: llm.has_dependencies,
@@ -378,6 +494,21 @@ fn build_enhanced_analysis(
         confidence,
         reasoning: llm.reasoning,
         strategy_decision,
+    };
+
+    let merged_config =
+        merge_recommended_config(llm.recommended_config.as_ref(), &baseline.recommended_config);
+
+    TaskStrategyRecommendation {
+        reasoning: analysis.reasoning.clone(),
+        confidence: analysis.confidence,
+        config_rationale: llm
+            .config_rationale
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| baseline.config_rationale.clone()),
+        recommended_config: merged_config,
+        recommendation_source: StrategyRecommendationSource::LlmEnhanced,
+        analysis,
     }
 }
 

@@ -122,6 +122,59 @@ export interface TaskInterviewSnapshot {
   totalQuestions: number;
 }
 
+export type StrategyRecommendationSource = 'deterministic' | 'llm_enhanced' | 'fallback_deterministic';
+
+export interface TaskStrategyAnalysisSnapshot {
+  functionalAreas: string[];
+  estimatedStories: number;
+  hasDependencies: boolean;
+  riskLevel: 'low' | 'medium' | 'high';
+  parallelizationBenefit: 'none' | 'moderate' | 'significant';
+  recommendedMode: 'chat' | 'task';
+  confidence: number;
+  reasoning: string;
+  strategyDecision: {
+    strategy: string;
+    confidence: number;
+    reasoning: string;
+  };
+}
+
+export interface TaskRecommendedWorkflowConfigSnapshot {
+  flowLevel: 'quick' | 'standard' | 'full';
+  tddMode: 'off' | 'flexible' | 'strict';
+  specInterviewEnabled: boolean;
+  qualityGatesEnabled: boolean;
+  maxParallel: number;
+  skipVerification: boolean;
+  skipReview: boolean;
+  globalAgentOverride: string | null;
+  implAgentOverride: string | null;
+}
+
+export interface TaskStrategyRecommendationSnapshot {
+  analysis: TaskStrategyAnalysisSnapshot;
+  recommendedConfig: TaskRecommendedWorkflowConfigSnapshot;
+  recommendationSource: StrategyRecommendationSource;
+  reasoning: string;
+  confidence: number;
+  configRationale: string[];
+}
+
+export interface TaskWorkflowConfigSnapshot {
+  flowLevel: string | null;
+  tddMode: string | null;
+  enableInterview: boolean;
+  qualityGatesEnabled: boolean;
+  maxParallel: number | null;
+  skipVerification: boolean;
+  skipReview: boolean;
+  globalAgentOverride: string | null;
+  implAgentOverride: string | null;
+}
+
+export type TaskConfigConfirmationState = 'pending' | 'confirmed';
+
 export interface TaskState {
   phase: TaskLifecyclePhase;
   prdId: string | null;
@@ -130,6 +183,9 @@ export interface TaskState {
   pendingInterview: TaskInterviewSnapshot | null;
   completedStories: number;
   failedStories: number;
+  strategyRecommendation?: TaskStrategyRecommendationSnapshot | null;
+  configConfirmationState?: TaskConfigConfirmationState;
+  confirmedConfig?: TaskWorkflowConfigSnapshot | null;
   runId?: string | null;
   backgroundStatus?: string | null;
   resumableFromCheckpoint?: boolean;

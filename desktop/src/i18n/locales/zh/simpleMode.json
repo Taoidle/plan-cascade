@@ -527,15 +527,33 @@
     "strategy": {
       "title": "策略分析",
       "confidence": "{{pct}}% 置信度",
+      "modelBadge": "模型：{{model}}",
       "risk": "风险",
       "stories": "故事数",
       "parallel": "并行度",
       "highParallelization": "高并行潜力 — 多个故事可以同时执行",
       "highRisk": "高风险 — 建议启用 TDD 模式和完整质量门禁",
-      "manyStories": "预计 {{count}} 个故事 — 建议增加最大并行代理数"
+      "manyStories": "预计 {{count}} 个故事 — 建议增加最大并行代理数",
+      "values": {
+        "strategy": {
+          "chat": "聊天",
+          "task": "任务"
+        },
+        "risk": {
+          "low": "低",
+          "medium": "中",
+          "high": "高"
+        },
+        "parallel": {
+          "none": "无",
+          "moderate": "中等",
+          "significant": "显著"
+        }
+      }
     },
     "config": {
       "title": "配置",
+      "aiRecommended": "AI 推荐",
       "customized": "已自定义",
       "flow": "流程",
       "tdd": "TDD",
@@ -563,7 +581,19 @@
       "nlPlaceholder": "例如：「使用 6 个并行代理并启用 TDD」",
       "apply": "应用",
       "backToForm": "返回表单",
-      "applied": "已应用"
+      "applied": "已应用",
+      "values": {
+        "flowLevel": {
+          "quick": "快速",
+          "standard": "标准",
+          "full": "完整"
+        },
+        "tddMode": {
+          "off": "关闭",
+          "flexible": "灵活",
+          "strict": "严格"
+        }
+      }
     },
     "designDoc": {
       "title": "设计文档",

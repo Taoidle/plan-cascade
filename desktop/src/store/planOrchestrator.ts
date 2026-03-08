@@ -34,7 +34,6 @@ import {
   buildPlanCompletionCardDataFromReport,
   injectPlanCard as injectCard,
   injectPlanError as injectError,
-  normalizeStepOutputFormat,
 } from './planOrchestrator/cardInjection';
 import {
   proceedToPlanningFlow,
@@ -44,6 +43,7 @@ import {
   submitClarificationFlow,
 } from './planOrchestrator/sessionFlow';
 import { approvePlanFlow, cancelWorkflowFlow, retryStepFlow } from './planOrchestrator/executionFlow';
+import { resolveRootSessionForMode } from './modeTranscriptRouting';
 
 // ============================================================================
 // Types
@@ -189,6 +189,7 @@ async function subscribePlanProgressEvents(
     const payload = event.payload;
     const { stepStatuses: currentStepStatuses, sessionId } = get();
     if (sessionId && payload.sessionId !== sessionId) return;
+    const hasAuthoritativeKernelTranscript = !!resolveRootSessionForMode('plan', payload.sessionId);
 
     const orchestratorPatch: {
       stepStatuses?: Record<string, string>;
@@ -204,7 +205,10 @@ async function subscribePlanProgressEvents(
     }
 
     const stepTitle = plan.steps.find((s) => s.id === payload.stepId)?.title;
-    if (stepUpdateEvents.has(payload.eventType as PlanStepUpdateCardData['eventType'])) {
+    if (
+      !hasAuthoritativeKernelTranscript &&
+      stepUpdateEvents.has(payload.eventType as PlanStepUpdateCardData['eventType'])
+    ) {
       const stepOutputFromEvent = payload.stepOutput;
       injectCard('plan_step_update', {
         eventType: payload.eventType as PlanStepUpdateCardData['eventType'],
@@ -222,7 +226,13 @@ async function subscribePlanProgressEvents(
               summary: stepOutputFromEvent.summary,
               content: stepOutputFromEvent.content,
               fullContent: stepOutputFromEvent.fullContent ?? stepOutputFromEvent.content,
-              format: normalizeStepOutputFormat(stepOutputFromEvent.format),
+              format:
+                stepOutputFromEvent.format === 'markdown' ||
+                stepOutputFromEvent.format === 'json' ||
+                stepOutputFromEvent.format === 'html' ||
+                stepOutputFromEvent.format === 'code'
+                  ? stepOutputFromEvent.format
+                  : 'text',
               truncated: stepOutputFromEvent.truncated ?? false,
               originalLength: stepOutputFromEvent.originalLength ?? stepOutputFromEvent.content.length,
               shownLength: stepOutputFromEvent.shownLength ?? stepOutputFromEvent.content.length,
@@ -238,7 +248,7 @@ async function subscribePlanProgressEvents(
       } satisfies PlanStepUpdateCardData);
     }
 
-    if (payload.eventType === 'step_completed' && payload.stepId) {
+    if (!hasAuthoritativeKernelTranscript && payload.eventType === 'step_completed' && payload.stepId) {
       const completedStepId = payload.stepId;
       const completedStepTitle = stepTitle ?? completedStepId;
       const stepOutputFromEvent = payload.stepOutput;
@@ -249,7 +259,13 @@ async function subscribePlanProgressEvents(
           summary: stepOutputFromEvent.summary,
           content: stepOutputFromEvent.summary ?? stepOutputFromEvent.content,
           fullContent: stepOutputFromEvent.fullContent ?? stepOutputFromEvent.content,
-          format: normalizeStepOutputFormat(stepOutputFromEvent.format),
+          format:
+            stepOutputFromEvent.format === 'markdown' ||
+            stepOutputFromEvent.format === 'json' ||
+            stepOutputFromEvent.format === 'html' ||
+            stepOutputFromEvent.format === 'code'
+              ? stepOutputFromEvent.format
+              : 'text',
           artifacts: stepOutputFromEvent.artifacts ?? [],
           truncated: stepOutputFromEvent.truncated ?? false,
           originalLength: stepOutputFromEvent.originalLength ?? stepOutputFromEvent.content.length,
@@ -291,7 +307,9 @@ async function subscribePlanProgressEvents(
         const existingReport = get().report;
         const effectiveReport =
           progressReport && progressReport.sessionId === payload.sessionId ? progressReport : existingReport;
-        if (effectiveReport && effectiveReport.sessionId === payload.sessionId) {
+        if (hasAuthoritativeKernelTranscript) {
+          set({ _completionCardInjectedRunToken: runToken, report: effectiveReport ?? null });
+        } else if (effectiveReport && effectiveReport.sessionId === payload.sessionId) {
           const immediateCompletionData = buildPlanCompletionCardDataFromReport(effectiveReport);
           injectCard('plan_completion_card', immediateCompletionData as unknown as Record<string, unknown>);
           set({ _completionCardInjectedRunToken: runToken, report: effectiveReport });
@@ -321,7 +339,9 @@ async function subscribePlanProgressEvents(
       unlistenRef?.();
       if (get()._completionCardInjectedRunToken !== runToken) {
         const progressReport = payload.terminalReport ?? null;
-        if (progressReport && progressReport.sessionId === payload.sessionId) {
+        if (hasAuthoritativeKernelTranscript) {
+          set({ _completionCardInjectedRunToken: runToken, report: progressReport });
+        } else if (progressReport && progressReport.sessionId === payload.sessionId) {
           const cancelledData = buildPlanCompletionCardDataFromReport(progressReport);
           injectCard('plan_completion_card', cancelledData as unknown as Record<string, unknown>);
           set({ _completionCardInjectedRunToken: runToken, report: progressReport });

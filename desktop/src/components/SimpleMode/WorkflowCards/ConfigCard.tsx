@@ -27,6 +27,8 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
   const confirmConfig = useWorkflowOrchestratorStore((s) => s.confirmConfig);
   const overrideConfigNatural = useWorkflowOrchestratorStore((s) => s.overrideConfigNatural);
   const workflowSession = useWorkflowKernelStore((s) => s.session);
+  const displayFlowLevel = localizeFlowLevel(t, localConfig.flowLevel);
+  const displayTddMode = localizeTddMode(t, localConfig.tddMode);
 
   const isKernelTaskActive = workflowSession?.status === 'active' && workflowSession.activeMode === 'task';
   const kernelTaskPhase = workflowSession?.modeSnapshots.task?.phase ?? 'idle';
@@ -36,8 +38,19 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
     if (!isActive || isSubmitting) return;
     setIsSubmitting(true);
     setSubmitError(null);
+    const workflowConfig = {
+      flowLevel: localConfig.flowLevel,
+      tddMode: localConfig.tddMode,
+      maxParallel: localConfig.maxParallel,
+      qualityGatesEnabled: localConfig.qualityGatesEnabled,
+      specInterviewEnabled: localConfig.specInterviewEnabled,
+      skipVerification: localConfig.skipVerification,
+      skipReview: localConfig.skipReview,
+      globalAgentOverride: localConfig.globalAgentOverride,
+      implAgentOverride: localConfig.implAgentOverride,
+    };
     if (layer === 2) {
-      updateConfig(localConfig);
+      updateConfig(workflowConfig);
     }
     const summary = [
       `flow=${localConfig.flowLevel}`,
@@ -66,7 +79,7 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
       // Keep orchestration available even if kernel logging fails.
     }
     try {
-      const result = await confirmConfig();
+      const result = await confirmConfig(workflowConfig);
       if (!result.ok) {
         const message = result.message || 'Failed to confirm workflow configuration';
         setSubmitError(message);
@@ -120,6 +133,11 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
           {t('workflow.config.title')}
         </span>
         <div className="flex items-center gap-1.5">
+          {data.recommendationSource === 'llm_enhanced' && (
+            <span className="text-2xs px-1.5 py-0.5 rounded bg-violet-200 dark:bg-violet-800 text-violet-700 dark:text-violet-300">
+              {t('workflow.config.aiRecommended')}
+            </span>
+          )}
           {(data.isOverridden ||
             (kernelTaskPhase !== 'configuring' &&
               (localConfig.flowLevel !== data.flowLevel ||
@@ -148,8 +166,8 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
           )}
         >
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-            <ConfigRow label={t('workflow.config.flow')} value={localConfig.flowLevel} />
-            <ConfigRow label={t('workflow.config.tdd')} value={localConfig.tddMode} />
+            <ConfigRow label={t('workflow.config.flow')} value={displayFlowLevel} />
+            <ConfigRow label={t('workflow.config.tdd')} value={displayTddMode} />
             <ConfigRow label={t('workflow.config.maxParallel')} value={String(localConfig.maxParallel)} />
             <ConfigRow
               label={t('workflow.config.qualityGates')}
@@ -301,6 +319,14 @@ export function ConfigCard({ data, interactive }: { data: ConfigCardData; intera
       </div>
     </div>
   );
+}
+
+function localizeFlowLevel(t: ReturnType<typeof useTranslation>['t'], value: ConfigCardData['flowLevel']): string {
+  return t(`workflow.config.values.flowLevel.${value}`, { defaultValue: t(`workflow.config.${value}`) });
+}
+
+function localizeTddMode(t: ReturnType<typeof useTranslation>['t'], value: ConfigCardData['tddMode']): string {
+  return t(`workflow.config.values.tddMode.${value}`, { defaultValue: t(`workflow.config.${value}`) });
 }
 
 function ConfigRow({ label, value }: { label: string; value: string }) {

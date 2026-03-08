@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlanCardData, PlanModeProgressPayload } from '../types/planModeCard';
 
 const listenMock = vi.fn();
+const resolveRootSessionForModeMock = vi.fn();
 const routedCards: Array<{ mode: string; payload: { cardType?: string; data?: Record<string, unknown> } }> = [];
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -13,6 +14,7 @@ vi.mock('./modeTranscriptRouting', () => ({
     routedCards.push({ mode, payload });
   }),
   routeModeStreamLine: vi.fn(async () => undefined),
+  resolveRootSessionForMode: (...args: unknown[]) => resolveRootSessionForModeMock(...args),
 }));
 
 import { useExecutionStore } from './execution';
@@ -65,6 +67,13 @@ function extractPlanStepUpdateCards() {
     .filter((card) => card.cardType === 'plan_step_update');
 }
 
+function extractPlanStepOutputCards() {
+  return routedCards
+    .filter((entry) => entry.mode === 'plan')
+    .map((entry) => entry.payload)
+    .filter((card) => card.cardType === 'plan_step_output');
+}
+
 describe('planOrchestrator event handling', () => {
   let progressListener: ((event: { payload: PlanModeProgressPayload }) => void) | null = null;
   const unlisten = vi.fn();
@@ -79,6 +88,8 @@ describe('planOrchestrator event handling', () => {
         return unlisten;
       },
     );
+    resolveRootSessionForModeMock.mockReset();
+    resolveRootSessionForModeMock.mockReturnValue(null);
     routedCards.length = 0;
 
     useExecutionStore.getState().reset();
@@ -118,6 +129,85 @@ describe('planOrchestrator event handling', () => {
     });
 
     expect(usePlanOrchestratorStore.getState().stepStatuses).toEqual({});
+  });
+
+  it('does not re-inject progress or completion cards when kernel transcript is authoritative', async () => {
+    resolveRootSessionForModeMock.mockImplementation((mode: string, modeSessionId?: string | null) =>
+      mode === 'plan' && modeSessionId === 'session-1' ? 'kernel-plan-1' : null,
+    );
+    useWorkflowKernelStore.setState({
+      sessionId: 'kernel-plan-1',
+      session: {
+        ...createKernelPlanSession(),
+        activeMode: 'plan',
+        linkedModeSessions: { plan: 'session-1' },
+      },
+    } as unknown as ReturnType<typeof useWorkflowKernelStore.getState>);
+
+    await usePlanOrchestratorStore.getState().approvePlan(TEST_PLAN);
+    expect(progressListener).not.toBeNull();
+
+    progressListener!({
+      payload: payload({
+        eventType: 'step_started',
+        stepId: 'step-1',
+        stepStatus: 'running',
+      }),
+    });
+
+    progressListener!({
+      payload: payload({
+        eventType: 'step_completed',
+        stepId: 'step-1',
+        stepStatus: 'completed',
+        progressPct: 100,
+        stepOutput: {
+          stepId: 'step-1',
+          summary: 'done',
+          content: 'done',
+          fullContent: 'done',
+          format: 'markdown',
+          criteriaMet: [],
+          artifacts: [],
+          truncated: false,
+          originalLength: 4,
+          shownLength: 4,
+          toolEvidence: [],
+        },
+      }),
+    });
+
+    progressListener!({
+      payload: payload({
+        eventType: 'execution_completed',
+        progressPct: 100,
+        terminalReport: {
+          sessionId: 'session-1',
+          planTitle: 'Test Plan',
+          success: true,
+          terminalState: 'completed',
+          totalSteps: 1,
+          stepsCompleted: 1,
+          stepsFailed: 0,
+          totalDurationMs: 1000,
+          stepSummaries: { 'step-1': 'done' },
+          failureReasons: {},
+          cancelledBy: null,
+          runId: 'run-1',
+          finalConclusionMarkdown: 'done',
+          highlights: [],
+          nextActions: ['ship'],
+          retryStats: { totalRetries: 0, stepsRetried: 0, exhaustedFailures: 0 },
+        },
+      }),
+    });
+
+    expect(extractPlanStepUpdateCards()).toHaveLength(0);
+    expect(extractPlanStepOutputCards()).toHaveLength(0);
+    expect(extractPlanCompletionCards()).toHaveLength(0);
+    expect(usePlanOrchestratorStore.getState().stepStatuses['step-1']).toBe('completed');
+    expect(usePlanOrchestratorStore.getState().report?.runId).toBe('run-1');
+    expect(usePlanOrchestratorStore.getState()._completionCardInjectedRunToken).toBe(1);
   });
 
   it('converges to cancelled state on execution_cancelled event', async () => {

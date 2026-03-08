@@ -12,13 +12,13 @@
  */
 
 import { create } from 'zustand';
-import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import i18n from '../i18n';
 import {
   useTaskModeStore,
   type TaskPrd,
   type StrategyAnalysis,
+  type TaskStrategyRecommendation,
   type GateResult,
   type GateStatus,
   type ExecutionReport,
@@ -246,7 +246,13 @@ function mapInterviewQuestion(
 }
 
 /** Build strategy card data from analysis */
-function buildStrategyCardData(analysis: StrategyAnalysis, model?: string): StrategyCardData {
+function buildStrategyCardData(
+  analysis: StrategyAnalysis,
+  options?: {
+    model?: string;
+    recommendationSource?: TaskStrategyRecommendation['recommendationSource'];
+  },
+): StrategyCardData {
   const recommendations: string[] = [];
   if (analysis.parallelizationBenefit === 'significant') {
     recommendations.push(i18n.t('workflow.strategy.highParallelization', { ns: 'simpleMode' }));
@@ -269,19 +275,43 @@ function buildStrategyCardData(analysis: StrategyAnalysis, model?: string): Stra
     parallelizationBenefit: analysis.parallelizationBenefit,
     functionalAreas: analysis.functionalAreas,
     recommendations,
-    model,
+    model: options?.model,
+    recommendationSource: options?.recommendationSource,
   };
 }
 
 /** Build config card data from current config */
-function buildConfigCardData(config: WorkflowConfig, isOverridden: boolean): ConfigCardData {
+function buildConfigCardData(
+  config: WorkflowConfig,
+  isOverridden: boolean,
+  recommendationSource?: TaskStrategyRecommendation['recommendationSource'],
+): ConfigCardData {
   return {
     flowLevel: config.flowLevel,
     tddMode: config.tddMode,
     maxParallel: config.maxParallel,
     qualityGatesEnabled: config.qualityGatesEnabled,
     specInterviewEnabled: config.specInterviewEnabled,
+    skipVerification: config.skipVerification,
+    skipReview: config.skipReview,
+    globalAgentOverride: config.globalAgentOverride,
+    implAgentOverride: config.implAgentOverride,
     isOverridden,
+    recommendationSource,
+  };
+}
+
+function workflowConfigFromRecommendation(recommendation: TaskStrategyRecommendation): WorkflowConfig {
+  return {
+    flowLevel: recommendation.recommendedConfig.flowLevel,
+    tddMode: recommendation.recommendedConfig.tddMode,
+    maxParallel: recommendation.recommendedConfig.maxParallel,
+    qualityGatesEnabled: recommendation.recommendedConfig.qualityGatesEnabled,
+    specInterviewEnabled: recommendation.recommendedConfig.specInterviewEnabled,
+    skipVerification: recommendation.recommendedConfig.skipVerification,
+    skipReview: recommendation.recommendedConfig.skipReview,
+    globalAgentOverride: recommendation.recommendedConfig.globalAgentOverride,
+    implAgentOverride: recommendation.recommendedConfig.implAgentOverride,
   };
 }
 
@@ -437,73 +467,37 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
 
       const sessionId = enteredSession.sessionId;
       modeSessionId = sessionId;
-      let analysis = enteredSession.strategyAnalysis;
-
-      // 2. Try LLM enhancement of strategy analysis
+      const recommendation = enteredSession.strategyRecommendation;
+      const analysis = recommendation?.analysis ?? enteredSession.strategyAnalysis;
       const { resolvePhaseAgent, formatModelDisplay } = await import('../lib/phaseAgentResolver');
-      if (!isRunActive(get, runToken)) return { modeSessionId: modeSessionId ?? null };
       const strategyResolved = resolvePhaseAgent('plan_strategy');
-      if (analysis) {
-        try {
-          if (!isRunActive(get, runToken)) return { modeSessionId: modeSessionId ?? null };
-          injectInfo(i18n.t('workflow.orchestrator.enhancingAnalysis', { ns: 'simpleMode' }), 'info');
-
-          const enhanced = await invoke<{ success: boolean; data: StrategyAnalysis | null; error: string | null }>(
-            'enhance_strategy_with_llm',
-            {
-              description,
-              keywordAnalysis: analysis,
-              provider: strategyResolved.provider || null,
-              model: strategyResolved.model || null,
-              apiKey: null,
-              baseUrl: strategyResolved.baseUrl || null,
-              locale: i18n.language,
-            },
-          );
-          if (!isRunActive(get, runToken)) return { modeSessionId: modeSessionId ?? null };
-
-          if (enhanced.success && enhanced.data) {
-            analysis = enhanced.data;
-          }
-        } catch {
-          // LLM enhancement failed — silently use keyword analysis
-        }
-      }
+      const strategyModel =
+        recommendation?.recommendationSource === 'llm_enhanced' ? formatModelDisplay(strategyResolved) : undefined;
 
       if (!isRunActive(get, runToken)) return { modeSessionId: modeSessionId ?? null };
       set({ sessionId, strategyAnalysis: analysis });
 
-      // 3. Inject strategy card (with LLM-enhanced or keyword result)
+      // 2. Inject strategy card from authoritative backend recommendation
       if (analysis) {
         if (!isRunActive(get, runToken)) return { modeSessionId: modeSessionId ?? null };
-        injectCard('strategy_card', buildStrategyCardData(analysis, formatModelDisplay(strategyResolved)));
+        injectCard(
+          'strategy_card',
+          buildStrategyCardData(analysis, {
+            model: strategyModel,
+            recommendationSource: recommendation?.recommendationSource,
+          }),
+        );
       }
 
-      // 4. Build recommended config from analysis
-      const config: WorkflowConfig = { ...DEFAULT_CONFIG };
-      if (analysis) {
-        if (analysis.riskLevel === 'high') {
-          config.tddMode = 'flexible';
-          config.qualityGatesEnabled = true;
-        }
-        if (analysis.estimatedStories > 6) {
-          config.maxParallel = 6;
-        }
-        if (analysis.parallelizationBenefit === 'none') {
-          config.maxParallel = 2;
-        }
-        // Enable interview for high-risk or high-story-count tasks in standard/full flow
-        if (config.flowLevel !== 'quick' && (analysis.riskLevel === 'high' || analysis.estimatedStories > 8)) {
-          config.specInterviewEnabled = true;
-        }
-      }
+      // 3. Use authoritative backend recommendation for initial workflow config
+      const config = recommendation ? workflowConfigFromRecommendation(recommendation) : { ...DEFAULT_CONFIG };
 
       if (!isRunActive(get, runToken)) return { modeSessionId: modeSessionId ?? null };
       set({ config, phase: 'configuring' });
 
-      // 5. Inject config card (user interacts with it to advance)
+      // 4. Inject config card (user still confirms manually)
       if (!isRunActive(get, runToken)) return { modeSessionId: modeSessionId ?? null };
-      injectCard('config_card', buildConfigCardData(config, false), true);
+      injectCard('config_card', buildConfigCardData(config, false, recommendation?.recommendationSource), true);
       return { modeSessionId: modeSessionId ?? null };
     } catch (e) {
       if (!isRunActive(get, runToken)) return { modeSessionId: null };
@@ -526,9 +520,30 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
     if (!isRunActive(get, runToken)) {
       return failResult('stale_run_token', 'Configuration request was superseded');
     }
-    set({ config, phase: 'exploring' });
-
     try {
+      const confirmedSession = await useTaskModeStore.getState().confirmTaskConfiguration(
+        {
+          flowLevel: config.flowLevel,
+          tddMode: config.tddMode,
+          enableInterview: config.specInterviewEnabled,
+          qualityGatesEnabled: config.qualityGatesEnabled,
+          maxParallel: config.maxParallel,
+          skipVerification: config.skipVerification,
+          skipReview: config.skipReview,
+          globalAgentOverride: config.globalAgentOverride,
+          implAgentOverride: config.implAgentOverride,
+        },
+        state.sessionId,
+      );
+      if (!confirmedSession) {
+        return failResult(
+          'config_confirm_failed',
+          useTaskModeStore.getState().error || 'Failed to persist confirmed workflow configuration',
+        );
+      }
+
+      set({ config, phase: 'exploring' });
+
       // Always explore first (exploration provides context for interview BA)
       await runExplorePhase(phaseRuntime, { normalizeExplorationCardData });
       if (!isRunActive(get, runToken)) {

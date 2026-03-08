@@ -545,6 +545,57 @@ pub struct StrategyAnalysis {
     pub strategy_decision: StrategyDecision,
 }
 
+/// Recommended Task workflow configuration derived from strategy analysis.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RecommendedWorkflowConfig {
+    pub flow_level: String,
+    pub tdd_mode: String,
+    pub spec_interview_enabled: bool,
+    pub quality_gates_enabled: bool,
+    pub max_parallel: usize,
+    pub skip_verification: bool,
+    pub skip_review: bool,
+    pub global_agent_override: Option<String>,
+    pub impl_agent_override: Option<String>,
+}
+
+impl Default for RecommendedWorkflowConfig {
+    fn default() -> Self {
+        Self {
+            flow_level: "standard".to_string(),
+            tdd_mode: "off".to_string(),
+            spec_interview_enabled: false,
+            quality_gates_enabled: true,
+            max_parallel: 4,
+            skip_verification: false,
+            skip_review: false,
+            global_agent_override: None,
+            impl_agent_override: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StrategyRecommendationSource {
+    Deterministic,
+    LlmEnhanced,
+    FallbackDeterministic,
+}
+
+/// Full Task-mode startup recommendation: analysis plus recommended workflow config.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskStrategyRecommendation {
+    pub analysis: StrategyAnalysis,
+    pub recommended_config: RecommendedWorkflowConfig,
+    pub recommendation_source: StrategyRecommendationSource,
+    pub reasoning: String,
+    pub confidence: f64,
+    pub config_rationale: String,
+}
+
 /// Analyze a task description and return a Chat/Task mode recommendation.
 ///
 /// Wraps `StrategyAnalyzer::analyze()` with additional heuristics:
@@ -615,6 +666,79 @@ pub fn analyze_task_for_mode(
         confidence: decision.confidence,
         reasoning,
         strategy_decision: decision,
+    }
+}
+
+fn clamp_max_parallel(value: usize) -> usize {
+    value.clamp(1, 8)
+}
+
+/// Build the deterministic baseline recommendation used for Task-mode startup.
+pub fn build_deterministic_recommendation(
+    analysis: StrategyAnalysis,
+) -> TaskStrategyRecommendation {
+    let mut config = RecommendedWorkflowConfig::default();
+    let mut rationale = Vec::new();
+
+    config.flow_level = match analysis.strategy_decision.strategy {
+        ExecutionStrategy::Direct => "quick".to_string(),
+        ExecutionStrategy::HybridAuto | ExecutionStrategy::HybridWorktree => {
+            if analysis.risk_level == RiskLevel::High || analysis.estimated_stories > 8 {
+                "full".to_string()
+            } else {
+                "standard".to_string()
+            }
+        }
+        ExecutionStrategy::MegaPlan => "full".to_string(),
+    };
+    rationale.push(format!("Flow level '{}' matches the analyzed task scope.", config.flow_level));
+
+    config.tdd_mode = if analysis.risk_level == RiskLevel::High {
+        "flexible".to_string()
+    } else {
+        "off".to_string()
+    };
+    if config.tdd_mode != "off" {
+        rationale.push("Enabled flexible TDD because the task risk level is high.".to_string());
+    }
+
+    config.quality_gates_enabled = true;
+    rationale.push("Quality gates remain enabled by default for Task mode.".to_string());
+
+    config.max_parallel = if analysis.parallelization_benefit == Benefit::None {
+        2
+    } else if analysis.parallelization_benefit == Benefit::Significant || analysis.estimated_stories > 6 {
+        6
+    } else {
+        4
+    };
+    config.max_parallel = clamp_max_parallel(config.max_parallel);
+    rationale.push(format!(
+        "Max parallel set to {} based on estimated story count and parallelization benefit.",
+        config.max_parallel
+    ));
+
+    config.spec_interview_enabled = config.flow_level != "quick"
+        && (analysis.risk_level == RiskLevel::High || analysis.estimated_stories > 8);
+    if config.spec_interview_enabled {
+        rationale.push(
+            "Spec interview enabled because the task is high risk or expected to expand into many stories."
+                .to_string(),
+        );
+    }
+
+    if config.flow_level == "quick" {
+        config.spec_interview_enabled = false;
+        rationale.push("Quick flow disables spec interview to keep startup lightweight.".to_string());
+    }
+
+    TaskStrategyRecommendation {
+        reasoning: analysis.reasoning.clone(),
+        confidence: analysis.confidence,
+        config_rationale: rationale.join(" "),
+        recommended_config: config,
+        recommendation_source: StrategyRecommendationSource::Deterministic,
+        analysis,
     }
 }
 

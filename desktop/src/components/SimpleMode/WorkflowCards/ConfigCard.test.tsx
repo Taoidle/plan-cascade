@@ -120,10 +120,17 @@ describe('ConfigCard', () => {
           maxParallel: 4,
           qualityGatesEnabled: true,
           specInterviewEnabled: false,
+          skipVerification: false,
+          skipReview: false,
+          globalAgentOverride: null,
+          implAgentOverride: null,
           isOverridden: false,
+          recommendationSource: 'llm_enhanced',
         }}
       />,
     );
+
+    expect(screen.getByText('workflow.config.aiRecommended')).toBeInTheDocument();
 
     const continueButton = screen.getByText('workflow.config.continue');
     await user.click(continueButton);

@@ -121,6 +121,7 @@ export interface StrategyCardData {
   functionalAreas: string[];
   recommendations: string[];
   model?: string;
+  recommendationSource?: 'deterministic' | 'llm_enhanced' | 'fallback_deterministic';
 }
 
 /** Workflow configuration card data */
@@ -130,7 +131,12 @@ export interface ConfigCardData {
   maxParallel: number;
   qualityGatesEnabled: boolean;
   specInterviewEnabled: boolean;
+  skipVerification: boolean;
+  skipReview: boolean;
+  globalAgentOverride: string | null;
+  implAgentOverride: string | null;
   isOverridden: boolean;
+  recommendationSource?: 'deterministic' | 'llm_enhanced' | 'fallback_deterministic';
 }
 
 /** Workflow configuration values (used by orchestrator) */
