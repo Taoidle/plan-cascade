@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 use super::types::{Agent, AgentConfig, AgentContext, AgentEvent, AgentEventStream};
-use crate::services::orchestrator::{OrchestratorConfig, OrchestratorService};
+use crate::services::orchestrator::{ExecutionKind, OrchestratorConfig, OrchestratorService};
 use crate::services::streaming::UnifiedStreamEvent;
 use crate::utils::error::AppResult;
 
@@ -174,7 +174,8 @@ impl Agent for LlmAgent {
         let orchestrator_config = OrchestratorConfig {
             provider: provider_config,
             system_prompt: self.instruction.clone(),
-            max_iterations: self.config.max_iterations,
+            execution_kind: ExecutionKind::AgentComposerLlmStep,
+            soft_limit_override: self.config.soft_limit_override,
             max_total_tokens: self.config.max_total_tokens,
             project_root: ctx.project_root.clone(),
             analysis_artifacts_root,
@@ -417,7 +418,7 @@ mod tests {
             .with_model("claude-3-5-sonnet")
             .with_tools(vec!["read_file".to_string(), "grep".to_string()])
             .with_config(AgentConfig {
-                max_iterations: 10,
+                soft_limit_override: Some(10),
                 ..Default::default()
             });
 
@@ -426,7 +427,7 @@ mod tests {
         assert_eq!(agent.instruction, Some("Be helpful".to_string()));
         assert_eq!(agent.model, Some("claude-3-5-sonnet".to_string()));
         assert_eq!(agent.tools.as_ref().unwrap().len(), 2);
-        assert_eq!(agent.config.max_iterations, 10);
+        assert_eq!(agent.config.soft_limit_override, Some(10));
     }
 
     #[test]
@@ -436,6 +437,6 @@ mod tests {
         assert!(agent.instruction.is_none());
         assert!(agent.model.is_none());
         assert!(agent.tools.is_none());
-        assert_eq!(agent.config.max_iterations, 50);
+        assert_eq!(agent.config.soft_limit_override, None);
     }
 }

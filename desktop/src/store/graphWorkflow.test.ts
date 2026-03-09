@@ -39,7 +39,7 @@ function createMockWorkflow(overrides: Partial<GraphWorkflow> = {}): GraphWorkfl
           model: null,
           tools: null,
           config: {
-            max_iterations: 50,
+            soft_limit_override: null,
             max_total_tokens: 1000000,
             streaming: true,
             enable_compaction: true,
@@ -57,7 +57,7 @@ function createMockWorkflow(overrides: Partial<GraphWorkflow> = {}): GraphWorkfl
           model: null,
           tools: null,
           config: {
-            max_iterations: 50,
+            soft_limit_override: null,
             max_total_tokens: 1000000,
             streaming: true,
             enable_compaction: true,
@@ -84,7 +84,7 @@ function createMockNode(id: string): GraphNode {
       model: null,
       tools: null,
       config: {
-        max_iterations: 50,
+        soft_limit_override: null,
         max_total_tokens: 1000000,
         streaming: true,
         enable_compaction: true,

@@ -23,7 +23,7 @@ use crate::models::CommandResponse;
 use crate::services::llm::{LlmProvider, ProviderConfig, ProviderType};
 use crate::services::orchestrator::index_manager::{IndexManager, IndexStatusEvent};
 use crate::services::orchestrator::{
-    ExecutionResult, OrchestratorConfig, OrchestratorService, SessionExecutionResult,
+    ExecutionKind, ExecutionResult, OrchestratorConfig, OrchestratorService, SessionExecutionResult,
 };
 use crate::services::plugins::models::{PluginInvocation, ResolvedPluginInvocation};
 use crate::services::streaming::UnifiedStreamEvent;
@@ -834,7 +834,8 @@ pub async fn check_provider_health(
     let orchestrator_config = OrchestratorConfig {
         provider: config,
         system_prompt: None,
-        max_iterations: 1,
+        execution_kind: ExecutionKind::StandaloneRoot,
+        soft_limit_override: Some(1),
         max_total_tokens: 1000,
         project_root: PathBuf::from("."),
         streaming: false,
@@ -1242,7 +1243,6 @@ pub async fn execute_standalone(
     enable_compaction: Option<bool>,
     enable_thinking: Option<bool>,
     max_total_tokens: Option<u32>,
-    max_iterations: Option<u32>,
     max_concurrent_subagents: Option<u32>,
     memory_auto_extract_enabled: Option<bool>,
     memoryAutoExtractEnabled: Option<bool>,
@@ -1500,7 +1500,8 @@ pub async fn execute_standalone(
     let orchestrator_config = OrchestratorConfig {
         provider: config,
         system_prompt,
-        max_iterations: max_iterations.unwrap_or(50),
+        execution_kind: ExecutionKind::StandaloneRoot,
+        soft_limit_override: None,
         max_total_tokens: max_total_tokens.unwrap_or(1_000_000),
         project_root: PathBuf::from(&project_path),
         streaming: true,
@@ -2080,7 +2081,8 @@ pub async fn execute_standalone_with_session(
     let orchestrator_config = OrchestratorConfig {
         provider: config,
         system_prompt: request.system_prompt.clone(),
-        max_iterations: request.max_iterations.unwrap_or(50),
+        execution_kind: ExecutionKind::StandaloneRoot,
+        soft_limit_override: None,
         max_total_tokens: request.max_total_tokens.unwrap_or(1_000_000),
         project_root: PathBuf::from(&request.project_path),
         streaming: true,
@@ -2448,7 +2450,8 @@ pub async fn get_standalone_status(
             ..Default::default()
         },
         system_prompt: None,
-        max_iterations: 1,
+        execution_kind: ExecutionKind::StandaloneRoot,
+        soft_limit_override: Some(1),
         max_total_tokens: 1,
         project_root: PathBuf::from("."),
         streaming: false,
@@ -2526,7 +2529,8 @@ pub async fn get_standalone_progress(
             ..Default::default()
         },
         system_prompt: None,
-        max_iterations: 1,
+        execution_kind: ExecutionKind::StandaloneRoot,
+        soft_limit_override: Some(1),
         max_total_tokens: 1,
         project_root: PathBuf::from("."),
         streaming: false,
@@ -2589,7 +2593,8 @@ pub async fn resume_standalone_execution(
             ..Default::default()
         },
         system_prompt: None,
-        max_iterations: 1,
+        execution_kind: ExecutionKind::StandaloneRoot,
+        soft_limit_override: Some(1),
         max_total_tokens: 1,
         project_root: PathBuf::from("."),
         streaming: false,
@@ -2708,7 +2713,8 @@ pub async fn resume_standalone_execution(
     let orchestrator_config = OrchestratorConfig {
         provider: config,
         system_prompt: session.system_prompt.clone(),
-        max_iterations: 50,
+        execution_kind: ExecutionKind::StandaloneRoot,
+        soft_limit_override: None,
         max_total_tokens: 1_000_000,
         project_root: PathBuf::from(&session.project_path),
         streaming: true,
@@ -2850,7 +2856,8 @@ pub async fn get_standalone_session(
             ..Default::default()
         },
         system_prompt: None,
-        max_iterations: 1,
+        execution_kind: ExecutionKind::StandaloneRoot,
+        soft_limit_override: Some(1),
         max_total_tokens: 1,
         project_root: PathBuf::from("."),
         streaming: false,
@@ -2911,7 +2918,8 @@ pub async fn list_standalone_sessions(
             ..Default::default()
         },
         system_prompt: None,
-        max_iterations: 1,
+        execution_kind: ExecutionKind::StandaloneRoot,
+        soft_limit_override: Some(1),
         max_total_tokens: 1,
         project_root: PathBuf::from("."),
         streaming: false,
@@ -2964,7 +2972,8 @@ pub async fn delete_standalone_session(
             ..Default::default()
         },
         system_prompt: None,
-        max_iterations: 1,
+        execution_kind: ExecutionKind::StandaloneRoot,
+        soft_limit_override: Some(1),
         max_total_tokens: 1,
         project_root: PathBuf::from("."),
         streaming: false,
@@ -3017,7 +3026,8 @@ pub async fn cleanup_standalone_sessions(
             ..Default::default()
         },
         system_prompt: None,
-        max_iterations: 1,
+        execution_kind: ExecutionKind::StandaloneRoot,
+        soft_limit_override: Some(1),
         max_total_tokens: 1,
         project_root: PathBuf::from("."),
         streaming: false,
@@ -3162,9 +3172,9 @@ mod tests {
     }
 
     #[test]
-    fn test_default_max_iterations_is_50() {
-        let default_iters: u32 = None::<u32>.unwrap_or(50);
-        assert_eq!(default_iters, 50);
+    fn test_default_soft_limit_override_is_none() {
+        let default_soft_limit_override: Option<u32> = None;
+        assert_eq!(default_soft_limit_override, None);
     }
 
     #[test]
@@ -3176,16 +3186,15 @@ mod tests {
     }
 
     #[test]
-    fn test_optional_max_iterations_override() {
+    fn test_optional_soft_limit_override() {
         let custom: Option<u32> = Some(100);
-        let resolved = custom.unwrap_or(50);
-        assert_eq!(resolved, 100);
+        assert_eq!(custom, Some(100));
     }
 
     #[test]
     fn test_execute_with_session_request_serde_defaults() {
         // Verify that ExecuteWithSessionRequest deserializes correctly when
-        // max_total_tokens and max_iterations are absent from the JSON.
+        // max_total_tokens is absent from the JSON.
         use crate::models::orchestrator::ExecuteWithSessionRequest;
 
         let json = r#"{
@@ -3197,10 +3206,9 @@ mod tests {
 
         let req: ExecuteWithSessionRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.max_total_tokens, None);
-        assert_eq!(req.max_iterations, None);
-        // When None, the command should fall back to 1_000_000 / 50.
+        // When None, the command should fall back to 1_000_000 tokens and
+        // derive iteration budgets from execution kind.
         assert_eq!(req.max_total_tokens.unwrap_or(1_000_000), 1_000_000);
-        assert_eq!(req.max_iterations.unwrap_or(50), 50);
     }
 
     #[test]
@@ -3235,12 +3243,10 @@ mod tests {
             "provider": "anthropic",
             "model": "claude-3-5-sonnet-20241022",
             "run_quality_gates": true,
-            "max_total_tokens": 2000000,
-            "max_iterations": 100
+            "max_total_tokens": 2000000
         }"#;
 
         let req: ExecuteWithSessionRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.max_total_tokens, Some(2_000_000));
-        assert_eq!(req.max_iterations, Some(100));
     }
 }

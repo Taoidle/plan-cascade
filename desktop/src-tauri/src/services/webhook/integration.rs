@@ -15,8 +15,13 @@ use super::types::*;
 
 const PROGRESS_MILESTONES: [u8; 3] = [25, 50, 75];
 const TERMINAL_REGISTRY_TTL_SECS: u64 = 600;
-const FAILED_STOP_REASON_HINTS: [&str; 4] =
-    ["fail", "error", "max_iterations", "analysis_gate_failed"];
+const FAILED_STOP_REASON_HINTS: [&str; 5] = [
+    "fail",
+    "error",
+    "iteration_stalled",
+    "iteration_hard_limit_reached",
+    "analysis_gate_failed",
+];
 
 static SENT_PROGRESS_MILESTONES: OnceLock<Mutex<HashMap<String, HashSet<u8>>>> = OnceLock::new();
 static SENT_TERMINAL_EVENTS: OnceLock<Mutex<HashMap<String, TerminalEventRecord>>> =

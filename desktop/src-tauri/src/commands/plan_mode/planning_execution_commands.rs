@@ -599,7 +599,7 @@ pub async fn approve_plan(
     tokio::spawn(async move {
         let mut config = crate::services::plan_mode::step_executor::StepExecutionConfig::default();
         config.max_parallel = max_parallel;
-        config.max_step_iterations = max_step_iterations;
+        config.step_soft_limit_cap = max_step_iterations;
         config.max_retry_attempts = if retry_policy.enabled {
             retry_policy.max_attempts
         } else {
@@ -989,7 +989,7 @@ pub async fn retry_plan_step(
         let mut config = crate::services::plan_mode::step_executor::StepExecutionConfig::default();
         let normalized_retry = plan.execution_config.normalized_retry_policy();
         config.max_parallel = plan.execution_config.normalized_max_parallel();
-        config.max_step_iterations = plan.execution_config.normalized_max_step_iterations();
+        config.step_soft_limit_cap = plan.execution_config.normalized_max_step_iterations();
         config.max_retry_attempts = if normalized_retry.enabled {
             normalized_retry.max_attempts
         } else {

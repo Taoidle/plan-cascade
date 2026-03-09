@@ -183,7 +183,8 @@ impl TaskSpawner for OrchestratorTaskSpawner {
         let sub_config = OrchestratorConfig {
             provider: sub_provider,
             system_prompt: Some(task_prefix),
-            max_iterations: subagent_max_iterations(effective_type),
+            execution_kind: subagent_execution_kind(effective_type),
+            soft_limit_override: None,
             max_total_tokens: subagent_token_budget_typed(
                 self.context_window,
                 effective_type,

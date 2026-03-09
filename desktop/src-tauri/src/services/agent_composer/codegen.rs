@@ -202,14 +202,16 @@ fn write_typescript_agent_definition(out: &mut String, node_id: &str, step: &Age
         AgentStep::LoopStep {
             name,
             condition_key,
-            max_iterations,
+            soft_limit_override,
             step: _,
         } => {
             writeln!(out, "const {} = new AgentNode({{", var_name).unwrap();
             writeln!(out, "  name: \"{}\",", name).unwrap();
             writeln!(out, "  type: \"loop\",").unwrap();
             writeln!(out, "  conditionKey: \"{}\",", condition_key).unwrap();
-            writeln!(out, "  maxIterations: {},", max_iterations).unwrap();
+            if let Some(limit) = soft_limit_override {
+                writeln!(out, "  softLimitOverride: {},", limit).unwrap();
+            }
             writeln!(out, "}});").unwrap();
         }
     }
@@ -527,7 +529,7 @@ fn write_rust_agent_step(out: &mut String, step: &AgentStep, indent: &str) {
         AgentStep::LoopStep {
             name,
             condition_key,
-            max_iterations,
+            soft_limit_override,
             step: _,
         } => {
             writeln!(out, "{}agent_step: AgentStep::LoopStep {{", indent).unwrap();
@@ -538,7 +540,11 @@ fn write_rust_agent_step(out: &mut String, step: &AgentStep, indent: &str) {
                 indent, condition_key
             )
             .unwrap();
-            writeln!(out, "{}    max_iterations: {},", indent, max_iterations).unwrap();
+            if let Some(limit) = soft_limit_override {
+                writeln!(out, "{}    soft_limit_override: Some({}),", indent, limit).unwrap();
+            } else {
+                writeln!(out, "{}    soft_limit_override: None,", indent).unwrap();
+            }
             writeln!(out, "{}    step: Box::new(/* sub-step */),", indent).unwrap();
             writeln!(out, "{}}},", indent).unwrap();
         }

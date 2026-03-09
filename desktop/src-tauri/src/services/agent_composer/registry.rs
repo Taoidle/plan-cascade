@@ -169,13 +169,13 @@ impl ComposerRegistry {
             AgentStep::LoopStep {
                 name,
                 condition_key,
-                max_iterations,
+                soft_limit_override,
                 step,
             } => {
                 let sub_agent = self.build_step(step)?;
                 let condition = build_loop_condition(condition_key.clone());
                 let loop_agent = LoopAgent::new(name.clone(), sub_agent, condition)
-                    .with_max_iterations(*max_iterations);
+                    .with_soft_limit_override(*soft_limit_override);
                 Ok(Arc::new(loop_agent))
             }
         }
@@ -449,7 +449,7 @@ mod tests {
             model: Some("claude-3-opus".to_string()),
             tools: Some(vec!["read_file".to_string()]),
             config: AgentConfig {
-                max_iterations: 10,
+                soft_limit_override: Some(10),
                 ..Default::default()
             },
         };

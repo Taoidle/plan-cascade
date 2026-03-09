@@ -120,7 +120,7 @@ impl EvaluationEngine {
         let agent = LlmAgent::new(format!("eval-{}", model_config.model))
             .with_model(model_config.model.clone())
             .with_config(AgentConfig {
-                max_iterations: 10,
+                soft_limit_override: Some(10),
                 streaming: false,
                 ..Default::default()
             });

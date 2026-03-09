@@ -154,19 +154,23 @@ function LlmStepFields({ step, index, onUpdate }: LlmStepFieldsProps) {
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-            {t('agentComposer.node.maxIterations')}
+            {t('agentComposer.node.softLimitOverride')}
           </label>
           <input
             type="number"
-            value={step.config.max_iterations}
+            value={step.config.soft_limit_override ?? ''}
             onChange={(e) =>
               onUpdate(index, {
                 ...step,
-                config: { ...step.config, max_iterations: parseInt(e.target.value) || 50 },
+                config: {
+                  ...step.config,
+                  soft_limit_override: e.target.value ? parseInt(e.target.value, 10) || null : null,
+                },
               })
             }
             min={1}
-            max={200}
+            max={400}
+            placeholder={t('agentComposer.node.softLimitOverridePlaceholder')}
             className="w-full px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
           />
         </div>

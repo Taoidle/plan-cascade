@@ -225,7 +225,7 @@ impl SessionState {
 /// `AgentConfig` in `agent_composer::types` but with validated fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuiltAgentConfig {
-    pub max_iterations: u32,
+    pub soft_limit_override: Option<u32>,
     pub max_total_tokens: u32,
     pub streaming: bool,
     pub enable_compaction: bool,
@@ -237,13 +237,13 @@ pub struct BuiltAgentConfig {
 /// # Example
 /// ```ignore
 /// let config = AgentConfigBuilder::new()
-///     .max_iterations(100)
+///     .soft_limit_override(100)
 ///     .temperature(0.7)
 ///     .build()?;
 /// ```
 #[derive(Debug, Default)]
 pub struct AgentConfigBuilder {
-    max_iterations: Option<u32>,
+    soft_limit_override: Option<u32>,
     max_total_tokens: Option<u32>,
     streaming: Option<bool>,
     enable_compaction: Option<bool>,
@@ -256,9 +256,9 @@ impl AgentConfigBuilder {
         Self::default()
     }
 
-    /// Set maximum iterations (must be > 0 and <= 10000).
-    pub fn max_iterations(mut self, n: u32) -> Self {
-        self.max_iterations = Some(n);
+    /// Set an optional soft iteration limit override (must be > 0 and <= 10000).
+    pub fn soft_limit_override(mut self, n: u32) -> Self {
+        self.soft_limit_override = Some(n);
         self
     }
 
@@ -288,17 +288,18 @@ impl AgentConfigBuilder {
 
     /// Build and validate the configuration.
     pub fn build(self) -> CoreResult<BuiltAgentConfig> {
-        let max_iterations = self.max_iterations.unwrap_or(50);
         let max_total_tokens = self.max_total_tokens.unwrap_or(1_000_000);
         let streaming = self.streaming.unwrap_or(true);
         let enable_compaction = self.enable_compaction.unwrap_or(true);
 
         // Validation
-        if max_iterations == 0 {
-            return Err(CoreError::validation("max_iterations must be > 0"));
-        }
-        if max_iterations > 10_000 {
-            return Err(CoreError::validation("max_iterations must be <= 10000"));
+        if let Some(soft_limit_override) = self.soft_limit_override {
+            if soft_limit_override == 0 {
+                return Err(CoreError::validation("soft_limit_override must be > 0"));
+            }
+            if soft_limit_override > 10_000 {
+                return Err(CoreError::validation("soft_limit_override must be <= 10000"));
+            }
         }
         if max_total_tokens == 0 {
             return Err(CoreError::validation("max_total_tokens must be > 0"));
@@ -312,7 +313,7 @@ impl AgentConfigBuilder {
         }
 
         Ok(BuiltAgentConfig {
-            max_iterations,
+            soft_limit_override: self.soft_limit_override,
             max_total_tokens,
             streaming,
             enable_compaction,
@@ -330,7 +331,7 @@ impl AgentConfigBuilder {
 pub struct BuiltExecutionConfig {
     pub session_id: String,
     pub project_root: PathBuf,
-    pub max_iterations: u32,
+    pub soft_limit_override: Option<u32>,
     pub max_total_tokens: u32,
     pub enable_compaction: bool,
 }
@@ -344,14 +345,14 @@ pub struct BuiltExecutionConfig {
 /// let config = ExecutionConfigBuilder::new()
 ///     .session_id("sess-123")
 ///     .project_root("/path/to/project")
-///     .max_iterations(100)
+///     .soft_limit_override(100)
 ///     .build()?;
 /// ```
 #[derive(Debug, Default)]
 pub struct ExecutionConfigBuilder {
     session_id: Option<String>,
     project_root: Option<PathBuf>,
-    max_iterations: Option<u32>,
+    soft_limit_override: Option<u32>,
     max_total_tokens: Option<u32>,
     enable_compaction: Option<bool>,
 }
@@ -374,9 +375,9 @@ impl ExecutionConfigBuilder {
         self
     }
 
-    /// Set maximum iterations.
-    pub fn max_iterations(mut self, n: u32) -> Self {
-        self.max_iterations = Some(n);
+    /// Set an optional soft iteration limit override.
+    pub fn soft_limit_override(mut self, n: u32) -> Self {
+        self.soft_limit_override = Some(n);
         self
     }
 
@@ -405,17 +406,18 @@ impl ExecutionConfigBuilder {
             return Err(CoreError::validation("session_id cannot be empty"));
         }
 
-        let max_iterations = self.max_iterations.unwrap_or(50);
         let max_total_tokens = self.max_total_tokens.unwrap_or(1_000_000);
 
-        if max_iterations == 0 {
-            return Err(CoreError::validation("max_iterations must be > 0"));
+        if let Some(soft_limit_override) = self.soft_limit_override {
+            if soft_limit_override == 0 {
+                return Err(CoreError::validation("soft_limit_override must be > 0"));
+            }
         }
 
         Ok(BuiltExecutionConfig {
             session_id,
             project_root,
-            max_iterations,
+            soft_limit_override: self.soft_limit_override,
             max_total_tokens,
             enable_compaction: self.enable_compaction.unwrap_or(true),
         })
@@ -688,7 +690,7 @@ mod tests {
     #[test]
     fn test_agent_config_builder_defaults() {
         let config = AgentConfigBuilder::new().build().unwrap();
-        assert_eq!(config.max_iterations, 50);
+        assert_eq!(config.soft_limit_override, None);
         assert_eq!(config.max_total_tokens, 1_000_000);
         assert!(config.streaming);
         assert!(config.enable_compaction);
@@ -698,7 +700,7 @@ mod tests {
     #[test]
     fn test_agent_config_builder_custom_values() {
         let config = AgentConfigBuilder::new()
-            .max_iterations(100)
+            .soft_limit_override(100)
             .max_total_tokens(500_000)
             .streaming(false)
             .enable_compaction(false)
@@ -706,7 +708,7 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(config.max_iterations, 100);
+        assert_eq!(config.soft_limit_override, Some(100));
         assert_eq!(config.max_total_tokens, 500_000);
         assert!(!config.streaming);
         assert!(!config.enable_compaction);
@@ -714,15 +716,18 @@ mod tests {
     }
 
     #[test]
-    fn test_agent_config_builder_zero_iterations_fails() {
-        let result = AgentConfigBuilder::new().max_iterations(0).build();
+    fn test_agent_config_builder_zero_soft_limit_override_fails() {
+        let result = AgentConfigBuilder::new().soft_limit_override(0).build();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("max_iterations"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("soft_limit_override"));
     }
 
     #[test]
-    fn test_agent_config_builder_too_many_iterations_fails() {
-        let result = AgentConfigBuilder::new().max_iterations(10_001).build();
+    fn test_agent_config_builder_too_many_soft_limit_override_fails() {
+        let result = AgentConfigBuilder::new().soft_limit_override(10_001).build();
         assert!(result.is_err());
     }
 
@@ -752,7 +757,7 @@ mod tests {
 
         assert_eq!(config.session_id, "sess-123");
         assert_eq!(config.project_root, PathBuf::from("/path/to/project"));
-        assert_eq!(config.max_iterations, 50);
+        assert_eq!(config.soft_limit_override, None);
         assert_eq!(config.max_total_tokens, 1_000_000);
         assert!(config.enable_compaction);
     }
@@ -762,13 +767,13 @@ mod tests {
         let config = ExecutionConfigBuilder::new()
             .session_id("s-1")
             .project_root("/proj")
-            .max_iterations(200)
+            .soft_limit_override(200)
             .max_total_tokens(2_000_000)
             .enable_compaction(false)
             .build()
             .unwrap();
 
-        assert_eq!(config.max_iterations, 200);
+        assert_eq!(config.soft_limit_override, Some(200));
         assert_eq!(config.max_total_tokens, 2_000_000);
         assert!(!config.enable_compaction);
     }
@@ -797,11 +802,11 @@ mod tests {
     }
 
     #[test]
-    fn test_execution_config_builder_zero_iterations() {
+    fn test_execution_config_builder_zero_soft_limit_override() {
         let result = ExecutionConfigBuilder::new()
             .session_id("s")
             .project_root("/p")
-            .max_iterations(0)
+            .soft_limit_override(0)
             .build();
         assert!(result.is_err());
     }
@@ -879,17 +884,17 @@ mod tests {
     #[test]
     fn test_built_agent_config_serialization() {
         let config = AgentConfigBuilder::new()
-            .max_iterations(100)
+            .soft_limit_override(100)
             .temperature(0.5)
             .build()
             .unwrap();
 
         let json = serde_json::to_string(&config).unwrap();
-        assert!(json.contains("\"max_iterations\":100"));
+        assert!(json.contains("\"soft_limit_override\":100"));
         assert!(json.contains("\"temperature\":0.5"));
 
         let parsed: BuiltAgentConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.max_iterations, 100);
+        assert_eq!(parsed.soft_limit_override, Some(100));
         assert_eq!(parsed.temperature, Some(0.5));
     }
 }

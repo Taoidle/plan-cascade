@@ -21,7 +21,12 @@ export function PlanStepOutputCard({ data }: { data: PlanStepOutputCardData }) {
     if (reason.includes('execution narration')) return t('output.incompleteNarration', 'Narration-only output');
     if (reason.includes('completion criteria unmet'))
       return t('output.incompleteCriteria', 'Completion criteria unmet');
-    if (reason.includes('max iterations') || reason.includes('maximum iterations')) {
+    if (
+      reason.includes('iteration hard limit') ||
+      reason.includes('iteration_hard_limit') ||
+      reason.includes('iteration stalled') ||
+      reason.includes('iteration_stalled')
+    ) {
       return t('output.incompleteMaxIterations', 'Iteration limit reached');
     }
     return null;

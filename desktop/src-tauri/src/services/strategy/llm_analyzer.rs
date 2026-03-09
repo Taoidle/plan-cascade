@@ -616,20 +616,22 @@ mod tests {
             parallelization_benefit: "significant".to_string(),
             has_dependencies: true,
             functional_areas: vec!["auth".to_string(), "api".to_string()],
+            recommended_config: None,
+            config_rationale: None,
         };
         let keyword = make_test_analysis();
-        let result = build_enhanced_analysis(llm, &keyword);
+        let result = build_enhanced_recommendation(llm, &keyword);
 
         assert_eq!(
-            result.strategy_decision.strategy,
+            result.analysis.strategy_decision.strategy,
             ExecutionStrategy::MegaPlan
         );
-        assert_eq!(result.recommended_mode, ExecutionMode::Task);
-        assert_eq!(result.risk_level, RiskLevel::High);
-        assert_eq!(result.parallelization_benefit, Benefit::Significant);
-        assert_eq!(result.estimated_stories, 12);
-        assert!(result.has_dependencies);
-        assert_eq!(result.functional_areas.len(), 2);
+        assert_eq!(result.analysis.recommended_mode, ExecutionMode::Task);
+        assert_eq!(result.analysis.risk_level, RiskLevel::High);
+        assert_eq!(result.analysis.parallelization_benefit, Benefit::Significant);
+        assert_eq!(result.analysis.estimated_stories, 12);
+        assert!(result.analysis.has_dependencies);
+        assert_eq!(result.analysis.functional_areas.len(), 2);
     }
 
     #[test]
@@ -643,9 +645,11 @@ mod tests {
             parallelization_benefit: "none".to_string(),
             has_dependencies: false,
             functional_areas: vec![],
+            recommended_config: None,
+            config_rationale: None,
         };
         let keyword = make_test_analysis();
-        let result = build_enhanced_analysis(llm, &keyword);
+        let result = build_enhanced_recommendation(llm, &keyword);
         assert!(result.confidence <= 1.0);
     }
 
@@ -660,12 +664,14 @@ mod tests {
             parallelization_benefit: "none".to_string(),
             has_dependencies: false,
             functional_areas: vec![],
+            recommended_config: None,
+            config_rationale: None,
         };
         let keyword = make_test_analysis();
-        let result = build_enhanced_analysis(llm, &keyword);
+        let result = build_enhanced_recommendation(llm, &keyword);
         // Falls back to keyword analysis strategy
         assert_eq!(
-            result.strategy_decision.strategy,
+            result.analysis.strategy_decision.strategy,
             keyword.strategy_decision.strategy
         );
     }

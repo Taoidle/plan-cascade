@@ -391,7 +391,8 @@ impl SessionBridge {
             let orchestrator_config = OrchestratorConfig {
                 provider: provider_config,
                 system_prompt: None,
-                max_iterations: 50,
+                execution_kind: crate::services::orchestrator::ExecutionKind::StandaloneRoot,
+                soft_limit_override: None,
                 max_total_tokens: 1_000_000,
                 project_root: PathBuf::from(&resolved_path),
                 streaming: true,
@@ -697,7 +698,8 @@ impl SessionBridge {
         let orchestrator_config = OrchestratorConfig {
             provider: provider_config,
             system_prompt: None,
-            max_iterations: 50,
+            execution_kind: crate::services::orchestrator::ExecutionKind::StandaloneRoot,
+            soft_limit_override: None,
             max_total_tokens: 1_000_000,
             project_root: PathBuf::from(project_path),
             streaming: true,

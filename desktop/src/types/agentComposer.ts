@@ -7,8 +7,8 @@
 
 /** Configuration for an agent step */
 export interface AgentConfig {
-  /** Maximum number of agentic loop iterations */
-  max_iterations: number;
+  /** Optional soft iteration limit override for advanced workflows */
+  soft_limit_override: number | null;
   /** Maximum total tokens to consume */
   max_total_tokens: number;
   /** Whether to enable streaming output */
@@ -21,7 +21,7 @@ export interface AgentConfig {
 
 /** Default agent configuration */
 export const DEFAULT_AGENT_CONFIG: AgentConfig = {
-  max_iterations: 50,
+  soft_limit_override: null,
   max_total_tokens: 1_000_000,
   streaming: true,
   enable_compaction: true,

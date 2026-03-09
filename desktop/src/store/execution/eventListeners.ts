@@ -1265,6 +1265,20 @@ function handleUnifiedExecutionEvent(
       }
       break;
 
+    case 'warning':
+      if (payload.message) {
+        get().appendStreamLine(`[warning] ${payload.message}`, 'warning');
+        get().addExecutionError({
+          severity: 'warning',
+          title: 'Stream Warning',
+          description: payload.message,
+        });
+        if (payload.session_id) {
+          scheduleForegroundChatTranscriptSync(payload.session_id, get);
+        }
+      }
+      break;
+
     case 'complete': {
       clearPermissionRequestsForSession(payload.session_id);
       // Flush any buffered content from the tool-call filter

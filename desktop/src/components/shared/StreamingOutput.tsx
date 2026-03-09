@@ -39,6 +39,8 @@ interface StreamingOutputProps {
   className?: string;
   /** Whether to show the clear button */
   showClear?: boolean;
+  /** Whether to show the export button */
+  showExport?: boolean;
   /** Compact mode for SimpleMode (reduced padding, smaller text) */
   compact?: boolean;
   /** Optional explicit transcript lines. When omitted, falls back to execution store. */
@@ -91,6 +93,7 @@ export function StreamingOutput({
   maxHeight = '400px',
   className,
   showClear = true,
+  showExport = true,
   compact = false,
   lines,
   statusOverride,
@@ -443,7 +446,7 @@ export function StreamingOutput({
             </span>
           )}
         </div>
-        {showClear && (
+        {(showExport || showClear) && (
           <div className="flex items-center gap-2">
             {exportNotice && (
               <span
@@ -455,117 +458,121 @@ export function StreamingOutput({
                 {exportNotice.text}
               </span>
             )}
-            <div ref={exportMenuRef} className="relative">
+            {showExport && (
+              <div ref={exportMenuRef} className="relative">
+                <button
+                  onClick={() => setShowExportMenu((v) => !v)}
+                  disabled={streamingOutput.length === 0 || isCapturing}
+                  className="px-2 py-1 rounded text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed text-2xs font-mono transition-colors"
+                  title="Export output"
+                >
+                  {isCapturing ? t('export.capturing') : 'export'}
+                </button>
+                {showExportMenu && (
+                  <div className="absolute right-0 mt-1 w-52 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg z-20 p-1 animate-fade-in">
+                    {/* Text formats */}
+                    <div className="px-2 py-0.5 text-2xs font-mono text-gray-500 uppercase tracking-wider">
+                      {t('export.textFormats')}
+                    </div>
+                    <button
+                      onClick={() => {
+                        setShowExportMenu(false);
+                        void exportMarkdown();
+                      }}
+                      disabled={streamingOutput.length === 0}
+                      className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {t('export.markdown')}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowExportMenu(false);
+                        void exportAll();
+                      }}
+                      disabled={streamingOutput.length === 0}
+                      className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {t('export.conversationTranscript')}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowExportMenu(false);
+                        void exportLatestReply();
+                      }}
+                      disabled={assistantReplies.length === 0}
+                      className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {t('export.latestReply')}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowExportMenu(false);
+                        void exportReplyByNumber();
+                      }}
+                      disabled={assistantReplies.length === 0}
+                      className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {t('export.chooseReply')}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowExportMenu(false);
+                        void exportRaw();
+                      }}
+                      disabled={streamingOutput.length === 0}
+                      className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {t('export.rawOutput')}
+                    </button>
+                    {/* Divider */}
+                    <div className="my-1 border-t border-gray-200 dark:border-gray-700/60" />
+                    {/* Visual formats */}
+                    <div className="px-2 py-0.5 text-2xs font-mono text-gray-500 uppercase tracking-wider">
+                      {t('export.visualFormats')}
+                    </div>
+                    <button
+                      onClick={() => {
+                        setShowExportMenu(false);
+                        void exportPdf();
+                      }}
+                      disabled={streamingOutput.length === 0 || status === 'running'}
+                      className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {t('export.pdf')}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowExportMenu(false);
+                        void exportPng();
+                      }}
+                      disabled={streamingOutput.length === 0 || status === 'running'}
+                      className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {t('export.png')}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowExportMenu(false);
+                        void exportJpg();
+                      }}
+                      disabled={streamingOutput.length === 0 || status === 'running'}
+                      className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {t('export.jpg')}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            {showClear && (
               <button
-                onClick={() => setShowExportMenu((v) => !v)}
-                disabled={streamingOutput.length === 0 || isCapturing}
-                className="px-2 py-1 rounded text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed text-2xs font-mono transition-colors"
-                title="Export output"
+                onClick={clearStreamingOutput}
+                className="p-1 rounded text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+                title="Clear output"
               >
-                {isCapturing ? t('export.capturing') : 'export'}
+                <Cross2Icon className="w-3 h-3" />
               </button>
-              {showExportMenu && (
-                <div className="absolute right-0 mt-1 w-52 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg z-20 p-1 animate-fade-in">
-                  {/* Text formats */}
-                  <div className="px-2 py-0.5 text-2xs font-mono text-gray-500 uppercase tracking-wider">
-                    {t('export.textFormats')}
-                  </div>
-                  <button
-                    onClick={() => {
-                      setShowExportMenu(false);
-                      void exportMarkdown();
-                    }}
-                    disabled={streamingOutput.length === 0}
-                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {t('export.markdown')}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowExportMenu(false);
-                      void exportAll();
-                    }}
-                    disabled={streamingOutput.length === 0}
-                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {t('export.conversationTranscript')}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowExportMenu(false);
-                      void exportLatestReply();
-                    }}
-                    disabled={assistantReplies.length === 0}
-                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {t('export.latestReply')}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowExportMenu(false);
-                      void exportReplyByNumber();
-                    }}
-                    disabled={assistantReplies.length === 0}
-                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {t('export.chooseReply')}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowExportMenu(false);
-                      void exportRaw();
-                    }}
-                    disabled={streamingOutput.length === 0}
-                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {t('export.rawOutput')}
-                  </button>
-                  {/* Divider */}
-                  <div className="my-1 border-t border-gray-200 dark:border-gray-700/60" />
-                  {/* Visual formats */}
-                  <div className="px-2 py-0.5 text-2xs font-mono text-gray-500 uppercase tracking-wider">
-                    {t('export.visualFormats')}
-                  </div>
-                  <button
-                    onClick={() => {
-                      setShowExportMenu(false);
-                      void exportPdf();
-                    }}
-                    disabled={streamingOutput.length === 0 || status === 'running'}
-                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {t('export.pdf')}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowExportMenu(false);
-                      void exportPng();
-                    }}
-                    disabled={streamingOutput.length === 0 || status === 'running'}
-                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {t('export.png')}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowExportMenu(false);
-                      void exportJpg();
-                    }}
-                    disabled={streamingOutput.length === 0 || status === 'running'}
-                    className="w-full text-left px-2 py-1 rounded text-2xs font-mono text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {t('export.jpg')}
-                  </button>
-                </div>
-              )}
-            </div>
-            <button
-              onClick={clearStreamingOutput}
-              className="p-1 rounded text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
-              title="Clear output"
-            >
-              <Cross2Icon className="w-3 h-3" />
-            </button>
+            )}
           </div>
         )}
       </div>

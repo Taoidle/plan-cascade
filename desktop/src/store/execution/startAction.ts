@@ -438,7 +438,6 @@ export function createStartAction(
           permissionLevel,
           enableCompaction: settings.enableContextCompaction ?? true,
           enableThinking: settings.enableThinking ?? false,
-          maxIterations: settings.maxIterations ?? undefined,
           maxConcurrentSubagents: settings.maxConcurrentSubagents || undefined,
           executionId: standaloneExecutionId,
           kernelSessionId: activeKernelRootSessionId,

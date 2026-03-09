@@ -257,9 +257,9 @@ pub enum AgentEvent {
 /// Configuration options for agent execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
-    /// Maximum number of agentic loop iterations.
-    #[serde(default = "default_max_iterations")]
-    pub max_iterations: u32,
+    /// Optional override for the derived soft iteration limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub soft_limit_override: Option<u32>,
     /// Maximum total tokens to consume.
     #[serde(default = "default_max_total_tokens")]
     pub max_total_tokens: u32,
@@ -272,10 +272,6 @@ pub struct AgentConfig {
     /// LLM temperature setting.
     #[serde(default)]
     pub temperature: Option<f32>,
-}
-
-fn default_max_iterations() -> u32 {
-    50
 }
 
 fn default_max_total_tokens() -> u32 {
@@ -293,7 +289,7 @@ fn default_enable_compaction() -> bool {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            max_iterations: default_max_iterations(),
+            soft_limit_override: None,
             max_total_tokens: default_max_total_tokens(),
             streaming: default_streaming(),
             enable_compaction: default_enable_compaction(),
@@ -358,16 +354,12 @@ pub enum AgentStep {
         /// The shared_state key to evaluate for loop continuation.
         /// If the value is falsy (false, 0, "", null) the loop stops.
         condition_key: String,
-        /// Maximum number of iterations before forced termination.
-        #[serde(default = "default_loop_max_iterations")]
-        max_iterations: u32,
+        /// Optional override for the derived soft limit.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        soft_limit_override: Option<u32>,
         /// The sub-step to execute on each iteration.
         step: Box<AgentStep>,
     },
-}
-
-fn default_loop_max_iterations() -> u32 {
-    10
 }
 
 /// Configuration for an LLM agent step.
@@ -447,7 +439,7 @@ mod tests {
     #[test]
     fn test_agent_config_default() {
         let config = AgentConfig::default();
-        assert_eq!(config.max_iterations, 50);
+        assert_eq!(config.soft_limit_override, None);
         assert_eq!(config.max_total_tokens, 1_000_000);
         assert!(config.streaming);
         assert!(config.enable_compaction);

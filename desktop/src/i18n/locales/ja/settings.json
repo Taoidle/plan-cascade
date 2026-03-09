@@ -93,7 +93,6 @@
     "executionLimits": {
       "title": "実行制限",
       "maxParallelStories": "最大並列ストーリー数",
-      "maxIterations": "最大イテレーション数",
       "timeout": "タイムアウト（秒）",
       "maxConcurrentSubagents": "最大並行サブエージェント数",
       "maxConcurrentSubagentsHelp": "0 = 自動（プロバイダのデフォルト値）"

@@ -1,6 +1,119 @@
 use super::*;
+use crate::services::orchestrator::{
+    assess_progress, build_iteration_budget, IterationBudgetHints,
+    IterationProgressAssessment, IterationProgressSnapshot,
+};
+
+#[derive(Default)]
+struct LoopProgressState {
+    successful_tool_results: u32,
+    unique_tool_fingerprints: HashSet<String>,
+    observed_paths: HashSet<String>,
+    sampled_reads: HashSet<String>,
+    artifact_count: u32,
+    tool_evidence_count: u32,
+    subagent_completion_count: u32,
+    latest_candidate_chars: usize,
+    latest_candidate_deliverable: bool,
+}
+
+impl LoopProgressState {
+    fn record_tool_result(
+        &mut self,
+        tool_name: &str,
+        args: &str,
+        result: &crate::services::tools::executor::ToolResult,
+    ) {
+        if result.is_success() && !result.is_dedup {
+            self.successful_tool_results = self.successful_tool_results.saturating_add(1);
+        }
+        let fingerprint = format!(
+            "{}::{}",
+            tool_name,
+            hash_text_fragment(args)
+        );
+        self.unique_tool_fingerprints.insert(fingerprint);
+
+        if matches!(tool_name, "Read" | "Grep" | "Glob" | "LS") {
+            if !args.trim().is_empty() {
+                self.observed_paths.insert(args.trim().to_string());
+            }
+        }
+        if tool_name == "Read" && !args.trim().is_empty() {
+            self.sampled_reads.insert(args.trim().to_string());
+        }
+        if let Some(message) = result.success_message() {
+            let lower = message.to_ascii_lowercase();
+            if lower.contains("file:") || lower.contains("path:") || lower.contains("src/") {
+                self.tool_evidence_count = self.tool_evidence_count.saturating_add(1);
+            }
+            if lower.contains("created") || lower.contains("updated") || lower.contains("artifact") {
+                self.artifact_count = self.artifact_count.saturating_add(1);
+            }
+        }
+    }
+
+    fn record_candidate(&mut self, candidate: Option<&str>) {
+        let content = candidate.unwrap_or("").trim();
+        self.latest_candidate_chars = content.chars().count();
+        self.latest_candidate_deliverable = candidate_looks_structured(content);
+    }
+
+    fn snapshot(
+        &self,
+        iteration: u32,
+        file_change_count: u32,
+        shared_state_fingerprint: Option<u64>,
+    ) -> IterationProgressSnapshot {
+        IterationProgressSnapshot {
+            iteration,
+            file_change_count,
+            criteria_met_count: 0,
+            observed_paths_count: self.observed_paths.len() as u32,
+            sampled_reads_count: self.sampled_reads.len() as u32,
+            candidate_chars: self.latest_candidate_chars,
+            candidate_deliverable: self.latest_candidate_deliverable,
+            successful_tool_results: self.successful_tool_results,
+            unique_tool_fingerprints: self.unique_tool_fingerprints.len() as u32,
+            artifact_count: self.artifact_count,
+            tool_evidence_count: self.tool_evidence_count,
+            subagent_completion_count: self.subagent_completion_count,
+            shared_state_fingerprint,
+        }
+    }
+}
+
+fn candidate_looks_structured(content: &str) -> bool {
+    if content.is_empty() {
+        return false;
+    }
+    let line_count = content.lines().filter(|line| !line.trim().is_empty()).count();
+    line_count >= 3
+        || content.contains("```")
+        || content.contains("## ")
+        || content.contains("- ")
+        || content.contains("1.")
+}
+
+fn hash_text_fragment(value: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
+}
 
 impl OrchestratorService {
+    fn current_file_change_count(&self) -> u32 {
+        self.tool_executor
+            .get_file_change_tracker()
+            .and_then(|tracker| tracker.lock().ok().map(|guard| guard.change_count() as u32))
+            .unwrap_or(0)
+    }
+
+    fn current_shared_state_fingerprint(&self) -> Option<u64> {
+        None
+    }
+
     fn analyze_cache_file_path(&self) -> PathBuf {
         if let Some(parent) = self.config.analysis_artifacts_root.parent() {
             return parent.join("analysis-tool-cache.json");
@@ -597,6 +710,26 @@ impl OrchestratorService {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let iteration_budget = build_iteration_budget(
+            self.config.execution_kind,
+            &IterationBudgetHints {
+                prompt_chars: prompt.chars().count()
+                    + self
+                        .config
+                        .system_prompt
+                        .as_ref()
+                        .map(|value| value.chars().count())
+                        .unwrap_or(0),
+                complexity_score: tools.len(),
+                has_specialized_tools: tools.iter().any(|tool| {
+                    matches!(tool.name.as_str(), "Task" | "SearchKnowledge" | "Browser" | "Bash")
+                }),
+                analysis_profile: Some(self.config.analysis_profile),
+                soft_limit_override: self.config.soft_limit_override,
+            },
+        );
+        let mut progress_state = LoopProgressState::default();
+        let mut progress_snapshots: VecDeque<IterationProgressSnapshot> = VecDeque::new();
 
         // Build TaskContext so coordinator sub-agents can spawn nested sub-agents.
         let task_ctx = self.build_task_context(&tx);
@@ -786,53 +919,50 @@ impl OrchestratorService {
                 tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             }
 
-            // Check iteration limit
-            if iterations >= self.config.max_iterations {
-                // Recover last_assistant_text if available (story-004)
-                let (response, success, error_msg, stop_reason) =
-                    if let Some(ref text) = last_assistant_text {
-                        eprintln!(
-                        "[max-iterations] execute_task: recovering {} chars of accumulated text",
-                        text.len()
+            if iterations >= iteration_budget.hard_limit {
+                let recovered = last_assistant_text.as_ref().filter(|text| !text.trim().is_empty());
+                if let Some(text) = recovered {
+                    let message = format!(
+                        "Iteration hard limit ({}) reached; recovered final response.",
+                        iteration_budget.hard_limit
                     );
-                        (
-                            Some(text.clone()),
-                            true,
-                            format!(
-                                "Max iterations ({}) reached but response recovered",
-                                self.config.max_iterations
-                            ),
-                            "max_iterations_with_recovery".to_string(),
-                        )
-                    } else {
-                        (
-                            None,
-                            false,
-                            format!(
-                                "Maximum iterations ({}) reached",
-                                self.config.max_iterations
-                            ),
-                            "max_iterations".to_string(),
-                        )
+                    let _ = tx
+                        .send(UnifiedStreamEvent::Warning {
+                            message: message.clone(),
+                            code: Some("iteration_hard_limit_recovered".to_string()),
+                        })
+                        .await;
+                    let _ = tx
+                        .send(UnifiedStreamEvent::Complete {
+                            stop_reason: Some("iteration_hard_limit_recovered".to_string()),
+                        })
+                        .await;
+                    emit_usage(&tx, &total_usage).await;
+                    return ExecutionResult {
+                        response: Some(text.clone()),
+                        usage: total_usage,
+                        iterations,
+                        success: true,
+                        error: Some(message),
                     };
+                }
 
+                let error_msg = format!(
+                    "Iteration hard limit ({}) reached without recoverable response.",
+                    iteration_budget.hard_limit
+                );
                 let _ = tx
                     .send(UnifiedStreamEvent::Error {
                         message: error_msg.clone(),
-                        code: Some("max_iterations".to_string()),
-                    })
-                    .await;
-                let _ = tx
-                    .send(UnifiedStreamEvent::Complete {
-                        stop_reason: Some(stop_reason),
+                        code: Some("iteration_hard_limit_reached".to_string()),
                     })
                     .await;
                 emit_usage(&tx, &total_usage).await;
                 return ExecutionResult {
-                    response,
+                    response: None,
                     usage: total_usage,
                     iterations,
-                    success,
+                    success: false,
                     error: Some(error_msg),
                 };
             }
@@ -1870,17 +2000,9 @@ impl OrchestratorService {
             // Track consecutive Task-only iterations to prevent infinite delegation.
             if task_ctx.is_some() {
                 let tool_names: Vec<&str> = if has_native_tool_calls {
-                    response
-                        .tool_calls
-                        .iter()
-                        .map(|tc| tc.name.as_str())
-                        .collect()
+                    response.tool_calls.iter().map(|tc| tc.name.as_str()).collect()
                 } else if !parsed_fallback.calls.is_empty() {
-                    parsed_fallback
-                        .calls
-                        .iter()
-                        .map(|ptc| ptc.tool_name.as_str())
-                        .collect()
+                    parsed_fallback.calls.iter().map(|ptc| ptc.tool_name.as_str()).collect()
                 } else {
                     vec![]
                 };
@@ -1902,6 +2024,93 @@ impl OrchestratorService {
                             .to_string(),
                     ));
                     consecutive_task_only_iterations = 0;
+                }
+            }
+
+            if has_native_tool_calls {
+                for tc in &response.tool_calls {
+                    progress_state.unique_tool_fingerprints.insert(format!(
+                        "{}::{}",
+                        tc.name,
+                        hash_text_fragment(&tc.arguments.to_string())
+                    ));
+                    if matches!(tc.name.as_str(), "Read" | "Grep" | "Glob" | "LS") {
+                        progress_state
+                            .observed_paths
+                            .insert(tc.arguments.to_string());
+                    }
+                    if tc.name == "Read" {
+                        progress_state.sampled_reads.insert(tc.arguments.to_string());
+                    }
+                    if tc.name == "Task" {
+                        progress_state.subagent_completion_count =
+                            progress_state.subagent_completion_count.saturating_add(1);
+                    }
+                }
+                progress_state.successful_tool_results = progress_state
+                    .successful_tool_results
+                    .saturating_add(response.tool_calls.len() as u32);
+            } else if !parsed_fallback.calls.is_empty() {
+                for call in &parsed_fallback.calls {
+                    progress_state.unique_tool_fingerprints.insert(format!(
+                        "{}::{}",
+                        call.tool_name,
+                        hash_text_fragment(&call.arguments.to_string())
+                    ));
+                    if matches!(call.tool_name.as_str(), "Read" | "Grep" | "Glob" | "LS") {
+                        progress_state
+                            .observed_paths
+                            .insert(call.arguments.to_string());
+                    }
+                    if call.tool_name == "Read" {
+                        progress_state.sampled_reads.insert(call.arguments.to_string());
+                    }
+                    if call.tool_name == "Task" {
+                        progress_state.subagent_completion_count =
+                            progress_state.subagent_completion_count.saturating_add(1);
+                    }
+                }
+                progress_state.successful_tool_results = progress_state
+                    .successful_tool_results
+                    .saturating_add(parsed_fallback.calls.len() as u32);
+            }
+            progress_state.record_candidate(last_assistant_text.as_deref());
+            let snapshot = progress_state.snapshot(
+                iterations,
+                self.current_file_change_count(),
+                self.current_shared_state_fingerprint(),
+            );
+            progress_snapshots.push_back(snapshot.clone());
+            while progress_snapshots.len() > iteration_budget.review_window as usize {
+                progress_snapshots.pop_front();
+            }
+            if iterations >= iteration_budget.soft_limit
+                && (iterations - iteration_budget.soft_limit) % iteration_budget.review_interval == 0
+                && progress_snapshots.len() >= 2
+            {
+                let previous = progress_snapshots.front().expect("progress snapshot present");
+                if matches!(
+                    assess_progress(previous, &snapshot),
+                    IterationProgressAssessment::Stalled
+                ) {
+                    let error_msg = format!(
+                        "Execution stalled after reaching soft iteration limit ({}) without meaningful progress.",
+                        iteration_budget.soft_limit
+                    );
+                    let _ = tx
+                        .send(UnifiedStreamEvent::Error {
+                            message: error_msg.clone(),
+                            code: Some("iteration_stalled".to_string()),
+                        })
+                        .await;
+                    emit_usage(&tx, &total_usage).await;
+                    return ExecutionResult {
+                        response: last_assistant_text,
+                        usage: total_usage,
+                        iterations,
+                        success: false,
+                        error: Some(error_msg),
+                    };
                 }
             }
         }
@@ -2024,6 +2233,33 @@ impl OrchestratorService {
         // does any direct work itself.
         let mut consecutive_task_only_iterations = 0u32;
         const MAX_CONSECUTIVE_TASK_ONLY: u32 = 3;
+        let iteration_budget = build_iteration_budget(
+            self.config.execution_kind,
+            &IterationBudgetHints {
+                prompt_chars: messages
+                    .iter()
+                    .flat_map(|message| message.content.iter())
+                    .filter_map(|content| match content {
+                        MessageContent::Text { text } => Some(text.chars().count()),
+                        _ => None,
+                    })
+                    .sum::<usize>()
+                    + self
+                        .config
+                        .system_prompt
+                        .as_ref()
+                        .map(|value| value.chars().count())
+                        .unwrap_or(0),
+                complexity_score: tools.len(),
+                has_specialized_tools: tools.iter().any(|tool| {
+                    matches!(tool.name.as_str(), "Task" | "SearchKnowledge" | "Browser" | "Bash")
+                }),
+                analysis_profile: Some(self.config.analysis_profile),
+                soft_limit_override: self.config.soft_limit_override,
+            },
+        );
+        let mut progress_state = LoopProgressState::default();
+        let mut progress_snapshots: VecDeque<IterationProgressSnapshot> = VecDeque::new();
 
         let task_ctx = self.build_task_context(&tx);
 
@@ -2106,53 +2342,50 @@ impl OrchestratorService {
                 tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             }
 
-            // Check iteration limit
-            if iterations >= self.config.max_iterations {
-                // Recover last_assistant_text if available (story-004)
-                let (response, success, error_msg, stop_reason) =
-                    if let Some(ref text) = last_assistant_text {
-                        eprintln!(
-                            "[max-iterations] execute: recovering {} chars of accumulated text",
-                            text.len()
-                        );
-                        (
-                            Some(text.clone()),
-                            true,
-                            format!(
-                                "Max iterations ({}) reached but response recovered",
-                                self.config.max_iterations
-                            ),
-                            "max_iterations_with_recovery".to_string(),
-                        )
-                    } else {
-                        (
-                            None,
-                            false,
-                            format!(
-                                "Maximum iterations ({}) reached",
-                                self.config.max_iterations
-                            ),
-                            "max_iterations".to_string(),
-                        )
+            if iterations >= iteration_budget.hard_limit {
+                let recovered = last_assistant_text.as_ref().filter(|text| !text.trim().is_empty());
+                if let Some(text) = recovered {
+                    let message = format!(
+                        "Iteration hard limit ({}) reached; recovered final response.",
+                        iteration_budget.hard_limit
+                    );
+                    let _ = tx
+                        .send(UnifiedStreamEvent::Warning {
+                            message: message.clone(),
+                            code: Some("iteration_hard_limit_recovered".to_string()),
+                        })
+                        .await;
+                    let _ = tx
+                        .send(UnifiedStreamEvent::Complete {
+                            stop_reason: Some("iteration_hard_limit_recovered".to_string()),
+                        })
+                        .await;
+                    emit_usage(&tx, &total_usage).await;
+                    return ExecutionResult {
+                        response: Some(text.clone()),
+                        usage: total_usage,
+                        iterations,
+                        success: true,
+                        error: Some(message),
                     };
+                }
 
+                let error_msg = format!(
+                    "Iteration hard limit ({}) reached without recoverable response.",
+                    iteration_budget.hard_limit
+                );
                 let _ = tx
                     .send(UnifiedStreamEvent::Error {
                         message: error_msg.clone(),
-                        code: Some("max_iterations".to_string()),
-                    })
-                    .await;
-                let _ = tx
-                    .send(UnifiedStreamEvent::Complete {
-                        stop_reason: Some(stop_reason),
+                        code: Some("iteration_hard_limit_reached".to_string()),
                     })
                     .await;
                 emit_usage(&tx, &total_usage).await;
                 return ExecutionResult {
-                    response,
+                    response: None,
                     usage: total_usage,
                     iterations,
-                    success,
+                    success: false,
                     error: Some(error_msg),
                 };
             }
@@ -3479,6 +3712,93 @@ impl OrchestratorService {
                     ));
                     // Reset counter so the model gets another chance
                     consecutive_task_only_iterations = 0;
+                }
+            }
+
+            if has_native_tool_calls {
+                for tc in &response.tool_calls {
+                    progress_state.unique_tool_fingerprints.insert(format!(
+                        "{}::{}",
+                        tc.name,
+                        hash_text_fragment(&tc.arguments.to_string())
+                    ));
+                    if matches!(tc.name.as_str(), "Read" | "Grep" | "Glob" | "LS") {
+                        progress_state
+                            .observed_paths
+                            .insert(tc.arguments.to_string());
+                    }
+                    if tc.name == "Read" {
+                        progress_state.sampled_reads.insert(tc.arguments.to_string());
+                    }
+                    if tc.name == "Task" {
+                        progress_state.subagent_completion_count =
+                            progress_state.subagent_completion_count.saturating_add(1);
+                    }
+                }
+                progress_state.successful_tool_results = progress_state
+                    .successful_tool_results
+                    .saturating_add(response.tool_calls.len() as u32);
+            } else if !parsed_fallback.calls.is_empty() {
+                for call in &parsed_fallback.calls {
+                    progress_state.unique_tool_fingerprints.insert(format!(
+                        "{}::{}",
+                        call.tool_name,
+                        hash_text_fragment(&call.arguments.to_string())
+                    ));
+                    if matches!(call.tool_name.as_str(), "Read" | "Grep" | "Glob" | "LS") {
+                        progress_state
+                            .observed_paths
+                            .insert(call.arguments.to_string());
+                    }
+                    if call.tool_name == "Read" {
+                        progress_state.sampled_reads.insert(call.arguments.to_string());
+                    }
+                    if call.tool_name == "Task" {
+                        progress_state.subagent_completion_count =
+                            progress_state.subagent_completion_count.saturating_add(1);
+                    }
+                }
+                progress_state.successful_tool_results = progress_state
+                    .successful_tool_results
+                    .saturating_add(parsed_fallback.calls.len() as u32);
+            }
+            progress_state.record_candidate(last_assistant_text.as_deref());
+            let snapshot = progress_state.snapshot(
+                iterations,
+                self.current_file_change_count(),
+                self.current_shared_state_fingerprint(),
+            );
+            progress_snapshots.push_back(snapshot.clone());
+            while progress_snapshots.len() > iteration_budget.review_window as usize {
+                progress_snapshots.pop_front();
+            }
+            if iterations >= iteration_budget.soft_limit
+                && (iterations - iteration_budget.soft_limit) % iteration_budget.review_interval == 0
+                && progress_snapshots.len() >= 2
+            {
+                let previous = progress_snapshots.front().expect("progress snapshot present");
+                if matches!(
+                    assess_progress(previous, &snapshot),
+                    IterationProgressAssessment::Stalled
+                ) {
+                    let error_msg = format!(
+                        "Execution stalled after reaching soft iteration limit ({}) without meaningful progress.",
+                        iteration_budget.soft_limit
+                    );
+                    let _ = tx
+                        .send(UnifiedStreamEvent::Error {
+                            message: error_msg.clone(),
+                            code: Some("iteration_stalled".to_string()),
+                        })
+                        .await;
+                    emit_usage(&tx, &total_usage).await;
+                    return ExecutionResult {
+                        response: last_assistant_text,
+                        usage: total_usage,
+                        iterations,
+                        success: false,
+                        error: Some(error_msg),
+                    };
                 }
             }
         }

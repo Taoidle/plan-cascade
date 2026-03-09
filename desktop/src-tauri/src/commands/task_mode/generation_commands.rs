@@ -1423,7 +1423,8 @@ pub async fn explore_project(
                 let config = crate::services::orchestrator::OrchestratorConfig {
                     provider: provider_config,
                     system_prompt: Some(coordinator_prompt),
-                    max_iterations: 14,
+                    execution_kind: crate::services::orchestrator::ExecutionKind::SubAgentExplore,
+                    soft_limit_override: None,
                     max_total_tokens: 200_000,
                     project_root: project_path.clone(),
                     analysis_artifacts_root: dirs::home_dir()

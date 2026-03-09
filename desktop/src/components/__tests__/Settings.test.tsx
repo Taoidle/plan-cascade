@@ -63,7 +63,6 @@ vi.mock('react-i18next', () => ({
         'general.developerMode.panels.streamingOutput.description': 'Show streaming output in the right panel.',
         'general.executionLimits.title': 'Execution Limits',
         'general.executionLimits.maxParallelStories': 'Max Parallel Stories',
-        'general.executionLimits.maxIterations': 'Max Iterations',
         'general.executionLimits.maxTotalTokens': 'Max Token Budget',
         'general.executionLimits.timeout': 'Timeout (seconds)',
         'general.executionLimits.maxConcurrentSubagents': 'Max Concurrent Subagents',
@@ -195,7 +194,6 @@ const mockSettingsState = {
     { name: 'aider', enabled: false, command: 'aider', isDefault: false },
   ],
   maxParallelStories: 3,
-  maxIterations: 50,
   maxTotalTokens: 1000000,
   timeoutSeconds: 300,
   onboardingCompleted: true,
@@ -393,7 +391,6 @@ describe('GeneralSection', () => {
 
     expect(screen.getByText('Execution Limits')).toBeInTheDocument();
     expect(screen.getByText('Max Parallel Stories')).toBeInTheDocument();
-    expect(screen.getByText('Max Iterations')).toBeInTheDocument();
     expect(screen.getByText('Timeout (seconds)')).toBeInTheDocument();
     expect(screen.getByText('Max Concurrent Subagents')).toBeInTheDocument();
   });
@@ -450,15 +447,6 @@ describe('GeneralSection', () => {
     expect(storiesInput).toBeDefined();
   });
 
-  it('renders max iterations input with default value', () => {
-    render(<GeneralSection />);
-
-    // The maxIterations field should display the default value (50)
-    const inputs = screen.getAllByRole('spinbutton');
-    const iterationsInput = inputs.find((el) => (el as HTMLInputElement).value === '50');
-    expect(iterationsInput).toBeDefined();
-  });
-
   it('updates maxParallelStories via setState when changed', () => {
     render(<GeneralSection />);
 
@@ -488,26 +476,6 @@ describe('GeneralSection', () => {
 
     expect(storiesInput).toBeDefined();
     expect(storiesInput.max).toBe('10');
-  });
-
-  it('enforces min constraint on maxIterations input', () => {
-    render(<GeneralSection />);
-
-    const inputs = screen.getAllByRole('spinbutton');
-    const iterationsInput = inputs.find((el) => (el as HTMLInputElement).value === '50') as HTMLInputElement;
-
-    expect(iterationsInput).toBeDefined();
-    expect(iterationsInput.min).toBe('10');
-  });
-
-  it('enforces max constraint on maxIterations input', () => {
-    render(<GeneralSection />);
-
-    const inputs = screen.getAllByRole('spinbutton');
-    const iterationsInput = inputs.find((el) => (el as HTMLInputElement).value === '50') as HTMLInputElement;
-
-    expect(iterationsInput).toBeDefined();
-    expect(iterationsInput.max).toBe('200');
   });
 
   it('renders language selector', () => {

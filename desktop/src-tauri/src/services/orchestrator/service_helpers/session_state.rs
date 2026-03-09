@@ -162,7 +162,7 @@ pub(super) enum LoopDetection {
 /// that can be used to escalate intervention (warn, strip tools, force terminate).
 ///
 /// ADR-002: Sliding window for macro-loop detection.
-/// ADR-004: Pattern-based loop detection is cheaper than waiting for max_iterations=50.
+/// ADR-004: Pattern-based loop detection is cheaper than waiting for a hard iteration limit.
 #[derive(Debug)]
 pub(super) struct ToolCallLoopDetector {
     /// Threshold of consecutive identical calls before triggering

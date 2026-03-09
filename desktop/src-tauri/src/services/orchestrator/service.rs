@@ -31,6 +31,7 @@ use super::embedding_manager::EmbeddingManager;
 use super::embedding_service::EmbeddingService;
 use super::hnsw_index::HnswIndex;
 use super::index_store::IndexStore;
+use super::iteration_budget::ExecutionKind;
 use crate::models::orchestrator::{
     ExecutionProgress, ExecutionSession, ExecutionSessionSummary, ExecutionStatus,
     StoryExecutionState,
@@ -72,9 +73,12 @@ pub struct OrchestratorConfig {
     /// System prompt for the LLM
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
-    /// Maximum iterations before stopping (prevents infinite loops)
-    #[serde(default = "default_max_iterations")]
-    pub max_iterations: u32,
+    /// Execution budget family used to derive soft/hard iteration limits.
+    #[serde(default)]
+    pub execution_kind: ExecutionKind,
+    /// Optional debug/testing override for the derived soft limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub soft_limit_override: Option<u32>,
     /// Maximum total tokens to use
     #[serde(default = "default_max_tokens")]
     pub max_total_tokens: u32,
@@ -118,10 +122,6 @@ pub struct OrchestratorConfig {
     /// Root agent uses `Some(0)`, coordinator sub-agent uses `Some(1)`, etc.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sub_agent_depth: Option<u32>,
-}
-
-fn default_max_iterations() -> u32 {
-    50
 }
 
 fn default_max_tokens() -> u32 {
@@ -182,14 +182,15 @@ fn subagent_token_budget_typed(
     budget.clamp(20_000, 4_000_000)
 }
 
-/// Max iterations for typed sub-agents.
-fn subagent_max_iterations(subagent_type: crate::services::tools::SubAgentType) -> u32 {
+fn subagent_execution_kind(
+    subagent_type: crate::services::tools::SubAgentType,
+) -> ExecutionKind {
     use crate::services::tools::SubAgentType;
     match subagent_type {
-        SubAgentType::Explore => 100,
-        SubAgentType::Plan => 50,
-        SubAgentType::GeneralPurpose => 60,
-        SubAgentType::Bash => 10,
+        SubAgentType::Explore => ExecutionKind::SubAgentExplore,
+        SubAgentType::Plan => ExecutionKind::SubAgentPlan,
+        SubAgentType::GeneralPurpose => ExecutionKind::SubAgentGeneral,
+        SubAgentType::Bash => ExecutionKind::SubAgentBash,
     }
 }
 
@@ -521,14 +522,6 @@ impl AnalysisPhase {
             AnalysisPhase::StructureDiscovery => "explore",
             AnalysisPhase::ArchitectureTrace => "analyze",
             AnalysisPhase::ConsistencyCheck => "analyze",
-        }
-    }
-
-    fn max_iterations(self) -> u32 {
-        match self {
-            AnalysisPhase::StructureDiscovery => 6,
-            AnalysisPhase::ArchitectureTrace => 5,
-            AnalysisPhase::ConsistencyCheck => 4,
         }
     }
 

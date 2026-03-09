@@ -2201,7 +2201,8 @@ impl OrchestratorService {
             let phase_config = OrchestratorConfig {
                 provider: self.config.provider.clone(),
                 system_prompt: Some(phase_system_prompt),
-                max_iterations: phase.max_iterations(),
+                execution_kind: ExecutionKind::AnalysisPhase,
+                soft_limit_override: None,
                 max_total_tokens: phase_token_budget,
                 project_root: self.config.project_root.clone(),
                 analysis_artifacts_root: self.config.analysis_artifacts_root.clone(),

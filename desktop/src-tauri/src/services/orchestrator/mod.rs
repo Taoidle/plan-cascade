@@ -26,6 +26,7 @@ pub mod hooks;
 pub mod hybrid_search;
 pub mod index_manager;
 pub mod index_store;
+pub mod iteration_budget;
 pub mod lsp_client;
 pub mod lsp_enricher;
 pub mod lsp_registry;
@@ -41,6 +42,10 @@ pub use hooks::{
     BeforeToolResult, HookContext, SessionSummary,
 };
 pub(crate) use service::text_describes_pending_action;
+pub use iteration_budget::{
+    assess_progress, build_iteration_budget, ExecutionKind, IterationBudget,
+    IterationBudgetHints, IterationProgressAssessment, IterationProgressSnapshot,
+};
 pub use service::{
     ExecutionResult, OrchestratorConfig, OrchestratorService, ProviderInfo, SessionExecutionResult,
 };

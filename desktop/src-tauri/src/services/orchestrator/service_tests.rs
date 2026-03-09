@@ -7,7 +7,8 @@ fn test_config() -> OrchestratorConfig {
             ..Default::default()
         },
         system_prompt: Some("You are a helpful assistant.".to_string()),
-        max_iterations: 10,
+        execution_kind: crate::services::orchestrator::ExecutionKind::StandaloneRoot,
+        soft_limit_override: Some(10),
         max_total_tokens: 10000,
         project_root: std::env::temp_dir(),
         streaming: true,
@@ -496,7 +497,8 @@ fn test_architecture_baseline_keeps_seed_files_ahead_of_observed_noise() {
             ..Default::default()
         },
         system_prompt: None,
-        max_iterations: 4,
+        execution_kind: crate::services::orchestrator::ExecutionKind::AnalysisPhase,
+        soft_limit_override: Some(4),
         max_total_tokens: 8_000,
         project_root: project_root.clone(),
         streaming: false,
@@ -569,7 +571,8 @@ fn test_baseline_steps_cover_required_tool_families() {
             ..Default::default()
         },
         system_prompt: None,
-        max_iterations: 4,
+        execution_kind: crate::services::orchestrator::ExecutionKind::AnalysisPhase,
+        soft_limit_override: Some(4),
         max_total_tokens: 8_000,
         project_root,
         streaming: false,
@@ -999,7 +1002,8 @@ fn test_reliable_provider_no_fallback_instructions() {
             ..Default::default()
         },
         system_prompt: Some("Test prompt.".to_string()),
-        max_iterations: 10,
+        execution_kind: crate::services::orchestrator::ExecutionKind::StandaloneRoot,
+        soft_limit_override: Some(10),
         max_total_tokens: 10000,
         project_root: std::env::temp_dir(),
         streaming: false,
@@ -1034,7 +1038,8 @@ fn test_unreliable_provider_gets_fallback_instructions() {
             ..Default::default()
         },
         system_prompt: None,
-        max_iterations: 10,
+        execution_kind: crate::services::orchestrator::ExecutionKind::StandaloneRoot,
+        soft_limit_override: Some(10),
         max_total_tokens: 10000,
         project_root: std::env::temp_dir(),
         streaming: false,
@@ -1074,7 +1079,8 @@ fn test_user_override_disables_fallback_for_unreliable() {
             ..Default::default()
         },
         system_prompt: None,
-        max_iterations: 10,
+        execution_kind: crate::services::orchestrator::ExecutionKind::StandaloneRoot,
+        soft_limit_override: Some(10),
         max_total_tokens: 10000,
         project_root: std::env::temp_dir(),
         streaming: false,
@@ -1108,7 +1114,8 @@ fn test_ollama_reliable_provider_disables_fallback_instructions() {
             ..Default::default()
         },
         system_prompt: None,
-        max_iterations: 10,
+        execution_kind: crate::services::orchestrator::ExecutionKind::StandaloneRoot,
+        soft_limit_override: Some(10),
         max_total_tokens: 10000,
         project_root: std::env::temp_dir(),
         streaming: false,
@@ -1187,8 +1194,8 @@ fn test_default_enable_compaction_function_returns_true() {
 
 #[test]
 fn test_orchestrator_config_serde_defaults_without_optional_fields() {
-    // When deserializing OrchestratorConfig JSON without max_total_tokens,
-    // enable_compaction, or max_iterations, serde should fill in the correct defaults.
+    // When deserializing OrchestratorConfig JSON without optional fields,
+    // serde should fill in the correct defaults.
     let json = r#"{
         "provider": {
             "provider": "anthropic",
@@ -1200,7 +1207,12 @@ fn test_orchestrator_config_serde_defaults_without_optional_fields() {
 
     let config: OrchestratorConfig = serde_json::from_str(json).unwrap();
     assert_eq!(config.max_total_tokens, 1_000_000, "default max_total_tokens should be 1M");
-    assert_eq!(config.max_iterations, 50, "default max_iterations should be 50");
+    assert_eq!(
+        config.execution_kind,
+        crate::services::orchestrator::ExecutionKind::StandaloneRoot,
+        "default execution_kind should be standalone_root"
+    );
+    assert_eq!(config.soft_limit_override, None, "default soft_limit_override should be None");
     assert!(config.enable_compaction, "default enable_compaction should be true");
     assert!(config.streaming, "default streaming should be true");
 }
@@ -1215,15 +1227,17 @@ fn test_orchestrator_config_serde_explicit_overrides() {
             "model": "claude-3-5-sonnet-20241022"
         },
         "project_root": "/tmp/test",
+        "execution_kind": "task_story",
+        "soft_limit_override": 25,
         "max_total_tokens": 500000,
-        "max_iterations": 25,
         "enable_compaction": false,
         "streaming": false
     }"#;
 
     let config: OrchestratorConfig = serde_json::from_str(json).unwrap();
     assert_eq!(config.max_total_tokens, 500_000);
-    assert_eq!(config.max_iterations, 25);
+    assert_eq!(config.execution_kind, crate::services::orchestrator::ExecutionKind::TaskStory);
+    assert_eq!(config.soft_limit_override, Some(25));
     assert!(!config.enable_compaction);
     assert!(!config.streaming);
 }
@@ -1239,7 +1253,8 @@ fn test_sub_agent_spawner_uses_compaction_enabled() {
             ..Default::default()
         },
         system_prompt: Some("test".to_string()),
-        max_iterations: 25,
+        execution_kind: crate::services::orchestrator::ExecutionKind::SubAgentGeneral,
+        soft_limit_override: Some(25),
         max_total_tokens: sub_agent_token_budget(128_000, None),
         project_root: std::env::temp_dir(),
         streaming: true,
@@ -2653,71 +2668,76 @@ fn test_is_complete_answer_i_will_in_middle_ok() {
     assert!(is_complete_answer(&text));
 }
 
-// ===== max_iterations recovery tests (story-004) =====
-// These test the ExecutionResult behavior: when max_iterations is reached
-// and last_assistant_text is Some, the result should recover it.
+// ===== iteration hard-limit recovery tests (story-004) =====
+// These test the ExecutionResult behavior when the hard limit is reached.
 
 #[test]
-fn test_max_iterations_recovery_with_accumulated_text() {
-    // Simulate the scenario: max_iterations hit, but we have accumulated text
+fn test_iteration_hard_limit_recovery_with_accumulated_text() {
+    // Simulate the scenario: hard limit hit, but we have accumulated text
     let last_assistant_text: Option<String> = Some("Here is the analysis of the codebase.".to_string());
-    let max_iterations = 10;
+    let hard_limit = 10;
     let iterations = 10;
 
-    // This is the logic that should exist in the max_iterations handler
+    // This is the logic that should exist in the hard-limit handler
     let (response, success, error) = if let Some(ref text) = last_assistant_text {
         (
             Some(text.clone()),
             true,
-            Some(format!("Max iterations ({}) reached but response recovered", max_iterations)),
+            Some(format!(
+                "Iteration hard limit ({}) reached but response recovered",
+                hard_limit
+            )),
         )
     } else {
         (
             None,
             false,
-            Some(format!("Maximum iterations ({}) reached", max_iterations)),
+            Some(format!("Iteration hard limit ({}) reached", hard_limit)),
         )
     };
 
     assert_eq!(response, Some("Here is the analysis of the codebase.".to_string()));
     assert!(success);
     assert!(error.unwrap().contains("recovered"));
-    assert_eq!(iterations, max_iterations);
+    assert_eq!(iterations, hard_limit);
 }
 
 #[test]
-fn test_max_iterations_no_text_returns_none() {
+fn test_iteration_hard_limit_no_text_returns_none() {
     let last_assistant_text: Option<String> = None;
-    let max_iterations = 10;
+    let hard_limit = 10;
 
     let (response, success, error) = if let Some(ref text) = last_assistant_text {
         (
             Some(text.clone()),
             true,
-            Some(format!("Max iterations ({}) reached but response recovered", max_iterations)),
+            Some(format!(
+                "Iteration hard limit ({}) reached but response recovered",
+                hard_limit
+            )),
         )
     } else {
         (
             None,
             false,
-            Some(format!("Maximum iterations ({}) reached", max_iterations)),
+            Some(format!("Iteration hard limit ({}) reached", hard_limit)),
         )
     };
 
     assert!(response.is_none());
     assert!(!success);
-    assert!(error.unwrap().contains("Maximum iterations"));
+    assert!(error.unwrap().contains("Iteration hard limit"));
 }
 
 #[test]
-fn test_max_iterations_recovery_produces_valid_execution_result() {
+fn test_iteration_hard_limit_recovery_produces_valid_execution_result() {
     let recovered_text = "The project uses a three-tier execution model.".to_string();
     let result = ExecutionResult {
         response: Some(recovered_text.clone()),
         usage: UsageStats::default(),
         iterations: 25,
         success: true,
-        error: Some("Max iterations (25) reached but response recovered".to_string()),
+        error: Some("Iteration hard limit (25) reached but response recovered".to_string()),
     };
 
     assert!(result.success);
@@ -2726,13 +2746,13 @@ fn test_max_iterations_recovery_produces_valid_execution_result() {
 }
 
 #[test]
-fn test_max_iterations_no_recovery_produces_failed_execution_result() {
+fn test_iteration_hard_limit_no_recovery_produces_failed_execution_result() {
     let result = ExecutionResult {
         response: None,
         usage: UsageStats::default(),
         iterations: 25,
         success: false,
-        error: Some("Maximum iterations (25) reached".to_string()),
+        error: Some("Iteration hard limit (25) reached".to_string()),
     };
 
     assert!(!result.success);
@@ -4090,6 +4110,8 @@ fn test_sub_agent_knowledge_block_capped() {
         shared_embedding_service: None,
         shared_embedding_manager: None,
         shared_hnsw_index: None,
+        shared_file_change_tracker: None,
+        shared_file_change_turn_index: None,
         detected_language: None,
         parent_supports_thinking: false,
         skills_snapshot: vec![],

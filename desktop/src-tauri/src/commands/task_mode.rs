@@ -2454,7 +2454,8 @@ async fn execute_story_via_llm(
     let config = OrchestratorConfig {
         provider: provider_config,
         system_prompt: Some(system_prompt),
-        max_iterations: 50,
+        execution_kind: crate::services::orchestrator::ExecutionKind::TaskStory,
+        soft_limit_override: None,
         max_total_tokens: 1_000_000,
         project_root: project_path.to_path_buf(),
         analysis_artifacts_root,
@@ -3496,7 +3497,7 @@ mod tests {
 
         let agent_cmd = agent_path.to_string_lossy().into_owned();
         let outcome =
-            execute_story_via_agent(&agent_cmd, "test prompt", temp_dir.path(), token).await;
+            execute_story_via_agent(&agent_cmd, "test prompt", temp_dir.path(), token, None, None).await;
 
         let _ = cancel_handle.await;
 

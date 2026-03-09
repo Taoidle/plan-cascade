@@ -1,12 +1,15 @@
 //! LoopAgent — condition-based iteration agent
 //!
 //! Repeatedly executes a sub-agent until a condition function evaluating shared
-//! state returns `false` or `max_iterations` is reached. The output of iteration
+//! state returns `false`, the loop stalls, or the hard iteration limit is reached. The output of iteration
 //! N becomes the input of iteration N+1 via `AgentInput::Text` (same chaining
 //! pattern as `SequentialAgent`). `StateUpdate` events are prefixed with
 //! `loop.{iteration_index}.{agent_name}.{key}`.
 
+use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -14,6 +17,9 @@ use futures_util::StreamExt;
 use serde_json::Value;
 
 use super::types::{Agent, AgentContext, AgentEvent, AgentEventStream, AgentInput};
+use crate::services::orchestrator::{
+    build_iteration_budget, ExecutionKind, IterationBudget, IterationBudgetHints,
+};
 use crate::utils::error::AppResult;
 
 /// Type alias for the loop condition function.
@@ -23,11 +29,8 @@ use crate::utils::error::AppResult;
 /// - `false` means stop looping
 pub type LoopConditionFn = Box<dyn Fn(&HashMap<String, Value>) -> bool + Send + Sync>;
 
-/// Default maximum number of loop iterations.
-const DEFAULT_MAX_ITERATIONS: u32 = 10;
-
 /// A composite agent that repeatedly executes a sub-agent until a condition
-/// evaluates to `false` or `max_iterations` is reached.
+/// evaluates to `false`, the loop stalls, or the hard limit is reached.
 ///
 /// On each iteration, the sub-agent runs with the current context. The output
 /// of iteration N becomes the `AgentInput::Text` for iteration N+1.
@@ -42,8 +45,8 @@ pub struct LoopAgent {
     agent: Arc<dyn Agent>,
     /// Condition function stored in Arc so it can be shared with the unfold closure.
     condition: Arc<LoopConditionFn>,
-    /// Maximum number of iterations before forced termination.
-    max_iterations: u32,
+    /// Soft limit override used by the loop agent.
+    soft_limit_override: Option<u32>,
 }
 
 impl LoopAgent {
@@ -54,7 +57,7 @@ impl LoopAgent {
             description: "Repeatedly executes a sub-agent until a condition is met".to_string(),
             agent,
             condition: Arc::new(condition),
-            max_iterations: DEFAULT_MAX_ITERATIONS,
+            soft_limit_override: None,
         }
     }
 
@@ -64,9 +67,9 @@ impl LoopAgent {
         self
     }
 
-    /// Set the maximum number of iterations.
-    pub fn with_max_iterations(mut self, max: u32) -> Self {
-        self.max_iterations = max;
+    /// Set a custom soft limit override for the loop agent.
+    pub fn with_soft_limit_override(mut self, soft_limit_override: Option<u32>) -> Self {
+        self.soft_limit_override = soft_limit_override;
         self
     }
 }
@@ -83,6 +86,16 @@ impl Agent for LoopAgent {
 
     async fn run(&self, ctx: AgentContext) -> AppResult<AgentEventStream> {
         let condition = self.condition.clone();
+        let budget = build_iteration_budget(
+            ExecutionKind::AgentComposerLoopStep,
+            &IterationBudgetHints {
+                prompt_chars: ctx.input.as_text().chars().count(),
+                complexity_score: 0,
+                has_specialized_tools: false,
+                analysis_profile: None,
+                soft_limit_override: self.soft_limit_override,
+            },
+        );
 
         // Check the condition before starting the first iteration
         {
@@ -100,10 +113,12 @@ impl Agent for LoopAgent {
                 agent: self.agent.clone(),
                 base_ctx: ctx,
                 condition,
-                max_iterations: self.max_iterations,
+                budget,
+                next_review_iteration: budget.soft_limit,
                 current_iteration: 0,
                 current_stream: None,
                 last_output: None,
+                recent_snapshots: VecDeque::new(),
                 finished: false,
             },
             |mut state| async move {
@@ -124,12 +139,22 @@ impl Agent for LoopAgent {
                                         state.current_stream = None;
                                         state.current_iteration += 1;
 
-                                        // Check if max_iterations reached
-                                        if state.current_iteration >= state.max_iterations {
+                                        state.capture_progress_snapshot().await;
+
+                                        if state.current_iteration >= state.budget.hard_limit {
+                                            state.finished = true;
+                                            return Some((state.finish_on_hard_limit(), state));
+                                        }
+
+                                        if state.should_review_progress()
+                                            && !state.has_recent_progress()
+                                        {
                                             state.finished = true;
                                             return Some((
-                                                Ok(AgentEvent::Done {
-                                                    output: state.last_output.clone(),
+                                                Ok(AgentEvent::Failed {
+                                                    run_id: state.base_ctx.session_id.clone(),
+                                                    error: "iteration_stalled".to_string(),
+                                                    duration_ms: 0,
                                                 }),
                                                 state,
                                             ));
@@ -180,11 +205,20 @@ impl Agent for LoopAgent {
                                 state.current_stream = None;
                                 state.current_iteration += 1;
 
-                                if state.current_iteration >= state.max_iterations {
+                                state.capture_progress_snapshot().await;
+
+                                if state.current_iteration >= state.budget.hard_limit {
+                                    state.finished = true;
+                                    return Some((state.finish_on_hard_limit(), state));
+                                }
+
+                                if state.should_review_progress() && !state.has_recent_progress() {
                                     state.finished = true;
                                     return Some((
-                                        Ok(AgentEvent::Done {
-                                            output: state.last_output.clone(),
+                                        Ok(AgentEvent::Failed {
+                                            run_id: state.base_ctx.session_id.clone(),
+                                            error: "iteration_stalled".to_string(),
+                                            duration_ms: 0,
                                         }),
                                         state,
                                     ));
@@ -210,7 +244,7 @@ impl Agent for LoopAgent {
                     }
 
                     // No active stream — check if we still have iterations left
-                    if state.finished || state.current_iteration >= state.max_iterations {
+                    if state.finished {
                         return None;
                     }
 
@@ -244,13 +278,94 @@ struct LoopState {
     agent: Arc<dyn Agent>,
     base_ctx: AgentContext,
     condition: Arc<LoopConditionFn>,
-    max_iterations: u32,
+    budget: IterationBudget,
+    next_review_iteration: u32,
     current_iteration: u32,
     current_stream: Option<AgentEventStream>,
     last_output: Option<String>,
+    recent_snapshots: VecDeque<LoopProgressSnapshot>,
     /// Set to true after emitting the final Done event, so the unfold
     /// terminates on the next call.
     finished: bool,
+}
+
+#[derive(Clone, Debug)]
+struct LoopProgressSnapshot {
+    shared_state_fingerprint: Option<u64>,
+    output_fingerprint: Option<u64>,
+}
+
+impl LoopState {
+    async fn capture_progress_snapshot(&mut self) {
+        let shared_state_fingerprint = {
+            let shared = self.base_ctx.shared_state.read().await;
+            fingerprint_shared_state(&shared)
+        };
+
+        self.recent_snapshots.push_back(LoopProgressSnapshot {
+            shared_state_fingerprint,
+            output_fingerprint: self.last_output.as_ref().map(|value| hash_text(value)),
+        });
+
+        while self.recent_snapshots.len() > self.budget.review_window as usize {
+            self.recent_snapshots.pop_front();
+        }
+    }
+
+    fn should_review_progress(&mut self) -> bool {
+        if self.current_iteration < self.next_review_iteration {
+            return false;
+        }
+        self.next_review_iteration = self
+            .next_review_iteration
+            .saturating_add(self.budget.review_interval);
+        true
+    }
+
+    fn has_recent_progress(&self) -> bool {
+        if self.recent_snapshots.len() < self.budget.review_window as usize {
+            return true;
+        }
+        let Some(first) = self.recent_snapshots.front() else {
+            return true;
+        };
+        let Some(last) = self.recent_snapshots.back() else {
+            return true;
+        };
+
+        first.shared_state_fingerprint != last.shared_state_fingerprint
+            || first.output_fingerprint != last.output_fingerprint
+    }
+
+    fn finish_on_hard_limit(&self) -> AppResult<AgentEvent> {
+        if self.last_output.is_some() {
+            Ok(AgentEvent::Done {
+                output: self.last_output.clone(),
+            })
+        } else {
+            Ok(AgentEvent::Failed {
+                run_id: self.base_ctx.session_id.clone(),
+                error: "iteration_hard_limit_reached".to_string(),
+                duration_ms: 0,
+            })
+        }
+    }
+}
+
+fn fingerprint_shared_state(state: &HashMap<String, Value>) -> Option<u64> {
+    let ordered: BTreeMap<String, Value> = state
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    serde_json::to_string(&ordered)
+        .ok()
+        .map(|serialized| hash_text(&serialized))
+}
+
+fn hash_text(value: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// Construct a condition function from a `condition_key` for pipeline definitions.
@@ -299,6 +414,7 @@ mod tests {
     use crate::services::agent_composer::types::*;
     use std::collections::HashMap;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use tokio::sync::RwLock;
 
@@ -532,7 +648,8 @@ mod tests {
             None => true,
         });
 
-        let loop_agent = LoopAgent::new("test-loop", sub_agent, condition).with_max_iterations(10);
+        let loop_agent =
+            LoopAgent::new("test-loop", sub_agent, condition).with_soft_limit_override(Some(10));
 
         let mut initial_state = HashMap::new();
         initial_state.insert("counter".to_string(), serde_json::json!(3));
@@ -564,17 +681,46 @@ mod tests {
     }
 
     // ========================================================================
-    // Test: loop terminates on max_iterations
+    // Test: loop terminates on stalled progress after soft limit
     // ========================================================================
 
     #[tokio::test]
-    async fn test_loop_terminates_on_max_iterations() {
-        let sub_agent = Arc::new(MockAgent::new("repeater", "X")) as Arc<dyn Agent>;
+    async fn test_loop_terminates_on_stalled_progress() {
+        struct ConstantAgent {
+            name: String,
+        }
 
-        // Condition always returns true -- loop limited by max_iterations
+        #[async_trait]
+        impl Agent for ConstantAgent {
+            fn name(&self) -> &str {
+                &self.name
+            }
+
+            fn description(&self) -> &str {
+                "Constant output agent"
+            }
+
+            async fn run(&self, _ctx: AgentContext) -> AppResult<AgentEventStream> {
+                let stream = futures_util::stream::iter(vec![
+                    Ok(AgentEvent::TextDelta {
+                        content: "same".to_string(),
+                    }),
+                    Ok(AgentEvent::Done {
+                        output: Some("same".to_string()),
+                    }),
+                ]);
+                Ok(Box::pin(stream))
+            }
+        }
+
+        let sub_agent = Arc::new(ConstantAgent {
+            name: "repeater".to_string(),
+        }) as Arc<dyn Agent>;
+
         let condition: LoopConditionFn = Box::new(|_| true);
 
-        let loop_agent = LoopAgent::new("max-loop", sub_agent, condition).with_max_iterations(3);
+        let loop_agent =
+            LoopAgent::new("stall-loop", sub_agent, condition).with_soft_limit_override(Some(8));
 
         let ctx = mock_context();
         let mut stream = loop_agent.run(ctx).await.unwrap();
@@ -584,20 +730,14 @@ mod tests {
             events.push(event.unwrap());
         }
 
-        let text_deltas: Vec<_> = events
+        let failed_events: Vec<_> = events
             .iter()
-            .filter(|e| matches!(e, AgentEvent::TextDelta { .. }))
-            .collect();
-        assert_eq!(text_deltas.len(), 3, "Should have 3 TextDelta events");
-
-        let done_events: Vec<_> = events
-            .iter()
-            .filter(|e| matches!(e, AgentEvent::Done { .. }))
+            .filter(|e| matches!(e, AgentEvent::Failed { .. }))
             .collect();
         assert_eq!(
-            done_events.len(),
+            failed_events.len(),
             1,
-            "Should have exactly one final Done event"
+            "Should have exactly one failed terminal event"
         );
     }
 
@@ -607,11 +747,55 @@ mod tests {
 
     #[tokio::test]
     async fn test_loop_output_chaining() {
-        let sub_agent = Arc::new(MockAgent::new("chainer", "step")) as Arc<dyn Agent>;
+        struct ChainingCounterAgent {
+            name: String,
+        }
 
-        let condition: LoopConditionFn = Box::new(|_| true);
+        #[async_trait]
+        impl Agent for ChainingCounterAgent {
+            fn name(&self) -> &str {
+                &self.name
+            }
 
-        let loop_agent = LoopAgent::new("chain-loop", sub_agent, condition).with_max_iterations(3);
+            fn description(&self) -> &str {
+                "Chaining counter agent"
+            }
+
+            async fn run(&self, ctx: AgentContext) -> AppResult<AgentEventStream> {
+                let input_text = ctx.input.as_text();
+                let output = format!("{}+step", input_text);
+
+                let mut shared = ctx.shared_state.write().await;
+                let count = shared.get("count").and_then(|v| v.as_u64()).unwrap_or(0) + 1;
+                shared.insert("count".to_string(), serde_json::json!(count));
+                if count >= 3 {
+                    shared.insert("loop_continue".to_string(), serde_json::json!(false));
+                }
+                drop(shared);
+
+                let stream = futures_util::stream::iter(vec![
+                    Ok(AgentEvent::TextDelta {
+                        content: output.clone(),
+                    }),
+                    Ok(AgentEvent::Done {
+                        output: Some(output),
+                    }),
+                ]);
+                Ok(Box::pin(stream))
+            }
+        }
+
+        let sub_agent = Arc::new(ChainingCounterAgent {
+            name: "chainer".to_string(),
+        }) as Arc<dyn Agent>;
+
+        let condition: LoopConditionFn = Box::new(|state| match state.get("loop_continue") {
+            Some(v) => is_truthy(v),
+            None => true,
+        });
+
+        let loop_agent =
+            LoopAgent::new("chain-loop", sub_agent, condition).with_soft_limit_override(Some(10));
 
         let ctx = mock_context();
         let mut stream = loop_agent.run(ctx).await.unwrap();
@@ -621,10 +805,7 @@ mod tests {
             events.push(event.unwrap());
         }
 
-        // MockAgent concatenates input + "+" + output:
-        // Iteration 0: input="start" -> output="start+step"
-        // Iteration 1: input="start+step" -> output="start+step+step"
-        // Iteration 2: input="start+step+step" -> output="start+step+step+step"
+        // ChainingCounterAgent appends "+step" on each of 3 iterations.
         if let Some(AgentEvent::Done { output }) = events.last() {
             let out = output.as_ref().unwrap();
             assert_eq!(out, "start+step+step+step");
@@ -641,9 +822,12 @@ mod tests {
     async fn test_loop_state_update_prefix() {
         let sub_agent = Arc::new(MockStateAgent::new("my-agent")) as Arc<dyn Agent>;
 
-        let condition: LoopConditionFn = Box::new(|_| true);
+        let counter = Arc::new(AtomicUsize::new(0));
+        let condition_counter = counter.clone();
+        let condition: LoopConditionFn = Box::new(move |_| condition_counter.fetch_add(1, Ordering::SeqCst) < 2);
 
-        let loop_agent = LoopAgent::new("prefix-loop", sub_agent, condition).with_max_iterations(2);
+        let loop_agent =
+            LoopAgent::new("prefix-loop", sub_agent, condition).with_soft_limit_override(Some(10));
 
         let ctx = mock_context();
         let mut stream = loop_agent.run(ctx).await.unwrap();
@@ -671,7 +855,8 @@ mod tests {
 
         let condition: LoopConditionFn = Box::new(|_| false);
 
-        let loop_agent = LoopAgent::new("no-loop", sub_agent, condition).with_max_iterations(10);
+        let loop_agent =
+            LoopAgent::new("no-loop", sub_agent, condition).with_soft_limit_override(Some(10));
 
         let ctx = mock_context();
         let mut stream = loop_agent.run(ctx).await.unwrap();
@@ -751,9 +936,12 @@ mod tests {
     async fn test_loop_forwards_all_sub_agent_events() {
         let sub_agent = Arc::new(MockAgent::new("fwd", "out")) as Arc<dyn Agent>;
 
-        let condition: LoopConditionFn = Box::new(|_| true);
+        let counter = Arc::new(AtomicUsize::new(0));
+        let condition_counter = counter.clone();
+        let condition: LoopConditionFn = Box::new(move |_| condition_counter.fetch_add(1, Ordering::SeqCst) < 1);
 
-        let loop_agent = LoopAgent::new("fwd-loop", sub_agent, condition).with_max_iterations(1);
+        let loop_agent =
+            LoopAgent::new("fwd-loop", sub_agent, condition).with_soft_limit_override(Some(10));
 
         let ctx = mock_context();
         let mut stream = loop_agent.run(ctx).await.unwrap();
@@ -770,16 +958,19 @@ mod tests {
     }
 
     // ========================================================================
-    // Test: single iteration (max_iterations = 1)
+    // Test: single iteration
     // ========================================================================
 
     #[tokio::test]
     async fn test_loop_single_iteration() {
         let sub_agent = Arc::new(MockAgent::new("once", "result")) as Arc<dyn Agent>;
 
-        let condition: LoopConditionFn = Box::new(|_| true);
+        let counter = Arc::new(AtomicUsize::new(0));
+        let condition_counter = counter.clone();
+        let condition: LoopConditionFn = Box::new(move |_| condition_counter.fetch_add(1, Ordering::SeqCst) < 1);
 
-        let loop_agent = LoopAgent::new("single-loop", sub_agent, condition).with_max_iterations(1);
+        let loop_agent =
+            LoopAgent::new("single-loop", sub_agent, condition).with_soft_limit_override(Some(10));
 
         let ctx = mock_context();
         let mut stream = loop_agent.run(ctx).await.unwrap();

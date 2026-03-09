@@ -375,8 +375,8 @@ describe('planOrchestrator event handling', () => {
           incompleteReason: 'Output is an execution narration rather than a completed result',
           attemptCount: 2,
           iterations: 24,
-          stopReason: 'max_iterations',
-          errorCode: 'max_iterations_no_recovery',
+          stopReason: 'iteration_stalled',
+          errorCode: 'iteration_stalled',
           toolEvidence: [],
         },
       }),
@@ -400,8 +400,8 @@ describe('planOrchestrator event handling', () => {
     expect(updateCards[0]?.data?.attemptCount).toBe(2);
     expect(updateCards[0]?.data?.errorCode).toBe('incomplete_narration');
     expect(diagnostics?.iterations).toBe(24);
-    expect(diagnostics?.stopReason).toBe('max_iterations');
-    expect(diagnostics?.errorCode).toBe('max_iterations_no_recovery');
+    expect(diagnostics?.stopReason).toBe('iteration_stalled');
+    expect(diagnostics?.errorCode).toBe('iteration_stalled');
   });
 
   it('injects at most one plan completion card for the same run token', async () => {

@@ -22,7 +22,6 @@ const mockSettingsState = {
   defaultAgent: 'claude-code',
   qualityGates: { typecheck: true, test: true, lint: true, custom: false, customScript: '', maxRetries: 3 },
   maxParallelStories: 3,
-  maxIterations: 50,
   maxTotalTokens: 1_000_000,
   timeoutSeconds: 300,
   standaloneContextTurns: -1,

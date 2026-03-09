@@ -29,7 +29,7 @@ use crate::services::orchestrator::hnsw_index::HnswIndex;
 use crate::services::orchestrator::index_store::IndexStore;
 use crate::services::orchestrator::permission_gate::PermissionGate;
 use crate::services::orchestrator::text_describes_pending_action;
-use crate::services::orchestrator::{OrchestratorConfig, OrchestratorService};
+use crate::services::orchestrator::{ExecutionKind, OrchestratorConfig, OrchestratorService};
 use crate::services::skills::model::SkillMatch;
 use crate::services::streaming::UnifiedStreamEvent;
 use crate::services::tools::definitions::get_tool_definitions_from_registry;
@@ -72,8 +72,8 @@ pub type PlanExecutionProgressCallback =
 pub struct StepExecutionConfig {
     /// Maximum parallel steps per batch
     pub max_parallel: usize,
-    /// Maximum iterations allowed for a single step execution.
-    pub max_step_iterations: u32,
+    /// Optional cap for the derived soft limit of a single step execution.
+    pub step_soft_limit_cap: u32,
     /// Maximum output tokens per context injection (~4000 chars per dep)
     pub max_dep_output_chars: usize,
     /// Total cap for all dependency outputs
@@ -90,7 +90,7 @@ impl Default for StepExecutionConfig {
     fn default() -> Self {
         Self {
             max_parallel: 4,
-            max_step_iterations: 36,
+            step_soft_limit_cap: 96,
             max_dep_output_chars: 4000,
             max_total_dep_chars: 16000,
             max_retry_attempts: 2,
@@ -128,7 +128,7 @@ impl FailureCategory {
         match self {
             FailureCategory::IncompleteNarration => "incomplete_narration",
             FailureCategory::CriteriaUnmet => "criteria_unmet",
-            FailureCategory::MaxIterations => "max_iterations",
+            FailureCategory::MaxIterations => "iteration_stalled",
             FailureCategory::InternalError => "internal_error",
         }
     }
@@ -728,7 +728,7 @@ async fn execute_batch_round(request: BatchRoundRequest<'_>) {
                 cfg.max_dep_output_chars,
                 cfg.max_total_dep_chars,
             );
-            let step_max_iterations = compute_step_iteration_limit(&step, cfg.max_step_iterations);
+            let step_soft_limit = compute_step_iteration_limit(&step, cfg.step_soft_limit_cap);
             let retry_failure_category = retry_feedback.as_deref().map(classify_failure_reason);
 
             match execute_single_step(
@@ -742,7 +742,7 @@ async fn execute_batch_round(request: BatchRoundRequest<'_>) {
                 &lang_inst,
                 retry_feedback.as_deref(),
                 retry_failure_category,
-                step_max_iterations,
+                step_soft_limit,
                 cancel.clone(),
             )
             .await
@@ -1096,7 +1096,7 @@ pub async fn retry_single_step(
         &language_instruction,
         None,
         None,
-        compute_step_iteration_limit(step, config.max_step_iterations),
+        compute_step_iteration_limit(step, config.step_soft_limit_cap),
         cancellation_token.clone(),
     )
     .await
@@ -1562,7 +1562,7 @@ async fn execute_single_step(
     language_instruction: &str,
     retry_feedback: Option<&str>,
     retry_failure_category: Option<FailureCategory>,
-    max_iterations: u32,
+    soft_limit_override: u32,
     cancellation_token: CancellationToken,
 ) -> AppResult<StepOutput> {
     if cancellation_token.is_cancelled() {
@@ -1635,7 +1635,8 @@ async fn execute_single_step(
         let config = OrchestratorConfig {
             provider: runtime.provider_config.clone(),
             system_prompt: Some(system),
-            max_iterations,
+            execution_kind: ExecutionKind::PlanStep,
+            soft_limit_override: Some(soft_limit_override),
             max_total_tokens: 120_000,
             project_root: runtime.project_root.clone(),
             analysis_artifacts_root: dirs::home_dir()
@@ -1738,9 +1739,9 @@ async fn execute_single_step(
         let mut output = build_step_output(step.id.clone(), content, OutputFormat::Markdown);
         output.iterations = result.iterations;
         if let Some(err) = result.error.as_deref() {
-            if err.contains("Max iterations") {
-                output.stop_reason = Some("max_iterations_with_recovery".to_string());
-                output.error_code = Some("max_iterations_with_recovery".to_string());
+            if err.contains("Iteration hard limit") {
+                output.stop_reason = Some("iteration_hard_limit_recovered".to_string());
+                output.error_code = Some("iteration_hard_limit_recovered".to_string());
             }
         }
         return Ok(output);
@@ -1915,7 +1916,7 @@ fn classify_failure_reason(reason: &str) -> FailureCategory {
     if lower.contains("completion criteria unmet") {
         return FailureCategory::CriteriaUnmet;
     }
-    if lower.contains("maximum iterations") || lower.contains("max iterations") {
+    if lower.contains("iteration hard limit") || lower.contains("iteration stalled") {
         return FailureCategory::MaxIterations;
     }
     FailureCategory::InternalError

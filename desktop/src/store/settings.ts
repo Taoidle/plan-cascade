@@ -17,7 +17,7 @@ export type GlmEndpoint = 'standard' | 'coding' | 'international' | 'internation
 export type MinimaxEndpoint = 'international' | 'china';
 export type QwenEndpoint = 'china' | 'singapore' | 'us';
 export type MemoryReviewMode = 'llm_review' | 'auto_approve' | 'manual_only';
-const SETTINGS_PERSIST_VERSION = 6;
+const SETTINGS_PERSIST_VERSION = 7;
 const EXECUTION_PHASE_IDS = ['planning', 'implementation', 'retry', 'refactor', 'review'] as const;
 
 function normalizeProviderKey(provider: string): string {
@@ -78,7 +78,6 @@ interface SettingsState {
 
   // Execution settings
   maxParallelStories: number;
-  maxIterations: number;
   maxTotalTokens: number;
   timeoutSeconds: number;
   maxConcurrentSubagents: number;
@@ -226,7 +225,6 @@ const defaultSettings = {
 
   // Execution
   maxParallelStories: 3,
-  maxIterations: 50,
   maxTotalTokens: 1_000_000,
   timeoutSeconds: 300,
   maxConcurrentSubagents: 0,

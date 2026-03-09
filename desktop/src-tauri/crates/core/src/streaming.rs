@@ -87,6 +87,13 @@ pub enum UnifiedStreamEvent {
         code: Option<String>,
     },
 
+    /// Non-fatal diagnostic or warning emitted during streaming.
+    Warning {
+        message: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
+    },
+
     /// Stream complete
     Complete {
         #[serde(skip_serializing_if = "Option::is_none")]
