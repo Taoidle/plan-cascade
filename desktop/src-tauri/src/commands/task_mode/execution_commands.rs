@@ -261,6 +261,7 @@ pub async fn approve_task_prd(
     app: tauri::AppHandle,
     request: ApproveTaskPrdRequest,
     state: tauri::State<'_, TaskModeState>,
+    file_changes_state: tauri::State<'_, crate::commands::file_changes::FileChangesState>,
     kernel_state: tauri::State<'_, WorkflowKernelState>,
     app_state: tauri::State<'_, AppState>,
     permission_state: tauri::State<'_, crate::commands::permissions::PermissionState>,
@@ -462,6 +463,19 @@ pub async fn approve_task_prd(
                 .filter(|path| !path.is_empty())
                 .unwrap_or(".")
                 .to_string();
+            let tracker_session_id = kernel_state
+                .inner()
+                .linked_kernel_sessions_for_mode_session(WorkflowMode::Task, &session_id)
+                .await
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| session_id.clone());
+            let file_change_tracker = file_changes_state
+                .get_or_create(&tracker_session_id, &project_path_str)
+                .await;
+            if let Ok(mut tracker) = file_change_tracker.lock() {
+                tracker.set_app_handle(app.clone());
+            }
             let enriched_ctx = assemble_enriched_context_v2(
                 app_state.inner(),
                 knowledge_state.inner(),
@@ -728,6 +742,7 @@ pub async fn approve_task_prd(
                         skills_block,
                         selected_skill_matches,
                         knowledge_tool_params,
+                        Some(file_change_tracker),
                     );
 
                     let result = executor

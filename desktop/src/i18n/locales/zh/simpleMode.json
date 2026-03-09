@@ -877,6 +877,7 @@
     "fileChange": {
       "newFile": "新文件",
       "modified": "已修改",
+      "deleted": "已删除",
       "expandDiff": "展开完整 Diff",
       "collapseDiff": "收起",
       "viewInChanges": "在变更中查看",

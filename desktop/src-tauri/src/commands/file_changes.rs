@@ -116,12 +116,12 @@ pub async fn get_file_change_diff(
     session_id: String,
     project_root: String,
     before_hash: Option<String>,
-    after_hash: String,
+    after_hash: Option<String>,
     state: tauri::State<'_, FileChangesState>,
 ) -> Result<CommandResponse<String>, String> {
     let tracker = state.get_or_create(&session_id, &project_root).await;
     let result = match tracker.lock() {
-        Ok(t) => match t.get_file_diff(before_hash.as_deref(), &after_hash) {
+        Ok(t) => match t.get_file_diff(before_hash.as_deref(), after_hash.as_deref()) {
             Ok(diff) => CommandResponse::ok(diff),
             Err(e) => CommandResponse::err(e),
         },

@@ -244,6 +244,14 @@ impl TaskSpawner for OrchestratorTaskSpawner {
         // Propagate analytics tracking to sub-agent
         sub_agent.analytics_tx = self.shared_analytics_tx.clone();
         sub_agent.analytics_cost_calculator = self.shared_analytics_cost_calculator.clone();
+        if let Some(ref tracker) = self.shared_file_change_tracker {
+            sub_agent
+                .tool_executor
+                .set_file_change_tracker(Arc::clone(tracker));
+        }
+        if let Some(turn_index) = self.shared_file_change_turn_index {
+            sub_agent.tool_executor.set_file_change_turn_index(turn_index);
+        }
         // Propagate permission gate to sub-agent so tool calls are approved
         if let Some(ref gate) = self.shared_permission_gate {
             sub_agent
@@ -670,6 +678,12 @@ impl OrchestratorService {
         tracker: Arc<std::sync::Mutex<crate::services::file_change_tracker::FileChangeTracker>>,
     ) -> Self {
         self.tool_executor.set_file_change_tracker(tracker);
+        self
+    }
+
+    /// Set a fixed turn index for file change tracking within this orchestrator.
+    pub fn with_file_change_turn_index(mut self, turn_index: u32) -> Self {
+        self.tool_executor.set_file_change_turn_index(turn_index);
         self
     }
 

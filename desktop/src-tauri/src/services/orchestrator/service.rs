@@ -462,6 +462,11 @@ struct OrchestratorTaskSpawner {
     shared_analytics_cost_calculator: Option<Arc<crate::services::analytics::CostCalculator>>,
     /// Shared permission gate from the parent orchestrator.
     shared_permission_gate: Option<Arc<super::permission_gate::PermissionGate>>,
+    /// Shared file change tracker from the parent orchestrator.
+    shared_file_change_tracker:
+        Option<Arc<std::sync::Mutex<crate::services::file_change_tracker::FileChangeTracker>>>,
+    /// Fixed turn index for all file changes emitted by this sub-agent tree.
+    shared_file_change_turn_index: Option<u32>,
     /// Shared pause flag from the parent orchestrator.
     /// Sub-agents inherit this so that pausing the parent also pauses sub-agents.
     shared_paused: Arc<AtomicBool>,

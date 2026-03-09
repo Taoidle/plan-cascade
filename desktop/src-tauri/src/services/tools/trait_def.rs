@@ -79,6 +79,11 @@ pub struct ToolExecutionContext {
     /// Optional file change tracker for recording LLM file modifications.
     /// When set, Write/Edit tools capture before/after snapshots in CAS.
     pub file_change_tracker: Option<Arc<Mutex<FileChangeTracker>>>,
+    /// Optional fixed turn index for file change recording.
+    /// When set, tools record all changes under this turn instead of the
+    /// tracker's mutable global index. Used by Plan/Task step or story runs
+    /// so nested sub-agents share the same group deterministically.
+    pub file_change_turn_index: Option<u32>,
 
     /// Optional permission gate for tool execution approval.
     /// When set, tool calls are checked against the session's permission level
@@ -525,6 +530,7 @@ mod tests {
             task_context: None,
             core_context: None,
             file_change_tracker: None,
+            file_change_turn_index: None,
             permission_gate: None,
             knowledge_pipeline: None,
             knowledge_project_id: None,

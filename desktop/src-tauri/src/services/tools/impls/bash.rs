@@ -188,6 +188,12 @@ impl Tool for BashTool {
         #[cfg(not(windows))]
         let (shell, shell_arg) = ("sh", "-c");
 
+        let before_workspace_snapshot = ctx
+            .file_change_tracker
+            .as_ref()
+            .and_then(|tracker| tracker.lock().ok())
+            .and_then(|tracker| tracker.capture_workspace_snapshot().ok());
+
         let mut cmd = Command::new(shell);
         cmd.arg(shell_arg)
             .arg(command)
@@ -242,9 +248,30 @@ impl Tool for BashTool {
             _ = ctx.cancellation_token.cancelled() => {
                 // Cancelled: kill the child process
                 let _ = child.kill().await;
-                return ToolResult::err("Command cancelled".to_string());
+                Err("cancelled")
             }
         };
+
+        if let (Some(tracker), Some(before_snapshot)) = (
+            ctx.file_change_tracker.as_ref(),
+            before_workspace_snapshot.as_ref(),
+        ) {
+            if let Ok(mut tracker_guard) = tracker.lock() {
+                if let Ok(after_snapshot) = tracker_guard.capture_workspace_snapshot() {
+                    let turn_index = ctx
+                        .file_change_turn_index
+                        .unwrap_or_else(|| tracker_guard.turn_index());
+                    tracker_guard.record_workspace_delta_between_at(
+                        turn_index,
+                        &format!("bash-{}", uuid::Uuid::new_v4()),
+                        "Bash",
+                        before_snapshot,
+                        &after_snapshot,
+                        command.trim(),
+                    );
+                }
+            }
+        }
 
         match result {
             Ok(Ok(output)) => {
@@ -295,6 +322,7 @@ impl Tool for BashTool {
                 }
             }
             Ok(Err(e)) => ToolResult::err(format!("Failed to execute command: {}", e)),
+            Err("cancelled") => ToolResult::err("Command cancelled".to_string()),
             Err(_) => ToolResult::err(format!("Command timed out after {} ms", timeout_ms)), // "timeout" sentinel
         }
     }
@@ -305,6 +333,9 @@ mod tests {
     use super::super::test_helpers::make_test_ctx;
     use super::*;
     use tempfile::TempDir;
+    use std::sync::{Arc, Mutex};
+
+    use crate::services::file_change_tracker::FileChangeTracker;
 
     #[tokio::test]
     async fn test_bash_tool_echo() {
@@ -316,6 +347,33 @@ mod tests {
         let result = tool.execute(&ctx, args).await;
         assert!(result.is_success());
         assert!(result.success_message_owned().unwrap().contains("hello"));
+    }
+
+    #[tokio::test]
+    async fn test_bash_tool_records_workspace_changes() {
+        let dir = TempDir::new().unwrap();
+        let tool = BashTool::new();
+        let mut ctx = make_test_ctx(dir.path());
+        let tracker = Arc::new(Mutex::new(FileChangeTracker::new_with_data_dir(
+            "bash-test",
+            dir.path(),
+            dir.path(),
+        )));
+        ctx.file_change_tracker = Some(Arc::clone(&tracker));
+        ctx.file_change_turn_index = Some(3);
+
+        let args = serde_json::json!({
+            "command": "printf 'tracked' > tracked.txt"
+        });
+        let result = tool.execute(&ctx, args).await;
+        assert!(result.is_success());
+
+        let changes = tracker.lock().unwrap().get_changes_by_turn();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].turn_index, 3);
+        assert_eq!(changes[0].changes.len(), 1);
+        assert_eq!(changes[0].changes[0].tool_name, "Bash");
+        assert_eq!(changes[0].changes[0].file_path, "tracked.txt");
     }
 
     #[tokio::test]

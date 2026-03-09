@@ -1532,6 +1532,7 @@ pub async fn execute_standalone(
             let next = t.turn_index() + 1;
             t.set_turn_index(next);
             t.set_app_handle(app.clone());
+            orchestrator = orchestrator.with_file_change_turn_index(next);
         }
         orchestrator = orchestrator.with_file_change_tracker(tracker);
     }
@@ -2117,6 +2118,7 @@ pub async fn execute_standalone_with_session(
             let next = t.turn_index() + 1;
             t.set_turn_index(next);
             t.set_app_handle(app.clone());
+            orchestrator = orchestrator.with_file_change_turn_index(next);
         }
         orchestrator = orchestrator.with_file_change_tracker(tracker);
     }
@@ -2737,6 +2739,7 @@ pub async fn resume_standalone_execution(
             let next = t.turn_index() + 1;
             t.set_turn_index(next);
             t.set_app_handle(app.clone());
+            orchestrator = orchestrator.with_file_change_turn_index(next);
         }
         orchestrator = orchestrator.with_file_change_tracker(tracker);
     }

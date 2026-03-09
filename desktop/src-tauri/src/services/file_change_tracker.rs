@@ -28,7 +28,7 @@ pub struct FileChange {
     pub tool_name: String,
     pub file_path: String,
     pub before_hash: Option<String>,
-    pub after_hash: String,
+    pub after_hash: Option<String>,
     pub timestamp: i64,
     pub description: String,
 }
@@ -61,6 +61,29 @@ pub struct RestorePreviewItem {
 pub struct RestoreExecutionResult {
     pub operation_id: Option<String>,
     pub restored: Vec<RestoredFile>,
+}
+
+/// A content-addressed snapshot of workspace files at a point in time.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WorkspaceChangeSnapshot {
+    pub files: HashMap<String, String>,
+}
+
+/// A detected workspace delta between two snapshots.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DetectedWorkspaceChange {
+    pub path: String,
+    pub before_hash: Option<String>,
+    pub after_hash: Option<String>,
+    pub change_type: WorkspaceChangeType,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceChangeType {
+    Created,
+    Modified,
+    Deleted,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,7 +119,7 @@ struct FileChangeEvent {
     tool_name: String,
     change_id: String,
     before_hash: Option<String>,
-    after_hash: String,
+    after_hash: Option<String>,
     description: String,
 }
 
@@ -258,6 +281,126 @@ impl FileChangeTracker {
         self.store_content(&bytes).ok()
     }
 
+    /// Capture a workspace snapshot for later delta calculation.
+    pub fn capture_workspace_snapshot(&self) -> Result<WorkspaceChangeSnapshot, String> {
+        let mut snapshot = WorkspaceChangeSnapshot::default();
+        self.capture_workspace_snapshot_dir(&self.project_root, &mut snapshot)?;
+        Ok(snapshot)
+    }
+
+    fn capture_workspace_snapshot_dir(
+        &self,
+        dir: &Path,
+        snapshot: &mut WorkspaceChangeSnapshot,
+    ) -> Result<(), String> {
+        let entries = fs::read_dir(dir)
+            .map_err(|e| format!("Failed to read workspace directory '{}': {}", dir.display(), e))?;
+        for entry in entries {
+            let entry =
+                entry.map_err(|e| format!("Failed to inspect workspace entry in '{}': {}", dir.display(), e))?;
+            let path = entry.path();
+            let file_type = entry
+                .file_type()
+                .map_err(|e| format!("Failed to inspect file type '{}': {}", path.display(), e))?;
+
+            if should_skip_workspace_path(&self.project_root, &self.data_dir, &path, file_type.is_dir()) {
+                continue;
+            }
+
+            if file_type.is_dir() {
+                self.capture_workspace_snapshot_dir(&path, snapshot)?;
+                continue;
+            }
+
+            if !file_type.is_file() {
+                continue;
+            }
+
+            let rel_path = path
+                .strip_prefix(&self.project_root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let bytes =
+                fs::read(&path).map_err(|e| format!("Failed to read workspace file '{}': {}", rel_path, e))?;
+            let hash = self.store_content(&bytes)?;
+            snapshot.files.insert(rel_path, hash);
+        }
+        Ok(())
+    }
+
+    pub fn detect_workspace_changes(
+        &self,
+        before: &WorkspaceChangeSnapshot,
+        after: &WorkspaceChangeSnapshot,
+    ) -> Vec<DetectedWorkspaceChange> {
+        let mut paths: Vec<String> = before
+            .files
+            .keys()
+            .chain(after.files.keys())
+            .cloned()
+            .collect();
+        paths.sort();
+        paths.dedup();
+
+        let mut changes = Vec::new();
+        for path in paths {
+            let before_hash = before.files.get(&path).cloned();
+            let after_hash = after.files.get(&path).cloned();
+            let change_type = match (&before_hash, &after_hash) {
+                (None, Some(_)) => Some(WorkspaceChangeType::Created),
+                (Some(_), None) => Some(WorkspaceChangeType::Deleted),
+                (Some(left), Some(right)) if left != right => Some(WorkspaceChangeType::Modified),
+                _ => None,
+            };
+
+            if let Some(change_type) = change_type {
+                changes.push(DetectedWorkspaceChange {
+                    path,
+                    before_hash,
+                    after_hash,
+                    change_type,
+                });
+            }
+        }
+
+        changes
+    }
+
+    pub fn record_workspace_delta_between_at(
+        &mut self,
+        turn_index: u32,
+        tool_call_id_prefix: &str,
+        tool_name: &str,
+        before: &WorkspaceChangeSnapshot,
+        after: &WorkspaceChangeSnapshot,
+        description_prefix: &str,
+    ) -> usize {
+        let changes = self.detect_workspace_changes(before, after);
+        for (idx, change) in changes.iter().enumerate() {
+            let action = match change.change_type {
+                WorkspaceChangeType::Created => "created",
+                WorkspaceChangeType::Modified => "modified",
+                WorkspaceChangeType::Deleted => "deleted",
+            };
+            let description = if description_prefix.is_empty() {
+                action.to_string()
+            } else {
+                format!("{description_prefix} {action}")
+            };
+            self.record_change_at(
+                turn_index,
+                &format!("{tool_call_id_prefix}-{idx}"),
+                tool_name,
+                &change.path,
+                change.before_hash.clone(),
+                change.after_hash.as_deref(),
+                &description,
+            );
+        }
+        changes.len()
+    }
+
     // ── Change Recording ────────────────────────────────────────────────
 
     /// Record a file modification.
@@ -267,25 +410,46 @@ impl FileChangeTracker {
         tool_name: &str,
         file_path: &str,
         before_hash: Option<String>,
-        after_hash: &str,
+        after_hash: Option<&str>,
+        description: &str,
+    ) {
+        self.record_change_at(
+            self.current_turn_index,
+            tool_call_id,
+            tool_name,
+            file_path,
+            before_hash,
+            after_hash,
+            description,
+        );
+    }
+
+    pub fn record_change_at(
+        &mut self,
+        turn_index: u32,
+        tool_call_id: &str,
+        tool_name: &str,
+        file_path: &str,
+        before_hash: Option<String>,
+        after_hash: Option<&str>,
         description: &str,
     ) {
         let change = FileChange {
             id: uuid::Uuid::new_v4().to_string(),
             session_id: self.session_id.clone(),
-            turn_index: self.current_turn_index,
+            turn_index,
             tool_call_id: tool_call_id.to_string(),
             tool_name: tool_name.to_string(),
             file_path: file_path.to_string(),
             before_hash,
-            after_hash: after_hash.to_string(),
+            after_hash: after_hash.map(|value| value.to_string()),
             timestamp: chrono::Utc::now().timestamp_millis(),
             description: description.to_string(),
         };
         // Capture event fields before moving change into the vec
         let event = FileChangeEvent {
             session_id: self.session_id.clone(),
-            turn_index: self.current_turn_index,
+            turn_index,
             file_path: change.file_path.clone(),
             tool_name: change.tool_name.clone(),
             change_id: change.id.clone(),
@@ -341,7 +505,7 @@ impl FileChangeTracker {
     pub fn get_file_diff(
         &self,
         before_hash: Option<&str>,
-        after_hash: &str,
+        after_hash: Option<&str>,
     ) -> Result<String, String> {
         let before_content = match before_hash {
             Some(h) => {
@@ -351,8 +515,13 @@ impl FileChangeTracker {
             None => String::new(),
         };
 
-        let after_bytes = self.get_content(after_hash)?;
-        let after_content = String::from_utf8_lossy(&after_bytes).to_string();
+        let after_content = match after_hash {
+            Some(h) => {
+                let after_bytes = self.get_content(h)?;
+                String::from_utf8_lossy(&after_bytes).to_string()
+            }
+            None => String::new(),
+        };
 
         Ok(unified_diff(&before_content, &after_content))
     }
@@ -640,6 +809,35 @@ impl FileChangeTracker {
     }
 }
 
+fn should_skip_workspace_path(
+    project_root: &Path,
+    tracker_data_dir: &Path,
+    path: &Path,
+    is_dir: bool,
+) -> bool {
+    if let Some(name) = path.file_name().and_then(|value| value.to_str()) {
+        if name == ".git" || name == ".plan-cascade" {
+            return true;
+        }
+    }
+
+    if path.starts_with(tracker_data_dir) {
+        return true;
+    }
+
+    if let Ok(global_plan_cascade_dir) = plan_cascade_dir() {
+        if path.starts_with(global_plan_cascade_dir) {
+            return true;
+        }
+    }
+
+    if is_dir {
+        return path == project_root.join(".git") || path == project_root.join(".plan-cascade");
+    }
+
+    false
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 fn sha256_hex(data: &[u8]) -> String {
@@ -756,14 +954,14 @@ mod tests {
         let mut tracker = make_tracker(dir.path());
 
         tracker.set_turn_index(0);
-        tracker.record_change("tc1", "Write", "src/a.rs", None, "hash_a", "Wrote 10 lines");
+        tracker.record_change("tc1", "Write", "src/a.rs", None, Some("hash_a"), "Wrote 10 lines");
         tracker.set_turn_index(1);
         tracker.record_change(
             "tc2",
             "Edit",
             "src/b.rs",
             Some("hash_b0".to_string()),
-            "hash_b1",
+            Some("hash_b1"),
             "Edited 1 occurrence",
         );
 
@@ -785,7 +983,7 @@ mod tests {
         tracker.set_turn_index(0);
         let after_hash = tracker.store_content(b"new content").unwrap();
         fs::write(&file_path, "new content").unwrap();
-        tracker.record_change("tc1", "Write", "new.txt", None, &after_hash, "Wrote file");
+        tracker.record_change("tc1", "Write", "new.txt", None, Some(&after_hash), "Wrote file");
 
         // Simulate: Turn 1 edits an existing file
         let existing = dir.path().join("existing.txt");
@@ -799,7 +997,7 @@ mod tests {
             "Edit",
             "existing.txt",
             Some(before_hash),
-            &edit_after,
+            Some(&edit_after),
             "Edited",
         );
 
@@ -840,7 +1038,7 @@ mod tests {
             "Write",
             "new.txt",
             None,
-            &new_after,
+            Some(&new_after),
             "Created new file",
         );
 
@@ -856,7 +1054,7 @@ mod tests {
             "Edit",
             "existing.txt",
             Some(existing_before),
-            &existing_after,
+            Some(&existing_after),
             "Edited existing file",
         );
 
@@ -894,7 +1092,7 @@ mod tests {
             "Edit",
             "existing.txt",
             Some(existing_before),
-            &existing_after,
+            Some(&existing_after),
             "Edited existing file",
         );
 
@@ -907,7 +1105,7 @@ mod tests {
             "Write",
             "new.txt",
             None,
-            &new_after,
+            Some(&new_after),
             "Created new file",
         );
 
@@ -931,7 +1129,7 @@ mod tests {
         {
             let mut tracker = make_tracker(dir.path());
             tracker.set_turn_index(2);
-            tracker.record_change("tc1", "Write", "a.txt", None, "hash1", "Wrote");
+            tracker.record_change("tc1", "Write", "a.txt", None, Some("hash1"), "Wrote");
         }
         // New tracker should reload persisted changes
         let tracker = make_tracker(dir.path());
@@ -945,7 +1143,7 @@ mod tests {
         let tracker = make_tracker(dir.path());
         let h1 = tracker.store_content(b"line 1\nline 2\nline 3").unwrap();
         let h2 = tracker.store_content(b"line 1\nmodified\nline 3").unwrap();
-        let diff = tracker.get_file_diff(Some(&h1), &h2).unwrap();
+        let diff = tracker.get_file_diff(Some(&h1), Some(&h2)).unwrap();
         assert!(diff.contains("+modified"));
         assert!(diff.contains("-line 2"));
     }
@@ -955,11 +1153,11 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut tracker = make_tracker(dir.path());
         tracker.set_turn_index(0);
-        tracker.record_change("tc1", "Write", "a.txt", None, "h1", "Wrote");
+        tracker.record_change("tc1", "Write", "a.txt", None, Some("h1"), "Wrote");
         tracker.set_turn_index(1);
-        tracker.record_change("tc2", "Write", "b.txt", None, "h2", "Wrote");
+        tracker.record_change("tc2", "Write", "b.txt", None, Some("h2"), "Wrote");
         tracker.set_turn_index(2);
-        tracker.record_change("tc3", "Write", "c.txt", None, "h3", "Wrote");
+        tracker.record_change("tc3", "Write", "c.txt", None, Some("h3"), "Wrote");
 
         tracker.truncate_from_turn(1);
         assert_eq!(tracker.change_count(), 1);
@@ -975,5 +1173,51 @@ mod tests {
         let big = vec![0u8; MAX_CAS_FILE_SIZE + 1];
         let result = tracker.store_content(&big);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_workspace_snapshot_detects_create_modify_delete() {
+        let dir = TempDir::new().unwrap();
+        let mut tracker = make_tracker(dir.path());
+
+        fs::write(dir.path().join("old.txt"), "remove me").unwrap();
+        fs::write(dir.path().join("keep.txt"), "before").unwrap();
+        let before = tracker.capture_workspace_snapshot().unwrap();
+
+        fs::remove_file(dir.path().join("old.txt")).unwrap();
+        fs::write(dir.path().join("keep.txt"), "after").unwrap();
+        fs::write(dir.path().join("new.txt"), "created").unwrap();
+        let after = tracker.capture_workspace_snapshot().unwrap();
+
+        let changes = tracker.detect_workspace_changes(&before, &after);
+        assert_eq!(changes.len(), 3);
+        assert!(changes.iter().any(|change| {
+            change.path == "old.txt" && change.change_type == WorkspaceChangeType::Deleted
+        }));
+        assert!(changes.iter().any(|change| {
+            change.path == "keep.txt" && change.change_type == WorkspaceChangeType::Modified
+        }));
+        assert!(changes.iter().any(|change| {
+            change.path == "new.txt" && change.change_type == WorkspaceChangeType::Created
+        }));
+
+        tracker.record_workspace_delta_between_at(
+            7,
+            "workspace",
+            "Bash",
+            &before,
+            &after,
+            "workspace delta",
+        );
+        let turns = tracker.get_changes_by_turn();
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].turn_index, 7);
+        assert_eq!(turns[0].changes.len(), 3);
+        let deleted = turns[0]
+            .changes
+            .iter()
+            .find(|change| change.file_path == "old.txt")
+            .unwrap();
+        assert!(deleted.after_hash.is_none());
     }
 }

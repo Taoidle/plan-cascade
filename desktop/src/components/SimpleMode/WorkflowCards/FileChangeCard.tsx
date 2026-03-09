@@ -78,7 +78,9 @@ export function FileChangeCard({ data }: { data: FileChangeCardData }) {
             'inline-block rounded px-1.5 py-0.5 text-2xs font-medium shrink-0',
             data.toolName === 'Write'
               ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-              : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
+              : data.toolName === 'Bash'
+                ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
           )}
         >
           {data.toolName}
@@ -96,10 +98,16 @@ export function FileChangeCard({ data }: { data: FileChangeCardData }) {
             'inline-block rounded px-1.5 py-0.5 text-2xs font-medium shrink-0',
             data.changeType === 'new_file'
               ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-              : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
+              : data.changeType === 'deleted'
+                ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+                : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
           )}
         >
-          {data.changeType === 'new_file' ? t('workflow.fileChange.newFile') : t('workflow.fileChange.modified')}
+          {data.changeType === 'new_file'
+            ? t('workflow.fileChange.newFile')
+            : data.changeType === 'deleted'
+              ? t('workflow.fileChange.deleted')
+              : t('workflow.fileChange.modified')}
         </span>
       </div>
 

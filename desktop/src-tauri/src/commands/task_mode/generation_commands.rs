@@ -1191,6 +1191,7 @@ pub async fn explore_project(
     app_state: tauri::State<'_, AppState>,
     standalone_state: tauri::State<'_, crate::commands::standalone::StandaloneState>,
     knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
+    file_changes_state: tauri::State<'_, crate::commands::file_changes::FileChangesState>,
     kernel_state: tauri::State<'_, WorkflowKernelState>,
     app_handle: tauri::AppHandle,
 ) -> Result<CommandResponse<ExplorationResult>, String> {
@@ -1443,6 +1444,26 @@ pub async fn explore_project(
                 let (search_provider, search_api_key) = resolve_search_provider_for_tools();
                 let mut coordinator = crate::services::orchestrator::OrchestratorService::new(config)
                     .with_search_provider(&search_provider, search_api_key);
+                let tracker_session_id = kernel_state
+                    .inner()
+                    .linked_kernel_sessions_for_mode_session(WorkflowMode::Task, &session_id)
+                    .await
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| session_id.clone());
+                let file_change_tracker = file_changes_state
+                    .get_or_create(&tracker_session_id, &project_path.to_string_lossy())
+                    .await;
+                let tracker_for_orchestrator = std::sync::Arc::clone(&file_change_tracker);
+                if let Ok(mut tracker) = file_change_tracker.lock() {
+                    tracker.set_app_handle(app_handle.clone());
+                    let next = tracker.turn_index().saturating_add(1);
+                    tracker.set_turn_index(next);
+                    drop(tracker);
+                    coordinator = coordinator
+                        .with_file_change_tracker(tracker_for_orchestrator)
+                        .with_file_change_turn_index(next);
+                }
 
                 // Wire database pool for CodebaseSearch
                 if let Ok(pool) = app_state.with_database(|db| Ok(db.pool().clone())).await {

@@ -877,6 +877,7 @@
     "fileChange": {
       "newFile": "新規ファイル",
       "modified": "変更済み",
+      "deleted": "削除済み",
       "expandDiff": "完全なDiffを展開",
       "collapseDiff": "折りたたむ",
       "viewInChanges": "変更一覧で表示",

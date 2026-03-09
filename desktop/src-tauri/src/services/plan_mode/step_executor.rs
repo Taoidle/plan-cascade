@@ -8,7 +8,7 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::Instant;
 
@@ -22,6 +22,7 @@ use crate::services::llm::provider::LlmProvider;
 use crate::services::llm::types::{
     LlmRequestOptions, Message, MessageRole, ProviderConfig, ToolDefinition,
 };
+use crate::services::file_change_tracker::FileChangeTracker;
 use crate::services::orchestrator::embedding_manager::EmbeddingManager;
 use crate::services::orchestrator::embedding_service::EmbeddingService;
 use crate::services::orchestrator::hnsw_index::HnswIndex;
@@ -104,6 +105,7 @@ impl Default for StepExecutionConfig {
 pub struct StepExecutionRuntime {
     pub provider_config: ProviderConfig,
     pub project_root: PathBuf,
+    pub file_change_tracker: Option<Arc<Mutex<FileChangeTracker>>>,
     pub index_store: Option<Arc<IndexStore>>,
     pub embedding_service: Option<Arc<EmbeddingService>>,
     pub embedding_manager: Option<Arc<EmbeddingManager>>,
@@ -1652,6 +1654,19 @@ async fn execute_single_step(
         };
 
         let mut orchestrator = OrchestratorService::new(config);
+        if let Some(tracker) = runtime.file_change_tracker.as_ref() {
+            let turn_index = match tracker.lock() {
+                Ok(mut guard) => {
+                    let next = guard.turn_index() + 1;
+                    guard.set_turn_index(next);
+                    next
+                }
+                Err(_) => 0,
+            };
+            orchestrator = orchestrator
+                .with_file_change_tracker(Arc::clone(tracker))
+                .with_file_change_turn_index(turn_index);
+        }
         let mut tools = resolve_step_tools(adapter, step);
         if matches!(retry_failure_category, Some(FailureCategory::MaxIterations)) {
             let narrowed = narrow_tools_for_max_iteration_retry(&tools);

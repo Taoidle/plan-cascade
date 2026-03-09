@@ -175,14 +175,26 @@ impl Tool for EditTool {
                                 "Edited 1 occurrence".to_string()
                             };
                             let tool_call_id = format!("edit-{}", uuid::Uuid::new_v4());
-                            t.record_change(
-                                &tool_call_id,
-                                "Edit",
-                                &rel_path,
-                                before_hash,
-                                &after_hash,
-                                &desc,
-                            );
+                            if let Some(turn_index) = ctx.file_change_turn_index {
+                                t.record_change_at(
+                                    turn_index,
+                                    &tool_call_id,
+                                    "Edit",
+                                    &rel_path,
+                                    before_hash,
+                                    Some(&after_hash),
+                                    &desc,
+                                );
+                            } else {
+                                t.record_change(
+                                    &tool_call_id,
+                                    "Edit",
+                                    &rel_path,
+                                    before_hash,
+                                    Some(&after_hash),
+                                    &desc,
+                                );
+                            }
                         }
                     }
                 }

@@ -2123,6 +2123,9 @@ fn build_story_executor(
     skills_block: String,
     selected_skill_matches: Vec<crate::services::skills::model::SkillMatch>,
     knowledge_tool_params: Option<KnowledgeToolParams>,
+    file_change_tracker: Option<
+        Arc<std::sync::Mutex<crate::services::file_change_tracker::FileChangeTracker>>,
+    >,
 ) -> impl Fn(StoryExecutionContext) -> Pin<Box<dyn Future<Output = StoryExecutionOutcome> + Send>>
        + Send
        + Sync
@@ -2141,6 +2144,7 @@ fn build_story_executor(
         let skills_block = skills_block.clone();
         let selected_skill_matches = selected_skill_matches.clone();
         let knowledge_tool_params = knowledge_tool_params.clone();
+        let file_change_tracker = file_change_tracker.clone();
         Box::pin(async move {
             eprintln!(
                 "[INFO] Executing story '{}' (attempt {}) with agent '{}' in {} [mode: {:?}]",
@@ -2181,6 +2185,13 @@ fn build_story_executor(
 
             // Build execution prompt from story context
             let prompt = build_story_prompt(&ctx, &knowledge_block, &memory_block, &skills_block);
+            let file_change_turn_index = file_change_tracker.as_ref().and_then(|tracker| {
+                tracker.lock().ok().map(|mut guard| {
+                    let next = guard.turn_index().saturating_add(1);
+                    guard.set_turn_index(next);
+                    next
+                })
+            });
 
             match mode {
                 StoryExecutionMode::Cli => {
@@ -2190,6 +2201,8 @@ fn build_story_executor(
                         &prompt,
                         &ctx.project_path,
                         ctx.cancel_token.clone(),
+                        file_change_tracker.clone(),
+                        file_change_turn_index,
                     )
                     .await
                 }
@@ -2210,6 +2223,8 @@ fn build_story_executor(
                         selected_skill_matches.as_slice(),
                         knowledge_tool_params.as_ref(),
                         ctx.cancel_token.clone(),
+                        file_change_tracker.clone(),
+                        file_change_turn_index,
                     )
                     .await
                 }
@@ -2228,6 +2243,10 @@ async fn execute_story_via_agent(
     prompt: &str,
     project_path: &std::path::Path,
     cancel_token: tokio_util::sync::CancellationToken,
+    file_change_tracker: Option<
+        Arc<std::sync::Mutex<crate::services::file_change_tracker::FileChangeTracker>>,
+    >,
+    file_change_turn_index: Option<u32>,
 ) -> StoryExecutionOutcome {
     use tokio::process::Command;
 
@@ -2266,6 +2285,11 @@ async fn execute_story_via_agent(
         project_path.display()
     );
 
+    let before_workspace_snapshot = file_change_tracker
+        .as_ref()
+        .and_then(|tracker| tracker.lock().ok())
+        .and_then(|tracker| tracker.capture_workspace_snapshot().ok());
+
     let mut process_builder = Command::new(&command);
     process_builder
         .args(&args)
@@ -2288,7 +2312,7 @@ async fn execute_story_via_agent(
 
     let mut wait_handle = tokio::spawn(async move { child.wait_with_output().await });
 
-    tokio::select! {
+    let outcome = tokio::select! {
         _ = cancel_token.cancelled() => {
             wait_handle.abort();
             eprintln!("[INFO] Agent '{}' execution cancelled", command);
@@ -2338,7 +2362,29 @@ async fn execute_story_via_agent(
                 }
             }
         }
+    };
+
+    if let (Some(tracker), Some(before_snapshot)) = (
+        file_change_tracker.as_ref(),
+        before_workspace_snapshot.as_ref(),
+    ) {
+        if let Ok(mut tracker_guard) = tracker.lock() {
+            if let Ok(after_snapshot) = tracker_guard.capture_workspace_snapshot() {
+                let turn_index = file_change_turn_index
+                    .unwrap_or_else(|| tracker_guard.turn_index());
+                tracker_guard.record_workspace_delta_between_at(
+                    turn_index,
+                    &format!("agent-{}", uuid::Uuid::new_v4()),
+                    "Bash",
+                    before_snapshot,
+                    &after_snapshot,
+                    &format!("{} story execution", command),
+                );
+            }
+        }
     }
+
+    outcome
 }
 
 /// Execute a story via the OrchestratorService using direct LLM API.
@@ -2361,6 +2407,10 @@ async fn execute_story_via_llm(
     selected_skill_matches: &[crate::services::skills::model::SkillMatch],
     knowledge_tool_params: Option<&KnowledgeToolParams>,
     cancel_token: tokio_util::sync::CancellationToken,
+    file_change_tracker: Option<
+        Arc<std::sync::Mutex<crate::services::file_change_tracker::FileChangeTracker>>,
+    >,
+    file_change_turn_index: Option<u32>,
 ) -> StoryExecutionOutcome {
     use crate::services::orchestrator::{OrchestratorConfig, OrchestratorService};
     use crate::services::streaming::UnifiedStreamEvent;
@@ -2423,6 +2473,13 @@ async fn execute_story_via_llm(
     let mut orchestrator = OrchestratorService::new(config)
         .with_search_provider(&search_provider, search_api_key)
         .with_permission_gate(permission_gate.clone());
+
+    if let Some(ref tracker) = file_change_tracker {
+        orchestrator = orchestrator.with_file_change_tracker(Arc::clone(tracker));
+    }
+    if let Some(turn_index) = file_change_turn_index {
+        orchestrator = orchestrator.with_file_change_turn_index(turn_index);
+    }
 
     if !selected_skill_matches.is_empty() {
         let selected_skills =

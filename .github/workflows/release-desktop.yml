@@ -68,7 +68,7 @@ jobs:
           shopt -u nullglob
           for patch_file in "${patches[@]}"; do
             echo "Applying patch: $(basename "$patch_file")"
-            git -C "$TMP_DIR/upstream" apply --whitespace=nowarn "$patch_file"
+            patch -p0 -d "$TMP_DIR/upstream" < "$patch_file"
           done
 
           rm -rf "$VENDOR_DIR"

@@ -348,6 +348,8 @@ pub struct ToolExecutor {
     registry: super::trait_def::ToolRegistry,
     /// Optional file change tracker for recording LLM file modifications.
     file_change_tracker: Option<Arc<Mutex<FileChangeTracker>>>,
+    /// Optional fixed turn index to use when recording file changes.
+    file_change_turn_index: Option<u32>,
     /// Optional permission gate for tool execution approval.
     permission_gate: Option<Arc<crate::services::orchestrator::permission_gate::PermissionGate>>,
     /// Cancellation token propagated from the orchestrator.
@@ -413,6 +415,7 @@ impl ToolExecutor {
             hnsw_index: None,
             registry: Self::build_registry(),
             file_change_tracker: None,
+            file_change_turn_index: None,
             permission_gate: None,
             cancellation_token: tokio_util::sync::CancellationToken::new(),
             knowledge_pipeline: None,
@@ -445,6 +448,7 @@ impl ToolExecutor {
             hnsw_index: None,
             registry: Self::build_registry(),
             file_change_tracker: None,
+            file_change_turn_index: None,
             permission_gate: None,
             cancellation_token: tokio_util::sync::CancellationToken::new(),
             knowledge_pipeline: None,
@@ -547,6 +551,16 @@ impl ToolExecutor {
     /// Get the file change tracker Arc (if set).
     pub fn get_file_change_tracker(&self) -> Option<Arc<Mutex<FileChangeTracker>>> {
         self.file_change_tracker.clone()
+    }
+
+    /// Set the fixed turn index to use for file change recording.
+    pub fn set_file_change_turn_index(&mut self, turn_index: u32) {
+        self.file_change_turn_index = Some(turn_index);
+    }
+
+    /// Get the fixed turn index for file change recording.
+    pub fn get_file_change_turn_index(&self) -> Option<u32> {
+        self.file_change_turn_index
     }
 
     /// Set the cancellation token propagated from the orchestrator.
@@ -662,6 +676,7 @@ impl ToolExecutor {
             task_context: None, // Set by callers who have TaskContext
             core_context: None, // Set by callers who have OrchestratorContext
             file_change_tracker: self.file_change_tracker.clone(),
+            file_change_turn_index: self.file_change_turn_index,
             permission_gate: self.permission_gate.clone(),
             knowledge_pipeline: self.knowledge_pipeline.clone(),
             knowledge_project_id: self.knowledge_project_id.clone(),

@@ -317,10 +317,10 @@ export interface ExplorationCardData {
 export interface FileChangeCardData {
   changeId: string;
   filePath: string;
-  toolName: 'Write' | 'Edit';
-  changeType: 'new_file' | 'modified';
+  toolName: 'Write' | 'Edit' | 'Bash';
+  changeType: 'new_file' | 'modified' | 'deleted';
   beforeHash: string | null;
-  afterHash: string;
+  afterHash: string | null;
   diffPreview: string | null;
   linesAdded: number;
   linesRemoved: number;
@@ -336,8 +336,8 @@ export interface TurnChangeSummaryCardData {
   totalFiles: number;
   files: Array<{
     filePath: string;
-    toolName: 'Write' | 'Edit';
-    changeType: 'new_file' | 'modified';
+    toolName: 'Write' | 'Edit' | 'Bash';
+    changeType: 'new_file' | 'modified' | 'deleted';
     linesAdded: number;
     linesRemoved: number;
   }>;

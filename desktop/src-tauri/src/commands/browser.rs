@@ -123,6 +123,7 @@ fn make_minimal_ctx() -> crate::services::tools::trait_def::ToolExecutionContext
         task_context: None,
         core_context: None,
         file_change_tracker: None,
+        file_change_turn_index: None,
         permission_gate: None,
         knowledge_pipeline: None,
         knowledge_project_id: None,

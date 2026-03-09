@@ -138,10 +138,16 @@ export function TurnChangeSummaryCard({ data }: { data: TurnChangeSummaryCardDat
                   'shrink-0 rounded px-1 py-0.5 font-medium',
                   file.changeType === 'new_file'
                     ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-                    : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
+                    : file.changeType === 'deleted'
+                      ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+                      : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
                 )}
               >
-                {file.changeType === 'new_file' ? t('workflow.fileChange.newFile') : t('workflow.fileChange.modified')}
+                {file.changeType === 'new_file'
+                  ? t('workflow.fileChange.newFile')
+                  : file.changeType === 'deleted'
+                    ? t('workflow.fileChange.deleted')
+                    : t('workflow.fileChange.modified')}
               </span>
               <span className="shrink-0 font-mono text-gray-500 dark:text-gray-400">
                 <span className="text-green-600 dark:text-green-400">+{file.linesAdded}</span>

@@ -27,7 +27,7 @@ interface FileChangeEvent {
   tool_name: string;
   change_id: string;
   before_hash: string | null;
-  after_hash: string;
+  after_hash: string | null;
   description: string;
 }
 
@@ -120,8 +120,8 @@ export function createFileChangeCardBridge(sessionId: string, projectRoot: strin
         const cardData: FileChangeCardData = {
           changeId: event.change_id,
           filePath: event.file_path,
-          toolName: event.tool_name as 'Write' | 'Edit',
-          changeType: event.before_hash === null ? 'new_file' : 'modified',
+          toolName: event.tool_name as 'Write' | 'Edit' | 'Bash',
+          changeType: event.after_hash === null ? 'deleted' : event.before_hash === null ? 'new_file' : 'modified',
           beforeHash: event.before_hash,
           afterHash: event.after_hash,
           diffPreview,
@@ -206,8 +206,8 @@ export function createFileChangeCardBridge(sessionId: string, projectRoot: strin
         totalFiles: changes.length,
         files: changes.map((c) => ({
           filePath: c.event.file_path,
-          toolName: c.event.tool_name as 'Write' | 'Edit',
-          changeType: c.event.before_hash === null ? 'new_file' : 'modified',
+          toolName: c.event.tool_name as 'Write' | 'Edit' | 'Bash',
+          changeType: c.event.after_hash === null ? 'deleted' : c.event.before_hash === null ? 'new_file' : 'modified',
           linesAdded: c.linesAdded,
           linesRemoved: c.linesRemoved,
         })),

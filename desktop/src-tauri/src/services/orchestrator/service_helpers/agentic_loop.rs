@@ -1969,6 +1969,8 @@ impl OrchestratorService {
             shared_analytics_tx: self.analytics_tx.clone(),
             shared_analytics_cost_calculator: self.analytics_cost_calculator.clone(),
             shared_permission_gate: self.permission_gate.clone(),
+            shared_file_change_tracker: self.tool_executor.get_file_change_tracker(),
+            shared_file_change_turn_index: self.tool_executor.get_file_change_turn_index(),
             shared_paused: Arc::clone(&self.paused),
             plugin_instructions_snapshot,
             plugin_skills_snapshot,

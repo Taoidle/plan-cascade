@@ -143,14 +143,26 @@ impl Tool for WriteTool {
                                 .to_string_lossy()
                                 .to_string();
                             let tool_call_id = format!("write-{}", uuid::Uuid::new_v4());
-                            t.record_change(
-                                &tool_call_id,
-                                "Write",
-                                &rel_path,
-                                before_hash,
-                                &after_hash,
-                                &format!("Wrote {} lines", line_count),
-                            );
+                            if let Some(turn_index) = ctx.file_change_turn_index {
+                                t.record_change_at(
+                                    turn_index,
+                                    &tool_call_id,
+                                    "Write",
+                                    &rel_path,
+                                    before_hash,
+                                    Some(&after_hash),
+                                    &format!("Wrote {} lines", line_count),
+                                );
+                            } else {
+                                t.record_change(
+                                    &tool_call_id,
+                                    "Write",
+                                    &rel_path,
+                                    before_hash,
+                                    Some(&after_hash),
+                                    &format!("Wrote {} lines", line_count),
+                                );
+                            }
                         }
                     }
                 }

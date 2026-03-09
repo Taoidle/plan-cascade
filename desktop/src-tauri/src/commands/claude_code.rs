@@ -2,6 +2,8 @@
 //!
 //! Tauri commands for Claude Code CLI integration.
 
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::RwLock;
@@ -15,6 +17,7 @@ use crate::models::response::CommandResponse;
 use crate::services::claude_code::{
     channels, ActiveSessionManager, ChatHandler, StreamEventPayload,
 };
+use crate::services::file_change_tracker::WorkspaceChangeSnapshot;
 use crate::services::streaming::UnifiedStreamEvent;
 use crate::services::webhook::integration::dispatch_on_event as dispatch_webhook_on_event;
 use crate::services::workflow_kernel::{ChatRuntimeDispatch, WorkflowKernelState};
@@ -41,6 +44,36 @@ impl Default for ClaudeCodeState {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn extract_tool_file_paths(tool_name: &str, arguments: &str) -> Vec<String> {
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(arguments) else {
+        return Vec::new();
+    };
+    match tool_name.to_lowercase().as_str() {
+        "write" | "edit" => json
+            .get("file_path")
+            .and_then(|value| value.as_str())
+            .map(|value| vec![value.to_string()])
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+fn resolve_tool_file_path(project_root: &Path, raw_path: &str) -> PathBuf {
+    let candidate = PathBuf::from(raw_path);
+    if candidate.is_absolute() {
+        candidate
+    } else {
+        project_root.join(candidate)
+    }
+}
+
+fn tracker_relative_path(project_root: &Path, path: &Path) -> String {
+    path.strip_prefix(project_root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 /// Start a new Claude Code chat session
@@ -91,6 +124,7 @@ pub async fn send_message(
     request: SendMessageRequest,
     state: State<'_, ClaudeCodeState>,
     app_state: State<'_, AppState>,
+    file_changes_state: State<'_, crate::commands::file_changes::FileChangesState>,
     workflow_state: State<'_, WorkflowKernelState>,
     webhook_state: State<'_, WebhookState>,
     app: AppHandle,
@@ -104,6 +138,31 @@ pub async fn send_message(
     let webhook_project_path = session_for_webhook
         .as_ref()
         .map(|session| session.project_path.clone());
+    let tracker_session_id = request
+        .kernel_session_id
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| request.session_id.clone());
+    let tracker_project_root = session_for_webhook
+        .as_ref()
+        .map(|session| PathBuf::from(session.project_path.clone()));
+    let tracker_bundle = if let Some(project_root) = tracker_project_root.as_ref() {
+        let tracker = file_changes_state
+            .get_or_create(&tracker_session_id, &project_root.to_string_lossy())
+            .await;
+        let mut turn_index = None;
+        if let Ok(mut guard) = tracker.lock() {
+            guard.set_app_handle(app.clone());
+            let next = guard.turn_index().saturating_add(1);
+            guard.set_turn_index(next);
+            turn_index = Some(next);
+        }
+        turn_index.map(|idx| (tracker, project_root.clone(), idx))
+    } else {
+        None
+    };
 
     match chat_handler
         .send_message(&request.session_id, &request.prompt)
@@ -134,9 +193,13 @@ pub async fn send_message(
             }
             let mut rx = receiver;
             let session_id = request.session_id.clone();
-            let kernel_session_id = request.kernel_session_id.clone();
             let response_execution_id = execution_id.clone();
             let workflow_kernel = workflow_state.inner().clone();
+            let tracker_for_events = tracker_bundle.as_ref().map(|(tracker, _, _)| Arc::clone(tracker));
+            let tracker_project_root = tracker_bundle
+                .as_ref()
+                .map(|(_, project_root, _)| project_root.clone());
+            let tracker_turn_index = tracker_bundle.as_ref().map(|(_, _, turn_index)| *turn_index);
             eprintln!(
                 "[DEBUG] send_message: spawning event forwarder for session {} execution {}",
                 session_id, execution_id
@@ -144,6 +207,12 @@ pub async fn send_message(
             // Spawn a task to forward events from the mpsc channel to Tauri events
             tokio::spawn(async move {
                 let mut event_count = 0u32;
+                let mut tool_names = HashMap::<String, String>::new();
+                let mut tool_arguments = HashMap::<String, String>::new();
+                let mut tool_file_snapshots =
+                    HashMap::<String, Vec<(String, Option<String>)>>::new();
+                let mut tool_workspace_snapshots =
+                    HashMap::<String, WorkspaceChangeSnapshot>::new();
                 while let Some(event) = rx.recv().await {
                     event_count += 1;
                     if let Some(service) = webhook_service.clone() {
@@ -161,6 +230,173 @@ pub async fn send_message(
                         "[DEBUG] forwarding event #{} to frontend for session {}",
                         event_count, session_id
                     );
+                    match &event {
+                        UnifiedStreamEvent::ToolStart {
+                            tool_id,
+                            tool_name,
+                            arguments,
+                        } => {
+                            tool_names.insert(tool_id.clone(), tool_name.clone());
+                            if let Some(arguments) = arguments.clone() {
+                                tool_arguments.insert(tool_id.clone(), arguments.clone());
+                                if let (Some(tracker), Some(project_root)) =
+                                    (tracker_for_events.as_ref(), tracker_project_root.as_ref())
+                                {
+                                    if tool_name.eq_ignore_ascii_case("bash") {
+                                        if let Ok(guard) = tracker.lock() {
+                                            if let Ok(snapshot) = guard.capture_workspace_snapshot() {
+                                                tool_workspace_snapshots
+                                                    .insert(tool_id.clone(), snapshot);
+                                            }
+                                        }
+                                    } else if tool_name.eq_ignore_ascii_case("write")
+                                        || tool_name.eq_ignore_ascii_case("edit")
+                                    {
+                                        if let Ok(guard) = tracker.lock() {
+                                            let snapshots = extract_tool_file_paths(tool_name, &arguments)
+                                                .into_iter()
+                                                .map(|raw_path| {
+                                                    let absolute_path =
+                                                        resolve_tool_file_path(project_root, &raw_path);
+                                                    let relative_path =
+                                                        tracker_relative_path(project_root, &absolute_path);
+                                                    let before_hash = guard.capture_before(&absolute_path);
+                                                    (relative_path, before_hash)
+                                                })
+                                                .collect::<Vec<_>>();
+                                            if !snapshots.is_empty() {
+                                                tool_file_snapshots.insert(tool_id.clone(), snapshots);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        UnifiedStreamEvent::ToolComplete {
+                            tool_id,
+                            tool_name,
+                            arguments,
+                        } => {
+                            tool_arguments.insert(tool_id.clone(), arguments.clone());
+                            tool_names
+                                .entry(tool_id.clone())
+                                .or_insert_with(|| tool_name.clone());
+                            if let (Some(tracker), Some(project_root)) =
+                                (tracker_for_events.as_ref(), tracker_project_root.as_ref())
+                            {
+                                if tool_name.eq_ignore_ascii_case("bash")
+                                    && !tool_workspace_snapshots.contains_key(tool_id)
+                                {
+                                    if let Ok(guard) = tracker.lock() {
+                                        if let Ok(snapshot) = guard.capture_workspace_snapshot() {
+                                            tool_workspace_snapshots
+                                                .insert(tool_id.clone(), snapshot);
+                                        }
+                                    }
+                                } else if (tool_name.eq_ignore_ascii_case("write")
+                                    || tool_name.eq_ignore_ascii_case("edit"))
+                                    && !tool_file_snapshots.contains_key(tool_id)
+                                {
+                                    if let Ok(guard) = tracker.lock() {
+                                        let snapshots = extract_tool_file_paths(tool_name, arguments)
+                                            .into_iter()
+                                            .map(|raw_path| {
+                                                let absolute_path =
+                                                    resolve_tool_file_path(project_root, &raw_path);
+                                                let relative_path =
+                                                    tracker_relative_path(project_root, &absolute_path);
+                                                let before_hash = guard.capture_before(&absolute_path);
+                                                (relative_path, before_hash)
+                                            })
+                                            .collect::<Vec<_>>();
+                                        if !snapshots.is_empty() {
+                                            tool_file_snapshots.insert(tool_id.clone(), snapshots);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        UnifiedStreamEvent::ToolResult { tool_id, .. } => {
+                            if let (Some(tracker), Some(project_root), Some(turn_index)) = (
+                                tracker_for_events.as_ref(),
+                                tracker_project_root.as_ref(),
+                                tracker_turn_index,
+                            ) {
+                                let tool_name = tool_names.remove(tool_id);
+                                let arguments = tool_arguments.remove(tool_id);
+                                if let Some(tool_name) = tool_name {
+                                    if tool_name.eq_ignore_ascii_case("bash") {
+                                        if let Some(before_snapshot) =
+                                            tool_workspace_snapshots.remove(tool_id)
+                                        {
+                                            if let Ok(mut guard) = tracker.lock() {
+                                                if let Ok(after_snapshot) =
+                                                    guard.capture_workspace_snapshot()
+                                                {
+                                                    guard.record_workspace_delta_between_at(
+                                                        turn_index,
+                                                        &format!("claude-{tool_id}"),
+                                                        "Bash",
+                                                        &before_snapshot,
+                                                        &after_snapshot,
+                                                        "Claude Code Bash",
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    } else if (tool_name.eq_ignore_ascii_case("write")
+                                        || tool_name.eq_ignore_ascii_case("edit"))
+                                        && arguments.is_some()
+                                    {
+                                        if let Some(before_files) = tool_file_snapshots.remove(tool_id)
+                                        {
+                                            if let Ok(mut guard) = tracker.lock() {
+                                                for (idx, (relative_path, before_hash)) in
+                                                    before_files.into_iter().enumerate()
+                                                {
+                                                    let absolute_path =
+                                                        project_root.join(&relative_path);
+                                                    let after_hash = if absolute_path.exists() {
+                                                        std::fs::read(&absolute_path)
+                                                            .ok()
+                                                            .and_then(|bytes| {
+                                                                guard.store_content(&bytes).ok()
+                                                            })
+                                                    } else {
+                                                        None
+                                                    };
+                                                    let description = match (
+                                                        before_hash.as_ref(),
+                                                        after_hash.as_ref(),
+                                                    ) {
+                                                        (None, Some(_)) => {
+                                                            format!("Claude Code {} created file", tool_name)
+                                                        }
+                                                        (Some(_), None) => {
+                                                            format!("Claude Code {} deleted file", tool_name)
+                                                        }
+                                                        _ => {
+                                                            format!("Claude Code {} modified file", tool_name)
+                                                        }
+                                                    };
+                                                    guard.record_change_at(
+                                                        turn_index,
+                                                        &format!("claude-{tool_id}-{idx}"),
+                                                        &tool_name,
+                                                        &relative_path,
+                                                        before_hash,
+                                                        after_hash.as_deref(),
+                                                        &description,
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
                     let payload = StreamEventPayload {
                         event,
                         session_id: session_id.clone(),

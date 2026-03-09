@@ -60,7 +60,7 @@ export function TurnGroup({ turn, sessionId, projectRoot, onRestoreComplete, onU
     const seen = new Map<string, boolean>();
     for (const change of turn.changes) {
       if (!seen.has(change.file_path)) {
-        seen.set(change.file_path, change.before_hash === null);
+        seen.set(change.file_path, change.before_hash === null && change.after_hash !== null);
       }
     }
     return Array.from(seen.entries()).map(([path, willDelete]) => ({

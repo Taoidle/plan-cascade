@@ -8,10 +8,10 @@ export interface FileChange {
   session_id: string;
   turn_index: number;
   tool_call_id: string;
-  tool_name: 'Write' | 'Edit';
+  tool_name: 'Write' | 'Edit' | 'Bash';
   file_path: string;
   before_hash: string | null;
-  after_hash: string;
+  after_hash: string | null;
   timestamp: number;
   description: string;
 }

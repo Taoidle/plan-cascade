@@ -877,6 +877,7 @@
     "fileChange": {
       "newFile": "New File",
       "modified": "Modified",
+      "deleted": "Deleted",
       "expandDiff": "Expand Full Diff",
       "collapseDiff": "Collapse",
       "viewInChanges": "View in Changes",

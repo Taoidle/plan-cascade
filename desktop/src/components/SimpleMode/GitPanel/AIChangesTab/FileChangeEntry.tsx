@@ -67,7 +67,9 @@ export function FileChangeEntry({ change, sessionId, projectRoot }: FileChangeEn
             'inline-block min-w-[2.5rem] text-center rounded px-1 py-0.5 text-2xs font-medium shrink-0',
             change.tool_name === 'Write'
               ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-              : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
+              : change.tool_name === 'Bash'
+                ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
           )}
         >
           {change.tool_name}

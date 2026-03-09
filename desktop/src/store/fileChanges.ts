@@ -34,7 +34,7 @@ interface FileChangesState {
     projectRoot: string,
     changeId: string,
     beforeHash: string | null,
-    afterHash: string,
+    afterHash: string | null,
   ) => Promise<string | null>;
   previewRestoreToTurn: (
     sessionId: string,

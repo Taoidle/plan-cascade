@@ -390,6 +390,7 @@ pub async fn generate_plan(
 pub async fn approve_plan(
     request: ApprovePlanRequest,
     state: tauri::State<'_, PlanModeState>,
+    file_changes_state: tauri::State<'_, crate::commands::file_changes::FileChangesState>,
     app_state: tauri::State<'_, AppState>,
     knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
     standalone_state: tauri::State<'_, crate::commands::standalone::StandaloneState>,
@@ -546,6 +547,19 @@ pub async fn approve_plan(
         _ => standalone_state.working_directory.read().await.clone(),
     };
     let resolved_project_path = resolved_project_root.to_string_lossy().to_string();
+    let tracker_session_id = kernel_state
+        .inner()
+        .linked_kernel_sessions_for_mode_session(WorkflowMode::Plan, &session_id)
+        .await
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| session_id.clone());
+    let file_change_tracker = file_changes_state
+        .get_or_create(&tracker_session_id, &resolved_project_path)
+        .await;
+    if let Ok(mut tracker) = file_change_tracker.lock() {
+        tracker.set_app_handle(app_handle.clone());
+    }
 
     let selected_skills =
         crate::services::task_mode::context_provider::hydrate_skill_matches_by_ids(
@@ -572,6 +586,7 @@ pub async fn approve_plan(
     let step_runtime = crate::services::plan_mode::step_executor::StepExecutionRuntime {
         provider_config,
         project_root: resolved_project_root,
+        file_change_tracker: Some(file_change_tracker),
         index_store,
         embedding_service,
         embedding_manager,
@@ -751,6 +766,7 @@ pub async fn approve_plan(
 pub async fn retry_plan_step(
     request: RetryPlanStepRequest,
     state: tauri::State<'_, PlanModeState>,
+    file_changes_state: tauri::State<'_, crate::commands::file_changes::FileChangesState>,
     app_state: tauri::State<'_, AppState>,
     knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
     standalone_state: tauri::State<'_, crate::commands::standalone::StandaloneState>,
@@ -920,6 +936,19 @@ pub async fn retry_plan_step(
         _ => standalone_state.working_directory.read().await.clone(),
     };
     let resolved_project_path = resolved_project_root.to_string_lossy().to_string();
+    let tracker_session_id = kernel_state
+        .inner()
+        .linked_kernel_sessions_for_mode_session(WorkflowMode::Plan, &session_id)
+        .await
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| session_id.clone());
+    let file_change_tracker = file_changes_state
+        .get_or_create(&tracker_session_id, &resolved_project_path)
+        .await;
+    if let Ok(mut tracker) = file_change_tracker.lock() {
+        tracker.set_app_handle(app_handle.clone());
+    }
 
     let selected_skills =
         crate::services::task_mode::context_provider::hydrate_skill_matches_by_ids(
@@ -946,6 +975,7 @@ pub async fn retry_plan_step(
     let step_runtime = crate::services::plan_mode::step_executor::StepExecutionRuntime {
         provider_config,
         project_root: resolved_project_root,
+        file_change_tracker: Some(file_change_tracker),
         index_store,
         embedding_service,
         embedding_manager,
