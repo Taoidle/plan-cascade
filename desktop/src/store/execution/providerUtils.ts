@@ -111,3 +111,11 @@ export function resolveProviderBaseUrl(
   }
   return undefined;
 }
+
+export function parseMemoryReviewAgentProvider(reviewAgentRef: string | null | undefined): string | null {
+  if (!reviewAgentRef) return null;
+  const trimmed = reviewAgentRef.trim();
+  if (!trimmed.startsWith('llm:')) return null;
+  const [, provider] = trimmed.split(':', 3);
+  return normalizeProviderName(provider);
+}

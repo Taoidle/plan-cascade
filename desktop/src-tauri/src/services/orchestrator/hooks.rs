@@ -582,6 +582,10 @@ pub struct MemoryHookConfig {
     pub review_mode: Option<String>,
     /// Optional explicit LLM reviewer in `llm:provider:model` form.
     pub review_agent_ref: Option<String>,
+    /// Provider config snapshot for automatic extraction / inherited review.
+    pub extraction_provider_config: Option<crate::services::llm::types::ProviderConfig>,
+    /// Optional base URL override for explicit review agent provider.
+    pub review_base_url: Option<String>,
     /// App handle for emitting pipeline status events and resolving app state.
     pub app_handle: Option<tauri::AppHandle>,
     /// Allowed scope names: `project`, `global`, `session`.
@@ -602,6 +606,8 @@ impl Default for MemoryHookConfig {
             root_session_id: None,
             review_mode: None,
             review_agent_ref: None,
+            extraction_provider_config: None,
+            review_base_url: None,
             app_handle: None,
             selected_scopes: vec![],
             selected_categories: vec![],
@@ -723,6 +729,11 @@ pub fn register_memory_hooks_with_config(
     let extraction_review_mode = memory_hook_config.review_mode.clone();
     let extraction_review_agent_ref = memory_hook_config.review_agent_ref.clone();
     let extraction_app_handle = memory_hook_config.app_handle.clone();
+    let extraction_provider_config = memory_hook_config
+        .extraction_provider_config
+        .clone()
+        .or_else(|| llm_provider.as_ref().map(|provider| provider.config().clone()));
+    let extraction_review_base_url = memory_hook_config.review_base_url.clone();
     let selected_ids: HashSet<String> =
         memory_hook_config.selected_memory_ids.into_iter().collect();
     let excluded_ids: HashSet<String> =
@@ -857,6 +868,8 @@ pub fn register_memory_hooks_with_config(
         let review_mode = extraction_review_mode.clone();
         let review_agent_ref = extraction_review_agent_ref.clone();
         let app_handle = extraction_app_handle.clone();
+        let provider_config = extraction_provider_config.clone();
+        let review_base_url = extraction_review_base_url.clone();
         Box::pin(async move {
             let project_path = ctx.project_path.to_string_lossy().to_string();
             if !extraction_enabled {
@@ -909,6 +922,8 @@ pub fn register_memory_hooks_with_config(
                     root_session_id.clone().or_else(|| Some(ctx.session_id.clone())),
                     review_mode.clone(),
                     review_agent_ref.clone(),
+                    provider_config.clone(),
+                    review_base_url.clone(),
                 )
                 .await
                 {

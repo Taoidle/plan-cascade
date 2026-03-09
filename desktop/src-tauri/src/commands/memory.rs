@@ -860,6 +860,8 @@ pub(crate) async fn extract_session_memories_internal(
     root_session_id: Option<String>,
     review_mode: Option<String>,
     review_agent_ref: Option<String>,
+    fallback_provider_config: Option<crate::services::llm::types::ProviderConfig>,
+    review_base_url: Option<String>,
 ) -> Result<MemoryExtractionResult, String> {
     let state = app.state::<AppState>();
     let app_state: &AppState = state.inner();
@@ -968,7 +970,14 @@ pub(crate) async fn extract_session_memories_internal(
         },
     );
 
-    let provider = match resolve_provider_for_agent_ref(app_state, None).await {
+    let provider = match resolve_provider_for_agent_ref(
+        app_state,
+        None,
+        fallback_provider_config.as_ref(),
+        None,
+    )
+    .await
+    {
         Ok(p) => p,
         Err(e) => {
             eprintln!("[memory-extraction] Provider resolution failed: {}", e);
@@ -1072,6 +1081,8 @@ pub(crate) async fn extract_session_memories_internal(
         &candidates,
         parsed_review_mode,
         review_agent_ref.as_deref(),
+        fallback_provider_config.as_ref(),
+        review_base_url.as_deref(),
     )
     .await;
 
@@ -1209,6 +1220,8 @@ pub async fn extract_session_memories(
         root_session_id,
         review_mode,
         review_agent_ref,
+        None,
+        None,
     )
     .await?;
     Ok(CommandResponse::ok(result))
@@ -1222,10 +1235,33 @@ pub async fn extract_session_memories(
 async fn resolve_provider_for_agent_ref(
     state: &AppState,
     agent_ref: Option<&str>,
+    fallback_provider_config: Option<&crate::services::llm::types::ProviderConfig>,
+    explicit_base_url: Option<&str>,
 ) -> Result<Box<dyn crate::services::llm::provider::LlmProvider>, String> {
     use crate::commands::standalone::{get_api_key_with_aliases, normalize_provider_name};
     use crate::services::llm::types::{ProviderConfig, ProviderType};
     use crate::storage::KeyringService;
+
+    if let Some(fallback) = fallback_provider_config {
+        match agent_ref.and_then(parse_memory_agent_ref) {
+            None => return Ok(create_extraction_provider(fallback.clone())),
+            Some((provider, model)) => {
+                let fallback_provider = fallback.provider.to_string();
+                let canonical_fallback = normalize_provider_name(&fallback_provider)
+                    .ok_or_else(|| format!("Unsupported provider: {}", fallback_provider))?;
+                let canonical_requested = normalize_provider_name(&provider)
+                    .ok_or_else(|| format!("Unknown provider: {}", provider))?;
+                if canonical_fallback == canonical_requested {
+                    let mut config = fallback.clone();
+                    config.model = model;
+                    if let Some(base_url) = explicit_base_url.filter(|url| !url.trim().is_empty()) {
+                        config.base_url = Some(base_url.trim().to_string());
+                    }
+                    return Ok(create_extraction_provider(config));
+                }
+            }
+        }
+    }
 
     let app_config = state
         .get_config()
@@ -1259,8 +1295,13 @@ async fn resolve_provider_for_agent_ref(
         return Err("No API key configured".into());
     }
 
-    // Resolve base_url from database settings
-    let resolved_base_url = {
+    // Resolve base_url from explicit override or database settings.
+    let resolved_base_url = if let Some(base_url) = explicit_base_url
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(base_url.to_string())
+    } else {
         let key = format!("provider_{}_base_url", canonical);
         state
             .with_database(|db| db.get_setting(&key))
@@ -1507,6 +1548,8 @@ async fn review_candidates(
     candidates: &[ExtractedMemoryCandidate],
     review_mode: MemoryReviewMode,
     review_agent_ref: Option<&str>,
+    fallback_provider_config: Option<&crate::services::llm::types::ProviderConfig>,
+    review_base_url: Option<&str>,
 ) -> Vec<ReviewedCandidate> {
     match review_mode {
         MemoryReviewMode::AutoApprove => candidates
@@ -1532,7 +1575,14 @@ async fn review_candidates(
             })
             .collect(),
         MemoryReviewMode::LlmReview => {
-            let provider = match resolve_provider_for_agent_ref(state, review_agent_ref).await {
+            let provider = match resolve_provider_for_agent_ref(
+                state,
+                review_agent_ref,
+                fallback_provider_config,
+                review_base_url,
+            )
+            .await
+            {
                 Ok(provider) => provider,
                 Err(_) => {
                     return candidates

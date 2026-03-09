@@ -182,6 +182,8 @@ fn build_memory_hook_config(
     auto_extract_enabled: bool,
     review_mode: Option<String>,
     review_agent_ref: Option<String>,
+    extraction_provider_config: Option<ProviderConfig>,
+    review_base_url: Option<String>,
 ) -> Option<crate::services::orchestrator::hooks::MemoryHookConfig> {
     let memory = context_sources?.memory.as_ref()?;
     let selected_categories: Vec<crate::services::memory::store::MemoryCategory> = memory
@@ -196,6 +198,8 @@ fn build_memory_hook_config(
         root_session_id: root_session_id.map(ToOwned::to_owned),
         review_mode,
         review_agent_ref,
+        extraction_provider_config,
+        review_base_url,
         app_handle: Some(app.clone()),
         selected_scopes: memory.selected_scopes.clone(),
         selected_categories,
@@ -1250,6 +1254,8 @@ pub async fn execute_standalone(
     memoryReviewMode: Option<String>,
     memory_review_agent_ref: Option<String>,
     memoryReviewAgentRef: Option<String>,
+    memory_review_base_url: Option<String>,
+    memoryReviewBaseUrl: Option<String>,
     plugin_invocations: Option<Vec<PluginInvocation>>,
     pluginInvocations: Option<Vec<PluginInvocation>>,
     context_sources: Option<crate::services::task_mode::context_provider::ContextSourceConfig>,
@@ -1401,6 +1407,10 @@ pub async fn execute_standalone(
         .unwrap_or(true);
     let memory_review_mode = memory_review_mode.or(memoryReviewMode);
     let memory_review_agent_ref = memory_review_agent_ref.or(memoryReviewAgentRef);
+    let memory_review_base_url = memory_review_base_url
+        .or(memoryReviewBaseUrl)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
 
     // Clone session_id before it's moved into orchestrator_config
     let event_session_id = analysis_session_id.clone().unwrap_or_default();
@@ -1591,6 +1601,8 @@ pub async fn execute_standalone(
             memory_auto_extract_enabled,
             memory_review_mode.clone(),
             memory_review_agent_ref.clone(),
+            Some(provider_config_for_index.clone()),
+            memory_review_base_url.clone(),
         );
         if external_context_injected && injected_source_kinds.contains("memory") {
             if let Some(config) = memory_hook_config.as_mut() {

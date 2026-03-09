@@ -8,6 +8,7 @@ import { useToolPermissionStore } from '../toolPermission';
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   isClaudeCodeBackend,
+  parseMemoryReviewAgentProvider,
   resolveProviderBaseUrl,
   resolveStandaloneProvider,
 } from './providerUtils';
@@ -424,6 +425,10 @@ export function createStartAction(
         get().clearAttachments();
 
         const baseUrl = resolveProviderBaseUrl(provider, settings);
+        const memoryReviewProvider = parseMemoryReviewAgentProvider(settings.memorySettings.reviewAgentRef);
+        const memoryReviewBaseUrl = memoryReviewProvider
+          ? resolveProviderBaseUrl(memoryReviewProvider, settings)
+          : undefined;
         const standaloneExecutionId = createStandaloneExecutionId();
         set({ activeExecutionId: standaloneExecutionId });
 
@@ -444,6 +449,7 @@ export function createStartAction(
           memoryAutoExtractEnabled: settings.memorySettings.autoExtractEnabled,
           memoryReviewMode: settings.memorySettings.reviewMode,
           memoryReviewAgentRef: settings.memorySettings.reviewAgentRef || null,
+          memoryReviewBaseUrl: memoryReviewBaseUrl || null,
           pluginInvocations: pluginInvocations.length > 0 ? pluginInvocations : null,
           systemPrompt: activeAgent?.system_prompt ?? null,
           contextSources,

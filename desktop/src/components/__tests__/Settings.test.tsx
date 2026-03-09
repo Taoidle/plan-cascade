@@ -151,6 +151,9 @@ const mockSetModel = vi.fn();
 const mockSetModelByProvider = vi.fn();
 const mockSetProvider = vi.fn();
 const mockSetStandaloneContextTurns = vi.fn();
+const mockSetGlmEndpoint = vi.fn();
+const mockSetMinimaxEndpoint = vi.fn();
+const mockSetQwenEndpoint = vi.fn();
 const mockSetEnableContextCompaction = vi.fn();
 const mockSetShowReasoningOutput = vi.fn();
 const mockSetShowSubAgentEvents = vi.fn();
@@ -173,6 +176,9 @@ const mockSettingsState = {
   theme: 'system' as string,
   language: 'en' as string,
   standaloneContextTurns: 8 as number,
+  glmEndpoint: 'standard' as string,
+  minimaxEndpoint: 'international' as string,
+  qwenEndpoint: 'china' as string,
   enableContextCompaction: true,
   showReasoningOutput: false,
   showSubAgentEvents: true,
@@ -206,6 +212,9 @@ const mockSettingsState = {
   setModelByProvider: mockSetModelByProvider,
   setProvider: mockSetProvider,
   setStandaloneContextTurns: mockSetStandaloneContextTurns,
+  setGlmEndpoint: mockSetGlmEndpoint,
+  setMinimaxEndpoint: mockSetMinimaxEndpoint,
+  setQwenEndpoint: mockSetQwenEndpoint,
   setEnableContextCompaction: mockSetEnableContextCompaction,
   setShowReasoningOutput: mockSetShowReasoningOutput,
   setShowSubAgentEvents: mockSetShowSubAgentEvents,
@@ -561,6 +570,26 @@ describe('LLMBackendSection', () => {
     fireEvent.change(contextTurnsSelect, { target: { value: '20' } });
 
     expect(mockSetStandaloneContextTurns).toHaveBeenCalledWith(20);
+  });
+
+  it('syncs provider base URL when endpoint selection changes', async () => {
+    mockSettingsState.backend = 'minimax';
+    mockSettingsState.provider = 'minimax';
+    mockSettingsState.minimaxEndpoint = 'international';
+
+    render(<LLMBackendSection />);
+
+    fireEvent.click(screen.getByDisplayValue('china'));
+
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith(
+        'configure_provider',
+        expect.objectContaining({
+          provider: 'minimax',
+          baseUrl: 'https://api.minimaxi.com/v1/chat/completions',
+        }),
+      ),
+    );
   });
 
   it('does not show API key configuration for non-key backends', () => {

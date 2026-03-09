@@ -26,6 +26,7 @@ import {
   normalizeProvider,
   dedupeModels,
   getApiKeyRequiredProviders,
+  resolveProviderBaseUrl,
   type ApiKeyStatus,
 } from '../../lib/providers';
 
@@ -279,6 +280,14 @@ export function LLMBackendSection() {
       setSavingKey(null);
     }
   };
+
+  const syncProviderBaseUrl = useCallback(async (provider: string, baseUrl: string | undefined) => {
+    const canonicalProvider = normalizeProvider(provider);
+    await invoke<CommandResponse<boolean>>('configure_provider', {
+      provider: canonicalProvider,
+      baseUrl: baseUrl ?? '',
+    });
+  }, []);
 
   const handleToggleApiKeyVisibility = async (provider: string) => {
     const canonicalProvider = normalizeProvider(provider);
@@ -564,7 +573,10 @@ export function LLMBackendSection() {
                   name="glmEndpoint"
                   value={ep}
                   checked={glmEndpoint === ep}
-                  onChange={() => setGlmEndpoint(ep)}
+                  onChange={() => {
+                    setGlmEndpoint(ep);
+                    void syncProviderBaseUrl('glm', resolveProviderBaseUrl('glm', { glmEndpoint: ep }));
+                  }}
                   className="mt-0.5 text-primary-600"
                 />
                 <div>
@@ -606,7 +618,10 @@ export function LLMBackendSection() {
                   name="qwenEndpoint"
                   value={ep}
                   checked={qwenEndpoint === ep}
-                  onChange={() => setQwenEndpoint(ep)}
+                  onChange={() => {
+                    setQwenEndpoint(ep);
+                    void syncProviderBaseUrl('qwen', resolveProviderBaseUrl('qwen', { qwenEndpoint: ep }));
+                  }}
                   className="mt-0.5 text-primary-600"
                 />
                 <div>
@@ -648,7 +663,10 @@ export function LLMBackendSection() {
                   name="minimaxEndpoint"
                   value={ep}
                   checked={minimaxEndpoint === ep}
-                  onChange={() => setMinimaxEndpoint(ep)}
+                  onChange={() => {
+                    setMinimaxEndpoint(ep);
+                    void syncProviderBaseUrl('minimax', resolveProviderBaseUrl('minimax', { minimaxEndpoint: ep }));
+                  }}
                   className="mt-0.5 text-primary-600"
                 />
                 <div>

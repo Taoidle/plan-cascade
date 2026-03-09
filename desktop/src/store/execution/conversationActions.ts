@@ -9,6 +9,7 @@ import { useToolPermissionStore } from '../toolPermission';
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   isClaudeCodeBackend,
+  parseMemoryReviewAgentProvider,
   resolveProviderBaseUrl,
   resolveStandaloneProvider,
 } from './providerUtils';
@@ -591,6 +592,10 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
         });
         const messageToSend = assembledContext.message;
         const baseUrl = resolveProviderBaseUrl(provider, settingsSnapshot);
+        const memoryReviewProvider = parseMemoryReviewAgentProvider(settingsSnapshot.memorySettings.reviewAgentRef);
+        const memoryReviewBaseUrl = memoryReviewProvider
+          ? resolveProviderBaseUrl(memoryReviewProvider, settingsSnapshot)
+          : undefined;
         const permissionLevel = useToolPermissionStore.getState().sessionLevel;
         const standaloneExecutionId = createStandaloneExecutionId();
         set({ activeExecutionId: standaloneExecutionId });
@@ -613,6 +618,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
             memoryAutoExtractEnabled: settingsSnapshot.memorySettings.autoExtractEnabled,
             memoryReviewMode: settingsSnapshot.memorySettings.reviewMode,
             memoryReviewAgentRef: settingsSnapshot.memorySettings.reviewAgentRef || null,
+            memoryReviewBaseUrl: memoryReviewBaseUrl || null,
             pluginInvocations: pluginInvocations.length > 0 ? pluginInvocations : null,
             contextSources: regenContextSources,
             externalContextInjected: assembledContext.externalContextInjected,
@@ -894,6 +900,10 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
         });
         const messageToSend = assembledContext.message;
         const baseUrl = resolveProviderBaseUrl(provider, settingsSnapshot);
+        const memoryReviewProvider = parseMemoryReviewAgentProvider(settingsSnapshot.memorySettings.reviewAgentRef);
+        const memoryReviewBaseUrl = memoryReviewProvider
+          ? resolveProviderBaseUrl(memoryReviewProvider, settingsSnapshot)
+          : undefined;
         const permissionLevel = useToolPermissionStore.getState().sessionLevel;
         const standaloneExecutionId = createStandaloneExecutionId();
         set({ activeExecutionId: standaloneExecutionId });
@@ -916,6 +926,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
             memoryAutoExtractEnabled: settingsSnapshot.memorySettings.autoExtractEnabled,
             memoryReviewMode: settingsSnapshot.memorySettings.reviewMode,
             memoryReviewAgentRef: settingsSnapshot.memorySettings.reviewAgentRef || null,
+            memoryReviewBaseUrl: memoryReviewBaseUrl || null,
             pluginInvocations: pluginInvocations.length > 0 ? pluginInvocations : null,
             contextSources: editContextSources,
             externalContextInjected: assembledContext.externalContextInjected,
