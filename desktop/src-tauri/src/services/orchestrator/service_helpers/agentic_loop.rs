@@ -4,6 +4,13 @@ use crate::services::orchestrator::{
     IterationProgressAssessment, IterationProgressSnapshot,
 };
 
+#[derive(Debug, Clone, Copy, Default)]
+struct CodebaseIndexStatus {
+    available: bool,
+    ready: bool,
+    semantic_ready: bool,
+}
+
 #[derive(Default)]
 struct LoopProgressState {
     successful_tool_results: u32,
@@ -102,6 +109,39 @@ fn hash_text_fragment(value: &str) -> u64 {
     hasher.finish()
 }
 
+fn should_inject_codebase_search_first_hint(
+    codebase_ready: bool,
+    tool_names: &[&str],
+    consecutive_rounds_without_codebase: &mut u32,
+) -> bool {
+    if !codebase_ready {
+        *consecutive_rounds_without_codebase = 0;
+        return false;
+    }
+
+    if tool_names.iter().any(|name| *name == "CodebaseSearch") {
+        *consecutive_rounds_without_codebase = 0;
+        return false;
+    }
+
+    let used_fallback_discovery_tools = tool_names
+        .iter()
+        .any(|name| matches!(*name, "Grep" | "Read" | "Glob" | "LS"));
+    if !used_fallback_discovery_tools {
+        *consecutive_rounds_without_codebase = 0;
+        return false;
+    }
+
+    *consecutive_rounds_without_codebase =
+        consecutive_rounds_without_codebase.saturating_add(1);
+    if *consecutive_rounds_without_codebase >= 2 {
+        *consecutive_rounds_without_codebase = 0;
+        return true;
+    }
+
+    false
+}
+
 impl OrchestratorService {
     fn current_file_change_count(&self) -> u32 {
         self.tool_executor
@@ -112,6 +152,25 @@ impl OrchestratorService {
 
     fn current_shared_state_fingerprint(&self) -> Option<u64> {
         None
+    }
+
+    fn current_codebase_index_status(&self) -> CodebaseIndexStatus {
+        let Some(store) = self.index_store.as_ref() else {
+            return CodebaseIndexStatus::default();
+        };
+        let project_path = self.config.project_root.to_string_lossy();
+        match store.get_project_summary(&project_path) {
+            Ok(summary) => CodebaseIndexStatus {
+                available: true,
+                ready: summary.total_files > 0,
+                semantic_ready: summary.embedding_chunks > 0,
+            },
+            Err(_) => CodebaseIndexStatus {
+                available: true,
+                ready: false,
+                semantic_ready: false,
+            },
+        }
     }
 
     fn analyze_cache_file_path(&self) -> PathBuf {
@@ -698,10 +757,12 @@ impl OrchestratorService {
         // a final summary rather than a repair-worthy narration.
         let mut has_executed_tools = false;
         let is_sub_agent = self.config.task_type.is_some();
+        let codebase_index_status = self.current_codebase_index_status();
         // Track consecutive iterations where the ONLY tool calls are Task
         // delegations (lower threshold than main agent since sub-agents should
         // do direct work more often).
         let mut consecutive_task_only_iterations = 0u32;
+        let mut consecutive_search_rounds_without_codebase = 0u32;
         const SUB_AGENT_MAX_CONSECUTIVE_TASK_ONLY: u32 = 2;
         let execution_session_id = self
             .config
@@ -771,7 +832,8 @@ impl OrchestratorService {
                         // Inject tool preference guidance so sub-agents prefer
                         // CodebaseSearch over Grep when the index is available.
                         let guidance = build_sub_agent_tool_guidance(
-                            summary.total_symbols > 0,
+                            true,
+                            summary.total_files > 0,
                             summary.embedding_chunks > 0,
                             self.config.task_type.as_deref(),
                         );
@@ -818,10 +880,12 @@ impl OrchestratorService {
             // Inject unified tool priority section for sub-agents
             {
                 let has_knowledge = self.knowledge_awareness_section.is_some();
-                let has_codebase_search = self.index_store.is_some();
+                let has_codebase_search = codebase_index_status.available;
                 let priority_section = build_tool_priority_section(
                     has_knowledge,
                     has_codebase_search,
+                    codebase_index_status.ready,
+                    codebase_index_status.semantic_ready,
                     &detect_language(&self.config.project_root.to_string_lossy()),
                 );
                 if !priority_section.is_empty() {
@@ -890,6 +954,28 @@ impl OrchestratorService {
                 Some(parts.join("\n\n"))
             }
         };
+
+        let _ = tx
+            .send(UnifiedStreamEvent::Warning {
+                message: if codebase_index_status.ready {
+                    format!(
+                        "Codebase index ready. CodebaseSearch-first strategy enabled (semantic search: {}).",
+                        if codebase_index_status.semantic_ready {
+                            "available"
+                        } else {
+                            "unavailable"
+                        }
+                    )
+                } else if codebase_index_status.available {
+                    "Codebase index unavailable for the current project. Falling back to Grep/Read/Glob/LS."
+                        .to_string()
+                } else {
+                    "Codebase search capability not wired for this execution. Falling back to Grep/Read/Glob/LS."
+                        .to_string()
+                },
+                code: Some("codebase_search_strategy".to_string()),
+            })
+            .await;
 
         loop {
             // Check for cancellation
@@ -1194,7 +1280,11 @@ impl OrchestratorService {
             // Handle tool calls - either native or prompt-based fallback
             let has_native_tool_calls = response.has_tool_calls();
             let parsed_fallback = if !has_native_tool_calls {
-                parse_fallback_tool_calls(&response, request_options.analysis_phase.as_deref())
+                parse_fallback_tool_calls(
+                    &response,
+                    request_options.analysis_phase.as_deref(),
+                    codebase_index_status.ready,
+                )
             } else {
                 ParsedFallbackCalls::default()
             };
@@ -1225,6 +1315,7 @@ impl OrchestratorService {
                         &tc.name,
                         &tc.arguments,
                         request_options.analysis_phase.as_deref(),
+                        codebase_index_status.ready,
                     ) {
                         Ok((name, args)) => valid_calls.push((tc.id.clone(), name, args)),
                         Err(error_message) => {
@@ -1595,6 +1686,7 @@ impl OrchestratorService {
                         &ptc.tool_name,
                         &ptc.arguments,
                         request_options.analysis_phase.as_deref(),
+                        codebase_index_status.ready,
                     ) {
                         Ok((name, args)) => valid_fallback_calls.push((tool_id, name, args)),
                         Err(error_message) => {
@@ -1997,15 +2089,20 @@ impl OrchestratorService {
                 };
             }
 
+            let tool_names: Vec<&str> = if has_native_tool_calls {
+                response.tool_calls.iter().map(|tc| tc.name.as_str()).collect()
+            } else if !parsed_fallback.calls.is_empty() {
+                parsed_fallback
+                    .calls
+                    .iter()
+                    .map(|ptc| ptc.tool_name.as_str())
+                    .collect()
+            } else {
+                vec![]
+            };
+
             // Track consecutive Task-only iterations to prevent infinite delegation.
             if task_ctx.is_some() {
-                let tool_names: Vec<&str> = if has_native_tool_calls {
-                    response.tool_calls.iter().map(|tc| tc.name.as_str()).collect()
-                } else if !parsed_fallback.calls.is_empty() {
-                    parsed_fallback.calls.iter().map(|ptc| ptc.tool_name.as_str()).collect()
-                } else {
-                    vec![]
-                };
                 let all_task = !tool_names.is_empty() && tool_names.iter().all(|n| *n == "Task");
                 if all_task {
                     consecutive_task_only_iterations += 1;
@@ -2025,6 +2122,24 @@ impl OrchestratorService {
                     ));
                     consecutive_task_only_iterations = 0;
                 }
+            }
+
+            if should_inject_codebase_search_first_hint(
+                codebase_index_status.ready,
+                &tool_names,
+                &mut consecutive_search_rounds_without_codebase,
+            ) {
+                let _ = tx
+                    .send(UnifiedStreamEvent::Warning {
+                        message: "Codebase index is ready. Use CodebaseSearch before Grep/Read for code discovery and implementation tracing. Only use Grep for regex, exact-string, or full-text fallback."
+                            .to_string(),
+                        code: Some("codebase_search_first_hint".to_string()),
+                    })
+                    .await;
+                messages.push(Message::user(
+                    "[SEARCH STRATEGY] The codebase index is ready for this project. For code discovery, architecture understanding, and implementation tracing, you MUST use CodebaseSearch before Grep/Read/Glob. Use Grep only for regex, exact-string, or full-text fallback after CodebaseSearch is insufficient."
+                        .to_string(),
+                ));
             }
 
             if has_native_tool_calls {
@@ -2224,6 +2339,7 @@ impl OrchestratorService {
         let mut repair_retry_count = 0u32;
         let mut last_assistant_text: Option<String> = None;
         let mut loop_detector = ToolCallLoopDetector::new(3, 20);
+        let codebase_index_status = self.current_codebase_index_status();
         // Track whether any tool has been successfully executed in this loop.
         // Used to suppress repair hints when the model produces a final summary.
         let mut has_executed_tools = false;
@@ -2232,6 +2348,7 @@ impl OrchestratorService {
         // main agent keeps spawning sub-agents with different prompts but never
         // does any direct work itself.
         let mut consecutive_task_only_iterations = 0u32;
+        let mut consecutive_search_rounds_without_codebase = 0u32;
         const MAX_CONSECUTIVE_TASK_ONLY: u32 = 3;
         let iteration_budget = build_iteration_budget(
             self.config.execution_kind,
@@ -2262,6 +2379,28 @@ impl OrchestratorService {
         let mut progress_snapshots: VecDeque<IterationProgressSnapshot> = VecDeque::new();
 
         let task_ctx = self.build_task_context(&tx);
+
+        let _ = tx
+            .send(UnifiedStreamEvent::Warning {
+                message: if codebase_index_status.ready {
+                    format!(
+                        "Codebase index ready. CodebaseSearch-first strategy enabled (semantic search: {}).",
+                        if codebase_index_status.semantic_ready {
+                            "available"
+                        } else {
+                            "unavailable"
+                        }
+                    )
+                } else if codebase_index_status.available {
+                    "Codebase index unavailable for the current project. Falling back to Grep/Read/Glob/LS."
+                        .to_string()
+                } else {
+                    "Codebase search capability not wired for this execution. Falling back to Grep/Read/Glob/LS."
+                        .to_string()
+                },
+                code: Some("codebase_search_strategy".to_string()),
+            })
+            .await;
 
         // Connect permission gate event channel so approval requests reach the frontend
         if let Some(ref gate) = self.permission_gate {
@@ -2580,7 +2719,7 @@ impl OrchestratorService {
             let has_native_tool_calls = response.has_tool_calls();
             let parsed_fallback = if !has_native_tool_calls {
                 // Check both assistant text and thinking content for prompt-based tool calls.
-                parse_fallback_tool_calls(&response, None)
+                parse_fallback_tool_calls(&response, None, codebase_index_status.ready)
             } else {
                 ParsedFallbackCalls::default()
             };
@@ -2607,7 +2746,12 @@ impl OrchestratorService {
                 // Step 1: Validate all tool calls
                 let mut valid_calls: Vec<(String, String, serde_json::Value)> = Vec::new(); // (tc_id, name, args)
                 for tc in &response.tool_calls {
-                    match prepare_tool_call_for_execution(&tc.name, &tc.arguments, None) {
+                    match prepare_tool_call_for_execution(
+                        &tc.name,
+                        &tc.arguments,
+                        None,
+                        codebase_index_status.ready,
+                    ) {
                         Ok((name, args)) => valid_calls.push((tc.id.clone(), name, args)),
                         Err(error_message) => {
                             let _ = tx
@@ -3069,7 +3213,12 @@ impl OrchestratorService {
                     fallback_call_counter += 1;
                     let tool_id = format!("fallback_{}", fallback_call_counter);
                     // Validate and prepare each call
-                    match prepare_tool_call_for_execution(&ptc.tool_name, &ptc.arguments, None) {
+                    match prepare_tool_call_for_execution(
+                        &ptc.tool_name,
+                        &ptc.arguments,
+                        None,
+                        codebase_index_status.ready,
+                    ) {
                         Ok((name, args)) => valid_fallback_calls.push((tool_id, name, args)),
                         Err(error_message) => {
                             let _ = tx
@@ -3675,22 +3824,22 @@ impl OrchestratorService {
             // keeps spawning sub-agents with different prompts but never does any
             // direct work itself. The existing loop detector cannot catch this because
             // each Task call has different arguments (different prompts).
+            let tool_names: Vec<&str> = if has_native_tool_calls {
+                response
+                    .tool_calls
+                    .iter()
+                    .map(|tc| tc.name.as_str())
+                    .collect()
+            } else if !parsed_fallback.calls.is_empty() {
+                parsed_fallback
+                    .calls
+                    .iter()
+                    .map(|ptc| ptc.tool_name.as_str())
+                    .collect()
+            } else {
+                vec![]
+            };
             {
-                let tool_names: Vec<&str> = if has_native_tool_calls {
-                    response
-                        .tool_calls
-                        .iter()
-                        .map(|tc| tc.name.as_str())
-                        .collect()
-                } else if !parsed_fallback.calls.is_empty() {
-                    parsed_fallback
-                        .calls
-                        .iter()
-                        .map(|ptc| ptc.tool_name.as_str())
-                        .collect()
-                } else {
-                    vec![]
-                };
                 let all_task = !tool_names.is_empty() && tool_names.iter().all(|n| *n == "Task");
                 if all_task {
                     consecutive_task_only_iterations += 1;
@@ -3713,6 +3862,24 @@ impl OrchestratorService {
                     // Reset counter so the model gets another chance
                     consecutive_task_only_iterations = 0;
                 }
+            }
+
+            if should_inject_codebase_search_first_hint(
+                codebase_index_status.ready,
+                &tool_names,
+                &mut consecutive_search_rounds_without_codebase,
+            ) {
+                let _ = tx
+                    .send(UnifiedStreamEvent::Warning {
+                        message: "Codebase index is ready. Use CodebaseSearch before Grep/Read for code discovery and implementation tracing. Only use Grep for regex, exact-string, or full-text fallback."
+                            .to_string(),
+                        code: Some("codebase_search_first_hint".to_string()),
+                    })
+                    .await;
+                messages.push(Message::user(
+                    "[SEARCH STRATEGY] The codebase index is ready for this project. For code discovery, architecture understanding, and implementation tracing, you MUST use CodebaseSearch before Grep/Read/Glob. Use Grep only for regex, exact-string, or full-text fallback after CodebaseSearch is insufficient."
+                        .to_string(),
+                ));
             }
 
             if has_native_tool_calls {
@@ -4210,6 +4377,17 @@ impl OrchestratorService {
             let project_path = self.config.project_root.to_string_lossy();
             store.get_project_summary(&project_path).ok()
         });
+        let codebase_index_status = CodebaseIndexStatus {
+            available: self.index_store.is_some(),
+            ready: project_summary
+                .as_ref()
+                .map(|summary| summary.total_files > 0)
+                .unwrap_or(false),
+            semantic_ready: project_summary
+                .as_ref()
+                .map(|summary| summary.embedding_chunks > 0)
+                .unwrap_or(false),
+        };
 
         let provider_name = self.provider.name();
         let model_name = self.provider.model();
@@ -4284,12 +4462,34 @@ impl OrchestratorService {
         //   codebase only:       CodebaseSearch → others
         {
             let has_knowledge = self.knowledge_awareness_section.is_some();
-            let has_codebase_search = self.index_store.is_some();
-            let priority_section =
-                build_tool_priority_section(has_knowledge, has_codebase_search, language);
+            let has_codebase_search = prompt_tools.iter().any(|tool| tool.name == "CodebaseSearch");
+            let priority_section = build_tool_priority_section(
+                has_knowledge,
+                has_codebase_search,
+                codebase_index_status.ready,
+                codebase_index_status.semantic_ready,
+                language,
+            );
             if !priority_section.is_empty() {
                 prompt.push_str(&priority_section);
             }
+        }
+
+        let mode_key = match self.config.execution_kind {
+            crate::services::orchestrator::ExecutionKind::StandaloneRoot => "chat",
+            crate::services::orchestrator::ExecutionKind::TaskStory => "task",
+            crate::services::orchestrator::ExecutionKind::PlanStep => "plan",
+            crate::services::orchestrator::ExecutionKind::AnalysisPhase => "analysis",
+            crate::services::orchestrator::ExecutionKind::SubAgentExplore => "subagent_explore",
+            crate::services::orchestrator::ExecutionKind::SubAgentPlan => "subagent_plan",
+            crate::services::orchestrator::ExecutionKind::SubAgentGeneral => "subagent_general",
+            crate::services::orchestrator::ExecutionKind::SubAgentBash => "subagent_bash",
+            crate::services::orchestrator::ExecutionKind::AgentComposerLlmStep => "composer_llm",
+            crate::services::orchestrator::ExecutionKind::AgentComposerLoopStep => "composer_loop",
+        };
+        let mode_addendum = crate::services::tools::build_mode_addendum(mode_key, language);
+        if !mode_addendum.is_empty() {
+            prompt.push_str(&mode_addendum);
         }
 
         // Determine effective fallback mode:

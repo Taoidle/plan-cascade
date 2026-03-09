@@ -134,7 +134,7 @@ fn test_parse_fallback_tool_calls_uses_content_and_thinking() {
         search_citations: vec![],
     };
 
-    let parsed = parse_fallback_tool_calls(&response, None);
+    let parsed = parse_fallback_tool_calls(&response, None, false);
     assert!(parsed.dropped_reasons.is_empty());
     assert_eq!(parsed.calls.len(), 2);
     assert!(parsed.calls.iter().any(|c| c.tool_name == "LS"));
@@ -145,13 +145,14 @@ fn test_parse_fallback_tool_calls_uses_content_and_thinking() {
 fn test_prepare_tool_call_for_execution_repairs_ls_and_rejects_invalid_read() {
     let ls_args = serde_json::json!({});
     let prepared =
-        prepare_tool_call_for_execution("LS", &ls_args, Some("structure_discovery")).unwrap();
+        prepare_tool_call_for_execution("LS", &ls_args, Some("structure_discovery"), false)
+            .unwrap();
     assert_eq!(prepared.0, "LS");
     assert_eq!(prepared.1.get("path").and_then(|v| v.as_str()), Some("."));
 
     let read_args = serde_json::json!({});
     let read_result =
-        prepare_tool_call_for_execution("Read", &read_args, Some("consistency_check"));
+        prepare_tool_call_for_execution("Read", &read_args, Some("consistency_check"), false);
     assert!(read_result.is_err());
 }
 
@@ -167,9 +168,39 @@ fn test_parse_fallback_tool_calls_collects_dropped_reasons_in_analysis_mode() {
         search_citations: vec![],
     };
 
-    let parsed = parse_fallback_tool_calls(&response, Some("architecture_trace"));
+    let parsed = parse_fallback_tool_calls(&response, Some("architecture_trace"), false);
     assert!(parsed.calls.is_empty());
     assert!(!parsed.dropped_reasons.is_empty());
+}
+
+#[test]
+fn test_prepare_tool_call_promotes_identifier_grep_to_codebase_search_when_ready() {
+    let grep_args = serde_json::json!({
+        "pattern": "archiveSession",
+        "path": "desktop/src"
+    });
+    let prepared =
+        prepare_tool_call_for_execution("Grep", &grep_args, None, true).unwrap();
+    assert_eq!(prepared.0, "CodebaseSearch");
+    assert_eq!(
+        prepared.1.get("query").and_then(|v| v.as_str()),
+        Some("archiveSession")
+    );
+    assert_eq!(
+        prepared.1.get("scope").and_then(|v| v.as_str()),
+        Some("symbol")
+    );
+}
+
+#[test]
+fn test_prepare_tool_call_keeps_regex_grep_when_codebase_ready() {
+    let grep_args = serde_json::json!({
+        "pattern": "archive(Session|Workflow)",
+        "path": "desktop/src"
+    });
+    let prepared =
+        prepare_tool_call_for_execution("Grep", &grep_args, None, true).unwrap();
+    assert_eq!(prepared.0, "Grep");
 }
 
 #[test]
@@ -1138,6 +1169,82 @@ fn test_ollama_reliable_provider_disables_fallback_instructions() {
         !prompt.contains("```tool_call"),
         "Reliable provider should not get fallback instructions"
     );
+}
+
+#[test]
+fn test_effective_system_prompt_explicitly_marks_codebase_index_unavailable() {
+    let config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::Anthropic,
+            api_key: Some("test".to_string()),
+            model: "claude-3-5-sonnet-20241022".to_string(),
+            ..Default::default()
+        },
+        system_prompt: None,
+        execution_kind: crate::services::orchestrator::ExecutionKind::StandaloneRoot,
+        soft_limit_override: Some(10),
+        max_total_tokens: 10000,
+        project_root: std::env::temp_dir(),
+        streaming: false,
+        enable_compaction: false,
+        analysis_artifacts_root: default_analysis_artifacts_root(),
+        analysis_profile: AnalysisProfile::default(),
+        analysis_limits: AnalysisLimits::default(),
+        analysis_session_id: None,
+        project_id: None,
+        compaction_config: CompactionConfig::default(),
+        task_type: None,
+        sub_agent_depth: None,
+    };
+    let orchestrator = OrchestratorService::new(config);
+    let tools = crate::services::tools::get_tool_definitions_from_registry();
+    let opts = LlmRequestOptions::default();
+    let prompt = orchestrator.effective_system_prompt(&tools, &opts).unwrap();
+
+    assert!(
+        prompt.contains("Codebase index: **unavailable**"),
+        "Effective system prompt should explicitly mark unavailable index state"
+    );
+    assert!(
+        prompt.contains("Do not try CodebaseSearch"),
+        "Unavailable index prompt should direct the model to fallback tools"
+    );
+}
+
+#[test]
+fn test_effective_system_prompt_includes_mode_addendum_and_memory_policy() {
+    let config = OrchestratorConfig {
+        provider: ProviderConfig {
+            provider: ProviderType::Anthropic,
+            api_key: Some("test".to_string()),
+            model: "claude-3-5-sonnet-20241022".to_string(),
+            ..Default::default()
+        },
+        system_prompt: None,
+        execution_kind: crate::services::orchestrator::ExecutionKind::TaskStory,
+        soft_limit_override: Some(10),
+        max_total_tokens: 10000,
+        project_root: std::env::temp_dir(),
+        streaming: false,
+        enable_compaction: false,
+        analysis_artifacts_root: default_analysis_artifacts_root(),
+        analysis_profile: AnalysisProfile::default(),
+        analysis_limits: AnalysisLimits::default(),
+        analysis_session_id: None,
+        project_id: None,
+        compaction_config: CompactionConfig::default(),
+        task_type: None,
+        sub_agent_depth: None,
+    };
+    let orchestrator = OrchestratorService::new(config);
+    let tools = crate::services::tools::get_tool_definitions_from_registry();
+    let opts = LlmRequestOptions::default();
+    let prompt = orchestrator.effective_system_prompt(&tools, &opts).unwrap();
+
+    assert!(prompt.contains("## Memory Policy"));
+    assert!(prompt.contains("No Project Memory is injected for this session"));
+    assert!(prompt.contains("## Mode Addendum: Task"));
+    assert!(prompt.contains("Use CodebaseSearch first"));
 }
 
 // --- Story-003: sub_agent_token_budget tests ---

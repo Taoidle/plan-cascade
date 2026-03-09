@@ -330,14 +330,19 @@ pub(crate) fn text_describes_pending_action(text: &str) -> bool {
 pub(super) fn parse_fallback_tool_calls(
     response: &LlmResponse,
     analysis_phase: Option<&str>,
+    codebase_search_ready: bool,
 ) -> ParsedFallbackCalls {
     let mut parsed = ParsedFallbackCalls::default();
     let mut seen = HashSet::new();
 
     if let Some(text) = response.content.as_deref() {
         for call in parse_tool_calls(text) {
-            match prepare_tool_call_for_execution(&call.tool_name, &call.arguments, analysis_phase)
-            {
+            match prepare_tool_call_for_execution(
+                &call.tool_name,
+                &call.arguments,
+                analysis_phase,
+                codebase_search_ready,
+            ) {
                 Ok((tool_name, arguments)) => {
                     let signature = format!("{}:{}", tool_name, arguments);
                     if seen.insert(signature) {
@@ -417,10 +422,136 @@ pub(super) fn has_nonempty_string_arg(
         .map(ToString::to_string)
 }
 
+fn looks_like_regex_pattern(pattern: &str) -> bool {
+    let trimmed = pattern.trim();
+    trimmed.contains('*')
+        || trimmed.contains('+')
+        || trimmed.contains('?')
+        || trimmed.contains('[')
+        || trimmed.contains(']')
+        || trimmed.contains('{')
+        || trimmed.contains('}')
+        || trimmed.contains('(')
+        || trimmed.contains(')')
+        || trimmed.contains('|')
+        || trimmed.contains('\\')
+        || trimmed.contains('^')
+        || trimmed.contains('$')
+}
+
+fn looks_like_path_query(pattern: &str) -> bool {
+    let trimmed = pattern.trim();
+    trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed.ends_with(".rs")
+        || trimmed.ends_with(".ts")
+        || trimmed.ends_with(".tsx")
+        || trimmed.ends_with(".js")
+        || trimmed.ends_with(".jsx")
+        || trimmed.ends_with(".py")
+        || trimmed.ends_with(".go")
+        || trimmed.ends_with(".java")
+        || trimmed.ends_with(".kt")
+        || trimmed.ends_with(".swift")
+        || trimmed.ends_with(".md")
+}
+
+fn looks_like_symbol_query(pattern: &str) -> bool {
+    let trimmed = pattern.trim();
+    let mut chars = trimmed.chars();
+    match chars.next() {
+        Some(first) if first.is_ascii_alphabetic() || first == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+fn infer_codebase_scope_from_query(query: &str) -> &'static str {
+    if looks_like_path_query(query) {
+        "path"
+    } else if looks_like_symbol_query(query) {
+        "symbol"
+    } else {
+        "hybrid"
+    }
+}
+
+fn normalize_codebase_scope(scope: &str, query: &str) -> &'static str {
+    match scope.trim().to_ascii_lowercase().as_str() {
+        "hybrid" | "default" | "code" | "all" | "any" => "hybrid",
+        "symbol" | "symbols" | "identifier" | "identifiers" | "definition" | "definitions" => {
+            "symbol"
+        }
+        "path" | "paths" | "file" | "files" | "filename" => "path",
+        "semantic" | "semantics" | "meaning" | "natural_language" => "semantic",
+        _ => infer_codebase_scope_from_query(query),
+    }
+}
+
+fn insert_codebase_filter_path(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    candidate_path: &str,
+) {
+    let trimmed = candidate_path.trim();
+    if trimmed.is_empty() || trimmed == "." {
+        return;
+    }
+
+    let filters = map
+        .entry("filters".to_string())
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    if let serde_json::Value::Object(filter_map) = filters {
+        filter_map
+            .entry("file_path_prefix".to_string())
+            .or_insert_with(|| serde_json::Value::String(trimmed.to_string()));
+    }
+}
+
+fn should_promote_grep_to_codebase_search(
+    map: &serde_json::Map<String, serde_json::Value>,
+    codebase_search_ready: bool,
+) -> bool {
+    if !codebase_search_ready {
+        return false;
+    }
+
+    let pattern = match has_nonempty_string_arg(map, "pattern") {
+        Some(pattern) => pattern,
+        None => return false,
+    };
+    if pattern == "(missing pattern)" {
+        return false;
+    }
+    if looks_like_regex_pattern(&pattern) {
+        return false;
+    }
+    if pattern.chars().count() > 120 {
+        return false;
+    }
+    if pattern.contains('\n') || pattern.contains('\t') {
+        return false;
+    }
+
+    let trimmed = pattern.trim();
+    if trimmed.split_whitespace().count() > 3 {
+        return false;
+    }
+
+    if let Some(output_mode) = has_nonempty_string_arg(map, "output_mode") {
+        let lowered = output_mode.to_ascii_lowercase();
+        if lowered.contains("count") || lowered.contains("context") {
+            return false;
+        }
+    }
+
+    true
+}
+
 pub(super) fn prepare_tool_call_for_execution(
     tool_name: &str,
     arguments: &serde_json::Value,
     analysis_phase: Option<&str>,
+    codebase_search_ready: bool,
 ) -> Result<(String, serde_json::Value), String> {
     let canonical = canonical_tool_name(tool_name)
         .ok_or_else(|| format!("Unsupported tool name '{}'", tool_name.trim()))?;
@@ -465,6 +596,26 @@ pub(super) fn prepare_tool_call_for_execution(
             if pattern == "(missing pattern)" {
                 return Err("Grep requires non-empty 'pattern'".to_string());
             }
+            if should_promote_grep_to_codebase_search(&map, codebase_search_ready) {
+                let mut promoted = serde_json::Map::new();
+                promoted.insert("query".to_string(), serde_json::Value::String(pattern.clone()));
+                promoted.insert(
+                    "scope".to_string(),
+                    serde_json::Value::String(infer_codebase_scope_from_query(&pattern).to_string()),
+                );
+                if let Some(path) = has_nonempty_string_arg(&map, "path") {
+                    insert_codebase_filter_path(&mut promoted, &path);
+                }
+                if strict_analysis {
+                    promoted
+                        .entry("limit".to_string())
+                        .or_insert_with(|| serde_json::Value::Number(serde_json::Number::from(20)));
+                }
+                return Ok((
+                    "CodebaseSearch".to_string(),
+                    serde_json::Value::Object(promoted),
+                ));
+            }
             if has_nonempty_string_arg(&map, "path").is_none() {
                 map.insert(
                     "path".to_string(),
@@ -492,6 +643,40 @@ pub(super) fn prepare_tool_call_for_execution(
                     .or_insert_with(|| serde_json::Value::Number(serde_json::Number::from(1)));
                 map.entry("limit".to_string())
                     .or_insert_with(|| serde_json::Value::Number(serde_json::Number::from(120)));
+            }
+        }
+        "CodebaseSearch" => {
+            let query = has_nonempty_string_arg(&map, "query")
+                .or_else(|| has_nonempty_string_arg(&map, "search"))
+                .or_else(|| has_nonempty_string_arg(&map, "pattern"))
+                .or_else(|| has_nonempty_string_arg(&map, "symbol"))
+                .or_else(|| has_nonempty_string_arg(&map, "name"))
+                .ok_or_else(|| "CodebaseSearch requires non-empty 'query'".to_string())?;
+            map.insert("query".to_string(), serde_json::Value::String(query.clone()));
+
+            let normalized_scope = has_nonempty_string_arg(&map, "scope")
+                .map(|scope| normalize_codebase_scope(&scope, &query).to_string())
+                .unwrap_or_else(|| infer_codebase_scope_from_query(&query).to_string());
+            map.insert(
+                "scope".to_string(),
+                serde_json::Value::String(normalized_scope),
+            );
+
+            if let Some(limit) = map.get("head_limit").and_then(|v| v.as_u64()) {
+                map.entry("limit".to_string()).or_insert_with(|| {
+                    serde_json::Value::Number(serde_json::Number::from(limit.min(100)))
+                });
+            }
+
+            if let Some(path) = has_nonempty_string_arg(&map, "path") {
+                insert_codebase_filter_path(&mut map, &path);
+            }
+            if let Some(path) = has_nonempty_string_arg(&map, "file_path_prefix") {
+                insert_codebase_filter_path(&mut map, &path);
+            }
+            if strict_analysis {
+                map.entry("limit".to_string())
+                    .or_insert_with(|| serde_json::Value::Number(serde_json::Number::from(20)));
             }
         }
         "Bash" => {

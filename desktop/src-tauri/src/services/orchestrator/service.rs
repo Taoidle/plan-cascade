@@ -591,7 +591,7 @@ impl AnalysisPhasePolicy {
                     min_total_calls: 6,
                     min_read_calls: 3,
                     min_search_calls: 1,
-                    required_tools: vec!["Read", "Grep"],
+                    required_tools: vec!["Read", "CodebaseSearch"],
                 },
             },
             AnalysisPhase::ConsistencyCheck => Self {
@@ -602,7 +602,7 @@ impl AnalysisPhasePolicy {
                     min_total_calls: 6,
                     min_read_calls: 3,
                     min_search_calls: 1,
-                    required_tools: vec!["Read", "Grep"],
+                    required_tools: vec!["Read", "CodebaseSearch"],
                 },
             },
         }

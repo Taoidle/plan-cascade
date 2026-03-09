@@ -4,6 +4,7 @@ use super::*;
 pub(super) struct PhaseCapture {
     pub(super) tool_calls: usize,
     pub(super) read_calls: usize,
+    pub(super) codebase_search_calls: usize,
     pub(super) grep_calls: usize,
     pub(super) glob_calls: usize,
     pub(super) ls_calls: usize,
@@ -23,12 +24,13 @@ pub(super) struct PendingAnalysisToolCall {
 
 impl PhaseCapture {
     pub(super) fn search_calls(&self) -> usize {
-        self.grep_calls + self.glob_calls
+        self.codebase_search_calls + self.grep_calls + self.glob_calls
     }
 
     pub(super) fn tool_call_count(&self, name: &str) -> usize {
         match name {
             "Read" => self.read_calls,
+            "CodebaseSearch" => self.codebase_search_calls,
             "Grep" => self.grep_calls,
             "Glob" => self.glob_calls,
             "LS" => self.ls_calls,
@@ -1196,7 +1198,7 @@ impl OrchestratorService {
             tool_name.to_ascii_lowercase()
         );
         let (effective_tool_name, effective_args) =
-            match prepare_tool_call_for_execution(tool_name, args, Some(phase.id())) {
+            match prepare_tool_call_for_execution(tool_name, args, Some(phase.id()), true) {
                 Ok(prepared) => prepared,
                 Err(err) => {
                     capture.warnings.push(format!(
@@ -2567,6 +2569,7 @@ impl OrchestratorService {
                 capture.tool_calls += 1;
                 match tool_name.as_str() {
                     "Read" => capture.read_calls += 1,
+                    "CodebaseSearch" => capture.codebase_search_calls += 1,
                     "Grep" => capture.grep_calls += 1,
                     "Glob" => capture.glob_calls += 1,
                     "LS" => capture.ls_calls += 1,
