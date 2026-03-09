@@ -116,6 +116,12 @@
     "selectionCount": "已选择 {{count}} 个",
     "deleteSelected": "批量删除",
     "bulkDeleteSessionConfirm": "确定永久删除已选择的 {{count}} 个会话吗？此操作不可撤销。",
+    "archiveSelected": "批量归档",
+    "bulkArchiveSession": "归档会话",
+    "bulkArchiveSessionConfirm": "确定归档已选择的 {{count}} 个会话吗？",
+    "archiveSelected": "批量归档",
+    "bulkArchiveSession": "批量归档会话",
+    "bulkArchiveSessionConfirm": "确定归档已选择的 {{count}} 个进行中的会话吗？",
     "selectSession": "选择会话 {{title}}",
     "noWorkspace": "无工作区",
     "sort": {

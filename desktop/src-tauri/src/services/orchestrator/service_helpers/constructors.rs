@@ -304,11 +304,11 @@ fn build_subagent_prompt(
             "You are a codebase exploration specialist. Your goal is DEEP understanding through reading actual code.\n\n\
              {ANTI_DELEGATION}\
              ## Exploration Strategy\n\
-             1. **CodebaseSearch**(query='<your assigned area>', scope='all') — find key symbols, files, components\n\
-             2. **LS** on your assigned directory to understand structure\n\
-             3. **Read implementation files** (8-15 files) — the core logic, not just declarations\n\
+             1. **CodebaseSearch**(query='<your assigned area>', scope='hybrid') — FIRST, locate key symbols, files, and implementations\n\
+             2. **LS** on your assigned directory to understand structure after the first CodebaseSearch pass\n\
+             3. **Read implementation files** (8-15 files) — only after CodebaseSearch has narrowed the file set\n\
              4. **Bash** for git context: `git log --oneline -10` for recent changes, `git log --oneline -5 <file>` for file history\n\
-             5. **Grep** for specific patterns when you need to trace connections\n\n\
+             5. **Grep** only when you need exact identifier / regex / full-text matching that CodebaseSearch cannot answer\n\n\
              ## What to Read (Priority Order)\n\
              - **Core implementation files**: service logic, algorithms, handlers, processors — where the actual work happens\n\
              - **Type/model definitions**: structs, interfaces, enums that define the domain\n\
@@ -321,8 +321,10 @@ fn build_subagent_prompt(
              - **Medium** (default): Read 8-15 files, trace 2-3 levels of call chains. Cover core implementation files.\n\
              - **Very thorough** (prompt says \"thorough\", \"deep\", \"comprehensive\", \"detailed\"): Read 15-30 files, trace all major code paths. Include test files, config, and edge cases.\n\n\
              General rules:\n\
+             - You MUST start code discovery with CodebaseSearch when the index is available\n\
+             - Do NOT begin by scanning with Grep unless the task explicitly asks for regex, exact strings, log text, or known literals\n\
              - Read FULL implementation functions (not just signatures) for core logic\n\
-             - When you find a function call to another module, use Grep/CodebaseSearch to trace it\n\
+             - When you find a function call to another module, use CodebaseSearch first, then Grep only if you need exact string matching\n\
              - Read 2-3 levels deep: if module A calls B which uses C, read all three\n\
              - Use `git log --oneline -10` to understand recent project activity\n\
              - Use `git log --oneline -5 <file>` for important files to see recent change context\n\n\
@@ -339,12 +341,13 @@ fn build_subagent_prompt(
              dependencies, and potential issues.\n\n\
              {ANTI_DELEGATION}\
              ## Analysis Strategy\n\
-             1. **CodebaseSearch**(query='<topic>', scope='all') — find relevant symbols and files\n\
-             2. Read the relevant source files — understand the actual implementation\n\
+             1. **CodebaseSearch**(query='<topic>', scope='hybrid') — FIRST, find relevant symbols, files, and implementations\n\
+             2. Read the relevant source files — only after CodebaseSearch has narrowed the search space\n\
              3. Trace data flow and control flow through the code\n\
              4. Use **Bash** for git context: `git log --oneline -10 <file>` for change history\n\
-             5. Identify architectural patterns and anti-patterns\n\
-             6. Note dependency relationships and coupling\n\n\
+             5. Use **Grep** only for exact identifiers, string literals, or regex/full-text matching\n\
+             6. Identify architectural patterns and anti-patterns\n\
+             7. Note dependency relationships and coupling\n\n\
              ## Output Format\n\
              Provide a structured analysis with these sections:\n\
              - **Analysis Summary**: High-level findings in 2-3 sentences\n\
@@ -361,7 +364,7 @@ fn build_subagent_prompt(
              ## Strategy\n\
              Step 1: DISCOVER the project structure\n\
                - Use LS on the project root to see the top-level directories and files\n\
-               - Use CodebaseSearch(query='project structure', scope='files') to see key files\n\
+               - Use CodebaseSearch(query='project structure', scope='path') to see key files\n\
                - Read key config files (package.json, Cargo.toml, pyproject.toml, etc.) if present\n\
                - Understand what kind of project this is and how it's organized\n\n\
              Step 2: PARTITION the exploration based on what you discovered\n\
@@ -2095,6 +2098,46 @@ mod escalation_tests {
         assert!(
             !prompt.contains("CRITICAL: Parallel Task Execution"),
             "Explore prompt should never contain parallel hint"
+        );
+    }
+
+    #[test]
+    fn test_build_subagent_prompt_uses_valid_codebase_search_scopes() {
+        let provider = ProviderConfig {
+            provider: ProviderType::Anthropic,
+            ..Default::default()
+        };
+        let explore_prompt = build_subagent_prompt(
+            SubAgentType::Explore,
+            0,
+            &None,
+            &ProviderType::Anthropic,
+            &provider,
+        );
+        assert!(
+            !explore_prompt.contains("scope='all'") && !explore_prompt.contains("scope=\"all\""),
+            "Explore prompt should not include invalid scope=all"
+        );
+        assert!(
+            explore_prompt.contains("scope='hybrid'") || explore_prompt.contains("scope=\"hybrid\""),
+            "Explore prompt should use hybrid scope for code discovery"
+        );
+
+        let general_prompt = build_subagent_prompt(
+            SubAgentType::GeneralPurpose,
+            0,
+            &None,
+            &ProviderType::Anthropic,
+            &provider,
+        );
+        assert!(
+            !general_prompt.contains("scope='files'") && !general_prompt.contains("scope=\"files\""),
+            "General-purpose prompt should not include invalid scope=files"
+        );
+        assert!(
+            general_prompt.contains("use CodebaseSearch(query='<area-specific query>') as their first step")
+                || general_prompt.contains("CodebaseSearch(query='project structure', scope='path')"),
+            "General-purpose prompt should explicitly seed CodebaseSearch-first coordinator behavior"
         );
     }
 }

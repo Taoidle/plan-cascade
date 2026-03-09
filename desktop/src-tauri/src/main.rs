@@ -294,6 +294,7 @@ fn main() {
             plan_cascade_desktop::commands::design::get_design_doc,
             // File attachment commands
             plan_cascade_desktop::commands::files::read_file_for_attachment,
+            plan_cascade_desktop::commands::files::inspect_file_for_attachment,
             plan_cascade_desktop::commands::files::list_workspace_files,
             plan_cascade_desktop::commands::files::list_workspace_files_v2,
             plan_cascade_desktop::commands::files::estimate_prompt_tokens,

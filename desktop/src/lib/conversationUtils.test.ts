@@ -263,7 +263,7 @@ describe('buildPromptWithAttachments', () => {
         path: '/tmp/readme.md',
         size: 100,
         type: 'text',
-        content: '# Title\nSome content',
+        inlineContent: '# Title\nSome content',
       },
     ];
     const result = buildPromptWithAttachments('Summarize this file', attachments);
@@ -280,7 +280,7 @@ describe('buildPromptWithAttachments', () => {
         path: '/tmp/a.txt',
         size: 10,
         type: 'text',
-        content: 'File A',
+        inlineContent: 'File A',
       },
       {
         id: '2',
@@ -288,7 +288,7 @@ describe('buildPromptWithAttachments', () => {
         path: '/tmp/b.txt',
         size: 10,
         type: 'text',
-        content: 'File B',
+        inlineContent: 'File B',
       },
     ];
     const result = buildPromptWithAttachments('Process files', attachments);
@@ -307,7 +307,7 @@ describe('buildPromptWithAttachments', () => {
         path: '/tmp/photo.png',
         size: 50000,
         type: 'image',
-        preview: 'data:image/png;base64,abc123',
+        inlinePreview: 'data:image/png;base64,abc123',
       },
     ];
     const result = buildPromptWithAttachments('Describe this image', attachments);
@@ -341,7 +341,7 @@ describe('buildPromptWithAttachments', () => {
         path: '/tmp/file.txt',
         size: 10,
         type: 'text',
-        content: 'File content',
+        inlineContent: 'File content',
       },
     ];
     const result = buildPromptWithAttachments('My prompt', attachments);

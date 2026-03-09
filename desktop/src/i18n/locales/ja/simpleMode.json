@@ -116,6 +116,9 @@
     "selectionCount": "{{count}} 件を選択中",
     "deleteSelected": "選択を削除",
     "bulkDeleteSessionConfirm": "選択した {{count}} 件のセッションを完全に削除しますか？この操作は元に戻せません。",
+    "archiveSelected": "選択をアーカイブ",
+    "bulkArchiveSession": "セッションをアーカイブ",
+    "bulkArchiveSessionConfirm": "選択した {{count}} 件の実行中セッションをアーカイブしますか？",
     "selectSession": "セッション {{title}} を選択",
     "noWorkspace": "ワークスペースなし",
     "sort": {

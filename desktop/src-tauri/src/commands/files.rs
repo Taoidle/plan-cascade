@@ -21,6 +21,18 @@ pub struct FileContentResult {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AttachmentMetadataResult {
+    pub name: String,
+    pub path: String,
+    pub size: usize,
+    pub is_binary: bool,
+    pub mime_type: String,
+    #[serde(rename = "type")]
+    pub attachment_type: String,
+    pub is_previewable: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WorkspaceFileResult {
     pub name: String,
     pub path: String,
@@ -45,6 +57,15 @@ pub struct AttachmentContextInput {
     pub attachment_type: String,
     pub content: Option<String>,
     pub preview: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WorkspaceReferenceInput {
+    pub name: String,
+    #[serde(alias = "relativePath")]
+    pub relative_path: String,
+    #[serde(alias = "absolutePath")]
+    pub absolute_path: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -190,6 +211,198 @@ fn truncate_to_token_budget(text: &str, token_budget: usize) -> (String, bool) {
     (truncated, true)
 }
 
+fn read_attachment_file(path: &str, max_size: usize) -> Result<FileContentResult, String> {
+    let file_path = PathBuf::from(path);
+
+    if !file_path.exists() {
+        return Err(format!("File not found: {}", path));
+    }
+
+    if !file_path.is_file() {
+        return Err(format!("Not a file: {}", path));
+    }
+
+    let metadata =
+        std::fs::metadata(&file_path).map_err(|e| format!("Failed to read file metadata: {}", e))?;
+    let file_size = metadata.len() as usize;
+
+    if file_size > max_size {
+        return Err(format!(
+            "File too large: {} bytes (max {} bytes)",
+            file_size, max_size
+        ));
+    }
+
+    let data = std::fs::read(&file_path).map_err(|e| format!("Failed to read file: {}", e))?;
+    let ext = get_extension(&file_path);
+    let is_binary = is_binary_content(&data);
+    let mime = mime_type_from_extension(&ext).to_string();
+
+    if is_binary {
+        if is_image_extension(&ext) {
+            use base64::Engine;
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+            let data_url = format!("data:{};base64,{}", mime, b64);
+            return Ok(FileContentResult {
+                content: data_url,
+                size: file_size,
+                is_binary: true,
+                mime_type: mime,
+            });
+        }
+
+        return Err("Unsupported binary file type".to_string());
+    }
+
+    let content =
+        String::from_utf8(data).map_err(|_| "File contains invalid UTF-8 encoding".to_string())?;
+
+    Ok(FileContentResult {
+        content,
+        size: file_size,
+        is_binary: false,
+        mime_type: mime,
+    })
+}
+
+fn inspect_attachment_file(path: &str, max_size: usize) -> Result<AttachmentMetadataResult, String> {
+    let file_path = PathBuf::from(path);
+    if !file_path.exists() {
+        return Err(format!("File not found: {}", path));
+    }
+    if !file_path.is_file() {
+        return Err(format!("Not a file: {}", path));
+    }
+    let metadata =
+        std::fs::metadata(&file_path).map_err(|e| format!("Failed to read file metadata: {}", e))?;
+    let file_size = metadata.len() as usize;
+    if file_size > max_size {
+        return Err(format!(
+            "File too large: {} bytes (max {} bytes)",
+            file_size, max_size
+        ));
+    }
+
+    let ext = get_extension(&file_path);
+    let mime_type = mime_type_from_extension(&ext).to_string();
+    let attachment_type = if is_image_extension(&ext) {
+        "image"
+    } else if ext == "pdf" {
+        "pdf"
+    } else {
+        "text"
+    };
+
+    let is_binary = if attachment_type == "image" {
+        true
+    } else {
+        let data = std::fs::read(&file_path).map_err(|e| format!("Failed to read file: {}", e))?;
+        is_binary_content(&data)
+    };
+
+    Ok(AttachmentMetadataResult {
+        name: file_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(path)
+            .to_string(),
+        path: path.to_string(),
+        size: file_size,
+        is_binary,
+        mime_type,
+        attachment_type: if is_binary && attachment_type != "image" {
+            "unknown".to_string()
+        } else {
+            attachment_type.to_string()
+        },
+        is_previewable: attachment_type == "image",
+    })
+}
+
+fn resolve_attachment_section(
+    attachment: &AttachmentContextInput,
+    per_file_budget: usize,
+) -> Result<Option<(String, bool)>, String> {
+    let normalized_type = attachment.attachment_type.to_lowercase();
+    if normalized_type == "text" {
+        let source_text = if let Some(content) = attachment.content.as_deref() {
+            if content.is_empty() {
+                None
+            } else {
+                Some(content.to_string())
+            }
+        } else if !attachment.path.is_empty() {
+            Some(read_attachment_file(&attachment.path, DEFAULT_MAX_SIZE)?.content)
+        } else {
+            None
+        };
+
+        let Some(source_text) = source_text else {
+            return Ok(None);
+        };
+
+        let (prepared, was_truncated) = truncate_to_token_budget(&source_text, per_file_budget);
+        return Ok(Some((
+            format!(
+                "--- File: {} ---\n{}\n--- End of {} ---",
+                attachment.name, prepared, attachment.name
+            ),
+            was_truncated,
+        )));
+    }
+
+    if normalized_type == "image" {
+        return Ok(Some((
+            format!(
+                "--- Attached image: {} ({} bytes) ---",
+                attachment.name, attachment.size
+            ),
+            false,
+        )));
+    }
+
+    if normalized_type == "pdf" {
+        return Ok(Some((
+            format!(
+                "--- Attached PDF: {} ({} bytes) ---",
+                attachment.name, attachment.size
+            ),
+            false,
+        )));
+    }
+
+    Ok(Some((
+        format!(
+            "--- Attached file: {} ({}, {} bytes) ---",
+            attachment.name, normalized_type, attachment.size
+        ),
+        false,
+    )))
+}
+
+fn estimate_attachment_tokens(attachment: &AttachmentContextInput) -> usize {
+    if !attachment.attachment_type.eq_ignore_ascii_case("text") {
+        return DEFAULT_NON_TEXT_ATTACHMENT_TOKENS;
+    }
+
+    if let Some(content) = attachment.content.as_deref() {
+        return estimate_tokens_rough(content);
+    }
+
+    if attachment.size > 0 {
+        return estimate_tokens_rough(&"x".repeat((attachment.size as usize).min(32_000)));
+    }
+
+    if attachment.path.is_empty() {
+        return DEFAULT_NON_TEXT_ATTACHMENT_TOKENS;
+    }
+
+    match read_attachment_file(&attachment.path, DEFAULT_MAX_SIZE) {
+        Ok(file) => estimate_tokens_rough(&file.content),
+        Err(_) => DEFAULT_NON_TEXT_ATTACHMENT_TOKENS,
+    }
+}
+
 fn collect_workspace_files(
     dir_path: &Path,
     search_query: Option<&str>,
@@ -312,64 +525,23 @@ pub async fn read_file_for_attachment(
     path: String,
     max_size: Option<usize>,
 ) -> Result<CommandResponse<FileContentResult>, String> {
-    let file_path = PathBuf::from(&path);
     let max = max_size.unwrap_or(DEFAULT_MAX_SIZE);
-
-    if !file_path.exists() {
-        return Ok(CommandResponse::err(format!("File not found: {}", path)));
+    match read_attachment_file(&path, max) {
+        Ok(result) => Ok(CommandResponse::ok(result)),
+        Err(error) => Ok(CommandResponse::err(error)),
     }
+}
 
-    if !file_path.is_file() {
-        return Ok(CommandResponse::err(format!("Not a file: {}", path)));
+#[tauri::command]
+pub async fn inspect_file_for_attachment(
+    path: String,
+    max_size: Option<usize>,
+) -> Result<CommandResponse<AttachmentMetadataResult>, String> {
+    let max = max_size.unwrap_or(DEFAULT_MAX_SIZE);
+    match inspect_attachment_file(&path, max) {
+        Ok(result) => Ok(CommandResponse::ok(result)),
+        Err(error) => Ok(CommandResponse::err(error)),
     }
-
-    let metadata = std::fs::metadata(&file_path)
-        .map_err(|e| format!("Failed to read file metadata: {}", e))?;
-    let file_size = metadata.len() as usize;
-
-    if file_size > max {
-        return Ok(CommandResponse::err(format!(
-            "File too large: {} bytes (max {} bytes)",
-            file_size, max
-        )));
-    }
-
-    let data = std::fs::read(&file_path).map_err(|e| format!("Failed to read file: {}", e))?;
-
-    let ext = get_extension(&file_path);
-    let is_binary = is_binary_content(&data);
-
-    if is_binary {
-        if is_image_extension(&ext) {
-            let mime = mime_type_from_extension(&ext);
-            use base64::Engine;
-            let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
-            let data_url = format!("data:{};base64,{}", mime, b64);
-
-            return Ok(CommandResponse::ok(FileContentResult {
-                content: data_url,
-                size: file_size,
-                is_binary: true,
-                mime_type: mime.to_string(),
-            }));
-        }
-
-        return Ok(CommandResponse::err(
-            "Unsupported binary file type".to_string(),
-        ));
-    }
-
-    let content =
-        String::from_utf8(data).map_err(|_| "File contains invalid UTF-8 encoding".to_string())?;
-
-    let mime = mime_type_from_extension(&ext);
-
-    Ok(CommandResponse::ok(FileContentResult {
-        content,
-        size: file_size,
-        is_binary: false,
-        mime_type: mime.to_string(),
-    }))
 }
 
 /// List files in a workspace directory with optional search query.
@@ -457,6 +629,7 @@ pub async fn list_workspace_files_v2(
 pub async fn estimate_prompt_tokens(
     prompt: String,
     attachments: Option<Vec<AttachmentContextInput>>,
+    workspace_references: Option<Vec<WorkspaceReferenceInput>>,
     budget_tokens: Option<usize>,
 ) -> Result<CommandResponse<PromptTokenEstimateResult>, String> {
     let budget = budget_tokens.unwrap_or(DEFAULT_TOKEN_BUDGET);
@@ -466,27 +639,24 @@ pub async fn estimate_prompt_tokens(
         .as_deref()
         .unwrap_or_default()
         .iter()
-        .map(|attachment| {
-            if attachment.attachment_type.eq_ignore_ascii_case("text") {
-                attachment
-                    .content
-                    .as_deref()
-                    .map(estimate_tokens_rough)
-                    .unwrap_or(DEFAULT_NON_TEXT_ATTACHMENT_TOKENS)
-            } else {
-                DEFAULT_NON_TEXT_ATTACHMENT_TOKENS
-            }
-        })
+        .map(estimate_attachment_tokens)
         .sum();
+    let reference_tokens = workspace_references
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|reference| estimate_tokens_rough(&reference.relative_path).max(8))
+        .sum::<usize>();
 
-    let estimated_tokens = prompt_tokens + attachment_tokens;
+    let estimated_tokens = prompt_tokens + attachment_tokens + reference_tokens;
     let remaining_tokens = budget as isize - estimated_tokens as isize;
 
     Ok(CommandResponse::ok(PromptTokenEstimateResult {
         estimated_tokens,
         prompt_tokens,
-        attachment_tokens,
-        attachment_count: attachments.as_ref().map(|a| a.len()).unwrap_or(0),
+        attachment_tokens: attachment_tokens + reference_tokens,
+        attachment_count: attachments.as_ref().map(|a| a.len()).unwrap_or(0)
+            + workspace_references.as_ref().map(|r| r.len()).unwrap_or(0),
         budget_tokens: budget,
         remaining_tokens,
         exceeds_budget: estimated_tokens > budget,
@@ -498,6 +668,7 @@ pub async fn estimate_prompt_tokens(
 pub async fn prepare_attachment_context(
     prompt: String,
     attachments: Vec<AttachmentContextInput>,
+    workspace_references: Option<Vec<WorkspaceReferenceInput>>,
     budget_tokens: Option<usize>,
     max_attachment_tokens: Option<usize>,
     max_tokens_per_file: Option<usize>,
@@ -524,44 +695,25 @@ pub async fn prepare_attachment_context(
     let mut truncated = false;
 
     for attachment in attachments.iter() {
-        let normalized_type = attachment.attachment_type.to_lowercase();
         let identifier = if !attachment.path.is_empty() {
             attachment.path.clone()
         } else {
             attachment.name.clone()
         };
 
-        let section = if normalized_type == "text" {
-            match attachment.content.as_deref() {
-                Some(content) if !content.is_empty() => {
-                    let (prepared, was_truncated) =
-                        truncate_to_token_budget(content, per_file_budget);
-                    truncated |= was_truncated;
-                    Some(format!(
-                        "--- File: {} ---\n{}\n--- End of {} ---",
-                        attachment.name, prepared, attachment.name
-                    ))
-                }
-                _ => None,
+        let section = match resolve_attachment_section(attachment, per_file_budget) {
+            Ok(result) => result,
+            Err(error) => {
+                skipped_files.push(PreparedAttachmentSkip {
+                    name: attachment.name.clone(),
+                    path: attachment.path.clone(),
+                    reason: error,
+                });
+                continue;
             }
-        } else if normalized_type == "image" {
-            Some(format!(
-                "--- Attached image: {} ({} bytes) ---",
-                attachment.name, attachment.size
-            ))
-        } else if normalized_type == "pdf" {
-            Some(format!(
-                "--- Attached PDF: {} ({} bytes) ---",
-                attachment.name, attachment.size
-            ))
-        } else {
-            Some(format!(
-                "--- Attached file: {} ({}, {} bytes) ---",
-                attachment.name, normalized_type, attachment.size
-            ))
         };
 
-        let Some(section_text) = section else {
+        let Some((section_text, was_truncated)) = section else {
             skipped_files.push(PreparedAttachmentSkip {
                 name: attachment.name.clone(),
                 path: attachment.path.clone(),
@@ -569,6 +721,7 @@ pub async fn prepare_attachment_context(
             });
             continue;
         };
+        truncated |= was_truncated;
 
         let section_tokens = estimate_tokens_rough(&section_text);
         if section_tokens > remaining_attachment_budget {
@@ -590,6 +743,25 @@ pub async fn prepare_attachment_context(
         prompt
     } else {
         format!("{}\n\n{}", sections.join("\n\n"), prompt)
+    };
+    let prepared_prompt = if let Some(references) = workspace_references.as_ref() {
+        if references.is_empty() {
+            prepared_prompt
+        } else {
+            let reference_block = [
+                "--- Referenced workspace files ---".to_string(),
+                references
+                    .iter()
+                    .map(|reference| format!("- {} ({})", reference.relative_path, reference.name))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                "--- End referenced workspace files ---".to_string(),
+            ]
+            .join("\n");
+            format!("{}\n\n{}", reference_block, prepared_prompt)
+        }
+    } else {
+        prepared_prompt
     };
 
     let total_tokens = estimate_tokens_rough(&prepared_prompt);
@@ -734,8 +906,18 @@ mod tests {
             },
         ];
 
-        let response =
-            prepare_attachment_context(prompt.clone(), attachments, Some(120), Some(50), Some(10))
+        let response = prepare_attachment_context(
+            prompt.clone(),
+            attachments,
+            Some(vec![WorkspaceReferenceInput {
+                name: "first.txt".to_string(),
+                relative_path: "src/first.txt".to_string(),
+                absolute_path: "/tmp/src/first.txt".to_string(),
+            }]),
+            Some(120),
+            Some(50),
+            Some(10),
+        )
                 .await
                 .expect("command should resolve");
         assert!(response.success);
@@ -745,6 +927,9 @@ mod tests {
         assert_eq!(payload.included_files, vec!["src/first.txt".to_string()]);
         assert_eq!(payload.skipped_files.len(), 1);
         assert_eq!(payload.skipped_files[0].reason, "budget_exceeded");
+        assert!(payload
+            .prepared_prompt
+            .contains("--- Referenced workspace files ---"));
         assert!(payload.prepared_prompt.contains("--- File: first.txt ---"));
         assert!(payload.prepared_prompt.ends_with(&prompt));
         assert!(payload.attachment_tokens > 0);

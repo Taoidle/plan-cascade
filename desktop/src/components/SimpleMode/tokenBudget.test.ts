@@ -12,7 +12,7 @@ describe('tokenBudget utilities', () => {
           path: 'readme.md',
           size: 8,
           type: 'text',
-          content: 'abcdefgh',
+          inlineContent: 'abcdefgh',
         },
         {
           id: 'b',
@@ -20,9 +20,10 @@ describe('tokenBudget utilities', () => {
           path: 'diagram.png',
           size: 100,
           type: 'image',
-          preview: 'data:image/png;base64,test',
+          inlinePreview: 'data:image/png;base64,test',
         },
       ],
+      [],
       100,
     );
 
@@ -34,7 +35,7 @@ describe('tokenBudget utilities', () => {
   });
 
   it('reports budget overflow', () => {
-    const result = estimatePromptTokensFallback('a'.repeat(600), [], 100);
+    const result = estimatePromptTokensFallback('a'.repeat(600), [], [], 100);
     expect(result.exceeds_budget).toBe(true);
     expect(result.remaining_tokens).toBeLessThan(0);
   });

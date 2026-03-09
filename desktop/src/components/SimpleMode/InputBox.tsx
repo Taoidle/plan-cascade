@@ -33,7 +33,7 @@ import {
 import { MarkdownRenderer } from '../ClaudeCodeMode/MarkdownRenderer';
 import { PromptPalette } from './PromptPalette';
 import { usePromptsStore } from '../../store/prompts';
-import type { FileAttachmentData } from '../../types/attachment';
+import type { FileAttachmentData, WorkspaceFileReferenceData } from '../../types/attachment';
 import { PersonIcon } from '@radix-ui/react-icons';
 
 // ============================================================================
@@ -50,6 +50,8 @@ interface InputBoxProps {
   attachments?: FileAttachmentData[];
   onAttach?: (file: FileAttachmentData) => void;
   onRemoveAttachment?: (id: string) => void;
+  workspaceReferences?: WorkspaceFileReferenceData[];
+  onWorkspaceReferencesChange?: (references: WorkspaceFileReferenceData[]) => void;
   workspacePath?: string | null;
   activeAgentName?: string | null;
   onClearAgent?: () => void;
@@ -73,11 +75,14 @@ interface WorkspaceFileListV2Result {
   total: number;
 }
 
-interface FileContentResult {
-  content: string;
+interface AttachmentMetadataResult {
+  name: string;
+  path: string;
   size: number;
   is_binary: boolean;
   mime_type: string;
+  type: FileAttachmentData['type'];
+  is_previewable: boolean;
 }
 
 interface CommandResponse<T> {
@@ -120,6 +125,10 @@ function getFileNameFromPath(filePath: string): string {
   return parts[parts.length - 1] || filePath;
 }
 
+function normalizeWorkspaceRelativePath(filePath: string): string {
+  return filePath.replace(/\\/g, '/');
+}
+
 // ============================================================================
 // InputBox Component
 // ============================================================================
@@ -139,6 +148,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
     attachments = [],
     onAttach,
     onRemoveAttachment,
+    workspaceReferences = [],
+    onWorkspaceReferencesChange,
     workspacePath,
     activeAgentName,
     onClearAgent,
@@ -233,7 +244,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       setFileError(null);
 
       try {
-        const result = await invoke<CommandResponse<FileContentResult>>('read_file_for_attachment', { path: filePath });
+        const result = await invoke<CommandResponse<AttachmentMetadataResult>>('inspect_file_for_attachment', {
+          path: filePath,
+        });
 
         if (!result.success || !result.data) {
           const errMsg =
@@ -244,7 +257,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
 
         const data = result.data;
         const fileName = getFileNameFromPath(filePath);
-        const fileType = getFileTypeFromMime(data.mime_type);
+        const fileType = data.type || getFileTypeFromMime(data.mime_type);
 
         // Warn for large text files
         if (!data.is_binary && data.size > LARGE_FILE_WARNING_SIZE) {
@@ -257,8 +270,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
           path: filePath,
           size: data.size,
           type: fileType,
-          content: data.is_binary ? undefined : data.content,
-          preview: data.is_binary ? data.content : undefined, // base64 data URL for images
+          mimeType: data.mime_type,
+          isWorkspaceFile: !!workspacePath && filePath.startsWith(workspacePath),
+          isAccessible: true,
         };
 
         onAttach(attachment);
@@ -269,7 +283,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         setIsReadingFile(false);
       }
     },
-    [onAttach, t],
+    [onAttach, t, workspacePath],
   );
 
   // ============================================================================
@@ -321,14 +335,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         } else {
           // Browser fallback: read file content directly
           try {
-            const content = await file.text();
             const attachment: FileAttachmentData = {
               id: generateId(),
               name: file.name,
               path: file.name,
               size: file.size,
               type: 'text',
-              content,
+              inlineContent: await file.text(),
+              isAccessible: true,
             };
             onAttach(attachment);
           } catch {
@@ -372,14 +386,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         if (!input.files) return;
         for (const file of Array.from(input.files)) {
           try {
-            const content = await file.text();
             const attachment: FileAttachmentData = {
               id: generateId(),
               name: file.name,
               path: file.name,
               size: file.size,
               type: 'text',
-              content,
+              inlineContent: await file.text(),
+              isAccessible: true,
             };
             onAttach(attachment);
           } catch {
@@ -449,24 +463,42 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
 
   const handleAutocompleteSelect = useCallback(
     async (file: WorkspaceFileResult) => {
-      if (!onAttach || !workspacePath) return;
+      if (!workspacePath) return;
 
       // Replace @query text in the textarea with the file reference
       const beforeAt = value.substring(0, atTriggerPos);
       const afterQuery = value.substring(atTriggerPos + 1 + autocompleteQuery.length);
-      const newValue = `${beforeAt}@${file.name} ${afterQuery}`;
+      const relativePath = normalizeWorkspaceRelativePath(file.path);
+      const mentionText = `@${relativePath}`;
+      const newValue = `${beforeAt}${mentionText} ${afterQuery}`;
       onChange(newValue);
+      if (!file.is_dir && onWorkspaceReferencesChange) {
+        const absolutePath = file.path.startsWith('/') ? file.path : `${workspacePath}/${file.path}`;
+        const nextReference: WorkspaceFileReferenceData = {
+          id: generateId(),
+          name: file.name,
+          relativePath,
+          absolutePath,
+          mentionText,
+        };
+        const retained = workspaceReferences.filter(
+          (reference) => reference.mentionText !== mentionText && newValue.includes(reference.mentionText),
+        );
+        onWorkspaceReferencesChange([...retained, nextReference]);
+      }
 
       closeAutocomplete();
-
-      // Read the file and add as attachment
-      const fullPath = file.path.startsWith('/') ? file.path : `${workspacePath}/${file.path}`;
-
-      if (!file.is_dir) {
-        await readFileAndAttach(fullPath);
-      }
     },
-    [onAttach, workspacePath, value, atTriggerPos, autocompleteQuery, onChange, closeAutocomplete, readFileAndAttach],
+    [
+      workspacePath,
+      value,
+      atTriggerPos,
+      autocompleteQuery,
+      onChange,
+      onWorkspaceReferencesChange,
+      workspaceReferences,
+      closeAutocomplete,
+    ],
   );
 
   // Detect @ and / triggers when text changes
@@ -492,7 +524,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
         }
       }
 
-      if (!workspacePath || !onAttach) return;
+      if (onWorkspaceReferencesChange) {
+        onWorkspaceReferencesChange(
+          workspaceReferences.filter((reference) => newValue.includes(reference.mentionText)),
+        );
+      }
+
+      if (!workspacePath) return;
 
       {
         const textarea2 = textareaRef.current;
@@ -525,10 +563,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function Input
       onChange,
       isPromptPaletteOpen,
       workspacePath,
-      onAttach,
       isAutocompleteOpen,
       fetchWorkspaceFiles,
       closeAutocomplete,
+      onWorkspaceReferencesChange,
+      workspaceReferences,
     ],
   );
 

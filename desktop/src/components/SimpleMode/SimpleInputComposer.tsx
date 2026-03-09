@@ -1,5 +1,5 @@
 import type { Ref } from 'react';
-import type { FileAttachmentData } from '../../types/attachment';
+import type { FileAttachmentData, WorkspaceFileReferenceData } from '../../types/attachment';
 import type { PlanClarifyQuestionCardData } from '../../types/planModeCard';
 import type { InterviewQuestionCardData } from '../../types/workflowCard';
 import { InputBox, type InputBoxHandle } from './InputBox';
@@ -35,6 +35,8 @@ export interface SimpleInputComposerProps {
   attachments: FileAttachmentData[];
   onAttach: (file: FileAttachmentData) => void;
   onRemoveAttachment: (id: string) => void;
+  workspaceReferences: WorkspaceFileReferenceData[];
+  onWorkspaceReferencesChange: (references: WorkspaceFileReferenceData[]) => void;
   workspacePath: string | null;
   activeAgentName: string | null;
   onClearAgent: () => void;
@@ -75,6 +77,8 @@ export function SimpleInputComposer({
   attachments,
   onAttach,
   onRemoveAttachment,
+  workspaceReferences,
+  onWorkspaceReferencesChange,
   workspacePath,
   activeAgentName,
   onClearAgent,
@@ -211,6 +215,8 @@ export function SimpleInputComposer({
         attachments={attachments}
         onAttach={onAttach}
         onRemoveAttachment={onRemoveAttachment}
+        workspaceReferences={workspaceReferences}
+        onWorkspaceReferencesChange={onWorkspaceReferencesChange}
         workspacePath={workspacePath}
         activeAgentName={activeAgentName}
         onClearAgent={onClearAgent}

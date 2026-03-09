@@ -1,4 +1,4 @@
-[中文版](README_zh.md)
+[English](README.md)
 
 <div align="center">
 
@@ -6,7 +6,7 @@
 
 **AI-Powered Cascading Development Framework**
 
-*Decompose complex projects into parallel executable tasks with multi-agent collaboration*
+*Decompose complex projects into parallel executable tasks with multi-provider execution*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/version-4.4.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
@@ -18,7 +18,7 @@
 | Claude Code Plugin | ![Stable](https://img.shields.io/badge/status-stable-brightgreen) |
 | MCP Server | ![Stable](https://img.shields.io/badge/status-stable-brightgreen) |
 | Standalone CLI | ![In Development](https://img.shields.io/badge/status-in%20development-yellow) |
-| Desktop App | ![Beta](https://img.shields.io/badge/status-beta-blue) |
+| Desktop App | ![Alpha](https://img.shields.io/badge/status-alpha-red) |
 
 [Features](#features) • [Quick Start](#quick-start) • [Documentation](#documentation) • [Architecture](#architecture)
 
@@ -61,22 +61,78 @@ Traditional AI coding assistants struggle with large, complex projects. Plan Cas
 ┌─────────────────────────────────────────────────────────────┐
 │  Level 3: Story Execution                                   │
 │  ────────────────────────                                   │
-│  Parallel story execution with multi-agent support          │
-│  Automatic agent selection based on task type               │
+│  Parallel story execution with multi-provider support           │
+│  Configurable LLM provider selection for each execution stage  │
 │  Output: Code changes                                       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Multi-Agent Collaboration
+### Core Modes
 
-| Agent | Type | Best For |
-|-------|------|----------|
-| `claude-code` | Built-in | General purpose (default) |
-| `codex` | CLI | Bug fixes, quick implementations |
-| `aider` | CLI | Refactoring, code improvements |
-| `amp-code` | CLI | Alternative implementations |
+Plan Cascade provides three independent execution modes managed by a unified **Workflow Kernel**:
 
-Agents are automatically selected based on story type, or can be manually specified.
+| Mode | Description | Best For |
+|------|-------------|----------|
+| **Chat** | Lightweight chat interface for simple Q&A | Quick questions, file lookups, trivial tasks |
+| **Plan** | Domain-adaptive task decomposition with Steps | Content creation, research, multi-step workflows |
+| **Task** | PRD-driven code development with Stories and Quality Gates | Feature development, complex implementations |
+
+### Workflow Kernel
+
+All three modes are managed by a unified **Workflow Kernel** that provides:
+
+- **Unified session lifecycle** — Consistent state management across modes
+- **Typed event streaming** — Real-time progress updates
+- **Mode handoff** — Seamless switching between Chat/Plan/Task
+- **Lightweight checkpointing** — Recovery from interruptions
+
+### Plan Mode — Domain-Adaptive Task Decomposition
+
+The **Plan Mode** provides a domain-independent task decomposition framework:
+
+- **Domain Adapters** — Specialized handlers for different task types (General, Writing, Research, Marketing, DataAnalysis, etc.)
+- **Step Decomposition** — Breaks tasks into executable Steps with dependencies
+- **Batch Execution** — Parallel execution of independent Steps
+- **Output Validation** — Validates Step outputs against acceptance criteria
+
+### Task Mode — PRD-Driven Code Development
+
+The **Task Mode** is the most powerful mode, implementing a complete software engineering methodology:
+
+- **PRD Generation** — Auto-generate Product Requirements Document from task description
+- **Story Decomposition** — Break down requirements into executable Stories with dependencies
+- **Kahn Algorithm** — Topological sorting for optimal batch execution order
+- **7-Level Agent Priority** — Intelligent agent selection (global > stage > story > inference > default > fallback > claude-code)
+- **Complete Quality Gates** — Full validation pipeline after each Story:
+  - DoR (Definition of Ready)
+  - DoD (Definition of Done)
+  - AI Verification (detects skeleton code)
+  - Code Review (quality scoring)
+  - TDD Compliance
+- **Auto-Retry** — Exponential backoff on failures (5s → 10s → 20s)
+
+### Multi-Provider Execution
+
+Plan Cascade supports configuring different LLM providers for story execution. Providers are configured in Settings → Stage Agents tab.
+
+| Provider | Type | Best For |
+|----------|------|----------|
+| `claude-sonnet` | LLM (default) | Balanced capability and speed |
+| `claude-opus` | LLM | Complex tasks, best capability |
+| `claude-haiku` | LLM | Simple tasks, fastest response |
+
+Supported LLM providers: Anthropic, OpenAI, Ollama, DeepSeek.
+
+**Note**: CLI agent support (codex, aider) for external tool execution is not yet implemented.
+
+### Story Execution Modes
+
+| Mode | Description |
+|------|-------------|
+| `LLM` | Use direct LLM API via OrchestratorService (default) |
+| `CLI` | Use external CLI tools (not yet implemented) |
+
+Story execution mode is automatically determined based on whether an LLM provider is configured.
 
 ### Auto-Generated Design Documents
 
@@ -94,6 +150,59 @@ Automated verification after each story:
 - Linting (ESLint, Ruff)
 - Custom validation scripts
 - **AI Verification Gate** - Validates implementation against acceptance criteria and detects skeleton code
+- **Code Review Gate** - AI-powered code review with quality scoring
+- **TDD Compliance Gate** - Ensures test changes accompany code changes
+
+### Desktop Application Features
+
+The Desktop application provides a complete GUI with **50+ Tauri commands** covering:
+
+| Category | Commands |
+|----------|----------|
+| **Task Mode** | Enter/exit task mode, generate/approve PRD, execution status, cancel/report |
+| **Plan Mode** | Plan generation, session analysis, lifecycle reporting |
+| **Git Operations** | Worktree management, branch operations, commit history |
+| **Memory** | Semantic storage and retrieval with configurable embedding providers |
+| **Knowledge** | Project knowledge management with hybrid search (HNSW + FTS5) |
+| **Codebase Index** | LSP-based code intelligence, semantic search |
+| **Skills** | External framework skills loading (React, Vue, Rust, etc.) |
+| **MCP** | Model Context Protocol server integration |
+| **Plugins** | Extensible plugin architecture |
+| **Settings** | User preferences management |
+| **Webhooks** | External callbacks |
+| **Evaluation** | Code quality assessment |
+
+### Memory System
+
+The Desktop application includes a sophisticated **cross-session persistent memory system** that learns from user interactions and project context:
+
+| Feature | Description |
+|---------|-------------|
+| **Storage** | SQLite-based persistent storage with TF-IDF embedding |
+| **Scopes** | Project, Global (cross-project), and Session-level memory |
+| **Retrieval** | 4-signal hybrid ranking (embedding + keyword + importance + recency) |
+| **Categories** | Preference, Convention, Pattern, Correction, Fact |
+| **Extraction** | LLM-driven automatic memory extraction from conversations |
+| **Commands** | Explicit memory commands: `remember that...`, `forget that...`, `what do you remember about...` |
+| **Maintenance** | Automatic decay, pruning, and compaction |
+
+**Memory Categories:**
+
+| Category | Description |
+|----------|-------------|
+| `Preference` | User preferences and habits |
+| `Convention` | Project-specific conventions |
+| `Pattern` | Discovered patterns in the codebase |
+| `Correction` | Corrections made during development |
+| `Fact` | Factual knowledge about the project |
+
+**Explicit Memory Commands:**
+- `remember that [content]` — Store a new memory
+- `forget about [topic]` — Delete memories about a topic
+- `what do you remember about [topic]` — Query memories
+
+**Global Memory:**
+Memory tagged with `__global__` is shared across all projects and sessions, enabling user preference persistence.
 
 ### External Framework Skills
 
@@ -136,7 +245,23 @@ claude plugins install Taoidle/plan-cascade
 /plan-cascade:approve --auto-run
 ```
 
-### Option 2: Standalone CLI
+### Option 2: Desktop Application (Alpha)
+
+> **Note**: The Desktop application is currently in **Alpha** stage. Core capabilities are complete but some features may be unstable.
+
+Based on **Tauri 2.0** with Rust backend and React frontend:
+
+```bash
+# Build from source
+cd desktop
+pnpm install
+pnpm tauri dev
+
+# Or run the built app (after build)
+pnpm tauri build
+```
+
+### Option 3: Standalone CLI
 
 > **Note**: The standalone CLI is currently in active development. Some features may be incomplete or unstable. For production use, we recommend the Claude Code Plugin.
 
@@ -148,213 +273,62 @@ pip install plan-cascade
 plan-cascade config --setup
 
 # Run with auto-strategy
-plan-cascade run "Implement user authentication"
-
-# Or use expert mode for more control
-plan-cascade run "Implement user authentication" --expert
+...
 ```
-
-### Option 3: Desktop App
-
-A cross-platform desktop application built with **Tauri 2.0** (Rust backend + React frontend). Provides a full GUI for all Plan Cascade capabilities plus standalone features like multi-provider LLM chat, knowledge base (RAG), analytics dashboard, and more.
-
-```bash
-cd desktop
-pnpm install
-pnpm tauri:dev        # Development mode with hot reload
-pnpm tauri:build      # Production build for current platform
-```
-
-See the [Desktop README](desktop/README.md) for full details, or jump to the [Desktop App](#desktop-app) section below.
-
-## Usage Examples
-
-> **Note**: `/plan-cascade:auto` defaults to **FULL** flow (spec auto + TDD on + confirmations). Use `--flow standard|quick`, `--tdd auto|off`, or `--no-confirm` to opt out.
-
-### Simple Task (Quick Direct Execution)
-```bash
-/plan-cascade:auto --flow quick "Fix the typo in the login button"
-# → Executes directly without planning (quick flow)
-```
-
-### Medium Feature (Hybrid Auto)
-```bash
-/plan-cascade:auto "Implement OAuth2 login with Google and GitHub"
-# → Generates PRD with 3-5 stories, executes in parallel
-```
-
-### Large Project (Mega Plan)
-```bash
-/plan-cascade:auto "Build an e-commerce platform with users, products, cart, and orders"
-# → Creates mega-plan with 4 features, each with its own PRD
-```
-
-### With External Design Document
-```bash
-/plan-cascade:mega-plan "Build blog platform" ./architecture.md
-# → Converts your design doc and uses it for guidance
-```
-
-### With Specific Agent
-```bash
-/plan-cascade:approve --impl-agent=aider --retry-agent=codex
-# → Uses aider for implementation, codex for retries
-```
-
-## Desktop App
-
-The desktop application is a standalone AI programming platform that operates independently of the Python core. It provides a rich GUI with its own pure-Rust backend.
-
-### Execution Modes
-
-| Mode | Description |
-|------|-------------|
-| **Claude Code** | Interactive GUI for Claude Code CLI with tool visualization |
-| **Simple** | Direct LLM conversation with agentic tool use (file editing, shell, search) |
-| **Expert** | Interview-driven PRD generation with dependency graph visualization |
-| **Task** | PRD-driven autonomous multi-story execution with quality gates |
-| **Plan** | Multi-feature mega-plan orchestration |
-
-### LLM Providers
-
-Connects to **7+ providers** with streaming support and intelligent tool-calling fallback:
-
-| Provider | Tool Calling | Local |
-|----------|:---:|:---:|
-| Anthropic (Claude) | Native | |
-| OpenAI (GPT) | Native | |
-| DeepSeek | Dual-channel | |
-| Qwen (Alibaba) | Dual-channel | |
-| Zhipu GLM | Dual-channel | |
-| Ollama | Prompt-only | Yes |
-| MiniMax | Prompt-only | |
-
-### Key Features
-
-- **Agent Library** — Create reusable AI agents with custom prompts, tool constraints, and execution history
-- **Quality Gates** — Automated test, lint, and type-check validation after each code generation step
-- **Timeline & Checkpoints** — Session version control with branching, forking, and one-click rollback
-- **Git Integration** — Full GUI for staging, committing, branching, merging, conflict resolution, and AI-assisted commit messages (46 git commands)
-- **Knowledge Base (RAG)** — Semantic document search with HNSW vector indexing and multi-provider embeddings
-- **Codebase Index** — Tree-sitter symbol extraction (6 languages) with background indexing and semantic search
-- **MCP Integration** — Model Context Protocol server management and custom tool registration
-- **Analytics Dashboard** — Token usage, cost tracking, and model performance comparison with CSV/JSON export
-- **Agent Composer** — Visual canvas editor for multi-step agent pipelines (sequential, parallel, conditional)
-- **Graph Workflow** — DAG-based workflow editor with draggable nodes and SVG edges
-- **Plugins** — Framework skill injection (React, Vue, Rust) with marketplace support
-- **Guardrails** — Rule-based constraints for sensitive data detection, code security, and custom regex patterns
-- **Webhooks** — Event routing to Slack, Feishu, Discord, Telegram, or custom endpoints
-- **Remote Control** — Telegram bot gateway and A2A (Agent-to-Agent) protocol
-- **i18n** — English, Chinese (Simplified), Japanese
-
-### Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Frontend | React 18 + TypeScript + Zustand + Radix UI + Tailwind CSS + Monaco Editor |
-| Backend | Rust + Tauri 2.0 + Tokio + SQLite + AES-256-GCM keyring |
-| Code Analysis | Tree-sitter (Python, Rust, TypeScript, JavaScript, Go, Java) |
-| Vector Search | HNSW (hnsw_rs) for embeddings, hybrid search with BM25 reranking |
-
-### Build Targets
-
-```bash
-pnpm tauri:build:macos      # macOS Universal (Intel + Apple Silicon)
-pnpm tauri:build:windows    # Windows x64 MSI
-pnpm tauri:build:linux      # Linux x64 AppImage
-```
-
-For architecture details, development setup, and contribution guide, see the [Desktop README](desktop/README.md).
-
----
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
-| [Plugin Guide](docs/Plugin-Guide.md) | Claude Code plugin usage |
-| [CLI Guide](docs/CLI-Guide.md) | Standalone CLI usage |
-| [Desktop Guide](docs/Desktop-Guide.md) | Desktop application |
-| [Desktop README](desktop/README.md) | Desktop development and architecture |
-| [MCP Server Guide](docs/MCP-SERVER-GUIDE.md) | Integration with Cursor, Windsurf |
-| [System Architecture](docs/System-Architecture.md) | Technical architecture |
+| [Architecture Design](desktop/docs/architecture-design.md) | Overall system architecture |
+| [Kernel Design](desktop/docs/kernel-design.md) | Workflow kernel, Simple Plan/Task production specs |
+| [Memory & Skills Design](desktop/docs/memory-skill-design.md) | Memory and skills architecture |
+| [Codebase Index Design](desktop/docs/codebase-index-design.md) | HNSW/FTS5/LSP index design |
+| [Developer Guide](desktop/docs/developer-guide-v2.md) | Development setup, project structure |
+| [API Reference](desktop/docs/api-reference-v2.md) | Tauri command reference |
 
 ## Architecture
 
-### File Structure
+### Desktop Application Architecture
 
 ```
-plan-cascade/
-├── src/plan_cascade/       # Python core
-│   ├── core/               # Orchestration engine
-│   ├── backends/           # Agent abstraction
-│   ├── llm/                # LLM providers
-│   └── cli/                # CLI entry
-├── commands/               # Plugin commands
-├── skills/                 # Plugin skills
-├── mcp_server/             # MCP server
-├── external-skills/        # Framework skills (React, Vue, Rust)
-└── desktop/                # Desktop app (Tauri 2.0 + React 18)
-    ├── src/                #   React frontend (283 components)
-    │   ├── components/     #     UI by domain (23 feature areas)
-    │   ├── store/          #     Zustand state (39 stores)
-    │   └── lib/            #     Tauri IPC wrappers (30+ files)
-    └── src-tauri/          #   Rust backend
-        ├── src/commands/   #     359 IPC commands (43 modules)
-        ├── src/services/   #     Business logic (150+ files)
-        └── crates/         #     Workspace crates (core, llm, tools, quality-gates)
+┌─────────────────────────────────────────────────────────────┐
+│                     Frontend (React + TypeScript)           │
+├─────────────────────────────────────────────────────────────┤
+│  110+ Zustand Stores  │  React Query  │  Radix UI        │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                    Tauri IPC (50+ commands)
+                              │
+┌─────────────────────────────────────────────────────────────┐
+│                   Backend (Rust + Tauri 2.0)                │
+├─────────────────────────────────────────────────────────────┤
+│  Core Crate    │  LLM Crate   │  Quality Gates  │  Tools   │
+│  Context/      │  OpenAI/     │  Detector/     │  Executor│
+│  Events/       │  Anthropic/  │  Validator/   │  Traits  │
+│  Streaming     │  DeepSeek/   │  Pipeline     │          │
+│                │  Ollama/...   │               │          │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### Supported LLM Backends
+### LLM Providers Supported
 
-| Backend | API Key Required | Notes |
-|---------|-----------------|-------|
-| Claude Code | No | Default, via Claude Code CLI |
-| Claude API | Yes | Direct Anthropic API |
-| OpenAI | Yes | GPT-4o, etc. |
-| DeepSeek | Yes | DeepSeek Chat/Coder |
-| Ollama | No | Local models |
+| Provider | Models |
+|----------|--------|
+| OpenAI | GPT-4o, GPT-4o Mini |
+| Anthropic | Claude Sonnet, Claude Haiku |
+| DeepSeek | DeepSeek Chat |
+| GLM | ZhipuAI (Dialogue + Embedding) |
+| MiniMax | M2, M2.1, M2.5 (via Anthropic-compatible API) |
+| Ollama | Local models |
+| Qwen | Tongyi Qianwen (Dialogue + Embedding) |
 
-## What's New in v4.4.0
+### Search Capabilities
 
-- **`--agent` for hybrid-worktree** — PRD generation agent selection: `/plan-cascade:hybrid-worktree task branch "desc" --agent=codex`
-- **Spec Interview (optional)** — Planning-time `spec.json/spec.md` workflow that compiles into PRD
-- **Universal Resume** — `/plan-cascade:resume` auto-detects mode and routes to the right resume command
-- **Dashboard + Gates** — Aggregated status view plus DoR/DoD/TDD quality gates
-- **Compaction-Safe Session Journal** — Recent tool activity is persisted to `.state/claude-session/` and surfaced in `.hybrid-execution-context.md` / `.mega-execution-context.md`
-- **Safer Auto Defaults** — `/plan-cascade:auto` defaults to FULL flow with `--spec auto`, `--tdd on`, and confirmations (override via `--flow`, `--tdd`, `--no-confirm`)
-
-See [CHANGELOG.md](CHANGELOG.md) for full history.
-
-## Contributing
-
-Contributions are welcome! Please read our contributing guidelines before submitting PRs.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## Acknowledgments
-
-- [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files) — Original inspiration
-- [snarktank/ralph](https://github.com/snarktank/ralph) — PRD format
-- [Anthropic](https://www.anthropic.com/) — Claude Code & MCP protocol
-- [vercel-labs/agent-skills](https://github.com/vercel-labs/agent-skills) — React/Next.js best practices skills
-- [vuejs-ai/skills](https://github.com/vuejs-ai/skills) — Vue.js best practices skills
-- [actionbook/rust-skills](https://github.com/actionbook/rust-skills) — Rust meta-cognition framework skills
+- **Semantic Search** — Configurable embedding providers (OpenAI, Qwen, GLM, Ollama, TF-IDF)
+- **Hybrid Search** — HNSW + FTS5 combined
+- **LSP-based** — Language Server Protocol for code intelligence
 
 ## License
 
-[MIT License](LICENSE)
-
----
-
-<div align="center">
-
-**[GitHub](https://github.com/Taoidle/plan-cascade)** • **[Issues](https://github.com/Taoidle/plan-cascade/issues)** • **[Discussions](https://github.com/Taoidle/plan-cascade/discussions)**
-
-[![Star History Chart](https://api.star-history.com/svg?repos=Taoidle/plan-cascade&type=Date)](https://star-history.com/#Taoidle/plan-cascade&Date)
-
-</div>
+MIT License - see [LICENSE](LICENSE) for details.

@@ -6,7 +6,7 @@
  */
 
 import type { StreamLine, StreamLineType } from '../store/execution';
-import type { FileAttachmentData } from '../types/attachment';
+import type { FileAttachmentData, WorkspaceFileReferenceData } from '../types/attachment';
 
 // ============================================================================
 // Types
@@ -247,14 +247,28 @@ export function rebuildStandaloneTurns(lines: StreamLine[]): StandaloneTurn[] {
  * only a reference with the file name and type is included (binary content
  * is not embedded in the text prompt).
  */
-export function buildPromptWithAttachments(prompt: string, attachments: FileAttachmentData[]): string {
-  if (attachments.length === 0) return prompt;
+export function buildPromptWithAttachments(
+  prompt: string,
+  attachments: FileAttachmentData[],
+  workspaceReferences: WorkspaceFileReferenceData[] = [],
+): string {
+  if (attachments.length === 0 && workspaceReferences.length === 0) return prompt;
 
   const sections: string[] = [];
 
+  if (workspaceReferences.length > 0) {
+    sections.push(
+      [
+        '--- Referenced workspace files ---',
+        ...workspaceReferences.map((reference) => `- ${reference.relativePath}`),
+        '--- End referenced workspace files ---',
+      ].join('\n'),
+    );
+  }
+
   for (const attachment of attachments) {
-    if (attachment.type === 'text' && attachment.content) {
-      sections.push(`--- File: ${attachment.name} ---\n${attachment.content}\n--- End of ${attachment.name} ---`);
+    if (attachment.type === 'text' && attachment.inlineContent) {
+      sections.push(`--- File: ${attachment.name} ---\n${attachment.inlineContent}\n--- End of ${attachment.name} ---`);
     } else if (attachment.type === 'image') {
       sections.push(`--- Attached image: ${attachment.name} (${formatFileSize(attachment.size)}) ---`);
     } else if (attachment.type === 'pdf') {
@@ -281,4 +295,4 @@ function formatFileSize(bytes: number): string {
 }
 
 // Re-export types for convenience
-export type { StreamLine, StreamLineType, FileAttachmentData };
+export type { StreamLine, StreamLineType, FileAttachmentData, WorkspaceFileReferenceData };

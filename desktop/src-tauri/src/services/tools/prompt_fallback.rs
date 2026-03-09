@@ -95,14 +95,14 @@ IMPORTANT / 重要提示:
 {{"tool": "Bash", "arguments": {{"command": "cargo test"}}}}
 ```
 
-搜索代码 (Search code):
-```tool_call
-{{"tool": "Grep", "arguments": {{"pattern": "fn main", "path": "src/"}}}}
-```
-
-搜索符号和代码 (Search symbols and code with index):
+搜索代码架构/定位实现 (Search code structure / locate implementation):
 ```tool_call
 {{"tool": "CodebaseSearch", "arguments": {{"query": "authenticate", "scope": "hybrid"}}}}
+```
+
+精确字符串/正则搜索 (Exact string / regex search):
+```tool_call
+{{"tool": "Grep", "arguments": {{"pattern": "fn main", "path": "src/"}}}}
 ```
 
 When you receive a tool result, analyze it and decide whether to make more tool calls or provide your final response.

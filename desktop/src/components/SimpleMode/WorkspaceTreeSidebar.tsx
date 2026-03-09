@@ -886,6 +886,7 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(() => new Set());
   const [bulkDeleteTargets, setBulkDeleteTargets] = useState<SessionManageTarget[] | null>(null);
+  const [bulkArchiveTargets, setBulkArchiveTargets] = useState<SessionManageTarget[] | null>(null);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -1072,6 +1073,7 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
   const handleCloseArchiveDialog = useCallback((open: boolean) => {
     if (open) return;
     setArchiveTarget(null);
+    setBulkArchiveTargets(null);
   }, []);
 
   const handleConfirmArchive = useCallback(() => {
@@ -1079,6 +1081,19 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
     onArchiveWorkflowSession?.(archiveTarget.sourceSessionId);
     setArchiveTarget(null);
   }, [archiveTarget, onArchiveWorkflowSession]);
+
+  const handleConfirmBulkArchive = useCallback(() => {
+    const targets = bulkArchiveTargets ?? (archiveTarget ? [archiveTarget] : []);
+    for (const target of targets) {
+      if (target.kind === 'live') {
+        onArchiveWorkflowSession?.(target.sourceSessionId);
+      }
+    }
+    setArchiveTarget(null);
+    setBulkArchiveTargets(null);
+    setSelectionMode(false);
+    setSelectedSessionIds(new Set());
+  }, [bulkArchiveTargets, archiveTarget, onArchiveWorkflowSession]);
 
   const handleRequestRename = useCallback((target: SessionManageTarget) => {
     setRenameTarget(target);
@@ -1125,6 +1140,15 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
     [effectivePathGroups],
   );
 
+  const handleRequestBulkArchive = useCallback(() => {
+    const archiveableTargets = allSessionTargets
+      .filter((item) => selectedSessionIds.has(item.id))
+      .map((item) => item.target)
+      .filter((target) => target.kind === 'live');
+    if (archiveableTargets.length === 0) return;
+    setBulkArchiveTargets(archiveableTargets);
+  }, [allSessionTargets, selectedSessionIds]);
+
   useEffect(() => {
     const validIds = new Set(allSessionTargets.map((item) => item.id));
     setSelectedSessionIds((prev) => {
@@ -1165,6 +1189,8 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
   const handleCancelSelection = useCallback(() => {
     setSelectionMode(false);
     setSelectedSessionIds(new Set());
+    setBulkArchiveTargets(null);
+    setBulkDeleteTargets(null);
   }, []);
 
   const handleRequestBulkDelete = useCallback(() => {
@@ -1290,6 +1316,19 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
                   </button>
                   <button
                     type="button"
+                    onClick={handleRequestBulkArchive}
+                    disabled={selectedTargets.length === 0 || !selectedTargets.some((t) => t.kind === 'live')}
+                    className={clsx(
+                      'shrink-0 rounded-md px-2 py-1.5 text-xs transition-colors',
+                      selectedTargets.length === 0 || !selectedTargets.some((t) => t.kind === 'live')
+                        ? 'cursor-not-allowed text-gray-400 dark:text-gray-500'
+                        : 'text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20',
+                    )}
+                  >
+                    {t('sidebar.archiveSelected', { defaultValue: 'Archive Selected' })}
+                  </button>
+                  <button
+                    type="button"
                     onClick={handleRequestBulkDelete}
                     disabled={selectedTargets.length === 0}
                     className={clsx(
@@ -1366,18 +1405,35 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
       {/* Prompt Dialog (portal-rendered) */}
       <PromptDialog />
 
-      <Dialog.Root open={archiveTarget !== null} onOpenChange={handleCloseArchiveDialog}>
+      <Dialog.Root open={archiveTarget !== null || bulkArchiveTargets !== null} onOpenChange={handleCloseArchiveDialog}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[90] bg-black/40 backdrop-blur-[1px]" />
           <Dialog.Content className="fixed left-1/2 top-1/2 z-[100] w-[min(92vw,460px)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-700 dark:bg-gray-900">
             <Dialog.Title className="text-base font-semibold text-gray-900 dark:text-gray-100">
-              {t('sidebar.archiveSession', { defaultValue: 'Archive session' })}
+              {bulkArchiveTargets
+                ? t('sidebar.bulkArchiveSession', { defaultValue: 'Archive sessions' })
+                : t('sidebar.archiveSession', { defaultValue: 'Archive session' })}
             </Dialog.Title>
             <Dialog.Description className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-              {t('sidebar.archiveSessionConfirm', { defaultValue: 'Archive this live session?' })}
+              {bulkArchiveTargets
+                ? t('sidebar.bulkArchiveSessionConfirm', {
+                    count: bulkArchiveTargets.length,
+                    defaultValue: `Archive ${bulkArchiveTargets.length} selected live sessions?`,
+                  })
+                : t('sidebar.archiveSessionConfirm', { defaultValue: 'Archive this live session?' })}
             </Dialog.Description>
             <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300">
-              {archiveTarget?.title ?? ''}
+              {bulkArchiveTargets ? (
+                <ul className="max-h-32 overflow-y-auto">
+                  {bulkArchiveTargets.map((target) => (
+                    <li key={target.sourceSessionId} className="truncate">
+                      {target.title}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                (archiveTarget?.title ?? '')
+              )}
             </div>
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
@@ -1389,7 +1445,7 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
               </button>
               <button
                 type="button"
-                onClick={handleConfirmArchive}
+                onClick={bulkArchiveTargets ? handleConfirmBulkArchive : handleConfirmArchive}
                 className="rounded-md bg-primary-600 px-3 py-1.5 text-sm text-white transition-colors hover:bg-primary-700"
               >
                 {t('sidebar.archiveConfirmAction', { defaultValue: 'Confirm' })}

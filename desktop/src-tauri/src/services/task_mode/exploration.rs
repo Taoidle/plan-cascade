@@ -418,7 +418,11 @@ Your job is to explore the codebase to gather context that will help generate a 
    - Analyze project structure patterns (e.g., how services are organized, naming conventions)
    - Find relevant test patterns for the task domain
    - Identify dependencies and interfaces the task will need to interact with
-3. Use the available tools (Read, Glob, Grep, CodebaseSearch) to explore each dimension.
+3. Use the available tools to explore each dimension, but follow this order:
+   - Start with CodebaseSearch to locate relevant implementations, symbols, and files.
+   - Use Read only after CodebaseSearch narrows the target set.
+   - Use Grep only for regex / exact-string / full-text fallback.
+   - Use Glob only for path or filename pattern discovery.
 4. After exploring, provide a structured summary in the following format:
 
 ## Exploration Summary

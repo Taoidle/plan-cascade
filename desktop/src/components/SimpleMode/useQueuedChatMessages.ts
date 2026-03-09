@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { TFunction } from 'i18next';
-import type { FileAttachmentData } from '../../types/attachment';
+import type { FileAttachmentData, WorkspaceFileReferenceData } from '../../types/attachment';
 import type { WorkflowMode } from '../../types/workflowKernel';
 import { useSimpleQueueStore, selectNextQueueDispatchItem } from '../../store/simpleQueue';
 import {
@@ -8,6 +8,7 @@ import {
   loadPersistedSimpleChatQueueWithMeta,
   persistSimpleChatQueue,
   snapshotQueueAttachments,
+  snapshotQueueReferences,
   type QueuePriority,
   type QueuedChatMessage,
 } from './queuePersistence';
@@ -25,8 +26,10 @@ interface UseQueuedChatMessagesParams {
   isTaskWorkflowBusy: boolean;
   isPlanWorkflowBusy: boolean;
   attachments: FileAttachmentData[];
+  references: WorkspaceFileReferenceData[];
   addAttachment: (attachment: FileAttachmentData) => void;
   clearAttachments: () => void;
+  setWorkspaceReferences: (references: WorkspaceFileReferenceData[]) => void;
   handleFollowUp: (inputPrompt?: string) => Promise<void>;
   handleStart: (inputPrompt?: string) => Promise<void>;
   switchWorkflowModeForQueue: (targetMode: WorkflowMode) => Promise<boolean>;
@@ -41,6 +44,7 @@ interface UseQueuedChatMessagesResult {
     submitAsFollowUp: boolean,
     mode: WorkflowMode,
     queuedAttachments: FileAttachmentData[],
+    queuedReferences: WorkspaceFileReferenceData[],
     priority?: QueuePriority,
   ) => void;
   removeQueuedChatMessage: (id: string) => void;
@@ -62,6 +66,7 @@ export function useQueuedChatMessages({
   isPlanWorkflowBusy,
   addAttachment,
   clearAttachments,
+  setWorkspaceReferences,
   handleFollowUp,
   handleStart,
   switchWorkflowModeForQueue,
@@ -137,6 +142,7 @@ export function useQueuedChatMessages({
       submitAsFollowUp: boolean,
       mode: WorkflowMode,
       queuedAttachments: FileAttachmentData[],
+      queuedReferences: WorkspaceFileReferenceData[],
       priority: QueuePriority = 'normal',
     ) => {
       if (!sessionId) {
@@ -150,6 +156,7 @@ export function useQueuedChatMessages({
       }
 
       const { attachments, droppedCount } = snapshotQueueAttachments(queuedAttachments);
+      const references = snapshotQueueReferences(queuedReferences);
       if (droppedCount > 0) {
         showToast(
           t('workflow.queue.attachmentsDropped', {
@@ -168,6 +175,7 @@ export function useQueuedChatMessages({
           submitAsFollowUp,
           mode,
           attachments,
+          references,
           priority,
         },
         maxQueuedChatMessages,
@@ -217,7 +225,7 @@ export function useQueuedChatMessages({
       showToast(
         t('workflow.queue.migratedToV4', {
           fromVersion: restored.migratedFromVersion,
-          defaultValue: `Queue migrated from V${restored.migratedFromVersion} to V4.`,
+          defaultValue: `Queue migrated from V${restored.migratedFromVersion} to V5.`,
         }),
         'info',
       );
@@ -321,6 +329,7 @@ export function useQueuedChatMessages({
 
     const run = (async () => {
       clearAttachments();
+      setWorkspaceReferences(nextMessage.references);
       for (const queuedAttachment of nextMessage.attachments) {
         addAttachment(queuedAttachment);
       }
@@ -390,6 +399,7 @@ export function useQueuedChatMessages({
     handleStart,
     clearAttachments,
     addAttachment,
+    setWorkspaceReferences,
     showToast,
     t,
     markStatus,

@@ -21,6 +21,7 @@ describe('simpleQueue store', () => {
       submitAsFollowUp: true,
       mode: 'chat',
       attachments: [],
+      references: [],
       priority: 'normal',
     });
     store.enqueue({
@@ -29,6 +30,7 @@ describe('simpleQueue store', () => {
       submitAsFollowUp: true,
       mode: 'chat',
       attachments: [],
+      references: [],
       priority: 'high',
     });
 
@@ -44,6 +46,7 @@ describe('simpleQueue store', () => {
       submitAsFollowUp: true,
       mode: 'chat',
       attachments: [],
+      references: [],
     }).item;
     const second = store.enqueue({
       sessionId: 'session-1',
@@ -51,6 +54,7 @@ describe('simpleQueue store', () => {
       submitAsFollowUp: true,
       mode: 'chat',
       attachments: [],
+      references: [],
     }).item;
     const third = store.enqueue({
       sessionId: 'session-1',
@@ -58,6 +62,7 @@ describe('simpleQueue store', () => {
       submitAsFollowUp: true,
       mode: 'chat',
       attachments: [],
+      references: [],
     }).item;
 
     expect(first && second && third).toBeTruthy();

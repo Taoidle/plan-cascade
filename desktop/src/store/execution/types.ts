@@ -1,4 +1,4 @@
-import type { FileAttachmentData } from '../../types/attachment';
+import type { FileAttachmentData, WorkspaceFileReferenceData } from '../../types/attachment';
 import type { CardPayload } from '../../types/workflowCard';
 import { ToolCallStreamFilter } from '../../utils/toolCallFilter';
 
@@ -406,6 +406,9 @@ export interface ExecutionState {
   /** File attachments pending to be sent with the next message */
   attachments: FileAttachmentData[];
 
+  /** Structured workspace file references selected via @ autocomplete */
+  workspaceReferences: WorkspaceFileReferenceData[];
+
   /** Legacy session-tree only: background session snapshots keyed by session ID */
   backgroundSessions: Record<string, SessionSnapshot>;
 
@@ -448,6 +451,12 @@ export interface ExecutionState {
 
   /** Clear all file attachments */
   clearAttachments: () => void;
+
+  /** Replace the active workspace references */
+  setWorkspaceReferences: (references: WorkspaceFileReferenceData[]) => void;
+
+  /** Clear all workspace references */
+  clearWorkspaceReferences: () => void;
 
   /** Legacy session-tree only: snapshot the current foreground session into backgroundSessions and reset foreground */
   backgroundCurrentSession: () => void;

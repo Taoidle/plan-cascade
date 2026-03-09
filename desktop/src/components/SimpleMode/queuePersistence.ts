@@ -1,4 +1,4 @@
-import type { FileAttachmentData } from '../../types/attachment';
+import type { FileAttachmentData, WorkspaceFileReferenceData } from '../../types/attachment';
 
 export type QueuePriority = 'high' | 'normal' | 'low';
 
@@ -12,6 +12,7 @@ export interface QueuedChatMessage {
   mode: 'chat' | 'plan' | 'task';
   attempts: number;
   attachments: FileAttachmentData[];
+  references: WorkspaceFileReferenceData[];
   priority: QueuePriority;
   status: QueueStatus;
   enqueueSeq: number;
@@ -54,15 +55,16 @@ interface PersistedQueueV3 {
   }>;
 }
 
-interface PersistedQueueV4 {
-  version: 4;
+interface PersistedQueueV5 {
+  version: 5;
   workspacePath: string | null;
   queue: QueuedChatMessage[];
 }
 
-export const SIMPLE_CHAT_QUEUE_STORAGE_KEY = 'plan-cascade-simple-chat-queue-v4';
+export const SIMPLE_CHAT_QUEUE_STORAGE_KEY = 'plan-cascade-simple-chat-queue-v5';
 
 const LEGACY_STORAGE_KEYS = [
+  'plan-cascade-simple-chat-queue-v4',
   'plan-cascade-simple-chat-queue-v3',
   'plan-cascade-simple-chat-queue-v2',
   'plan-cascade-simple-chat-queue-v1',
@@ -121,8 +123,9 @@ export function sanitizeQueuedAttachment(value: unknown): FileAttachmentData | n
     path: entry.path,
     size: entry.size,
     type: entry.type,
-    content: typeof entry.content === 'string' ? entry.content : undefined,
-    preview: typeof entry.preview === 'string' ? entry.preview : undefined,
+    mimeType: typeof entry.mimeType === 'string' ? entry.mimeType : undefined,
+    isWorkspaceFile: typeof entry.isWorkspaceFile === 'boolean' ? entry.isWorkspaceFile : undefined,
+    isAccessible: typeof entry.isAccessible === 'boolean' ? entry.isAccessible : undefined,
   };
 }
 
@@ -132,10 +135,39 @@ function sanitizeQueuedAttachments(values: unknown[]): FileAttachmentData[] {
     .filter((attachment): attachment is FileAttachmentData => attachment !== null);
 }
 
+export function sanitizeQueuedReference(value: unknown): WorkspaceFileReferenceData | null {
+  if (!value || typeof value !== 'object') return null;
+  const entry = value as Partial<WorkspaceFileReferenceData>;
+  if (
+    typeof entry.id !== 'string' ||
+    typeof entry.name !== 'string' ||
+    typeof entry.relativePath !== 'string' ||
+    typeof entry.absolutePath !== 'string' ||
+    typeof entry.mentionText !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    id: entry.id,
+    name: entry.name,
+    relativePath: entry.relativePath,
+    absolutePath: entry.absolutePath,
+    mentionText: entry.mentionText,
+  };
+}
+
+function sanitizeQueuedReferences(values: unknown[]): WorkspaceFileReferenceData[] {
+  return values
+    .map((reference) => sanitizeQueuedReference(reference))
+    .filter((reference): reference is WorkspaceFileReferenceData => reference !== null);
+}
+
 function isQueuedChatMessage(value: unknown): value is QueuedChatMessage {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<QueuedChatMessage>;
   const attachments = Array.isArray(candidate.attachments) ? candidate.attachments : null;
+  const references = Array.isArray(candidate.references) ? candidate.references : null;
 
   return (
     typeof candidate.id === 'string' &&
@@ -146,6 +178,8 @@ function isQueuedChatMessage(value: unknown): value is QueuedChatMessage {
     typeof candidate.attempts === 'number' &&
     attachments !== null &&
     attachments.every((attachment) => sanitizeQueuedAttachment(attachment) !== null) &&
+    references !== null &&
+    references.every((reference) => sanitizeQueuedReference(reference) !== null) &&
     typeof candidate.enqueueSeq === 'number'
   );
 }
@@ -158,6 +192,7 @@ function normalizeLegacyEntry(
     mode: 'chat' | 'plan' | 'task';
     attempts: number;
     attachments?: FileAttachmentData[];
+    references?: WorkspaceFileReferenceData[];
   },
   index: number,
   sessionId: string,
@@ -170,6 +205,7 @@ function normalizeLegacyEntry(
     mode: entry.mode,
     attempts: entry.attempts,
     attachments: entry.attachments ?? [],
+    references: entry.references ?? [],
     priority: 'normal',
     status: 'pending',
     enqueueSeq: index,
@@ -192,8 +228,9 @@ export function snapshotQueueAttachments(attachments: FileAttachmentData[]): {
       path: attachment.path,
       size: attachment.size,
       type: attachment.type,
-      content: attachment.content,
-      preview: attachment.preview,
+      mimeType: attachment.mimeType,
+      isWorkspaceFile: attachment.isWorkspaceFile,
+      isAccessible: attachment.isAccessible,
     };
 
     try {
@@ -212,6 +249,12 @@ export function snapshotQueueAttachments(attachments: FileAttachmentData[]): {
   }
 
   return { attachments: snapshots, droppedCount };
+}
+
+export function snapshotQueueReferences(references: WorkspaceFileReferenceData[]): WorkspaceFileReferenceData[] {
+  return references
+    .map((reference) => sanitizeQueuedReference(reference))
+    .filter((reference): reference is WorkspaceFileReferenceData => reference !== null);
 }
 
 function clearQueueStorage(storage: Storage): void {
@@ -262,7 +305,7 @@ export function loadPersistedSimpleChatQueueWithMeta(
 
     let normalizedQueue: QueuedChatMessage[] = [];
 
-    if (parsed.version === 4) {
+    if (parsed.version === 5) {
       normalizedQueue = queue.filter(isQueuedChatMessage).map((entry) => ({
         ...entry,
         priority: normalizeQueuePriority(entry.priority),
@@ -271,7 +314,35 @@ export function loadPersistedSimpleChatQueueWithMeta(
         createdAt: ensureIsoDatetime(entry.createdAt),
         lastError: typeof entry.lastError === 'string' ? entry.lastError : null,
         attachments: sanitizeQueuedAttachments(entry.attachments),
+        references: sanitizeQueuedReferences(entry.references),
       }));
+    } else if (parsed.version === 4) {
+      normalizedQueue = queue
+        .filter(
+          (entry): entry is Omit<QueuedChatMessage, 'references'> =>
+            !!entry &&
+            typeof entry === 'object' &&
+            typeof (entry as { id?: unknown }).id === 'string' &&
+            typeof (entry as { sessionId?: unknown }).sessionId === 'string' &&
+            typeof (entry as { prompt?: unknown }).prompt === 'string' &&
+            typeof (entry as { submitAsFollowUp?: unknown }).submitAsFollowUp === 'boolean' &&
+            (((entry as { mode?: unknown }).mode as string) === 'chat' ||
+              ((entry as { mode?: unknown }).mode as string) === 'task' ||
+              ((entry as { mode?: unknown }).mode as string) === 'plan') &&
+            typeof (entry as { attempts?: unknown }).attempts === 'number' &&
+            Array.isArray((entry as { attachments?: unknown }).attachments) &&
+            typeof (entry as { enqueueSeq?: unknown }).enqueueSeq === 'number',
+        )
+        .map((entry) => ({
+          ...entry,
+          priority: normalizeQueuePriority(entry.priority),
+          status: normalizeQueueStatus(entry.status),
+          enqueueSeq: Number.isFinite(entry.enqueueSeq) ? entry.enqueueSeq : 0,
+          createdAt: ensureIsoDatetime(entry.createdAt),
+          lastError: typeof entry.lastError === 'string' ? entry.lastError : null,
+          attachments: sanitizeQueuedAttachments(entry.attachments),
+          references: [],
+        }));
     } else if (parsed.version === 3) {
       normalizedQueue = queue
         .filter(
@@ -296,6 +367,7 @@ export function loadPersistedSimpleChatQueueWithMeta(
               mode: entry.mode,
               attempts: entry.attempts,
               attachments: sanitizeQueuedAttachments(entry.attachments),
+              references: [],
             },
             index,
             fallbackSessionId,
@@ -324,6 +396,7 @@ export function loadPersistedSimpleChatQueueWithMeta(
               mode: entry.mode,
               attempts: entry.attempts,
               attachments: [],
+              references: [],
             },
             index,
             fallbackSessionId,
@@ -348,6 +421,7 @@ export function loadPersistedSimpleChatQueueWithMeta(
               mode: 'chat',
               attempts: 0,
               attachments: [],
+              references: [],
             },
             index,
             fallbackSessionId,
@@ -368,7 +442,7 @@ export function loadPersistedSimpleChatQueueWithMeta(
 
     const sliced = normalizedQueue.slice(0, maxEntries);
     const sourceVersion = typeof parsed.version === 'number' ? parsed.version : null;
-    const migratedFromVersion = sourceVersion && sourceVersion >= 1 && sourceVersion < 4 ? sourceVersion : null;
+    const migratedFromVersion = sourceVersion && sourceVersion >= 1 && sourceVersion < 5 ? sourceVersion : null;
     const crossSessionCount = fallbackSessionId
       ? sliced.filter((item) => item.sessionId !== fallbackSessionId).length
       : 0;
@@ -392,8 +466,8 @@ export function persistSimpleChatQueue(storage: Storage, queue: QueuedChatMessag
     return true;
   }
 
-  const payload: PersistedQueueV4 = {
-    version: 4,
+  const payload: PersistedQueueV5 = {
+    version: 5,
     workspacePath: workspacePath || null,
     queue,
   };

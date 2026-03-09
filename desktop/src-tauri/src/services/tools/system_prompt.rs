@@ -131,6 +131,345 @@ pub fn build_project_summary(summary: &ProjectIndexSummary) -> String {
 /// Prevents excessive token usage from too many memories.
 const MEMORY_SECTION_BUDGET: usize = 2000;
 
+fn build_operating_contract(language: &str) -> String {
+    match language {
+        "zh" => r#"
+## 基础操作契约
+
+### 身份
+- 你是当前项目的 AI 软件工程助手。
+- 你的职责是理解代码库、定位实现、修改代码、制定计划、执行任务，并基于真实工具结果回答问题。
+- 对代码库的结论优先使用工具和文件证据，不要凭空假设仓库内容。
+
+### 非协商规则
+- 不要伪造工具结果。
+- 不要声称读取过某个文件，除非你真的读取了它。
+- 不要声称搜索到了某个结果，除非搜索工具真的返回了它。
+- 不要声称测试通过，除非测试真的通过。
+- 不要声称修改成功，除非修改真的完成并已落盘。
+- 不要声称记忆已经保存，除非系统实际完成了记忆抽取/持久化。
+
+### 证据分层
+按以下顺序组织事实：
+1. 当前会话中的真实工具结果
+2. 注入的 Project Memory
+3. 当前对话上下文
+4. 明确标注为推断的结论
+
+### 输出规则
+- 事实与推断要分开。
+- 能引用文件路径、符号名、模块名时，就不要用模糊措辞。
+- 不要用空泛安慰或营销式语气。
+- 优先简洁、直接、技术化。
+
+### 完成标准
+只有以下情况之一满足时，任务才算完成：
+- 用户问题已基于足够证据回答
+- 请求的修改已实际完成并尽可能验证
+- 存在真实阻塞，且阻塞已明确说明
+"#
+        .to_string(),
+        _ => r#"
+## Operating Contract
+
+### Identity
+- You are the AI software engineering assistant for the current project.
+- Your job is to understand the codebase, locate implementations, modify code, plan work, execute tasks, and answer using real tool evidence.
+- For repository-specific claims, prefer tool-backed evidence over intuition.
+
+### Non-Negotiable Rules
+- Never fabricate tool results.
+- Never claim you read a file unless you actually read it.
+- Never claim a search found something unless a search actually found it.
+- Never claim tests passed unless they passed.
+- Never claim a change was applied unless it was actually written.
+- Never claim memory was saved unless the system actually completed extraction/persistence.
+
+### Evidence Hierarchy
+Use this order of trust:
+1. Real tool results from the current session
+2. Injected Project Memory
+3. Current conversation context
+4. Explicitly labeled inference
+
+### Output Rules
+- Separate verified facts from inference.
+- Prefer exact file paths, symbols, and modules over vague wording.
+- Avoid hype, filler, and reassurance-heavy language.
+- Be concise, direct, and technical.
+
+### Completion Criteria
+A task is complete only when one of these is true:
+- the user's question has been answered with sufficient evidence
+- the requested change has been made and verified as far as possible
+- a real blocker prevents progress and it has been clearly stated
+"#
+        .to_string(),
+    }
+}
+
+fn build_memory_policy_addendum(language: &str, has_project_memories: bool) -> String {
+    match language {
+        "zh" => {
+            let availability = if has_project_memories {
+                "当前会话已注入 Project Memory。可以把其中内容视为跨会话持久记忆，但如果它与新鲜代码证据冲突，必须优先相信最新代码证据，并明确指出冲突。"
+            } else {
+                "当前会话没有注入 Project Memory。不要假装记得过去的会话，也不要说“我之前记得/我一直知道”，除非当前上下文真的提供了这些内容。"
+            };
+            format!(
+                r#"
+## 记忆策略
+
+- 记忆系统是自动抽取、自动注入的，不要求你显式调用某个“记忆工具”才算有记忆。
+- 只有当 Project Memory 段真实出现在系统提示中时，你才可以把它当作跨会话持久记忆。
+- 不要把“当前会话里刚刚看到的内容”误说成“已经长期记住的内容”。
+- 不要虚构记忆状态，不要假装记忆持久化已经成功。
+- 如果记忆与仓库当前证据冲突，优先使用当前仓库证据。
+
+{availability}
+"#
+            )
+        }
+        _ => {
+            let availability = if has_project_memories {
+                "Project Memory is injected for this session. Treat it as persistent cross-session memory, but prefer fresh repository evidence if they conflict, and call out the conflict explicitly."
+            } else {
+                "No Project Memory is injected for this session. Do not pretend to remember prior sessions or claim persistent memory that is not actually present."
+            };
+            format!(
+                r#"
+## Memory Policy
+
+- The memory system is automatic: extraction and prompt injection are system-managed.
+- You may treat memory as cross-session persistent memory only when a Project Memory section is actually present.
+- Do not confuse current-session context with persistent memory.
+- Do not fabricate memory state or imply memory persistence succeeded if it did not.
+- If memory conflicts with fresh repository evidence, prefer the fresh repository evidence.
+
+{availability}
+"#
+            )
+        }
+    }
+}
+
+pub fn build_mode_addendum(mode_key: &str, language: &str) -> String {
+    match (mode_key, language) {
+        ("chat", "zh") => {
+            r#"
+## 模式附加段：Chat
+
+- 这是交互式代码助手模式。
+- 优先快速、准确地回答问题或完成局部修改。
+- 如果问题需要多文件理解，先搜索和收窄范围，再给出结论或执行修改。
+- 不要把简单问题过度升级成复杂工作流。
+"#
+        }
+        ("plan", "zh") => {
+            r#"
+## 模式附加段：Plan
+
+- 这是规划与分解模式。
+- 重点是任务拆解、依赖关系、风险、验收标准和执行顺序。
+- 对代码证据仍要真实引用，但输出优先结构化、可执行、可验证。
+- 不要把计划模式退化成泛泛分析。
+"#
+        }
+        ("task", "zh") => {
+            r#"
+## 模式附加段：Task
+
+- 这是任务执行模式。
+- 重点是围绕当前任务形成正确的实现、验证和交付链路。
+- 在探索和实现时，先用 CodebaseSearch 缩小范围，再读取和修改目标文件。
+- 不要跳过验证，也不要把中间推断当成最终结论。
+"#
+        }
+        ("analysis", "zh") => {
+            r#"
+## 模式附加段：Analysis
+
+- 这是分析阶段。
+- 目标是用尽可能高密度的证据生成结构化分析，而不是直接修改代码。
+- 关注覆盖率、代表性文件、关键实现链路和架构事实。
+"#
+        }
+        ("subagent_explore", "zh") => {
+            r#"
+## 模式附加段：Sub-Agent Explore
+
+- 你是被委派出来做代码探索的子代理。
+- 对实现定位、架构理解、符号追踪这类问题，先用 CodebaseSearch，再用 Read 读取缩小后的目标文件。
+- 只有在任务明确要求正则、精确字符串、日志全文或已知字面量时才优先使用 Grep。
+- 只返回与你被分配的子任务直接相关的高信号结论。
+"#
+        }
+        ("subagent_plan", "zh") => {
+            r#"
+## 模式附加段：Sub-Agent Plan
+
+- 你是被委派出来做深度分析/规划的子代理。
+- 重点是依赖关系、交互边界、风险点和实施顺序，而不是泛泛复述代码。
+- 先用 CodebaseSearch 缩小分析范围，再读取代表性文件。
+- 保持范围收敛，不要扩散成无边界探索。
+"#
+        }
+        ("subagent_general", "zh") => {
+            r#"
+## 模式附加段：Sub-Agent General
+
+- 你是被委派出来执行具体子任务的通用子代理。
+- 先定位目标，再执行修改或命令；不要无边界地重新探索整个项目。
+- 如果子任务涉及代码理解，先用 CodebaseSearch 收窄范围。
+- 汇报时突出结果、验证和阻塞，不要复述噪声。
+"#
+        }
+        ("subagent_bash", "zh") => {
+            r#"
+## 模式附加段：Sub-Agent Bash
+
+- 你是被委派出来执行命令的 Bash 子代理。
+- 只报告真实命令输出、退出码和必要结论。
+- 不要伪造命令结果，也不要把未执行的命令描述成已完成。
+"#
+        }
+        ("composer_llm", "zh") => {
+            r#"
+## 模式附加段：Agent Composer LLM Step
+
+- 你正在 Agent Composer 的 LLM 步骤中工作。
+- 目标是基于输入和共享状态产出明确、结构化、可供后续节点消费的结果。
+- 不要假设外部副作用已经发生，除非工具结果明确表明它发生了。
+"#
+        }
+        ("composer_loop", "zh") => {
+            r#"
+## 模式附加段：Agent Composer Loop Step
+
+- 你正在 Agent Composer 的循环步骤中工作。
+- 每一轮都要基于共享状态和前一轮真实结果推进，不要原地重复。
+- 如果没有新的证据或状态变化，就应收敛而不是空转。
+"#
+        }
+        ("subagent", "zh") => {
+            r#"
+## 模式附加段：Sub-Agent
+
+- 你是主代理分派出来的子代理。
+- 只处理分配给你的子任务，不要偏离范围。
+- 先收集证据，再返回高信号结论，不要复述噪声。
+"#
+        }
+        ("chat", _) => {
+            r#"
+## Mode Addendum: Chat
+
+- This is interactive assistant mode.
+- Prefer fast, accurate answers and focused edits.
+- If the question requires multi-file understanding, narrow the target area before concluding or editing.
+- Do not escalate simple requests into unnecessary workflows.
+"#
+        }
+        ("plan", _) => {
+            r#"
+## Mode Addendum: Plan
+
+- This is planning and decomposition mode.
+- Prioritize task breakdown, dependencies, risks, acceptance criteria, and execution order.
+- Ground planning claims in real code evidence when relevant.
+- Do not degrade planning into vague commentary.
+"#
+        }
+        ("task", _) => {
+            r#"
+## Mode Addendum: Task
+
+- This is execution-oriented task mode.
+- Focus on the implementation, verification, and delivery chain for the current task.
+- Use CodebaseSearch first to narrow the search space before reading and editing code.
+- Do not present intermediate guesses as final conclusions.
+"#
+        }
+        ("analysis", _) => {
+            r#"
+## Mode Addendum: Analysis
+
+- This is analysis mode.
+- The goal is to produce structured analysis grounded in strong evidence, not to jump directly into code changes.
+- Focus on coverage, representative files, key implementation chains, and architecture facts.
+"#
+        }
+        ("subagent_explore", _) => {
+            r#"
+## Mode Addendum: Sub-Agent Explore
+
+- You are a delegated exploration sub-agent.
+- For implementation tracing, architecture understanding, and symbol discovery, use CodebaseSearch first, then Read narrowed files.
+- Use Grep first only for regex, exact-string, log-text, or literal matching tasks.
+- Return only the findings that directly answer the assigned sub-task.
+"#
+        }
+        ("subagent_plan", _) => {
+            r#"
+## Mode Addendum: Sub-Agent Plan
+
+- You are a delegated deep-analysis/planning sub-agent.
+- Focus on dependencies, interaction boundaries, risks, and execution order rather than generic summaries.
+- Use CodebaseSearch to narrow the analysis scope before reading files.
+- Stay tightly scoped to the assigned analytical question.
+"#
+        }
+        ("subagent_general", _) => {
+            r#"
+## Mode Addendum: Sub-Agent General
+
+- You are a delegated general-purpose execution sub-agent.
+- Narrow the target area before editing or executing commands; do not re-explore the whole project without need.
+- If the task involves code understanding, use CodebaseSearch first to narrow the search space.
+- Report outcomes, verification, and blockers with minimal noise.
+"#
+        }
+        ("subagent_bash", _) => {
+            r#"
+## Mode Addendum: Sub-Agent Bash
+
+- You are a delegated bash execution sub-agent.
+- Report only real command output, exit codes, and necessary conclusions.
+- Do not fabricate command success or describe unexecuted commands as completed.
+"#
+        }
+        ("composer_llm", _) => {
+            r#"
+## Mode Addendum: Agent Composer LLM Step
+
+- You are operating inside an Agent Composer LLM step.
+- Produce explicit, structured output that downstream nodes can consume.
+- Do not imply external side effects occurred unless real tool evidence confirms them.
+"#
+        }
+        ("composer_loop", _) => {
+            r#"
+## Mode Addendum: Agent Composer Loop Step
+
+- You are operating inside an Agent Composer loop step.
+- Each round must advance based on shared state and real prior results.
+- If there is no new evidence or state change, converge instead of repeating yourself.
+"#
+        }
+        ("subagent", _) => {
+            r#"
+## Mode Addendum: Sub-Agent
+
+- You are a delegated sub-agent.
+- Stay tightly scoped to the assigned sub-task.
+- Gather evidence first, then return high-signal findings without noise.
+"#
+        }
+        _ => "",
+    }
+    .to_string()
+}
+
 /// Build a comprehensive system prompt for agentic tool usage.
 ///
 /// This prompt instructs the LLM to use the available tools proactively for code tasks.
@@ -191,6 +530,11 @@ pub fn build_system_prompt_with_memories(
     };
 
     let memory_section = build_memory_section(project_memories);
+    let operating_contract = build_operating_contract(language);
+    let memory_policy = build_memory_policy_addendum(
+        language,
+        project_memories.map(|mems| !mems.is_empty()).unwrap_or(false),
+    );
 
     let identity_line = format!(
         "You are an AI coding assistant powered by {provider}/{model}. \
@@ -229,6 +573,10 @@ You have access to tools for reading, writing, and analyzing code. You operate i
 
 {language_instruction}
 
+{operating_contract}
+
+{memory_policy}
+
 ## Working Directory
 {project_root}{summary_section}{memory_section}
 
@@ -255,11 +603,11 @@ Follow this decision tree to select the correct tool. Start from the top.
 | "What directory is this?" / "Where am I?" | **Cwd** | ~~Analyze~~ ~~Task~~ |
 | "List files in src/" / "What's in this folder?" | **LS** | ~~Analyze~~ ~~Task~~ |
 | "Find all .rs files" / "Where is config.toml?" | **Glob** | ~~Analyze~~ ~~Task~~ |
-| "Find where function X is defined" / "What files are in component Y?" | **CodebaseSearch** (preferred) or **Grep** | ~~Analyze~~ ~~Task~~ |
+| "Find where function X is defined" / "What files are in component Y?" | **CodebaseSearch** | ~~Analyze~~ ~~Task~~ |
 | "Search for error handling" / "Find string in files" | **Grep** | ~~Analyze~~ ~~Task~~ |
 | "Show me the contents of main.rs" | **Read** | ~~Analyze~~ ~~Task~~ |
 
-> **Tip — CodebaseSearch vs Grep**: Use **CodebaseSearch** first when exploring the codebase (finding symbols, locating files by component, understanding project structure). It queries the pre-built index and is faster than scanning files. Use **Grep** when you need full-text content search with regex, or when CodebaseSearch reports the index is unavailable.
+> **Tip — CodebaseSearch vs Grep**: For code discovery, architecture tracing, symbol lookup, and implementation search, use **CodebaseSearch first**. Use **Grep** only for regex, exact-string, or full-text fallback, or when CodebaseSearch reports the index is unavailable.
 
 **Project-level understanding** (requires reading multiple files) → Use **Task** sub-agent:
 
@@ -308,7 +656,7 @@ For medium-sized projects, emit multiple parallel explore Tasks in one response,
 **Use Task** when the request requires reading and synthesizing information from multiple files. The sub-agent gets its own context window and can read many files without exhausting your main context.
 
 **Sub-agent types** (via `subagent_type` parameter):
-- `explore`: Codebase exploration — reads code, uses git for context (Read, Glob, Grep, LS, CodebaseSearch, Bash)
+- `explore`: Codebase exploration — prefer CodebaseSearch first, then Read after narrowing; use Grep only for exact/full-text fallback (CodebaseSearch, Read, Grep, LS, Glob, Bash)
 - `plan`: Architecture design and deep analysis — same tools as explore
 - `general-purpose`: Coordinator with ALL tools including Task — can spawn further sub-agents
 - `bash`: Shell command execution only (Bash + Cwd)
@@ -349,7 +697,7 @@ When a user request touches **multiple independent files, modules, or domains**,
 
 ### How to Decompose — 4 Steps
 
-**Step A: Analyze** — Identify the independent work units. Read relevant files or use CodebaseSearch/Grep to understand the scope.
+**Step A: Analyze** — Identify the independent work units. Use CodebaseSearch first to locate relevant code, then Read narrowed files. Use Grep only for regex/exact/full-text fallback.
 
 **Step B: Plan & Announce** — Briefly tell the user what you're about to do: how many sub-tasks, what each one handles.
 
@@ -424,6 +772,8 @@ Your response should be:
 {critical_rules}"#,
         identity_line = identity_line,
         language_instruction = language_instruction,
+        operating_contract = operating_contract,
+        memory_policy = memory_policy,
         project_root = project_root.display(),
         summary_section = summary_section,
         memory_section = memory_section,
@@ -446,7 +796,7 @@ Your response should be:
 pub fn build_memory_section(memories: Option<&[MemoryEntry]>) -> String {
     match memories {
         Some(mems) if !mems.is_empty() => {
-            let header = "\n\n## Project Memory\nThe following facts were learned from previous sessions:\n\n";
+            let header = "\n\n## Project Memory\nThe following persistent facts were learned from previous sessions and injected automatically. Treat them as cross-session memory only for this session, and prefer fresh repository evidence if there is a conflict.\n\n";
             let mut section = header.to_string();
             let budget = MEMORY_SECTION_BUDGET;
 
@@ -540,6 +890,8 @@ pub fn build_knowledge_awareness_section(
 pub fn build_tool_priority_section(
     has_knowledge: bool,
     has_codebase_search: bool,
+    codebase_index_ready: bool,
+    semantic_search_ready: bool,
     language: &str,
 ) -> String {
     if !has_knowledge && !has_codebase_search {
@@ -565,16 +917,41 @@ pub fn build_tool_priority_section(
 
             // Scenario 2: code understanding
             if has_codebase_search {
-                section.push_str(
-                    "### 理解代码架构 / 定位功能实现\n\
-                     → **CodebaseSearch**\n\
-                     当你不确定代码在哪里、需要理解「某个功能是怎么实现的」、或探索不熟悉的代码模块时，\
-                     使用 CodebaseSearch（基于预构建索引，比 Grep 更快更准确）。\n\
-                     - `scope=\"hybrid\"` — 综合搜索（默认推荐）\n\
-                     - `scope=\"symbol\"` — 按名称查找函数/类/结构体定义\n\
-                     - `scope=\"path\"` — 按路径/文件名查找文件\n\
-                     - `scope=\"semantic\"` — 用自然语言描述搜索概念\n\n",
-                );
+                if codebase_index_ready {
+                    section.push_str(
+                        "### 代码索引状态\n\
+                         - Codebase index: **ready**\n\
+                         - Semantic search: "
+                    );
+                    section.push_str(if semantic_search_ready {
+                        "**available**\n\n"
+                    } else {
+                        "**unavailable**\n\n"
+                    });
+                    section.push_str(
+                        "### 理解代码架构 / 定位功能实现\n\
+                         → **必须先使用 CodebaseSearch**\n\
+                         当你不确定代码在哪里、需要理解「某个功能是怎么实现的」、或探索不熟悉的代码模块时，\
+                         先用 CodebaseSearch，不要先用 Grep/Read/Glob 逐文件扫描。\n\
+                         - `scope=\"hybrid\"` — 综合搜索（默认）\n\
+                         - `scope=\"symbol\"` — 按名称查找函数/类/结构体定义\n\
+                         - `scope=\"path\"` — 按路径/文件名查找文件\n"
+                    );
+                    if semantic_search_ready {
+                        section.push_str(
+                            "                         - `scope=\"semantic\"` — 用自然语言描述搜索概念\n\n"
+                        );
+                    } else {
+                        section.push_str("\n");
+                    }
+                } else {
+                    section.push_str(
+                        "### 代码索引状态\n\
+                         - Codebase index: **unavailable**\n\
+                         - Semantic search: **unavailable**\n\n\
+                         当前项目索引不可用。不要尝试 CodebaseSearch；直接使用 Grep / Read / Glob / LS 完成代码探索。\n\n",
+                    );
+                }
             }
 
             // Scenario 3: precise matching
@@ -621,10 +998,10 @@ pub fn build_tool_priority_section(
             if has_knowledge && has_codebase_search {
                 section.push_str(
                     "- 涉及**领域知识**（文档/规范/标准/设计）→ 优先 SearchKnowledge\n\
-                     - 涉及**代码搜索**（架构/实现/符号）→ 优先 CodebaseSearch\n\
+                     - 涉及**代码搜索**（架构/实现/符号）→ 先用 CodebaseSearch；只有查不到或索引不可用时才用 Grep\n\
                      - SearchKnowledge 和 CodebaseSearch 可以**并行调用**以加速信息收集\n\
-                     - 知识库和代码库搜索不到时再用 Grep/Read/LS 精确定位\n\
-                     - 不要在可以使用 CodebaseSearch 的场景下用 Grep 逐文件扫描\n\
+                     - 只有在 CodebaseSearch 结果不足，或需要 regex / 精确字符串 / 日志全文匹配时，才使用 Grep\n\
+                     - Read 只用于在 CodebaseSearch 缩小范围后读取目标文件\n\
                      - 即使你认为自己已经知道答案，也应先搜索知识库以获取最新信息\n",
                 );
             } else if has_knowledge {
@@ -636,9 +1013,10 @@ pub fn build_tool_priority_section(
             } else {
                 // has_codebase_search only
                 section.push_str(
-                    "- 涉及**代码搜索**（架构/实现/符号）→ 优先 CodebaseSearch\n\
-                     - 不要在可以使用 CodebaseSearch 的场景下用 Grep 逐文件扫描\n\
-                     - CodebaseSearch 不满足需求时再用 Grep 进行正则搜索\n",
+                    "- 涉及**代码搜索**（架构/实现/符号）→ 先用 CodebaseSearch\n\
+                     - 不要在索引可用时用 Grep 逐文件扫描代码实现\n\
+                     - 只有在 CodebaseSearch 不满足需求，或任务明确要求 regex / 全文匹配时，才使用 Grep\n\
+                     - Read 只用于在 CodebaseSearch 缩小范围后读取目标文件\n",
                 );
             }
         }
@@ -660,17 +1038,40 @@ pub fn build_tool_priority_section(
 
             // Scenario 2: code understanding
             if has_codebase_search {
-                section.push_str(
-                    "### Understanding code architecture / locating implementations\n\
-                     → **CodebaseSearch**\n\
-                     When you're unsure where code lives, need to understand how a feature is \
-                     implemented, or are exploring unfamiliar modules, use CodebaseSearch \
-                     (pre-built index, faster and more accurate than Grep).\n\
-                     - `scope=\"hybrid\"` — comprehensive search (default, recommended)\n\
-                     - `scope=\"symbol\"` — find function/class/struct definitions by name\n\
-                     - `scope=\"path\"` — find files by path/name patterns\n\
-                     - `scope=\"semantic\"` — search concepts using natural language\n\n",
-                );
+                if codebase_index_ready {
+                    section.push_str("### Codebase index status\n");
+                    section.push_str("- Codebase index: **ready**\n");
+                    section.push_str(if semantic_search_ready {
+                        "- Semantic search: **available**\n\n"
+                    } else {
+                        "- Semantic search: **unavailable**\n\n"
+                    });
+                    section.push_str(
+                        "### Understanding code architecture / locating implementations\n\
+                         → **MUST use CodebaseSearch first**\n\
+                         When you need to locate code, understand how a feature is implemented, \
+                         trace symbols, or explore unfamiliar modules, use CodebaseSearch before \
+                         Grep, Read, or Glob.\n\
+                         - `scope=\"hybrid\"` — comprehensive search (default)\n\
+                         - `scope=\"symbol\"` — find function/class/struct definitions by name\n\
+                         - `scope=\"path\"` — find files by path/name patterns\n"
+                    );
+                    if semantic_search_ready {
+                        section.push_str(
+                            "                         - `scope=\"semantic\"` — search concepts using natural language\n\n"
+                        );
+                    } else {
+                        section.push_str("\n");
+                    }
+                } else {
+                    section.push_str(
+                        "### Codebase index status\n\
+                         - Codebase index: **unavailable**\n\
+                         - Semantic search: **unavailable**\n\n\
+                         The current project index is unavailable. Do not try CodebaseSearch for this request. \
+                         Use Grep / Read / Glob / LS directly.\n\n",
+                    );
+                }
             }
 
             // Scenario 3: precise matching
@@ -718,10 +1119,10 @@ pub fn build_tool_priority_section(
             if has_knowledge && has_codebase_search {
                 section.push_str(
                     "- **Domain knowledge** (docs/specs/standards/design) → prefer SearchKnowledge\n\
-                     - **Code search** (architecture/implementation/symbols) → prefer CodebaseSearch\n\
+                     - **Code search** (architecture/implementation/symbols) → use CodebaseSearch first; use Grep only if the index is unavailable or insufficient\n\
                      - SearchKnowledge and CodebaseSearch can be called **in parallel** to speed up gathering\n\
-                     - Fall back to Grep/Read/LS only when knowledge and code search are insufficient\n\
-                     - Do NOT use Grep to scan files when CodebaseSearch can answer the question\n\
+                     - Use Grep only for regex / exact-string / full-text matching\n\
+                     - Use Read only after CodebaseSearch narrows the target files\n\
                      - Even if you think you know the answer, search the knowledge base for the latest info\n",
                 );
             } else if has_knowledge {
@@ -733,9 +1134,10 @@ pub fn build_tool_priority_section(
             } else {
                 // has_codebase_search only
                 section.push_str(
-                    "- **Code search** (architecture/implementation/symbols) → prefer CodebaseSearch\n\
+                    "- **Code search** (architecture/implementation/symbols) → use CodebaseSearch first\n\
                      - Do NOT use Grep to scan files when CodebaseSearch can answer the question\n\
-                     - Fall back to Grep for regex search only when CodebaseSearch is insufficient\n",
+                     - Use Grep only for regex / exact-string / full-text matching, or when CodebaseSearch is insufficient\n\
+                     - Use Read only after CodebaseSearch narrows the target files\n",
                 );
             }
         }
@@ -767,27 +1169,48 @@ pub fn merge_system_prompts(tool_prompt: &str, user_prompt: Option<&str>) -> Str
 /// - Other values / `None`: CodebaseSearch is preferred for code understanding tasks
 pub fn build_sub_agent_tool_guidance(
     has_index: bool,
+    index_ready: bool,
     has_semantic: bool,
     task_type: Option<&str>,
 ) -> String {
-    if !has_index {
-        return String::new();
-    }
-
     let mut lines = Vec::new();
     lines.push("## Tool Selection Guide / 工具选择指南".to_string());
     lines.push(String::new());
+    if !has_index || !index_ready {
+        lines.push("Codebase index status: unavailable".to_string());
+        lines.push("代码索引状态：不可用".to_string());
+        lines.push(
+            "Use Grep for exact/full-text search, Read for file contents, and LS/Glob for structure discovery."
+                .to_string(),
+        );
+        lines.push("此时直接使用 Grep、Read、LS、Glob，不要尝试 CodebaseSearch。".to_string());
+        return lines.join("\n");
+    }
+
+    lines.push("Codebase index status: ready".to_string());
+    lines.push("代码索引状态：已就绪".to_string());
+    lines.push(if has_semantic {
+        "Semantic search: available / 语义搜索：可用".to_string()
+    } else {
+        "Semantic search: unavailable / 语义搜索：不可用".to_string()
+    });
+    lines.push(String::new());
     lines.push(
-        "A pre-built codebase index is available. Choose tools based on your task:".to_string(),
+        "A pre-built codebase index is available. For code understanding tasks, use CodebaseSearch before Grep/Read."
+            .to_string(),
     );
-    lines.push("已有预构建的代码索引。请根据任务场景选择工具：".to_string());
+    lines.push("已有预构建的代码索引。涉及代码理解时，先用 CodebaseSearch，再用 Grep/Read。".to_string());
     lines.push(String::new());
 
     match task_type {
         Some("explore") => {
+            lines.push(
+                "- **Locate code / implementations first** → **CodebaseSearch** (scope=\"hybrid\") / 先定位实现 → CodebaseSearch"
+                    .to_string(),
+            );
             lines.push("- **Browse directory structure** → **LS** / 浏览目录结构 → LS".to_string());
             lines.push(
-                "- **Find symbols / locate files** → **CodebaseSearch** (scope=\"hybrid\") / 查找符号、定位文件 → CodebaseSearch"
+                "- **Find symbols / locate files** → **CodebaseSearch** (scope=\"symbol\" or \"path\") / 查找符号、定位文件 → CodebaseSearch"
                     .to_string(),
             );
             if has_semantic {
@@ -796,11 +1219,18 @@ pub fn build_sub_agent_tool_guidance(
                         .to_string(),
                 );
             }
-            lines.push("- **Read specific files** → **Read** / 读取具体文件 → Read".to_string());
             lines.push(
-                "- **Regex / exact string search** → **Grep** / 正则精确搜索 → Grep".to_string(),
+                "- **Read specific files after narrowing the target set** → **Read** / 缩小范围后读取文件 → Read"
+                    .to_string(),
+            );
+            lines.push(
+                "- **Regex / exact string / full-text search only** → **Grep** / 仅在正则/精确字符串/全文匹配时使用 → Grep".to_string(),
             );
             lines.push(String::new());
+            lines.push(
+                "**Hard rule / 强规则**: Do not start with Grep for code discovery when CodebaseSearch is available."
+                    .to_string(),
+            );
             lines.push(
                 "**Query tips / 查询技巧**: Use short, focused queries (1-2 keywords). 使用简短关键词（1-2个词）。"
                     .to_string(),
@@ -808,11 +1238,11 @@ pub fn build_sub_agent_tool_guidance(
         }
         _ => {
             lines.push(
-                "**Analyze priority order**: Prefer CodebaseSearch before Read/Grep/Glob."
+                "**Analyze priority order**: Use CodebaseSearch first. Read comes after narrowing files. Grep is fallback only."
                     .to_string(),
             );
             lines.push(
-                "分析任务优先顺序：优先使用 CodebaseSearch，再使用 Read/Grep/Glob。".to_string(),
+                "分析任务优先顺序：先用 CodebaseSearch。Read 用于缩小范围后读取，Grep 仅作回退。".to_string(),
             );
             lines.push(String::new());
             lines.push(
@@ -836,14 +1266,14 @@ pub fn build_sub_agent_tool_guidance(
                 lines.push("  自然语言语义搜索 → CodebaseSearch(semantic)".to_string());
             }
             lines.push(
-                "- **View file contents** → **Read** (after locating files via CodebaseSearch)"
+                "- **View file contents** → **Read** (only after locating files via CodebaseSearch)"
                     .to_string(),
             );
             lines.push(
                 "  查看文件内容 → Read（先用 CodebaseSearch 定位，再用 Read 读取）".to_string(),
             );
             lines.push(
-                "- **Exact identifier / regex search** → **Grep** (when CodebaseSearch is insufficient)"
+                "- **Exact identifier / regex / full-text search** → **Grep** (only when CodebaseSearch is insufficient)"
                     .to_string(),
             );
             lines.push("  精确标识符/正则搜索 → Grep（CodebaseSearch 不满足时使用）".to_string());
@@ -1299,12 +1729,12 @@ mod tests {
             "System prompt should mention CodebaseSearch"
         );
         assert!(
-            prompt.contains("CodebaseSearch vs Grep"),
-            "System prompt should explain when to prefer CodebaseSearch over Grep"
+            prompt.contains("CodebaseSearch first"),
+            "System prompt should explicitly require CodebaseSearch-first behavior"
         );
         assert!(
-            prompt.contains("pre-built index"),
-            "System prompt should mention the pre-built index advantage"
+            prompt.contains("Use **Grep** only for regex, exact-string, or full-text fallback"),
+            "System prompt should constrain Grep to fallback usage"
         );
     }
 
@@ -1726,13 +2156,62 @@ mod tests {
         assert!(prompt.contains("## Available Tools"));
     }
 
+    #[test]
+    fn test_build_system_prompt_includes_operating_contract_and_memory_policy() {
+        let tools = get_tool_definitions_from_registry();
+        let prompt = build_system_prompt_with_memories(
+            &PathBuf::from("/test/project"),
+            &tools,
+            None,
+            None,
+            "TestProvider",
+            "test-model",
+            "en",
+        );
+
+        assert!(prompt.contains("## Operating Contract"));
+        assert!(prompt.contains("## Memory Policy"));
+        assert!(prompt.contains("Never fabricate tool results"));
+        assert!(prompt.contains("No Project Memory is injected for this session"));
+    }
+
+    #[test]
+    fn test_build_system_prompt_memory_policy_mentions_injected_memories_when_present() {
+        let tools = get_tool_definitions_from_registry();
+        let memories = make_test_memories();
+        let prompt = build_system_prompt_with_memories(
+            &PathBuf::from("/test/project"),
+            &tools,
+            None,
+            Some(&memories),
+            "TestProvider",
+            "test-model",
+            "en",
+        );
+
+        assert!(prompt.contains(
+            "Project Memory is injected for this session. Treat it as persistent cross-session memory"
+        ));
+    }
+
+    #[test]
+    fn test_build_mode_addendum_covers_task_and_subagent_explore() {
+        let task = build_mode_addendum("task", "en");
+        let explore = build_mode_addendum("subagent_explore", "en");
+
+        assert!(task.contains("Mode Addendum: Task"));
+        assert!(task.contains("Use CodebaseSearch first"));
+        assert!(explore.contains("Mode Addendum: Sub-Agent Explore"));
+        assert!(explore.contains("use CodebaseSearch first"));
+    }
+
     // =========================================================================
     // Sub-agent tool guidance tests
     // =========================================================================
 
     #[test]
     fn test_build_sub_agent_tool_guidance_with_index() {
-        let guidance = build_sub_agent_tool_guidance(true, false, None);
+        let guidance = build_sub_agent_tool_guidance(true, true, false, None);
 
         assert!(
             guidance.contains("CodebaseSearch"),
@@ -1743,6 +2222,14 @@ mod tests {
             "Should recommend scope=hybrid"
         );
         assert!(guidance.contains("Grep"), "Should mention Grep as fallback");
+        assert!(
+            !guidance.contains("scope=\"all\""),
+            "Should not mention invalid all scope"
+        );
+        assert!(
+            !guidance.contains("scope=\"files\""),
+            "Should not mention invalid files scope"
+        );
         // No semantic search
         assert!(
             !guidance.contains("semantic"),
@@ -1752,7 +2239,7 @@ mod tests {
 
     #[test]
     fn test_build_sub_agent_tool_guidance_with_semantic() {
-        let guidance = build_sub_agent_tool_guidance(true, true, None);
+        let guidance = build_sub_agent_tool_guidance(true, true, true, None);
 
         assert!(
             guidance.contains("scope=\"semantic\""),
@@ -1762,40 +2249,36 @@ mod tests {
 
     #[test]
     fn test_build_sub_agent_tool_guidance_without_index() {
-        let guidance = build_sub_agent_tool_guidance(false, false, None);
+        let guidance = build_sub_agent_tool_guidance(false, false, false, None);
 
         assert!(
-            guidance.is_empty(),
-            "Should return empty string when no index is available"
+            guidance.contains("unavailable"),
+            "Should explain fallback when no index is available"
         );
     }
 
     #[test]
     fn test_build_sub_agent_tool_guidance_without_index_but_semantic() {
-        // Edge case: semantic without index — should still be empty
-        let guidance = build_sub_agent_tool_guidance(false, true, None);
+        // Edge case: semantic flag without index — should still fall back cleanly
+        let guidance = build_sub_agent_tool_guidance(false, false, true, None);
 
         assert!(
-            guidance.is_empty(),
-            "Should return empty string when no index, even with semantic flag"
+            guidance.contains("Codebase index status: unavailable"),
+            "Should explain fallback when no index, even with semantic flag"
         );
     }
 
     #[test]
     fn test_build_sub_agent_tool_guidance_explore_allows_ls() {
-        let guidance = build_sub_agent_tool_guidance(true, false, Some("explore"));
+        let guidance = build_sub_agent_tool_guidance(true, true, false, Some("explore"));
 
         assert!(
             guidance.contains("LS"),
             "Explore guidance should mention LS"
         );
         assert!(
-            !guidance.contains("ALWAYS use FIRST"),
-            "Explore guidance should not have absolute CodebaseSearch-first directive"
-        );
-        assert!(
-            !guidance.contains("Do NOT start"),
-            "Explore guidance should not prohibit starting with LS"
+            guidance.contains("Do not start with Grep"),
+            "Explore guidance should explicitly prohibit Grep-first exploration"
         );
         assert!(
             guidance.contains("Query tips"),
@@ -1809,19 +2292,57 @@ mod tests {
 
     #[test]
     fn test_build_sub_agent_tool_guidance_analyze_keeps_priority() {
-        let guidance = build_sub_agent_tool_guidance(true, false, Some("analyze"));
+        let guidance = build_sub_agent_tool_guidance(true, true, false, Some("analyze"));
 
         assert!(
             guidance.contains("priority order"),
             "Analyze guidance should maintain priority order"
         );
         assert!(
-            guidance.contains("Prefer CodebaseSearch"),
-            "Analyze guidance should prefer CodebaseSearch over LS/Glob"
+            guidance.contains("Use CodebaseSearch first"),
+            "Analyze guidance should require CodebaseSearch before fallback tools"
+        );
+    }
+
+    #[test]
+    fn test_build_tool_priority_section_codebase_ready_is_strict() {
+        let section = build_tool_priority_section(false, true, true, false, "en");
+        assert!(section.contains("Codebase index: **ready**"));
+        assert!(section.contains("MUST use CodebaseSearch first"));
+        assert!(section.contains("Do NOT use Grep to scan files"));
+    }
+
+    #[test]
+    fn test_build_tool_priority_section_codebase_unavailable_falls_back() {
+        let section = build_tool_priority_section(false, true, false, false, "en");
+        assert!(section.contains("Codebase index: **unavailable**"));
+        assert!(section.contains("Do not try CodebaseSearch"));
+        assert!(section.contains("Use Grep / Read / Glob / LS directly"));
+    }
+
+    #[test]
+    fn test_build_system_prompt_decision_tree_prefers_codebase_search_over_grep() {
+        let tools = get_tool_definitions_from_registry();
+        let prompt = build_system_prompt(
+            &PathBuf::from("/test"),
+            &tools,
+            None,
+            "TestProvider",
+            "test-model",
+            "en",
+        );
+
+        assert!(
+            prompt.contains("| \"Find where function X is defined\" / \"What files are in component Y?\" | **CodebaseSearch** |"),
+            "Decision table should use CodebaseSearch directly for code location questions"
         );
         assert!(
-            !guidance.contains("Do NOT start"),
-            "Analyze guidance should use softer language"
+            !prompt.contains("CodebaseSearch** (preferred) or **Grep"),
+            "Decision table should not keep the old ambiguous Grep-first wording"
+        );
+        assert!(
+            prompt.contains("Use **Grep** only for regex, exact-string, or full-text fallback"),
+            "System prompt should constrain Grep to fallback usage"
         );
     }
 

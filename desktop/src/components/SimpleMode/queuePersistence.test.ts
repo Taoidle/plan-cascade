@@ -18,6 +18,7 @@ function createQueuedMessage(overrides?: Partial<QueuedChatMessage>): QueuedChat
     mode: 'chat',
     attempts: 0,
     attachments: [],
+    references: [],
     priority: 'normal',
     status: 'pending',
     enqueueSeq: 0,
@@ -55,7 +56,7 @@ describe('queuePersistence utilities', () => {
             path: '/tmp/spec.md',
             size: 32,
             type: 'text',
-            content: '# spec',
+            inlineContent: '# spec',
           },
         ],
       }),
@@ -65,7 +66,24 @@ describe('queuePersistence utilities', () => {
     expect(persisted).toBe(true);
 
     const restored = loadPersistedSimpleChatQueue(localStorage, '/workspace/a', 3, 'session-a');
-    expect(restored).toEqual(sourceQueue);
+    expect(restored).toEqual([
+      sourceQueue[0],
+      {
+        ...sourceQueue[1],
+        attachments: [
+          {
+            id: 'att-1',
+            name: 'spec.md',
+            path: '/tmp/spec.md',
+            size: 32,
+            type: 'text',
+            mimeType: undefined,
+            isWorkspaceFile: undefined,
+            isAccessible: undefined,
+          },
+        ],
+      },
+    ]);
   });
 
   it('drops persisted queue when workspace mismatches', () => {
@@ -102,7 +120,7 @@ describe('queuePersistence utilities', () => {
     expect(persisted).toBe(false);
   });
 
-  it('drops non-serializable attachments when creating queue snapshots', () => {
+  it('creates lightweight metadata-only queue attachment snapshots', () => {
     const circular = { id: 'bad' } as unknown as { self?: unknown };
     circular.self = circular;
 
@@ -113,7 +131,7 @@ describe('queuePersistence utilities', () => {
         path: '/tmp/a.txt',
         size: 10,
         type: 'text',
-        content: 'ok',
+        inlineContent: 'ok',
       },
       {
         id: 'bad',
@@ -121,13 +139,34 @@ describe('queuePersistence utilities', () => {
         path: '/tmp/bad.txt',
         size: 10,
         type: 'text',
-        content: circular as unknown as string,
+        inlineContent: circular as unknown as string,
       },
     ]);
 
-    expect(attachments).toHaveLength(1);
-    expect(attachments[0].id).toBe('ok');
-    expect(droppedCount).toBe(1);
+    expect(attachments).toHaveLength(2);
+    expect(attachments).toEqual([
+      {
+        id: 'ok',
+        name: 'a.txt',
+        path: '/tmp/a.txt',
+        size: 10,
+        type: 'text',
+        mimeType: undefined,
+        isWorkspaceFile: undefined,
+        isAccessible: undefined,
+      },
+      {
+        id: 'bad',
+        name: 'bad.txt',
+        path: '/tmp/bad.txt',
+        size: 10,
+        type: 'text',
+        mimeType: undefined,
+        isWorkspaceFile: undefined,
+        isAccessible: undefined,
+      },
+    ]);
+    expect(droppedCount).toBe(0);
   });
 
   it('hydrates legacy v3 queue with fallback session id', () => {
@@ -160,7 +199,7 @@ describe('queuePersistence utilities', () => {
     localStorage.setItem(
       SIMPLE_CHAT_QUEUE_STORAGE_KEY,
       JSON.stringify({
-        version: 4,
+        version: 5,
         workspacePath: '/workspace/a',
         queue: [
           createQueuedMessage({ id: 'q-session-a', sessionId: 'session-a' }),
@@ -170,7 +209,7 @@ describe('queuePersistence utilities', () => {
     );
 
     const restored = loadPersistedSimpleChatQueueWithMeta(localStorage, '/workspace/a', 10, 'session-a');
-    expect(restored.sourceVersion).toBe(4);
+    expect(restored.sourceVersion).toBe(5);
     expect(restored.migratedFromVersion).toBeNull();
     expect(restored.crossSessionCount).toBe(1);
     expect(restored.queue).toHaveLength(2);

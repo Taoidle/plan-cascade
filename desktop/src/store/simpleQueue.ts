@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { FileAttachmentData } from '../types/attachment';
+import type { FileAttachmentData, WorkspaceFileReferenceData } from '../types/attachment';
 import type { WorkflowMode } from '../types/workflowKernel';
 import type { QueuePriority, QueueStatus, QueuedChatMessage } from '../components/SimpleMode/queuePersistence';
 
@@ -11,6 +11,7 @@ interface EnqueueMessageInput {
   submitAsFollowUp: boolean;
   mode: WorkflowMode;
   attachments: FileAttachmentData[];
+  references: WorkspaceFileReferenceData[];
   priority?: QueuePriority;
 }
 
@@ -122,6 +123,7 @@ export const useSimpleQueueStore = create<SimpleQueueState>((set, get) => ({
       mode: input.mode,
       attempts: 0,
       attachments: input.attachments,
+      references: input.references,
       priority: input.priority ?? 'normal',
       status: 'pending',
       enqueueSeq: get().nextEnqueueSeq,

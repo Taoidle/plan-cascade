@@ -56,6 +56,7 @@ function buildResetForegroundPatch(): Partial<ExecutionState> {
     isSubmitting: false,
     toolCallFilter: new ToolCallStreamFilter(),
     attachments: [],
+    workspaceReferences: [],
   };
 }
 

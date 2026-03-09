@@ -46,7 +46,7 @@ pub use prompt_fallback::{
 };
 pub use system_prompt::{
     build_memory_section, build_plugin_commands_section, build_plugin_instructions_section,
-    build_plugin_skills_section, build_project_summary, build_skills_section,
+    build_mode_addendum, build_plugin_skills_section, build_project_summary, build_skills_section,
     build_sub_agent_tool_guidance, build_system_prompt, build_system_prompt_with_memories,
     build_tool_priority_section, detect_language, merge_system_prompts,
 };

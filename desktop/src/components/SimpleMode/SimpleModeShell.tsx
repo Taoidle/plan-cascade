@@ -40,6 +40,7 @@ import {
   DEFAULT_PROMPT_TOKEN_BUDGET,
   estimatePromptTokensFallback,
   toAttachmentTokenEstimateInput,
+  toWorkspaceReferenceTokenEstimateInput,
   type PromptTokenEstimateResult,
 } from './tokenBudget';
 import { resolvePromptTokenBudget } from '../../lib/promptTokenBudget';
@@ -186,9 +187,12 @@ export function SimpleModeShell() {
   const taskId = useExecutionStore((s) => s.taskId);
   const standaloneSessionId = useExecutionStore((s) => s.standaloneSessionId);
   const attachments = useExecutionStore((s) => s.attachments);
+  const workspaceReferences = useExecutionStore((s) => s.workspaceReferences);
   const addAttachment = useExecutionStore((s) => s.addAttachment);
   const removeAttachment = useExecutionStore((s) => s.removeAttachment);
   const clearAttachments = useExecutionStore((s) => s.clearAttachments);
+  const setWorkspaceReferences = useExecutionStore((s) => s.setWorkspaceReferences);
+  const clearWorkspaceReferences = useExecutionStore((s) => s.clearWorkspaceReferences);
   const parkForegroundRuntime = useExecutionStore((s) => s.parkForegroundRuntime);
   const restoreForegroundChatRuntime = useExecutionStore((s) => s.restoreForegroundChatRuntime);
   const activeAgentName = useExecutionStore((s) => s.activeAgentName);
@@ -260,6 +264,8 @@ export function SimpleModeShell() {
   const getModeDraft = useSimpleSessionStore((s) => s.getDraft);
   const setModeAttachments = useSimpleSessionStore((s) => s.setAttachments);
   const getModeAttachments = useSimpleSessionStore((s) => s.getAttachments);
+  const setModeReferences = useSimpleSessionStore((s) => s.setReferences);
+  const getModeReferences = useSimpleSessionStore((s) => s.getReferences);
 
   useSimpleKernelSession({
     workspacePath,
@@ -590,8 +596,10 @@ export function SimpleModeShell() {
     isPlanWorkflowBusy:
       workflowMode === 'plan' && kernelRuntimeStatus.isPlanActive && isPlanPhaseBusy(effectivePlanPhaseForInput),
     attachments,
+    references: workspaceReferences,
     addAttachment,
     clearAttachments,
+    setWorkspaceReferences,
     handleFollowUp,
     handleStart,
     switchWorkflowModeForQueue,
@@ -636,6 +644,22 @@ export function SimpleModeShell() {
     if (!workflowKernelSessionId) return;
     setModeAttachments(workflowKernelSessionId, workflowMode, attachments);
   }, [attachments, setModeAttachments, workflowKernelSessionId, workflowMode]);
+
+  useEffect(() => {
+    if (!workflowKernelSessionId) return;
+    setModeReferences(workflowKernelSessionId, workflowMode, workspaceReferences);
+  }, [setModeReferences, workflowKernelSessionId, workflowMode, workspaceReferences]);
+
+  const restoreComposerArtifacts = useCallback(
+    (sessionId: string, mode: WorkflowMode) => {
+      setDescription(getModeDraft(sessionId, mode));
+      const restoredAttachments = getModeAttachments(sessionId, mode);
+      clearAttachments();
+      restoredAttachments.forEach((attachment) => addAttachment(attachment));
+      setWorkspaceReferences(getModeReferences(sessionId, mode));
+    },
+    [addAttachment, clearAttachments, getModeAttachments, getModeDraft, getModeReferences, setWorkspaceReferences],
+  );
 
   const persistForegroundModeView = useCallback(
     (sessionId: string | null, mode: WorkflowMode) => {
@@ -748,10 +772,7 @@ export function SimpleModeShell() {
     }
 
     if (workflowKernelSessionId) {
-      setDescription(getModeDraft(workflowKernelSessionId, workflowMode));
-      const restoredAttachments = getModeAttachments(workflowKernelSessionId, workflowMode);
-      clearAttachments();
-      restoredAttachments.forEach((attachment) => addAttachment(attachment));
+      restoreComposerArtifacts(workflowKernelSessionId, workflowMode);
       restoreForegroundModeView(workflowKernelSessionId, workflowMode);
     }
 
@@ -764,12 +785,9 @@ export function SimpleModeShell() {
       cancelled = true;
     };
   }, [
-    addAttachment,
-    clearAttachments,
     getWorkflowKernelModeTranscript,
-    getModeAttachments,
-    getModeDraft,
     persistForegroundModeView,
+    restoreComposerArtifacts,
     restoreForegroundModeView,
     workflowKernelSessionId,
     workflowMode,
@@ -836,9 +854,13 @@ export function SimpleModeShell() {
       });
       if (!submitted) return;
       const queuedAttachments = [...attachments];
-      queueChatMessage(prompt, submitAsFollowUp, workflowMode, queuedAttachments);
+      const queuedReferences = [...workspaceReferences];
+      queueChatMessage(prompt, submitAsFollowUp, workflowMode, queuedAttachments, queuedReferences);
       if (queuedAttachments.length > 0) {
         clearAttachments();
+      }
+      if (queuedReferences.length > 0) {
+        clearWorkspaceReferences();
       }
       setDescription('');
       return;
@@ -866,9 +888,11 @@ export function SimpleModeShell() {
     queuedChatMessages.length,
     attachments,
     clearAttachments,
+    clearWorkspaceReferences,
     queueChatMessage,
     handleFollowUp,
     handleStart,
+    workspaceReferences,
   ]);
 
   const handleNewTask = useCallback(() => {
@@ -881,6 +905,7 @@ export function SimpleModeShell() {
     resetPlanWorkflow();
     reset();
     clearStrategyAnalysis();
+    clearWorkspaceReferences();
     setDescription('');
     void openWorkflowKernelSession('chat', {
       conversationContext: [],
@@ -899,6 +924,7 @@ export function SimpleModeShell() {
   }, [
     reset,
     clearStrategyAnalysis,
+    clearWorkspaceReferences,
     resetWorkflow,
     resetPlanWorkflow,
     openWorkflowKernelSession,
@@ -978,6 +1004,7 @@ export function SimpleModeShell() {
       restoreFromHistory(historyId);
       setRightPanelOpen(false);
       setWorkflowMode('chat');
+      clearWorkspaceReferences();
       setDescription('');
       void openWorkflowKernelSession('chat', {
         conversationContext: [],
@@ -998,6 +1025,7 @@ export function SimpleModeShell() {
       restoreFromHistory,
       resetWorkflow,
       resetPlanWorkflow,
+      clearWorkspaceReferences,
       openWorkflowKernelSession,
       setRightPanelOpen,
       workspacePath,
@@ -1015,19 +1043,13 @@ export function SimpleModeShell() {
       }
       const nextMode = activated?.session.activeMode ?? 'chat';
       setWorkflowMode(nextMode);
-      setDescription(getModeDraft(sessionId, nextMode));
-      const restoredAttachments = getModeAttachments(sessionId, nextMode);
-      clearAttachments();
-      restoredAttachments.forEach((attachment) => addAttachment(attachment));
+      restoreComposerArtifacts(sessionId, nextMode);
       restoreForegroundModeView(sessionId, nextMode);
     },
     [
       activateWorkflowKernelSession,
-      addAttachment,
-      clearAttachments,
-      getModeAttachments,
-      getModeDraft,
       persistForegroundModeView,
+      restoreComposerArtifacts,
       restoreForegroundModeView,
       resetWorkflow,
       resetPlanWorkflow,
@@ -1057,10 +1079,7 @@ export function SimpleModeShell() {
         }
         const nextMode = activeCatalogItem?.activeMode ?? 'chat';
         setWorkflowMode(nextMode);
-        setDescription(getModeDraft(result.activeSessionId, nextMode));
-        const restoredAttachments = getModeAttachments(result.activeSessionId, nextMode);
-        clearAttachments();
-        restoredAttachments.forEach((attachment) => addAttachment(attachment));
+        restoreComposerArtifacts(result.activeSessionId, nextMode);
         restoreForegroundModeView(result.activeSessionId, nextMode);
         return;
       }
@@ -1069,6 +1088,7 @@ export function SimpleModeShell() {
       resetPlanWorkflow();
       reset();
       clearStrategyAnalysis();
+      clearWorkspaceReferences();
       setDescription('');
       await openWorkflowKernelSession('chat', {
         conversationContext: [],
@@ -1082,17 +1102,15 @@ export function SimpleModeShell() {
       });
     },
     [
-      addAttachment,
       archiveWorkflowKernelSession,
-      clearAttachments,
+      clearWorkspaceReferences,
       clearStrategyAnalysis,
-      getModeAttachments,
-      getModeDraft,
       openWorkflowKernelSession,
       persistForegroundModeView,
       reset,
       resetPlanWorkflow,
       resetWorkflow,
+      restoreComposerArtifacts,
       restoreForegroundModeView,
       setWorkspacePath,
       workflowKernelSessionId,
@@ -1114,20 +1132,14 @@ export function SimpleModeShell() {
       }
       const nextMode = restored.session.activeMode ?? 'chat';
       setWorkflowMode(nextMode);
-      setDescription(getModeDraft(sessionId, nextMode));
-      const restoredAttachments = getModeAttachments(sessionId, nextMode);
-      clearAttachments();
-      restoredAttachments.forEach((attachment) => addAttachment(attachment));
+      restoreComposerArtifacts(sessionId, nextMode);
       restoreForegroundModeView(sessionId, nextMode);
     },
     [
-      addAttachment,
-      clearAttachments,
-      getModeAttachments,
-      getModeDraft,
       persistForegroundModeView,
       resetPlanWorkflow,
       resetWorkflow,
+      restoreComposerArtifacts,
       restoreForegroundModeView,
       restoreWorkflowKernelSession,
       setWorkspacePath,
@@ -1149,10 +1161,7 @@ export function SimpleModeShell() {
         }
         const nextMode = activeCatalogItem?.activeMode ?? 'chat';
         setWorkflowMode(nextMode);
-        setDescription(getModeDraft(result.activeSessionId, nextMode));
-        const restoredAttachments = getModeAttachments(result.activeSessionId, nextMode);
-        clearAttachments();
-        restoredAttachments.forEach((attachment) => addAttachment(attachment));
+        restoreComposerArtifacts(result.activeSessionId, nextMode);
         restoreForegroundModeView(result.activeSessionId, nextMode);
         return;
       }
@@ -1162,6 +1171,7 @@ export function SimpleModeShell() {
       reset();
       clearStrategyAnalysis();
       clearAttachments();
+      clearWorkspaceReferences();
       setDescription('');
       await openWorkflowKernelSession('chat', {
         conversationContext: [],
@@ -1175,17 +1185,16 @@ export function SimpleModeShell() {
       });
     },
     [
-      addAttachment,
       clearAttachments,
+      clearWorkspaceReferences,
       clearStrategyAnalysis,
       deleteWorkflowKernelSession,
-      getModeAttachments,
-      getModeDraft,
       openWorkflowKernelSession,
       persistForegroundModeView,
       reset,
       resetPlanWorkflow,
       resetWorkflow,
+      restoreComposerArtifacts,
       restoreForegroundModeView,
       setWorkspacePath,
       workflowKernelSessionId,
@@ -1213,6 +1222,7 @@ export function SimpleModeShell() {
     reset();
     clearStrategyAnalysis();
     clearAttachments();
+    clearWorkspaceReferences();
     setDescription('');
     await openWorkflowKernelSession('chat', {
       conversationContext: [],
@@ -1226,6 +1236,7 @@ export function SimpleModeShell() {
     });
   }, [
     clearAttachments,
+    clearWorkspaceReferences,
     clearHistory,
     clearStrategyAnalysis,
     deleteWorkflowKernelSession,
@@ -1610,7 +1621,8 @@ export function SimpleModeShell() {
   useEffect(() => {
     const hasPrompt = description.trim().length > 0;
     const hasAttachments = attachments.length > 0;
-    if (!hasPrompt && !hasAttachments) {
+    const hasWorkspaceReferences = workspaceReferences.length > 0;
+    if (!hasPrompt && !hasAttachments && !hasWorkspaceReferences) {
       setTokenEstimate(null);
       setIsEstimatingTokenBudget(false);
       return;
@@ -1623,6 +1635,7 @@ export function SimpleModeShell() {
         const result = await invoke<CommandResponse<PromptTokenEstimateResult>>('estimate_prompt_tokens', {
           prompt: description,
           attachments: toAttachmentTokenEstimateInput(attachments),
+          workspaceReferences: toWorkspaceReferenceTokenEstimateInput(workspaceReferences),
           budgetTokens: promptTokenBudget,
         });
 
@@ -1640,7 +1653,9 @@ export function SimpleModeShell() {
       }
 
       if (!cancelled) {
-        setTokenEstimate(estimatePromptTokensFallback(description, attachments, promptTokenBudget));
+        setTokenEstimate(
+          estimatePromptTokensFallback(description, attachments, workspaceReferences, promptTokenBudget),
+        );
       }
     }, TOKEN_ESTIMATE_DEBOUNCE_MS);
 
@@ -1648,7 +1663,7 @@ export function SimpleModeShell() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [description, attachments, promptTokenBudget]);
+  }, [description, attachments, promptTokenBudget, workspaceReferences]);
 
   return (
     <div className="h-full flex flex-col">
@@ -1784,6 +1799,8 @@ export function SimpleModeShell() {
                 attachments={attachments}
                 onAttach={addAttachment}
                 onRemoveAttachment={removeAttachment}
+                workspaceReferences={workspaceReferences}
+                onWorkspaceReferencesChange={setWorkspaceReferences}
                 workspacePath={workspacePath}
                 activeAgentName={activeAgentName}
                 onClearAgent={handleClearActiveAgent}

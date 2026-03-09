@@ -116,6 +116,9 @@
     "selectionCount": "{{count}} selected",
     "deleteSelected": "Delete Selected",
     "bulkDeleteSessionConfirm": "Delete {{count}} selected sessions permanently? This cannot be undone.",
+    "archiveSelected": "Archive Selected",
+    "bulkArchiveSession": "Archive sessions",
+    "bulkArchiveSessionConfirm": "Archive {{count}} selected live sessions?",
     "selectSession": "Select session {{title}}",
     "noWorkspace": "No Workspace",
     "sort": {

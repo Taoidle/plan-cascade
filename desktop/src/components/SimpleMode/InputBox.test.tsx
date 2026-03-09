@@ -260,7 +260,7 @@ describe('InputBox compact-first layout', () => {
           path: '/path/test.txt',
           size: 100,
           type: 'text' as const,
-          content: 'hello',
+          inlineContent: 'hello',
         },
       ];
       renderInputBox({ attachments, onAttach: vi.fn(), onRemoveAttachment: vi.fn() });
@@ -393,7 +393,7 @@ describe('InputBox markdown preview toggle', () => {
           path: '/readme.md',
           size: 256,
           type: 'text' as const,
-          content: '# README',
+          inlineContent: '# README',
         },
       ];
       renderInputBox({

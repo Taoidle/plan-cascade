@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import type { FileAttachmentData } from '../types/attachment';
+import type { FileAttachmentData, WorkspaceFileReferenceData } from '../types/attachment';
 import type { WorkflowMode, WorkflowSessionCatalogItem, WorkflowSessionCatalogState } from '../types/workflowKernel';
 
 type DraftMap = Partial<Record<WorkflowMode, string>>;
 type AttachmentMap = Partial<Record<WorkflowMode, FileAttachmentData[]>>;
+type ReferenceMap = Partial<Record<WorkflowMode, WorkspaceFileReferenceData[]>>;
 type UnreadMap = Partial<Record<WorkflowMode, boolean>>;
 
 export interface SimpleSessionStore {
@@ -12,6 +13,7 @@ export interface SimpleSessionStore {
   catalog: Record<string, WorkflowSessionCatalogItem>;
   drafts: Record<string, DraftMap>;
   attachmentsByMode: Record<string, AttachmentMap>;
+  referencesByMode: Record<string, ReferenceMap>;
   unreadByMode: Record<string, UnreadMap>;
 
   setCatalogState: (state: WorkflowSessionCatalogState) => void;
@@ -21,6 +23,8 @@ export interface SimpleSessionStore {
   getDraft: (sessionId: string | null, mode: WorkflowMode) => string;
   setAttachments: (sessionId: string, mode: WorkflowMode, attachments: FileAttachmentData[]) => void;
   getAttachments: (sessionId: string | null, mode: WorkflowMode) => FileAttachmentData[];
+  setReferences: (sessionId: string, mode: WorkflowMode, references: WorkspaceFileReferenceData[]) => void;
+  getReferences: (sessionId: string | null, mode: WorkflowMode) => WorkspaceFileReferenceData[];
   markModeUnread: (sessionId: string, mode: WorkflowMode, unread: boolean) => void;
   isModeUnread: (sessionId: string | null, mode: WorkflowMode) => boolean;
   reset: () => void;
@@ -31,8 +35,32 @@ const DEFAULT_STATE = {
   catalog: {} as Record<string, WorkflowSessionCatalogItem>,
   drafts: {} as Record<string, DraftMap>,
   attachmentsByMode: {} as Record<string, AttachmentMap>,
+  referencesByMode: {} as Record<string, ReferenceMap>,
   unreadByMode: {} as Record<string, UnreadMap>,
 };
+
+function snapshotAttachment(item: FileAttachmentData): FileAttachmentData {
+  return {
+    id: item.id,
+    name: item.name,
+    path: item.path,
+    size: item.size,
+    type: item.type,
+    mimeType: item.mimeType,
+    isWorkspaceFile: item.isWorkspaceFile,
+    isAccessible: item.isAccessible,
+  };
+}
+
+function snapshotReference(item: WorkspaceFileReferenceData): WorkspaceFileReferenceData {
+  return {
+    id: item.id,
+    name: item.name,
+    relativePath: item.relativePath,
+    absolutePath: item.absolutePath,
+    mentionText: item.mentionText,
+  };
+}
 
 export const useSimpleSessionStore = create<SimpleSessionStore>()(
   persist(
@@ -77,7 +105,7 @@ export const useSimpleSessionStore = create<SimpleSessionStore>()(
       },
 
       setAttachments: (sessionId, mode, attachments) => {
-        const cloned = attachments.map((item) => ({ ...item }));
+        const cloned = attachments.map((item) => snapshotAttachment(item));
         set((state) => ({
           attachmentsByMode: {
             ...state.attachmentsByMode,
@@ -91,7 +119,25 @@ export const useSimpleSessionStore = create<SimpleSessionStore>()(
 
       getAttachments: (sessionId, mode) => {
         if (!sessionId) return [];
-        return (get().attachmentsByMode[sessionId]?.[mode] ?? []).map((item) => ({ ...item }));
+        return (get().attachmentsByMode[sessionId]?.[mode] ?? []).map((item) => snapshotAttachment(item));
+      },
+
+      setReferences: (sessionId, mode, references) => {
+        const cloned = references.map((item) => snapshotReference(item));
+        set((state) => ({
+          referencesByMode: {
+            ...state.referencesByMode,
+            [sessionId]: {
+              ...state.referencesByMode[sessionId],
+              [mode]: cloned,
+            },
+          },
+        }));
+      },
+
+      getReferences: (sessionId, mode) => {
+        if (!sessionId) return [];
+        return (get().referencesByMode[sessionId]?.[mode] ?? []).map((item) => snapshotReference(item));
       },
 
       markModeUnread: (sessionId, mode, unread) => {
@@ -116,12 +162,13 @@ export const useSimpleSessionStore = create<SimpleSessionStore>()(
       },
     }),
     {
-      name: 'simple-session-store-v2',
+      name: 'simple-session-store-v3',
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         activeRootSessionId: state.activeRootSessionId,
         drafts: state.drafts,
         attachmentsByMode: state.attachmentsByMode,
+        referencesByMode: state.referencesByMode,
         unreadByMode: state.unreadByMode,
       }),
       migrate: (persistedState) => {
@@ -135,7 +182,8 @@ export const useSimpleSessionStore = create<SimpleSessionStore>()(
               ? (state.activeRootSessionId as string | null)
               : null,
           drafts: (state.drafts as Record<string, DraftMap> | undefined) ?? {},
-          attachmentsByMode: (state.attachmentsByMode as Record<string, AttachmentMap> | undefined) ?? {},
+          attachmentsByMode: {},
+          referencesByMode: (state.referencesByMode as Record<string, ReferenceMap> | undefined) ?? {},
           unreadByMode: (state.unreadByMode as Record<string, UnreadMap> | undefined) ?? {},
           catalog: {},
         };

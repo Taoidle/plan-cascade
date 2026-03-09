@@ -1,4 +1,4 @@
-import type { FileAttachmentData } from '../../types/attachment';
+import type { FileAttachmentData, WorkspaceFileReferenceData } from '../../types/attachment';
 import { DEFAULT_PROMPT_TOKEN_BUDGET } from '../../lib/promptTokenBudget';
 export { DEFAULT_PROMPT_TOKEN_BUDGET };
 
@@ -7,8 +7,14 @@ export interface AttachmentTokenEstimateInput {
   path: string;
   size: number;
   type: FileAttachmentData['type'];
+  mimeType?: string;
   content?: string;
   preview?: string;
+}
+
+export interface WorkspaceReferenceTokenEstimateInput {
+  name: string;
+  relativePath: string;
 }
 
 export interface PromptTokenEstimateResult {
@@ -34,23 +40,37 @@ export function toAttachmentTokenEstimateInput(attachments: FileAttachmentData[]
     path: attachment.path,
     size: attachment.size,
     type: attachment.type,
-    content: attachment.content,
-    preview: attachment.preview,
+    mimeType: attachment.mimeType,
+    content: attachment.inlineContent,
+    preview: attachment.inlinePreview,
+  }));
+}
+
+export function toWorkspaceReferenceTokenEstimateInput(
+  references: WorkspaceFileReferenceData[],
+): WorkspaceReferenceTokenEstimateInput[] {
+  return references.map((reference) => ({
+    name: reference.name,
+    relativePath: reference.relativePath,
   }));
 }
 
 export function estimatePromptTokensFallback(
   prompt: string,
   attachments: FileAttachmentData[],
+  references: WorkspaceFileReferenceData[],
   budgetTokens = DEFAULT_PROMPT_TOKEN_BUDGET,
 ): PromptTokenEstimateResult {
   const prompt_tokens = estimateTokensRough(prompt);
   const attachment_tokens = attachments.reduce((sum, attachment) => {
     if (attachment.type === 'text') {
-      return sum + estimateTokensRough(attachment.content || '');
+      if (attachment.inlineContent) {
+        return sum + estimateTokensRough(attachment.inlineContent);
+      }
+      return sum + Math.ceil(attachment.size / 4);
     }
     return sum + DEFAULT_NON_TEXT_ATTACHMENT_TOKENS;
-  }, 0);
+  }, references.length * 12);
 
   const estimated_tokens = prompt_tokens + attachment_tokens;
   const remaining_tokens = budgetTokens - estimated_tokens;

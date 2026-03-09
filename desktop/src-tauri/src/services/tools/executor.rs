@@ -377,6 +377,7 @@ impl ToolExecutor {
     fn build_registry() -> super::trait_def::ToolRegistry {
         use super::impls::*;
         let mut registry = super::trait_def::ToolRegistry::new();
+        registry.register(Arc::new(CodebaseSearchTool::new()));
         registry.register(Arc::new(ReadTool::new()));
         registry.register(Arc::new(WriteTool::new()));
         registry.register(Arc::new(EditTool::new()));
@@ -390,7 +391,6 @@ impl ToolExecutor {
         registry.register(Arc::new(WebFetchTool::new()));
         registry.register(Arc::new(WebSearchTool::new()));
         registry.register(Arc::new(NotebookEditTool::new()));
-        registry.register(Arc::new(CodebaseSearchTool::new()));
         registry.register(Arc::new(SearchKnowledgeTool::new()));
         // BrowserTool is always registered (unconditional). Runtime detection
         // and graceful degradation handle the case when no browser is available.

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { FileAttachmentData } from '../../types/attachment';
+import type { FileAttachmentData, WorkspaceFileReferenceData } from '../../types/attachment';
 import type { ContextSourceConfig } from '../../types/contextSources';
 import { useAgentsStore } from '../agents';
 import { useContextSourcesStore } from '../contextSources';
@@ -129,6 +129,7 @@ interface StartActionDeps {
   preparePromptWithAttachmentContext: (
     prompt: string,
     attachments: FileAttachmentData[],
+    workspaceReferences: WorkspaceFileReferenceData[],
     addLog: (message: string) => void,
   ) => Promise<string>;
   getStandaloneContextTurnsLimit: () => number;
@@ -307,8 +308,14 @@ export function createStartAction(
         });
 
         const claudeAttachments = get().attachments;
-        const claudePrompt = await preparePromptWithAttachmentContext(assembledPrompt, claudeAttachments, get().addLog);
+        const claudePrompt = await preparePromptWithAttachmentContext(
+          assembledPrompt,
+          claudeAttachments,
+          get().workspaceReferences,
+          get().addLog,
+        );
         get().clearAttachments();
+        get().clearWorkspaceReferences();
 
         const sendResult = await invoke<CommandResponse<ClaudeSendMessageResponse | boolean>>('send_message', {
           request: {
@@ -420,9 +427,11 @@ export function createStartAction(
         const enrichedMessage = await preparePromptWithAttachmentContext(
           messageToSend,
           standaloneAttachments,
+          get().workspaceReferences,
           get().addLog,
         );
         get().clearAttachments();
+        get().clearWorkspaceReferences();
 
         const baseUrl = resolveProviderBaseUrl(provider, settings);
         const memoryReviewProvider = parseMemoryReviewAgentProvider(settings.memorySettings.reviewAgentRef);

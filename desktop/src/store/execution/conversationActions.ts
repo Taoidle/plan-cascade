@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { deriveConversationTurns, rebuildStandaloneTurns } from '../../lib/conversationUtils';
 import { reportNonFatal } from '../../lib/nonFatal';
-import type { FileAttachmentData } from '../../types/attachment';
+import type { FileAttachmentData, WorkspaceFileReferenceData } from '../../types/attachment';
 import type { ContextSourceConfig } from '../../types/contextSources';
 import { useContextSourcesStore } from '../contextSources';
 import { useSettingsStore } from '../settings';
@@ -120,6 +120,7 @@ interface ConversationActionDeps {
   preparePromptWithAttachmentContext: (
     prompt: string,
     attachments: FileAttachmentData[],
+    workspaceReferences: WorkspaceFileReferenceData[],
     addLog: (message: string) => void,
   ) => Promise<string>;
   getStandaloneContextTurnsLimit: () => number;
@@ -198,9 +199,11 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
       const enrichedPrompt = await preparePromptWithAttachmentContext(
         assembledPrompt,
         followUpAttachments,
+        get().workspaceReferences,
         get().addLog,
       );
       get().clearAttachments();
+      get().clearWorkspaceReferences();
 
       get().addLog(`Follow-up: ${prompt}`);
 
@@ -478,9 +481,11 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
           const enrichedPrompt = await preparePromptWithAttachmentContext(
             assembledPrompt,
             regenAttachments,
+            get().workspaceReferences,
             get().addLog,
           );
           get().clearAttachments();
+          get().clearWorkspaceReferences();
 
           const sendResult = await invoke<CommandResponse<ClaudeSendMessageResponse | boolean>>('send_message', {
             request: {
@@ -786,9 +791,11 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
           const enrichedPrompt = await preparePromptWithAttachmentContext(
             assembledPrompt,
             editAttachments,
+            get().workspaceReferences,
             get().addLog,
           );
           get().clearAttachments();
+          get().clearWorkspaceReferences();
 
           const sendResult = await invoke<CommandResponse<ClaudeSendMessageResponse | boolean>>('send_message', {
             request: {

@@ -10,7 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useSettingsStore, type Backend } from './settings';
 import { ToolCallStreamFilter } from '../utils/toolCallFilter';
 import { buildPromptWithAttachments } from '../lib/conversationUtils';
-import type { FileAttachmentData } from '../types/attachment';
+import type { FileAttachmentData, WorkspaceFileReferenceData } from '../types/attachment';
 import type { ContextSourceConfig } from '../types/contextSources';
 import { assembleTurnContext, type ContextEnvelope } from '../lib/contextApi';
 import { useContextOpsStore } from './contextOps';
@@ -87,8 +87,15 @@ interface AttachmentContextInput {
   path: string;
   size: number;
   type: FileAttachmentData['type'];
+  mimeType?: string;
   content?: string;
   preview?: string;
+}
+
+interface WorkspaceReferenceContextInput {
+  name: string;
+  relativePath: string;
+  absolutePath: string;
 }
 
 interface AttachmentContextPrepareResult {
@@ -483,17 +490,27 @@ function toAttachmentContextInputs(attachments: FileAttachmentData[]): Attachmen
     path: attachment.path,
     size: attachment.size,
     type: attachment.type,
-    content: attachment.content,
-    preview: attachment.preview,
+    mimeType: attachment.mimeType,
+    content: attachment.inlineContent,
+    preview: attachment.inlinePreview,
+  }));
+}
+
+function toWorkspaceReferenceContextInputs(references: WorkspaceFileReferenceData[]): WorkspaceReferenceContextInput[] {
+  return references.map((reference) => ({
+    name: reference.name,
+    relativePath: reference.relativePath,
+    absolutePath: reference.absolutePath,
   }));
 }
 
 async function preparePromptWithAttachmentContext(
   prompt: string,
   attachments: FileAttachmentData[],
+  workspaceReferences: WorkspaceFileReferenceData[],
   addLog?: (message: string) => void,
 ): Promise<string> {
-  if (attachments.length === 0) return prompt;
+  if (attachments.length === 0 && workspaceReferences.length === 0) return prompt;
 
   try {
     const settings = useSettingsStore.getState();
@@ -509,6 +526,7 @@ async function preparePromptWithAttachmentContext(
     const result = await invoke<CommandResponse<AttachmentContextPrepareResult>>('prepare_attachment_context', {
       prompt,
       attachments: toAttachmentContextInputs(attachments),
+      workspaceReferences: toWorkspaceReferenceContextInputs(workspaceReferences),
       budgetTokens,
       maxAttachmentTokens,
       maxTokensPerFile,
@@ -530,11 +548,14 @@ async function preparePromptWithAttachmentContext(
       return prepared.prepared_prompt;
     }
   } catch (error) {
-    reportNonFatal('execution.preparePromptWithAttachmentContext', error, { attachments: attachments.length });
+    reportNonFatal('execution.preparePromptWithAttachmentContext', error, {
+      attachments: attachments.length,
+      workspaceReferences: workspaceReferences.length,
+    });
   }
 
   addLog?.('Falling back to legacy attachment prompt builder');
-  return buildPromptWithAttachments(prompt, attachments);
+  return buildPromptWithAttachments(prompt, attachments, workspaceReferences);
 }
 
 function isBackendStandaloneExecutionResult(data: unknown): data is BackendStandaloneExecutionResult {
@@ -601,6 +622,7 @@ const initialState = {
   turnUsageTotals: null as BackendUsageStats | null,
   toolCallFilter: new ToolCallStreamFilter(),
   attachments: [] as FileAttachmentData[],
+  workspaceReferences: [] as WorkspaceFileReferenceData[],
   backgroundSessions: {} as Record<string, SessionSnapshot>,
   runtimeRegistry: {} as Record<string, ExecutionRuntimeHandle>,
   activeRuntimeHandleId: null as string | null,
@@ -769,6 +791,8 @@ export const useExecutionStore = create<ExecutionState>()((set, get) => {
     addAttachment: miscActions.addAttachment,
     removeAttachment: miscActions.removeAttachment,
     clearAttachments: miscActions.clearAttachments,
+    setWorkspaceReferences: miscActions.setWorkspaceReferences,
+    clearWorkspaceReferences: miscActions.clearWorkspaceReferences,
 
     backgroundCurrentSession: sessionTreeActions.backgroundCurrentSession,
     parkForegroundRuntime: runtimeRegistryActions.parkForegroundRuntime,

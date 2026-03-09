@@ -50,6 +50,8 @@ interface MiscActions {
   addAttachment: ExecutionState['addAttachment'];
   removeAttachment: ExecutionState['removeAttachment'];
   clearAttachments: ExecutionState['clearAttachments'];
+  setWorkspaceReferences: ExecutionState['setWorkspaceReferences'];
+  clearWorkspaceReferences: ExecutionState['clearWorkspaceReferences'];
   retryStory: ExecutionState['retryStory'];
   rollbackToTurn: ExecutionState['rollbackToTurn'];
   appendStandaloneTurn: ExecutionState['appendStandaloneTurn'];
@@ -337,6 +339,16 @@ export function createMiscActions(deps: MiscActionDeps): MiscActions {
 
     clearAttachments: () => {
       set({ attachments: [] });
+    },
+
+    setWorkspaceReferences: (references: ExecutionState['workspaceReferences']) => {
+      set({
+        workspaceReferences: references.map((reference) => ({ ...reference })),
+      });
+    },
+
+    clearWorkspaceReferences: () => {
+      set({ workspaceReferences: [] });
     },
 
     retryStory: async (storyId) => {
