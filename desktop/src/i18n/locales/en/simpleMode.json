@@ -1098,6 +1098,22 @@
     "gitTab": "Git",
     "contextTab": "Context",
     "resize": "Resize panel",
+    "workflowFailures": {
+      "title": "Workflow Reliability",
+      "none": "No recent workflow failures.",
+      "metrics": {
+        "linkRehydrate": "Link rehydrate {{success}}/{{total}}",
+        "actionFailures": "Action failures {{total}}",
+        "prdFeedback": "PRD feedback {{success}}/{{total}}"
+      },
+      "latest": {
+        "title": "Latest: {{action}}",
+        "mode": "Mode {{value}}",
+        "before": "Before {{value}}",
+        "after": "After {{value}}"
+      },
+      "breakdownItem": "{{card}} / {{action}} / {{errorCode}}: {{total}}"
+    },
     "contextOps": {
       "tabs": {
         "inspector": "Inspector",

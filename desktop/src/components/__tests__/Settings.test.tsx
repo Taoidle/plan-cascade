@@ -50,10 +50,17 @@ vi.mock('react-i18next', () => ({
         'general.knowledgeBase.kbPickerServerSearchDescription': 'Search unexpanded collections',
         'general.knowledgeBase.kbIngestJobScopedProgress': 'Use job-scoped ingest progress events',
         'general.knowledgeBase.kbIngestJobScopedProgressDescription': 'Isolate upload progress by job',
-        'general.contextInspector.title': 'Context Observability',
-        'general.contextInspector.enable': 'Enable Context Inspector tab',
-        'general.contextInspector.description':
-          'Show the Context tab in the right panel for trace, compaction, and source diagnostics.',
+        'general.developerMode.title': 'Developer Mode',
+        'general.developerMode.enable': 'Enable Developer Mode',
+        'general.developerMode.description': 'Control developer-facing panels in Simple mode.',
+        'general.developerMode.panels.contextInspector.title': 'Show Context Inspector tab',
+        'general.developerMode.panels.contextInspector.description': 'Show the Context tab in the right panel.',
+        'general.developerMode.panels.workflowReliability.title': 'Show Workflow Reliability',
+        'general.developerMode.panels.workflowReliability.description': 'Show workflow observability metrics.',
+        'general.developerMode.panels.executionLogs.title': 'Show execution logs',
+        'general.developerMode.panels.executionLogs.description': 'Show the execution logs card.',
+        'general.developerMode.panels.streamingOutput.title': 'Show output stream',
+        'general.developerMode.panels.streamingOutput.description': 'Show streaming output in the right panel.',
         'general.executionLimits.title': 'Execution Limits',
         'general.executionLimits.maxParallelStories': 'Max Parallel Stories',
         'general.executionLimits.maxIterations': 'Max Iterations',
@@ -153,6 +160,9 @@ const mockSetKnowledgeAutoEnsureDocsCollection = vi.fn();
 const mockSetKbQueryRunsV2 = vi.fn();
 const mockSetKbPickerServerSearch = vi.fn();
 const mockSetKbIngestJobScopedProgress = vi.fn();
+const mockSetDeveloperModeEnabled = vi.fn();
+const mockSetDeveloperPanels = vi.fn();
+const mockSetDeveloperSettingsInitialized = vi.fn();
 
 const mockSettingsState = {
   backend: 'claude-code' as string,
@@ -172,6 +182,14 @@ const mockSettingsState = {
   kbQueryRunsV2: true,
   kbPickerServerSearch: true,
   kbIngestJobScopedProgress: true,
+  developerModeEnabled: false,
+  developerPanels: {
+    contextInspector: false,
+    workflowReliability: false,
+    executionLogs: false,
+    streamingOutput: true,
+  },
+  developerSettingsInitialized: false,
   agents: [
     { name: 'claude-code', enabled: true, command: 'claude', isDefault: true },
     { name: 'aider', enabled: false, command: 'aider', isDefault: false },
@@ -198,6 +216,9 @@ const mockSettingsState = {
   setKbQueryRunsV2: mockSetKbQueryRunsV2,
   setKbPickerServerSearch: mockSetKbPickerServerSearch,
   setKbIngestJobScopedProgress: mockSetKbIngestJobScopedProgress,
+  setDeveloperModeEnabled: mockSetDeveloperModeEnabled,
+  setDeveloperPanels: mockSetDeveloperPanels,
+  setDeveloperSettingsInitialized: mockSetDeveloperSettingsInitialized,
 };
 
 vi.mock('../../store/settings', () => ({
@@ -298,6 +319,14 @@ describe('GeneralSection', () => {
     localStorage.clear();
     mockSettingsState.defaultMode = 'simple';
     mockSettingsState.theme = 'system';
+    mockSettingsState.developerModeEnabled = false;
+    mockSettingsState.developerPanels = {
+      contextInspector: false,
+      workflowReliability: false,
+      executionLogs: false,
+      streamingOutput: true,
+    };
+    mockSettingsState.developerSettingsInitialized = false;
   });
 
   it('renders the general settings title and description', () => {
@@ -487,10 +516,29 @@ describe('GeneralSection', () => {
     expect(screen.getByTestId('language-selector')).toBeInTheDocument();
   });
 
-  it('persists context inspector toggle via context policy API', async () => {
+  it('updates developer mode through settings store', () => {
     render(<GeneralSection />);
 
-    const title = await screen.findByText('Enable Context Inspector tab');
+    const title = screen.getByText('Enable Developer Mode');
+    const toggle = title.closest('label')?.querySelector('input[type="checkbox"]');
+    expect(toggle).toBeTruthy();
+    fireEvent.click(toggle!);
+
+    expect(mockSetDeveloperModeEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it('disables developer panel toggles when developer mode is off', () => {
+    render(<GeneralSection />);
+
+    const workflowReliability = screen.getByText('Show Workflow Reliability').closest('label')?.querySelector('input');
+    expect(workflowReliability).toBeDisabled();
+  });
+
+  it('persists developer context inspector toggle via context policy API', async () => {
+    mockSettingsState.developerModeEnabled = true;
+    render(<GeneralSection />);
+
+    const title = await screen.findByText('Show Context Inspector tab');
     const toggle = title.closest('label')?.querySelector('input[type="checkbox"]');
     expect(toggle).toBeTruthy();
     fireEvent.click(toggle!);

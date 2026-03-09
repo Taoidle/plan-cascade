@@ -37,6 +37,12 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
     setKbPickerServerSearch,
     kbIngestJobScopedProgress,
     setKbIngestJobScopedProgress,
+    developerModeEnabled,
+    setDeveloperModeEnabled,
+    developerPanels,
+    setDeveloperPanels,
+    developerSettingsInitialized,
+    setDeveloperSettingsInitialized,
   } = useSettingsStore();
   const { triggerWizard, startTour } = useOnboardingStore();
   const [contextPolicy, setContextPolicyState] = useState<ContextPolicy | null>(null);
@@ -48,6 +54,10 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
       if (cancelled) return;
       if (response.success && response.data) {
         setContextPolicyState(response.data);
+        if (!developerSettingsInitialized) {
+          setDeveloperPanels({ contextInspector: response.data.context_inspector_ui });
+          setDeveloperSettingsInitialized(true);
+        }
       } else {
         setContextPolicyState(
           (prev) =>
@@ -61,12 +71,15 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
               hard_threshold_ratio: 0.95,
             },
         );
+        if (!developerSettingsInitialized) {
+          setDeveloperSettingsInitialized(true);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [developerSettingsInitialized, setDeveloperPanels, setDeveloperSettingsInitialized]);
 
   const handleContextInspectorToggle = async (enabled: boolean) => {
     const basePolicy: ContextPolicy = contextPolicy ?? {
@@ -79,9 +92,11 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
       hard_threshold_ratio: 0.95,
     };
     const nextPolicy: ContextPolicy = { ...basePolicy, context_inspector_ui: enabled };
+    setDeveloperPanels({ contextInspector: enabled });
     setContextPolicyState(nextPolicy);
     const response = await setContextPolicy(nextPolicy);
     if (!response.success) {
+      setDeveloperPanels({ contextInspector: basePolicy.context_inspector_ui });
       setContextPolicyState(basePolicy);
     }
   };
@@ -297,9 +312,9 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
         </label>
       </section>
 
-      {/* Context Inspector */}
+      {/* Developer Mode */}
       <section className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('general.contextInspector.title')}</h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('general.developerMode.title')}</h3>
         <label
           className={clsx(
             'flex items-start gap-4 p-4 rounded-lg border cursor-pointer',
@@ -310,19 +325,83 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
         >
           <input
             type="checkbox"
-            checked={contextPolicy?.context_inspector_ui ?? false}
-            onChange={(e) => void handleContextInspectorToggle(e.target.checked)}
+            checked={developerModeEnabled}
+            onChange={(e) => setDeveloperModeEnabled(e.target.checked)}
             className="mt-1 text-primary-600"
           />
           <div>
-            <div className="font-medium text-gray-900 dark:text-white text-sm">
-              {t('general.contextInspector.enable')}
-            </div>
+            <div className="font-medium text-gray-900 dark:text-white text-sm">{t('general.developerMode.enable')}</div>
             <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              {t('general.contextInspector.description')}
+              {t('general.developerMode.description')}
             </div>
           </div>
         </label>
+
+        <div
+          className={clsx(
+            'space-y-3 rounded-lg border border-dashed border-gray-200 dark:border-gray-700 p-4 transition-opacity',
+            !developerModeEnabled && 'opacity-60',
+          )}
+        >
+          <label
+            className={clsx(
+              'flex items-start gap-4 rounded-lg border p-4 transition-colors',
+              developerModeEnabled
+                ? 'cursor-pointer border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                : 'cursor-not-allowed border-gray-200/70 dark:border-gray-700/70 bg-gray-50/40 dark:bg-gray-800/30',
+            )}
+          >
+            <input
+              type="checkbox"
+              checked={developerPanels.contextInspector}
+              disabled={!developerModeEnabled}
+              onChange={(e) => void handleContextInspectorToggle(e.target.checked)}
+              className="mt-1 text-primary-600"
+            />
+            <div>
+              <div className="font-medium text-gray-900 dark:text-white text-sm">
+                {t('general.developerMode.panels.contextInspector.title')}
+              </div>
+              <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                {t('general.developerMode.panels.contextInspector.description')}
+              </div>
+            </div>
+          </label>
+
+          {(
+            [
+              ['workflowReliability', 'general.developerMode.panels.workflowReliability'],
+              ['executionLogs', 'general.developerMode.panels.executionLogs'],
+              ['streamingOutput', 'general.developerMode.panels.streamingOutput'],
+            ] as const
+          ).map(([panelKey, keyBase]) => (
+            <label
+              key={panelKey}
+              className={clsx(
+                'flex items-start gap-4 rounded-lg border p-4 transition-colors',
+                developerModeEnabled
+                  ? 'cursor-pointer border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                  : 'cursor-not-allowed border-gray-200/70 dark:border-gray-700/70 bg-gray-50/40 dark:bg-gray-800/30',
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={developerPanels[panelKey]}
+                disabled={!developerModeEnabled}
+                onChange={(e) =>
+                  setDeveloperPanels({
+                    [panelKey]: e.target.checked,
+                  } as Record<typeof panelKey, boolean>)
+                }
+                className="mt-1 text-primary-600"
+              />
+              <div>
+                <div className="font-medium text-gray-900 dark:text-white text-sm">{t(`${keyBase}.title`)}</div>
+                <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t(`${keyBase}.description`)}</div>
+              </div>
+            </label>
+          ))}
+        </div>
       </section>
 
       {/* Execution Limits */}
@@ -342,30 +421,6 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
                 const value = parseInt(e.target.value, 10);
                 if (!isNaN(value)) {
                   useSettingsStore.setState({ maxParallelStories: value });
-                }
-              }}
-              className={clsx(
-                'w-full px-3 py-2 rounded-lg border',
-                'border-gray-200 dark:border-gray-700',
-                'bg-white dark:bg-gray-800',
-                'text-gray-900 dark:text-white',
-                'focus:outline-none focus:ring-2 focus:ring-primary-500',
-              )}
-            />
-          </div>
-          <div>
-            <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
-              {t('general.executionLimits.maxIterations')}
-            </label>
-            <input
-              type="number"
-              min={10}
-              max={200}
-              value={useSettingsStore.getState().maxIterations}
-              onChange={(e) => {
-                const value = parseInt(e.target.value, 10);
-                if (!isNaN(value)) {
-                  useSettingsStore.setState({ maxIterations: value });
                 }
               }}
               className={clsx(

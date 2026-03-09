@@ -61,10 +61,28 @@
       "kbIngestJobScopedProgressDescription": "When enabled, upload progress is isolated by job/project/collection to avoid cross-collection progress interference."
     },
 
-    "contextInspector": {
-      "title": "Context Observability",
-      "enable": "Enable Context Inspector tab",
-      "description": "Show the Context tab in the right panel for trace, compaction, and source diagnostics."
+    "developerMode": {
+      "title": "Developer Mode",
+      "enable": "Enable Developer Mode",
+      "description": "Control developer-facing panels in Simple mode.",
+      "panels": {
+        "contextInspector": {
+          "title": "Show Context Inspector tab",
+          "description": "Show the Context tab in the right panel for trace, compaction, and source diagnostics."
+        },
+        "workflowReliability": {
+          "title": "Show Workflow Reliability",
+          "description": "Show workflow observability metrics in the output panel."
+        },
+        "executionLogs": {
+          "title": "Show execution logs",
+          "description": "Show the execution logs card in the output panel."
+        },
+        "streamingOutput": {
+          "title": "Show output stream",
+          "description": "Show streaming output in the output panel."
+        }
+      }
     },
 
     "language": {

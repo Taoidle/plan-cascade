@@ -1098,6 +1098,22 @@
     "gitTab": "Git",
     "contextTab": "上下文",
     "resize": "调整面板宽度",
+    "workflowFailures": {
+      "title": "工作流可靠性",
+      "none": "最近没有工作流失败记录。",
+      "metrics": {
+        "linkRehydrate": "链接恢复 {{success}}/{{total}}",
+        "actionFailures": "动作失败 {{total}}",
+        "prdFeedback": "PRD 反馈 {{success}}/{{total}}"
+      },
+      "latest": {
+        "title": "最近一次：{{action}}",
+        "mode": "模式 {{value}}",
+        "before": "之前 {{value}}",
+        "after": "之后 {{value}}"
+      },
+      "breakdownItem": "{{card}} / {{action}} / {{errorCode}}：{{total}}"
+    },
     "contextOps": {
       "tabs": {
         "inspector": "检查器",

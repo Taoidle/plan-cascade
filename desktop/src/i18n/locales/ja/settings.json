@@ -61,10 +61,28 @@
       "kbIngestJobScopedProgressDescription": "有効時、アップロード進捗を job/project/collection ごとに分離し、コレクション間の進捗干渉を防ぎます。"
     },
 
-    "contextInspector": {
-      "title": "コンテキスト観測",
-      "enable": "Context Inspector タブを有効化",
-      "description": "右側パネルに Context タブを表示し、trace、圧縮結果、ソース診断を確認できます。"
+    "developerMode": {
+      "title": "開発者モード",
+      "enable": "開発者モードを有効化",
+      "description": "Simple モードの開発者向けパネル表示を制御します。",
+      "panels": {
+        "contextInspector": {
+          "title": "コンテキスト観測タブを表示",
+          "description": "右側パネルに Context タブを表示し、trace、圧縮結果、ソース診断を確認できます。"
+        },
+        "workflowReliability": {
+          "title": "Workflow Reliability を表示",
+          "description": "出力パネルにワークフロー観測メトリクスを表示します。"
+        },
+        "executionLogs": {
+          "title": "実行ログを表示",
+          "description": "出力パネルに実行ログカードを表示します。"
+        },
+        "streamingOutput": {
+          "title": "出力ストリームを表示",
+          "description": "出力パネルにストリーミング出力を表示します。"
+        }
+      }
     },
 
     "language": {

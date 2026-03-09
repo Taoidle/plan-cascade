@@ -1098,6 +1098,22 @@
     "gitTab": "Git",
     "contextTab": "コンテキスト",
     "resize": "パネル幅を調整",
+    "workflowFailures": {
+      "title": "ワークフロー信頼性",
+      "none": "最近のワークフロー失敗はありません。",
+      "metrics": {
+        "linkRehydrate": "リンク再復元 {{success}}/{{total}}",
+        "actionFailures": "アクション失敗 {{total}}",
+        "prdFeedback": "PRD フィードバック {{success}}/{{total}}"
+      },
+      "latest": {
+        "title": "最新: {{action}}",
+        "mode": "モード {{value}}",
+        "before": "前 {{value}}",
+        "after": "後 {{value}}"
+      },
+      "breakdownItem": "{{card}} / {{action}} / {{errorCode}}: {{total}}"
+    },
     "contextOps": {
       "tabs": {
         "inspector": "インスペクター",

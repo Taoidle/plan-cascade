@@ -566,7 +566,6 @@ function SessionTreeRow({
         <label
           className="shrink-0 flex items-center"
           onClick={(event) => {
-            event.preventDefault();
             event.stopPropagation();
           }}
         >

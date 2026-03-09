@@ -61,10 +61,28 @@
       "kbIngestJobScopedProgressDescription": "开启后，上传进度会按 job/project/collection 隔离，避免跨集合串扰。"
     },
 
-    "contextInspector": {
-      "title": "上下文观测",
-      "enable": "启用 Context Inspector 标签页",
-      "description": "在右侧面板显示 Context 标签页，用于查看 trace、压缩结果和来源诊断信息。"
+    "developerMode": {
+      "title": "开发者模式",
+      "enable": "启用开发者模式",
+      "description": "控制 Simple 模式中的开发者向面板内容。",
+      "panels": {
+        "contextInspector": {
+          "title": "显示上下文观测标签页",
+          "description": "在右侧面板显示 Context 标签页，用于查看 trace、压缩结果和来源诊断信息。"
+        },
+        "workflowReliability": {
+          "title": "显示 Workflow Reliability",
+          "description": "在输出面板中显示工作流观测指标。"
+        },
+        "executionLogs": {
+          "title": "显示执行日志",
+          "description": "在输出面板中显示执行日志卡片。"
+        },
+        "streamingOutput": {
+          "title": "显示输出流",
+          "description": "在输出面板中显示流式输出内容。"
+        }
+      }
     },
 
     "language": {

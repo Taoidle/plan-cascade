@@ -17,7 +17,7 @@ export type GlmEndpoint = 'standard' | 'coding' | 'international' | 'internation
 export type MinimaxEndpoint = 'international' | 'china';
 export type QwenEndpoint = 'china' | 'singapore' | 'us';
 export type MemoryReviewMode = 'llm_review' | 'auto_approve' | 'manual_only';
-const SETTINGS_PERSIST_VERSION = 5;
+const SETTINGS_PERSIST_VERSION = 6;
 const EXECUTION_PHASE_IDS = ['planning', 'implementation', 'retry', 'refactor', 'review'] as const;
 
 function normalizeProviderKey(provider: string): string {
@@ -51,6 +51,13 @@ export interface MemorySettings {
   reviewAgentRef: string;
   injectActiveOnly: true;
   extractSuccessfulSessionsOnly: true;
+}
+
+export interface DeveloperPanels {
+  contextInspector: boolean;
+  workflowReliability: boolean;
+  executionLogs: boolean;
+  streamingOutput: boolean;
 }
 
 interface SettingsState {
@@ -103,6 +110,11 @@ interface SettingsState {
   autoPanelHoverEnabled: boolean;
   sessionPathSort: SessionPathSort;
   showArchivedSessions: boolean;
+
+  // Developer mode
+  developerModeEnabled: boolean;
+  developerPanels: DeveloperPanels;
+  developerSettingsInitialized: boolean;
 
   // Context compaction
   enableContextCompaction: boolean;
@@ -180,6 +192,9 @@ interface SettingsState {
   setAutoPanelHoverEnabled: (enabled: boolean) => void;
   setSessionPathSort: (sort: SessionPathSort) => void;
   setShowArchivedSessions: (show: boolean) => void;
+  setDeveloperModeEnabled: (enabled: boolean) => void;
+  setDeveloperPanels: (patch: Partial<DeveloperPanels>) => void;
+  setDeveloperSettingsInitialized: (initialized: boolean) => void;
 }
 
 const defaultSettings = {
@@ -243,6 +258,16 @@ const defaultSettings = {
   autoPanelHoverEnabled: false,
   sessionPathSort: 'recent' as SessionPathSort,
   showArchivedSessions: false,
+
+  // Developer mode
+  developerModeEnabled: false,
+  developerPanels: {
+    contextInspector: false,
+    workflowReliability: false,
+    executionLogs: false,
+    streamingOutput: true,
+  } as DeveloperPanels,
+  developerSettingsInitialized: false,
 
   // Context compaction
   enableContextCompaction: true,
@@ -339,6 +364,28 @@ function ensureMemorySettings(settings: Partial<SettingsState>): MemorySettings 
         : defaultSettings.memorySettings.reviewAgentRef,
     injectActiveOnly: true,
     extractSuccessfulSessionsOnly: true,
+  };
+}
+
+function ensureDeveloperPanels(settings: Partial<SettingsState>): DeveloperPanels {
+  const current = (settings.developerPanels ?? {}) as Partial<DeveloperPanels>;
+  return {
+    contextInspector:
+      typeof current.contextInspector === 'boolean'
+        ? current.contextInspector
+        : defaultSettings.developerPanels.contextInspector,
+    workflowReliability:
+      typeof current.workflowReliability === 'boolean'
+        ? current.workflowReliability
+        : defaultSettings.developerPanels.workflowReliability,
+    executionLogs:
+      typeof current.executionLogs === 'boolean'
+        ? current.executionLogs
+        : defaultSettings.developerPanels.executionLogs,
+    streamingOutput:
+      typeof current.streamingOutput === 'boolean'
+        ? current.streamingOutput
+        : defaultSettings.developerPanels.streamingOutput,
   };
 }
 
@@ -502,6 +549,17 @@ export const useSettingsStore = create<SettingsState>()(
       setAutoPanelHoverEnabled: (autoPanelHoverEnabled) => set({ autoPanelHoverEnabled }),
       setSessionPathSort: (sessionPathSort) => set({ sessionPathSort }),
       setShowArchivedSessions: (showArchivedSessions) => set({ showArchivedSessions }),
+      setDeveloperModeEnabled: (developerModeEnabled) => set({ developerModeEnabled }),
+      setDeveloperPanels: (patch) =>
+        set((state) => ({
+          developerPanels: ensureDeveloperPanels({
+            developerPanels: {
+              ...state.developerPanels,
+              ...patch,
+            },
+          }),
+        })),
+      setDeveloperSettingsInitialized: (developerSettingsInitialized) => set({ developerSettingsInitialized }),
     }),
     {
       name: 'plan-cascade-settings',
@@ -526,6 +584,9 @@ export const useSettingsStore = create<SettingsState>()(
         return {
           ...(nextState as Partial<SettingsState>),
           memorySettings: ensureMemorySettings(state),
+          developerPanels: ensureDeveloperPanels(state),
+          developerSettingsInitialized:
+            typeof state.developerSettingsInitialized === 'boolean' ? state.developerSettingsInitialized : false,
         };
       },
       partialize: (state) => {
@@ -557,6 +618,11 @@ export const useSettingsStore = create<SettingsState>()(
         }
         mergedState.phaseConfigs = storedPhases;
         mergedState.memorySettings = ensureMemorySettings(mergedState);
+        mergedState.developerPanels = ensureDeveloperPanels(mergedState);
+        mergedState.developerSettingsInitialized =
+          typeof mergedState.developerSettingsInitialized === 'boolean'
+            ? mergedState.developerSettingsInitialized
+            : false;
         return mergedState;
       },
       onRehydrateStorage: () => (state) => {

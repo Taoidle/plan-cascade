@@ -73,9 +73,17 @@ describe('settings store migration', () => {
     expect(state.memorySettings.autoExtractEnabled).toBe(true);
     expect(state.memorySettings.reviewMode).toBe('llm_review');
     expect(state.memorySettings.reviewAgentRef).toBe('');
+    expect(state.developerModeEnabled).toBe(false);
+    expect(state.developerPanels).toEqual({
+      contextInspector: false,
+      workflowReliability: false,
+      executionLogs: false,
+      streamingOutput: true,
+    });
+    expect(state.developerSettingsInitialized).toBe(false);
 
     const persisted = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-    expect(persisted.version).toBe(5);
+    expect(persisted.version).toBe(6);
   });
 
   it('does not keep forcing values after migration has completed', async () => {

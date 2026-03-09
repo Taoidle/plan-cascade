@@ -386,6 +386,32 @@ describe('WorkspaceTreeSidebar', () => {
     expect(screen.queryByLabelText('Select session Ship auth')).not.toBeInTheDocument();
   });
 
+  it('updates the clicked session checkbox immediately in selection mode', () => {
+    render(
+      <WorkspaceTreeSidebar
+        {...defaultProps}
+        workflowSessions={[
+          createWorkflowSession({ sessionId: 'root-live-1', displayTitle: 'Ship auth' }),
+          createWorkflowSession({ sessionId: 'root-live-2', displayTitle: 'Fix billing' }),
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+
+    const firstCheckbox = screen.getByLabelText('Select session Ship auth') as HTMLInputElement;
+    const secondCheckbox = screen.getByLabelText('Select session Fix billing') as HTMLInputElement;
+
+    fireEvent.click(firstCheckbox);
+    expect(firstCheckbox.checked).toBe(true);
+    expect(secondCheckbox.checked).toBe(false);
+
+    fireEvent.click(secondCheckbox);
+    expect(firstCheckbox.checked).toBe(true);
+    expect(secondCheckbox.checked).toBe(true);
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+  });
+
   it('cancels multi-select mode without deleting sessions', () => {
     render(
       <WorkspaceTreeSidebar
