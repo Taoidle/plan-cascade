@@ -31,6 +31,8 @@ import {
 import { Mode, MODES, useModeStore } from '../store/mode';
 import { useExecutionStore } from '../store/execution';
 import { useSettingsStore } from '../store/settings';
+import { quitApplication } from '../lib/desktopAppApi';
+import { isTauriAvailable } from '../lib/settingsApi';
 import { SettingsDialog } from './Settings';
 
 // ============================================================================
@@ -205,6 +207,25 @@ export function TopNavBar({ onOpenCommandPalette }: TopNavBarProps) {
                     </DropdownMenu.Item>
                   );
                 })}
+
+                {isTauriAvailable() && (
+                  <>
+                    <DropdownMenu.Separator className="my-1 h-px bg-gray-200 dark:bg-gray-700" />
+                    <DropdownMenu.Item
+                      onSelect={() => {
+                        void quitApplication();
+                      }}
+                      className={clsx(
+                        'flex items-center gap-3 px-3 py-2.5 rounded-md',
+                        'outline-none transition-colors duration-150 cursor-pointer',
+                        'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',
+                      )}
+                    >
+                      <ArchiveIcon className="w-4 h-4" />
+                      <span className="text-sm font-medium">{t('topNavBar.quitApplication')}</span>
+                    </DropdownMenu.Item>
+                  </>
+                )}
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>

@@ -64,7 +64,12 @@
     "menuTooltip": "Navigation menu",
     "searchTooltip": "Search commands",
     "themeTooltip": "Toggle theme",
-    "settingsTooltip": "Settings"
+    "settingsTooltip": "Settings",
+    "quitApplication": "Quit Application"
+  },
+
+  "appLifecycle": {
+    "backgroundRunTip": "Closing the window keeps Plan Cascade running in the background. Use the tray icon or Quit Application to fully exit."
   },
 
   "modeSwitch": {

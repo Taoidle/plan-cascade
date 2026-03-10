@@ -29,6 +29,8 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
     setTheme,
     autoPanelHoverEnabled,
     setAutoPanelHoverEnabled,
+    closeToBackgroundEnabled,
+    setCloseToBackgroundEnabled,
     knowledgeAutoEnsureDocsCollection,
     setKnowledgeAutoEnsureDocsCollection,
     kbQueryRunsV2,
@@ -46,6 +48,13 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
   } = useSettingsStore();
   const { triggerWizard, startTour } = useOnboardingStore();
   const [contextPolicy, setContextPolicyState] = useState<ContextPolicy | null>(null);
+
+  const backgroundBehaviorDescriptionKey = (() => {
+    const platform = navigator.userAgent.toLowerCase();
+    if (platform.includes('mac')) return 'general.backgroundRun.descriptionMac';
+    if (platform.includes('win')) return 'general.backgroundRun.descriptionWindows';
+    return 'general.backgroundRun.descriptionLinux';
+  })();
 
   useEffect(() => {
     let cancelled = false;
@@ -208,6 +217,30 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
           <div>
             <div className="font-medium text-gray-900 dark:text-white text-sm">{t('general.panelHover.enable')}</div>
             <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('general.panelHover.description')}</div>
+          </div>
+        </label>
+      </section>
+
+      {/* Background Run Section */}
+      <section className="space-y-4">
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('general.backgroundRun.title')}</h3>
+        <label
+          className={clsx(
+            'flex items-start gap-4 p-4 rounded-lg border cursor-pointer',
+            'transition-colors',
+            'border-gray-200 dark:border-gray-700',
+            'hover:bg-gray-50 dark:hover:bg-gray-800',
+          )}
+        >
+          <input
+            type="checkbox"
+            checked={closeToBackgroundEnabled}
+            onChange={(e) => setCloseToBackgroundEnabled(e.target.checked)}
+            className="mt-1 text-primary-600"
+          />
+          <div>
+            <div className="font-medium text-gray-900 dark:text-white text-sm">{t('general.backgroundRun.enable')}</div>
+            <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t(backgroundBehaviorDescriptionKey)}</div>
           </div>
         </label>
       </section>

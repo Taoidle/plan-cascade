@@ -64,7 +64,12 @@
     "menuTooltip": "ナビゲーションメニュー",
     "searchTooltip": "コマンド検索",
     "themeTooltip": "テーマ切替",
-    "settingsTooltip": "設定"
+    "settingsTooltip": "設定",
+    "quitApplication": "アプリを終了"
+  },
+
+  "appLifecycle": {
+    "backgroundRunTip": "ウィンドウを閉じても Plan Cascade はバックグラウンドで実行され続けます。完全に終了するにはトレイアイコンまたは「アプリを終了」を使ってください。"
   },
 
   "modeSwitch": {

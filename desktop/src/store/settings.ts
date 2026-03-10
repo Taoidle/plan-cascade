@@ -107,6 +107,7 @@ interface SettingsState {
   pinnedDirectories: string[];
   sidebarCollapsed: boolean;
   autoPanelHoverEnabled: boolean;
+  closeToBackgroundEnabled: boolean;
   sessionPathSort: SessionPathSort;
   showArchivedSessions: boolean;
 
@@ -189,6 +190,7 @@ interface SettingsState {
   removePinnedDirectory: (path: string) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setAutoPanelHoverEnabled: (enabled: boolean) => void;
+  setCloseToBackgroundEnabled: (enabled: boolean) => void;
   setSessionPathSort: (sort: SessionPathSort) => void;
   setShowArchivedSessions: (show: boolean) => void;
   setDeveloperModeEnabled: (enabled: boolean) => void;
@@ -254,6 +256,7 @@ const defaultSettings = {
   pinnedDirectories: [] as string[],
   sidebarCollapsed: false,
   autoPanelHoverEnabled: false,
+  closeToBackgroundEnabled: true,
   sessionPathSort: 'recent' as SessionPathSort,
   showArchivedSessions: false,
 
@@ -545,6 +548,7 @@ export const useSettingsStore = create<SettingsState>()(
 
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
       setAutoPanelHoverEnabled: (autoPanelHoverEnabled) => set({ autoPanelHoverEnabled }),
+      setCloseToBackgroundEnabled: (closeToBackgroundEnabled) => set({ closeToBackgroundEnabled }),
       setSessionPathSort: (sessionPathSort) => set({ sessionPathSort }),
       setShowArchivedSessions: (showArchivedSessions) => set({ showArchivedSessions }),
       setDeveloperModeEnabled: (developerModeEnabled) => set({ developerModeEnabled }),

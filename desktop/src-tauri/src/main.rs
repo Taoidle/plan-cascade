@@ -22,15 +22,19 @@ use plan_cascade_desktop::commands::standalone::StandaloneState;
 use plan_cascade_desktop::commands::task_mode::TaskModeState;
 use plan_cascade_desktop::commands::webhook::WebhookState;
 use plan_cascade_desktop::commands::worktree::WorktreeState;
+use plan_cascade_desktop::app_shell::{handle_run_event, handle_window_event, init_tray, AppShellState};
 use plan_cascade_desktop::services::workflow_kernel::WorkflowKernelState;
 use plan_cascade_desktop::state::AppState;
 
 use tauri::Manager;
 
 fn main() {
+    let shell_state = AppShellState::from_disk();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .manage(shell_state)
         .manage(AppState::new())
         .manage(ClaudeCodeState::new())
         .manage(AnalyticsState::new())
@@ -54,7 +58,11 @@ fn main() {
         .manage(GitState::new())
         .manage(FileChangesState::new())
         .manage(PermissionState::new())
+        .on_window_event(handle_window_event)
         .invoke_handler(tauri::generate_handler![
+            plan_cascade_desktop::commands::app_shell::app_quit,
+            plan_cascade_desktop::commands::app_shell::app_show_main_window,
+            plan_cascade_desktop::commands::app_shell::app_hide_main_window_to_background,
             // Initialization commands
             plan_cascade_desktop::commands::init::init_app,
             plan_cascade_desktop::commands::init::get_version,
@@ -560,6 +568,11 @@ fn main() {
             plan_cascade_desktop::commands::artifacts::artifact_delete,
         ])
         .setup(|app| {
+            let locale = plan_cascade_desktop::storage::ConfigService::new()
+                .map(|service| service.get_config().language.clone())
+                .unwrap_or_else(|_| "en".to_string());
+            init_tray(app.handle(), &locale)?;
+
             #[cfg(debug_assertions)]
             {
                 let window = app.get_webview_window("main").unwrap();
@@ -567,6 +580,7 @@ fn main() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| handle_run_event(app, &event));
 }

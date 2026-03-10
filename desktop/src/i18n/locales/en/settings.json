@@ -48,6 +48,13 @@
       "enable": "Enable edge hover expand/collapse",
       "description": "When enabled, moving the mouse to the left/right edge temporarily expands the sidebar/output panel, and moving away collapses it after a short delay."
     },
+    "backgroundRun": {
+      "title": "Desktop Behavior",
+      "enable": "Keep the app running in the background when the window is closed",
+      "descriptionMac": "On macOS, closing the window hides it while the app keeps running. Reopen it from the Dock, tray icon, or Quit Application.",
+      "descriptionWindows": "On Windows, closing the window hides it to the system tray while the app keeps running. Reopen it from the tray icon or Quit Application.",
+      "descriptionLinux": "On Linux, closing the window minimizes it to the taskbar while the app keeps running. Reopen it from the taskbar, tray icon, or Quit Application."
+    },
 
     "knowledgeBase": {
       "title": "Knowledge Base",

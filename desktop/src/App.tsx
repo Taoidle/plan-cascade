@@ -29,19 +29,22 @@ import { FeatureTour } from './components/shared/FeatureTour';
 import { GlobalCommandPaletteProvider, useGlobalCommandPalette } from './components/shared/CommandPalette';
 import { ShortcutOverlay } from './components/shared/ShortcutOverlay';
 import { RecoveryPrompt } from './components/shared/RecoveryPrompt';
-import { ToastProvider } from './components/shared/Toast';
+import { ToastProvider, useToast } from './components/shared/Toast';
 import { useGlobalCommands } from './hooks/useGlobalCommands';
 import { ShortcutsHelpDialog } from './components/ClaudeCodeMode/KeyboardShortcuts';
 import { useModeStore } from './store/mode';
 import { useOnboardingStore } from './store/onboarding';
 import { useRecoveryStore } from './store/recovery';
 import { usePermissionPolicyStore } from './store/permissionPolicy';
+import { useSettingsStore } from './store/settings';
+import { isTauriAvailable } from './lib/settingsApi';
 
 const STARTUP_MIN_DURATION_MS = 3000;
 const STARTUP_MAX_DURATION_MS = 5000;
 const STARTUP_FADE_OUT_MS = 450;
 const INIT_PROGRESS_EVENT = 'app-init-progress';
 const DEFAULT_STARTUP_TOTAL_STEPS = 6;
+const BACKGROUND_RUN_TIP_SEEN_KEY = 'plan-cascade-background-close-tip-v1';
 
 type BackendInitStage =
   | 'core_state'
@@ -109,6 +112,8 @@ function StartupSplash({
 function AppContent() {
   const { t } = useTranslation('common');
   const { mode } = useModeStore();
+  const { showToast } = useToast();
+  const closeToBackgroundEnabled = useSettingsStore((state) => state.closeToBackgroundEnabled);
   const { open: openCommandPalette } = useGlobalCommandPalette();
 
   const { detectIncompleteTasks, initializeListener, cleanupListener } = useRecoveryStore();
@@ -245,6 +250,14 @@ function AppContent() {
     onOpenSettings: handleOpenSettings,
     onShowShortcuts: handleShowShortcuts,
   });
+
+  useEffect(() => {
+    if (!isTauriAvailable() || !closeToBackgroundEnabled) return;
+    if (localStorage.getItem(BACKGROUND_RUN_TIP_SEEN_KEY) === '1') return;
+
+    showToast(t('appLifecycle.backgroundRunTip'), 'info');
+    localStorage.setItem(BACKGROUND_RUN_TIP_SEEN_KEY, '1');
+  }, [closeToBackgroundEnabled, showToast, t]);
 
   const startupStageLabel: Record<StartupStage, string> = {
     booting: t('startup.stage.booting'),

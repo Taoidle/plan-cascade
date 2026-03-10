@@ -165,6 +165,8 @@ const mockSetKbIngestJobScopedProgress = vi.fn();
 const mockSetDeveloperModeEnabled = vi.fn();
 const mockSetDeveloperPanels = vi.fn();
 const mockSetDeveloperSettingsInitialized = vi.fn();
+const mockSetAutoPanelHoverEnabled = vi.fn();
+const mockSetCloseToBackgroundEnabled = vi.fn();
 
 const mockSettingsState = {
   backend: 'claude-code' as string,
@@ -183,6 +185,8 @@ const mockSettingsState = {
   showReasoningOutput: false,
   showSubAgentEvents: true,
   searchProvider: 'duckduckgo' as string,
+  autoPanelHoverEnabled: false,
+  closeToBackgroundEnabled: true,
   knowledgeAutoEnsureDocsCollection: false,
   kbQueryRunsV2: true,
   kbPickerServerSearch: true,
@@ -219,6 +223,8 @@ const mockSettingsState = {
   setShowReasoningOutput: mockSetShowReasoningOutput,
   setShowSubAgentEvents: mockSetShowSubAgentEvents,
   setSearchProvider: mockSetSearchProvider,
+  setAutoPanelHoverEnabled: mockSetAutoPanelHoverEnabled,
+  setCloseToBackgroundEnabled: mockSetCloseToBackgroundEnabled,
   setKnowledgeAutoEnsureDocsCollection: mockSetKnowledgeAutoEnsureDocsCollection,
   setKbQueryRunsV2: mockSetKbQueryRunsV2,
   setKbPickerServerSearch: mockSetKbPickerServerSearch,

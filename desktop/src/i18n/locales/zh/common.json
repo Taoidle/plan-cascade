@@ -64,7 +64,12 @@
     "menuTooltip": "导航菜单",
     "searchTooltip": "搜索命令",
     "themeTooltip": "切换主题",
-    "settingsTooltip": "设置"
+    "settingsTooltip": "设置",
+    "quitApplication": "退出应用"
+  },
+
+  "appLifecycle": {
+    "backgroundRunTip": "关闭窗口后，Plan Cascade 仍会在后台运行。可通过托盘图标或“退出应用”完全退出。"
   },
 
   "modeSwitch": {

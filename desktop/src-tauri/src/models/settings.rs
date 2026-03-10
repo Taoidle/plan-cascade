@@ -30,10 +30,17 @@ pub struct AppConfig {
     /// Web search provider: "tavily", "brave", or "duckduckgo"
     #[serde(default = "default_search_provider")]
     pub search_provider: String,
+    /// Whether clicking the window close button keeps the app running in background.
+    #[serde(default = "default_true")]
+    pub close_to_background_enabled: bool,
 }
 
 fn default_search_provider() -> String {
     "duckduckgo".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_model_by_provider() -> HashMap<String, String> {
@@ -58,6 +65,7 @@ impl Default for AppConfig {
             max_recent_projects: 10,
             debug_mode: false,
             search_provider: "duckduckgo".to_string(),
+            close_to_background_enabled: true,
         }
     }
 }
@@ -75,6 +83,7 @@ pub struct SettingsUpdate {
     pub max_recent_projects: Option<u32>,
     pub debug_mode: Option<bool>,
     pub search_provider: Option<String>,
+    pub close_to_background_enabled: Option<bool>,
 }
 
 impl AppConfig {
@@ -161,6 +170,9 @@ impl AppConfig {
         if let Some(search_provider) = update.search_provider {
             self.search_provider = search_provider;
         }
+        if let Some(close_to_background_enabled) = update.close_to_background_enabled {
+            self.close_to_background_enabled = close_to_background_enabled;
+        }
     }
 
     /// Validate the configuration
@@ -207,6 +219,7 @@ mod tests {
         assert_eq!(config.language, "en");
         assert_eq!(config.default_provider, "anthropic");
         assert_eq!(config.default_model, "claude-sonnet-4-6-20260219");
+        assert!(config.close_to_background_enabled);
         assert_eq!(
             config.model_by_provider.get("anthropic"),
             Some(&"claude-sonnet-4-6-20260219".to_string())
@@ -228,6 +241,7 @@ mod tests {
         assert_eq!(config.language, "zh");
         assert_eq!(config.default_provider, "openai");
         assert_eq!(config.default_model, "gpt-5.1");
+        assert!(config.close_to_background_enabled);
         assert_eq!(
             config.model_by_provider.get("openai"),
             Some(&"gpt-5.1".to_string())

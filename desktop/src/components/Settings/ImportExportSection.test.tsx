@@ -43,7 +43,9 @@ const mockSettingsState = {
   pinnedDirectories: [],
   sidebarCollapsed: false,
   autoPanelHoverEnabled: false,
+  closeToBackgroundEnabled: true,
   workspacePath: '',
+  setCloseToBackgroundEnabled: vi.fn(),
   resetToDefaults: vi.fn(),
 };
 

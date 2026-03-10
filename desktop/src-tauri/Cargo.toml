@@ -30,7 +30,7 @@ plan-cascade-tools = { path = "crates/tools" }
 plan-cascade-quality-gates = { path = "crates/quality-gates" }
 
 # Tauri
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 
@@ -170,7 +170,7 @@ futures = { version = "0.3", optional = true }
 [dev-dependencies]
 # Testing
 tempfile = "3"
-tauri = { version = "2", features = ["test"] }
+tauri = { version = "2", features = ["test", "tray-icon"] }
 
 [features]
 default = ["custom-protocol"]

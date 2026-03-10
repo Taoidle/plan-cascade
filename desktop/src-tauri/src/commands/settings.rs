@@ -6,8 +6,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, State};
 
+use crate::app_shell::{apply_runtime_preferences, AppShellState};
 use crate::commands::webhook::WebhookState;
 use crate::models::export::{SettingsImportResult, UnifiedSettingsExport};
 use crate::models::response::CommandResponse;
@@ -78,13 +79,18 @@ pub async fn get_settings(
 /// Update application settings with a partial update
 #[tauri::command]
 pub async fn update_settings(
+    app: AppHandle,
     state: State<'_, AppState>,
+    shell_state: State<'_, AppShellState>,
     webhook_state: State<'_, WebhookState>,
     update: SettingsUpdate,
 ) -> Result<CommandResponse<AppConfig>, String> {
     let should_sync_webhook_locale = update.language.is_some();
     match state.update_config(update).await {
         Ok(config) => {
+            if let Err(error) = apply_runtime_preferences(&app, shell_state.inner(), &config) {
+                tracing::warn!("Failed to apply runtime shell preferences: {}", error);
+            }
             if should_sync_webhook_locale {
                 webhook_state
                     .set_locale_if_initialized(&config.language)
@@ -153,7 +159,9 @@ pub async fn set_knowledge_feature_flags(
 /// Reset all settings to defaults (frontend callers should also reset local state).
 #[tauri::command]
 pub async fn reset_all_settings(
+    app: AppHandle,
     state: State<'_, AppState>,
+    shell_state: State<'_, AppShellState>,
     webhook_state: State<'_, WebhookState>,
 ) -> Result<CommandResponse<bool>, String> {
     if let Err(e) = state
@@ -191,6 +199,9 @@ pub async fn reset_all_settings(
     }
 
     if let Ok(config) = state.get_config().await {
+        if let Err(error) = apply_runtime_preferences(&app, shell_state.inner(), &config) {
+            tracing::warn!("Failed to apply runtime shell preferences: {}", error);
+        }
         webhook_state
             .set_locale_if_initialized(&config.language)
             .await;
@@ -203,7 +214,11 @@ pub async fn reset_all_settings(
 /// - frontend local data is cleared by caller
 /// - backend DB rows, config, keyring secrets, and ~/.plan-cascade persistent artifacts
 #[tauri::command]
-pub async fn clear_all_data(state: State<'_, AppState>) -> Result<CommandResponse<bool>, String> {
+pub async fn clear_all_data(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    shell_state: State<'_, AppShellState>,
+) -> Result<CommandResponse<bool>, String> {
     if let Err(e) = state.with_database(clear_all_database_business_data).await {
         return Ok(CommandResponse::err(format!(
             "Failed to clear database data: {}",
@@ -245,6 +260,12 @@ pub async fn clear_all_data(state: State<'_, AppState>) -> Result<CommandRespons
             "Failed to clear persisted files: {}",
             e
         )));
+    }
+
+    if let Ok(config) = state.get_config().await {
+        if let Err(error) = apply_runtime_preferences(&app, shell_state.inner(), &config) {
+            tracing::warn!("Failed to apply runtime shell preferences: {}", error);
+        }
     }
 
     Ok(CommandResponse::ok(true))
@@ -315,7 +336,9 @@ pub async fn export_all_settings(
 /// Import settings from a unified export JSON
 #[tauri::command]
 pub async fn import_all_settings(
+    app: AppHandle,
     state: State<'_, AppState>,
+    shell_state: State<'_, AppShellState>,
     export_json: String,
     password: Option<String>,
 ) -> Result<CommandResponse<SettingsImportResult>, String> {
@@ -454,6 +477,7 @@ pub async fn import_all_settings(
                 max_recent_projects: Some(new_config.max_recent_projects),
                 debug_mode: Some(new_config.debug_mode),
                 search_provider: Some(new_config.search_provider),
+                close_to_background_enabled: Some(new_config.close_to_background_enabled),
             };
             config_service.update_config(update)?;
             Ok(())
@@ -462,6 +486,12 @@ pub async fn import_all_settings(
     {
         Ok(()) => result.imported_sections.push("config".to_string()),
         Err(e) => result.errors.push(format!("config: {}", e)),
+    }
+
+    if let Ok(config) = state.get_config().await {
+        if let Err(error) = apply_runtime_preferences(&app, shell_state.inner(), &config) {
+            tracing::warn!("Failed to apply runtime shell preferences: {}", error);
+        }
     }
 
     // Merge secret warnings

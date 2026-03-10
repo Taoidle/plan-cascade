@@ -7,6 +7,7 @@
 //! - Storage layer (SQLite, Keyring, Config)
 //! - Data models and utilities
 
+pub mod app_shell;
 pub mod commands;
 pub mod models;
 pub mod services;

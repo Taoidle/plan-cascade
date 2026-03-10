@@ -6,6 +6,7 @@
 pub mod a2a;
 pub mod agent_composer;
 pub mod agents;
+pub mod app_shell;
 pub mod analytics;
 pub mod artifacts;
 pub mod browser;
@@ -53,6 +54,7 @@ pub mod worktree;
 pub use a2a::*;
 pub use agent_composer::*;
 pub use agents::*;
+pub use app_shell::*;
 pub use analytics::*;
 pub use artifacts::*;
 pub use browser::*;

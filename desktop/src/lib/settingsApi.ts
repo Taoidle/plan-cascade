@@ -27,6 +27,7 @@ export interface AppConfig {
   auto_save_interval: number;
   max_recent_projects: number;
   debug_mode: boolean;
+  close_to_background_enabled: boolean;
 }
 
 export interface SettingsUpdate {
@@ -39,6 +40,7 @@ export interface SettingsUpdate {
   auto_save_interval?: number;
   max_recent_projects?: number;
   debug_mode?: boolean;
+  close_to_background_enabled?: boolean;
 }
 
 export interface KnowledgeFeatureFlags {

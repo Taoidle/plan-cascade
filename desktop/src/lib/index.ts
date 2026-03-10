@@ -82,3 +82,4 @@ export {
 
 // Tauri utilities
 export { getHealth, isTauri } from './tauri';
+export { quitApplication, showMainWindow, hideToBackground } from './desktopAppApi';
