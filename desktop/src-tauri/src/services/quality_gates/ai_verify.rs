@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use crate::services::analytics::send_message_tracked;
 use crate::services::llm::provider::LlmProvider;
 use crate::services::llm::types::{LlmRequestOptions, Message};
 use crate::services::quality_gates::pipeline::{GatePhase, PipelineGateResult};
@@ -162,10 +163,7 @@ Git diff to analyze:
                 ..Default::default()
             };
 
-            match provider
-                .send_message(messages, None, vec![], request_options)
-                .await
-            {
+            match send_message_tracked(provider.as_ref(), messages, None, vec![], request_options).await {
                 Ok(response) => {
                     if let Some(content) = &response.content {
                         return self.parse_response(content);

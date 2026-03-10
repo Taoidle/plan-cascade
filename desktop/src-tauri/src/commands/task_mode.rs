@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tauri::Manager;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
@@ -1477,6 +1478,66 @@ pub(crate) async fn resolve_llm_provider(
     Ok(prd_generator::create_provider(config))
 }
 
+pub(crate) async fn get_task_analytics_tracker_components(
+    app_handle: &tauri::AppHandle,
+    app_state: &AppState,
+) -> Option<(
+    tokio::sync::mpsc::Sender<crate::services::analytics::TrackerMessage>,
+    Arc<crate::services::analytics::CostCalculator>,
+)> {
+    let analytics_state = app_handle.state::<crate::commands::analytics::AnalyticsState>();
+    let _ = analytics_state.initialize(app_state).await;
+    analytics_state.get_tracker_components().await
+}
+
+pub(crate) async fn wrap_task_provider_with_tracking(
+    app_handle: &tauri::AppHandle,
+    app_state: &AppState,
+    provider: Arc<dyn crate::services::llm::provider::LlmProvider>,
+    attribution: crate::models::analytics::AnalyticsAttribution,
+) -> Arc<dyn crate::services::llm::provider::LlmProvider> {
+    if let Some((tx, calc)) = get_task_analytics_tracker_components(app_handle, app_state).await {
+        crate::services::analytics::wrap_provider_with_tracking(provider, tx, calc, attribution)
+    } else {
+        provider
+    }
+}
+
+pub(crate) fn build_task_analytics_attribution(
+    kernel_session_id: Option<String>,
+    mode_session_id: &str,
+    phase_id: &str,
+    execution_scope: crate::models::analytics::AnalyticsExecutionScope,
+    execution_id: String,
+    parent_execution_id: Option<String>,
+    agent_role: Option<String>,
+    agent_name: Option<String>,
+    story_id: Option<String>,
+    gate_id: Option<String>,
+    attempt: Option<i64>,
+    call_site: &str,
+) -> crate::models::analytics::AnalyticsAttribution {
+    crate::models::analytics::AnalyticsAttribution {
+        project_id: None,
+        kernel_session_id,
+        mode_session_id: Some(mode_session_id.to_string()),
+        workflow_mode: Some(crate::models::analytics::AnalyticsWorkflowMode::Task),
+        phase_id: Some(phase_id.to_string()),
+        execution_scope: Some(execution_scope),
+        execution_id: Some(execution_id),
+        parent_execution_id,
+        agent_role,
+        agent_name,
+        step_id: None,
+        story_id,
+        gate_id,
+        attempt,
+        request_sequence: Some(1),
+        call_site: Some(call_site.to_string()),
+        metadata_json: None,
+    }
+}
+
 /// Resolve a ProviderConfig from frontend parameters and OS keyring.
 ///
 /// Same as `resolve_llm_provider` but returns the raw config instead of
@@ -2143,6 +2204,7 @@ fn build_story_executor(
     app_handle: tauri::AppHandle,
     task_session_id: String,
     kernel_state: WorkflowKernelState,
+    kernel_session_id: Option<String>,
     mode: StoryExecutionMode,
     provider_config: Option<crate::services::llm::types::ProviderConfig>,
     permission_gate: Arc<crate::services::orchestrator::permission_gate::PermissionGate>,
@@ -2152,6 +2214,10 @@ fn build_story_executor(
     skills_block: String,
     selected_skill_matches: Vec<crate::services::skills::model::SkillMatch>,
     knowledge_tool_params: Option<KnowledgeToolParams>,
+    analytics_components: Option<(
+        tokio::sync::mpsc::Sender<crate::services::analytics::TrackerMessage>,
+        Arc<crate::services::analytics::CostCalculator>,
+    )>,
     file_change_tracker: Option<
         Arc<std::sync::Mutex<crate::services::file_change_tracker::FileChangeTracker>>,
     >,
@@ -2164,6 +2230,7 @@ fn build_story_executor(
         let app = app_handle.clone();
         let task_session_id = task_session_id.clone();
         let kernel_state = kernel_state.clone();
+        let kernel_session_id = kernel_session_id.clone();
         let mode = mode.clone();
         let provider_config = provider_config.clone();
         let permission_gate = permission_gate.clone();
@@ -2173,6 +2240,7 @@ fn build_story_executor(
         let skills_block = skills_block.clone();
         let selected_skill_matches = selected_skill_matches.clone();
         let knowledge_tool_params = knowledge_tool_params.clone();
+        let analytics_components = analytics_components.clone();
         let file_change_tracker = file_change_tracker.clone();
         Box::pin(async move {
             eprintln!(
@@ -2239,10 +2307,14 @@ fn build_story_executor(
                     // Execute via OrchestratorService using direct LLM API
                     execute_story_via_llm(
                         &task_session_id,
+                        kernel_session_id.clone(),
                         app.clone(),
                         kernel_state.clone(),
                         provider_config.as_ref(),
                         permission_gate.clone(),
+                        &ctx.story_id,
+                        &ctx.agent_name,
+                        ctx.attempt as i64,
                         &prompt,
                         &ctx.project_path,
                         db_pool.as_ref(),
@@ -2251,6 +2323,7 @@ fn build_story_executor(
                         &skills_block,
                         selected_skill_matches.as_slice(),
                         knowledge_tool_params.as_ref(),
+                        analytics_components.clone(),
                         ctx.cancel_token.clone(),
                         file_change_tracker.clone(),
                         file_change_turn_index,
@@ -2423,10 +2496,14 @@ async fn execute_story_via_agent(
 /// maps the result to StoryExecutionOutcome.
 async fn execute_story_via_llm(
     task_session_id: &str,
+    kernel_session_id: Option<String>,
     app_handle: tauri::AppHandle,
     kernel_state: WorkflowKernelState,
     provider_config: Option<&crate::services::llm::types::ProviderConfig>,
     permission_gate: Arc<crate::services::orchestrator::permission_gate::PermissionGate>,
+    story_id: &str,
+    agent_name: &str,
+    attempt: i64,
     prompt: &str,
     project_path: &std::path::Path,
     db_pool: Option<&r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>>,
@@ -2435,6 +2512,10 @@ async fn execute_story_via_llm(
     skills_block: &str,
     selected_skill_matches: &[crate::services::skills::model::SkillMatch],
     knowledge_tool_params: Option<&KnowledgeToolParams>,
+    analytics_components: Option<(
+        tokio::sync::mpsc::Sender<crate::services::analytics::TrackerMessage>,
+        Arc<crate::services::analytics::CostCalculator>,
+    )>,
     cancel_token: tokio_util::sync::CancellationToken,
     file_change_tracker: Option<
         Arc<std::sync::Mutex<crate::services::file_change_tracker::FileChangeTracker>>,
@@ -2503,6 +2584,27 @@ async fn execute_story_via_llm(
     let mut orchestrator = OrchestratorService::new(config)
         .with_search_provider(&search_provider, search_api_key)
         .with_permission_gate(permission_gate.clone());
+
+    if let Some((analytics_tx, analytics_cost_calculator)) = analytics_components {
+        let execution_id = format!("task:{}:{}:{}", task_session_id, story_id, attempt);
+        orchestrator = orchestrator
+            .with_analytics_tracker(analytics_tx)
+            .with_analytics_cost_calculator(analytics_cost_calculator)
+            .with_analytics_attribution(build_task_analytics_attribution(
+                kernel_session_id,
+                task_session_id,
+                "task_story",
+                crate::models::analytics::AnalyticsExecutionScope::RootAgent,
+                execution_id,
+                None,
+                Some("task_story".to_string()),
+                Some(agent_name.to_string()),
+                Some(story_id.to_string()),
+                None,
+                Some(attempt),
+                "task_story.execution",
+            ));
+    }
 
     if let Some(ref tracker) = file_change_tracker {
         orchestrator = orchestrator.with_file_change_tracker(Arc::clone(tracker));

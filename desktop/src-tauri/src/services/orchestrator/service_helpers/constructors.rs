@@ -245,6 +245,19 @@ impl TaskSpawner for OrchestratorTaskSpawner {
         // Propagate analytics tracking to sub-agent
         sub_agent.analytics_tx = self.shared_analytics_tx.clone();
         sub_agent.analytics_cost_calculator = self.shared_analytics_cost_calculator.clone();
+        sub_agent.analytics_attribution = self.shared_analytics_attribution.clone().map(|mut attribution| {
+            attribution.execution_scope = Some(crate::models::analytics::AnalyticsExecutionScope::SubAgent);
+            attribution.parent_execution_id = attribution.execution_id.clone();
+            attribution.execution_id = Some(format!(
+                "{}::sub_agent::{}",
+                attribution
+                    .parent_execution_id
+                    .clone()
+                    .unwrap_or_else(|| "execution".to_string()),
+                uuid::Uuid::new_v4()
+            ));
+            attribution
+        });
         if let Some(ref tracker) = self.shared_file_change_tracker {
             sub_agent
                 .tool_executor
@@ -482,6 +495,7 @@ impl OrchestratorService {
             composer_registry: None,
             analytics_tx: None,
             analytics_cost_calculator: None,
+            analytics_attribution: None,
             permission_gate: None,
             plugin_instructions: None,
             plugin_skills: None,
@@ -504,6 +518,14 @@ impl OrchestratorService {
         calc: Arc<crate::services::analytics::CostCalculator>,
     ) -> Self {
         self.analytics_cost_calculator = Some(calc);
+        self
+    }
+
+    pub fn with_analytics_attribution(
+        mut self,
+        attribution: crate::models::analytics::AnalyticsAttribution,
+    ) -> Self {
+        self.analytics_attribution = Some(attribution);
         self
     }
 
@@ -553,6 +575,7 @@ impl OrchestratorService {
             composer_registry: None,
             analytics_tx: None,
             analytics_cost_calculator: None,
+            analytics_attribution: None,
             permission_gate: None,
             plugin_instructions: None,
             plugin_skills: None,
@@ -658,6 +681,7 @@ impl OrchestratorService {
             composer_registry: None,
             analytics_tx: None,
             analytics_cost_calculator: None,
+            analytics_attribution: None,
             permission_gate: None,
             plugin_instructions: plugin_instructions_snapshot,
             plugin_skills: plugin_skills_snapshot,

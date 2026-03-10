@@ -879,6 +879,15 @@ pub enum PlanPhaseAgentKind {
     Cli,
 }
 
+impl PlanPhaseAgentKind {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            PlanPhaseAgentKind::Llm => "LLM",
+            PlanPhaseAgentKind::Cli => "CLI",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PlanPhaseAgentRef {
@@ -904,6 +913,20 @@ pub struct ResolvedPlanPhaseAgent {
     pub agent_name: Option<String>,
     #[serde(default)]
     pub execution_backend_unavailable: bool,
+}
+
+impl ResolvedPlanPhaseAgent {
+    pub fn display_label(&self) -> String {
+        self.agent_name
+            .clone()
+            .or_else(|| self.agent_ref.clone())
+            .or_else(|| match (&self.provider, &self.model) {
+                (Some(provider), Some(model)) => Some(format!("{} / {}", provider, model)),
+                (Some(provider), None) => Some(provider.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| self.agent_kind.display_name().to_string())
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

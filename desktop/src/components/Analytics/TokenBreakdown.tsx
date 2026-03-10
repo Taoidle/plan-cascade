@@ -1,72 +1,82 @@
 /**
  * Token Breakdown Component
  *
- * Displays usage breakdown by model (pie chart) and by project (bar chart).
- * Uses simple SVG-based visualizations.
+ * Displays analytics usage breakdown across multiple dimensions.
  */
 
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
-import type { ModelUsage, ProjectUsage } from '../../store/analytics';
+import type { AnalyticsBreakdownRow, ModelUsage, ProjectUsage } from '../../store/analytics';
 import { formatCost, formatTokens } from '../../store/analytics';
+
+type BreakdownTab = 'model' | 'project' | 'workflow' | 'phase' | 'scope';
 
 interface TokenBreakdownProps {
   byModel: ModelUsage[];
   byProject: ProjectUsage[];
+  byWorkflow: AnalyticsBreakdownRow[];
+  byPhase: AnalyticsBreakdownRow[];
+  byScope: AnalyticsBreakdownRow[];
 }
 
-// Color palette for charts
-const COLORS = [
-  '#3B82F6', // blue-500
-  '#10B981', // emerald-500
-  '#F59E0B', // amber-500
-  '#EF4444', // red-500
-  '#8B5CF6', // violet-500
-  '#EC4899', // pink-500
-  '#06B6D4', // cyan-500
-  '#84CC16', // lime-500
-];
+const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16'];
 
-export function TokenBreakdown({ byModel, byProject }: TokenBreakdownProps) {
+export function TokenBreakdown({ byModel, byProject, byWorkflow, byPhase, byScope }: TokenBreakdownProps) {
   const { t } = useTranslation('analytics');
-  const [activeTab, setActiveTab] = useState<'model' | 'project'>('model');
+  const [activeTab, setActiveTab] = useState<BreakdownTab>('model');
+
+  const tabs: Array<{ id: BreakdownTab; label: string }> = [
+    { id: 'model', label: t('breakdown.byModel', 'By Model') },
+    { id: 'project', label: t('breakdown.byProject', 'By Project') },
+    { id: 'workflow', label: t('breakdown.byWorkflow', 'By Workflow') },
+    { id: 'phase', label: t('breakdown.byPhase', 'By Phase') },
+    { id: 'scope', label: t('breakdown.byScope', 'By Scope') },
+  ];
 
   return (
     <div>
-      {/* Tab Switcher */}
-      <div className="flex gap-2 mb-4">
-        <button
-          onClick={() => setActiveTab('model')}
-          className={clsx(
-            'px-3 py-1.5 text-sm rounded-lg transition-colors',
-            activeTab === 'model'
-              ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
-          )}
-        >
-          {t('breakdown.byModel', 'By Model')}
-        </button>
-        <button
-          onClick={() => setActiveTab('project')}
-          className={clsx(
-            'px-3 py-1.5 text-sm rounded-lg transition-colors',
-            activeTab === 'project'
-              ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
-          )}
-        >
-          {t('breakdown.byProject', 'By Project')}
-        </button>
+      <div className="flex flex-wrap gap-2 mb-4">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={clsx(
+              'px-3 py-1.5 text-sm rounded-lg transition-colors',
+              activeTab === tab.id
+                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      {/* Content */}
-      {activeTab === 'model' ? <ModelPieChart data={byModel} /> : <ProjectBarChart data={byProject} />}
+      {activeTab === 'model' && <ModelPieChart data={byModel} />}
+      {activeTab === 'project' && (
+        <BreakdownBarList
+          rows={byProject.map((item) => ({
+            key: item.project_id,
+            label: item.project_name || item.project_id,
+            stats: item.stats,
+          }))}
+          emptyLabel={t('breakdown.noProjectData', 'No project data available')}
+        />
+      )}
+      {activeTab === 'workflow' && (
+        <BreakdownBarList rows={byWorkflow} emptyLabel={t('breakdown.noWorkflowData', 'No workflow data available')} />
+      )}
+      {activeTab === 'phase' && (
+        <BreakdownBarList rows={byPhase} emptyLabel={t('breakdown.noPhaseData', 'No phase data available')} />
+      )}
+      {activeTab === 'scope' && (
+        <BreakdownBarList rows={byScope} emptyLabel={t('breakdown.noScopeData', 'No scope data available')} />
+      )}
     </div>
   );
 }
 
-// Pie chart for model usage
 interface ModelPieChartProps {
   data: ModelUsage[];
 }
@@ -109,7 +119,6 @@ function ModelPieChart({ data }: ModelPieChartProps) {
     );
   }
 
-  // Convert angle to SVG path
   const describeArc = (startAngle: number, endAngle: number, radius: number) => {
     const start = polarToCartesian(50, 50, radius, endAngle);
     const end = polarToCartesian(50, 50, radius, startAngle);
@@ -128,12 +137,11 @@ function ModelPieChart({ data }: ModelPieChartProps) {
 
   return (
     <div className="flex items-start gap-6">
-      {/* Pie Chart */}
       <div className="relative w-[180px] h-[180px] shrink-0">
         <svg viewBox="0 0 100 100" className="w-full h-full">
           {chartData.slices.map((slice, i) => (
             <path
-              key={i}
+              key={slice.model_name}
               d={describeArc(slice.startAngle, slice.endAngle, 40)}
               fill={slice.color}
               className={clsx(
@@ -144,7 +152,6 @@ function ModelPieChart({ data }: ModelPieChartProps) {
               onMouseLeave={() => setHoveredIndex(null)}
             />
           ))}
-          {/* Center text */}
           <text x="50" y="48" textAnchor="middle" className="fill-gray-900 dark:fill-white text-[6px] font-semibold">
             {formatCost(chartData.total)}
           </text>
@@ -154,15 +161,12 @@ function ModelPieChart({ data }: ModelPieChartProps) {
         </svg>
       </div>
 
-      {/* Legend */}
       <div className="flex-1 space-y-2">
         {chartData.slices.map((slice, i) => (
           <div
-            key={i}
+            key={slice.model_name}
             className={clsx(
-              'flex items-center gap-2 text-sm',
-              'cursor-pointer rounded px-2 py-1 -mx-2',
-              'transition-colors',
+              'flex items-center gap-2 text-sm cursor-pointer rounded px-2 py-1 -mx-2 transition-colors',
               hoveredIndex === i && 'bg-gray-100 dark:bg-gray-800',
             )}
             onMouseEnter={() => setHoveredIndex(i)}
@@ -178,72 +182,57 @@ function ModelPieChart({ data }: ModelPieChartProps) {
   );
 }
 
-// Bar chart for project usage
-interface ProjectBarChartProps {
-  data: ProjectUsage[];
+interface BreakdownBarListProps {
+  rows: AnalyticsBreakdownRow[];
+  emptyLabel: string;
 }
 
-function ProjectBarChart({ data }: ProjectBarChartProps) {
+function BreakdownBarList({ rows, emptyLabel }: BreakdownBarListProps) {
   const { t } = useTranslation('analytics');
-  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
-
   const chartData = useMemo(() => {
-    if (!data || data.length === 0) return { bars: [], maxCost: 0 };
+    if (!rows.length) return { rows: [], maxCost: 0 };
+    const maxCost = Math.max(...rows.map((row) => row.stats.total_cost_microdollars), 1);
+    return {
+      maxCost,
+      rows: rows.slice(0, 10).map((row, index) => ({
+        ...row,
+        percentage: row.stats.total_cost_microdollars / maxCost,
+        color: COLORS[index % COLORS.length],
+      })),
+    };
+  }, [rows]);
 
-    const maxCost = Math.max(...data.map((d) => d.stats.total_cost_microdollars), 1);
-
-    const bars = data.slice(0, 8).map((d, i) => ({
-      ...d,
-      percentage: d.stats.total_cost_microdollars / maxCost,
-      color: COLORS[i % COLORS.length],
-      displayName: d.project_name || d.project_id.substring(0, 8) + '...',
-    }));
-
-    return { bars, maxCost };
-  }, [data]);
-
-  if (chartData.bars.length === 0) {
+  if (!chartData.rows.length) {
     return (
-      <div className="flex items-center justify-center h-[200px] text-gray-400 dark:text-gray-600">
-        {t('breakdown.noProjectData', 'No project data available')}
-      </div>
+      <div className="flex items-center justify-center h-[200px] text-gray-400 dark:text-gray-600">{emptyLabel}</div>
     );
   }
 
   return (
     <div className="space-y-3">
-      {chartData.bars.map((bar, i) => (
+      {chartData.rows.map((row) => (
         <div
-          key={bar.project_id}
-          className={clsx(
-            'cursor-pointer rounded px-2 py-2 -mx-2',
-            'transition-colors',
-            hoveredIndex === i && 'bg-gray-100 dark:bg-gray-800',
-          )}
-          onMouseEnter={() => setHoveredIndex(i)}
-          onMouseLeave={() => setHoveredIndex(null)}
+          key={row.key}
+          className="rounded px-2 py-2 -mx-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
         >
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-sm text-gray-900 dark:text-white truncate">{bar.displayName}</span>
-            <span className="text-sm text-gray-500 dark:text-gray-400 ml-2">
-              {formatCost(bar.stats.total_cost_microdollars)}
+          <div className="flex items-center justify-between mb-1 gap-3">
+            <div className="min-w-0">
+              <div className="text-sm text-gray-900 dark:text-white truncate">{row.label}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                {row.stats.request_count.toLocaleString()} {t('labels.requests', 'requests')} ·{' '}
+                {formatTokens(row.stats.total_input_tokens + row.stats.total_output_tokens)}
+              </div>
+            </div>
+            <span className="text-sm text-gray-500 dark:text-gray-400">
+              {formatCost(row.stats.total_cost_microdollars)}
             </span>
           </div>
           <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
             <div
               className="h-full rounded-full transition-all"
-              style={{
-                width: `${bar.percentage * 100}%`,
-                backgroundColor: bar.color,
-              }}
+              style={{ width: `${row.percentage * 100}%`, backgroundColor: row.color }}
             />
           </div>
-          {hoveredIndex === i && (
-            <div className="mt-2 text-xs text-gray-500 dark:text-gray-400 flex gap-4">
-              <span>{formatTokens(bar.stats.total_input_tokens + bar.stats.total_output_tokens)} tokens</span>
-              <span>{bar.stats.request_count} requests</span>
-            </div>
-          )}
         </div>
       ))}
     </div>

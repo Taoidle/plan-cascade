@@ -12,7 +12,14 @@ import { ReactElement } from 'react';
 import type { Project, Session, SessionDetails } from '../../types/project';
 import type { StrategyAnalysis, DimensionScores } from '../../store/execution';
 import type { InterviewSession, InterviewQuestion, InterviewHistoryEntry } from '../../store/specInterview';
-import type { DashboardSummary, UsageStats, ModelUsage, ProjectUsage, TimeSeriesPoint } from '../../store/analytics';
+import type {
+  DashboardSummary,
+  UsageStats,
+  ModelUsage,
+  ProjectUsage,
+  TimeSeriesPoint,
+  AnalyticsBreakdownRow,
+} from '../../store/analytics';
 
 // ============================================================================
 // Mock Data Factories
@@ -161,6 +168,15 @@ export function createMockTimeSeriesPoint(overrides: Partial<TimeSeriesPoint> = 
   };
 }
 
+export function createMockBreakdownRow(overrides: Partial<AnalyticsBreakdownRow> = {}): AnalyticsBreakdownRow {
+  return {
+    key: 'chat',
+    label: 'Chat',
+    stats: createMockUsageStats(),
+    ...overrides,
+  };
+}
+
 export function createMockDashboardSummary(overrides: Partial<DashboardSummary> = {}): DashboardSummary {
   return {
     current_period: createMockUsageStats(),
@@ -170,6 +186,9 @@ export function createMockDashboardSummary(overrides: Partial<DashboardSummary> 
     requests_change_percent: 15.0,
     by_model: [createMockModelUsage()],
     by_project: [createMockProjectUsage()],
+    by_workflow: [createMockBreakdownRow({ key: 'chat', label: 'Chat' })],
+    by_phase: [createMockBreakdownRow({ key: 'chat_turn', label: 'Chat Turn' })],
+    by_scope: [createMockBreakdownRow({ key: 'root_agent', label: 'Root Agent' })],
     time_series: [createMockTimeSeriesPoint()],
     ...overrides,
   };

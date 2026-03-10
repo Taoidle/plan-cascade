@@ -1,11 +1,11 @@
 {
   "title": "使用状況分析",
-  "subtitle": "API使用量とコストを追跡",
+  "subtitle": "プロバイダー使用量、実行スコープ、コスト帰属を追跡",
   "export": "エクスポート",
   "retry": "再試行",
   "tabs": {
     "overview": "概要",
-    "details": "詳細レコード"
+    "details": "詳細イベント"
   },
   "cards": {
     "totalCost": "合計コスト",
@@ -33,8 +33,8 @@
     "apply": "適用"
   },
   "charts": {
-    "costOverTime": "時系列コスト",
-    "tokenBreakdown": "モデル別使用量",
+    "costOverTime": "コスト推移",
+    "tokenBreakdown": "使用内訳",
     "noData": "この期間のデータがありません"
   },
   "tooltip": {
@@ -45,22 +45,40 @@
   "legend": {
     "cost": "コスト"
   },
+  "overview": {
+    "byWorkflow": "ワークフロー概要",
+    "byPhase": "フェーズ概要",
+    "byScope": "スコープ概要",
+    "noBreakdownData": "使用データがありません"
+  },
   "breakdown": {
     "byModel": "モデル別",
     "byProject": "プロジェクト別",
+    "byWorkflow": "ワークフロー別",
+    "byPhase": "フェーズ別",
+    "byScope": "スコープ別",
     "total": "合計",
     "noData": "データがありません",
-    "noProjectData": "プロジェクトデータがありません"
+    "noProjectData": "プロジェクトデータがありません",
+    "noWorkflowData": "ワークフローデータがありません",
+    "noPhaseData": "フェーズデータがありません",
+    "noScopeData": "スコープデータがありません"
   },
   "tables": {
     "topModels": "コスト上位モデル"
   },
   "table": {
-    "title": "使用レコード",
-    "timestamp": "タイムスタンプ",
+    "title": "使用イベント",
+    "timestamp": "時刻",
+    "mode": "モード",
+    "phase": "フェーズ",
+    "scope": "スコープ",
+    "stepStory": "ステップ/ストーリー",
+    "agent": "エージェント",
     "model": "モデル",
     "provider": "プロバイダー",
     "project": "プロジェクト",
+    "tokens": "トークン",
     "inputTokens": "入力",
     "outputTokens": "出力",
     "thinkingTokens": "思考",
@@ -68,18 +86,56 @@
     "cost": "コスト",
     "costStatus": "コスト状態",
     "session": "セッション",
-    "noRecords": "使用レコードが見つかりません",
+    "loading": "使用イベントを読み込み中...",
+    "noRecords": "使用イベントが見つかりません",
     "showing": "表示中",
     "of": "/",
     "records": "件",
     "previous": "前へ",
     "next": "次へ"
   },
+  "detail": {
+    "title": "使用イベント詳細",
+    "close": "閉じる",
+    "loading": "イベント詳細を読み込み中...",
+    "empty": "イベント詳細がありません",
+    "provider": "プロバイダー",
+    "model": "モデル",
+    "mode": "モード",
+    "phase": "フェーズ",
+    "scope": "スコープ",
+    "agent": "エージェント",
+    "project": "プロジェクト",
+    "stepStory": "ステップ/ストーリー",
+    "kernelSession": "Kernel セッション",
+    "modeSession": "モードセッション",
+    "executionId": "実行 ID",
+    "parentExecutionId": "親実行 ID",
+    "callSite": "呼び出し箇所",
+    "attempt": "試行回数",
+    "requestSequence": "リクエスト順序",
+    "inputTokens": "入力トークン",
+    "outputTokens": "出力トークン",
+    "thinkingTokens": "思考トークン",
+    "cacheTokens": "キャッシュ 読み/書き",
+    "totalCost": "合計コスト",
+    "timestamp": "時刻",
+    "metadata": "メタデータ",
+    "noMetadata": "メタデータは記録されていません"
+  },
   "filters": {
     "provider": "プロバイダー",
     "model": "モデル",
     "project": "プロジェクト ID",
     "session": "セッション ID",
+    "workflowAll": "すべてのワークフロー",
+    "scopeAll": "すべてのスコープ",
+    "phase": "フェーズ",
+    "step": "ステップ ID",
+    "story": "ストーリー ID",
+    "gate": "ゲート ID",
+    "modeSession": "モードセッション ID",
+    "kernelSession": "Kernel セッション ID",
     "costStatusAll": "すべてのコスト状態",
     "costStatusExact": "正確",
     "costStatusEstimated": "推定",
@@ -89,6 +145,46 @@
     "viewName": "ビュー名",
     "saveView": "ビュー保存",
     "savedViews": "保存済みビュー"
+  },
+  "labels": {
+    "unknown": "不明",
+    "none": "なし",
+    "step": "ステップ",
+    "story": "ストーリー",
+    "gate": "ゲート",
+    "requests": "リクエスト"
+  },
+  "workflow": {
+    "chat": "チャット",
+    "plan": "プラン",
+    "task": "タスク"
+  },
+  "scope": {
+    "root_agent": "ルートエージェント",
+    "sub_agent": "サブエージェント",
+    "direct_llm": "直接 LLM",
+    "quality_gate": "品質ゲート"
+  },
+  "phase": {
+    "chat_turn": "チャットターン",
+    "plan_strategy": "プラン戦略",
+    "plan_clarification": "プラン確認",
+    "plan_generation": "プラン生成",
+    "plan_validation": "プラン検証",
+    "plan_execution": "プラン実行",
+    "plan_retry": "プラン再試行",
+    "plan_exploration": "プロジェクト探索",
+    "plan_interview": "仕様インタビュー",
+    "task_strategy": "タスク戦略",
+    "task_exploration": "タスク探索",
+    "task_requirements": "要件分析",
+    "task_architecture": "アーキテクチャレビュー",
+    "task_prd": "タスク PRD",
+    "task_prd_feedback": "PRD フィードバック",
+    "task_story": "タスクストーリー",
+    "task_ai_verify": "AI 検証",
+    "task_code_review": "コードレビュー",
+    "task_dod": "完了定義"
   },
   "pricing": {
     "title": "価格ルール",

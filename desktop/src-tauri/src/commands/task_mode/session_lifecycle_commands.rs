@@ -55,17 +55,21 @@ pub async fn enter_task_mode(
         .and_then(render_task_entry_handoff_context)
         .map(|handoff| format!("{description}\n\nCross-mode context:\n{handoff}"))
         .unwrap_or_else(|| description.clone());
+    let session_id = uuid::Uuid::new_v4().to_string();
 
     // Run strategy analysis with deterministic baseline and optional LLM enhancement.
     let analysis = analyze_task_for_mode(&analysis_input, None);
     let mut recommendation = build_deterministic_recommendation(analysis.clone());
     if let Some(enhanced) = build_task_strategy_recommendation(
+        &session_id,
+        normalized_kernel_session_id.clone(),
         &analysis_input,
         &analysis,
         locale.as_deref(),
         provider.as_deref(),
         model.as_deref(),
         base_url.as_deref(),
+        &app_handle,
         &app_state,
     )
     .await
@@ -75,7 +79,7 @@ pub async fn enter_task_mode(
     let locale_tag = normalize_locale(locale.as_deref());
 
     let session = TaskModeSession {
-        session_id: uuid::Uuid::new_v4().to_string(),
+        session_id: session_id.clone(),
         kernel_session_id: normalized_kernel_session_id.clone(),
         locale: locale.clone(),
         description: description.clone(),
@@ -238,12 +242,15 @@ pub async fn exit_task_mode(
 }
 
 async fn build_task_strategy_recommendation(
+    session_id: &str,
+    kernel_session_id: Option<String>,
     analysis_input: &str,
     analysis: &StrategyAnalysis,
     locale: Option<&str>,
     provider_override: Option<&str>,
     model_override: Option<&str>,
     base_url_override: Option<&str>,
+    app_handle: &tauri::AppHandle,
     app_state: &tauri::State<'_, AppState>,
 ) -> Option<TaskStrategyRecommendation> {
     let config = app_state.inner().get_config().await.ok()?;
@@ -283,6 +290,26 @@ async fn build_task_strategy_recommendation(
             return Some(fallback);
         }
     };
+    let llm = wrap_task_provider_with_tracking(
+        app_handle,
+        app_state.inner(),
+        llm,
+        build_task_analytics_attribution(
+            kernel_session_id,
+            session_id,
+            "task_strategy",
+            crate::models::analytics::AnalyticsExecutionScope::DirectLlm,
+            format!("task:{}:strategy", session_id),
+            None,
+            Some("task_strategy".to_string()),
+            Some(format!("{} / {}", provider, resolved_model)),
+            None,
+            None,
+            Some(1),
+            "task_mode.strategy",
+        ),
+    )
+    .await;
 
     match tokio::time::timeout(
         std::time::Duration::from_secs(30),

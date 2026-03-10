@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 
-use crate::models::analytics::UsageRecord;
+use crate::models::analytics::{AnalyticsUsageEvent, UsageRecord};
 use crate::utils::error::{AppError, AppResult};
 
 use super::cost_calculator::CostCalculator;
@@ -18,6 +18,8 @@ use super::service::AnalyticsService;
 pub enum TrackerMessage {
     /// Track a new usage record
     Track(UsageRecord),
+    /// Track a structured analytics usage event
+    TrackEvent(AnalyticsUsageEvent),
     /// Flush all buffered records to database
     Flush,
     /// Shutdown the tracker
@@ -90,7 +92,8 @@ impl UsageTracker {
         service: Arc<AnalyticsService>,
         config: TrackerConfig,
     ) {
-        let mut buffer: Vec<UsageRecord> = Vec::with_capacity(config.buffer_size);
+        let mut legacy_buffer: Vec<UsageRecord> = Vec::with_capacity(config.buffer_size);
+        let mut event_buffer: Vec<AnalyticsUsageEvent> = Vec::with_capacity(config.buffer_size);
         let mut flush_interval =
             tokio::time::interval(tokio::time::Duration::from_secs(config.flush_interval_secs));
 
@@ -100,35 +103,46 @@ impl UsageTracker {
                 msg = receiver.recv() => {
                     match msg {
                         Some(TrackerMessage::Track(record)) => {
-                            buffer.push(record);
+                            legacy_buffer.push(record);
 
                             // Auto-flush when buffer is full
-                            if buffer.len() >= config.buffer_size {
-                                Self::flush_buffer(&service, &mut buffer).await;
+                            if legacy_buffer.len() >= config.buffer_size {
+                                Self::flush_legacy_buffer(&service, &mut legacy_buffer).await;
+                            }
+                        }
+                        Some(TrackerMessage::TrackEvent(event)) => {
+                            event_buffer.push(event);
+                            if event_buffer.len() >= config.buffer_size {
+                                Self::flush_event_buffer(&service, &mut event_buffer).await;
                             }
                         }
                         Some(TrackerMessage::Flush) => {
-                            Self::flush_buffer(&service, &mut buffer).await;
+                            Self::flush_legacy_buffer(&service, &mut legacy_buffer).await;
+                            Self::flush_event_buffer(&service, &mut event_buffer).await;
                         }
                         Some(TrackerMessage::Shutdown) | None => {
                             // Flush remaining records before shutdown
-                            Self::flush_buffer(&service, &mut buffer).await;
+                            Self::flush_legacy_buffer(&service, &mut legacy_buffer).await;
+                            Self::flush_event_buffer(&service, &mut event_buffer).await;
                             break;
                         }
                     }
                 }
                 // Periodic flush
                 _ = flush_interval.tick() => {
-                    if !buffer.is_empty() {
-                        Self::flush_buffer(&service, &mut buffer).await;
+                    if !legacy_buffer.is_empty() {
+                        Self::flush_legacy_buffer(&service, &mut legacy_buffer).await;
+                    }
+                    if !event_buffer.is_empty() {
+                        Self::flush_event_buffer(&service, &mut event_buffer).await;
                     }
                 }
             }
         }
     }
 
-    /// Flush buffer to database
-    async fn flush_buffer(service: &AnalyticsService, buffer: &mut Vec<UsageRecord>) {
+    /// Flush legacy usage buffer to database
+    async fn flush_legacy_buffer(service: &AnalyticsService, buffer: &mut Vec<UsageRecord>) {
         if buffer.is_empty() {
             return;
         }
@@ -140,6 +154,23 @@ impl UsageTracker {
             Err(e) => {
                 tracing::error!("Failed to flush usage records: {}", e);
                 // Keep records in buffer for retry? For now, we log and clear
+            }
+        }
+
+        buffer.clear();
+    }
+
+    async fn flush_event_buffer(service: &AnalyticsService, buffer: &mut Vec<AnalyticsUsageEvent>) {
+        if buffer.is_empty() {
+            return;
+        }
+
+        match service.insert_usage_events_batch(buffer) {
+            Ok(_) => {
+                tracing::debug!("Flushed {} analytics usage events to database", buffer.len());
+            }
+            Err(e) => {
+                tracing::error!("Failed to flush analytics usage events: {}", e);
             }
         }
 
@@ -193,6 +224,19 @@ impl UsageTracker {
             .send(TrackerMessage::Track(record))
             .await
             .map_err(|_| AppError::internal("Failed to send tracking message"))?;
+
+        Ok(())
+    }
+
+    pub async fn track_event(&self, event: AnalyticsUsageEvent) -> AppResult<()> {
+        if !self.config.enabled {
+            return Ok(());
+        }
+
+        self.sender
+            .send(TrackerMessage::TrackEvent(event))
+            .await
+            .map_err(|_| AppError::internal("Failed to send analytics event"))?;
 
         Ok(())
     }
@@ -401,6 +445,14 @@ impl SyncUsageTracker {
 
         // Try to send, but don't block if channel is full
         let _ = self.sender.try_send(TrackerMessage::Track(record));
+    }
+
+    pub fn track_event(&self, event: AnalyticsUsageEvent) {
+        if !self.enabled {
+            return;
+        }
+
+        let _ = self.sender.try_send(TrackerMessage::TrackEvent(event));
     }
 }
 

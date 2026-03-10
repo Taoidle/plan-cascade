@@ -7,8 +7,10 @@ use tauri::State;
 use tokio::sync::RwLock;
 
 use crate::models::analytics::{
-    AggregationPeriod, DashboardFilterV2, DashboardSummary, ExportJob, ExportStreamingJobRequest,
-    PricingRule, RecomputeCostsRequest, RecomputeCostsResult, UsageFilter, UsageRecordV2,
+    AggregationPeriod, AnalyticsBreakdownRow, AnalyticsEventDetail, AnalyticsFilter,
+    AnalyticsSummary, AnalyticsUsageEvent, DashboardFilterV2, DashboardSummary, ExportJob,
+    ExportStreamingJobRequest, PricingRule, RecomputeCostsRequest, RecomputeCostsResult,
+    UsageFilter, UsageRecordV2,
 };
 use crate::models::response::CommandResponse;
 use crate::services::analytics::{
@@ -89,6 +91,17 @@ impl AnalyticsState {
         let guard = self.tracker.read().await;
         guard.as_ref().map(|t| t.sender())
     }
+
+    pub async fn get_tracker_components(
+        &self,
+    ) -> Option<(
+        tokio::sync::mpsc::Sender<crate::services::analytics::TrackerMessage>,
+        Arc<CostCalculator>,
+    )> {
+        self.get_tracker_sender()
+            .await
+            .map(|sender| (sender, self.cost_calculator()))
+    }
 }
 
 impl Default for AnalyticsState {
@@ -126,6 +139,81 @@ pub async fn list_usage_records_v2(
         .await
     {
         Ok(records) => Ok(CommandResponse::ok(records)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+#[tauri::command]
+pub async fn list_usage_events(
+    analytics_state: State<'_, AnalyticsState>,
+    filter: AnalyticsFilter,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<CommandResponse<Vec<AnalyticsUsageEvent>>, String> {
+    match analytics_state
+        .with_service(|s| s.list_usage_events(&filter, limit, offset))
+        .await
+    {
+        Ok(events) => Ok(CommandResponse::ok(events)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+#[tauri::command]
+pub async fn count_usage_events(
+    analytics_state: State<'_, AnalyticsState>,
+    filter: AnalyticsFilter,
+) -> Result<CommandResponse<i64>, String> {
+    match analytics_state
+        .with_service(|s| s.count_usage_events(&filter))
+        .await
+    {
+        Ok(count) => Ok(CommandResponse::ok(count)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+#[tauri::command]
+pub async fn get_analytics_summary(
+    analytics_state: State<'_, AnalyticsState>,
+    filter: AnalyticsFilter,
+    period: Option<AggregationPeriod>,
+) -> Result<CommandResponse<AnalyticsSummary>, String> {
+    let period = period.unwrap_or(AggregationPeriod::Daily);
+    match analytics_state
+        .with_service(|s| s.get_analytics_summary(&filter, period))
+        .await
+    {
+        Ok(summary) => Ok(CommandResponse::ok(summary)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+#[tauri::command]
+pub async fn get_usage_breakdown(
+    analytics_state: State<'_, AnalyticsState>,
+    filter: AnalyticsFilter,
+    dimension: String,
+) -> Result<CommandResponse<Vec<AnalyticsBreakdownRow>>, String> {
+    match analytics_state
+        .with_service(|s| s.get_usage_breakdown(&filter, &dimension))
+        .await
+    {
+        Ok(rows) => Ok(CommandResponse::ok(rows)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+#[tauri::command]
+pub async fn get_usage_event_detail(
+    analytics_state: State<'_, AnalyticsState>,
+    event_id: String,
+) -> Result<CommandResponse<Option<AnalyticsEventDetail>>, String> {
+    match analytics_state
+        .with_service(|s| s.get_usage_event_detail(&event_id))
+        .await
+    {
+        Ok(detail) => Ok(CommandResponse::ok(detail)),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
 }

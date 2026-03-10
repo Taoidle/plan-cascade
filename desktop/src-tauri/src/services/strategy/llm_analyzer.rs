@@ -9,6 +9,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 use tracing::debug;
 
+use crate::services::analytics::send_message_tracked;
 use crate::services::llm::provider::LlmProvider;
 use crate::services::llm::types::{LlmRequestOptions, Message};
 
@@ -154,13 +155,13 @@ pub async fn enhance_strategy_analysis(
     let options = LlmRequestOptions::default();
 
     // First attempt
-    let response = provider
-        .send_message(
-            messages.clone(),
-            Some(system_prompt.clone()),
-            vec![],
-            options.clone(),
-        )
+    let response = send_message_tracked(
+        provider.as_ref(),
+        messages.clone(),
+        Some(system_prompt.clone()),
+        vec![],
+        options.clone(),
+    )
         .await
         .map_err(|e| format!("LLM strategy analysis request failed: {}", e))?;
 
@@ -185,8 +186,13 @@ pub async fn enhance_strategy_analysis(
             retry_messages.push(Message::assistant(&response_text));
             retry_messages.push(Message::user(&repair_message));
 
-            let retry_response = provider
-                .send_message(retry_messages, Some(system_prompt), vec![], options)
+            let retry_response = send_message_tracked(
+                provider.as_ref(),
+                retry_messages,
+                Some(system_prompt),
+                vec![],
+                options,
+            )
                 .await
                 .map_err(|e| format!("LLM strategy analysis retry failed: {}", e))?;
 

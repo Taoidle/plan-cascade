@@ -15,7 +15,7 @@ use crate::services::spec_interview::{
     CompileOptions, InterviewManager, InterviewStateManager, SpecCompiler,
 };
 use crate::services::workflow_kernel::{
-    TaskInterviewSnapshot, WorkflowKernelState, WorkflowKernelUpdatedEvent,
+    TaskInterviewSnapshot, WorkflowKernelState, WorkflowKernelUpdatedEvent, WorkflowMode,
     WORKFLOW_KERNEL_UPDATED_CHANNEL,
 };
 use crate::state::AppState;
@@ -243,6 +243,37 @@ pub async fn start_spec_interview(
     match llm_provider {
         Some(provider) => {
             let config_clone = config.clone();
+            let provider = if let Some(task_session_id) = linked_task_session_id.as_deref() {
+                crate::commands::task_mode::wrap_task_provider_with_tracking(
+                    &app_handle,
+                    app_state.inner(),
+                    provider,
+                    crate::commands::task_mode::build_task_analytics_attribution(
+                        kernel_state
+                            .linked_kernel_sessions_for_mode_session(
+                                WorkflowMode::Task,
+                                task_session_id,
+                            )
+                            .await
+                            .into_iter()
+                            .next(),
+                        task_session_id,
+                        "plan_interview",
+                        crate::models::analytics::AnalyticsExecutionScope::DirectLlm,
+                        format!("task:{}:interview:start", task_session_id),
+                        None,
+                        Some("task_interview".to_string()),
+                        Some("business_analyst".to_string()),
+                        None,
+                        None,
+                        Some(1),
+                        "spec_interview.start",
+                    ),
+                )
+                .await
+            } else {
+                provider
+            };
             let provider_for_translate = Some(Arc::clone(&provider));
             match mgr.start_interview_with_llm(config, provider).await {
                 Ok(session) => {
@@ -359,6 +390,37 @@ pub async fn submit_interview_answer(
 
     match llm_provider {
         Some(provider) => {
+            let provider = if let Some(task_session_id) = linked_task_session_id.as_deref() {
+                crate::commands::task_mode::wrap_task_provider_with_tracking(
+                    &app_handle,
+                    app_state.inner(),
+                    provider,
+                    crate::commands::task_mode::build_task_analytics_attribution(
+                        kernel_state
+                            .linked_kernel_sessions_for_mode_session(
+                                WorkflowMode::Task,
+                                task_session_id,
+                            )
+                            .await
+                            .into_iter()
+                            .next(),
+                        task_session_id,
+                        "plan_interview",
+                        crate::models::analytics::AnalyticsExecutionScope::DirectLlm,
+                        format!("task:{}:interview:{}", task_session_id, interview_id),
+                        None,
+                        Some("task_interview".to_string()),
+                        Some("business_analyst".to_string()),
+                        None,
+                        None,
+                        Some(1),
+                        "spec_interview.answer",
+                    ),
+                )
+                .await
+            } else {
+                provider
+            };
             let provider_for_translate = Some(Arc::clone(&provider));
             match mgr
                 .submit_answer_with_llm(&interview_id, &answer, provider)

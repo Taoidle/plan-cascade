@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
+use crate::models::analytics::{AnalyticsAttribution, AnalyticsExecutionScope, AnalyticsWorkflowMode};
 use crate::services::llm::provider::LlmProvider;
 use crate::services::quality_gates::ai_verify::AiVerificationGate;
 use crate::services::quality_gates::code_review::CodeReviewGate;
@@ -695,6 +696,11 @@ pub struct BatchExecutor {
     state: Arc<RwLock<BatchExecutionState>>,
     /// Optional LLM provider for AI quality gates (verification, code review)
     llm_provider: Option<Arc<dyn LlmProvider>>,
+    /// Optional analytics tracker for story and quality gate usage attribution
+    analytics_tx: Option<tokio::sync::mpsc::Sender<crate::services::analytics::TrackerMessage>>,
+    analytics_cost_calculator: Option<Arc<crate::services::analytics::CostCalculator>>,
+    kernel_session_id: Option<String>,
+    mode_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -738,6 +744,10 @@ impl BatchExecutor {
                 agent_assignments: HashMap::new(),
             })),
             llm_provider: None,
+            analytics_tx: None,
+            analytics_cost_calculator: None,
+            kernel_session_id: None,
+            mode_session_id: None,
         }
     }
 
@@ -777,6 +787,10 @@ impl BatchExecutor {
                 agent_assignments: HashMap::new(),
             })),
             llm_provider: None,
+            analytics_tx: None,
+            analytics_cost_calculator: None,
+            kernel_session_id: None,
+            mode_session_id: None,
         }
     }
 
@@ -784,6 +798,65 @@ impl BatchExecutor {
     pub fn with_llm_provider(mut self, provider: Arc<dyn LlmProvider>) -> Self {
         self.llm_provider = Some(provider);
         self
+    }
+
+    pub fn with_analytics_context(
+        mut self,
+        analytics_tx: tokio::sync::mpsc::Sender<crate::services::analytics::TrackerMessage>,
+        analytics_cost_calculator: Arc<crate::services::analytics::CostCalculator>,
+        kernel_session_id: Option<String>,
+        mode_session_id: impl Into<String>,
+    ) -> Self {
+        self.analytics_tx = Some(analytics_tx);
+        self.analytics_cost_calculator = Some(analytics_cost_calculator);
+        self.kernel_session_id = kernel_session_id;
+        self.mode_session_id = Some(mode_session_id.into());
+        self
+    }
+
+    fn tracked_quality_gate_provider(
+        provider: Option<Arc<dyn LlmProvider>>,
+        analytics_tx: Option<tokio::sync::mpsc::Sender<crate::services::analytics::TrackerMessage>>,
+        analytics_cost_calculator: Option<Arc<crate::services::analytics::CostCalculator>>,
+        kernel_session_id: Option<String>,
+        mode_session_id: Option<String>,
+        phase_id: &str,
+        gate_id: &str,
+        story_id: &str,
+        attempt: u32,
+    ) -> Option<Arc<dyn LlmProvider>> {
+        let provider = provider?;
+        let analytics_tx = analytics_tx?;
+        let analytics_cost_calculator = analytics_cost_calculator?;
+        let mode_session_id = mode_session_id?;
+        let parent_execution_id = format!("task:{}:{}:{}", mode_session_id, story_id, attempt);
+        Some(crate::services::analytics::wrap_provider_with_tracking(
+            provider,
+            analytics_tx,
+            analytics_cost_calculator,
+            AnalyticsAttribution {
+                project_id: None,
+                kernel_session_id,
+                mode_session_id: Some(mode_session_id.clone()),
+                workflow_mode: Some(AnalyticsWorkflowMode::Task),
+                phase_id: Some(phase_id.to_string()),
+                execution_scope: Some(AnalyticsExecutionScope::QualityGate),
+                execution_id: Some(format!(
+                    "task:{}:{}:{}:{}",
+                    mode_session_id, story_id, attempt, gate_id
+                )),
+                parent_execution_id: Some(parent_execution_id),
+                agent_role: Some(gate_id.to_string()),
+                agent_name: Some(gate_id.to_string()),
+                step_id: None,
+                story_id: Some(story_id.to_string()),
+                gate_id: Some(gate_id.to_string()),
+                attempt: Some(attempt as i64),
+                request_sequence: Some(1),
+                call_site: Some(format!("task_gate.{}", gate_id)),
+                metadata_json: None,
+            },
+        ))
     }
 
     /// Calculate execution batches.
@@ -1081,6 +1154,10 @@ impl BatchExecutor {
                 let resolver_config = agent_resolver.config().clone();
                 let se = story_executor.clone();
                 let provider = self.llm_provider.clone();
+                let analytics_tx = self.analytics_tx.clone();
+                let analytics_cost_calculator = self.analytics_cost_calculator.clone();
+                let kernel_session_id = self.kernel_session_id.clone();
+                let mode_session_id = self.mode_session_id.clone();
 
                 emit(TaskModeProgressEvent::story_started(
                     &sid,
@@ -1111,6 +1188,10 @@ impl BatchExecutor {
                         state_ref,
                         resolver_config,
                         provider,
+                        analytics_tx,
+                        analytics_cost_calculator,
+                        kernel_session_id,
+                        mode_session_id,
                         emit,
                         se,
                     )
@@ -1215,6 +1296,10 @@ impl BatchExecutor {
         state: Arc<RwLock<BatchExecutionState>>,
         agents_config: crate::services::task_mode::agent_resolver::AgentsConfig,
         llm_provider: Option<Arc<dyn LlmProvider>>,
+        analytics_tx: Option<tokio::sync::mpsc::Sender<crate::services::analytics::TrackerMessage>>,
+        analytics_cost_calculator: Option<Arc<crate::services::analytics::CostCalculator>>,
+        kernel_session_id: Option<String>,
+        mode_session_id: Option<String>,
         emit: impl Fn(TaskModeProgressEvent) + Send + Sync,
         story_executor: E,
     ) where
@@ -1521,7 +1606,17 @@ impl BatchExecutor {
 
             if !diff_content.is_empty() {
                 let verify_diff = diff_content.clone();
-                let verify_provider = llm_provider.clone();
+                let verify_provider = Self::tracked_quality_gate_provider(
+                    llm_provider.clone(),
+                    analytics_tx.clone(),
+                    analytics_cost_calculator.clone(),
+                    kernel_session_id.clone(),
+                    mode_session_id.clone(),
+                    "task_ai_verify",
+                    "ai_verify",
+                    story_id,
+                    attempt,
+                );
                 pipeline.register_gate(
                     "ai_verify",
                     Box::new(move || {
@@ -1532,7 +1627,17 @@ impl BatchExecutor {
                 );
 
                 let review_diff = diff_content.clone();
-                let review_provider = llm_provider.clone();
+                let review_provider = Self::tracked_quality_gate_provider(
+                    llm_provider.clone(),
+                    analytics_tx.clone(),
+                    analytics_cost_calculator.clone(),
+                    kernel_session_id.clone(),
+                    mode_session_id.clone(),
+                    "task_code_review",
+                    "code_review",
+                    story_id,
+                    attempt,
+                );
                 pipeline.register_gate(
                     "code_review",
                     Box::new(move || {
@@ -1650,7 +1755,19 @@ impl BatchExecutor {
                         };
 
                         let dod_gate = DoDGate::new(dod_input);
-                        let dod_result = dod_gate.run(llm_provider.clone()).await;
+                        let dod_result = dod_gate
+                            .run(Self::tracked_quality_gate_provider(
+                                llm_provider.clone(),
+                                analytics_tx.clone(),
+                                analytics_cost_calculator.clone(),
+                                kernel_session_id.clone(),
+                                mode_session_id.clone(),
+                                "task_dod",
+                                "dod",
+                                story_id,
+                                attempt,
+                            ))
+                            .await;
 
                         gate_results.push(dod_result.clone());
 

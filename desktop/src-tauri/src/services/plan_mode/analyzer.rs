@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use crate::services::analytics::send_message_tracked;
 use crate::services::llm::provider::LlmProvider;
 use crate::services::llm::types::{LlmRequestOptions, Message, MessageRole};
 use crate::utils::error::{AppError, AppResult};
@@ -65,8 +66,7 @@ pub async fn analyze_task(
         ..Default::default()
     };
 
-    let response = provider
-        .send_message(messages, Some(system), vec![], options)
+    let response = send_message_tracked(provider.as_ref(), messages, Some(system), vec![], options)
         .await
         .map_err(|e| AppError::Internal(format!("Plan analysis LLM error: {e}")))?;
 

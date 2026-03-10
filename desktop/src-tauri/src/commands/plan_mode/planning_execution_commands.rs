@@ -349,14 +349,45 @@ pub async fn generate_plan(
         false,
     )
     .await?;
+    let analytics_components = get_analytics_tracker_components(&app_handle, app_state.inner()).await;
     let (operation_id, operation_token) = register_plan_operation_token(&state, &session_id).await;
     let result = tokio::select! {
         _ = operation_token.cancelled() => Ok(CommandResponse::err(PLAN_OPERATION_CANCELLED_ERROR)),
         result = async {
             let provider_config =
                 build_llm_provider_from_plan_phase_agent(&resolved_generation_agent, app_state.inner()).await?;
-            let llm_provider =
+            let base_provider =
                 crate::services::task_mode::prd_generator::create_provider(provider_config.clone());
+            let llm_provider = if let Some((tx, calc)) = analytics_components.clone() {
+                crate::services::analytics::wrap_provider_with_tracking(
+                    base_provider,
+                    tx,
+                    calc,
+                    crate::models::analytics::AnalyticsAttribution {
+                        project_id: None,
+                        kernel_session_id: None,
+                        mode_session_id: Some(session_id.clone()),
+                        workflow_mode: Some(crate::models::analytics::AnalyticsWorkflowMode::Plan),
+                        phase_id: Some("plan_generation".to_string()),
+                        execution_scope: Some(
+                            crate::models::analytics::AnalyticsExecutionScope::DirectLlm,
+                        ),
+                        execution_id: Some(format!("plan:{}:generation", session_id)),
+                        parent_execution_id: None,
+                        agent_role: Some("plan_generation".to_string()),
+                        agent_name: Some(resolved_generation_agent.display_label()),
+                        step_id: None,
+                        story_id: None,
+                        gate_id: None,
+                        attempt: Some(1),
+                        request_sequence: Some(1),
+                        call_site: Some("plan_mode.generation".to_string()),
+                        metadata_json: None,
+                    },
+                )
+            } else {
+                base_provider
+            };
 
             let registry = state.adapter_registry.read().await;
             let adapter = registry
@@ -547,6 +578,7 @@ pub async fn approve_plan(
         build_llm_provider_from_plan_phase_agent(&resolved_execution_agent, app_state.inner())
             .await?;
     let llm_provider = crate::services::task_mode::prd_generator::create_provider(provider_config.clone());
+    let analytics_components = get_analytics_tracker_components(&app_handle, app_state.inner()).await;
 
     let registry = state.adapter_registry.read().await;
     let adapter = registry
@@ -671,6 +703,9 @@ pub async fn approve_plan(
     let step_runtime = crate::services::plan_mode::step_executor::StepExecutionRuntime {
         provider_config,
         project_root: resolved_project_root,
+        kernel_session_id: executing_session_snapshot.kernel_session_id.clone(),
+        mode_session_id: session_id.clone(),
+        phase_id: "plan_execution".to_string(),
         file_change_tracker: Some(file_change_tracker),
         index_store,
         embedding_service,
@@ -679,6 +714,10 @@ pub async fn approve_plan(
         permission_gate: Some(permission_state.gate.clone()),
         search_provider: Some(resolve_search_provider_for_tools()),
         selected_skills,
+        analytics_tx: analytics_components.as_ref().map(|(tx, _)| tx.clone()),
+        analytics_cost_calculator: analytics_components
+            .as_ref()
+            .map(|(_, calc)| Arc::clone(calc)),
     };
 
     tokio::spawn(async move {
@@ -960,6 +999,7 @@ pub async fn retry_plan_step(
     let provider_config =
         build_llm_provider_from_plan_phase_agent(&resolved_retry_agent, app_state.inner()).await?;
     let llm_provider = crate::services::task_mode::prd_generator::create_provider(provider_config.clone());
+    let analytics_components = get_analytics_tracker_components(&app_handle, app_state.inner()).await;
 
     let registry = state.adapter_registry.read().await;
     let adapter = registry
@@ -1080,6 +1120,9 @@ pub async fn retry_plan_step(
     let step_runtime = crate::services::plan_mode::step_executor::StepExecutionRuntime {
         provider_config,
         project_root: resolved_project_root,
+        kernel_session_id: executing_session_snapshot.kernel_session_id.clone(),
+        mode_session_id: session_id.clone(),
+        phase_id: "plan_retry".to_string(),
         file_change_tracker: Some(file_change_tracker),
         index_store,
         embedding_service,
@@ -1088,6 +1131,10 @@ pub async fn retry_plan_step(
         permission_gate: Some(permission_state.gate.clone()),
         search_provider: Some(resolve_search_provider_for_tools()),
         selected_skills,
+        analytics_tx: analytics_components.as_ref().map(|(tx, _)| tx.clone()),
+        analytics_cost_calculator: analytics_components
+            .as_ref()
+            .map(|(_, calc)| Arc::clone(calc)),
     };
 
     tokio::spawn(async move {

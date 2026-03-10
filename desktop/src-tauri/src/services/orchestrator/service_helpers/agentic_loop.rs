@@ -1232,13 +1232,11 @@ impl OrchestratorService {
             track_analytics(
                 &self.analytics_tx,
                 &self.config.provider.provider.to_string(),
-                &self.config.provider.model,
+                &response.model,
                 &response.usage,
-                self.config.analysis_session_id.as_deref(),
-                self.config.project_id.as_deref(),
                 &self.analytics_cost_calculator,
+                self.analytics_attribution.as_ref(),
                 iterations,
-                self.config.task_type.is_some(),
             );
 
             // Check for context compaction before processing tool calls.
@@ -2361,6 +2359,7 @@ impl OrchestratorService {
             knowledge_awareness_snapshot: self.knowledge_awareness_section.clone(),
             shared_analytics_tx: self.analytics_tx.clone(),
             shared_analytics_cost_calculator: self.analytics_cost_calculator.clone(),
+            shared_analytics_attribution: self.analytics_attribution.clone(),
             shared_permission_gate: self.permission_gate.clone(),
             shared_file_change_tracker: self.tool_executor.get_file_change_tracker(),
             shared_file_change_turn_index: self.tool_executor.get_file_change_turn_index(),
@@ -2714,13 +2713,11 @@ impl OrchestratorService {
             track_analytics(
                 &self.analytics_tx,
                 &self.config.provider.provider.to_string(),
-                &self.config.provider.model,
+                &response.model,
                 &response.usage,
-                self.config.analysis_session_id.as_deref(),
-                self.config.project_id.as_deref(),
                 &self.analytics_cost_calculator,
+                self.analytics_attribution.as_ref(),
                 iterations,
-                self.config.task_type.is_some(),
             );
 
             // Hook: on_after_llm

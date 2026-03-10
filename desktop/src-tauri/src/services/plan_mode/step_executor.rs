@@ -18,6 +18,7 @@ use tokio::sync::{mpsc, RwLock, Semaphore};
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
+use crate::services::analytics::send_message_tracked;
 use crate::services::llm::provider::LlmProvider;
 use crate::services::llm::types::{
     LlmRequestOptions, Message, MessageRole, ProviderConfig, ToolDefinition,
@@ -107,6 +108,9 @@ impl Default for StepExecutionConfig {
 pub struct StepExecutionRuntime {
     pub provider_config: ProviderConfig,
     pub project_root: PathBuf,
+    pub kernel_session_id: Option<String>,
+    pub mode_session_id: String,
+    pub phase_id: String,
     pub file_change_tracker: Option<Arc<Mutex<FileChangeTracker>>>,
     pub index_store: Option<Arc<IndexStore>>,
     pub embedding_service: Option<Arc<EmbeddingService>>,
@@ -115,6 +119,8 @@ pub struct StepExecutionRuntime {
     pub permission_gate: Option<Arc<PermissionGate>>,
     pub search_provider: Option<(String, Option<String>)>,
     pub selected_skills: Vec<SkillMatch>,
+    pub analytics_tx: Option<tokio::sync::mpsc::Sender<crate::services::analytics::TrackerMessage>>,
+    pub analytics_cost_calculator: Option<Arc<crate::services::analytics::CostCalculator>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -744,6 +750,7 @@ async fn execute_batch_round(request: BatchRoundRequest<'_>) {
                 retry_feedback.as_deref(),
                 retry_failure_category,
                 step_soft_limit,
+                attempt_count,
                 cancel.clone(),
             )
             .await
@@ -757,11 +764,56 @@ async fn execute_batch_round(request: BatchRoundRequest<'_>) {
 
                     output.attempt_count = attempt_count;
                     output.evidence_bundle.runtime_stats.attempt_count = attempt_count;
+                    let validation_provider = if let Some(runtime) = runtime_cloned.as_ref() {
+                        if let (Some(tx), Some(calc)) = (
+                            runtime.analytics_tx.as_ref(),
+                            runtime.analytics_cost_calculator.as_ref(),
+                        ) {
+                            crate::services::analytics::wrap_provider_with_tracking(
+                                provider_cloned.clone(),
+                                tx.clone(),
+                                Arc::clone(calc),
+                                crate::models::analytics::AnalyticsAttribution {
+                                    project_id: None,
+                                    kernel_session_id: runtime.kernel_session_id.clone(),
+                                    mode_session_id: Some(runtime.mode_session_id.clone()),
+                                    workflow_mode: Some(
+                                        crate::models::analytics::AnalyticsWorkflowMode::Plan,
+                                    ),
+                                    phase_id: Some("plan_validation".to_string()),
+                                    execution_scope: Some(
+                                        crate::models::analytics::AnalyticsExecutionScope::DirectLlm,
+                                    ),
+                                    execution_id: Some(format!(
+                                        "plan:{}:{}:{}:validation",
+                                        runtime.mode_session_id, step.id, attempt_count
+                                    )),
+                                    parent_execution_id: Some(format!(
+                                        "plan:{}:{}:{}",
+                                        runtime.mode_session_id, step.id, attempt_count
+                                    )),
+                                    agent_role: Some("plan_validation".to_string()),
+                                    agent_name: None,
+                                    step_id: Some(step.id.clone()),
+                                    story_id: None,
+                                    gate_id: None,
+                                    attempt: Some(attempt_count as i64),
+                                    request_sequence: Some(1),
+                                    call_site: Some("plan_step.validation".to_string()),
+                                    metadata_json: None,
+                                },
+                            )
+                        } else {
+                            provider_cloned.clone()
+                        }
+                    } else {
+                        provider_cloned.clone()
+                    };
                     let validation_result = validate_step_output(
                         &step,
                         &mut output,
                         adapter_cloned.clone(),
-                        provider_cloned.clone(),
+                        validation_provider,
                     )
                     .await;
 
@@ -1097,6 +1149,7 @@ pub async fn retry_single_step(
         None,
         None,
         compute_step_iteration_limit(step, config.step_soft_limit_cap),
+        1,
         cancellation_token.clone(),
     )
     .await
@@ -1599,6 +1652,7 @@ async fn execute_single_step(
     retry_feedback: Option<&str>,
     retry_failure_category: Option<FailureCategory>,
     soft_limit_override: u32,
+    attempt_count: usize,
     cancellation_token: CancellationToken,
 ) -> AppResult<StepOutput> {
     if cancellation_token.is_cancelled() {
@@ -1738,6 +1792,38 @@ async fn execute_single_step(
             let selected_skills = Arc::new(RwLock::new(runtime.selected_skills.clone()));
             orchestrator = orchestrator.with_selected_skills(selected_skills);
         }
+        if let (Some(tx), Some(calc)) = (
+            runtime.analytics_tx.as_ref(),
+            runtime.analytics_cost_calculator.as_ref(),
+        ) {
+            orchestrator = orchestrator
+                .with_analytics_tracker(tx.clone())
+                .with_analytics_cost_calculator(Arc::clone(calc))
+                .with_analytics_attribution(crate::models::analytics::AnalyticsAttribution {
+                    project_id: None,
+                    kernel_session_id: runtime.kernel_session_id.clone(),
+                    mode_session_id: Some(runtime.mode_session_id.clone()),
+                    workflow_mode: Some(crate::models::analytics::AnalyticsWorkflowMode::Plan),
+                    phase_id: Some(runtime.phase_id.clone()),
+                    execution_scope: Some(
+                        crate::models::analytics::AnalyticsExecutionScope::RootAgent,
+                    ),
+                    execution_id: Some(format!(
+                        "plan:{}:{}:{}",
+                        runtime.mode_session_id, step.id, attempt_count
+                    )),
+                    parent_execution_id: None,
+                    agent_role: Some("plan_step".to_string()),
+                    agent_name: None,
+                    step_id: Some(step.id.clone()),
+                    story_id: None,
+                    gate_id: None,
+                    attempt: Some(attempt_count as i64),
+                    request_sequence: Some(1),
+                    call_site: Some("plan_step.execution".to_string()),
+                    metadata_json: None,
+                });
+        }
 
         let cancel_bridge = orchestrator.cancellation_token();
         let cancel_observer = cancellation_token.clone();
@@ -1807,7 +1893,7 @@ async fn execute_single_step(
         _ = cancellation_token.cancelled() => {
             return Err(AppError::internal("Execution cancelled"));
         }
-        response = provider.send_message(messages, Some(system), vec![], options) => {
+        response = send_message_tracked(provider, messages, Some(system), vec![], options) => {
             response.map_err(|e| AppError::Internal(format!("Step execution LLM error: {e}")))?
         }
     };

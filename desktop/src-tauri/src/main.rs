@@ -142,6 +142,11 @@ fn main() {
             plan_cascade_desktop::commands::markdown::get_claude_md_metadata,
             // Analytics commands
             plan_cascade_desktop::commands::analytics::init_analytics,
+            plan_cascade_desktop::commands::analytics::list_usage_events,
+            plan_cascade_desktop::commands::analytics::count_usage_events,
+            plan_cascade_desktop::commands::analytics::get_analytics_summary,
+            plan_cascade_desktop::commands::analytics::get_usage_breakdown,
+            plan_cascade_desktop::commands::analytics::get_usage_event_detail,
             plan_cascade_desktop::commands::analytics::list_usage_records_v2,
             plan_cascade_desktop::commands::analytics::count_usage_records_v2,
             plan_cascade_desktop::commands::analytics::get_dashboard_summary_v2,

@@ -12,10 +12,12 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use crate::models::analytics::{
-    AggregationPeriod, CostBreakdown, CostStatus, DashboardFilterV2, DashboardSummary,
-    ExportFormat, ExportJob, ExportJobStatus, ExportStreamingJobRequest, ModelPricing, ModelUsage,
-    PricingRule, PricingRuleStatus, ProjectUsage, RecomputeCostsRequest, RecomputeCostsResult,
-    TimeSeriesPoint, UsageFilter, UsageRecord, UsageRecordV2, UsageStats,
+    AggregationPeriod, AnalyticsBreakdownRow, AnalyticsEventDetail, AnalyticsExecutionScope,
+    AnalyticsFilter, AnalyticsSummary, AnalyticsUsageEvent, AnalyticsWorkflowMode, CostBreakdown,
+    CostStatus, DashboardFilterV2, DashboardSummary, ExportFormat, ExportJob, ExportJobStatus,
+    ExportStreamingJobRequest, ModelPricing, ModelUsage, PricingRule, PricingRuleStatus,
+    ProjectUsage, RecomputeCostsRequest, RecomputeCostsResult, TimeSeriesPoint, UsageFilter,
+    UsageRecord, UsageRecordV2, UsageStats,
 };
 use crate::utils::error::{AppError, AppResult};
 
@@ -148,6 +150,21 @@ impl AnalyticsService {
                 event_id TEXT PRIMARY KEY,
                 session_id TEXT,
                 project_id TEXT,
+                kernel_session_id TEXT,
+                mode_session_id TEXT,
+                workflow_mode TEXT,
+                phase_id TEXT,
+                execution_scope TEXT,
+                execution_id TEXT,
+                parent_execution_id TEXT,
+                agent_role TEXT,
+                agent_name TEXT,
+                step_id TEXT,
+                story_id TEXT,
+                gate_id TEXT,
+                attempt INTEGER,
+                request_sequence INTEGER,
+                call_site TEXT,
                 provider TEXT NOT NULL,
                 model TEXT NOT NULL,
                 input_tokens INTEGER NOT NULL DEFAULT 0,
@@ -176,6 +193,26 @@ impl AnalyticsService {
         )?;
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_usage_events_session ON usage_events(session_id)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_kernel_session ON usage_events(kernel_session_id)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_mode_session ON usage_events(mode_session_id)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_workflow_phase_scope ON usage_events(workflow_mode, phase_id, execution_scope)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_step_story_gate ON usage_events(step_id, story_id, gate_id)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_execution_ids ON usage_events(execution_id, parent_execution_id)",
             [],
         )?;
 
@@ -285,6 +322,38 @@ impl AnalyticsService {
             }
             conn.execute(
                 "INSERT INTO analytics_schema_version (version, applied_at) VALUES (4, ?1)",
+                params![chrono::Utc::now().timestamp()],
+            )?;
+        }
+
+        if current_version < 5 {
+            let usage_event_columns = [
+                ("kernel_session_id", "TEXT"),
+                ("mode_session_id", "TEXT"),
+                ("workflow_mode", "TEXT"),
+                ("phase_id", "TEXT"),
+                ("execution_scope", "TEXT"),
+                ("execution_id", "TEXT"),
+                ("parent_execution_id", "TEXT"),
+                ("agent_role", "TEXT"),
+                ("agent_name", "TEXT"),
+                ("step_id", "TEXT"),
+                ("story_id", "TEXT"),
+                ("gate_id", "TEXT"),
+                ("attempt", "INTEGER"),
+                ("request_sequence", "INTEGER"),
+                ("call_site", "TEXT"),
+            ];
+            for (column, ty) in usage_event_columns {
+                if !Self::column_exists(conn, "usage_events", column)? {
+                    conn.execute(
+                        &format!("ALTER TABLE usage_events ADD COLUMN {} {}", column, ty),
+                        [],
+                    )?;
+                }
+            }
+            conn.execute(
+                "INSERT INTO analytics_schema_version (version, applied_at) VALUES (5, ?1)",
                 params![chrono::Utc::now().timestamp()],
             )?;
         }
@@ -465,6 +534,20 @@ impl AnalyticsService {
             )?;
             ids.push(tx.last_insert_rowid());
             Self::dual_write_v2_tx(&tx, record)?;
+        }
+
+        tx.commit()?;
+        Ok(ids)
+    }
+
+    pub fn insert_usage_events_batch(&self, events: &[AnalyticsUsageEvent]) -> AppResult<Vec<String>> {
+        let mut conn = self.get_connection()?;
+        let tx = conn.unchecked_transaction()?;
+        let mut ids = Vec::with_capacity(events.len());
+
+        for event in events {
+            Self::insert_usage_event_tx(&tx, event)?;
+            ids.push(event.event_id.clone());
         }
 
         tx.commit()?;
@@ -997,6 +1080,192 @@ impl AnalyticsService {
             params_vec.iter().map(|p| p.as_ref()).collect();
         let count = conn.query_row(&sql, params_refs.as_slice(), |row| row.get(0))?;
         Ok(count)
+    }
+
+    pub fn list_usage_events(
+        &self,
+        filter: &AnalyticsFilter,
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> AppResult<Vec<AnalyticsUsageEvent>> {
+        let conn = self.get_connection()?;
+        let mut sql = String::from(
+            "SELECT ue.event_id, ue.timestamp_utc, ue.provider, ue.model,
+                    ue.input_tokens, ue.output_tokens, ue.thinking_tokens,
+                    ue.cache_read_tokens, ue.cache_write_tokens,
+                    COALESCE(uc.cost_total, 0) AS cost_total,
+                    COALESCE(uc.cost_status, 'missing') AS cost_status,
+                    ue.project_id, ue.kernel_session_id, ue.mode_session_id,
+                    ue.workflow_mode, ue.phase_id, ue.execution_scope, ue.execution_id,
+                    ue.parent_execution_id, ue.agent_role, ue.agent_name, ue.step_id,
+                    ue.story_id, ue.gate_id, ue.attempt, ue.request_sequence, ue.call_site,
+                    ue.metadata_json
+             FROM usage_events ue
+             LEFT JOIN usage_costs uc ON uc.event_id = ue.event_id
+             WHERE 1=1",
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        Self::append_analytics_filter_clauses(&mut sql, &mut params_vec, filter, "ue", "uc");
+        sql.push_str(" ORDER BY ue.timestamp_utc DESC");
+        if let Some(lim) = limit {
+            sql.push_str(&format!(" LIMIT {}", lim.max(0)));
+        }
+        if let Some(off) = offset {
+            sql.push_str(&format!(" OFFSET {}", off.max(0)));
+        }
+
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params_refs.as_slice(), Self::row_to_analytics_usage_event)?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    pub fn count_usage_events(&self, filter: &AnalyticsFilter) -> AppResult<i64> {
+        let conn = self.get_connection()?;
+        let mut sql = String::from(
+            "SELECT COUNT(*)
+             FROM usage_events ue
+             LEFT JOIN usage_costs uc ON uc.event_id = ue.event_id
+             WHERE 1=1",
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        Self::append_analytics_filter_clauses(&mut sql, &mut params_vec, filter, "ue", "uc");
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+        let count = conn.query_row(&sql, params_refs.as_slice(), |row| row.get(0))?;
+        Ok(count)
+    }
+
+    pub fn get_usage_event_detail(&self, event_id: &str) -> AppResult<Option<AnalyticsEventDetail>> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT ue.event_id, ue.timestamp_utc, ue.provider, ue.model,
+                    ue.input_tokens, ue.output_tokens, ue.thinking_tokens,
+                    ue.cache_read_tokens, ue.cache_write_tokens,
+                    COALESCE(uc.cost_total, 0) AS cost_total,
+                    COALESCE(uc.cost_status, 'missing') AS cost_status,
+                    ue.project_id, ue.kernel_session_id, ue.mode_session_id,
+                    ue.workflow_mode, ue.phase_id, ue.execution_scope, ue.execution_id,
+                    ue.parent_execution_id, ue.agent_role, ue.agent_name, ue.step_id,
+                    ue.story_id, ue.gate_id, ue.attempt, ue.request_sequence, ue.call_site,
+                    ue.metadata_json
+             FROM usage_events ue
+             LEFT JOIN usage_costs uc ON uc.event_id = ue.event_id
+             WHERE ue.event_id = ?1",
+        )?;
+        match stmt.query_row(params![event_id], Self::row_to_analytics_usage_event) {
+            Ok(event) => Ok(Some(event)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub fn get_usage_breakdown(
+        &self,
+        filter: &AnalyticsFilter,
+        dimension: &str,
+    ) -> AppResult<Vec<AnalyticsBreakdownRow>> {
+        let conn = self.get_connection()?;
+        let (select_expr, label_expr) = match dimension {
+            "workflow" => (
+                "COALESCE(ue.workflow_mode, 'unknown')",
+                "COALESCE(ue.workflow_mode, 'unknown')",
+            ),
+            "phase" => (
+                "COALESCE(ue.phase_id, 'unknown')",
+                "COALESCE(ue.phase_id, 'unknown')",
+            ),
+            "scope" => (
+                "COALESCE(ue.execution_scope, 'unknown')",
+                "COALESCE(ue.execution_scope, 'unknown')",
+            ),
+            "project" => (
+                "COALESCE(ue.project_id, '')",
+                "COALESCE(ue.project_id, '(none)')",
+            ),
+            _ => (
+                "ue.provider || ':' || ue.model",
+                "ue.provider || ' / ' || ue.model",
+            ),
+        };
+        let mut sql = format!(
+            "SELECT {select_expr} AS key,
+                    {label_expr} AS label,
+                    COALESCE(SUM(ue.input_tokens), 0) AS total_input,
+                    COALESCE(SUM(ue.output_tokens), 0) AS total_output,
+                    COALESCE(SUM(COALESCE(uc.cost_total, 0)), 0) AS total_cost,
+                    COUNT(*) AS request_count
+             FROM usage_events ue
+             LEFT JOIN usage_costs uc ON uc.event_id = ue.event_id
+             WHERE 1=1"
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        Self::append_analytics_filter_clauses(&mut sql, &mut params_vec, filter, "ue", "uc");
+        sql.push_str(" GROUP BY key, label ORDER BY total_cost DESC, request_count DESC");
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                let total_input: i64 = row.get(2)?;
+                let total_output: i64 = row.get(3)?;
+                let total_cost: i64 = row.get(4)?;
+                let request_count: i64 = row.get(5)?;
+                Ok(AnalyticsBreakdownRow {
+                    key: row.get(0)?,
+                    label: row.get(1)?,
+                    stats: Self::usage_stats_from_totals(
+                        total_input,
+                        total_output,
+                        total_cost,
+                        request_count,
+                    ),
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    pub fn get_analytics_summary(
+        &self,
+        filter: &AnalyticsFilter,
+        period: AggregationPeriod,
+    ) -> AppResult<AnalyticsSummary> {
+        let current_stats = self.get_usage_stats_from_analytics_filter(filter)?;
+        let previous_filter = Self::calculate_previous_period_analytics_filter(filter);
+        let previous_stats = self.get_usage_stats_from_analytics_filter(&previous_filter)?;
+
+        let cost_change = DashboardSummary::calculate_change(
+            current_stats.total_cost_microdollars as f64,
+            previous_stats.total_cost_microdollars as f64,
+        );
+        let tokens_change = DashboardSummary::calculate_change(
+            current_stats.total_tokens() as f64,
+            previous_stats.total_tokens() as f64,
+        );
+        let requests_change = DashboardSummary::calculate_change(
+            current_stats.request_count as f64,
+            previous_stats.request_count as f64,
+        );
+
+        Ok(AnalyticsSummary {
+            current_period: current_stats,
+            previous_period: previous_stats,
+            cost_change_percent: cost_change,
+            tokens_change_percent: tokens_change,
+            requests_change_percent: requests_change,
+            by_model: self.aggregate_by_model_analytics(filter)?,
+            by_project: self.aggregate_by_project_analytics(filter)?,
+            by_workflow: self.get_usage_breakdown(filter, "workflow")?,
+            by_phase: self.get_usage_breakdown(filter, "phase")?,
+            by_scope: self.get_usage_breakdown(filter, "scope")?,
+            time_series: self.get_time_series_analytics(filter, period)?,
+        })
     }
 
     /// v2 dashboard summary with cost-status filtering and rollup acceleration.
@@ -1625,6 +1894,168 @@ impl AnalyticsService {
         Ok(rows)
     }
 
+    fn get_usage_stats_from_analytics_filter(
+        &self,
+        filter: &AnalyticsFilter,
+    ) -> AppResult<UsageStats> {
+        let conn = self.get_connection()?;
+        let mut sql = String::from(
+            "SELECT COALESCE(SUM(ue.input_tokens), 0) AS total_input,
+                    COALESCE(SUM(ue.output_tokens), 0) AS total_output,
+                    COALESCE(SUM(COALESCE(uc.cost_total, 0)), 0) AS total_cost,
+                    COUNT(*) AS request_count
+             FROM usage_events ue
+             LEFT JOIN usage_costs uc ON uc.event_id = ue.event_id
+             WHERE 1=1",
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        Self::append_analytics_filter_clauses(&mut sql, &mut params_vec, filter, "ue", "uc");
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+        let (total_input, total_output, total_cost, request_count): (i64, i64, i64, i64) = conn
+            .query_row(&sql, params_refs.as_slice(), |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?;
+        Ok(Self::usage_stats_from_totals(
+            total_input,
+            total_output,
+            total_cost,
+            request_count,
+        ))
+    }
+
+    fn aggregate_by_model_analytics(
+        &self,
+        filter: &AnalyticsFilter,
+    ) -> AppResult<Vec<ModelUsage>> {
+        let conn = self.get_connection()?;
+        let mut sql = String::from(
+            "SELECT ue.model, ue.provider,
+                    COALESCE(SUM(ue.input_tokens), 0) AS total_input,
+                    COALESCE(SUM(ue.output_tokens), 0) AS total_output,
+                    COALESCE(SUM(COALESCE(uc.cost_total, 0)), 0) AS total_cost,
+                    COUNT(*) AS request_count
+             FROM usage_events ue
+             LEFT JOIN usage_costs uc ON uc.event_id = ue.event_id
+             WHERE 1=1",
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        Self::append_analytics_filter_clauses(&mut sql, &mut params_vec, filter, "ue", "uc");
+        sql.push_str(" GROUP BY ue.model, ue.provider ORDER BY total_cost DESC, request_count DESC");
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                let total_input: i64 = row.get(2)?;
+                let total_output: i64 = row.get(3)?;
+                let total_cost: i64 = row.get(4)?;
+                let request_count: i64 = row.get(5)?;
+                Ok(ModelUsage {
+                    model_name: row.get(0)?,
+                    provider: row.get(1)?,
+                    stats: Self::usage_stats_from_totals(
+                        total_input,
+                        total_output,
+                        total_cost,
+                        request_count,
+                    ),
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    fn aggregate_by_project_analytics(
+        &self,
+        filter: &AnalyticsFilter,
+    ) -> AppResult<Vec<ProjectUsage>> {
+        let conn = self.get_connection()?;
+        let mut sql = String::from(
+            "SELECT COALESCE(ue.project_id, '') AS project_id,
+                    COALESCE(SUM(ue.input_tokens), 0) AS total_input,
+                    COALESCE(SUM(ue.output_tokens), 0) AS total_output,
+                    COALESCE(SUM(COALESCE(uc.cost_total, 0)), 0) AS total_cost,
+                    COUNT(*) AS request_count
+             FROM usage_events ue
+             LEFT JOIN usage_costs uc ON uc.event_id = ue.event_id
+             WHERE COALESCE(ue.project_id, '') != ''",
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        Self::append_analytics_filter_clauses(&mut sql, &mut params_vec, filter, "ue", "uc");
+        sql.push_str(" GROUP BY COALESCE(ue.project_id, '') ORDER BY total_cost DESC, request_count DESC");
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                let total_input: i64 = row.get(1)?;
+                let total_output: i64 = row.get(2)?;
+                let total_cost: i64 = row.get(3)?;
+                let request_count: i64 = row.get(4)?;
+                Ok(ProjectUsage {
+                    project_id: row.get(0)?,
+                    project_name: None,
+                    stats: Self::usage_stats_from_totals(
+                        total_input,
+                        total_output,
+                        total_cost,
+                        request_count,
+                    ),
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    fn get_time_series_analytics(
+        &self,
+        filter: &AnalyticsFilter,
+        period: AggregationPeriod,
+    ) -> AppResult<Vec<TimeSeriesPoint>> {
+        let conn = self.get_connection()?;
+        let mut sql = format!(
+            "SELECT strftime('{}', datetime(ue.timestamp_utc, 'unixepoch')) AS period,
+                    MIN(ue.timestamp_utc) AS period_start,
+                    COALESCE(SUM(ue.input_tokens), 0) AS total_input,
+                    COALESCE(SUM(ue.output_tokens), 0) AS total_output,
+                    COALESCE(SUM(COALESCE(uc.cost_total, 0)), 0) AS total_cost,
+                    COUNT(*) AS request_count
+             FROM usage_events ue
+             LEFT JOIN usage_costs uc ON uc.event_id = ue.event_id
+             WHERE 1=1",
+            period.sql_format()
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        Self::append_analytics_filter_clauses(&mut sql, &mut params_vec, filter, "ue", "uc");
+        sql.push_str(" GROUP BY period ORDER BY period_start ASC");
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                let total_input: i64 = row.get(2)?;
+                let total_output: i64 = row.get(3)?;
+                let total_cost: i64 = row.get(4)?;
+                let request_count: i64 = row.get(5)?;
+                Ok(TimeSeriesPoint {
+                    timestamp: row.get(1)?,
+                    timestamp_formatted: row.get(0)?,
+                    stats: Self::usage_stats_from_totals(
+                        total_input,
+                        total_output,
+                        total_cost,
+                        request_count,
+                    ),
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
     fn rebuild_rollup_daily_tx(tx: &rusqlite::Transaction<'_>) -> AppResult<()> {
         tx.execute("DELETE FROM analytics_rollup_daily", [])?;
         tx.execute(
@@ -1717,6 +2148,87 @@ impl AnalyticsService {
         }
     }
 
+    fn append_analytics_filter_clauses(
+        sql: &mut String,
+        params_vec: &mut Vec<Box<dyn rusqlite::ToSql>>,
+        filter: &AnalyticsFilter,
+        event_alias: &str,
+        cost_alias: &str,
+    ) {
+        if let Some(start) = filter.start_timestamp {
+            sql.push_str(&format!(" AND {}.timestamp_utc >= ?", event_alias));
+            params_vec.push(Box::new(start));
+        }
+        if let Some(end) = filter.end_timestamp {
+            sql.push_str(&format!(" AND {}.timestamp_utc < ?", event_alias));
+            params_vec.push(Box::new(end));
+        }
+        if let Some(ref provider) = filter.provider {
+            sql.push_str(&format!(" AND {}.provider = ?", event_alias));
+            params_vec.push(Box::new(provider.clone()));
+        }
+        if let Some(ref model) = filter.model {
+            sql.push_str(&format!(" AND {}.model = ?", event_alias));
+            params_vec.push(Box::new(model.clone()));
+        }
+        if let Some(ref project_id) = filter.project_id {
+            sql.push_str(&format!(" AND COALESCE({}.project_id, '') = ?", event_alias));
+            params_vec.push(Box::new(project_id.clone()));
+        }
+        if let Some(ref kernel_session_id) = filter.kernel_session_id {
+            sql.push_str(&format!(" AND COALESCE({}.kernel_session_id, '') = ?", event_alias));
+            params_vec.push(Box::new(kernel_session_id.clone()));
+        }
+        if let Some(ref mode_session_id) = filter.mode_session_id {
+            sql.push_str(&format!(" AND COALESCE({}.mode_session_id, '') = ?", event_alias));
+            params_vec.push(Box::new(mode_session_id.clone()));
+        }
+        if let Some(workflow_mode) = &filter.workflow_mode {
+            sql.push_str(&format!(" AND COALESCE({}.workflow_mode, '') = ?", event_alias));
+            params_vec.push(Box::new(workflow_mode.as_str().to_string()));
+        }
+        if let Some(ref phase_id) = filter.phase_id {
+            sql.push_str(&format!(" AND COALESCE({}.phase_id, '') = ?", event_alias));
+            params_vec.push(Box::new(phase_id.clone()));
+        }
+        if let Some(execution_scope) = &filter.execution_scope {
+            sql.push_str(&format!(
+                " AND COALESCE({}.execution_scope, '') = ?",
+                event_alias
+            ));
+            params_vec.push(Box::new(execution_scope.as_str().to_string()));
+        }
+        if let Some(ref step_id) = filter.step_id {
+            sql.push_str(&format!(" AND COALESCE({}.step_id, '') = ?", event_alias));
+            params_vec.push(Box::new(step_id.clone()));
+        }
+        if let Some(ref story_id) = filter.story_id {
+            sql.push_str(&format!(" AND COALESCE({}.story_id, '') = ?", event_alias));
+            params_vec.push(Box::new(story_id.clone()));
+        }
+        if let Some(ref gate_id) = filter.gate_id {
+            sql.push_str(&format!(" AND COALESCE({}.gate_id, '') = ?", event_alias));
+            params_vec.push(Box::new(gate_id.clone()));
+        }
+        if let Some(cost_status) = &filter.cost_status {
+            sql.push_str(&format!(
+                " AND COALESCE({}.cost_status, 'missing') = ?",
+                cost_alias
+            ));
+            params_vec.push(Box::new(cost_status.as_str().to_string()));
+        }
+    }
+
+    fn calculate_previous_period_analytics_filter(filter: &AnalyticsFilter) -> AnalyticsFilter {
+        let mut prev = filter.clone();
+        if let (Some(start), Some(end)) = (filter.start_timestamp, filter.end_timestamp) {
+            let duration = end - start;
+            prev.start_timestamp = Some(start - duration);
+            prev.end_timestamp = Some(start);
+        }
+        prev
+    }
+
     fn calculate_previous_period_filter_v2(filter: &DashboardFilterV2) -> DashboardFilterV2 {
         let mut prev = filter.clone();
         if let (Some(start), Some(end)) = (filter.start_timestamp, filter.end_timestamp) {
@@ -1801,6 +2313,93 @@ impl AnalyticsService {
     // ========================================================================
     // Analytics v2 dual-write helpers
     // ========================================================================
+
+    fn insert_usage_event_tx(
+        tx: &rusqlite::Transaction<'_>,
+        event: &AnalyticsUsageEvent,
+    ) -> AppResult<()> {
+        tx.execute(
+            "INSERT OR REPLACE INTO usage_events
+             (event_id, session_id, project_id, kernel_session_id, mode_session_id, workflow_mode,
+              phase_id, execution_scope, execution_id, parent_execution_id, agent_role, agent_name,
+              step_id, story_id, gate_id, attempt, request_sequence, call_site,
+              provider, model, input_tokens, output_tokens, thinking_tokens, cache_read_tokens,
+              cache_write_tokens, timestamp_utc, metadata_json, ingest_status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, 'ingested')",
+            params![
+                event.event_id,
+                event.kernel_session_id.clone(),
+                event.project_id.clone(),
+                event.kernel_session_id.clone(),
+                event.mode_session_id.clone(),
+                event.workflow_mode.as_ref().map(|value| value.as_str().to_string()),
+                event.phase_id.clone(),
+                event.execution_scope.as_ref().map(|value| value.as_str().to_string()),
+                event.execution_id.clone(),
+                event.parent_execution_id.clone(),
+                event.agent_role.clone(),
+                event.agent_name.clone(),
+                event.step_id.clone(),
+                event.story_id.clone(),
+                event.gate_id.clone(),
+                event.attempt,
+                event.request_sequence,
+                event.call_site.clone(),
+                event.provider.clone(),
+                event.model.clone(),
+                event.input_tokens,
+                event.output_tokens,
+                event.thinking_tokens,
+                event.cache_read_tokens,
+                event.cache_write_tokens,
+                event.timestamp_utc,
+                event.metadata_json.clone(),
+            ],
+        )?;
+
+        let synthetic = UsageRecord {
+            id: 0,
+            session_id: event.kernel_session_id.clone(),
+            project_id: event.project_id.clone(),
+            model_name: event.model.clone(),
+            provider: event.provider.clone(),
+            input_tokens: event.input_tokens,
+            output_tokens: event.output_tokens,
+            thinking_tokens: event.thinking_tokens,
+            cache_read_tokens: event.cache_read_tokens,
+            cache_creation_tokens: event.cache_write_tokens,
+            cost_microdollars: event.cost_total,
+            timestamp: event.timestamp_utc,
+            metadata: event.metadata_json.clone(),
+        };
+
+        let (rule_id, cost_total, cost_status, currency, breakdown_json) =
+            Self::resolve_cost_for_record_tx(tx, &synthetic)?;
+
+        tx.execute(
+            "INSERT INTO usage_costs
+             (event_id, rule_id, cost_total, currency, cost_status, cost_breakdown_json, computed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(event_id) DO UPDATE SET
+                rule_id = excluded.rule_id,
+                cost_total = excluded.cost_total,
+                currency = excluded.currency,
+                cost_status = excluded.cost_status,
+                cost_breakdown_json = excluded.cost_breakdown_json,
+                computed_at = excluded.computed_at",
+            params![
+                event.event_id,
+                rule_id,
+                cost_total,
+                currency,
+                cost_status.as_str(),
+                breakdown_json,
+                chrono::Utc::now().timestamp(),
+            ],
+        )?;
+
+        Ok(())
+    }
 
     fn dual_write_v2_tx(tx: &rusqlite::Transaction<'_>, record: &UsageRecord) -> AppResult<()> {
         let event_id = uuid::Uuid::new_v4().to_string();
@@ -2037,6 +2636,55 @@ impl AnalyticsService {
             currency: row.get(14)?,
             cost_status: CostStatus::from_str(&status_raw),
             cost_breakdown_json: row.get(16)?,
+        })
+    }
+
+    fn row_to_analytics_usage_event(
+        row: &rusqlite::Row,
+    ) -> rusqlite::Result<AnalyticsUsageEvent> {
+        let cost_status_raw: String = row.get(10)?;
+        let workflow_mode_raw: Option<String> = row.get(14)?;
+        let execution_scope_raw: Option<String> = row.get(16)?;
+        Ok(AnalyticsUsageEvent {
+            event_id: row.get(0)?,
+            timestamp_utc: row.get(1)?,
+            provider: row.get(2)?,
+            model: row.get(3)?,
+            input_tokens: row.get(4)?,
+            output_tokens: row.get(5)?,
+            thinking_tokens: row.get(6)?,
+            cache_read_tokens: row.get(7)?,
+            cache_write_tokens: row.get(8)?,
+            cost_total: row.get(9)?,
+            cost_status: CostStatus::from_str(&cost_status_raw),
+            project_id: row.get(11)?,
+            kernel_session_id: row.get(12)?,
+            mode_session_id: row.get(13)?,
+            workflow_mode: workflow_mode_raw.and_then(|value| match value.as_str() {
+                "chat" => Some(AnalyticsWorkflowMode::Chat),
+                "plan" => Some(AnalyticsWorkflowMode::Plan),
+                "task" => Some(AnalyticsWorkflowMode::Task),
+                _ => None,
+            }),
+            phase_id: row.get(15)?,
+            execution_scope: execution_scope_raw.and_then(|value| match value.as_str() {
+                "root_agent" => Some(AnalyticsExecutionScope::RootAgent),
+                "sub_agent" => Some(AnalyticsExecutionScope::SubAgent),
+                "direct_llm" => Some(AnalyticsExecutionScope::DirectLlm),
+                "quality_gate" => Some(AnalyticsExecutionScope::QualityGate),
+                _ => None,
+            }),
+            execution_id: row.get(17)?,
+            parent_execution_id: row.get(18)?,
+            agent_role: row.get(19)?,
+            agent_name: row.get(20)?,
+            step_id: row.get(21)?,
+            story_id: row.get(22)?,
+            gate_id: row.get(23)?,
+            attempt: row.get(24)?,
+            request_sequence: row.get(25)?,
+            call_site: row.get(26)?,
+            metadata_json: row.get(27)?,
         })
     }
 

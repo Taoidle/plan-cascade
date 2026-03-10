@@ -5,6 +5,10 @@ async fn generate_plan_clarification_question(
     app_state: &AppState,
     knowledge_state: &crate::commands::knowledge::KnowledgeState,
     kernel_state: &WorkflowKernelState,
+    tracker_components: Option<(
+        tokio::sync::mpsc::Sender<crate::services::analytics::TrackerMessage>,
+        Arc<crate::services::analytics::CostCalculator>,
+    )>,
     session_id: &str,
     description: &str,
     analysis: &PlanAnalysis,
@@ -31,7 +35,8 @@ async fn generate_plan_clarification_question(
     )
     .await?;
     let provider_config = build_llm_provider_from_plan_phase_agent(&resolved_agent, app_state).await?;
-    let llm_provider = crate::services::task_mode::prd_generator::create_provider(provider_config.clone());
+    let base_provider =
+        crate::services::task_mode::prd_generator::create_provider(provider_config.clone());
 
     let registry = state.adapter_registry.read().await;
     let adapter = registry
@@ -62,6 +67,37 @@ async fn generate_plan_clarification_question(
         None
     } else {
         Some(plan_context.rendered_context.as_str())
+    };
+
+    let llm_provider = if let Some((tx, calc)) = tracker_components {
+        crate::services::analytics::wrap_provider_with_tracking(
+            base_provider,
+            tx,
+            calc,
+            crate::models::analytics::AnalyticsAttribution {
+                project_id: None,
+                kernel_session_id: None,
+                mode_session_id: Some(session_id.to_string()),
+                workflow_mode: Some(crate::models::analytics::AnalyticsWorkflowMode::Plan),
+                phase_id: Some("plan_clarification".to_string()),
+                execution_scope: Some(
+                    crate::models::analytics::AnalyticsExecutionScope::DirectLlm,
+                ),
+                execution_id: Some(format!("plan:{}:clarification", session_id)),
+                parent_execution_id: None,
+                agent_role: Some("plan_clarification".to_string()),
+                agent_name: Some(resolved_agent.display_label()),
+                step_id: None,
+                story_id: None,
+                gate_id: None,
+                attempt: Some((clarifications.len() + 1) as i64),
+                request_sequence: Some(1),
+                call_site: Some("plan_mode.clarification".to_string()),
+                metadata_json: None,
+            },
+        )
+    } else {
+        base_provider
     };
 
     let question = crate::services::plan_mode::clarifier::generate_clarification_question(
@@ -112,6 +148,7 @@ pub async fn enter_plan_mode(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+    let analytics_components = get_analytics_tracker_components(&app_handle, app_state.inner()).await;
 
     // Create initial session
     let mut session = PlanModeSession {
@@ -198,8 +235,38 @@ pub async fn enter_plan_mode(
             let provider_config =
                 build_llm_provider_from_plan_phase_agent(&resolved_strategy, app_state.inner())
                     .await?;
-            let llm_provider =
+            let base_provider =
                 crate::services::task_mode::prd_generator::create_provider(provider_config.clone());
+            let llm_provider = if let Some((tx, calc)) = analytics_components.clone() {
+                crate::services::analytics::wrap_provider_with_tracking(
+                    base_provider,
+                    tx,
+                    calc,
+                    crate::models::analytics::AnalyticsAttribution {
+                        project_id: None,
+                        kernel_session_id: normalized_kernel_session_id.clone(),
+                        mode_session_id: Some(session.session_id.clone()),
+                        workflow_mode: Some(crate::models::analytics::AnalyticsWorkflowMode::Plan),
+                        phase_id: Some("plan_strategy".to_string()),
+                        execution_scope: Some(
+                            crate::models::analytics::AnalyticsExecutionScope::DirectLlm,
+                        ),
+                        execution_id: Some(format!("plan:{}:strategy", session.session_id)),
+                        parent_execution_id: None,
+                        agent_role: Some("plan_strategy".to_string()),
+                        agent_name: Some(resolved_strategy.display_label()),
+                        step_id: None,
+                        story_id: None,
+                        gate_id: None,
+                        attempt: Some(1),
+                        request_sequence: Some(1),
+                        call_site: Some("plan_mode.strategy".to_string()),
+                        metadata_json: None,
+                    },
+                )
+            } else {
+                base_provider
+            };
 
             let registry = state.adapter_registry.read().await;
 
@@ -344,6 +411,7 @@ pub async fn start_plan_clarification(
             app_state.inner(),
             knowledge_state.inner(),
             kernel_state.inner(),
+            get_analytics_tracker_components(&app_handle, app_state.inner()).await,
             &session_id,
             &description,
             &analysis,
@@ -463,6 +531,7 @@ pub async fn submit_plan_clarification(
             app_state.inner(),
             knowledge_state.inner(),
             kernel_state.inner(),
+            get_analytics_tracker_components(&app_handle, app_state.inner()).await,
             &session_id,
             &description,
             &analysis,

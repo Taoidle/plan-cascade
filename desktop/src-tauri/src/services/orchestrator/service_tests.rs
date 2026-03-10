@@ -4235,6 +4235,7 @@ fn test_sub_agent_knowledge_block_capped() {
         knowledge_awareness_snapshot: None,
         shared_analytics_tx: None,
         shared_analytics_cost_calculator: None,
+        shared_analytics_attribution: None,
         shared_permission_gate: None,
         shared_paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         plugin_instructions_snapshot: None,

@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use crate::services::analytics::send_message_tracked;
 use crate::services::llm::provider::LlmProvider;
 use crate::services::plan_mode::adapter::DomainAdapter;
 use crate::services::plan_mode::types::{CriterionResult, Plan, PlanStep, StepOutput, TaskDomain};
@@ -245,10 +246,7 @@ async fn llm_validate_criterion(
         ..Default::default()
     };
 
-    match provider
-        .send_message(messages, Some(system), vec![], options)
-        .await
-    {
+    match send_message_tracked(provider.as_ref(), messages, Some(system), vec![], options).await {
         Ok(response) => {
             // Try to parse JSON from response
             let text = response.content.as_deref().unwrap_or("").trim();

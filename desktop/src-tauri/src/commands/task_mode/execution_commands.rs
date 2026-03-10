@@ -470,6 +470,12 @@ pub async fn approve_task_prd(
                 .into_iter()
                 .next()
                 .unwrap_or_else(|| session_id.clone());
+            let analytics_kernel_session_id = kernel_state
+                .inner()
+                .linked_kernel_sessions_for_mode_session(WorkflowMode::Task, &session_id)
+                .await
+                .into_iter()
+                .next();
             let file_change_tracker = file_changes_state
                 .get_or_create(&tracker_session_id, &project_path_str)
                 .await;
@@ -570,6 +576,8 @@ pub async fn approve_task_prd(
             };
             let plugin_quality_gates = plugin_state.collect_quality_gates().await;
             config.plugin_quality_gates = plugin_quality_gates;
+            let analytics_components =
+                get_task_analytics_tracker_components(&app, app_state.inner()).await;
             let story_titles: HashMap<String, String> = stories
                 .iter()
                 .map(|story| (story.id.clone(), story.title.clone()))
@@ -602,6 +610,18 @@ pub async fn approve_task_prd(
                     };
                     let executor = if let Some(provider) = llm_provider.clone() {
                         executor.with_llm_provider(provider)
+                    } else {
+                        executor
+                    };
+                    let executor = if let Some((analytics_tx, analytics_cost_calculator)) =
+                        analytics_components.clone()
+                    {
+                        executor.with_analytics_context(
+                            analytics_tx,
+                            analytics_cost_calculator,
+                            analytics_kernel_session_id.clone(),
+                            sid_for_worker.clone(),
+                        )
                     } else {
                         executor
                     };
@@ -739,6 +759,7 @@ pub async fn approve_task_prd(
                         app_handle_for_worker.clone(),
                         sid_for_worker.clone(),
                         kernel_state_handle_for_worker.clone(),
+                        analytics_kernel_session_id.clone(),
                         mode,
                         provider_config,
                         permission_gate_for_story,
@@ -748,6 +769,7 @@ pub async fn approve_task_prd(
                         skills_block,
                         selected_skill_matches,
                         knowledge_tool_params,
+                        analytics_components.clone(),
                         Some(file_change_tracker),
                     );
 

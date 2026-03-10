@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use crate::services::analytics::send_message_tracked;
 use crate::services::llm::provider::LlmProvider;
 use crate::services::llm::types::{LlmRequestOptions, Message, MessageRole};
 
@@ -420,16 +421,16 @@ Output summary:\n{}\n",
         truncate_for_semantic_review(content, 6000)
     );
 
-    let response = provider
-        .send_message(
-            vec![Message::text(MessageRole::User, prompt)],
-            Some("Validate semantic quality only. Do not discuss tooling. Output strict JSON.".to_string()),
-            vec![],
-            LlmRequestOptions {
-                temperature_override: Some(0.1),
-                ..Default::default()
-            },
-        )
+    let response = send_message_tracked(
+        provider.as_ref(),
+        vec![Message::text(MessageRole::User, prompt)],
+        Some("Validate semantic quality only. Do not discuss tooling. Output strict JSON.".to_string()),
+        vec![],
+        LlmRequestOptions {
+            temperature_override: Some(0.1),
+            ..Default::default()
+        },
+    )
         .await;
 
     let Ok(response) = response else {

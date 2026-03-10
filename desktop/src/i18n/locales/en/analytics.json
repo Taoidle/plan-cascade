@@ -1,11 +1,11 @@
 {
   "title": "Usage Analytics",
-  "subtitle": "Track your API usage and costs",
+  "subtitle": "Track provider usage, execution scope, and cost attribution",
   "export": "Export",
   "retry": "Retry",
   "tabs": {
     "overview": "Overview",
-    "details": "Detailed Records"
+    "details": "Detailed Events"
   },
   "cards": {
     "totalCost": "Total Cost",
@@ -34,7 +34,7 @@
   },
   "charts": {
     "costOverTime": "Cost Over Time",
-    "tokenBreakdown": "Usage by Model",
+    "tokenBreakdown": "Usage Breakdown",
     "noData": "No data available for this period"
   },
   "tooltip": {
@@ -45,22 +45,40 @@
   "legend": {
     "cost": "Cost"
   },
+  "overview": {
+    "byWorkflow": "Workflow Overview",
+    "byPhase": "Phase Overview",
+    "byScope": "Scope Overview",
+    "noBreakdownData": "No usage available"
+  },
   "breakdown": {
     "byModel": "By Model",
     "byProject": "By Project",
+    "byWorkflow": "By Workflow",
+    "byPhase": "By Phase",
+    "byScope": "By Scope",
     "total": "Total",
     "noData": "No data available",
-    "noProjectData": "No project data available"
+    "noProjectData": "No project data available",
+    "noWorkflowData": "No workflow data available",
+    "noPhaseData": "No phase data available",
+    "noScopeData": "No scope data available"
   },
   "tables": {
     "topModels": "Top Models by Cost"
   },
   "table": {
-    "title": "Usage Records",
+    "title": "Usage Events",
     "timestamp": "Timestamp",
+    "mode": "Mode",
+    "phase": "Phase",
+    "scope": "Scope",
+    "stepStory": "Step/Story",
+    "agent": "Agent",
     "model": "Model",
     "provider": "Provider",
     "project": "Project",
+    "tokens": "Tokens",
     "inputTokens": "Input",
     "outputTokens": "Output",
     "thinkingTokens": "Thinking",
@@ -68,18 +86,56 @@
     "cost": "Cost",
     "costStatus": "Cost Status",
     "session": "Session",
-    "noRecords": "No usage records found",
+    "loading": "Loading usage events...",
+    "noRecords": "No usage events found",
     "showing": "Showing",
     "of": "of",
     "records": "records",
     "previous": "Previous",
     "next": "Next"
   },
+  "detail": {
+    "title": "Usage Event Detail",
+    "close": "Close",
+    "loading": "Loading event detail...",
+    "empty": "No event detail available",
+    "provider": "Provider",
+    "model": "Model",
+    "mode": "Mode",
+    "phase": "Phase",
+    "scope": "Scope",
+    "agent": "Agent",
+    "project": "Project",
+    "stepStory": "Step/Story",
+    "kernelSession": "Kernel Session",
+    "modeSession": "Mode Session",
+    "executionId": "Execution ID",
+    "parentExecutionId": "Parent Execution ID",
+    "callSite": "Call Site",
+    "attempt": "Attempt",
+    "requestSequence": "Request Sequence",
+    "inputTokens": "Input Tokens",
+    "outputTokens": "Output Tokens",
+    "thinkingTokens": "Thinking Tokens",
+    "cacheTokens": "Cache R/W",
+    "totalCost": "Total Cost",
+    "timestamp": "Timestamp",
+    "metadata": "Metadata",
+    "noMetadata": "No metadata recorded"
+  },
   "filters": {
     "provider": "Provider",
     "model": "Model",
     "project": "Project ID",
     "session": "Session ID",
+    "workflowAll": "All Workflows",
+    "scopeAll": "All Scopes",
+    "phase": "Phase",
+    "step": "Step ID",
+    "story": "Story ID",
+    "gate": "Gate ID",
+    "modeSession": "Mode Session ID",
+    "kernelSession": "Kernel Session ID",
     "costStatusAll": "All Cost Status",
     "costStatusExact": "Exact",
     "costStatusEstimated": "Estimated",
@@ -89,6 +145,46 @@
     "viewName": "View name",
     "saveView": "Save View",
     "savedViews": "Saved Views"
+  },
+  "labels": {
+    "unknown": "Unknown",
+    "none": "None",
+    "step": "Step",
+    "story": "Story",
+    "gate": "Gate",
+    "requests": "requests"
+  },
+  "workflow": {
+    "chat": "Chat",
+    "plan": "Plan",
+    "task": "Task"
+  },
+  "scope": {
+    "root_agent": "Root Agent",
+    "sub_agent": "Sub-agent",
+    "direct_llm": "Direct LLM",
+    "quality_gate": "Quality Gate"
+  },
+  "phase": {
+    "chat_turn": "Chat Turn",
+    "plan_strategy": "Plan Strategy",
+    "plan_clarification": "Plan Clarification",
+    "plan_generation": "Plan Generation",
+    "plan_validation": "Plan Validation",
+    "plan_execution": "Plan Execution",
+    "plan_retry": "Plan Retry",
+    "plan_exploration": "Project Exploration",
+    "plan_interview": "Spec Interview",
+    "task_strategy": "Task Strategy",
+    "task_exploration": "Task Exploration",
+    "task_requirements": "Requirements Analysis",
+    "task_architecture": "Architecture Review",
+    "task_prd": "Task PRD",
+    "task_prd_feedback": "PRD Feedback",
+    "task_story": "Task Story",
+    "task_ai_verify": "AI Verify",
+    "task_code_review": "Code Review",
+    "task_dod": "Definition of Done"
   },
   "pricing": {
     "title": "Pricing Rules",

@@ -98,6 +98,30 @@ pub async fn run_requirement_analysis(
         Ok(p) => p,
         Err(e) => return Ok(CommandResponse::err(e)),
     };
+    let kernel_session_id = state
+        .get_session_snapshot(&session_id)
+        .await
+        .and_then(|session| session.kernel_session_id);
+    let llm_provider = wrap_task_provider_with_tracking(
+        &app_handle,
+        app_state.inner(),
+        llm_provider,
+        build_task_analytics_attribution(
+            kernel_session_id,
+            &session_id,
+            "task_requirements",
+            crate::models::analytics::AnalyticsExecutionScope::DirectLlm,
+            format!("task:{}:requirements", session_id),
+            None,
+            Some("task_requirements".to_string()),
+            Some(format!("{} / {}", resolved_provider, resolved_model)),
+            None,
+            None,
+            Some(1),
+            "task_mode.requirement_analysis",
+        ),
+    )
+    .await;
 
     // Query domain knowledge for requirement analysis (only if user enabled sources)
     let project_path_str = project_path
@@ -353,6 +377,30 @@ pub async fn run_architecture_review(
         Ok(p) => p,
         Err(e) => return Ok(CommandResponse::err(e)),
     };
+    let kernel_session_id = state
+        .get_session_snapshot(&session_id)
+        .await
+        .and_then(|session| session.kernel_session_id);
+    let llm_provider = wrap_task_provider_with_tracking(
+        &app_handle,
+        app_state.inner(),
+        llm_provider,
+        build_task_analytics_attribution(
+            kernel_session_id,
+            &session_id,
+            "task_architecture",
+            crate::models::analytics::AnalyticsExecutionScope::DirectLlm,
+            format!("task:{}:architecture", session_id),
+            None,
+            Some("task_architecture".to_string()),
+            Some(format!("{} / {}", resolved_provider, resolved_model)),
+            None,
+            None,
+            Some(1),
+            "task_mode.architecture_review",
+        ),
+    )
+    .await;
 
     // Query domain knowledge for architecture review (only if user enabled sources)
     let project_path_str = project_path

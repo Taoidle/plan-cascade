@@ -1591,7 +1591,28 @@ pub async fn execute_standalone(
         if let Some(tx) = analytics_state.get_tracker_sender().await {
             orchestrator = orchestrator
                 .with_analytics_tracker(tx)
-                .with_analytics_cost_calculator(analytics_state.cost_calculator());
+                .with_analytics_cost_calculator(analytics_state.cost_calculator())
+                .with_analytics_attribution(crate::models::analytics::AnalyticsAttribution {
+                    project_id: None,
+                    kernel_session_id: kernel_session_id.clone(),
+                    mode_session_id: Some(event_session_id.clone()),
+                    workflow_mode: Some(crate::models::analytics::AnalyticsWorkflowMode::Chat),
+                    phase_id: Some("chat_turn".to_string()),
+                    execution_scope: Some(
+                        crate::models::analytics::AnalyticsExecutionScope::RootAgent,
+                    ),
+                    execution_id: Some(format!("chat:{}:root", event_session_id)),
+                    parent_execution_id: None,
+                    agent_role: Some("chat_root".to_string()),
+                    agent_name: None,
+                    step_id: None,
+                    story_id: None,
+                    gate_id: None,
+                    attempt: Some(1),
+                    request_sequence: Some(1),
+                    call_site: Some("standalone.execute".to_string()),
+                    metadata_json: None,
+                });
         }
     }
 
@@ -2161,7 +2182,28 @@ pub async fn execute_standalone_with_session(
         if let Some(atx) = analytics_state.get_tracker_sender().await {
             orchestrator = orchestrator
                 .with_analytics_tracker(atx)
-                .with_analytics_cost_calculator(analytics_state.cost_calculator());
+                .with_analytics_cost_calculator(analytics_state.cost_calculator())
+                .with_analytics_attribution(crate::models::analytics::AnalyticsAttribution {
+                    project_id: None,
+                    kernel_session_id: None,
+                    mode_session_id: Some(session_id.clone()),
+                    workflow_mode: Some(crate::models::analytics::AnalyticsWorkflowMode::Chat),
+                    phase_id: Some("chat_turn".to_string()),
+                    execution_scope: Some(
+                        crate::models::analytics::AnalyticsExecutionScope::RootAgent,
+                    ),
+                    execution_id: Some(format!("chat:{}:root", session_id)),
+                    parent_execution_id: None,
+                    agent_role: Some("chat_root".to_string()),
+                    agent_name: None,
+                    step_id: None,
+                    story_id: None,
+                    gate_id: None,
+                    attempt: Some(1),
+                    request_sequence: Some(1),
+                    call_site: Some("standalone.resume".to_string()),
+                    metadata_json: None,
+                });
         }
     }
 

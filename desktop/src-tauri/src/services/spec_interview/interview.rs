@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use tracing::debug;
 use uuid::Uuid;
 
+use crate::services::analytics::send_message_tracked;
 use crate::services::llm::provider::LlmProvider;
 use crate::services::llm::types::{LlmRequestOptions, Message};
 use crate::services::persona::prompt_builder;
@@ -1925,8 +1926,7 @@ Otherwise, respond with ONLY the JSON object. No formatting, no preamble, no mar
             "BA: generating next question via LLM"
         );
 
-        let response = provider
-            .send_message(messages, Some(system_prompt), vec![], options)
+        let response = send_message_tracked(provider.as_ref(), messages, Some(system_prompt), vec![], options)
             .await
             .map_err(|e| AppError::command(format!("BA LLM call failed: {}", e)))?;
 
@@ -2100,10 +2100,7 @@ Otherwise, respond with ONLY the JSON object. No formatting, no preamble, no mar
             ..Default::default()
         };
 
-        match provider
-            .send_message(messages, Some(system), vec![], options)
-            .await
-        {
+        match send_message_tracked(provider.as_ref(), messages, Some(system), vec![], options).await {
             Ok(response) => {
                 let content = response
                     .content
@@ -2184,13 +2181,13 @@ Otherwise, respond with ONLY the JSON object. No formatting, no preamble, no mar
             "BA: extracting structured spec_data from conversation"
         );
 
-        let response = provider
-            .send_message(
-                vec![Message::user(&formatter_user)],
-                Some(formatter_system.clone()),
-                vec![],
-                options.clone(),
-            )
+        let response = send_message_tracked(
+            provider.as_ref(),
+            vec![Message::user(&formatter_user)],
+            Some(formatter_system.clone()),
+            vec![],
+            options.clone(),
+        )
             .await
             .map_err(|e| AppError::command(format!("Spec extraction failed: {}", e)))?;
 
@@ -2217,17 +2214,17 @@ Otherwise, respond with ONLY the JSON object. No formatting, no preamble, no mar
                     first_error
                 );
 
-                let retry_response = provider
-                    .send_message(
-                        vec![
-                            Message::user(&formatter_user),
-                            Message::assistant(response_text),
-                            Message::user(&repair_msg),
-                        ],
-                        Some(formatter_system),
-                        vec![],
-                        options,
-                    )
+                let retry_response = send_message_tracked(
+                    provider.as_ref(),
+                    vec![
+                        Message::user(&formatter_user),
+                        Message::assistant(response_text),
+                        Message::user(&repair_msg),
+                    ],
+                    Some(formatter_system),
+                    vec![],
+                    options,
+                )
                     .await
                     .map_err(|e| {
                         AppError::command(format!("Spec extraction retry failed: {}", e))

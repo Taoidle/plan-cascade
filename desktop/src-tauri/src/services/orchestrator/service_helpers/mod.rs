@@ -138,11 +138,9 @@ fn track_analytics(
     provider_name: &str,
     model_name: &str,
     usage: &UsageStats,
-    session_id: Option<&str>,
-    project_id: Option<&str>,
     cost_calculator: &Option<Arc<crate::services::analytics::CostCalculator>>,
+    attribution: Option<&crate::models::analytics::AnalyticsAttribution>,
     iteration: u32,
-    is_sub_agent: bool,
 ) {
     let atx = match analytics_tx {
         Some(tx) => tx,
@@ -161,33 +159,54 @@ fn track_analytics(
         })
         .unwrap_or(0);
 
-    let mut record = crate::models::analytics::UsageRecord::new(
-        model_name,
-        provider_name,
-        usage.input_tokens as i64,
-        usage.output_tokens as i64,
-    )
-    .with_cost(cost)
-    .with_extended_tokens(
-        usage.thinking_tokens.unwrap_or(0) as i64,
-        usage.cache_read_tokens.unwrap_or(0) as i64,
-        usage.cache_creation_tokens.unwrap_or(0) as i64,
-    );
-
-    if let Some(sid) = session_id {
-        record = record.with_session(sid.to_string());
-    }
-    if let Some(pid) = project_id {
-        record = record.with_project(pid.to_string());
+    let mut metadata = attribution
+        .and_then(|value| value.metadata_json.clone())
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if let Some(map) = metadata.as_object_mut() {
+        map.insert("iteration".to_string(), serde_json::json!(iteration));
     }
 
-    let metadata = serde_json::json!({
-        "iteration": iteration,
-        "is_sub_agent": is_sub_agent,
-    });
-    record.metadata = Some(metadata.to_string());
+    let mut event = crate::models::analytics::AnalyticsUsageEvent {
+        event_id: uuid::Uuid::new_v4().to_string(),
+        timestamp_utc: chrono::Utc::now().timestamp(),
+        provider: provider_name.to_string(),
+        model: model_name.to_string(),
+        input_tokens: usage.input_tokens as i64,
+        output_tokens: usage.output_tokens as i64,
+        thinking_tokens: usage.thinking_tokens.unwrap_or(0) as i64,
+        cache_read_tokens: usage.cache_read_tokens.unwrap_or(0) as i64,
+        cache_write_tokens: usage.cache_creation_tokens.unwrap_or(0) as i64,
+        cost_total: cost,
+        cost_status: if cost > 0 {
+            crate::models::analytics::CostStatus::Estimated
+        } else {
+            crate::models::analytics::CostStatus::Missing
+        },
+        project_id: attribution.and_then(|value| value.project_id.clone()),
+        kernel_session_id: attribution.and_then(|value| value.kernel_session_id.clone()),
+        mode_session_id: attribution.and_then(|value| value.mode_session_id.clone()),
+        workflow_mode: attribution.and_then(|value| value.workflow_mode.clone()),
+        phase_id: attribution.and_then(|value| value.phase_id.clone()),
+        execution_scope: attribution.and_then(|value| value.execution_scope.clone()),
+        execution_id: attribution.and_then(|value| value.execution_id.clone()),
+        parent_execution_id: attribution.and_then(|value| value.parent_execution_id.clone()),
+        agent_role: attribution.and_then(|value| value.agent_role.clone()),
+        agent_name: attribution.and_then(|value| value.agent_name.clone()),
+        step_id: attribution.and_then(|value| value.step_id.clone()),
+        story_id: attribution.and_then(|value| value.story_id.clone()),
+        gate_id: attribution.and_then(|value| value.gate_id.clone()),
+        attempt: attribution.and_then(|value| value.attempt),
+        request_sequence: Some(iteration as i64),
+        call_site: attribution.and_then(|value| value.call_site.clone()),
+        metadata_json: Some(metadata.to_string()),
+    };
 
-    let _ = atx.try_send(crate::services::analytics::TrackerMessage::Track(record));
+    if event.request_sequence.is_none() {
+        event.request_sequence = Some(iteration as i64);
+    }
+
+    let _ = atx.try_send(crate::services::analytics::TrackerMessage::TrackEvent(event));
 }
 
 fn merge_usage(total: &mut UsageStats, delta: &UsageStats) {

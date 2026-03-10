@@ -44,11 +44,15 @@ let mockAnalyticsState = {
   filter: {},
   records: [],
   totalRecords: 0,
+  selectedEventDetail: null,
   pricingRules: [],
+  eventDetailLoading: false,
   initialize: mockInitialize,
   fetchDashboardSummary: mockFetchDashboardSummary,
   fetchPricing: mockFetchPricing,
   fetchRecords: vi.fn().mockResolvedValue(undefined),
+  fetchEventDetail: vi.fn().mockResolvedValue(null),
+  clearEventDetail: vi.fn(),
   setFilter: vi.fn(),
   clearError: mockClearError,
   periodPreset: 'last30days' as string,
@@ -207,11 +211,15 @@ describe('Dashboard', () => {
       filter: {},
       records: [],
       totalRecords: 0,
+      selectedEventDetail: null,
       pricingRules: [],
+      eventDetailLoading: false,
       initialize: mockInitialize,
       fetchDashboardSummary: mockFetchDashboardSummary,
       fetchPricing: mockFetchPricing,
       fetchRecords: vi.fn().mockResolvedValue(undefined),
+      fetchEventDetail: vi.fn().mockResolvedValue(null),
+      clearEventDetail: vi.fn(),
       setFilter: vi.fn(),
       clearError: mockClearError,
       periodPreset: 'last30days',
@@ -233,7 +241,7 @@ describe('Dashboard', () => {
     render(<Dashboard />);
 
     expect(screen.getByText('Usage Analytics')).toBeInTheDocument();
-    expect(screen.getByText('Track your API usage and costs')).toBeInTheDocument();
+    expect(screen.getByText('Track provider usage, execution scope, and cost attribution')).toBeInTheDocument();
   });
 
   it('shows loading skeleton when loading and no summary', () => {

@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tracing::debug;
 
 use crate::commands::task_mode::{ConversationTurnInput, TaskPrd, TaskStory};
+use crate::services::analytics::send_message_tracked;
 use crate::services::llm::provider::LlmProvider;
 use crate::services::llm::types::{LlmRequestOptions, Message};
 use crate::services::persona::{PersonaRegistry, PersonaRole};
@@ -391,13 +392,13 @@ pub async fn generate_prd_with_llm(
     messages.push(Message::user(&user_message));
 
     // First attempt
-    let response = provider
-        .send_message(
-            messages.clone(),
-            Some(system_prompt.clone()),
-            vec![], // No tools needed for PRD generation
-            LlmRequestOptions::default(),
-        )
+    let response = send_message_tracked(
+        provider.as_ref(),
+        messages.clone(),
+        Some(system_prompt.clone()),
+        vec![], // No tools needed for PRD generation
+        LlmRequestOptions::default(),
+    )
         .await
         .map_err(|e| format!("LLM request failed: {}", e))?;
 
@@ -426,13 +427,13 @@ pub async fn generate_prd_with_llm(
             retry_messages.push(Message::assistant(&response_text));
             retry_messages.push(Message::user(&repair_message));
 
-            let retry_response = provider
-                .send_message(
-                    retry_messages,
-                    Some(system_prompt),
-                    vec![],
-                    LlmRequestOptions::default(),
-                )
+            let retry_response = send_message_tracked(
+                provider.as_ref(),
+                retry_messages,
+                Some(system_prompt),
+                vec![],
+                LlmRequestOptions::default(),
+            )
                 .await
                 .map_err(|e| format!("LLM retry request failed: {}", e))?;
 
@@ -550,9 +551,14 @@ async fn compact_conversation_history(
     );
 
     let summary_messages = vec![Message::user(&summary_prompt)];
-    match provider
-        .send_message(summary_messages, None, vec![], LlmRequestOptions::default())
-        .await
+    match send_message_tracked(
+        provider.as_ref(),
+        summary_messages,
+        None,
+        vec![],
+        LlmRequestOptions::default(),
+    )
+    .await
     {
         Ok(response) => {
             let summary = response

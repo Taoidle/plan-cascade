@@ -1,20 +1,18 @@
 /**
  * Analytics Store
  *
- * Manages usage analytics state for the dashboard.
+ * Manages structured usage analytics state for the dashboard.
  */
 
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 
-// Shared command envelope
 export interface CommandResponse<T> {
   success: boolean;
   data: T | null;
   error: string | null;
 }
 
-// Core usage stats
 export interface UsageStats {
   total_input_tokens: number;
   total_output_tokens: number;
@@ -42,7 +40,17 @@ export interface TimeSeriesPoint {
   stats: UsageStats;
 }
 
-export interface DashboardSummary {
+export interface AnalyticsBreakdownRow {
+  key: string;
+  label: string;
+  stats: UsageStats;
+}
+
+export type CostStatus = 'exact' | 'estimated' | 'missing';
+export type AnalyticsWorkflowMode = 'chat' | 'plan' | 'task';
+export type AnalyticsExecutionScope = 'root_agent' | 'sub_agent' | 'direct_llm' | 'quality_gate';
+
+export interface AnalyticsSummary {
   current_period: UsageStats;
   previous_period: UsageStats;
   cost_change_percent: number;
@@ -50,40 +58,66 @@ export interface DashboardSummary {
   requests_change_percent: number;
   by_model: ModelUsage[];
   by_project: ProjectUsage[];
+  by_workflow: AnalyticsBreakdownRow[];
+  by_phase: AnalyticsBreakdownRow[];
+  by_scope: AnalyticsBreakdownRow[];
   time_series: TimeSeriesPoint[];
 }
 
-export type CostStatus = 'exact' | 'estimated' | 'missing';
+export type DashboardSummary = AnalyticsSummary;
 
-export interface DashboardFilterV2 {
+export interface AnalyticsFilter {
   start_timestamp?: number;
   end_timestamp?: number;
-  model_name?: string;
   provider?: string;
-  session_id?: string;
+  model?: string;
   project_id?: string;
+  kernel_session_id?: string;
+  mode_session_id?: string;
+  workflow_mode?: AnalyticsWorkflowMode;
+  phase_id?: string;
+  execution_scope?: AnalyticsExecutionScope;
+  step_id?: string;
+  story_id?: string;
+  gate_id?: string;
   cost_status?: CostStatus;
 }
 
-export interface UsageRecord {
+export type DashboardFilterV2 = AnalyticsFilter;
+
+export interface AnalyticsUsageEvent {
   event_id: string;
-  session_id: string | null;
-  project_id: string | null;
-  model_name: string;
+  timestamp_utc: number;
   provider: string;
+  model: string;
   input_tokens: number;
   output_tokens: number;
   thinking_tokens: number;
   cache_read_tokens: number;
-  cache_creation_tokens: number;
-  cost_microdollars: number;
-  timestamp: number;
-  metadata: string | null;
-  pricing_rule_id: string | null;
-  currency: string;
+  cache_write_tokens: number;
+  cost_total: number;
   cost_status: CostStatus;
-  cost_breakdown_json: string | null;
+  project_id: string | null;
+  kernel_session_id: string | null;
+  mode_session_id: string | null;
+  workflow_mode: AnalyticsWorkflowMode | null;
+  phase_id: string | null;
+  execution_scope: AnalyticsExecutionScope | null;
+  execution_id: string | null;
+  parent_execution_id: string | null;
+  agent_role: string | null;
+  agent_name: string | null;
+  step_id: string | null;
+  story_id: string | null;
+  gate_id: string | null;
+  attempt: number | null;
+  request_sequence: number | null;
+  call_site: string | null;
+  metadata_json: string | null;
 }
+
+export type UsageRecord = AnalyticsUsageEvent;
+export type AnalyticsEventDetail = AnalyticsUsageEvent;
 
 export interface PricingRule {
   id: string;
@@ -131,52 +165,48 @@ export interface RecomputeCostsResult {
   missing_records: number;
 }
 
-// Period presets
 export type PeriodPreset = 'last7days' | 'last30days' | 'last90days' | 'custom';
+export type AnalyticsBreakdownDimension = 'model' | 'project' | 'workflow' | 'phase' | 'scope';
 
 interface AnalyticsState {
-  // Data
   summary: DashboardSummary | null;
-  records: UsageRecord[];
+  records: AnalyticsUsageEvent[];
   totalRecords: number;
+  selectedEventDetail: AnalyticsEventDetail | null;
   pricingRules: PricingRule[];
 
-  // Loading states (split)
   summaryLoading: boolean;
   recordsLoading: boolean;
   pricingLoading: boolean;
   exportLoading: boolean;
+  eventDetailLoading: boolean;
 
-  // Backward-compatible loading fields
   isLoading: boolean;
   isExporting: boolean;
 
-  // Filter state
-  filter: DashboardFilterV2;
+  filter: AnalyticsFilter;
   period: AggregationPeriod;
   periodPreset: PeriodPreset;
 
-  // Error
   error: string | null;
 
-  // Actions
   initialize: () => Promise<void>;
   fetchDashboardSummary: () => Promise<void>;
   fetchRecords: (limit?: number, offset?: number) => Promise<void>;
   fetchPricing: () => Promise<void>;
+  fetchEventDetail: (eventId: string) => Promise<AnalyticsEventDetail | null>;
+  clearEventDetail: () => void;
 
-  setFilter: (filter: DashboardFilterV2) => void;
+  setFilter: (filter: AnalyticsFilter) => void;
   setPeriod: (period: AggregationPeriod) => void;
   setPeriodPreset: (preset: PeriodPreset) => void;
   setDateRange: (start: Date, end: Date) => void;
 
-  // Export (v1 compatibility + v2 streaming)
   exportData: (format: ExportFormat, includeSummary: boolean) => Promise<ExportResult | null>;
   exportByModel: (format: ExportFormat) => Promise<string | null>;
   exportByProject: (format: ExportFormat) => Promise<string | null>;
   exportStreamingJob: (format: ExportFormat, includeSummary: boolean, filePath?: string) => Promise<ExportJob | null>;
 
-  // Pricing rule management (v2)
   upsertPricingRule: (rule: PricingRule) => Promise<PricingRule | null>;
   deletePricingRule: (ruleId: string) => Promise<boolean>;
   recomputeCosts: () => Promise<RecomputeCostsResult | null>;
@@ -188,8 +218,7 @@ function refreshCompositeLoading(state: Pick<AnalyticsState, 'summaryLoading' | 
   return state.summaryLoading || state.recordsLoading || state.pricingLoading;
 }
 
-// Helper to convert preset to filter
-function presetToFilter(preset: PeriodPreset): DashboardFilterV2 {
+function presetToFilter(preset: PeriodPreset): AnalyticsFilter {
   const now = Math.floor(Date.now() / 1000);
   const day = 24 * 60 * 60;
 
@@ -206,7 +235,6 @@ function presetToFilter(preset: PeriodPreset): DashboardFilterV2 {
   }
 }
 
-// Helper to format cost
 export function formatCost(microdollars: number): string {
   const dollars = microdollars / 1_000_000;
   if (dollars < 0.01) {
@@ -220,7 +248,6 @@ export function formatCost(microdollars: number): string {
   }
 }
 
-// Helper to format tokens
 export function formatTokens(tokens: number): string {
   if (tokens < 1000) {
     return tokens.toString();
@@ -231,7 +258,6 @@ export function formatTokens(tokens: number): string {
   }
 }
 
-// Helper to format change percentage
 export function formatChange(percent: number): string {
   const sign = percent >= 0 ? '+' : '';
   return `${sign}${percent.toFixed(1)}%`;
@@ -251,17 +277,30 @@ function analyticsFilename(prefix: string, format: ExportFormat): string {
   return `${prefix}_${stamp}.${format}`;
 }
 
+function toLegacyExportFilter(filter: AnalyticsFilter) {
+  return {
+    start_timestamp: filter.start_timestamp,
+    end_timestamp: filter.end_timestamp,
+    model_name: filter.model,
+    provider: filter.provider,
+    session_id: filter.mode_session_id ?? filter.kernel_session_id,
+    project_id: filter.project_id,
+    cost_status: filter.cost_status,
+  };
+}
+
 export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
-  // Initial state
   summary: null,
   records: [],
   totalRecords: 0,
+  selectedEventDetail: null,
   pricingRules: [],
 
   summaryLoading: false,
   recordsLoading: false,
   pricingLoading: false,
   exportLoading: false,
+  eventDetailLoading: false,
 
   isLoading: false,
   isExporting: false,
@@ -272,7 +311,6 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
 
   error: null,
 
-  // Initialize analytics
   initialize: async () => {
     try {
       const response = await invoke<CommandResponse<boolean>>('init_analytics');
@@ -284,7 +322,6 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
     }
   },
 
-  // Fetch dashboard summary (v2)
   fetchDashboardSummary: async () => {
     set((state) => ({
       summaryLoading: true,
@@ -293,7 +330,7 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
     }));
     try {
       const { filter, period } = get();
-      const response = await invoke<CommandResponse<DashboardSummary>>('get_dashboard_summary_v2', {
+      const response = await invoke<CommandResponse<DashboardSummary>>('get_analytics_summary', {
         filter,
         period,
       });
@@ -320,7 +357,6 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
     }
   },
 
-  // Fetch usage records + total count (v2)
   fetchRecords: async (limit = 100, offset = 0) => {
     set((state) => ({
       recordsLoading: true,
@@ -331,14 +367,12 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
       const { filter } = get();
 
       const [recordsResp, countResp] = await Promise.all([
-        invoke<CommandResponse<UsageRecord[]>>('list_usage_records_v2', {
+        invoke<CommandResponse<AnalyticsUsageEvent[]>>('list_usage_events', {
           filter,
           limit,
           offset,
         }),
-        invoke<CommandResponse<number>>('count_usage_records_v2', {
-          filter,
-        }),
+        invoke<CommandResponse<number>>('count_usage_events', { filter }),
       ]);
 
       if (recordsResp.success && recordsResp.data) {
@@ -352,7 +386,7 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
         }));
       } else {
         set((state) => ({
-          error: recordsResp.error || 'Failed to fetch records',
+          error: recordsResp.error || 'Failed to fetch usage events',
           recordsLoading: false,
           isLoading: refreshCompositeLoading({ ...state, recordsLoading: false }),
         }));
@@ -366,7 +400,6 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
     }
   },
 
-  // Fetch pricing rules (v2)
   fetchPricing: async () => {
     set((state) => ({
       pricingLoading: true,
@@ -375,9 +408,8 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
     try {
       const response = await invoke<CommandResponse<PricingRule[]>>('list_pricing_rules');
       if (response.success && response.data) {
-        const rules = response.data ?? [];
         set((state) => ({
-          pricingRules: rules,
+          pricingRules: response.data ?? [],
           pricingLoading: false,
           isLoading: refreshCompositeLoading({ ...state, pricingLoading: false }),
         }));
@@ -397,20 +429,30 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
     }
   },
 
-  setFilter: (filter) => {
-    set({ filter, periodPreset: 'custom' });
+  fetchEventDetail: async (eventId) => {
+    set({ eventDetailLoading: true, error: null });
+    try {
+      const response = await invoke<CommandResponse<AnalyticsEventDetail | null>>('get_usage_event_detail', {
+        eventId,
+      });
+      if (response.success) {
+        set({ selectedEventDetail: response.data ?? null, eventDetailLoading: false });
+        return response.data ?? null;
+      }
+      set({ error: response.error || 'Failed to fetch event detail', eventDetailLoading: false });
+      return null;
+    } catch (error) {
+      set({ error: String(error), eventDetailLoading: false });
+      return null;
+    }
   },
 
-  setPeriod: (period) => {
-    set({ period });
-  },
+  clearEventDetail: () => set({ selectedEventDetail: null, eventDetailLoading: false }),
 
-  setPeriodPreset: (preset) => {
-    const filter = presetToFilter(preset);
-    set({ periodPreset: preset, filter });
-  },
+  setFilter: (filter) => set({ filter, periodPreset: 'custom' }),
+  setPeriod: (period) => set({ period }),
+  setPeriodPreset: (preset) => set({ periodPreset: preset, filter: presetToFilter(preset) }),
 
-  // Inclusive end date (UI chooses day, backend uses end-exclusive timestamp)
   setDateRange: (start, end) => {
     const startBoundary = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 0, 0, 0, 0);
     const endExclusive = new Date(end.getFullYear(), end.getMonth(), end.getDate() + 1, 0, 0, 0, 0);
@@ -424,17 +466,16 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
     });
   },
 
-  // Compatibility export API now built on v2 data (no v1 backend dependency)
   exportData: async (format, includeSummary) => {
     set({ exportLoading: true, isExporting: true });
     try {
       const { filter, period } = get();
       const pageSize = 2000;
       let offset = 0;
-      const rows: UsageRecord[] = [];
+      const rows: AnalyticsUsageEvent[] = [];
 
       while (true) {
-        const resp = await invoke<CommandResponse<UsageRecord[]>>('list_usage_records_v2', {
+        const resp = await invoke<CommandResponse<AnalyticsUsageEvent[]>>('list_usage_events', {
           filter,
           limit: pageSize,
           offset,
@@ -452,7 +493,7 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
 
       let summary: UsageStats | null = null;
       if (includeSummary) {
-        const summaryResp = await invoke<CommandResponse<DashboardSummary>>('get_dashboard_summary_v2', {
+        const summaryResp = await invoke<CommandResponse<DashboardSummary>>('get_analytics_summary', {
           filter,
           period,
         });
@@ -475,24 +516,36 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
         );
       } else {
         const header =
-          'event_id,session_id,project_id,provider,model,input_tokens,output_tokens,thinking_tokens,cache_read_tokens,cache_write_tokens,cost_microdollars,currency,cost_status,timestamp,metadata_json';
+          'event_id,timestamp_utc,provider,model,workflow_mode,phase_id,execution_scope,project_id,kernel_session_id,mode_session_id,step_id,story_id,gate_id,agent_name,attempt,request_sequence,input_tokens,output_tokens,thinking_tokens,cache_read_tokens,cache_write_tokens,cost_total,cost_status,execution_id,parent_execution_id,call_site,metadata_json';
         const lines = rows.map((r) =>
           [
             csvEscape(r.event_id),
-            csvEscape(r.session_id || ''),
-            csvEscape(r.project_id || ''),
+            r.timestamp_utc,
             csvEscape(r.provider),
-            csvEscape(r.model_name),
+            csvEscape(r.model),
+            csvEscape(r.workflow_mode || ''),
+            csvEscape(r.phase_id || ''),
+            csvEscape(r.execution_scope || ''),
+            csvEscape(r.project_id || ''),
+            csvEscape(r.kernel_session_id || ''),
+            csvEscape(r.mode_session_id || ''),
+            csvEscape(r.step_id || ''),
+            csvEscape(r.story_id || ''),
+            csvEscape(r.gate_id || ''),
+            csvEscape(r.agent_name || ''),
+            r.attempt ?? '',
+            r.request_sequence ?? '',
             r.input_tokens,
             r.output_tokens,
             r.thinking_tokens,
             r.cache_read_tokens,
-            r.cache_creation_tokens,
-            r.cost_microdollars,
-            csvEscape(r.currency),
-            r.cost_status,
-            r.timestamp,
-            csvEscape(r.metadata || ''),
+            r.cache_write_tokens,
+            r.cost_total,
+            csvEscape(r.cost_status),
+            csvEscape(r.execution_id || ''),
+            csvEscape(r.parent_execution_id || ''),
+            csvEscape(r.call_site || ''),
+            csvEscape(r.metadata_json || ''),
           ].join(','),
         );
         data = [header, ...lines].join('\n');
@@ -506,7 +559,7 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
         data,
         record_count: rows.length,
         summary,
-        suggested_filename: analyticsFilename('analytics_records', format),
+        suggested_filename: analyticsFilename('analytics_usage_events', format),
       };
     } catch (error) {
       set({ error: String(error), exportLoading: false, isExporting: false });
@@ -518,18 +571,13 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
     set({ exportLoading: true, isExporting: true });
     try {
       const { filter, period } = get();
-      const response = await invoke<CommandResponse<DashboardSummary>>('get_dashboard_summary_v2', {
-        filter,
-        period,
-      });
-
+      const response = await invoke<CommandResponse<DashboardSummary>>('get_analytics_summary', { filter, period });
       set({ exportLoading: false, isExporting: false });
       if (response.success && response.data) {
         const rows = response.data.by_model;
         if (format === 'json') {
           return JSON.stringify(rows, null, 2);
         }
-
         const header =
           'model_name,provider,total_input_tokens,total_output_tokens,total_cost_microdollars,request_count,avg_tokens_per_request,avg_cost_per_request';
         const lines = rows.map((r) =>
@@ -558,18 +606,13 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
     set({ exportLoading: true, isExporting: true });
     try {
       const { filter, period } = get();
-      const response = await invoke<CommandResponse<DashboardSummary>>('get_dashboard_summary_v2', {
-        filter,
-        period,
-      });
-
+      const response = await invoke<CommandResponse<DashboardSummary>>('get_analytics_summary', { filter, period });
       set({ exportLoading: false, isExporting: false });
       if (response.success && response.data) {
         const rows = response.data.by_project;
         if (format === 'json') {
           return JSON.stringify(rows, null, 2);
         }
-
         const header =
           'project_id,project_name,total_input_tokens,total_output_tokens,total_cost_microdollars,request_count,avg_tokens_per_request,avg_cost_per_request';
         const lines = rows.map((r) =>
@@ -594,21 +637,19 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
     }
   },
 
-  // v2 streaming export job (writes local file on backend)
   exportStreamingJob: async (format, includeSummary, filePath) => {
     set({ exportLoading: true, isExporting: true });
     try {
       const { filter } = get();
       const response = await invoke<CommandResponse<ExportJob>>('export_usage_streaming_job', {
         request: {
-          filter,
+          filter: toLegacyExportFilter(filter),
           format,
           include_summary: includeSummary,
           file_path: filePath,
         },
       });
       set({ exportLoading: false, isExporting: false });
-
       if (response.success && response.data) {
         return response.data;
       }
@@ -655,7 +696,7 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
   recomputeCosts: async () => {
     try {
       const response = await invoke<CommandResponse<RecomputeCostsResult>>('recompute_costs', {
-        request: { filter: get().filter },
+        request: { filter: toLegacyExportFilter(get().filter) },
       });
       if (response.success && response.data) {
         await Promise.all([get().fetchDashboardSummary(), get().fetchRecords(), get().fetchPricing()]);
@@ -669,9 +710,7 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
     }
   },
 
-  clearError: () => {
-    set({ error: null });
-  },
+  clearError: () => set({ error: null }),
 }));
 
 export default useAnalyticsStore;

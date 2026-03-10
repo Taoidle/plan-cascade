@@ -265,6 +265,50 @@ fn map_clarification_input_type(
     }
 }
 
+pub(crate) async fn get_analytics_tracker_components(
+    app_handle: &tauri::AppHandle,
+    app_state: &AppState,
+) -> Option<(
+    tokio::sync::mpsc::Sender<crate::services::analytics::TrackerMessage>,
+    Arc<crate::services::analytics::CostCalculator>,
+)> {
+    let analytics_state = app_handle.state::<crate::commands::analytics::AnalyticsState>();
+    let _ = analytics_state.initialize(app_state).await;
+    analytics_state.get_tracker_components().await
+}
+
+pub(crate) fn build_plan_analytics_attribution(
+    session: &PlanModeSession,
+    phase_id: &str,
+    execution_scope: crate::models::analytics::AnalyticsExecutionScope,
+    execution_id: String,
+    parent_execution_id: Option<String>,
+    agent_name: Option<String>,
+    step_id: Option<String>,
+    attempt: Option<i64>,
+    call_site: &str,
+) -> crate::models::analytics::AnalyticsAttribution {
+    crate::models::analytics::AnalyticsAttribution {
+        project_id: None,
+        kernel_session_id: session.kernel_session_id.clone(),
+        mode_session_id: Some(session.session_id.clone()),
+        workflow_mode: Some(crate::models::analytics::AnalyticsWorkflowMode::Plan),
+        phase_id: Some(phase_id.to_string()),
+        execution_scope: Some(execution_scope),
+        execution_id: Some(execution_id),
+        parent_execution_id,
+        agent_role: Some("plan_agent".to_string()),
+        agent_name,
+        step_id,
+        story_id: None,
+        gate_id: None,
+        attempt,
+        request_sequence: Some(1),
+        call_site: Some(call_site.to_string()),
+        metadata_json: None,
+    }
+}
+
 fn map_pending_clarification(
     question: Option<&crate::services::plan_mode::types::ClarificationQuestion>,
 ) -> Option<PlanClarificationSnapshot> {

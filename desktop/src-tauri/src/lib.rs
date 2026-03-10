@@ -48,6 +48,7 @@ pub use commands::{
     connect_enabled_mcp_servers,
     // MCP commands
     connect_mcp_server,
+    count_usage_events,
     count_usage_records_v2,
     create_agent,
     // Agent Composer commands
@@ -109,6 +110,7 @@ pub use commands::{
     get_checkpoint_diff,
     get_claude_md_metadata,
     get_connected_mcp_server_tools,
+    get_analytics_summary,
     get_dashboard_summary_v2,
     get_default_gates_for_type,
     get_design_doc,
@@ -148,6 +150,8 @@ pub use commands::{
     get_timeline,
     get_trigger_log,
     get_usage_stats,
+    get_usage_breakdown,
+    get_usage_event_detail,
     get_version,
     get_webhook_deliveries,
     get_webhook_health,
@@ -252,6 +256,7 @@ pub use commands::{
     list_sessions,
     list_skills,
     list_standalone_sessions,
+    list_usage_events,
     list_usage_records_v2,
     // Webhook commands
     list_webhook_channels,

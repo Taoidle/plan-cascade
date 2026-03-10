@@ -213,6 +213,30 @@ pub async fn generate_task_prd(
                     return Ok(CommandResponse::err(e));
                 }
             };
+            let kernel_session_id = state
+                .get_session_snapshot(&session_id)
+                .await
+                .and_then(|session| session.kernel_session_id);
+            let llm_provider = wrap_task_provider_with_tracking(
+                &app_handle,
+                app_state.inner(),
+                llm_provider,
+                build_task_analytics_attribution(
+                    kernel_session_id,
+                    &session_id,
+                    "task_prd",
+                    crate::models::analytics::AnalyticsExecutionScope::DirectLlm,
+                    format!("task:{}:prd", session_id),
+                    None,
+                    Some("task_prd".to_string()),
+                    Some(format!("{} / {}", resolved_provider, resolved_model)),
+                    None,
+                    None,
+                    Some(1),
+                    "task_mode.prd_generation",
+                ),
+            )
+            .await;
 
             // Root session context is resolved from kernel when the frontend omits history.
             let root_handoff = if conversation_history
@@ -917,6 +941,30 @@ pub async fn apply_task_prd_feedback(
                 Ok(provider) => provider,
                 Err(error) => return CommandResponse::err(error),
             };
+            let kernel_session_id = state
+                .get_session_snapshot(&session_id)
+                .await
+                .and_then(|session| session.kernel_session_id);
+            let llm_provider = wrap_task_provider_with_tracking(
+                &app_handle,
+                app_state.inner(),
+                llm_provider,
+                build_task_analytics_attribution(
+                    kernel_session_id,
+                    &session_id,
+                    "task_prd_feedback",
+                    crate::models::analytics::AnalyticsExecutionScope::DirectLlm,
+                    format!("task:{}:prd_feedback", session_id),
+                    None,
+                    Some("task_prd_feedback".to_string()),
+                    Some(format!("{} / {}", resolved_provider, resolved_model)),
+                    None,
+                    None,
+                    Some(1),
+                    "task_mode.prd_feedback",
+                ),
+            )
+            .await;
 
             let project_path_str = project_path
                 .as_deref()
@@ -1451,6 +1499,35 @@ pub async fn explore_project(
                 let (search_provider, search_api_key) = resolve_search_provider_for_tools();
                 let mut coordinator = crate::services::orchestrator::OrchestratorService::new(config)
                     .with_search_provider(&search_provider, search_api_key);
+                if let Some((analytics_tx, analytics_cost_calculator)) =
+                    get_task_analytics_tracker_components(&app_handle, app_state.inner()).await
+                {
+                    coordinator = coordinator
+                        .with_analytics_tracker(analytics_tx)
+                        .with_analytics_cost_calculator(analytics_cost_calculator)
+                        .with_analytics_attribution(build_task_analytics_attribution(
+                            kernel_state
+                                .inner()
+                                .linked_kernel_sessions_for_mode_session(
+                                    WorkflowMode::Task,
+                                    &session_id,
+                                )
+                                .await
+                                .into_iter()
+                                .next(),
+                            &session_id,
+                            "task_exploration",
+                            crate::models::analytics::AnalyticsExecutionScope::RootAgent,
+                            format!("task:{}:exploration", session_id),
+                            None,
+                            Some("task_exploration".to_string()),
+                            Some(format!("{} / {}", resolved_provider, resolved_model)),
+                            None,
+                            None,
+                            Some(1),
+                            "task_mode.exploration",
+                        ));
+                }
                 let tracker_session_id = kernel_state
                     .inner()
                     .linked_kernel_sessions_for_mode_session(WorkflowMode::Task, &session_id)

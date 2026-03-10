@@ -17,6 +17,7 @@ import { ExportDialog } from './ExportDialog';
 import { UsageTable } from './UsageTable';
 import { PricingRulesPanel } from './PricingRulesPanel';
 import AnalyticsSkeleton from './AnalyticsSkeleton';
+import { formatCost, formatTokens, type AnalyticsBreakdownRow } from '../../store/analytics';
 
 export function Dashboard() {
   const { t } = useTranslation('analytics');
@@ -62,7 +63,7 @@ export function Dashboard() {
     setFilter({
       ...filter,
       provider,
-      model_name: modelName,
+      model: modelName,
     });
     setActiveTab('details');
   };
@@ -81,7 +82,7 @@ export function Dashboard() {
         <div>
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{t('title', 'Usage Analytics')}</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            {t('subtitle', 'Track your API usage and costs')}
+            {t('subtitle', 'Track provider usage, execution scope, and cost attribution')}
           </p>
         </div>
 
@@ -210,10 +211,22 @@ export function Dashboard() {
                 )}
               >
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                  {t('charts.tokenBreakdown', 'Usage by Model')}
+                  {t('charts.tokenBreakdown', 'Usage Breakdown')}
                 </h3>
-                <TokenBreakdown byModel={summary.by_model} byProject={summary.by_project} />
+                <TokenBreakdown
+                  byModel={summary.by_model}
+                  byProject={summary.by_project}
+                  byWorkflow={summary.by_workflow}
+                  byPhase={summary.by_phase}
+                  byScope={summary.by_scope}
+                />
               </div>
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+              <BreakdownCard title={t('overview.byWorkflow', 'Workflow Overview')} rows={summary.by_workflow} />
+              <BreakdownCard title={t('overview.byPhase', 'Phase Overview')} rows={summary.by_phase} />
+              <BreakdownCard title={t('overview.byScope', 'Scope Overview')} rows={summary.by_scope} />
             </div>
 
             {/* Top Models Table */}
@@ -245,6 +258,44 @@ export function Dashboard() {
 
       {/* Export Dialog */}
       <ExportDialog open={showExportDialog} onOpenChange={setShowExportDialog} />
+    </div>
+  );
+}
+
+interface BreakdownCardProps {
+  title: string;
+  rows: AnalyticsBreakdownRow[];
+}
+
+function BreakdownCard({ title, rows }: BreakdownCardProps) {
+  const { t } = useTranslation('analytics');
+  const displayRows = rows.slice(0, 5);
+
+  return (
+    <div className={clsx('bg-white dark:bg-gray-900 rounded-xl', 'border border-gray-200 dark:border-gray-800', 'p-6')}>
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{title}</h3>
+      {displayRows.length === 0 ? (
+        <div className="text-sm text-gray-500 dark:text-gray-400">
+          {t('overview.noBreakdownData', 'No usage available')}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {displayRows.map((row) => (
+            <div key={row.key} className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-gray-900 dark:text-white truncate">{row.label}</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">
+                  {row.stats.request_count.toLocaleString()} {t('labels.requests', 'requests')} ·{' '}
+                  {formatTokens(row.stats.total_input_tokens + row.stats.total_output_tokens)}
+                </div>
+              </div>
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                {formatCost(row.stats.total_cost_microdollars)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

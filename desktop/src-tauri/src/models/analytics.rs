@@ -505,6 +505,139 @@ pub struct UsageRecordV2 {
     pub cost_breakdown_json: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalyticsWorkflowMode {
+    Chat,
+    Plan,
+    Task,
+}
+
+impl AnalyticsWorkflowMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AnalyticsWorkflowMode::Chat => "chat",
+            AnalyticsWorkflowMode::Plan => "plan",
+            AnalyticsWorkflowMode::Task => "task",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalyticsExecutionScope {
+    RootAgent,
+    SubAgent,
+    DirectLlm,
+    QualityGate,
+}
+
+impl AnalyticsExecutionScope {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AnalyticsExecutionScope::RootAgent => "root_agent",
+            AnalyticsExecutionScope::SubAgent => "sub_agent",
+            AnalyticsExecutionScope::DirectLlm => "direct_llm",
+            AnalyticsExecutionScope::QualityGate => "quality_gate",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AnalyticsAttribution {
+    pub project_id: Option<String>,
+    pub kernel_session_id: Option<String>,
+    pub mode_session_id: Option<String>,
+    pub workflow_mode: Option<AnalyticsWorkflowMode>,
+    pub phase_id: Option<String>,
+    pub execution_scope: Option<AnalyticsExecutionScope>,
+    pub execution_id: Option<String>,
+    pub parent_execution_id: Option<String>,
+    pub agent_role: Option<String>,
+    pub agent_name: Option<String>,
+    pub step_id: Option<String>,
+    pub story_id: Option<String>,
+    pub gate_id: Option<String>,
+    pub attempt: Option<i64>,
+    pub request_sequence: Option<i64>,
+    pub call_site: Option<String>,
+    pub metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsUsageEvent {
+    pub event_id: String,
+    pub timestamp_utc: i64,
+    pub provider: String,
+    pub model: String,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub thinking_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub cost_total: i64,
+    pub cost_status: CostStatus,
+    pub project_id: Option<String>,
+    pub kernel_session_id: Option<String>,
+    pub mode_session_id: Option<String>,
+    pub workflow_mode: Option<AnalyticsWorkflowMode>,
+    pub phase_id: Option<String>,
+    pub execution_scope: Option<AnalyticsExecutionScope>,
+    pub execution_id: Option<String>,
+    pub parent_execution_id: Option<String>,
+    pub agent_role: Option<String>,
+    pub agent_name: Option<String>,
+    pub step_id: Option<String>,
+    pub story_id: Option<String>,
+    pub gate_id: Option<String>,
+    pub attempt: Option<i64>,
+    pub request_sequence: Option<i64>,
+    pub call_site: Option<String>,
+    pub metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AnalyticsFilter {
+    pub start_timestamp: Option<i64>,
+    pub end_timestamp: Option<i64>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub project_id: Option<String>,
+    pub kernel_session_id: Option<String>,
+    pub mode_session_id: Option<String>,
+    pub workflow_mode: Option<AnalyticsWorkflowMode>,
+    pub phase_id: Option<String>,
+    pub execution_scope: Option<AnalyticsExecutionScope>,
+    pub step_id: Option<String>,
+    pub story_id: Option<String>,
+    pub gate_id: Option<String>,
+    pub cost_status: Option<CostStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsBreakdownRow {
+    pub key: String,
+    pub label: String,
+    pub stats: UsageStats,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsSummary {
+    pub current_period: UsageStats,
+    pub previous_period: UsageStats,
+    pub cost_change_percent: f64,
+    pub tokens_change_percent: f64,
+    pub requests_change_percent: f64,
+    pub by_model: Vec<ModelUsage>,
+    pub by_project: Vec<ProjectUsage>,
+    pub by_workflow: Vec<AnalyticsBreakdownRow>,
+    pub by_phase: Vec<AnalyticsBreakdownRow>,
+    pub by_scope: Vec<AnalyticsBreakdownRow>,
+    pub time_series: Vec<TimeSeriesPoint>,
+}
+
+pub type AnalyticsEventDetail = AnalyticsUsageEvent;
+
 /// Request payload for streaming export job.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportStreamingJobRequest {
