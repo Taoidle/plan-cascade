@@ -11,7 +11,7 @@ pub struct PromptTemplate {
     pub title: String,
     pub content: String,
     pub description: Option<String>,
-    /// Category: "coding" | "writing" | "analysis" | "custom"
+    /// Category: system category id, user-defined category id, or empty for uncategorized
     pub category: String,
     /// Tags as a list of strings (stored as JSON in DB)
     pub tags: Vec<String>,

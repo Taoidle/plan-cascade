@@ -250,6 +250,19 @@
     "reject": "却下",
     "archive": "アーカイブ",
     "restore": "レビュー待ちに戻す",
+    "allMemories": "すべて",
+    "archivedMemories": "アーカイブ済み",
+    "deletedMemories": "ごみ箱",
+    "pendingJumpHint": "レビュー待ち候補 {{count}} 件は「レビュー待ち」タブで管理します。",
+    "moveToRecycleBin": "ごみ箱へ移動",
+    "purgeSelected": "完全に削除",
+    "confirmPurge": "完全削除を確認",
+    "noPersistedMemories": "保存済みメモリがありません",
+    "noPersistedMemoriesHint": "有効・却下・アーカイブ済み・削除済みのメモリがここに表示されます。",
+    "noArchivedMemories": "アーカイブ済みメモリはありません",
+    "noArchivedMemoriesHint": "アーカイブ済みメモリは有効状態に戻すか、ごみ箱へ移動できます。",
+    "noDeletedMemories": "ごみ箱は空です",
+    "noDeletedMemoriesHint": "削除したメモリは、復元または完全削除するまでここに残ります。",
     "whySkillsTitle": "これらのスキルを使う理由",
     "showWhySkills": "なぜこのスキル？",
     "hideWhySkills": "理由を隠す",
@@ -342,6 +355,7 @@
       "memoryUpdated": "メモリを更新しました",
       "updateMemoryFailed": "メモリの更新に失敗しました",
       "memoryDeleted": "メモリを削除しました",
+      "memoryMovedToRecycleBin": "メモリをごみ箱へ移動しました",
       "deleteMemoryFailed": "メモリの削除に失敗しました",
       "memoriesCleared": "すべてのメモリをクリアしました",
       "clearMemoriesFailed": "メモリのクリアに失敗しました",
@@ -352,6 +366,14 @@
       "memoryRejectSuccess": "{{count}} 件のメモリ候補を却下しました",
       "memoryArchiveSuccess": "{{count}} 件のメモリ候補をアーカイブしました",
       "memoryRestoreSuccess": "{{count}} 件のメモリ候補を復元しました",
+      "memoryStatusUpdateFailed": "メモリの状態更新に失敗しました",
+      "memoryArchivedSuccess": "{{count}} 件のメモリをアーカイブしました",
+      "memoryActivatedSuccess": "{{count}} 件のメモリを復元しました",
+      "memoryDeletedSuccess": "{{count}} 件のメモリをごみ箱へ移動しました",
+      "memoryRestoreDeletedFailed": "メモリの復元に失敗しました",
+      "memoryRestoreDeletedSuccess": "{{count}} 件のメモリを復元しました",
+      "memoryPurgeFailed": "メモリの完全削除に失敗しました",
+      "memoryPurgedSuccess": "{{count}} 件のメモリを完全に削除しました",
       "sessionMemoryRequiresSession": "セッションメモリには有効なセッションが必要です"
     }
   },
@@ -977,6 +999,13 @@
     "noPrompts": "プロンプトがありません",
     "insert": "挿入"
   },
+  "promptCategories": {
+    "all": "すべて",
+    "uncategorized": "未分類",
+    "coding": "コーディング",
+    "writing": "ライティング",
+    "analysis": "分析"
+  },
   "promptDialog": {
     "title": "プロンプト管理",
     "searchPlaceholder": "プロンプトを検索...",
@@ -984,6 +1013,9 @@
     "titleLabel": "タイトル",
     "titlePlaceholder": "プロンプトのタイトル",
     "category": "カテゴリ",
+    "categoryPlaceholder": "未分類にする場合は空欄のままにするか、新しいカテゴリ名を入力してください",
+    "categoryEmptyHint": "空欄のままにすると、このプロンプトは未分類になります。",
+    "categoryCustomHint": "ここに新しいカテゴリ名を直接入力できます。",
     "description": "説明",
     "descriptionPlaceholder": "簡単な説明（任意）",
     "content": "内容",
@@ -995,13 +1027,53 @@
     "save": "保存",
     "delete": "削除",
     "deleteConfirm": "このプロンプトを削除しますか？",
+    "confirmDelete": "もう一度クリックして確認",
     "duplicate": "カスタムとして複製",
-    "selectOrCreate": "プロンプトを選択または作成"
+    "selectOrCreate": "プロンプトを選択または作成",
+    "builtinBadge": "内蔵",
+    "builtinReadonly": "内蔵プロンプトは現在の言語に合わせてローカライズされ、直接編集できません。必要なら複製してカスタム化してください。",
+    "copyTitle": "{{title}}（コピー）"
   },
   "promptPalette": {
-    "title": "/ プロンプト",
+    "title": "/ ショートカット",
     "back": "戻る",
-    "insertPrompt": "プロンプトを挿入"
+    "insertPrompt": "プロンプトを挿入",
+    "groups": {
+      "quickPrompts": "クイックプロンプト",
+      "promptTemplates": "プロンプトテンプレート",
+      "pluginSkills": "プラグインスキル"
+    },
+    "badges": {
+      "quickPrompt": "クイック",
+      "pluginSkill": "プラグイン"
+    },
+    "empty": {
+      "quickPrompts": "一致するクイックプロンプトはありません。",
+      "promptTemplates": "一致するプロンプトテンプレートはありません。",
+      "pluginSkills": "一致するプラグインスキルはありません。"
+    },
+    "quick": {
+      "plan": {
+        "title": "先に計画する",
+        "description": "実装前に計画を立てるためのプロンプトを挿入します。",
+        "content": "コードを書き始める前に、この作業を短く具体的な実行計画に分解してください。"
+      },
+      "review": {
+        "title": "変更をレビュー",
+        "description": "バグと回帰に注目したレビュー依頼を挿入します。",
+        "content": "最新の変更をレビューし、バグ、回帰、抜けているテストに重点を置いて確認してください。"
+      },
+      "summarize": {
+        "title": "要点をまとめる",
+        "description": "簡潔な要約依頼を挿入します。",
+        "content": "重要なポイントを要約し、主要な決定事項、リスク、次のアクションだけを残してください。"
+      },
+      "explainError": {
+        "title": "エラーを説明",
+        "description": "エラーの説明と修正案の依頼を挿入します。",
+        "content": "このエラーを説明し、最も可能性の高い原因を特定し、最小で安全な修正案を提案してください。"
+      }
+    }
   },
   "export": {
     "markdown": "Markdown (.md)",

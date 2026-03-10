@@ -16,6 +16,31 @@ use crate::services::memory::store::{
 };
 use crate::utils::error::{AppError, AppResult};
 
+fn normalize_locale_tag(locale: Option<&str>) -> &'static str {
+    let normalized = locale.unwrap_or("en").trim().to_ascii_lowercase();
+    if normalized.starts_with("zh") {
+        "zh"
+    } else if normalized.starts_with("ja") {
+        "ja"
+    } else {
+        "en"
+    }
+}
+
+fn memory_output_language_instruction(locale: Option<&str>) -> &'static str {
+    match normalize_locale_tag(locale) {
+        "zh" => {
+            "Output language: Simplified Chinese. Keep paths, code identifiers, tool names, APIs, commands, and package names in their original form."
+        }
+        "ja" => {
+            "Output language: Japanese. Keep paths, code identifiers, tool names, APIs, commands, and package names in their original form."
+        }
+        _ => {
+            "Output language: English. Keep paths, code identifiers, tool names, APIs, commands, and package names in their original form."
+        }
+    }
+}
+
 /// Explicit memory commands detected from user messages
 #[derive(Debug, Clone, PartialEq)]
 pub enum MemoryCommand {
@@ -163,9 +188,13 @@ impl MemoryExtractor {
     pub fn build_summarization_prompt(
         task_description: &str,
         conversation_content: &str,
+        locale: Option<&str>,
     ) -> String {
+        let language_instruction = memory_output_language_instruction(locale);
         format!(
             r#"You are a conversation analyst. Your job is to distill a long development session into a focused summary that captures information worth remembering across sessions.
+
+{language_instruction}
 
 ## Original Task
 {task}
@@ -184,7 +213,12 @@ Produce a focused summary (under 2000 characters) that prioritizes the following
 5. **Corrections & Pitfalls**: Mistakes encountered, things that don't work, approaches that were abandoned and why
 6. **Key Decisions Made**: Important choices during the session, trade-offs considered, rationale for decisions
 
-Format as a structured list with category headers. Omit categories with no relevant information. Be concise and factual — no filler text."#,
+Format as a structured list with category headers.
+- Use the output language above for all natural-language summary text.
+- Keep code snippets, file paths, tool names, APIs, package names, and identifiers unchanged.
+- Omit categories with no relevant information.
+- Be concise and factual, with no filler text."#,
+            language_instruction = language_instruction,
             task = task_description,
             conversation = conversation_content,
         )
@@ -200,7 +234,9 @@ Format as a structured list with category headers. Omit categories with no relev
         key_findings: &[String],
         conversation_summary: &str,
         existing_memories: &[MemoryEntry],
+        locale: Option<&str>,
     ) -> String {
+        let language_instruction = memory_output_language_instruction(locale);
         let files_section = if files_read.is_empty() {
             "(none)".to_string()
         } else {
@@ -234,6 +270,8 @@ Format as a structured list with category headers. Omit categories with no relev
         format!(
             r#"You are a memory extraction system. Analyze the following session data and extract
 facts worth remembering for future sessions with this project.
+
+{language_instruction}
 
 ## Session Task
 {task}
@@ -281,7 +319,10 @@ Rules:
 - Preferences about the user themselves (not the project) should be "global"
 - evidence_snippets: include 1-3 short factual snippets from the conversation that justify the memory
 - confidence: 0.9+ only when the conversation is explicit, 0.5-0.8 for inferred but well-supported facts
+- Use the output language above for all natural-language JSON values, especially "content", "keywords", and "evidence_snippets"
+- Keep paths, code identifiers, tool names, APIs, commands, and package names in their original form
 - Return empty array [] if nothing worth extracting"#,
+            language_instruction = language_instruction,
             task = task_description,
             files = files_section,
             findings = findings_section,
@@ -419,6 +460,7 @@ pub async fn run_session_extraction(
     conversation_content: &str,
     session_id: Option<&str>,
     existing_memories: &[MemoryEntry],
+    locale: Option<&str>,
 ) -> AppResult<Vec<NewMemoryEntry>> {
     use crate::services::llm::types::{LlmRequestOptions, Message};
     use std::time::Duration;
@@ -427,7 +469,7 @@ pub async fn run_session_extraction(
 
     let effective_summary = if conversation_content.len() > MemoryExtractor::SUMMARIZE_THRESHOLD {
         let summarize_prompt =
-            MemoryExtractor::build_summarization_prompt(task_description, conversation_content);
+            MemoryExtractor::build_summarization_prompt(task_description, conversation_content, locale);
         let summarize_call = provider.send_message(
             vec![Message::user(summarize_prompt)],
             None,
@@ -453,6 +495,7 @@ pub async fn run_session_extraction(
         key_findings,
         &effective_summary,
         existing_memories,
+        locale,
     );
     let extract_call = provider.send_message(
         vec![Message::user(extraction_prompt)],
@@ -492,6 +535,7 @@ pub async fn run_session_extraction_candidates(
     conversation_content: &str,
     session_id: Option<&str>,
     existing_memories: &[MemoryEntry],
+    locale: Option<&str>,
 ) -> AppResult<Vec<ExtractedMemoryCandidate>> {
     use crate::services::llm::types::{LlmRequestOptions, Message};
     use std::time::Duration;
@@ -500,7 +544,7 @@ pub async fn run_session_extraction_candidates(
 
     let effective_summary = if conversation_content.len() > MemoryExtractor::SUMMARIZE_THRESHOLD {
         let summarize_prompt =
-            MemoryExtractor::build_summarization_prompt(task_description, conversation_content);
+            MemoryExtractor::build_summarization_prompt(task_description, conversation_content, locale);
         let summarize_call = provider.send_message(
             vec![Message::user(summarize_prompt)],
             None,
@@ -526,6 +570,7 @@ pub async fn run_session_extraction_candidates(
         key_findings,
         &effective_summary,
         existing_memories,
+        locale,
     );
     let extract_call = provider.send_message(
         vec![Message::user(extraction_prompt)],
@@ -872,6 +917,7 @@ mod tests {
             &["Uses JWT tokens".into()],
             "Found and fixed auth issue",
             &[],
+            Some("zh-CN"),
         );
 
         assert!(prompt.contains("Fix the login bug"));
@@ -879,11 +925,12 @@ mod tests {
         assert!(prompt.contains("Uses JWT tokens"));
         assert!(prompt.contains("Found and fixed auth issue"));
         assert!(prompt.contains("Already Known"));
+        assert!(prompt.contains("Output language: Simplified Chinese"));
     }
 
     #[test]
     fn test_build_extraction_prompt_empty_inputs() {
-        let prompt = MemoryExtractor::build_extraction_prompt("", &[], &[], "", &[]);
+        let prompt = MemoryExtractor::build_extraction_prompt("", &[], &[], "", &[], None);
 
         assert!(prompt.contains("(none)"));
     }
@@ -917,10 +964,12 @@ mod tests {
             &[],
             "Explored architecture",
             &existing,
+            Some("ja"),
         );
 
         assert!(prompt.contains("This is a Tauri app"));
         assert!(prompt.contains("[fact]"));
+        assert!(prompt.contains("Output language: Japanese"));
     }
 
     #[test]

@@ -12,7 +12,7 @@ import { clsx } from 'clsx';
 import { Cross2Icon, Pencil1Icon, TrashIcon } from '@radix-ui/react-icons';
 import { CategoryBadge } from './CategoryBadge';
 import { ImportanceBar } from './ImportanceBar';
-import type { MemoryEntry, MemoryCategory, MemoryReviewDecision } from '../../types/skillMemory';
+import type { MemoryEntry, MemoryCategory, MemoryReviewDecision, MemoryStatus } from '../../types/skillMemory';
 import { MEMORY_CATEGORIES } from '../../types/skillMemory';
 
 interface MemoryDetailProps {
@@ -28,11 +28,24 @@ interface MemoryDetailProps {
     },
   ) => void;
   onDelete: (id: string) => void;
+  onSetStatus?: (id: string, targetStatus: Extract<MemoryStatus, 'active' | 'archived' | 'deleted'>) => void;
+  onRestoreDeleted?: (id: string) => void;
+  onPurge?: (id: string) => void;
   onReviewDecision?: (id: string, decision: MemoryReviewDecision) => void;
   className?: string;
 }
 
-export function MemoryDetail({ memory, onClose, onUpdate, onDelete, onReviewDecision, className }: MemoryDetailProps) {
+export function MemoryDetail({
+  memory,
+  onClose,
+  onUpdate,
+  onDelete,
+  onSetStatus,
+  onRestoreDeleted,
+  onPurge,
+  onReviewDecision,
+  className,
+}: MemoryDetailProps) {
   const { t } = useTranslation('simpleMode');
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(memory.content);
@@ -41,6 +54,7 @@ export function MemoryDetail({ memory, onClose, onUpdate, onDelete, onReviewDeci
   const [editKeywords, setEditKeywords] = useState<string[]>(memory.keywords);
   const [keywordInput, setKeywordInput] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmPurge, setConfirmPurge] = useState(false);
   const categoryLabel = useCallback(
     (cat: MemoryCategory) =>
       t(`skillPanel.memoryCategories.${cat}`, {
@@ -90,9 +104,22 @@ export function MemoryDetail({ memory, onClose, onUpdate, onDelete, onReviewDeci
           <div className="flex items-center gap-2 mb-1">
             <CategoryBadge category={editing ? editCategory : memory.category} />
             <ImportanceBar value={editing ? editImportance : memory.importance} showLabel className="flex-1" />
-            {memory.status === 'rejected' && (
-              <span className="text-2xs px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300">
-                {t('skillPanel.rejectedMemories', { defaultValue: 'Rejected' })}
+            {memory.status && memory.status !== 'active' && (
+              <span
+                className={clsx(
+                  'text-2xs px-1.5 py-0.5 rounded',
+                  memory.status === 'rejected'
+                    ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'
+                    : memory.status === 'archived'
+                      ? 'bg-slate-100 text-slate-700 dark:bg-slate-900/30 dark:text-slate-300'
+                      : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+                )}
+              >
+                {memory.status === 'rejected'
+                  ? t('skillPanel.rejectedMemories', { defaultValue: 'Rejected' })
+                  : memory.status === 'archived'
+                    ? t('skillPanel.archivedMemories', { defaultValue: 'Archived' })
+                    : t('skillPanel.deletedMemories', { defaultValue: 'Recycle Bin' })}
               </span>
             )}
           </div>
@@ -101,7 +128,7 @@ export function MemoryDetail({ memory, onClose, onUpdate, onDelete, onReviewDeci
           </p>
         </div>
         <div className="flex items-center gap-1 shrink-0 ml-2">
-          {!editing && (
+          {!editing && memory.status !== 'deleted' && (
             <button
               onClick={() => setEditing(true)}
               className="p-1 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
@@ -110,18 +137,20 @@ export function MemoryDetail({ memory, onClose, onUpdate, onDelete, onReviewDeci
               <Pencil1Icon className="w-3.5 h-3.5" />
             </button>
           )}
-          <button
-            onClick={handleDelete}
-            className={clsx(
-              'p-1 rounded-md',
-              confirmDelete
-                ? 'text-red-600 bg-red-50 dark:bg-red-900/20'
-                : 'text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20',
-            )}
-            title={confirmDelete ? t('skillPanel.confirmDelete') : t('skillPanel.delete')}
-          >
-            <TrashIcon className="w-3.5 h-3.5" />
-          </button>
+          {memory.status !== 'deleted' && (
+            <button
+              onClick={handleDelete}
+              className={clsx(
+                'p-1 rounded-md',
+                confirmDelete
+                  ? 'text-red-600 bg-red-50 dark:bg-red-900/20'
+                  : 'text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20',
+              )}
+              title={confirmDelete ? t('skillPanel.confirmDelete') : t('skillPanel.delete')}
+            >
+              <TrashIcon className="w-3.5 h-3.5" />
+            </button>
+          )}
           <button
             onClick={onClose}
             className="p-1 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
@@ -318,6 +347,70 @@ export function MemoryDetail({ memory, onClose, onUpdate, onDelete, onReviewDeci
                 >
                   {t('skillPanel.archive', { defaultValue: 'Archive' })}
                 </button>
+              </div>
+            )}
+
+            {memory.status === 'active' && onSetStatus && (
+              <div className="flex flex-wrap gap-2 pt-2">
+                <button
+                  onClick={() => onSetStatus(memory.id, 'archived')}
+                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-slate-100 text-slate-700 dark:bg-slate-900/30 dark:text-slate-300"
+                >
+                  {t('skillPanel.archive', { defaultValue: 'Archive' })}
+                </button>
+              </div>
+            )}
+
+            {memory.status === 'archived' && onSetStatus && (
+              <div className="flex flex-wrap gap-2 pt-2">
+                <button
+                  onClick={() => onSetStatus(memory.id, 'active')}
+                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                >
+                  {t('skillPanel.restoreSelected', { defaultValue: 'Restore Selected' })}
+                </button>
+                <button
+                  onClick={() => onSetStatus(memory.id, 'deleted')}
+                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
+                >
+                  {t('skillPanel.moveToRecycleBin', { defaultValue: 'Move to Recycle Bin' })}
+                </button>
+              </div>
+            )}
+
+            {memory.status === 'deleted' && (
+              <div className="flex flex-wrap gap-2 pt-2">
+                {onRestoreDeleted && (
+                  <button
+                    onClick={() => onRestoreDeleted(memory.id)}
+                    className="px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                  >
+                    {t('skillPanel.restoreSelected', { defaultValue: 'Restore Selected' })}
+                  </button>
+                )}
+                {onPurge && (
+                  <button
+                    onClick={() => {
+                      if (confirmPurge) {
+                        onPurge(memory.id);
+                        onClose();
+                      } else {
+                        setConfirmPurge(true);
+                        setTimeout(() => setConfirmPurge(false), 3000);
+                      }
+                    }}
+                    className={clsx(
+                      'px-3 py-1.5 rounded-md text-xs font-medium',
+                      confirmPurge
+                        ? 'bg-red-600 text-white'
+                        : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+                    )}
+                  >
+                    {confirmPurge
+                      ? t('skillPanel.confirmPurge', { defaultValue: 'Confirm Permanent Delete' })
+                      : t('skillPanel.purgeSelected', { defaultValue: 'Delete Permanently' })}
+                  </button>
+                )}
               </div>
             )}
           </>

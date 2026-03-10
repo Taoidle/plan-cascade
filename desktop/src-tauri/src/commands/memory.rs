@@ -15,9 +15,12 @@ use crate::services::memory::query_v2::{
     list_memory_entries_v2 as list_memory_entries_unified_v2,
     list_pending_memory_candidates_v2 as list_pending_memory_candidates_unified_v2,
     memory_stats_v2 as memory_stats_unified_v2,
+    purge_memories_v2 as purge_memories_unified_v2,
     query_memory_entries_v2 as query_memory_entries_unified_v2,
+    restore_deleted_memories_v2 as restore_deleted_memories_unified_v2,
     review_memory_candidates_v2 as review_memory_candidates_unified_v2, MemoryReviewCandidateV2,
-    MemoryReviewDecisionV2, MemoryReviewSummaryV2, MemoryScopeV2, MemoryStatusV2,
+    set_memory_status_v2 as set_memory_status_unified_v2, MemoryReviewDecisionV2,
+    MemoryReviewSummaryV2, MemoryScopeV2, MemoryStatusV2,
     UnifiedMemoryQueryRequestV2, UnifiedMemoryQueryResultV2,
 };
 use crate::services::memory::retrieval::{MemorySearchIntent, MemorySearchResultV2};
@@ -166,6 +169,15 @@ fn parse_memory_review_decision_v2(value: &str) -> Result<MemoryReviewDecisionV2
             Ok(MemoryReviewDecisionV2::Restore)
         }
         _ => Err(format!("Invalid review decision: {}", value)),
+    }
+}
+
+fn parse_lifecycle_status_v2(value: &str) -> Result<MemoryStatusV2, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "active" => Ok(MemoryStatusV2::Active),
+        "archived" | "archive" => Ok(MemoryStatusV2::Archived),
+        "deleted" | "delete" => Ok(MemoryStatusV2::Deleted),
+        _ => Err(format!("Invalid lifecycle status: {}", value)),
     }
 }
 
@@ -451,10 +463,10 @@ pub async fn delete_project_memory(
     state: State<'_, AppState>,
 ) -> Result<CommandResponse<()>, String> {
     match state
-        .with_memory_store(|store| store.delete_memory(&id))
+        .with_memory_store(|store| set_memory_status_unified_v2(store, &[id], MemoryStatusV2::Deleted))
         .await
     {
-        Ok(()) => Ok(CommandResponse::ok(())),
+        Ok(_) => Ok(CommandResponse::ok(())),
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
 }
@@ -789,6 +801,56 @@ pub async fn review_memory_candidates_v2(
     }
 }
 
+/// Update lifecycle status for persisted memories (active / archived / deleted).
+#[tauri::command]
+pub async fn set_memory_status_v2(
+    memory_ids: Vec<String>,
+    target_status: String,
+    state: State<'_, AppState>,
+) -> Result<CommandResponse<MemoryReviewSummaryV2>, String> {
+    let parsed_status = match parse_lifecycle_status_v2(&target_status) {
+        Ok(value) => value,
+        Err(e) => return Ok(CommandResponse::err(e)),
+    };
+    match state
+        .with_memory_store(|store| set_memory_status_unified_v2(store, &memory_ids, parsed_status))
+        .await
+    {
+        Ok(summary) => Ok(CommandResponse::ok(summary)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Restore memories from the recycle bin back to their last persisted status.
+#[tauri::command]
+pub async fn restore_deleted_memories_v2(
+    memory_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<CommandResponse<MemoryReviewSummaryV2>, String> {
+    match state
+        .with_memory_store(|store| restore_deleted_memories_unified_v2(store, &memory_ids))
+        .await
+    {
+        Ok(summary) => Ok(CommandResponse::ok(summary)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+/// Permanently delete memories that are already in the recycle bin.
+#[tauri::command]
+pub async fn purge_memories_v2(
+    memory_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<CommandResponse<MemoryReviewSummaryV2>, String> {
+    match state
+        .with_memory_store(|store| purge_memories_unified_v2(store, &memory_ids))
+        .await
+    {
+        Ok(summary) => Ok(CommandResponse::ok(summary)),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
 /// Result of running maintenance operations
 #[derive(Debug, Clone, Serialize)]
 pub struct MaintenanceResult {
@@ -856,6 +918,7 @@ pub(crate) async fn extract_session_memories_internal(
     project_path: String,
     task_description: String,
     conversation_summary: String,
+    locale: Option<String>,
     session_id: Option<String>,
     root_session_id: Option<String>,
     review_mode: Option<String>,
@@ -882,6 +945,15 @@ pub(crate) async fn extract_session_memories_internal(
         .or_else(|| normalized_runtime_session_id.clone());
     let Some(root_session_id) = normalized_root_session_id else {
         return Ok(zero_result);
+    };
+    let effective_locale = if let Some(locale) = locale
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(locale.to_string())
+    } else {
+        app_state.get_config().await.ok().map(|config| config.language)
     };
     let parsed_review_mode = parse_memory_review_mode(review_mode.as_deref());
 
@@ -1012,6 +1084,7 @@ pub(crate) async fn extract_session_memories_internal(
         &conversation_summary,
         session_id.as_deref(),
         &existing_memories,
+        effective_locale.as_deref(),
     )
     .await
     {
@@ -1206,6 +1279,7 @@ pub async fn extract_session_memories(
     project_path: String,
     task_description: String,
     conversation_summary: String,
+    locale: Option<String>,
     session_id: Option<String>,
     root_session_id: Option<String>,
     review_mode: Option<String>,
@@ -1216,6 +1290,7 @@ pub async fn extract_session_memories(
         project_path,
         task_description,
         conversation_summary,
+        locale,
         session_id,
         root_session_id,
         review_mode,

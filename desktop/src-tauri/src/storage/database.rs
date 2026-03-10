@@ -589,7 +589,7 @@ impl Database {
                 title TEXT NOT NULL,
                 content TEXT NOT NULL,
                 description TEXT,
-                category TEXT NOT NULL DEFAULT 'custom',
+                category TEXT NOT NULL DEFAULT '',
                 tags TEXT NOT NULL DEFAULT '[]',
                 variables TEXT NOT NULL DEFAULT '[]',
                 is_builtin INTEGER NOT NULL DEFAULT 0,
@@ -609,6 +609,13 @@ impl Database {
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_prompts_pinned ON prompts(is_pinned DESC, use_count DESC)",
+            [],
+        )?;
+
+        conn.execute(
+            "UPDATE prompts
+             SET category = ''
+             WHERE lower(trim(category)) = 'custom'",
             [],
         )?;
 
@@ -824,6 +831,12 @@ impl Database {
                     'active',
                     'pending_review',
                     'rejected',
+                    'archived',
+                    'deleted'
+                )),
+                deleted_from_status TEXT CHECK(deleted_from_status IN (
+                    'active',
+                    'rejected',
                     'archived'
                 )),
                 risk_tier TEXT NOT NULL DEFAULT 'high' CHECK(risk_tier IN ('low', 'medium', 'high')),
@@ -838,6 +851,7 @@ impl Database {
             )",
             [],
         )?;
+        Self::ensure_memory_entries_v2_schema(&conn)?;
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_entries_v2_unique_content
              ON memory_entries_v2(scope, IFNULL(project_path, ''), IFNULL(session_id, ''), content_hash)",
@@ -874,7 +888,7 @@ impl Database {
                 "INSERT OR IGNORE INTO memory_entries_v2 (
                     id, scope, project_path, session_id, category, content, content_hash,
                     keywords, embedding, importance, access_count, source_session_id, source_context,
-                    status, risk_tier, conflict_flag, created_at, updated_at, last_accessed_at,
+                    status, deleted_from_status, risk_tier, conflict_flag, created_at, updated_at, last_accessed_at,
                     last_decay_at, embedding_provider, embedding_dim, quality_score
                 )
                 SELECT
@@ -907,6 +921,7 @@ impl Database {
                             THEN 'pending_review'
                         ELSE 'active'
                     END,
+                    NULL,
                     CASE
                         WHEN source_context LIKE 'llm_extract:%' THEN 'medium'
                         WHEN source_context LIKE 'rule_extract:%' THEN 'low'
@@ -1022,12 +1037,22 @@ impl Database {
             "CREATE TABLE IF NOT EXISTS memory_review_audit_v2 (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 memory_id TEXT NOT NULL,
-                decision TEXT NOT NULL CHECK(decision IN ('approve', 'reject', 'archive')),
+                decision TEXT NOT NULL CHECK(decision IN (
+                    'approve',
+                    'reject',
+                    'archive',
+                    'restore',
+                    'restore_deleted',
+                    'restore_active',
+                    'delete',
+                    'purge'
+                )),
                 operator TEXT NOT NULL DEFAULT 'system',
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             )",
             [],
         )?;
+        Self::ensure_memory_review_audit_v2_schema(&conn)?;
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_memory_review_audit_v2_created
              ON memory_review_audit_v2(created_at DESC)",
@@ -1576,6 +1601,140 @@ impl Database {
         )
         .map(|count| count > 0)
         .unwrap_or(false)
+    }
+
+    fn table_sql_contains(conn: &rusqlite::Connection, table: &str, needle: &str) -> bool {
+        conn.query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name = ?1",
+            params![table],
+            |row| row.get::<_, String>(0),
+        )
+        .map(|sql| sql.contains(needle))
+        .unwrap_or(false)
+    }
+
+    fn ensure_memory_entries_v2_schema(conn: &rusqlite::Connection) -> AppResult<()> {
+        let has_deleted_from_status = Self::table_has_column(conn, "memory_entries_v2", "deleted_from_status");
+        let supports_deleted_status = Self::table_sql_contains(conn, "memory_entries_v2", "'deleted'");
+        if has_deleted_from_status && supports_deleted_status {
+            return Ok(());
+        }
+
+        conn.execute_batch(
+            "DROP TRIGGER IF EXISTS trg_memory_v2_fts_insert;
+             DROP TRIGGER IF EXISTS trg_memory_v2_fts_update;
+             DROP TRIGGER IF EXISTS trg_memory_v2_fts_delete;
+             DROP TRIGGER IF EXISTS trg_memory_v2_conflict_insert;
+             DROP TRIGGER IF EXISTS trg_memory_v2_conflict_update;
+             DROP INDEX IF EXISTS idx_memory_entries_v2_unique_content;
+             DROP INDEX IF EXISTS idx_memory_entries_v2_scope_project_session;
+             DROP INDEX IF EXISTS idx_memory_entries_v2_status_risk;
+             DROP INDEX IF EXISTS idx_memory_entries_v2_category_importance;
+             ALTER TABLE memory_entries_v2 RENAME TO memory_entries_v2_legacy_deleted_upgrade;
+             CREATE TABLE memory_entries_v2 (
+                id TEXT PRIMARY KEY,
+                scope TEXT NOT NULL CHECK(scope IN ('global', 'project', 'session')),
+                project_path TEXT,
+                session_id TEXT,
+                category TEXT NOT NULL CHECK(category IN (
+                    'preference',
+                    'convention',
+                    'pattern',
+                    'correction',
+                    'fact'
+                )),
+                content TEXT NOT NULL,
+                content_hash TEXT NOT NULL DEFAULT '',
+                keywords TEXT NOT NULL DEFAULT '[]',
+                embedding BLOB,
+                importance REAL NOT NULL DEFAULT 0.5,
+                access_count INTEGER NOT NULL DEFAULT 0,
+                source_session_id TEXT,
+                source_context TEXT,
+                status TEXT NOT NULL DEFAULT 'active' CHECK(status IN (
+                    'active',
+                    'pending_review',
+                    'rejected',
+                    'archived',
+                    'deleted'
+                )),
+                deleted_from_status TEXT CHECK(deleted_from_status IN (
+                    'active',
+                    'rejected',
+                    'archived'
+                )),
+                risk_tier TEXT NOT NULL DEFAULT 'high' CHECK(risk_tier IN ('low', 'medium', 'high')),
+                conflict_flag INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                last_accessed_at TEXT NOT NULL DEFAULT (datetime('now')),
+                last_decay_at TEXT,
+                embedding_provider TEXT NOT NULL DEFAULT 'tfidf',
+                embedding_dim INTEGER NOT NULL DEFAULT 0,
+                quality_score REAL NOT NULL DEFAULT 1.0
+             );
+             INSERT INTO memory_entries_v2 (
+                id, scope, project_path, session_id, category, content, content_hash,
+                keywords, embedding, importance, access_count, source_session_id, source_context,
+                status, deleted_from_status, risk_tier, conflict_flag, created_at, updated_at,
+                last_accessed_at, last_decay_at, embedding_provider, embedding_dim, quality_score
+             )
+             SELECT
+                id, scope, project_path, session_id, category, content, content_hash,
+                keywords, embedding, importance, access_count, source_session_id, source_context,
+                status, NULL, risk_tier, conflict_flag, created_at, updated_at,
+                last_accessed_at, last_decay_at, embedding_provider, embedding_dim, quality_score
+             FROM memory_entries_v2_legacy_deleted_upgrade;
+             DROP TABLE memory_entries_v2_legacy_deleted_upgrade;",
+        )?;
+
+        if Self::table_exists(conn, "memory_fts_v2") {
+            conn.execute("DELETE FROM memory_fts_v2", [])?;
+            conn.execute(
+                "INSERT INTO memory_fts_v2(memory_id, content, keywords)
+                 SELECT id, content, keywords FROM memory_entries_v2",
+                [],
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn ensure_memory_review_audit_v2_schema(conn: &rusqlite::Connection) -> AppResult<()> {
+        let supports_lifecycle_audit =
+            Self::table_sql_contains(conn, "memory_review_audit_v2", "'purge'")
+                && Self::table_sql_contains(conn, "memory_review_audit_v2", "'delete'");
+        if supports_lifecycle_audit {
+            return Ok(());
+        }
+
+        conn.execute_batch(
+            "DROP INDEX IF EXISTS idx_memory_review_audit_v2_created;
+             DROP INDEX IF EXISTS idx_memory_review_audit_v2_memory;
+             ALTER TABLE memory_review_audit_v2 RENAME TO memory_review_audit_v2_legacy_actions;
+             CREATE TABLE memory_review_audit_v2 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                memory_id TEXT NOT NULL,
+                decision TEXT NOT NULL CHECK(decision IN (
+                    'approve',
+                    'reject',
+                    'archive',
+                    'restore',
+                    'restore_deleted',
+                    'restore_active',
+                    'delete',
+                    'purge'
+                )),
+                operator TEXT NOT NULL DEFAULT 'system',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+             );
+             INSERT INTO memory_review_audit_v2 (id, memory_id, decision, operator, created_at)
+             SELECT id, memory_id, decision, operator, created_at
+             FROM memory_review_audit_v2_legacy_actions;
+             DROP TABLE memory_review_audit_v2_legacy_actions;",
+        )?;
+
+        Ok(())
     }
 
     /// Normalize duplicate MCP server names in-place by appending numeric suffixes.

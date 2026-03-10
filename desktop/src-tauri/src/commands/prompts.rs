@@ -12,6 +12,7 @@ use crate::state::AppState;
 pub async fn list_prompts(
     category: Option<String>,
     search: Option<String>,
+    locale: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<CommandResponse<Vec<PromptTemplate>>, String> {
     let result = state
@@ -19,7 +20,7 @@ pub async fn list_prompts(
             let service = PromptService::from_database(db);
             // Seed built-in prompts on first access
             service.seed_builtins()?;
-            service.list_prompts(category.as_deref(), search.as_deref())
+            service.list_prompts(category.as_deref(), search.as_deref(), locale.as_deref())
         })
         .await;
 
@@ -110,12 +111,13 @@ pub async fn record_prompt_use(
 #[tauri::command]
 pub async fn toggle_prompt_pin(
     id: String,
+    locale: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<CommandResponse<PromptTemplate>, String> {
     let result = state
         .with_database(|db| {
             let service = PromptService::from_database(db);
-            service.toggle_pin(&id)
+            service.toggle_pin(&id, locale.as_deref())
         })
         .await;
 

@@ -223,8 +223,12 @@
     "clearAllConfirmGlobal": "Delete all global memories? This cannot be undone.",
     "clearAllConfirmSession": "Delete all memories for this session? This cannot be undone.",
     "activeMemories": "Active",
+    "allMemories": "All",
     "pendingReview": "Pending Review",
     "rejectedMemories": "Rejected",
+    "archivedMemories": "Archived",
+    "deletedMemories": "Recycle Bin",
+    "pendingJumpHint": "{{count}} pending candidates are managed in the Pending tab.",
     "panelSummary": {
       "idle": "Memory pipeline ready",
       "pending": "{{count}} memories pending review",
@@ -250,6 +254,15 @@
     "reject": "Reject",
     "archive": "Archive",
     "restore": "Restore to Review",
+    "moveToRecycleBin": "Move to Recycle Bin",
+    "purgeSelected": "Delete Permanently",
+    "confirmPurge": "Confirm Permanent Delete",
+    "noPersistedMemories": "No persisted memories",
+    "noPersistedMemoriesHint": "Archived, rejected, and deleted memories will appear here with active memories.",
+    "noArchivedMemories": "No archived memories",
+    "noArchivedMemoriesHint": "Archived memories can be restored to active or moved to the recycle bin.",
+    "noDeletedMemories": "Recycle bin is empty",
+    "noDeletedMemoriesHint": "Deleted memories stay here until you restore or permanently delete them.",
     "whySkillsTitle": "Why these skills",
     "showWhySkills": "Why Skills?",
     "hideWhySkills": "Hide Why",
@@ -342,6 +355,7 @@
       "memoryUpdated": "Memory updated",
       "updateMemoryFailed": "Failed to update memory",
       "memoryDeleted": "Memory deleted",
+      "memoryMovedToRecycleBin": "Memory moved to recycle bin",
       "deleteMemoryFailed": "Failed to delete memory",
       "memoriesCleared": "All memories cleared",
       "clearMemoriesFailed": "Failed to clear memories",
@@ -352,6 +366,14 @@
       "memoryRejectSuccess": "Rejected {{count}} memory candidates",
       "memoryArchiveSuccess": "Archived {{count}} memory candidates",
       "memoryRestoreSuccess": "Restored {{count}} memory candidates",
+      "memoryStatusUpdateFailed": "Failed to update memory status",
+      "memoryArchivedSuccess": "Archived {{count}} memories",
+      "memoryActivatedSuccess": "Restored {{count}} memories",
+      "memoryDeletedSuccess": "Moved {{count}} memories to recycle bin",
+      "memoryRestoreDeletedFailed": "Failed to restore memories",
+      "memoryRestoreDeletedSuccess": "Restored {{count}} memories",
+      "memoryPurgeFailed": "Failed to permanently delete memories",
+      "memoryPurgedSuccess": "Permanently deleted {{count}} memories",
       "sessionMemoryRequiresSession": "Session memory requires an active session"
     }
   },
@@ -977,6 +999,13 @@
     "noPrompts": "No prompts yet",
     "insert": "Insert"
   },
+  "promptCategories": {
+    "all": "All",
+    "uncategorized": "Uncategorized",
+    "coding": "Coding",
+    "writing": "Writing",
+    "analysis": "Analysis"
+  },
   "promptDialog": {
     "title": "Manage Prompts",
     "searchPlaceholder": "Search prompts...",
@@ -984,6 +1013,9 @@
     "titleLabel": "Title",
     "titlePlaceholder": "Prompt title",
     "category": "Category",
+    "categoryPlaceholder": "Leave empty for uncategorized, or enter a new category",
+    "categoryEmptyHint": "Leave this empty to keep the prompt uncategorized.",
+    "categoryCustomHint": "You can type a new category name directly.",
     "description": "Description",
     "descriptionPlaceholder": "Brief description (optional)",
     "content": "Content",
@@ -995,13 +1027,53 @@
     "save": "Save",
     "delete": "Delete",
     "deleteConfirm": "Delete this prompt?",
+    "confirmDelete": "Click again to confirm",
     "duplicate": "Duplicate as Custom",
-    "selectOrCreate": "Select or create a prompt"
+    "selectOrCreate": "Select or create a prompt",
+    "builtinBadge": "Built-in",
+    "builtinReadonly": "Built-in prompts are localized and read-only. Duplicate one to customize it.",
+    "copyTitle": "{{title}} (Copy)"
   },
   "promptPalette": {
-    "title": "/ Prompts",
+    "title": "/ Shortcuts",
     "back": "Back",
-    "insertPrompt": "Insert Prompt"
+    "insertPrompt": "Insert Prompt",
+    "groups": {
+      "quickPrompts": "Quick Prompts",
+      "promptTemplates": "Prompt Templates",
+      "pluginSkills": "Plugin Skills"
+    },
+    "badges": {
+      "quickPrompt": "Quick",
+      "pluginSkill": "Plugin"
+    },
+    "empty": {
+      "quickPrompts": "No quick prompts match this search.",
+      "promptTemplates": "No prompt templates match this search.",
+      "pluginSkills": "No plugin skills match this search."
+    },
+    "quick": {
+      "plan": {
+        "title": "Plan the work",
+        "description": "Insert a planning prompt before implementation.",
+        "content": "Break this task into a short concrete plan before writing code."
+      },
+      "review": {
+        "title": "Review my changes",
+        "description": "Insert a bug- and regression-focused review request.",
+        "content": "Review my latest changes for bugs, regressions, and missing tests."
+      },
+      "summarize": {
+        "title": "Summarize this",
+        "description": "Insert a concise summary request.",
+        "content": "Summarize the important points and keep only the key decisions and risks."
+      },
+      "explainError": {
+        "title": "Explain this error",
+        "description": "Insert an error explanation and fix request.",
+        "content": "Explain this error, identify the likely root cause, and suggest the smallest safe fix."
+      }
+    }
   },
   "export": {
     "markdown": "Markdown (.md)",

@@ -123,7 +123,7 @@ export function SkillMemoryPanel() {
   }, [openDialog]);
 
   const handleMemoryClick = useCallback(() => {
-    openDialog('memory');
+    openDialog('memory', { memoryViewMode: 'all' });
   }, [openDialog]);
 
   return (
@@ -205,7 +205,7 @@ export function SkillMemoryPanel() {
           )}
           {memories.length > 5 && (
             <button
-              onClick={() => openDialog('memory')}
+              onClick={() => openDialog('memory', { memoryViewMode: 'all' })}
               className="w-full text-2xs text-primary-600 dark:text-primary-400 hover:underline px-2 py-1"
             >
               {t('skillPanel.viewAll', { count: memories.length })}

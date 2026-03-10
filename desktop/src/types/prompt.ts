@@ -44,13 +44,15 @@ export interface CommandResponse<T> {
   error: string | null;
 }
 
-export const PROMPT_CATEGORIES = [
-  { id: 'all', label: 'All' },
-  { id: 'coding', label: 'Coding' },
-  { id: 'writing', label: 'Writing' },
-  { id: 'analysis', label: 'Analysis' },
-  { id: 'custom', label: 'Custom' },
-] as const;
+export const SYSTEM_PROMPT_CATEGORIES = ['coding', 'writing', 'analysis'] as const;
+export const PROMPT_CATEGORIES = ['all', 'uncategorized', ...SYSTEM_PROMPT_CATEGORIES] as const;
+export type PromptCategoryId = (typeof PROMPT_CATEGORIES)[number];
+
+/** Map legacy/custom category markers to uncategorized. */
+export function normalizePromptCategory(category: string | null | undefined): string {
+  const normalized = (category ?? '').trim();
+  return normalized.toLowerCase() === 'custom' ? '' : normalized;
+}
 
 /** Substitute {{variable}} placeholders in a template string */
 export function substituteVariables(template: string, values: Record<string, string>): string {

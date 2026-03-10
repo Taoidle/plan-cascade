@@ -10,13 +10,14 @@ import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { GearIcon, DrawingPinIcon, DrawingPinFilledIcon } from '@radix-ui/react-icons';
 import { usePromptsStore } from '../../store/prompts';
+import { normalizePromptCategory } from '../../types/prompt';
 
 // ============================================================================
 // PromptPanel
 // ============================================================================
 
 export function PromptPanel() {
-  const { t } = useTranslation('simpleMode');
+  const { t, i18n } = useTranslation('simpleMode');
 
   const prompts = usePromptsStore((s) => s.prompts);
   const loading = usePromptsStore((s) => s.loading);
@@ -28,10 +29,20 @@ export function PromptPanel() {
 
   // Fallback loading for direct panel usage (sidebar preloads on mount).
   useEffect(() => {
-    if (prompts.length === 0) {
-      void fetchPrompts();
-    }
-  }, [prompts.length, fetchPrompts]);
+    void fetchPrompts();
+  }, [fetchPrompts, i18n.language]);
+
+  const categoryLabel = useCallback(
+    (category: string) => {
+      const normalizedCategory = normalizePromptCategory(category);
+      return normalizedCategory
+        ? t(`promptCategories.${normalizedCategory}`, {
+            defaultValue: normalizedCategory,
+          })
+        : t('promptCategories.uncategorized', { defaultValue: 'Uncategorized' });
+    },
+    [t],
+  );
 
   const pinnedPrompts = useMemo(() => prompts.filter((p) => p.is_pinned), [prompts]);
 
@@ -43,6 +54,14 @@ export function PromptPanel() {
         .slice(0, 5),
     [prompts],
   );
+
+  const visiblePrompts = useMemo(() => {
+    const recentIds = new Set(recentPrompts.map((prompt) => prompt.id));
+    const pinnedIds = new Set(pinnedPrompts.map((prompt) => prompt.id));
+    const remainingPrompts = prompts.filter((prompt) => !recentIds.has(prompt.id) && !pinnedIds.has(prompt.id));
+    const maxRemaining = Math.max(0, 8 - pinnedPrompts.length - recentPrompts.length);
+    return [...recentPrompts, ...remainingPrompts.slice(0, maxRemaining)];
+  }, [pinnedPrompts, prompts, recentPrompts]);
 
   const handleInsert = useCallback(
     (prompt: (typeof prompts)[0]) => {
@@ -60,7 +79,7 @@ export function PromptPanel() {
     coding: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
     writing: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300',
     analysis: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
-    custom: 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300',
+    fallback: 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300',
   };
 
   return (
@@ -111,6 +130,7 @@ export function PromptPanel() {
                 key={prompt.id}
                 prompt={prompt}
                 categoryBadgeColor={categoryBadgeColor}
+                categoryLabel={categoryLabel(prompt.category)}
                 onInsert={() => handleInsert(prompt)}
                 onTogglePin={() => togglePin(prompt.id)}
               />
@@ -119,32 +139,17 @@ export function PromptPanel() {
           </>
         )}
 
-        {/* Recent section */}
-        {recentPrompts.map((prompt) => (
+        {/* Recent + remaining section */}
+        {visiblePrompts.map((prompt) => (
           <PromptRow
             key={prompt.id}
             prompt={prompt}
             categoryBadgeColor={categoryBadgeColor}
+            categoryLabel={categoryLabel(prompt.category)}
             onInsert={() => handleInsert(prompt)}
             onTogglePin={() => togglePin(prompt.id)}
           />
         ))}
-
-        {/* Show all if no pinned and no recent but have prompts */}
-        {pinnedPrompts.length === 0 &&
-          recentPrompts.length === 0 &&
-          prompts.length > 0 &&
-          prompts
-            .slice(0, 8)
-            .map((prompt) => (
-              <PromptRow
-                key={prompt.id}
-                prompt={prompt}
-                categoryBadgeColor={categoryBadgeColor}
-                onInsert={() => handleInsert(prompt)}
-                onTogglePin={() => togglePin(prompt.id)}
-              />
-            ))}
       </div>
 
       {/* Manage All button */}
@@ -172,11 +177,13 @@ export function PromptPanel() {
 function PromptRow({
   prompt,
   categoryBadgeColor,
+  categoryLabel,
   onInsert,
   onTogglePin,
 }: {
   prompt: { id: string; title: string; category: string; is_pinned: boolean; content: string };
   categoryBadgeColor: Record<string, string>;
+  categoryLabel: string;
   onInsert: () => void;
   onTogglePin: () => void;
 }) {
@@ -197,10 +204,10 @@ function PromptRow({
           <span
             className={clsx(
               'text-2xs px-1 py-0.5 rounded shrink-0',
-              categoryBadgeColor[prompt.category] || categoryBadgeColor.custom,
+              categoryBadgeColor[normalizePromptCategory(prompt.category)] || categoryBadgeColor.fallback,
             )}
           >
-            {prompt.category}
+            {categoryLabel}
           </span>
         </div>
       </div>

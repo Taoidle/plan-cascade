@@ -918,6 +918,7 @@ pub fn register_memory_hooks_with_config(
                     project_path.clone(),
                     summary.task_description.clone(),
                     summary.conversation_content.clone(),
+                    None,
                     Some(ctx.session_id.clone()),
                     root_session_id.clone().or_else(|| Some(ctx.session_id.clone())),
                     review_mode.clone(),

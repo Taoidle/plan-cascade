@@ -10,7 +10,12 @@ import { clsx } from 'clsx';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Cross2Icon, PlusIcon, MagnifyingGlassIcon, TrashIcon, CopyIcon } from '@radix-ui/react-icons';
 import { usePromptsStore } from '../../store/prompts';
-import { PROMPT_CATEGORIES, extractVariables } from '../../types/prompt';
+import {
+  PROMPT_CATEGORIES,
+  SYSTEM_PROMPT_CATEGORIES,
+  extractVariables,
+  normalizePromptCategory,
+} from '../../types/prompt';
 import type { PromptTemplate, PromptCreateRequest, PromptUpdateRequest } from '../../types/prompt';
 
 // ============================================================================
@@ -18,7 +23,7 @@ import type { PromptTemplate, PromptCreateRequest, PromptUpdateRequest } from '.
 // ============================================================================
 
 export function PromptDialog() {
-  const { t } = useTranslation('simpleMode');
+  const { t, i18n } = useTranslation('simpleMode');
 
   const prompts = usePromptsStore((s) => s.prompts);
   const loading = usePromptsStore((s) => s.loading);
@@ -34,18 +39,67 @@ export function PromptDialog() {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isNew, setIsNew] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   // Form state
   const [formTitle, setFormTitle] = useState('');
   const [formContent, setFormContent] = useState('');
   const [formDescription, setFormDescription] = useState('');
-  const [formCategory, setFormCategory] = useState('custom');
+  const [formCategory, setFormCategory] = useState('');
   const [formTags, setFormTags] = useState('');
+  const selectedPromptObj = useMemo(() => prompts.find((p) => p.id === selectedId), [prompts, selectedId]);
+  const isBuiltinPrompt = Boolean(selectedPromptObj?.is_builtin && !isNew);
+
+  const categoryLabel = useCallback(
+    (category: string) => {
+      const normalizedCategory = normalizePromptCategory(category);
+      return normalizedCategory
+        ? t(`promptCategories.${normalizedCategory}`, {
+            defaultValue: normalizedCategory,
+          })
+        : t('promptCategories.uncategorized', { defaultValue: 'Uncategorized' });
+    },
+    [t],
+  );
+
+  const userCategories = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          prompts
+            .map((prompt) => normalizePromptCategory(prompt.category))
+            .filter(
+              (category) =>
+                category && !SYSTEM_PROMPT_CATEGORIES.includes(category as (typeof SYSTEM_PROMPT_CATEGORIES)[number]),
+            ),
+        ),
+      ).sort((left, right) => left.localeCompare(right)),
+    [prompts],
+  );
+
+  const categoryFilters = useMemo(
+    () => [
+      ...PROMPT_CATEGORIES,
+      ...userCategories.filter(
+        (category) => !PROMPT_CATEGORIES.includes(category as (typeof PROMPT_CATEGORIES)[number]),
+      ),
+    ],
+    [userCategories],
+  );
+
+  const categorySuggestions = useMemo(
+    () => [''].concat([...SYSTEM_PROMPT_CATEGORIES], userCategories),
+    [userCategories],
+  );
 
   const filteredPrompts = useMemo(() => {
     let result = prompts;
     if (categoryFilter !== 'all') {
-      result = result.filter((p) => p.category === categoryFilter);
+      if (categoryFilter === 'uncategorized') {
+        result = result.filter((prompt) => !normalizePromptCategory(prompt.category));
+      } else {
+        result = result.filter((prompt) => normalizePromptCategory(prompt.category) === categoryFilter);
+      }
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -58,35 +112,39 @@ export function PromptDialog() {
 
   const detectedVariables = useMemo(() => extractVariables(formContent), [formContent]);
 
+  useEffect(() => {
+    setConfirmDelete(false);
+  }, [selectedId, isNew, formTitle, formContent, formDescription, formCategory, formTags]);
+
   // Load prompts when dialog opens
   useEffect(() => {
     if (dialogOpen) {
       fetchPrompts();
     }
-  }, [dialogOpen, fetchPrompts]);
+  }, [dialogOpen, fetchPrompts, i18n.language]);
 
   // Select prompt if provided
+  const populateForm = useCallback((prompt: PromptTemplate) => {
+    setFormTitle(prompt.title);
+    setFormContent(prompt.content);
+    setFormDescription(prompt.description || '');
+    setFormCategory(normalizePromptCategory(prompt.category));
+    setFormTags(prompt.tags.join(', '));
+  }, []);
+
   useEffect(() => {
     if (selectedPrompt && dialogOpen) {
       setSelectedId(selectedPrompt.id);
       populateForm(selectedPrompt);
       setIsNew(false);
     }
-  }, [selectedPrompt, dialogOpen]);
-
-  const populateForm = useCallback((prompt: PromptTemplate) => {
-    setFormTitle(prompt.title);
-    setFormContent(prompt.content);
-    setFormDescription(prompt.description || '');
-    setFormCategory(prompt.category);
-    setFormTags(prompt.tags.join(', '));
-  }, []);
+  }, [selectedPrompt, dialogOpen, populateForm]);
 
   const resetForm = useCallback(() => {
     setFormTitle('');
     setFormContent('');
     setFormDescription('');
-    setFormCategory('custom');
+    setFormCategory('');
     setFormTags('');
   }, []);
 
@@ -95,6 +153,7 @@ export function PromptDialog() {
       setSelectedId(prompt.id);
       populateForm(prompt);
       setIsNew(false);
+      setConfirmDelete(false);
     },
     [populateForm],
   );
@@ -103,6 +162,7 @@ export function PromptDialog() {
     setSelectedId(null);
     setIsNew(true);
     resetForm();
+    setConfirmDelete(false);
   }, [resetForm]);
 
   const handleSave = useCallback(async () => {
@@ -118,7 +178,7 @@ export function PromptDialog() {
         title: formTitle.trim(),
         content: formContent,
         description: formDescription.trim() || null,
-        category: formCategory,
+        category: formCategory.trim(),
         tags,
         is_pinned: false,
       };
@@ -126,13 +186,14 @@ export function PromptDialog() {
       if (result) {
         setSelectedId(result.id);
         setIsNew(false);
+        setConfirmDelete(false);
       }
     } else if (selectedId) {
       const req: PromptUpdateRequest = {
         title: formTitle.trim(),
         content: formContent,
         description: formDescription.trim() || null,
-        category: formCategory,
+        category: formCategory.trim(),
         tags,
       };
       await updatePrompt(selectedId, req);
@@ -141,16 +202,19 @@ export function PromptDialog() {
 
   const handleDelete = useCallback(async () => {
     if (!selectedId) return;
-    const confirmed = window.confirm(t('promptDialog.deleteConfirm', { defaultValue: 'Delete this prompt?' }));
-    if (!confirmed) return;
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
+    }
 
     const success = await deletePrompt(selectedId);
     if (success) {
       setSelectedId(null);
       resetForm();
       setIsNew(false);
+      setConfirmDelete(false);
     }
-  }, [selectedId, deletePrompt, resetForm, t]);
+  }, [confirmDelete, selectedId, deletePrompt, resetForm]);
 
   const handleDuplicate = useCallback(async () => {
     if (!selectedId) return;
@@ -158,10 +222,13 @@ export function PromptDialog() {
     if (!source) return;
 
     const req: PromptCreateRequest = {
-      title: `${source.title} (Copy)`,
+      title: t('promptDialog.copyTitle', {
+        defaultValue: '{{title}} (Copy)',
+        title: source.title,
+      }),
       content: source.content,
       description: source.description,
-      category: 'custom',
+      category: normalizePromptCategory(source.category),
       tags: source.tags,
       is_pinned: false,
     };
@@ -170,11 +237,9 @@ export function PromptDialog() {
       setSelectedId(result.id);
       populateForm(result);
       setIsNew(false);
+      setConfirmDelete(false);
     }
-  }, [selectedId, prompts, createPrompt, populateForm]);
-
-  const selectedPromptObj = useMemo(() => prompts.find((p) => p.id === selectedId), [prompts, selectedId]);
-
+  }, [selectedId, prompts, createPrompt, populateForm, t]);
   return (
     <Dialog.Root open={dialogOpen} onOpenChange={(open) => !open && closeDialog()}>
       <Dialog.Portal>
@@ -206,18 +271,20 @@ export function PromptDialog() {
             <div className="w-[200px] border-r border-gray-200 dark:border-gray-700 flex flex-col">
               {/* Category tabs */}
               <div className="flex flex-wrap gap-1 p-2 border-b border-gray-100 dark:border-gray-800">
-                {PROMPT_CATEGORIES.map((cat) => (
+                {categoryFilters.map((cat) => (
                   <button
-                    key={cat.id}
-                    onClick={() => setCategoryFilter(cat.id)}
+                    key={cat}
+                    onClick={() => setCategoryFilter(cat)}
                     className={clsx(
                       'px-1.5 py-0.5 text-2xs rounded-md transition-colors',
-                      categoryFilter === cat.id
+                      categoryFilter === cat
                         ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
                         : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
                     )}
                   >
-                    {cat.label}
+                    {cat === 'uncategorized'
+                      ? t('promptCategories.uncategorized', { defaultValue: 'Uncategorized' })
+                      : categoryLabel(cat)}
                   </button>
                 ))}
               </div>
@@ -264,7 +331,7 @@ export function PromptDialog() {
                       <span className="truncate font-medium">{prompt.title}</span>
                       {prompt.is_builtin && (
                         <span className="text-2xs px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 shrink-0">
-                          built-in
+                          {t('promptDialog.builtinBadge', { defaultValue: 'Built-in' })}
                         </span>
                       )}
                     </div>
@@ -290,6 +357,7 @@ export function PromptDialog() {
                       type="text"
                       value={formTitle}
                       onChange={(e) => setFormTitle(e.target.value)}
+                      disabled={isBuiltinPrompt}
                       placeholder={t('promptDialog.titlePlaceholder', { defaultValue: 'Prompt title' })}
                       className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-primary-500"
                     />
@@ -300,17 +368,32 @@ export function PromptDialog() {
                     <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
                       {t('promptDialog.category', { defaultValue: 'Category' })}
                     </label>
-                    <select
+                    <input
+                      list="prompt-category-options"
                       value={formCategory}
                       onChange={(e) => setFormCategory(e.target.value)}
+                      disabled={isBuiltinPrompt}
+                      placeholder={t('promptDialog.categoryPlaceholder', {
+                        defaultValue: 'Leave empty for uncategorized, or enter a new category',
+                      })}
                       className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-primary-500"
-                    >
-                      {PROMPT_CATEGORIES.filter((c) => c.id !== 'all').map((cat) => (
-                        <option key={cat.id} value={cat.id}>
-                          {cat.label}
+                    />
+                    <datalist id="prompt-category-options">
+                      {categorySuggestions.map((cat) => (
+                        <option key={cat || '__uncategorized__'} value={cat}>
+                          {categoryLabel(cat)}
                         </option>
                       ))}
-                    </select>
+                    </datalist>
+                    <p className="text-2xs text-gray-400 dark:text-gray-500 mt-1">
+                      {formCategory.trim()
+                        ? t('promptDialog.categoryCustomHint', {
+                            defaultValue: 'You can type a new category name directly.',
+                          })
+                        : t('promptDialog.categoryEmptyHint', {
+                            defaultValue: 'Leave this empty to keep the prompt uncategorized.',
+                          })}
+                    </p>
                   </div>
 
                   {/* Description */}
@@ -322,6 +405,7 @@ export function PromptDialog() {
                       type="text"
                       value={formDescription}
                       onChange={(e) => setFormDescription(e.target.value)}
+                      disabled={isBuiltinPrompt}
                       placeholder={t('promptDialog.descriptionPlaceholder', {
                         defaultValue: 'Brief description (optional)',
                       })}
@@ -337,6 +421,7 @@ export function PromptDialog() {
                     <textarea
                       value={formContent}
                       onChange={(e) => setFormContent(e.target.value)}
+                      disabled={isBuiltinPrompt}
                       placeholder={t('promptDialog.contentPlaceholder', {
                         defaultValue: 'Write your prompt template...',
                       })}
@@ -376,6 +461,7 @@ export function PromptDialog() {
                       type="text"
                       value={formTags}
                       onChange={(e) => setFormTags(e.target.value)}
+                      disabled={isBuiltinPrompt}
                       placeholder={t('promptDialog.tagsPlaceholder', { defaultValue: 'Comma-separated tags' })}
                       className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-primary-500"
                     />
@@ -385,7 +471,7 @@ export function PromptDialog() {
                   <div className="flex items-center gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
                     <button
                       onClick={handleSave}
-                      disabled={!formTitle.trim() || !formContent.trim() || loading}
+                      disabled={!formTitle.trim() || !formContent.trim() || loading || isBuiltinPrompt}
                       className={clsx(
                         'px-4 py-1.5 text-xs font-medium rounded-md transition-colors',
                         'bg-primary-600 text-white hover:bg-primary-700',
@@ -412,16 +498,27 @@ export function PromptDialog() {
                             onClick={handleDelete}
                             className={clsx(
                               'px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
-                              'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',
+                              confirmDelete
+                                ? 'bg-red-600 text-white hover:bg-red-700'
+                                : 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',
                             )}
                           >
                             <TrashIcon className="w-3.5 h-3.5 inline mr-1" />
-                            {t('promptDialog.delete', { defaultValue: 'Delete' })}
+                            {confirmDelete
+                              ? t('promptDialog.confirmDelete', { defaultValue: 'Click again to confirm' })
+                              : t('promptDialog.delete', { defaultValue: 'Delete' })}
                           </button>
                         )}
                       </>
                     )}
                   </div>
+                  {isBuiltinPrompt && (
+                    <p className="text-2xs text-gray-500 dark:text-gray-400">
+                      {t('promptDialog.builtinReadonly', {
+                        defaultValue: 'Built-in prompts are localized and read-only. Duplicate one to customize it.',
+                      })}
+                    </p>
+                  )}
                 </>
               )}
             </div>

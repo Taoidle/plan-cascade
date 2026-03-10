@@ -2,47 +2,38 @@
  * PromptPalette Component
  *
  * Floating panel triggered by "/" in InputBox.
- * Shows filtered prompt templates and plugin skills with keyboard navigation.
+ * Shows localized quick prompts, prompt templates, and plugin skills in groups.
  */
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { usePromptsStore } from '../../store/prompts';
-import { substituteVariables } from '../../types/prompt';
+import { normalizePromptCategory, substituteVariables } from '../../types/prompt';
 import { listInvocableSkills } from '../../lib/pluginApi';
 import type { InvocablePluginSkill, PluginInvocation } from '../../types/plugin';
-
-// ============================================================================
-// Types
-// ============================================================================
 
 interface PromptPaletteProps {
   query: string;
   onSelectText: (resolvedText: string) => void;
   onSelectPluginSkill: (invocation: PluginInvocation, displayText: string) => void;
   onClose: () => void;
-  onKeyboardNav?: (handler: (e: React.KeyboardEvent) => boolean) => void;
 }
 
-/** Unified palette item representing either a prompt template or a plugin skill. */
-type PaletteItem =
-  | { kind: 'prompt'; id: string; title: string; description?: string; category: string }
-  | {
-      kind: 'skill';
-      plugin_name: string;
-      skill_name: string;
-      description: string;
-      allowed_tools: string[];
-    };
+type SlashItem =
+  | { kind: 'quick_prompt'; id: string; title: string; description: string; content: string }
+  | { kind: 'prompt_template'; id: string; title: string; description?: string; category: string }
+  | { kind: 'plugin_skill'; plugin_name: string; skill_name: string; description: string; allowed_tools: string[] };
 
-// ============================================================================
-// PromptPalette
-// ============================================================================
+interface SlashSection {
+  key: 'quick_prompts' | 'prompt_templates' | 'plugin_skills';
+  label: string;
+  emptyLabel: string;
+  items: SlashItem[];
+}
 
 export function PromptPalette({ query, onSelectText, onSelectPluginSkill, onClose }: PromptPaletteProps) {
-  const { t } = useTranslation('simpleMode');
-
+  const { t, i18n } = useTranslation('simpleMode');
   const prompts = usePromptsStore((s) => s.prompts);
   const fetchPrompts = usePromptsStore((s) => s.fetchPrompts);
   const recordUse = usePromptsStore((s) => s.recordUse);
@@ -54,89 +45,163 @@ export function PromptPalette({ query, onSelectText, onSelectPluginSkill, onClos
   const [pluginSkills, setPluginSkills] = useState<InvocablePluginSkill[]>([]);
   const paletteRef = useRef<HTMLDivElement>(null);
 
-  // Fetch prompts on mount
   useEffect(() => {
-    if (prompts.length === 0) {
-      fetchPrompts();
-    }
-  }, [prompts.length, fetchPrompts]);
+    void fetchPrompts();
+  }, [fetchPrompts, i18n.language]);
 
-  // Fetch invocable plugin skills on mount
   useEffect(() => {
     listInvocableSkills().then((res) => {
       if (res.success && res.data) {
-        setPluginSkills(res.data);
+        const sorted = [...res.data].sort((left, right) =>
+          `${left.plugin_name}:${left.skill_name}`.localeCompare(`${right.plugin_name}:${right.skill_name}`),
+        );
+        setPluginSkills(sorted);
       }
     });
   }, []);
 
-  // Build unified palette items: prompts + plugin skills, filtered by query
-  const filteredItems = useMemo(() => {
-    const promptItems: PaletteItem[] = prompts.map((p) => ({
-      kind: 'prompt' as const,
-      id: p.id,
-      title: p.title,
-      description: p.description || undefined,
-      category: p.category,
-    }));
-    const skillItems: PaletteItem[] = pluginSkills.map((s) => ({
-      kind: 'skill' as const,
-      plugin_name: s.plugin_name,
-      skill_name: s.skill_name,
-      description: s.description,
-      allowed_tools: s.allowed_tools,
-    }));
-
-    const all = [...promptItems, ...skillItems];
-
-    if (!query.trim()) {
-      // Show pinned prompts first, then by use_count, then skills at end
-      const sortedPrompts = [...prompts]
-        .sort((a, b) => {
-          if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1;
-          return b.use_count - a.use_count;
-        })
-        .slice(0, 6)
-        .map(
-          (p): PaletteItem => ({
-            kind: 'prompt',
-            id: p.id,
-            title: p.title,
-            description: p.description || undefined,
-            category: p.category,
-          }),
-        );
-      const skills = skillItems.slice(0, 8 - sortedPrompts.length);
-      return [...sortedPrompts, ...skills];
-    }
-
-    const q = query.toLowerCase();
-    return all
-      .filter((item) => {
-        if (item.kind === 'prompt') {
-          return (
-            item.title.toLowerCase().includes(q) ||
-            item.category.toLowerCase().includes(q) ||
-            (item.description && item.description.toLowerCase().includes(q))
-          );
-        }
-        const display = `${item.plugin_name}:${item.skill_name}`.toLowerCase();
-        return display.includes(q) || item.description.toLowerCase().includes(q);
-      })
-      .slice(0, 8);
-  }, [prompts, pluginSkills, query]);
+  const quickPrompts = useMemo<SlashItem[]>(
+    () => [
+      {
+        kind: 'quick_prompt',
+        id: 'quick-plan',
+        title: t('promptPalette.quick.plan.title', { defaultValue: 'Plan the work' }),
+        description: t('promptPalette.quick.plan.description', {
+          defaultValue: 'Insert a planning prompt before implementation.',
+        }),
+        content: t('promptPalette.quick.plan.content', {
+          defaultValue: 'Break this task into a short concrete plan before writing code.',
+        }),
+      },
+      {
+        kind: 'quick_prompt',
+        id: 'quick-review',
+        title: t('promptPalette.quick.review.title', { defaultValue: 'Review my changes' }),
+        description: t('promptPalette.quick.review.description', {
+          defaultValue: 'Insert a bug- and regression-focused review request.',
+        }),
+        content: t('promptPalette.quick.review.content', {
+          defaultValue: 'Review my latest changes for bugs, regressions, and missing tests.',
+        }),
+      },
+      {
+        kind: 'quick_prompt',
+        id: 'quick-summarize',
+        title: t('promptPalette.quick.summarize.title', { defaultValue: 'Summarize this' }),
+        description: t('promptPalette.quick.summarize.description', {
+          defaultValue: 'Insert a concise summary request.',
+        }),
+        content: t('promptPalette.quick.summarize.content', {
+          defaultValue: 'Summarize the important points and keep only the key decisions and risks.',
+        }),
+      },
+      {
+        kind: 'quick_prompt',
+        id: 'quick-explain-error',
+        title: t('promptPalette.quick.explainError.title', { defaultValue: 'Explain this error' }),
+        description: t('promptPalette.quick.explainError.description', {
+          defaultValue: 'Insert an error explanation and fix request.',
+        }),
+        content: t('promptPalette.quick.explainError.content', {
+          defaultValue: 'Explain this error, identify the likely root cause, and suggest the smallest safe fix.',
+        }),
+      },
+    ],
+    [t],
+  );
 
   const selectedPrompt = useMemo(() => prompts.find((p) => p.id === selectedPromptId), [prompts, selectedPromptId]);
 
-  // Reset selection when filtered list changes
+  const matchesQuery = useCallback(
+    (value: string, currentQuery: string) => value.toLowerCase().includes(currentQuery),
+    [],
+  );
+
+  const sections = useMemo<SlashSection[]>(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    const promptTemplates: SlashItem[] = prompts.map((prompt) => ({
+      kind: 'prompt_template',
+      id: prompt.id,
+      title: prompt.title,
+      description: prompt.description || undefined,
+      category: normalizePromptCategory(prompt.category),
+    }));
+    const pluginItems: SlashItem[] = pluginSkills.map((skill) => ({
+      kind: 'plugin_skill',
+      plugin_name: skill.plugin_name,
+      skill_name: skill.skill_name,
+      description: skill.description,
+      allowed_tools: skill.allowed_tools,
+    }));
+
+    const filterItems = (items: SlashItem[]) => {
+      if (!normalizedQuery) return items;
+      return items.filter((item) => {
+        if (item.kind === 'quick_prompt') {
+          return (
+            matchesQuery(item.title.toLowerCase(), normalizedQuery) ||
+            matchesQuery(item.description.toLowerCase(), normalizedQuery) ||
+            matchesQuery(item.content.toLowerCase(), normalizedQuery)
+          );
+        }
+        if (item.kind === 'prompt_template') {
+          return (
+            matchesQuery(item.title.toLowerCase(), normalizedQuery) ||
+            matchesQuery((item.description || '').toLowerCase(), normalizedQuery) ||
+            matchesQuery(item.category.toLowerCase(), normalizedQuery)
+          );
+        }
+        const label = `${item.plugin_name}:${item.skill_name}`.toLowerCase();
+        return matchesQuery(label, normalizedQuery) || matchesQuery(item.description.toLowerCase(), normalizedQuery);
+      });
+    };
+
+    return [
+      {
+        key: 'quick_prompts',
+        label: t('promptPalette.groups.quickPrompts', { defaultValue: 'Quick Prompts' }),
+        emptyLabel: t('promptPalette.empty.quickPrompts', { defaultValue: 'No quick prompts match this search.' }),
+        items: filterItems(quickPrompts).slice(0, normalizedQuery ? 6 : quickPrompts.length),
+      },
+      {
+        key: 'prompt_templates',
+        label: t('promptPalette.groups.promptTemplates', { defaultValue: 'Prompt Templates' }),
+        emptyLabel: t('promptPalette.empty.promptTemplates', {
+          defaultValue: 'No prompt templates match this search.',
+        }),
+        items: filterItems(promptTemplates).slice(0, 6),
+      },
+      {
+        key: 'plugin_skills',
+        label: t('promptPalette.groups.pluginSkills', { defaultValue: 'Plugin Skills' }),
+        emptyLabel: t('promptPalette.empty.pluginSkills', { defaultValue: 'No plugin skills match this search.' }),
+        items: filterItems(pluginItems).slice(0, 6),
+      },
+    ];
+  }, [matchesQuery, pluginSkills, prompts, query, quickPrompts, t]);
+
+  const flatItems = useMemo(() => sections.flatMap((section) => section.items), [sections]);
+
   useEffect(() => {
     setSelectedIndex(0);
-  }, [filteredItems.length]);
+  }, [flatItems.length, query]);
+
+  const promptCategoryLabel = useCallback(
+    (category: string) => {
+      const normalizedCategory = normalizePromptCategory(category);
+      return normalizedCategory
+        ? t(`promptCategories.${normalizedCategory}`, {
+            defaultValue: normalizedCategory,
+          })
+        : t('promptCategories.uncategorized', { defaultValue: 'Uncategorized' });
+    },
+    [t],
+  );
 
   const handleSelectItem = useCallback(
-    (item: PaletteItem) => {
-      if (item.kind === 'skill') {
-        const display = `/${item.plugin_name}:${item.skill_name}`;
+    (item: SlashItem) => {
+      if (item.kind === 'plugin_skill') {
+        const display = `/plugin:${item.plugin_name}:${item.skill_name}`;
         onSelectPluginSkill(
           {
             plugin_name: item.plugin_name,
@@ -149,18 +214,22 @@ export function PromptPalette({ query, onSelectText, onSelectPluginSkill, onClos
         return;
       }
 
-      const prompt = prompts.find((p) => p.id === item.id);
+      if (item.kind === 'quick_prompt') {
+        onSelectText(item.content);
+        return;
+      }
+
+      const prompt = prompts.find((entry) => entry.id === item.id);
       if (!prompt) return;
 
-      recordUse(prompt.id);
-
+      void recordUse(prompt.id);
       if (prompt.variables.length > 0) {
-        setSelectedPromptId(item.id);
+        setSelectedPromptId(prompt.id);
         setVariableMode(true);
         setVariableValues({});
-      } else {
-        onSelectText(prompt.content);
+        return;
       }
+      onSelectText(prompt.content);
     },
     [onSelectPluginSkill, onSelectText, prompts, recordUse],
   );
@@ -169,68 +238,73 @@ export function PromptPalette({ query, onSelectText, onSelectPluginSkill, onClos
     if (!selectedPrompt) return;
     const resolved = substituteVariables(selectedPrompt.content, variableValues);
     onSelectText(resolved);
-  }, [selectedPrompt, variableValues, onSelectText]);
+  }, [onSelectText, selectedPrompt, variableValues]);
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
+    (event: React.KeyboardEvent) => {
       if (variableMode) {
-        if (e.key === 'Escape') {
-          e.preventDefault();
+        if (event.key === 'Escape') {
+          event.preventDefault();
           setVariableMode(false);
           setSelectedPromptId(null);
-        } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-          e.preventDefault();
+        } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
           handleVariableSubmit();
         }
         return;
       }
 
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setSelectedIndex((prev) => (prev < filteredItems.length - 1 ? prev + 1 : prev));
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setSelectedIndex((prev) => (prev < flatItems.length - 1 ? prev + 1 : prev));
+        return;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
         setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
-      } else if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
-        e.preventDefault();
-        const selected = filteredItems[selectedIndex];
-        if (selected) {
-          handleSelectItem(selected);
-        }
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
+        return;
+      }
+      if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) {
+        event.preventDefault();
+        const selected = flatItems[selectedIndex];
+        if (selected) handleSelectItem(selected);
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
         onClose();
       }
     },
-    [variableMode, filteredItems, selectedIndex, handleSelectItem, handleVariableSubmit, onClose],
+    [flatItems, handleSelectItem, handleVariableSubmit, onClose, selectedIndex, variableMode],
   );
 
-  // Expose keyboard handler via ref-like pattern
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      handleKeyDown(e as unknown as React.KeyboardEvent);
+    const handler = (event: KeyboardEvent) => {
+      handleKeyDown(event as unknown as React.KeyboardEvent);
     };
-
-    // Only listen when palette is mounted
     document.addEventListener('keydown', handler, true);
     return () => document.removeEventListener('keydown', handler, true);
   }, [handleKeyDown]);
 
-  const categoryBadgeColor: Record<string, string> = {
-    coding: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
-    writing: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300',
-    analysis: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
-    plugin: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300',
-    custom: 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300',
-  };
+  const badgeTone = useCallback((item: SlashItem) => {
+    if (item.kind === 'quick_prompt') return 'bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300';
+    if (item.kind === 'plugin_skill') return 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300';
+    if (item.category === 'coding') return 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300';
+    if (item.category === 'writing')
+      return 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300';
+    if (item.category === 'analysis') return 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300';
+    return 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300';
+  }, []);
 
-  if (filteredItems.length === 0 && !variableMode) return null;
+  if (!variableMode && flatItems.length === 0) return null;
+
+  let runningIndex = -1;
 
   return (
     <div
       ref={paletteRef}
       className={clsx(
-        'absolute z-50 left-4 right-16 max-h-72 overflow-auto',
+        'absolute z-50 left-4 right-16 max-h-80 overflow-auto',
         'bg-white dark:bg-gray-800',
         'border border-gray-200 dark:border-gray-700',
         'rounded-lg shadow-lg',
@@ -238,7 +312,6 @@ export function PromptPalette({ query, onSelectText, onSelectPluginSkill, onClos
       )}
     >
       {variableMode && selectedPrompt ? (
-        /* Variable fill mode */
         <div className="p-3 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{selectedPrompt.title}</span>
@@ -258,7 +331,7 @@ export function PromptPalette({ query, onSelectText, onSelectPluginSkill, onClos
               <input
                 type="text"
                 value={variableValues[varName] || ''}
-                onChange={(e) => setVariableValues((prev) => ({ ...prev, [varName]: e.target.value }))}
+                onChange={(event) => setVariableValues((prev) => ({ ...prev, [varName]: event.target.value }))}
                 placeholder={varName}
                 className="w-full px-2 py-1 text-xs rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-primary-500"
                 autoFocus={selectedPrompt.variables[0] === varName}
@@ -267,59 +340,77 @@ export function PromptPalette({ query, onSelectText, onSelectPluginSkill, onClos
           ))}
           <button
             onClick={handleVariableSubmit}
-            className={clsx(
-              'w-full px-3 py-1.5 text-xs font-medium rounded-md',
-              'bg-primary-600 text-white hover:bg-primary-700',
-              'transition-colors',
-            )}
+            className="w-full px-3 py-1.5 text-xs font-medium rounded-md bg-primary-600 text-white hover:bg-primary-700 transition-colors"
           >
             {t('promptPalette.insertPrompt', { defaultValue: 'Insert Prompt' })}
           </button>
         </div>
       ) : (
-        /* Prompt & skill list mode */
         <>
           <div className="sticky top-0 px-3 py-1.5 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
             <span className="text-xs text-gray-500 dark:text-gray-400">
-              {t('promptPalette.title', { defaultValue: '/ Prompts' })}
-              {query && ` — ${filteredItems.length} matches`}
+              {t('promptPalette.title', { defaultValue: '/ Shortcuts' })}
+              {query ? ` · ${flatItems.length}` : ''}
             </span>
           </div>
           <div className="py-1">
-            {filteredItems.map((item, index) => {
-              const key = item.kind === 'prompt' ? item.id : `skill:${item.plugin_name}:${item.skill_name}`;
-              const title = item.kind === 'prompt' ? item.title : `${item.plugin_name}:${item.skill_name}`;
-              const desc = item.description;
-              const badge = item.kind === 'prompt' ? item.category : 'plugin';
+            {sections.map((section) => (
+              <div key={section.key}>
+                <div className="px-3 py-1 text-2xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                  {section.label}
+                </div>
+                {section.items.length === 0 ? (
+                  <div className="px-3 pb-2 text-2xs text-gray-400 dark:text-gray-500">{section.emptyLabel}</div>
+                ) : (
+                  section.items.map((item) => {
+                    runningIndex += 1;
+                    const currentIndex = runningIndex;
+                    const title = item.kind === 'plugin_skill' ? `${item.plugin_name}:${item.skill_name}` : item.title;
+                    const subtitle =
+                      item.kind === 'quick_prompt'
+                        ? item.description
+                        : item.kind === 'prompt_template'
+                          ? item.description
+                          : item.description;
+                    const badge =
+                      item.kind === 'quick_prompt'
+                        ? t('promptPalette.badges.quickPrompt', { defaultValue: 'Quick' })
+                        : item.kind === 'prompt_template'
+                          ? promptCategoryLabel(item.category)
+                          : t('promptPalette.badges.pluginSkill', { defaultValue: 'Plugin' });
 
-              return (
-                <button
-                  key={key}
-                  onClick={() => handleSelectItem(item)}
-                  className={clsx(
-                    'w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors',
-                    index === selectedIndex
-                      ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-900 dark:text-primary-100'
-                      : 'hover:bg-gray-100 dark:hover:bg-gray-700',
-                  )}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-sm font-medium truncate">{title}</span>
-                      <span
+                    return (
+                      <button
+                        key={
+                          item.kind === 'plugin_skill'
+                            ? `plugin:${item.plugin_name}:${item.skill_name}`
+                            : `${item.kind}:${item.id}`
+                        }
+                        onClick={() => handleSelectItem(item)}
                         className={clsx(
-                          'text-2xs px-1 py-0.5 rounded shrink-0',
-                          categoryBadgeColor[badge] || categoryBadgeColor.custom,
+                          'w-full flex items-start gap-2 px-3 py-1.5 text-left transition-colors',
+                          currentIndex === selectedIndex
+                            ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-900 dark:text-primary-100'
+                            : 'hover:bg-gray-100 dark:hover:bg-gray-700',
                         )}
                       >
-                        {badge}
-                      </span>
-                    </div>
-                    {desc && <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{desc}</div>}
-                  </div>
-                </button>
-              );
-            })}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm font-medium truncate">{title}</span>
+                            <span className={clsx('text-2xs px-1 py-0.5 rounded shrink-0', badgeTone(item))}>
+                              {badge}
+                            </span>
+                          </div>
+                          {subtitle && (
+                            <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{subtitle}</div>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            ))}
           </div>
         </>
       )}

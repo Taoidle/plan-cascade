@@ -27,7 +27,8 @@ pub use query_policy_v2::{
 };
 pub use query_v2::{
     list_memory_entries_v2, list_pending_memory_candidates_v2, memory_stats_v2,
-    query_memory_entries_v2, review_memory_candidates_v2, MemoryReviewCandidateV2,
+    purge_memories_v2, query_memory_entries_v2, restore_deleted_memories_v2,
+    review_memory_candidates_v2, set_memory_status_v2, MemoryReviewCandidateV2,
     MemoryReviewDecisionV2, MemoryReviewSummaryV2, MemoryScopeV2, MemoryStatusV2, RiskTierV2,
     UnifiedMemoryQueryRequestV2, UnifiedMemoryQueryResultV2,
 };

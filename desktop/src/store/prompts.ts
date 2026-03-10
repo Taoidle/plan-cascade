@@ -7,6 +7,7 @@
 
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
+import i18n from '../i18n';
 import type { PromptTemplate, PromptCreateRequest, PromptUpdateRequest, CommandResponse } from '../types/prompt';
 
 interface PromptsState {
@@ -73,12 +74,18 @@ export const usePromptsStore = create<PromptsState>((set, get) => ({
   pendingInsertContent: null,
 
   fetchPrompts: async (category?: string, search?: string) => {
-    set({ loading: true, error: null });
+    set({
+      loading: true,
+      error: null,
+      selectedCategory: category ?? null,
+      searchQuery: search ?? '',
+    });
 
     try {
       const response = await invoke<CommandResponse<PromptTemplate[]>>('list_prompts', {
-        category: category || null,
+        category: category !== undefined ? category : null,
         search: search || null,
+        locale: i18n.language || null,
       });
 
       if (response.success && response.data) {
@@ -101,7 +108,7 @@ export const usePromptsStore = create<PromptsState>((set, get) => ({
       });
 
       if (response.success && response.data) {
-        await get().fetchPrompts();
+        await get().fetchPrompts(get().selectedCategory ?? undefined, get().searchQuery || undefined);
         return response.data;
       } else {
         set({ error: response.error || 'Failed to create prompt' });
@@ -121,7 +128,7 @@ export const usePromptsStore = create<PromptsState>((set, get) => ({
       });
 
       if (response.success && response.data) {
-        await get().fetchPrompts();
+        await get().fetchPrompts(get().selectedCategory ?? undefined, get().searchQuery || undefined);
         return response.data;
       } else {
         set({ error: response.error || 'Failed to update prompt' });
@@ -138,7 +145,7 @@ export const usePromptsStore = create<PromptsState>((set, get) => ({
       const response = await invoke<CommandResponse<void>>('delete_prompt', { id });
 
       if (response.success) {
-        await get().fetchPrompts();
+        await get().fetchPrompts(get().selectedCategory ?? undefined, get().searchQuery || undefined);
         return true;
       } else {
         set({ error: response.error || 'Failed to delete prompt' });
@@ -164,11 +171,18 @@ export const usePromptsStore = create<PromptsState>((set, get) => ({
 
   togglePin: async (id: string) => {
     try {
-      const response = await invoke<CommandResponse<PromptTemplate>>('toggle_prompt_pin', { id });
+      const response = await invoke<CommandResponse<PromptTemplate>>('toggle_prompt_pin', {
+        id,
+        locale: i18n.language || null,
+      });
 
       if (response.success && response.data) {
         set((state) => ({
-          prompts: state.prompts.map((p) => (p.id === id ? response.data! : p)),
+          prompts: [...state.prompts.map((p) => (p.id === id ? response.data! : p))].sort((a, b) => {
+            if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1;
+            if (a.use_count !== b.use_count) return b.use_count - a.use_count;
+            return a.title.localeCompare(b.title);
+          }),
         }));
       }
     } catch {

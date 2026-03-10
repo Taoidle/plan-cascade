@@ -125,7 +125,7 @@ export type MemoryCategory = 'preference' | 'convention' | 'pattern' | 'correcti
 
 /** Scope of memory storage */
 export type MemoryScope = 'project' | 'global' | 'session';
-export type MemoryStatus = 'active' | 'pending_review' | 'rejected' | 'archived';
+export type MemoryStatus = 'active' | 'pending_review' | 'rejected' | 'archived' | 'deleted';
 export type MemoryRiskTier = 'low' | 'medium' | 'high';
 export type MemoryReviewDecision = 'approve' | 'reject' | 'archive' | 'restore';
 export type MemoryPipelinePhase = 'idle' | 'extracting' | 'reviewing' | 'ready' | 'pending' | 'error';
@@ -188,6 +188,7 @@ export interface MemoryReviewCandidate {
 export interface MemoryStats {
   total_count: number;
   category_counts: Record<string, number>;
+  status_counts: Record<string, number>;
   avg_importance: number;
 }
 

@@ -261,6 +261,8 @@ pub struct MemorySearchResult {
 pub struct MemoryStats {
     pub total_count: usize,
     pub category_counts: std::collections::HashMap<String, usize>,
+    #[serde(default)]
+    pub status_counts: std::collections::HashMap<String, usize>,
     pub avg_importance: f32,
 }
 
@@ -733,9 +735,25 @@ impl ProjectMemoryStore {
             .filter_map(|r| r.ok())
             .collect();
 
+        let mut status_stmt = conn.prepare(
+            "SELECT status, COUNT(*)
+             FROM memory_entries_v2
+             WHERE scope = ?1
+               AND ((?1 = 'project' AND project_path = ?2) OR (?1 = 'session' AND session_id = ?3) OR (?1 = 'global'))
+             GROUP BY status",
+        )?;
+        let status_counts: std::collections::HashMap<String, usize> = status_stmt
+            .query_map(
+                params![scoped.scope, scoped.project_path, scoped.session_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as usize)),
+            )?
+            .filter_map(|r| r.ok())
+            .collect();
+
         Ok(MemoryStats {
             total_count: total_count as usize,
             category_counts,
+            status_counts,
             avg_importance: avg_importance as f32,
         })
     }

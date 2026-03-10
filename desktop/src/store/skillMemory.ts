@@ -90,7 +90,7 @@ export type MemoryCategoryFilter = MemoryCategory | 'all';
 
 /** Tab selection in the management dialog */
 export type SkillMemoryTab = 'skills' | 'memory';
-export type MemoryDialogView = 'active' | 'pending' | 'rejected';
+export type MemoryDialogView = 'all' | 'active' | 'pending' | 'rejected' | 'archived' | 'deleted';
 
 interface OpenDialogOptions {
   memoryViewMode?: MemoryDialogView;
@@ -125,10 +125,17 @@ function createEmptyMemoryPipelineSnapshot(rootSessionId: string): MemoryPipelin
 
 function statusesForMemoryView(mode: MemoryDialogView): MemoryStatus[] {
   switch (mode) {
+    case 'all':
+      return ['active', 'rejected', 'archived', 'deleted'];
     case 'pending':
       return ['pending_review'];
     case 'rejected':
       return ['rejected'];
+    case 'archived':
+      return ['archived'];
+    case 'deleted':
+      return ['deleted'];
+    case 'active':
     default:
       return ['active'];
   }
@@ -211,6 +218,13 @@ interface SkillMemoryState {
     memoryIds: string[],
     decision: MemoryReviewDecision,
   ) => Promise<void>;
+  setMemoryStatus: (
+    projectPath: string,
+    memoryIds: string[],
+    targetStatus: Extract<MemoryStatus, 'active' | 'archived' | 'deleted'>,
+  ) => Promise<void>;
+  restoreDeletedMemories: (projectPath: string, memoryIds: string[]) => Promise<void>;
+  purgeMemories: (projectPath: string, memoryIds: string[]) => Promise<void>;
   runMaintenance: (projectPath: string) => Promise<void>;
   setMemorySearchQuery: (query: string) => void;
   setMemoryCategoryFilter: (filter: MemoryCategoryFilter) => void;
@@ -254,7 +268,7 @@ const defaultState = {
   memoryCategoryFilter: 'all' as MemoryCategoryFilter,
   memoryScope: 'project' as MemoryScope,
   memorySessionId: null as string | null,
-  memoryViewMode: 'active' as MemoryDialogView,
+  memoryViewMode: 'all' as MemoryDialogView,
   memoryPage: 0,
   memoryPageSize: 20,
   memoryHasMore: true,
@@ -526,8 +540,9 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         sessionId: memorySessionId,
       });
       if (response.success && response.data) {
+        const sorted = [...response.data].sort((left, right) => right.updated_at.localeCompare(left.updated_at));
         set({
-          memories: response.data,
+          memories: sorted,
           memoriesLoading: false,
           memoryHasMore: response.data.length >= memoryPageSize,
         });
@@ -576,8 +591,11 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         sessionId: memorySessionId,
       });
       if (response.success && response.data) {
+        const combined = [...memories, ...response.data].sort((left, right) =>
+          right.updated_at.localeCompare(left.updated_at),
+        );
         set({
-          memories: [...memories, ...response.data],
+          memories: combined,
           memoryPage: nextPage,
           memoryHasMore: response.data.length >= memoryPageSize,
         });
@@ -670,7 +688,9 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
       });
       if (response.success && response.data) {
         set((state) => ({
-          memories: state.memories.map((m) => (m.id === id ? response.data! : m)),
+          memories: state.memories
+            .map((m) => (m.id === id ? response.data! : m))
+            .sort((left, right) => right.updated_at.localeCompare(left.updated_at)),
         }));
         get().showToast(tSkillMemory('skillPanel.toasts.memoryUpdated', 'Memory updated'), 'success');
       } else {
@@ -691,7 +711,10 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         set((state) => ({
           memories: state.memories.filter((m) => m.id !== id),
         }));
-        get().showToast(tSkillMemory('skillPanel.toasts.memoryDeleted', 'Memory deleted'), 'success');
+        get().showToast(
+          tSkillMemory('skillPanel.toasts.memoryMovedToRecycleBin', 'Memory moved to recycle bin'),
+          'success',
+        );
       } else {
         get().showToast(
           response.error || tSkillMemory('skillPanel.toasts.deleteMemoryFailed', 'Failed to delete memory'),
@@ -879,6 +902,113 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
     }
   },
 
+  setMemoryStatus: async (projectPath: string, memoryIds: string[], targetStatus) => {
+    if (memoryIds.length === 0) return;
+    try {
+      const response = await invoke<CommandResponse<MemoryReviewSummaryV2>>('set_memory_status_v2', {
+        memoryIds,
+        targetStatus,
+      });
+      if (!response.success) {
+        get().showToast(
+          memoryErrorWithTrace(
+            response.error ||
+              tSkillMemory('skillPanel.toasts.memoryStatusUpdateFailed', 'Failed to update memory status'),
+          ),
+          'error',
+        );
+        return;
+      }
+
+      const updated = response.data?.updated ?? memoryIds.length;
+      const successKey =
+        targetStatus === 'archived'
+          ? 'skillPanel.toasts.memoryArchivedSuccess'
+          : targetStatus === 'active'
+            ? 'skillPanel.toasts.memoryActivatedSuccess'
+            : 'skillPanel.toasts.memoryDeletedSuccess';
+      const defaultMessage =
+        targetStatus === 'archived'
+          ? `Archived ${updated} memories`
+          : targetStatus === 'active'
+            ? `Restored ${updated} memories`
+            : `Moved ${updated} memories to recycle bin`;
+      get().showToast(tSkillMemory(successKey, defaultMessage), 'success');
+      await Promise.all([
+        get().loadMemories(projectPath),
+        get().loadMemoryStats(projectPath),
+        get().loadPendingMemoryCandidates(projectPath),
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      get().showToast(memoryErrorWithTrace(message), 'error');
+    }
+  },
+
+  restoreDeletedMemories: async (projectPath: string, memoryIds: string[]) => {
+    if (memoryIds.length === 0) return;
+    try {
+      const response = await invoke<CommandResponse<MemoryReviewSummaryV2>>('restore_deleted_memories_v2', {
+        memoryIds,
+      });
+      if (!response.success) {
+        get().showToast(
+          memoryErrorWithTrace(
+            response.error ||
+              tSkillMemory('skillPanel.toasts.memoryRestoreDeletedFailed', 'Failed to restore memories'),
+          ),
+          'error',
+        );
+        return;
+      }
+      const updated = response.data?.updated ?? memoryIds.length;
+      get().showToast(
+        tSkillMemory('skillPanel.toasts.memoryRestoreDeletedSuccess', `Restored ${updated} memories`),
+        'success',
+      );
+      await Promise.all([
+        get().loadMemories(projectPath),
+        get().loadMemoryStats(projectPath),
+        get().loadPendingMemoryCandidates(projectPath),
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      get().showToast(memoryErrorWithTrace(message), 'error');
+    }
+  },
+
+  purgeMemories: async (projectPath: string, memoryIds: string[]) => {
+    if (memoryIds.length === 0) return;
+    try {
+      const response = await invoke<CommandResponse<MemoryReviewSummaryV2>>('purge_memories_v2', {
+        memoryIds,
+      });
+      if (!response.success) {
+        get().showToast(
+          memoryErrorWithTrace(
+            response.error ||
+              tSkillMemory('skillPanel.toasts.memoryPurgeFailed', 'Failed to permanently delete memories'),
+          ),
+          'error',
+        );
+        return;
+      }
+      const updated = response.data?.updated ?? memoryIds.length;
+      get().showToast(
+        tSkillMemory('skillPanel.toasts.memoryPurgedSuccess', `Permanently deleted ${updated} memories`),
+        'success',
+      );
+      await Promise.all([
+        get().loadMemories(projectPath),
+        get().loadMemoryStats(projectPath),
+        get().loadPendingMemoryCandidates(projectPath),
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      get().showToast(memoryErrorWithTrace(message), 'error');
+    }
+  },
+
   runMaintenance: async (projectPath: string) => {
     try {
       const { memoryScope, memorySessionId } = get();
@@ -986,7 +1116,11 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
     set({
       dialogOpen: true,
       activeTab: tab ?? get().activeTab,
-      ...(options?.memoryViewMode ? { memoryViewMode: options.memoryViewMode } : {}),
+      ...((tab ?? get().activeTab) === 'memory'
+        ? { memoryViewMode: options?.memoryViewMode ?? 'all' }
+        : options?.memoryViewMode
+          ? { memoryViewMode: options.memoryViewMode }
+          : {}),
       ...(options?.memoryScope ? { memoryScope: options.memoryScope } : {}),
       ...(options && 'memorySessionId' in options ? { memorySessionId: options.memorySessionId ?? null } : {}),
     }),

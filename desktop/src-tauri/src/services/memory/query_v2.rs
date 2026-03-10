@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use chrono::{NaiveDateTime, Utc};
-use rusqlite::{params, params_from_iter, types::Value};
+use rusqlite::{params, params_from_iter, types::Value, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::services::memory::query_policy_v2::{
@@ -58,6 +58,7 @@ pub enum MemoryStatusV2 {
     PendingReview,
     Rejected,
     Archived,
+    Deleted,
 }
 
 impl MemoryStatusV2 {
@@ -67,6 +68,7 @@ impl MemoryStatusV2 {
             MemoryStatusV2::PendingReview => "pending_review",
             MemoryStatusV2::Rejected => "rejected",
             MemoryStatusV2::Archived => "archived",
+            MemoryStatusV2::Deleted => "deleted",
         }
     }
 
@@ -76,6 +78,7 @@ impl MemoryStatusV2 {
             "pending_review" => Some(Self::PendingReview),
             "rejected" => Some(Self::Rejected),
             "archived" => Some(Self::Archived),
+            "deleted" => Some(Self::Deleted),
             _ => None,
         }
     }
@@ -223,6 +226,19 @@ impl MemoryReviewDecisionV2 {
             MemoryReviewDecisionV2::Restore => "restore",
         }
     }
+}
+
+fn write_memory_audit(
+    conn: &rusqlite::Transaction<'_>,
+    memory_id: &str,
+    decision: &str,
+    operator: &str,
+) -> rusqlite::Result<usize> {
+    conn.execute(
+        "INSERT INTO memory_review_audit_v2 (memory_id, decision, operator, created_at)
+         VALUES (?1, ?2, ?3, datetime('now'))",
+        params![memory_id, decision, operator],
+    )
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -805,9 +821,23 @@ pub fn memory_stats_v2(
         .filter_map(|r| r.ok())
         .collect();
 
+    let status_params = params.clone();
+    let status_sql = format!(
+        "SELECT status, COUNT(*) FROM memory_entries_v2{} GROUP BY status",
+        where_sql
+    );
+    let mut status_stmt = conn.prepare(&status_sql)?;
+    let status_counts: HashMap<String, usize> = status_stmt
+        .query_map(params_from_iter(status_params.iter()), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as usize))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
     Ok(MemoryStats {
         total_count: total_count as usize,
         category_counts,
+        status_counts,
         avg_importance: avg_importance as f32,
     })
 }
@@ -906,6 +936,134 @@ pub fn review_memory_candidates_v2(
     Ok(MemoryReviewSummaryV2 { updated })
 }
 
+pub fn set_memory_status_v2(
+    store: &ProjectMemoryStore,
+    ids: &[String],
+    target_status: MemoryStatusV2,
+) -> AppResult<MemoryReviewSummaryV2> {
+    if ids.is_empty() {
+        return Ok(MemoryReviewSummaryV2 { updated: 0 });
+    }
+    if !matches!(
+        target_status,
+        MemoryStatusV2::Active | MemoryStatusV2::Archived | MemoryStatusV2::Deleted
+    ) {
+        return Err(AppError::Validation(format!(
+            "Unsupported lifecycle target status: {}",
+            target_status.as_str()
+        )));
+    }
+
+    let conn = store.pool().get().map_err(|e| {
+        AppError::database(format!(
+            "Failed to get connection for set_memory_status_v2: {}",
+            e
+        ))
+    })?;
+    let tx = conn.unchecked_transaction()?;
+    let mut updated = 0usize;
+    for id in ids {
+        let current_status: Option<String> = tx
+            .query_row(
+                "SELECT status FROM memory_entries_v2 WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(current_status) = current_status else {
+            continue;
+        };
+
+        let audit_label = match target_status {
+            MemoryStatusV2::Deleted => "delete",
+            MemoryStatusV2::Archived => "archive",
+            MemoryStatusV2::Active => "restore_active",
+            _ => unreachable!(),
+        };
+        let deleted_from_status = if matches!(target_status, MemoryStatusV2::Deleted) {
+            match current_status.as_str() {
+                "active" | "archived" | "rejected" => Some(current_status.clone()),
+                _ => None,
+            }
+        } else {
+            None
+        };
+
+        updated += tx.execute(
+            "UPDATE memory_entries_v2
+             SET status = ?2,
+                 deleted_from_status = ?3,
+                 conflict_flag = CASE WHEN ?2 = 'pending_review' THEN conflict_flag ELSE 0 END,
+                 updated_at = datetime('now')
+             WHERE id = ?1",
+            params![id, target_status.as_str(), deleted_from_status],
+        )?;
+        let _ = write_memory_audit(&tx, id, audit_label, "user");
+    }
+    tx.commit()?;
+    Ok(MemoryReviewSummaryV2 { updated })
+}
+
+pub fn restore_deleted_memories_v2(
+    store: &ProjectMemoryStore,
+    ids: &[String],
+) -> AppResult<MemoryReviewSummaryV2> {
+    if ids.is_empty() {
+        return Ok(MemoryReviewSummaryV2 { updated: 0 });
+    }
+    let conn = store.pool().get().map_err(|e| {
+        AppError::database(format!(
+            "Failed to get connection for restore_deleted_memories_v2: {}",
+            e
+        ))
+    })?;
+    let tx = conn.unchecked_transaction()?;
+    let mut updated = 0usize;
+    for id in ids {
+        let affected = tx.execute(
+            "UPDATE memory_entries_v2
+             SET status = COALESCE(deleted_from_status, 'active'),
+                 deleted_from_status = NULL,
+                 conflict_flag = 0,
+                 updated_at = datetime('now')
+             WHERE id = ?1 AND status = 'deleted'",
+            params![id],
+        )?;
+        updated += affected;
+        if affected > 0 {
+            let _ = write_memory_audit(&tx, id, "restore_deleted", "user");
+        }
+    }
+    tx.commit()?;
+    Ok(MemoryReviewSummaryV2 { updated })
+}
+
+pub fn purge_memories_v2(
+    store: &ProjectMemoryStore,
+    ids: &[String],
+) -> AppResult<MemoryReviewSummaryV2> {
+    if ids.is_empty() {
+        return Ok(MemoryReviewSummaryV2 { updated: 0 });
+    }
+    let conn = store.pool().get().map_err(|e| {
+        AppError::database(format!(
+            "Failed to get connection for purge_memories_v2: {}",
+            e
+        ))
+    })?;
+    let tx = conn.unchecked_transaction()?;
+    let mut updated = 0usize;
+    for id in ids {
+        let _ = write_memory_audit(&tx, id, "purge", "user");
+        updated += tx.execute(
+            "DELETE FROM memory_entries_v2 WHERE id = ?1 AND status = 'deleted'",
+            params![id],
+        )?;
+    }
+    tx.commit()?;
+    Ok(MemoryReviewSummaryV2 { updated })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -971,6 +1129,72 @@ mod tests {
 
         let result = query_memory_entries_v2(&store, &request).await.unwrap();
         assert_eq!(result.results.len(), 3);
+    }
+
+    #[test]
+    fn test_memory_lifecycle_deleted_restore_and_purge() {
+        let store = create_store();
+        let conn = store.pool().get().unwrap();
+        conn.execute(
+            "INSERT INTO memory_entries_v2 (id, scope, project_path, category, content, content_hash, status, importance)
+             VALUES ('memory-a', 'project', '/scope-test', 'fact', 'remember me', 'remember me', 'active', 0.8)",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let delete_summary =
+            set_memory_status_v2(&store, &["memory-a".to_string()], MemoryStatusV2::Deleted)
+                .unwrap();
+        assert_eq!(delete_summary.updated, 1);
+
+        let deleted = list_memory_entries_v2(
+            &store,
+            UnifiedMemoryQueryRequestV2 {
+                project_path: "/scope-test".to_string(),
+                scopes: vec![MemoryScopeV2::Project],
+                statuses: vec![MemoryStatusV2::Deleted],
+                min_importance: 0.0,
+                ..Default::default()
+            },
+        );
+        let deleted = futures::executor::block_on(deleted).unwrap();
+        assert_eq!(deleted.len(), 1);
+        assert_eq!(deleted[0].status.as_deref(), Some("deleted"));
+
+        let restore_summary = restore_deleted_memories_v2(&store, &["memory-a".to_string()]).unwrap();
+        assert_eq!(restore_summary.updated, 1);
+
+        let restored = futures::executor::block_on(list_memory_entries_v2(
+            &store,
+            UnifiedMemoryQueryRequestV2 {
+                project_path: "/scope-test".to_string(),
+                scopes: vec![MemoryScopeV2::Project],
+                statuses: vec![MemoryStatusV2::Active],
+                min_importance: 0.0,
+                ..Default::default()
+            },
+        ))
+        .unwrap();
+        assert_eq!(restored.len(), 1);
+        assert_eq!(restored[0].status.as_deref(), Some("active"));
+
+        set_memory_status_v2(&store, &["memory-a".to_string()], MemoryStatusV2::Deleted).unwrap();
+        let purge_summary = purge_memories_v2(&store, &["memory-a".to_string()]).unwrap();
+        assert_eq!(purge_summary.updated, 1);
+
+        let remaining = futures::executor::block_on(list_memory_entries_v2(
+            &store,
+            UnifiedMemoryQueryRequestV2 {
+                project_path: "/scope-test".to_string(),
+                scopes: vec![MemoryScopeV2::Project],
+                statuses: vec![MemoryStatusV2::Deleted, MemoryStatusV2::Active],
+                min_importance: 0.0,
+                ..Default::default()
+            },
+        ))
+        .unwrap();
+        assert!(remaining.is_empty());
     }
 
     #[tokio::test]

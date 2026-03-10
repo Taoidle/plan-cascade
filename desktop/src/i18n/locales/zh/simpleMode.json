@@ -226,8 +226,12 @@
     "clearAllConfirmGlobal": "确定删除所有全局记忆？此操作不可撤销。",
     "clearAllConfirmSession": "确定删除当前会话的所有记忆？此操作不可撤销。",
     "activeMemories": "已生效",
+    "allMemories": "全部",
     "pendingReview": "待审核",
     "rejectedMemories": "已拒绝",
+    "archivedMemories": "已归档",
+    "deletedMemories": "回收站",
+    "pendingJumpHint": "{{count}} 条待审核候选记忆请在“待审核”标签中处理。",
     "panelSummary": {
       "idle": "记忆流水线已就绪",
       "pending": "{{count}} 条记忆待审核",
@@ -253,6 +257,15 @@
     "reject": "拒绝",
     "archive": "归档",
     "restore": "恢复为待审核",
+    "moveToRecycleBin": "移入回收站",
+    "purgeSelected": "彻底删除",
+    "confirmPurge": "确认彻底删除",
+    "noPersistedMemories": "暂无正式记忆",
+    "noPersistedMemoriesHint": "这里会同时展示已生效、已拒绝、已归档和已删除的记忆。",
+    "noArchivedMemories": "暂无已归档记忆",
+    "noArchivedMemoriesHint": "已归档记忆可以恢复为生效状态，或移入回收站。",
+    "noDeletedMemories": "回收站为空",
+    "noDeletedMemoriesHint": "删除后的记忆会保留在这里，直到你恢复或彻底删除它们。",
     "whySkillsTitle": "为何使用这些技能",
     "showWhySkills": "为何使用技能？",
     "hideWhySkills": "隐藏原因",
@@ -345,6 +358,7 @@
       "memoryUpdated": "记忆已更新",
       "updateMemoryFailed": "更新记忆失败",
       "memoryDeleted": "记忆已删除",
+      "memoryMovedToRecycleBin": "记忆已移入回收站",
       "deleteMemoryFailed": "删除记忆失败",
       "memoriesCleared": "全部记忆已清除",
       "clearMemoriesFailed": "清除记忆失败",
@@ -355,6 +369,14 @@
       "memoryRejectSuccess": "已拒绝 {{count}} 条记忆候选",
       "memoryArchiveSuccess": "已归档 {{count}} 条记忆候选",
       "memoryRestoreSuccess": "已恢复 {{count}} 条记忆候选",
+      "memoryStatusUpdateFailed": "更新记忆状态失败",
+      "memoryArchivedSuccess": "已归档 {{count}} 条记忆",
+      "memoryActivatedSuccess": "已恢复 {{count}} 条记忆",
+      "memoryDeletedSuccess": "已将 {{count}} 条记忆移入回收站",
+      "memoryRestoreDeletedFailed": "恢复记忆失败",
+      "memoryRestoreDeletedSuccess": "已恢复 {{count}} 条记忆",
+      "memoryPurgeFailed": "彻底删除记忆失败",
+      "memoryPurgedSuccess": "已彻底删除 {{count}} 条记忆",
       "sessionMemoryRequiresSession": "会话记忆需要一个活动会话"
     }
   },
@@ -980,6 +1002,13 @@
     "noPrompts": "暂无提示词",
     "insert": "插入"
   },
+  "promptCategories": {
+    "all": "全部",
+    "uncategorized": "未分类",
+    "coding": "编程",
+    "writing": "写作",
+    "analysis": "分析"
+  },
   "promptDialog": {
     "title": "管理提示词",
     "searchPlaceholder": "搜索提示词...",
@@ -987,6 +1016,9 @@
     "titleLabel": "标题",
     "titlePlaceholder": "提示词标题",
     "category": "分类",
+    "categoryPlaceholder": "留空表示未分类，或直接输入新的分类名称",
+    "categoryEmptyHint": "留空即可将该提示词设为未分类。",
+    "categoryCustomHint": "你可以直接输入一个新的分类名称。",
     "description": "描述",
     "descriptionPlaceholder": "简要描述（可选）",
     "content": "内容",
@@ -998,13 +1030,53 @@
     "save": "保存",
     "delete": "删除",
     "deleteConfirm": "确定删除此提示词？",
+    "confirmDelete": "再次点击确认",
     "duplicate": "复制为自定义",
-    "selectOrCreate": "选择或创建提示词"
+    "selectOrCreate": "选择或创建提示词",
+    "builtinBadge": "内置",
+    "builtinReadonly": "内置提示词会根据当前语言动态本地化，且不可直接编辑。若需修改，请先复制为自定义提示词。",
+    "copyTitle": "{{title}}（副本）"
   },
   "promptPalette": {
-    "title": "/ 提示词",
+    "title": "/ 快捷入口",
     "back": "返回",
-    "insertPrompt": "插入提示词"
+    "insertPrompt": "插入提示词",
+    "groups": {
+      "quickPrompts": "快捷提示词",
+      "promptTemplates": "提示词模板",
+      "pluginSkills": "插件技能"
+    },
+    "badges": {
+      "quickPrompt": "快捷",
+      "pluginSkill": "插件"
+    },
+    "empty": {
+      "quickPrompts": "没有匹配的快捷提示词。",
+      "promptTemplates": "没有匹配的提示词模板。",
+      "pluginSkills": "没有匹配的插件技能。"
+    },
+    "quick": {
+      "plan": {
+        "title": "先列计划",
+        "description": "插入一个先规划再实现的提示词。",
+        "content": "先把这个任务拆成一个简短而具体的执行计划，再开始写代码。"
+      },
+      "review": {
+        "title": "审查改动",
+        "description": "插入一个聚焦 bug 和回归风险的审查请求。",
+        "content": "请审查我最近的改动，重点关注 bug、行为回归和缺失的测试。"
+      },
+      "summarize": {
+        "title": "总结内容",
+        "description": "插入一个简洁总结请求。",
+        "content": "请总结关键信息，只保留重要决策、风险和后续事项。"
+      },
+      "explainError": {
+        "title": "解释错误",
+        "description": "插入一个解释错误并给出修复建议的请求。",
+        "content": "请解释这个错误，判断最可能的根因，并给出最小且安全的修复方案。"
+      }
+    }
   },
   "export": {
     "markdown": "Markdown (.md)",

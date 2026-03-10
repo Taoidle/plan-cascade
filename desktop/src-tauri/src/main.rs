@@ -315,6 +315,9 @@ fn main() {
             plan_cascade_desktop::commands::memory::memory_stats_v2,
             plan_cascade_desktop::commands::memory::list_pending_memory_candidates_v2,
             plan_cascade_desktop::commands::memory::review_memory_candidates_v2,
+            plan_cascade_desktop::commands::memory::set_memory_status_v2,
+            plan_cascade_desktop::commands::memory::restore_deleted_memories_v2,
+            plan_cascade_desktop::commands::memory::purge_memories_v2,
             plan_cascade_desktop::commands::memory::run_memory_maintenance,
             plan_cascade_desktop::commands::memory::extract_session_memories,
             // Context V2 commands
