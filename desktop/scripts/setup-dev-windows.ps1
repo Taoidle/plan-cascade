@@ -225,7 +225,7 @@ function Sync-VendorPatchQueue {
     $patches = Get-ChildItem -Path $PatchDir -Filter '*.patch' | Sort-Object Name
     foreach ($patch in $patches) {
       Write-Step "Applying patch $($patch.Name)"
-      & git -C $upstreamDir apply --whitespace=nowarn $patch.FullName
+      & git -C $upstreamDir apply -p0 --whitespace=nowarn $patch.FullName
     }
 
     Write-Step 'Syncing vendored openai-api-rs'
