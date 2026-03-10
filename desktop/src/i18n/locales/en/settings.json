@@ -421,15 +421,33 @@
     },
 
     "groups": {
-      "planning": "Planning Phases",
-      "planningDesc": "Configure LLM for each planning step. \"Global Default\" uses your main LLM Backend.",
+      "planMode": "Plan Mode",
+      "planModeDesc": "Configure the LLM used by each Plan-mode stage. \"Global Default\" uses your main LLM backend.",
+      "taskWorkflow": "Task Workflow",
+      "taskWorkflowDesc": "Configure the LLM used by Task planning workflow stages.",
       "execution": "Execution Phases",
-      "executionDesc": "Configure agents for story execution."
+      "executionDesc": "Configure Task execution agents and fallback chains."
     },
 
     "planStrategy": {
       "name": "Strategy Analysis",
       "description": "Task analysis and strategy selection"
+    },
+    "planClarification": {
+      "name": "Clarification",
+      "description": "Generate and continue plan clarification questions"
+    },
+    "planGeneration": {
+      "name": "Plan Generation",
+      "description": "Generate the executable step plan"
+    },
+    "planExecution": {
+      "name": "Plan Execution",
+      "description": "Execute approved plan steps"
+    },
+    "planRetry": {
+      "name": "Plan Retry",
+      "description": "Retry an individual failed plan step"
     },
     "planExploration": {
       "name": "Project Exploration",

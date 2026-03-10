@@ -17,13 +17,17 @@ use zai_rs::model::tools::{Function as ZaiFunction, Tools as ZaiTools};
 use super::provider::{missing_api_key_error, parse_http_error, LlmProvider};
 use super::types::{
     FallbackToolFormatMode, LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message,
-    MessageContent, MessageRole, ProviderConfig, StopReason, ToolCall, ToolCallMode,
-    ToolCallReliability, ToolDefinition, UsageStats,
+    ProviderConfig, StopReason, ToolCall, ToolCallMode, ToolCallReliability, ToolDefinition,
+    UsageStats,
 };
+use crate::openai_compat::build_openai_compatible_messages;
 use crate::http_client::build_http_client;
 use crate::reliable_catalog::is_reliable_model;
 use crate::streaming_adapters::GlmAdapter;
 use plan_cascade_core::streaming::{StreamAdapter, UnifiedStreamEvent};
+
+#[cfg(test)]
+use super::types::{MessageContent, MessageRole};
 
 /// Default GLM API endpoint
 const GLM_API_URL: &str = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
@@ -123,32 +127,8 @@ impl GlmProvider {
             "temperature": request_options.temperature_override.unwrap_or(self.config.temperature),
         });
 
-        // Convert messages to OpenAI-compatible format
-        let mut api_messages: Vec<serde_json::Value> = Vec::new();
-
-        if let Some(sys) = system {
-            api_messages.push(serde_json::json!({
-                "role": "system",
-                "content": sys
-            }));
-        }
-
-        for msg in messages {
-            if msg.role == MessageRole::System {
-                for content in &msg.content {
-                    if let MessageContent::Text { text } = content {
-                        api_messages.push(serde_json::json!({
-                            "role": "system",
-                            "content": text
-                        }));
-                    }
-                }
-            } else {
-                api_messages.push(self.message_to_api(msg));
-            }
-        }
-
-        body["messages"] = serde_json::json!(api_messages);
+        body["messages"] =
+            serde_json::json!(build_openai_compatible_messages(messages, system));
 
         if !tools.is_empty() {
             // Serialize tools using zai-rs Function type for type-safe tool definitions
@@ -267,6 +247,7 @@ impl GlmProvider {
         }
     }
 
+    #[cfg(test)]
     /// Convert a Message to OpenAI-compatible format
     fn message_to_api(&self, message: &Message) -> serde_json::Value {
         let role = match message.role {

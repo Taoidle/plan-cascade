@@ -43,8 +43,8 @@ export async function startPlanWorkflowFlow(
   let modeSessionId: string | null = null;
   const planStore = usePlanModeStore.getState();
   const settings = useSettingsStore.getState();
-  const { resolveProviderBaseUrl } = await import('../../lib/providers');
-  const { resolvePhaseAgent } = await import('../../lib/phaseAgentResolver');
+  const { resolvePlanPhaseAgent, formatResolvedPlanAgentDisplay } = await import('../../lib/phaseAgentResolver');
+  const strategyAgent = resolvePlanPhaseAgent('plan_strategy');
 
   set({ isBusy: true, isCancelling: false, taskDescription: description, phase: 'analyzing', _runToken: runToken });
 
@@ -54,14 +54,13 @@ export async function startPlanWorkflowFlow(
     role: 'planner',
     displayName: i18n.t('planMode:personas.planner', 'Planner'),
     phase: 'analyzing',
+    model: formatResolvedPlanAgentDisplay(strategyAgent),
   } satisfies PlanPersonaIndicatorData);
 
   injectInfo(i18n.t('planMode:orchestrator.analyzingTask', 'Analyzing task...'));
-
-  const strategyAgent = resolvePhaseAgent('plan_strategy');
-  const provider = strategyAgent.provider || settings.provider;
-  const model = strategyAgent.model || settings.model;
-  const baseUrl = strategyAgent.baseUrl ?? (provider ? resolveProviderBaseUrl(provider, settings) : undefined);
+  const provider = strategyAgent.kind === 'llm' ? strategyAgent.provider : undefined;
+  const model = strategyAgent.kind === 'llm' ? strategyAgent.model : undefined;
+  const baseUrl = strategyAgent.kind === 'llm' ? strategyAgent.baseUrl : undefined;
   const projectPath = settings.workspacePath || undefined;
   const contextSources = buildPlanContextSources(null);
   const resolvedKernelSessionId = kernelSessionId ?? useWorkflowKernelStore.getState().session?.sessionId ?? null;
@@ -76,6 +75,8 @@ export async function startPlanWorkflowFlow(
     undefined,
     i18n.language,
     resolvedKernelSessionId,
+    strategyAgent.agentRef,
+    strategyAgent.source,
   );
   if (get()._runToken !== runToken) return { modeSessionId: null };
 
@@ -141,11 +142,31 @@ export async function startPlanWorkflowFlow(
       role: 'analyst',
       displayName: i18n.t('planMode:personas.analyst', 'Analyst'),
       phase: 'clarifying',
+      model: formatResolvedPlanAgentDisplay(resolvePlanPhaseAgent('plan_clarification')),
     } satisfies PlanPersonaIndicatorData);
     injectInfo(i18n.t('planMode:orchestrator.needsClarification', 'Some details need clarification before planning.'));
 
-    if (currentQuestion) {
-      injectCard('plan_clarify_question', currentQuestion as unknown as Record<string, unknown>);
+    let effectiveQuestion = currentQuestion;
+    if (!effectiveQuestion) {
+      injectInfo(i18n.t('planMode:orchestrator.generatingQuestion', 'Generating next question...'));
+      const clarificationAgent = resolvePlanPhaseAgent('plan_clarification');
+      const clarificationSession = await planStore.startPlanClarification(
+        clarificationAgent.kind === 'llm' ? clarificationAgent.provider : undefined,
+        clarificationAgent.kind === 'llm' ? clarificationAgent.model : undefined,
+        clarificationAgent.kind === 'llm' ? clarificationAgent.baseUrl : undefined,
+        projectPath,
+        contextSources,
+        undefined,
+        i18n.language,
+        sessionId,
+        clarificationAgent.agentRef,
+        clarificationAgent.source,
+      );
+      effectiveQuestion = clarificationSession?.currentQuestion ?? null;
+    }
+    if (effectiveQuestion) {
+      set({ pendingClarifyQuestion: effectiveQuestion });
+      injectCard('plan_clarify_question', effectiveQuestion as unknown as Record<string, unknown>);
     } else {
       const message = i18n.t(
         'planMode:orchestrator.clarificationFailed',
@@ -167,6 +188,7 @@ export async function submitClarificationFlow(
   deps: SessionFlowDeps,
 ): Promise<{ ok: boolean; errorCode?: string | null }> {
   const { get, set, resolvePlanSessionId, buildPlanContextSources } = deps;
+  const { resolvePlanPhaseAgent } = await import('../../lib/phaseAgentResolver');
   const runToken = get()._runToken;
   const effectiveSessionId = resolvePlanSessionId(get, set);
   if (!effectiveSessionId) {
@@ -184,16 +206,19 @@ export async function submitClarificationFlow(
   const settings = useSettingsStore.getState();
   const projectPath = settings.workspacePath || undefined;
   const contextSources = buildPlanContextSources(effectiveSessionId);
+  const clarificationAgent = resolvePlanPhaseAgent('plan_clarification');
   const updatedSession = await planStore.submitClarification(
     answer,
-    undefined,
-    undefined,
-    undefined,
+    clarificationAgent.kind === 'llm' ? clarificationAgent.provider : undefined,
+    clarificationAgent.kind === 'llm' ? clarificationAgent.model : undefined,
+    clarificationAgent.kind === 'llm' ? clarificationAgent.baseUrl : undefined,
     projectPath,
     contextSources,
     undefined,
     i18n.language,
     effectiveSessionId,
+    clarificationAgent.agentRef,
+    clarificationAgent.source,
   );
   if (get()._runToken !== runToken) return { ok: false, errorCode: 'stale_run_token' };
 
@@ -266,6 +291,7 @@ export async function skipClarificationFlow(deps: SessionFlowDeps): Promise<void
 
 export async function proceedToPlanningFlow(deps: SessionFlowDeps): Promise<void> {
   const { get, set, resolvePlanSessionId, buildPlanContextSources } = deps;
+  const { resolvePlanPhaseAgent, formatResolvedPlanAgentDisplay } = await import('../../lib/phaseAgentResolver');
   const runToken = get()._runToken;
   const effectiveSessionId = resolvePlanSessionId(get, set);
   if (!effectiveSessionId) {
@@ -275,10 +301,12 @@ export async function proceedToPlanningFlow(deps: SessionFlowDeps): Promise<void
   }
   set({ phase: 'planning', isBusy: true });
 
+  const generationAgent = resolvePlanPhaseAgent('plan_generation');
   injectCard('plan_persona_indicator', {
     role: 'planner',
     displayName: i18n.t('planMode:personas.planner', 'Planner'),
     phase: 'planning',
+    model: formatResolvedPlanAgentDisplay(generationAgent),
   } satisfies PlanPersonaIndicatorData);
 
   injectInfo(i18n.t('planMode:orchestrator.generatingPlan', 'Generating plan...'));
@@ -289,14 +317,16 @@ export async function proceedToPlanningFlow(deps: SessionFlowDeps): Promise<void
 
   const planStore = usePlanModeStore.getState();
   const generatedPlan = await planStore.generatePlan(
-    undefined,
-    undefined,
-    undefined,
+    generationAgent.kind === 'llm' ? generationAgent.provider : undefined,
+    generationAgent.kind === 'llm' ? generationAgent.model : undefined,
+    generationAgent.kind === 'llm' ? generationAgent.baseUrl : undefined,
     projectPath,
     contextSources,
     undefined,
     i18n.language,
     effectiveSessionId,
+    generationAgent.agentRef,
+    generationAgent.source,
   );
   if (get()._runToken !== runToken) return;
 

@@ -104,6 +104,17 @@ export function PlanStepUpdateCard({ data }: { data: PlanStepUpdateCardData }) {
           {data.diagnostics?.stopReason ? `stop: ${data.diagnostics.stopReason}` : ''}
         </p>
       )}
+      {data.diagnostics?.outcomeStatus && (
+        <p className="mt-1 text-2xs text-gray-600 dark:text-gray-400">
+          {t('execution.outcome', 'Outcome')}: {data.diagnostics.outcomeStatus}
+          {data.diagnostics.reviewReason
+            ? ` | ${t('execution.reviewReason', 'Review')}: ${data.diagnostics.reviewReason}`
+            : ''}
+        </p>
+      )}
+      {data.diagnostics?.validationResult?.summary && (
+        <p className="mt-1 text-2xs text-gray-600 dark:text-gray-400">{data.diagnostics.validationResult.summary}</p>
+      )}
     </div>
   );
 }

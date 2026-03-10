@@ -202,6 +202,14 @@
     "tags": "标签",
     "version": "版本",
     "priority": "优先级",
+    "toolPolicy": "工具策略",
+    "allowedTools": "允许工具",
+    "toolPolicyAdvisoryHint": "该技能只提供指导，不会硬性限制运行时工具。",
+    "toolPolicyRestrictiveHint": "该技能会硬性限制运行时工具。",
+    "toolPolicyModes": {
+      "advisory": "指导型",
+      "restrictive": "限制型"
+    },
     "phases": "注入阶段",
     "createdAt": "创建时间",
     "updatedAt": "更新时间",

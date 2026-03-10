@@ -129,13 +129,195 @@ pub struct PlanStep {
     pub priority: StepPriority,
     /// Dependencies (step IDs that must complete before this step)
     pub dependencies: Vec<String>,
+    /// Structured completion contract for the expected deliverable.
+    #[serde(default)]
+    pub deliverable: StepDeliverableContract,
+    /// Structured runtime evidence requirements.
+    #[serde(default)]
+    pub evidence_requirements: StepEvidenceRequirements,
+    /// Structured quality and semantic expectations.
+    #[serde(default)]
+    pub quality_requirements: StepQualityRequirements,
+    /// Validation profile that selects default validation behavior.
+    #[serde(default)]
+    pub validation_profile: StepValidationProfile,
+    /// Failure policy controlling retries and downstream behavior.
+    #[serde(default)]
+    pub failure_policy: StepFailurePolicy,
     /// Criteria that determine when this step is complete
+    #[serde(default)]
     pub completion_criteria: Vec<String>,
     /// Description of the expected output format/content
+    #[serde(default)]
     pub expected_output: String,
     /// Additional domain-specific metadata
     #[serde(default)]
     pub metadata: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StepDeliverableContract {
+    #[serde(default)]
+    pub deliverable_type: StepDeliverableType,
+    #[serde(default)]
+    pub format: StepDeliverableFormat,
+    #[serde(default)]
+    pub required_sections: Vec<String>,
+    #[serde(default)]
+    pub required_artifacts: Vec<ArtifactRequirement>,
+    #[serde(default)]
+    pub expected_output_summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StepDeliverableType {
+    Report,
+    Markdown,
+    Json,
+    FilePatch,
+    CodeChange,
+    ArtifactBundle,
+    ResearchSummary,
+    AnalysisMemo,
+    Custom,
+}
+
+impl Default for StepDeliverableType {
+    fn default() -> Self {
+        Self::Custom
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StepDeliverableFormat {
+    Markdown,
+    Json,
+    Text,
+    Code,
+    Mixed,
+}
+
+impl Default for StepDeliverableFormat {
+    fn default() -> Self {
+        Self::Text
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactRequirement {
+    #[serde(default)]
+    pub artifact_type: String,
+    #[serde(default)]
+    pub path_hint: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StepEvidenceRequirements {
+    #[serde(default)]
+    pub min_files_read: usize,
+    #[serde(default)]
+    pub required_paths: Vec<String>,
+    #[serde(default)]
+    pub required_tools: Vec<String>,
+    #[serde(default)]
+    pub required_searches: Vec<String>,
+    #[serde(default)]
+    pub required_artifact_types: Vec<String>,
+    #[serde(default)]
+    pub dependency_evidence_mode: DependencyEvidenceMode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DependencyEvidenceMode {
+    None,
+    Optional,
+    Required,
+}
+
+impl Default for DependencyEvidenceMode {
+    fn default() -> Self {
+        Self::Optional
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StepQualityRequirements {
+    #[serde(default)]
+    pub must_cover_topics: Vec<String>,
+    #[serde(default)]
+    pub must_reference_evidence: bool,
+    #[serde(default)]
+    pub must_include_reasoning_links: bool,
+    #[serde(default)]
+    pub must_pass_checks: Vec<ValidationCheck>,
+    #[serde(default)]
+    pub semantic_expectations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidationCheck {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub severity: ValidationSeverity,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StepValidationProfile {
+    Report,
+    Analysis,
+    Research,
+    CodeChange,
+    Documentation,
+    Mixed,
+}
+
+impl Default for StepValidationProfile {
+    fn default() -> Self {
+        Self::Mixed
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StepFailurePolicy {
+    #[serde(default)]
+    pub severity: FailureSeverity,
+    #[serde(default = "default_step_failure_retries")]
+    pub max_auto_retries: usize,
+    #[serde(default)]
+    pub allow_downstream_on_soft_fail: bool,
+}
+
+fn default_step_failure_retries() -> usize {
+    1
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureSeverity {
+    Hard,
+    Soft,
+    Review,
+}
+
+impl Default for FailureSeverity {
+    fn default() -> Self {
+        Self::Hard
+    }
 }
 
 /// Step priority levels.
@@ -356,6 +538,206 @@ pub struct CriterionResult {
     pub explanation: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidationSeverity {
+    Hard,
+    Soft,
+    Review,
+}
+
+impl Default for ValidationSeverity {
+    fn default() -> Self {
+        Self::Soft
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StepValidationStatus {
+    Passed,
+    SoftFailed,
+    NeedsReview,
+    HardFailed,
+}
+
+impl Default for StepValidationStatus {
+    fn default() -> Self {
+        Self::Passed
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StepOutcomeStatus {
+    Completed,
+    SoftFailed,
+    NeedsReview,
+    HardFailed,
+}
+
+impl Default for StepOutcomeStatus {
+    fn default() -> Self {
+        Self::Completed
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StepReviewReason {
+    ReviewRequired,
+    LowSemanticConfidence,
+    AmbiguousEvidence,
+    SemanticGap,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StepFailureBucket {
+    MissingEvidence,
+    DeliverableIncomplete,
+    SemanticGap,
+    ReviewRequired,
+    ExecutionError,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidationEvidenceRef {
+    #[serde(default)]
+    pub reference_type: String,
+    #[serde(default)]
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidationCheckResult {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub category: String,
+    #[serde(default)]
+    pub passed: bool,
+    #[serde(default)]
+    pub severity: ValidationSeverity,
+    #[serde(default)]
+    pub explanation: String,
+    #[serde(default)]
+    pub evidence_refs: Vec<ValidationEvidenceRef>,
+    #[serde(default)]
+    pub missing_items: Vec<String>,
+    #[serde(default)]
+    pub confidence: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StepValidationResult {
+    #[serde(default)]
+    pub status: StepValidationStatus,
+    #[serde(default)]
+    pub outcome_status: StepOutcomeStatus,
+    #[serde(default)]
+    pub failure_bucket: Option<StepFailureBucket>,
+    #[serde(default)]
+    pub checks: Vec<ValidationCheckResult>,
+    #[serde(default)]
+    pub unmet_checks: Vec<ValidationCheckResult>,
+    #[serde(default)]
+    pub confidence: Option<f64>,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub retry_guidance: Vec<String>,
+    #[serde(default)]
+    pub review_reason: Option<StepReviewReason>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StepToolCallEvidence {
+    #[serde(default)]
+    pub tool_name: String,
+    #[serde(default)]
+    pub args_summary: String,
+    #[serde(default)]
+    pub timestamp_ms: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StepFileReadEvidence {
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub read_count: usize,
+    #[serde(default)]
+    pub bytes: u64,
+    #[serde(default)]
+    pub matched_required_path: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StepArtifactEvidence {
+    #[serde(default)]
+    pub artifact_type: String,
+    #[serde(default)]
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StepRuntimeStats {
+    #[serde(default)]
+    pub iterations: u32,
+    #[serde(default)]
+    pub stop_reason: Option<String>,
+    #[serde(default)]
+    pub attempt_count: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StepEvidenceBundle {
+    #[serde(default)]
+    pub tool_calls: Vec<StepToolCallEvidence>,
+    #[serde(default)]
+    pub files_read: Vec<StepFileReadEvidence>,
+    #[serde(default)]
+    pub files_written: Vec<String>,
+    #[serde(default)]
+    pub search_queries: Vec<String>,
+    #[serde(default)]
+    pub artifacts: Vec<StepArtifactEvidence>,
+    #[serde(default)]
+    pub dependency_inputs: Vec<String>,
+    #[serde(default)]
+    pub runtime_stats: StepRuntimeStats,
+    #[serde(default)]
+    pub coverage_markers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StepEvidenceSummary {
+    #[serde(default)]
+    pub files_read_count: usize,
+    #[serde(default)]
+    pub files_written_count: usize,
+    #[serde(default)]
+    pub tool_call_count: usize,
+    #[serde(default)]
+    pub search_query_count: usize,
+    #[serde(default)]
+    pub artifact_count: usize,
+    #[serde(default)]
+    pub dependency_input_count: usize,
+    #[serde(default)]
+    pub coverage_markers: Vec<String>,
+}
+
 /// Output produced by executing a step.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -373,6 +755,7 @@ pub struct StepOutput {
     /// Output format (text, markdown, json, etc.)
     pub format: OutputFormat,
     /// Validation results for completion criteria
+    #[serde(default)]
     pub criteria_met: Vec<CriterionResult>,
     /// Any artifacts produced (file paths, URLs, etc.)
     #[serde(default)]
@@ -407,6 +790,21 @@ pub struct StepOutput {
     /// Structured error code for diagnostics.
     #[serde(default)]
     pub error_code: Option<String>,
+    /// Evidence bundle captured from runtime execution.
+    #[serde(default)]
+    pub evidence_bundle: StepEvidenceBundle,
+    /// Condensed evidence summary for UI display.
+    #[serde(default)]
+    pub evidence_summary: StepEvidenceSummary,
+    /// Structured validation result.
+    #[serde(default)]
+    pub validation_result: StepValidationResult,
+    /// Final outcome status for this step output.
+    #[serde(default)]
+    pub outcome_status: StepOutcomeStatus,
+    /// Optional review reason when manual review is recommended.
+    #[serde(default)]
+    pub review_reason: Option<StepReviewReason>,
 }
 
 fn default_step_attempt_count() -> usize {
@@ -451,8 +849,12 @@ pub enum StepExecutionState {
     Running,
     /// Completed successfully
     Completed { duration_ms: u64 },
-    /// Failed
-    Failed { reason: String },
+    /// Completed but with non-blocking validation issues
+    SoftFailed { reason: String, duration_ms: u64 },
+    /// Requires human review
+    NeedsReview { reason: String, duration_ms: u64 },
+    /// Failed hard and blocks downstream execution
+    HardFailed { reason: String },
     /// Cancelled
     Cancelled,
 }
@@ -462,10 +864,61 @@ impl StepExecutionState {
         matches!(
             self,
             StepExecutionState::Completed { .. }
-                | StepExecutionState::Failed { .. }
+                | StepExecutionState::SoftFailed { .. }
+                | StepExecutionState::NeedsReview { .. }
+                | StepExecutionState::HardFailed { .. }
                 | StepExecutionState::Cancelled
         )
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanPhaseAgentKind {
+    Llm,
+    Cli,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanPhaseAgentRef {
+    Llm { provider: String, model: String },
+    Cli { agent_name: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedPlanPhaseAgent {
+    pub phase_id: String,
+    #[serde(default)]
+    pub agent_ref: Option<String>,
+    pub agent_kind: PlanPhaseAgentKind,
+    pub source: String,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub agent_name: Option<String>,
+    #[serde(default)]
+    pub execution_backend_unavailable: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedPlanPhaseAgents {
+    #[serde(default)]
+    pub strategy: Option<ResolvedPlanPhaseAgent>,
+    #[serde(default)]
+    pub clarification: Option<ResolvedPlanPhaseAgent>,
+    #[serde(default)]
+    pub generation: Option<ResolvedPlanPhaseAgent>,
+    #[serde(default)]
+    pub execution: Option<ResolvedPlanPhaseAgent>,
+    #[serde(default)]
+    pub retry: Option<ResolvedPlanPhaseAgent>,
 }
 
 // ============================================================================
@@ -512,6 +965,15 @@ pub struct PlanModeSession {
     /// Persisted execution launch metadata used for background resume.
     #[serde(default)]
     pub execution_resume_payload: Option<Value>,
+    /// Resolved phase-agent snapshots for all plan lifecycle phases.
+    #[serde(default)]
+    pub resolved_phase_agents: ResolvedPlanPhaseAgents,
+    /// Execution agent snapshot frozen when execution starts.
+    #[serde(default)]
+    pub execution_agent_snapshot: Option<ResolvedPlanPhaseAgent>,
+    /// Retry agent snapshot frozen for the latest retry invocation.
+    #[serde(default)]
+    pub retry_agent_snapshot: Option<ResolvedPlanPhaseAgent>,
     /// Session creation timestamp
     pub created_at: String,
 }
@@ -869,12 +1331,21 @@ pub struct PlanExecutionReport {
     pub success: bool,
     /// Terminal state of this run
     pub terminal_state: String,
+    /// Structured terminal verdict
+    #[serde(default)]
+    pub terminal_status: PlanTerminalStatus,
     /// Total steps
     pub total_steps: usize,
     /// Steps completed
     pub steps_completed: usize,
     /// Steps failed
     pub steps_failed: usize,
+    /// Steps completed with warnings
+    #[serde(default)]
+    pub steps_soft_failed: usize,
+    /// Steps pending review
+    #[serde(default)]
+    pub steps_needs_review: usize,
     /// Steps cancelled
     #[serde(default)]
     pub steps_cancelled: usize,
@@ -907,6 +1378,25 @@ pub struct PlanExecutionReport {
     /// Retry metrics for this run.
     #[serde(default)]
     pub retry_stats: PlanRetryStats,
+    /// Terminal verdict explanation trace.
+    #[serde(default)]
+    pub terminal_verdict_trace: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanTerminalStatus {
+    Completed,
+    CompletedWithWarnings,
+    NeedsReview,
+    Failed,
+    Cancelled,
+}
+
+impl Default for PlanTerminalStatus {
+    fn default() -> Self {
+        Self::Completed
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1014,29 +1504,29 @@ pub fn calculate_plan_batches_with_parallel(
 mod tests {
     use super::*;
 
+    fn sample_step(id: &str, title: &str, priority: StepPriority) -> PlanStep {
+        PlanStep {
+            id: id.to_string(),
+            title: title.to_string(),
+            description: String::new(),
+            priority,
+            dependencies: vec![],
+            deliverable: StepDeliverableContract::default(),
+            evidence_requirements: StepEvidenceRequirements::default(),
+            quality_requirements: StepQualityRequirements::default(),
+            validation_profile: StepValidationProfile::default(),
+            failure_policy: StepFailurePolicy::default(),
+            completion_criteria: vec![],
+            expected_output: String::new(),
+            metadata: HashMap::new(),
+        }
+    }
+
     #[test]
     fn test_calculate_plan_batches_no_deps() {
         let steps = vec![
-            PlanStep {
-                id: "step-1".to_string(),
-                title: "Step 1".to_string(),
-                description: "".to_string(),
-                priority: StepPriority::High,
-                dependencies: vec![],
-                completion_criteria: vec![],
-                expected_output: "".to_string(),
-                metadata: HashMap::new(),
-            },
-            PlanStep {
-                id: "step-2".to_string(),
-                title: "Step 2".to_string(),
-                description: "".to_string(),
-                priority: StepPriority::Medium,
-                dependencies: vec![],
-                completion_criteria: vec![],
-                expected_output: "".to_string(),
-                metadata: HashMap::new(),
-            },
+            sample_step("step-1", "Step 1", StepPriority::High),
+            sample_step("step-2", "Step 2", StepPriority::Medium),
         ];
 
         let batches = calculate_plan_batches(&steps);
@@ -1046,38 +1536,13 @@ mod tests {
 
     #[test]
     fn test_calculate_plan_batches_with_deps() {
-        let steps = vec![
-            PlanStep {
-                id: "step-1".to_string(),
-                title: "Step 1".to_string(),
-                description: "".to_string(),
-                priority: StepPriority::High,
-                dependencies: vec![],
-                completion_criteria: vec![],
-                expected_output: "".to_string(),
-                metadata: HashMap::new(),
-            },
-            PlanStep {
-                id: "step-2".to_string(),
-                title: "Step 2".to_string(),
-                description: "".to_string(),
-                priority: StepPriority::Medium,
-                dependencies: vec!["step-1".to_string()],
-                completion_criteria: vec![],
-                expected_output: "".to_string(),
-                metadata: HashMap::new(),
-            },
-            PlanStep {
-                id: "step-3".to_string(),
-                title: "Step 3".to_string(),
-                description: "".to_string(),
-                priority: StepPriority::Low,
-                dependencies: vec!["step-1".to_string()],
-                completion_criteria: vec![],
-                expected_output: "".to_string(),
-                metadata: HashMap::new(),
-            },
-        ];
+        let mut step_1 = sample_step("step-1", "Step 1", StepPriority::High);
+        let mut step_2 = sample_step("step-2", "Step 2", StepPriority::Medium);
+        step_2.dependencies = vec!["step-1".to_string()];
+        let mut step_3 = sample_step("step-3", "Step 3", StepPriority::Low);
+        step_3.dependencies = vec!["step-1".to_string()];
+
+        let steps = vec![step_1, step_2, step_3];
 
         let batches = calculate_plan_batches(&steps);
         assert_eq!(batches.len(), 2);
@@ -1091,7 +1556,7 @@ mod tests {
         assert!(!StepExecutionState::Pending.is_terminal());
         assert!(!StepExecutionState::Running.is_terminal());
         assert!(StepExecutionState::Completed { duration_ms: 100 }.is_terminal());
-        assert!(StepExecutionState::Failed {
+        assert!(StepExecutionState::HardFailed {
             reason: "err".to_string()
         }
         .is_terminal());

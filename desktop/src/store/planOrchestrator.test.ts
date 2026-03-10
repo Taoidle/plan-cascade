@@ -515,14 +515,18 @@ describe('planOrchestrator event handling', () => {
     expect(progressListener).not.toBeNull();
     expect(retryPlanStep).toHaveBeenCalledWith(
       'step-1',
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      expect.anything(),
-      undefined,
       expect.any(String),
+      expect.any(String),
+      undefined,
+      undefined,
+      expect.objectContaining({
+        project_id: 'default',
+      }),
+      undefined,
+      'en-US',
       'session-1',
+      null,
+      'global',
     );
 
     progressListener!({
@@ -617,14 +621,18 @@ describe('planOrchestrator event handling', () => {
 
     expect(approvePlan).toHaveBeenCalledWith(
       TEST_PLAN,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      expect.anything(),
-      undefined,
       expect.any(String),
+      expect.any(String),
+      undefined,
+      undefined,
+      expect.objectContaining({
+        project_id: 'default',
+      }),
+      undefined,
+      'en-US',
       'linked-plan-1',
+      null,
+      'global',
     );
     expect(usePlanOrchestratorStore.getState().sessionId).toBe('linked-plan-1');
     expect(usePlanOrchestratorStore.getState().phase).toBe('reviewing_plan');

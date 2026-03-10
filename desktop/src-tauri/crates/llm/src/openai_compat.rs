@@ -1,4 +1,6 @@
-//! Shared helpers for OpenAI-compatible providers (OpenAI, DeepSeek, Qwen).
+//! Shared helpers for OpenAI-compatible providers (OpenAI, DeepSeek, GLM, Qwen).
+
+use std::collections::HashSet;
 
 use openai_api_rs::v1::api::OpenAIClient;
 use openai_api_rs::v1::chat_completion::chat_completion::ChatCompletionRequest;
@@ -6,7 +8,7 @@ use openai_api_rs::v1::chat_completion::chat_completion_stream::ChatCompletionSt
 use openai_api_rs::v1::error::APIError;
 
 use crate::provider::{missing_api_key_error, parse_http_error};
-use crate::types::{LlmError, LlmResult, ProviderConfig};
+use crate::types::{LlmError, LlmResult, Message, MessageContent, MessageRole, ProviderConfig};
 
 const CHAT_COMPLETIONS_SUFFIX: &str = "/chat/completions";
 const QWEN_COMPATIBLE_MODE_PATH: &str = "/compatible-mode/v1";
@@ -132,6 +134,172 @@ pub fn value_to_chat_stream_request(
     })
 }
 
+fn extract_text_content(message: &Message) -> String {
+    message
+        .content
+        .iter()
+        .filter_map(|content| {
+            if let MessageContent::Text { text } = content {
+                Some(text.as_str())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn normalize_tool_result_content(content: &MessageContent) -> Option<(String, String)> {
+    match content {
+        MessageContent::ToolResult {
+            tool_use_id,
+            content,
+            ..
+        } => Some((tool_use_id.clone(), content.clone())),
+        MessageContent::ToolResultMultimodal {
+            tool_use_id,
+            content,
+            ..
+        } => {
+            let text = content
+                .iter()
+                .map(|block| match block {
+                    crate::types::ContentBlock::Text { text } => text.clone(),
+                    crate::types::ContentBlock::Image { media_type, data } => {
+                        format!("[Image: data:{};base64,<{} bytes>]", media_type, data.len())
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            Some((tool_use_id.clone(), text))
+        }
+        _ => None,
+    }
+}
+
+pub fn build_openai_compatible_messages(
+    messages: &[Message],
+    system: Option<&str>,
+) -> Vec<serde_json::Value> {
+    let mut api_messages: Vec<serde_json::Value> = Vec::new();
+    let mut pending_tool_call_ids: HashSet<String> = HashSet::new();
+
+    if let Some(sys) = system {
+        api_messages.push(serde_json::json!({
+            "role": "system",
+            "content": sys
+        }));
+    }
+
+    for msg in messages {
+        match msg.role {
+            MessageRole::System => {
+                pending_tool_call_ids.clear();
+                for content in &msg.content {
+                    if let MessageContent::Text { text } = content {
+                        api_messages.push(serde_json::json!({
+                            "role": "system",
+                            "content": text
+                        }));
+                    }
+                }
+            }
+            MessageRole::User => {
+                let tool_results: Vec<(String, String)> = msg
+                    .content
+                    .iter()
+                    .filter_map(normalize_tool_result_content)
+                    .collect();
+
+                if tool_results.is_empty() {
+                    pending_tool_call_ids.clear();
+                    api_messages.push(serde_json::json!({
+                        "role": "user",
+                        "content": extract_text_content(msg)
+                    }));
+                } else if tool_results
+                    .iter()
+                    .all(|(tool_use_id, _)| pending_tool_call_ids.contains(tool_use_id))
+                {
+                    for (tool_use_id, result_content) in tool_results {
+                        pending_tool_call_ids.remove(&tool_use_id);
+                        api_messages.push(serde_json::json!({
+                            "role": "tool",
+                            "content": result_content,
+                            "tool_call_id": tool_use_id
+                        }));
+                    }
+                } else {
+                    pending_tool_call_ids.clear();
+                    let fallback_text = tool_results
+                        .into_iter()
+                        .map(|(tool_use_id, result_content)| {
+                            format!("[tool_result:{}]\n{}", tool_use_id, result_content)
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n\n");
+                    api_messages.push(serde_json::json!({
+                        "role": "user",
+                        "content": fallback_text
+                    }));
+                }
+            }
+            MessageRole::Assistant => {
+                let text_content = extract_text_content(msg);
+                let tool_calls: Vec<serde_json::Value> = msg
+                    .content
+                    .iter()
+                    .filter_map(|content| {
+                        if let MessageContent::ToolUse { id, name, input } = content {
+                            Some(serde_json::json!({
+                                "id": id,
+                                "type": "function",
+                                "function": {
+                                    "name": name,
+                                    "arguments": input.to_string()
+                                }
+                            }))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                if tool_calls.is_empty() {
+                    pending_tool_call_ids.clear();
+                    api_messages.push(serde_json::json!({
+                        "role": "assistant",
+                        "content": text_content
+                    }));
+                } else {
+                    pending_tool_call_ids = tool_calls
+                        .iter()
+                        .filter_map(|tool_call| {
+                            tool_call
+                                .get("id")
+                                .and_then(|value| value.as_str())
+                                .map(ToOwned::to_owned)
+                        })
+                        .collect();
+
+                    let mut message_json = serde_json::json!({
+                        "role": "assistant",
+                        "tool_calls": tool_calls
+                    });
+                    if text_content.is_empty() {
+                        message_json["content"] = serde_json::Value::Null;
+                    } else {
+                        message_json["content"] = serde_json::json!(text_content);
+                    }
+                    api_messages.push(message_json);
+                }
+            }
+        }
+    }
+
+    api_messages
+}
+
 fn parse_status_code(text: &str) -> Option<u16> {
     for token in text.split(|c: char| !c.is_ascii_digit()) {
         if token.len() == 3 {
@@ -167,6 +335,7 @@ pub fn map_api_error(provider: &str, err: APIError) -> LlmError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::ContentBlock;
 
     #[test]
     fn test_stream_request_accepts_integer_tool_schema() {
@@ -218,5 +387,67 @@ mod tests {
 
         let result = value_to_chat_request("qwen", body);
         assert!(result.is_ok(), "unexpected error: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_build_openai_compatible_messages_orphan_tool_result_falls_back_to_user() {
+        let messages = vec![Message {
+            role: MessageRole::User,
+            content: vec![MessageContent::ToolResult {
+                tool_use_id: "call_orphan".to_string(),
+                content: "result".to_string(),
+                is_error: None,
+            }],
+        }];
+
+        let payload = build_openai_compatible_messages(&messages, None);
+        assert_eq!(payload.len(), 1);
+        assert_eq!(payload[0]["role"], "user");
+        assert!(payload[0]["content"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("[tool_result:call_orphan]"));
+    }
+
+    #[test]
+    fn test_build_openai_compatible_messages_preserves_valid_tool_pair() {
+        let messages = vec![
+            Message {
+                role: MessageRole::Assistant,
+                content: vec![MessageContent::ToolUse {
+                    id: "call_1".to_string(),
+                    name: "Read".to_string(),
+                    input: serde_json::json!({"file_path": "README.md"}),
+                }],
+            },
+            Message::tool_result("call_1", "contents", false),
+            Message {
+                role: MessageRole::User,
+                content: vec![MessageContent::ToolResultMultimodal {
+                    tool_use_id: "call_orphan_mm".to_string(),
+                    content: vec![
+                        ContentBlock::Text {
+                            text: "text".to_string(),
+                        },
+                        ContentBlock::Image {
+                            media_type: "image/png".to_string(),
+                            data: "abcd".to_string(),
+                        },
+                    ],
+                    is_error: None,
+                }],
+            },
+        ];
+
+        let payload = build_openai_compatible_messages(&messages, None);
+        assert_eq!(payload.len(), 3);
+        assert_eq!(payload[0]["role"], "assistant");
+        assert_eq!(payload[1]["role"], "tool");
+        assert_eq!(payload[1]["tool_call_id"], "call_1");
+        assert_eq!(payload[2]["role"], "user");
+        assert!(payload[2]["content"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("call_orphan_mm"));
     }
 }

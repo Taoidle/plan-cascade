@@ -615,35 +615,61 @@ impl OrchestratorService {
     fn normalized_allowed_tools_from_skill_matches(
         skills: &[crate::services::skills::model::SkillMatch],
     ) -> Option<std::collections::HashSet<String>> {
-        let mut allowed: Option<std::collections::HashSet<String>> = None;
-        for skill_match in skills {
-            if !skill_match.skill.enabled || skill_match.skill.allowed_tools.is_empty() {
-                continue;
-            }
-            let current = skill_match
-                .skill
-                .allowed_tools
-                .iter()
-                .map(|tool| tool.trim().to_ascii_lowercase())
-                .filter(|tool| !tool.is_empty())
-                .collect::<std::collections::HashSet<_>>();
-            if current.is_empty() {
-                continue;
-            }
-            allowed = Some(match allowed.take() {
-                Some(existing) => existing
-                    .intersection(&current)
-                    .cloned()
-                    .collect::<std::collections::HashSet<_>>(),
-                None => current,
-            });
-        }
-        let Some(mut allowed) = allowed else {
+        let mut restrictive_matches = skills
+            .iter()
+            .filter(|skill_match| {
+                skill_match.skill.enabled
+                    && skill_match.skill.tool_policy_mode
+                        == crate::services::skills::model::SkillToolPolicyMode::Restrictive
+                    && !skill_match.skill.allowed_tools.is_empty()
+            })
+            .collect::<Vec<_>>();
+        if restrictive_matches.is_empty() {
             return None;
-        };
+        }
 
-        // Minimal safe baseline to keep repo exploration functional.
-        for safe_tool in ["read", "ls", "glob", "grep", "cwd"] {
+        restrictive_matches.sort_by(|left, right| {
+            right
+                .skill
+                .priority
+                .cmp(&left.skill.priority)
+                .then_with(|| left.skill.id.cmp(&right.skill.id))
+        });
+
+        let winning_skill = restrictive_matches[0];
+        if restrictive_matches.len() > 1 {
+            tracing::warn!(
+                "Multiple restrictive skill policies active; using highest-priority policy '{}' (priority={}) and ignoring {} lower-priority policies",
+                winning_skill.skill.id,
+                winning_skill.skill.priority,
+                restrictive_matches.len().saturating_sub(1)
+            );
+        }
+
+        let mut allowed = winning_skill
+            .skill
+            .allowed_tools
+            .iter()
+            .map(|tool| tool.trim().to_ascii_lowercase())
+            .filter(|tool| !tool.is_empty())
+            .collect::<std::collections::HashSet<_>>();
+        if allowed.is_empty() {
+            return None;
+        }
+
+        // Core repo exploration baseline plus default reasoning tools that
+        // should remain available unless the environment explicitly disables them.
+        for safe_tool in [
+            "read",
+            "ls",
+            "glob",
+            "grep",
+            "cwd",
+            "codebasesearch",
+            "analyze",
+            "task",
+            "searchknowledge",
+        ] {
             allowed.insert(safe_tool.to_string());
         }
         Some(allowed)
@@ -1410,6 +1436,8 @@ impl OrchestratorService {
                         }
                     };
                     let analysis_phase = request_options.analysis_phase.as_deref();
+                    let mut deferred_loop_messages = Vec::new();
+                    let mut deferred_force_terminate: Option<String> = None;
 
                     // Process results in original order
                     for (tc_id, effective_tool_name, result) in results {
@@ -1478,38 +1506,61 @@ impl OrchestratorService {
                             match detection {
                                 LoopDetection::Warning(msg) => {
                                     eprintln!("[loop-detector] Level 1 escalation (sub-native-parallel): {}", effective_tool_name);
-                                    messages.push(Message::user(msg));
+                                    deferred_loop_messages.push(msg);
                                 }
                                 LoopDetection::StripTools(msg, _tools) => {
                                     eprintln!("[loop-detector] Level 2 escalation (sub-native-parallel): {}", effective_tool_name);
-                                    messages.push(Message::user(msg));
+                                    deferred_loop_messages.push(msg);
                                 }
                                 LoopDetection::ForceTerminate(msg) => {
                                     eprintln!("[loop-detector] Level 3 (sub-native-parallel): force terminating for {}", effective_tool_name);
-                                    let _ = tx
-                                        .send(UnifiedStreamEvent::Error {
-                                            message: msg.clone(),
-                                            code: None,
-                                        })
-                                        .await;
-                                    emit_usage(&tx, &total_usage).await;
-                                    return ExecutionResult {
-                                        response: last_assistant_text,
-                                        usage: total_usage,
-                                        iterations,
-                                        success: false,
-                                        error: Some(msg),
-                                    };
+                                    deferred_force_terminate = Some(msg);
                                 }
                             }
                         }
+                    }
+                    for msg in deferred_loop_messages {
+                        messages.push(Message::user(msg));
+                    }
+                    if let Some(msg) = deferred_force_terminate {
+                        let _ = tx
+                            .send(UnifiedStreamEvent::Error {
+                                message: msg.clone(),
+                                code: None,
+                            })
+                            .await;
+                        emit_usage(&tx, &total_usage).await;
+                        return ExecutionResult {
+                            response: last_assistant_text,
+                            usage: total_usage,
+                            iterations,
+                            success: false,
+                            error: Some(msg),
+                        };
                     }
                 } else {
                     // ═══════════════════════════════════════════════════
                     // Step 3b: SEQUENTIAL native execution (sub-agent)
                     // ═══════════════════════════════════════════════════
+                    let mut deferred_loop_messages = Vec::new();
+                    let mut deferred_force_terminate: Option<String> = None;
+                    let mut force_triggered = false;
                     for (tc_id, effective_tool_name, effective_args) in &valid_calls {
                         let mut effective_args = effective_args.clone();
+                        if force_triggered {
+                            let skip_msg =
+                                "Skipped due to loop protection triggered earlier in this tool batch"
+                                    .to_string();
+                            messages.push(Message::tool_result(tc_id, skip_msg.clone(), true));
+                            let _ = tx
+                                .send(UnifiedStreamEvent::ToolResult {
+                                    tool_id: tc_id.clone(),
+                                    result: None,
+                                    error: Some(skip_msg),
+                                })
+                                .await;
+                            continue;
+                        }
                         // Check cancellation before each tool execution
                         if self.cancellation_token.is_cancelled() {
                             messages.push(Message::tool_result(
@@ -1609,31 +1660,38 @@ impl OrchestratorService {
                                         "[loop-detector] Level 1 escalation: {}",
                                         effective_tool_name
                                     );
-                                    messages.push(Message::user(msg));
+                                    deferred_loop_messages.push(msg);
                                 }
                                 LoopDetection::StripTools(msg, _tools) => {
                                     eprintln!("[loop-detector] Level 2 escalation: stripping tools for {}", effective_tool_name);
-                                    messages.push(Message::user(msg));
+                                    deferred_loop_messages.push(msg);
                                 }
                                 LoopDetection::ForceTerminate(msg) => {
                                     eprintln!("[loop-detector] Level 3 escalation: force terminating for {}", effective_tool_name);
-                                    let _ = tx
-                                        .send(UnifiedStreamEvent::Error {
-                                            message: msg.clone(),
-                                            code: None,
-                                        })
-                                        .await;
-                                    emit_usage(&tx, &total_usage).await;
-                                    return ExecutionResult {
-                                        response: last_assistant_text,
-                                        usage: total_usage,
-                                        iterations,
-                                        success: false,
-                                        error: Some(msg),
-                                    };
+                                    deferred_force_terminate = Some(msg);
+                                    force_triggered = true;
                                 }
                             }
                         }
+                    }
+                    for msg in deferred_loop_messages {
+                        messages.push(Message::user(msg));
+                    }
+                    if let Some(msg) = deferred_force_terminate {
+                        let _ = tx
+                            .send(UnifiedStreamEvent::Error {
+                                message: msg.clone(),
+                                code: None,
+                            })
+                            .await;
+                        emit_usage(&tx, &total_usage).await;
+                        return ExecutionResult {
+                            response: last_assistant_text,
+                            usage: total_usage,
+                            iterations,
+                            success: false,
+                            error: Some(msg),
+                        };
                     }
                 }
 
@@ -2861,6 +2919,9 @@ impl OrchestratorService {
                         }
                     };
 
+                    let mut deferred_loop_messages = Vec::new();
+                    let mut deferred_force_terminate: Option<String> = None;
+
                     // Process results in original order (events, messages, loop detection)
                     for (tc_id, effective_tool_name, mut result) in results {
                         // Emit tool result event
@@ -2948,38 +3009,61 @@ impl OrchestratorService {
                                         "[loop-detector] Level 1 escalation: {}",
                                         effective_tool_name
                                     );
-                                    messages.push(Message::user(msg));
+                                    deferred_loop_messages.push(msg);
                                 }
                                 LoopDetection::StripTools(msg, _tools) => {
                                     eprintln!("[loop-detector] Level 2 escalation: stripping tools for {}", effective_tool_name);
-                                    messages.push(Message::user(msg));
+                                    deferred_loop_messages.push(msg);
                                 }
                                 LoopDetection::ForceTerminate(msg) => {
                                     eprintln!("[loop-detector] Level 3 escalation: force terminating for {}", effective_tool_name);
-                                    let _ = tx
-                                        .send(UnifiedStreamEvent::Error {
-                                            message: msg.clone(),
-                                            code: None,
-                                        })
-                                        .await;
-                                    emit_usage(&tx, &total_usage).await;
-                                    return ExecutionResult {
-                                        response: last_assistant_text,
-                                        usage: total_usage,
-                                        iterations,
-                                        success: false,
-                                        error: Some(msg),
-                                    };
+                                    deferred_force_terminate = Some(msg);
                                 }
                             }
                         }
+                    }
+                    for msg in deferred_loop_messages {
+                        messages.push(Message::user(msg));
+                    }
+                    if let Some(msg) = deferred_force_terminate {
+                        let _ = tx
+                            .send(UnifiedStreamEvent::Error {
+                                message: msg.clone(),
+                                code: None,
+                            })
+                            .await;
+                        emit_usage(&tx, &total_usage).await;
+                        return ExecutionResult {
+                            response: last_assistant_text,
+                            usage: total_usage,
+                            iterations,
+                            success: false,
+                            error: Some(msg),
+                        };
                     }
                 } else {
                     // ═══════════════════════════════════════════════════════
                     // Step 3b: SEQUENTIAL execution path (existing logic)
                     // ═══════════════════════════════════════════════════════
+                    let mut deferred_loop_messages = Vec::new();
+                    let mut deferred_force_terminate: Option<String> = None;
+                    let mut force_triggered = false;
                     for (tc_id, effective_tool_name, effective_args) in &valid_calls {
                         let mut effective_args = effective_args.clone();
+                        if force_triggered {
+                            let skip_msg =
+                                "Skipped due to loop protection triggered earlier in this tool batch"
+                                    .to_string();
+                            messages.push(Message::tool_result(tc_id, skip_msg.clone(), true));
+                            let _ = tx
+                                .send(UnifiedStreamEvent::ToolResult {
+                                    tool_id: tc_id.clone(),
+                                    result: None,
+                                    error: Some(skip_msg),
+                                })
+                                .await;
+                            continue;
+                        }
                         // Check cancellation before each tool execution
                         if self.cancellation_token.is_cancelled() {
                             messages.push(Message::tool_result(
@@ -3172,37 +3256,44 @@ impl OrchestratorService {
                                         "[loop-detector] Level 1 escalation: {}",
                                         effective_tool_name
                                     );
-                                    messages.push(Message::user(msg));
+                                    deferred_loop_messages.push(msg);
                                 }
                                 LoopDetection::StripTools(msg, _tools) => {
                                     eprintln!(
                                         "[loop-detector] Level 2 escalation: stripping tools for {}",
                                         effective_tool_name
                                     );
-                                    messages.push(Message::user(msg));
+                                    deferred_loop_messages.push(msg);
                                 }
                                 LoopDetection::ForceTerminate(msg) => {
                                     eprintln!(
                                         "[loop-detector] Level 3 escalation: force terminating for {}",
                                         effective_tool_name
                                     );
-                                    let _ = tx
-                                        .send(UnifiedStreamEvent::Error {
-                                            message: msg.clone(),
-                                            code: None,
-                                        })
-                                        .await;
-                                    emit_usage(&tx, &total_usage).await;
-                                    return ExecutionResult {
-                                        response: last_assistant_text,
-                                        usage: total_usage,
-                                        iterations,
-                                        success: false,
-                                        error: Some(msg),
-                                    };
+                                    deferred_force_terminate = Some(msg);
+                                    force_triggered = true;
                                 }
                             }
                         }
+                    }
+                    for msg in deferred_loop_messages {
+                        messages.push(Message::user(msg));
+                    }
+                    if let Some(msg) = deferred_force_terminate {
+                        let _ = tx
+                            .send(UnifiedStreamEvent::Error {
+                                message: msg.clone(),
+                                code: None,
+                            })
+                            .await;
+                        emit_usage(&tx, &total_usage).await;
+                        return ExecutionResult {
+                            response: last_assistant_text,
+                            usage: total_usage,
+                            iterations,
+                            success: false,
+                            error: Some(msg),
+                        };
                     }
                 }
 
@@ -5123,6 +5214,7 @@ mod skill_tool_policy_tests {
                 description: String::new(),
                 version: None,
                 tags: vec![],
+                tool_policy_mode: crate::services::skills::model::SkillToolPolicyMode::Restrictive,
                 allowed_tools: allowed_tools.into_iter().map(|v| v.to_string()).collect(),
                 source: crate::services::skills::model::SkillSource::User,
                 priority: 100,
@@ -5132,6 +5224,9 @@ mod skill_tool_policy_tests {
                 has_hooks: false,
                 inject_into: vec![crate::services::skills::model::InjectionPhase::Always],
                 path: PathBuf::from(format!("{}.md", id)),
+                review_status: None,
+                review_notes: None,
+                reviewed_at: None,
             },
         }
     }
@@ -5159,18 +5254,40 @@ mod skill_tool_policy_tests {
     }
 
     #[test]
-    fn allowlist_union_includes_minimum_safe_tools() {
-        let matches = vec![
-            make_skill_match("a", true, vec!["Write", "Edit"]),
-            make_skill_match("b", true, vec!["Bash"]),
-        ];
+    fn advisory_skill_allowlist_does_not_enable_hard_filter() {
+        let mut advisory = make_skill_match("python-platform", true, vec!["Read", "Write"]);
+        advisory.skill.tool_policy_mode =
+            crate::services::skills::model::SkillToolPolicyMode::Advisory;
+
+        let allowed =
+            OrchestratorService::normalized_allowed_tools_from_skill_matches(&[advisory]);
+        assert!(allowed.is_none());
+    }
+
+    #[test]
+    fn highest_priority_restrictive_policy_wins_and_includes_minimum_safe_tools() {
+        let mut a = make_skill_match("a", true, vec!["Write", "Edit"]);
+        a.skill.priority = 50;
+        let mut b = make_skill_match("b", true, vec!["Bash"]);
+        b.skill.priority = 100;
+        let matches = vec![a, b];
         let allowed = OrchestratorService::normalized_allowed_tools_from_skill_matches(&matches)
             .expect("allowlist should be enabled");
 
-        assert!(allowed.contains("write"));
-        assert!(allowed.contains("edit"));
         assert!(allowed.contains("bash"));
-        for safe in ["read", "ls", "glob", "grep", "cwd"] {
+        assert!(!allowed.contains("write"));
+        assert!(!allowed.contains("edit"));
+        for safe in [
+            "read",
+            "ls",
+            "glob",
+            "grep",
+            "cwd",
+            "codebasesearch",
+            "analyze",
+            "task",
+            "searchknowledge",
+        ] {
             assert!(
                 allowed.contains(safe),
                 "safe tool {} must always be allowed when policy is active",
@@ -5201,14 +5318,29 @@ mod skill_tool_policy_tests {
         let matches = vec![make_skill_match("skill", true, vec!["Write"])];
         let allowed = OrchestratorService::normalized_allowed_tools_from_skill_matches(&matches)
             .expect("allowlist should be enabled");
-        let tools = vec![make_tool("Write"), make_tool("Read"), make_tool("Bash")];
+        let tools = vec![
+            make_tool("Write"),
+            make_tool("Read"),
+            make_tool("CodebaseSearch"),
+            make_tool("Analyze"),
+            make_tool("Task"),
+            make_tool("SearchKnowledge"),
+            make_tool("Bash"),
+        ];
         let (filtered, blocked) =
             OrchestratorService::apply_skill_allowed_tool_filter(&tools, &allowed);
 
         let filtered_names: Vec<String> = filtered.into_iter().map(|tool| tool.name).collect();
         assert_eq!(
             filtered_names,
-            vec!["Write".to_string(), "Read".to_string()]
+            vec![
+                "Write".to_string(),
+                "Read".to_string(),
+                "CodebaseSearch".to_string(),
+                "Analyze".to_string(),
+                "Task".to_string(),
+                "SearchKnowledge".to_string()
+            ]
         );
         assert_eq!(blocked, vec!["Bash".to_string()]);
     }

@@ -126,6 +126,11 @@ export interface PlanStepData {
   description: string;
   priority: 'high' | 'medium' | 'low';
   dependencies: string[];
+  deliverable?: StepDeliverableContractData;
+  evidenceRequirements?: StepEvidenceRequirementsData;
+  qualityRequirements?: StepQualityRequirementsData;
+  validationProfile?: 'report' | 'analysis' | 'research' | 'code_change' | 'documentation' | 'mixed';
+  failurePolicy?: StepFailurePolicyData;
   completionCriteria: string[];
   expectedOutput: string;
 }
@@ -166,6 +171,10 @@ export interface PlanStepOutputDiagnosticData {
   iterations?: number;
   stopReason?: string | null;
   errorCode?: string | null;
+  outcomeStatus?: 'completed' | 'soft_failed' | 'needs_review' | 'hard_failed';
+  reviewReason?: string | null;
+  evidenceSummary?: StepEvidenceSummaryData;
+  validationResult?: StepValidationResultData;
 }
 
 /** Plan step output card data (Executing phase) */
@@ -187,6 +196,10 @@ export interface PlanStepOutputCardData {
   iterations?: number;
   stopReason?: string | null;
   errorCode?: string | null;
+  outcomeStatus?: 'completed' | 'soft_failed' | 'needs_review' | 'hard_failed';
+  reviewReason?: string | null;
+  evidenceSummary?: StepEvidenceSummaryData;
+  validationResult?: StepValidationResultData;
   criteriaMet: CriterionResultData[];
 }
 
@@ -200,11 +213,14 @@ export interface CriterionResultData {
 /** Plan completion card data (Completed phase) */
 export interface PlanCompletionCardData {
   success: boolean;
-  terminalState?: 'completed' | 'failed' | 'cancelled';
+  terminalState?: 'completed' | 'completed_with_warnings' | 'needs_review' | 'failed' | 'cancelled';
+  terminalStatus?: 'completed' | 'completed_with_warnings' | 'needs_review' | 'failed' | 'cancelled';
   planTitle: string;
   totalSteps: number;
   stepsCompleted: number;
   stepsFailed: number;
+  stepsSoftFailed?: number;
+  stepsNeedsReview?: number;
   stepsCancelled?: number;
   stepsAttempted?: number;
   stepsFailedBeforeCancel?: number;
@@ -217,6 +233,7 @@ export interface PlanCompletionCardData {
   highlights?: string[];
   nextActions?: string[];
   retryStats?: PlanRetryStatsData;
+  terminalVerdictTrace?: string[];
 }
 
 export interface PlanRetryStatsData {
@@ -230,6 +247,7 @@ export interface PlanPersonaIndicatorData {
   role: PlanPersonaRole;
   displayName: string;
   phase: PlanModePhase;
+  model?: string;
 }
 
 // ============================================================================
@@ -257,6 +275,7 @@ export interface PlanModeCardDataMap {
 export interface PlanModeSession {
   sessionId: string;
   kernelSessionId?: string | null;
+  locale?: string | null;
   description: string;
   phase: PlanModePhase;
   analysis: PlanAnalysisCardData | null;
@@ -266,6 +285,9 @@ export interface PlanModeSession {
   stepOutputs: Record<string, StepOutputData>;
   stepStates: Record<string, StepExecutionState>;
   progress: PlanExecutionProgress | null;
+  resolvedPhaseAgents?: Record<string, unknown>;
+  executionAgentSnapshot?: Record<string, unknown> | null;
+  retryAgentSnapshot?: Record<string, unknown> | null;
   createdAt: string;
 }
 
@@ -288,6 +310,10 @@ export interface StepOutputData {
   iterations?: number;
   stopReason?: string | null;
   errorCode?: string | null;
+  evidenceSummary?: StepEvidenceSummaryData;
+  validationResult?: StepValidationResultData;
+  outcomeStatus?: 'completed' | 'soft_failed' | 'needs_review' | 'hard_failed';
+  reviewReason?: string | null;
 }
 
 /** Step execution state */
@@ -295,7 +321,9 @@ export type StepExecutionState =
   | 'pending'
   | 'running'
   | { completed: { durationMs: number } }
-  | { failed: { reason: string } }
+  | { soft_failed: { reason: string; durationMs: number } }
+  | { needs_review: { reason: string; durationMs: number } }
+  | { hard_failed: { reason: string } }
   | 'cancelled';
 
 /** Execution progress */
@@ -314,9 +342,12 @@ export interface PlanExecutionReport {
   planTitle: string;
   success: boolean;
   terminalState: string;
+  terminalStatus?: 'completed' | 'completed_with_warnings' | 'needs_review' | 'failed' | 'cancelled';
   totalSteps: number;
   stepsCompleted: number;
   stepsFailed: number;
+  stepsSoftFailed?: number;
+  stepsNeedsReview?: number;
   stepsCancelled?: number;
   stepsAttempted?: number;
   stepsFailedBeforeCancel?: number;
@@ -329,6 +360,87 @@ export interface PlanExecutionReport {
   highlights: string[];
   nextActions: string[];
   retryStats: PlanRetryStatsData;
+  terminalVerdictTrace?: string[];
+}
+
+export interface StepDeliverableContractData {
+  deliverableType?: string;
+  format?: string;
+  requiredSections?: string[];
+  requiredArtifacts?: ArtifactRequirementData[];
+  expectedOutputSummary?: string;
+}
+
+export interface ArtifactRequirementData {
+  artifactType: string;
+  pathHint?: string | null;
+  description?: string | null;
+}
+
+export interface StepEvidenceRequirementsData {
+  minFilesRead?: number;
+  requiredPaths?: string[];
+  requiredTools?: string[];
+  requiredSearches?: string[];
+  requiredArtifactTypes?: string[];
+  dependencyEvidenceMode?: 'none' | 'optional' | 'required';
+}
+
+export interface StepQualityRequirementsData {
+  mustCoverTopics?: string[];
+  mustReferenceEvidence?: boolean;
+  mustIncludeReasoningLinks?: boolean;
+  mustPassChecks?: ValidationCheckDefinitionData[];
+  semanticExpectations?: string[];
+}
+
+export interface ValidationCheckDefinitionData {
+  name: string;
+  description: string;
+  severity?: 'hard' | 'soft' | 'review';
+}
+
+export interface StepFailurePolicyData {
+  severity?: 'hard' | 'soft' | 'review';
+  maxAutoRetries?: number;
+  allowDownstreamOnSoftFail?: boolean;
+}
+
+export interface StepEvidenceSummaryData {
+  filesReadCount?: number;
+  filesWrittenCount?: number;
+  toolCallCount?: number;
+  searchQueryCount?: number;
+  artifactCount?: number;
+  dependencyInputCount?: number;
+  coverageMarkers?: string[];
+}
+
+export interface StepValidationResultData {
+  status?: 'passed' | 'soft_failed' | 'needs_review' | 'hard_failed';
+  outcomeStatus?: 'completed' | 'soft_failed' | 'needs_review' | 'hard_failed';
+  failureBucket?:
+    | 'missing_evidence'
+    | 'deliverable_incomplete'
+    | 'semantic_gap'
+    | 'review_required'
+    | 'execution_error';
+  confidence?: number | null;
+  summary?: string;
+  retryGuidance?: string[];
+  reviewReason?: string | null;
+  checks?: ValidationCheckResultData[];
+  unmetChecks?: ValidationCheckResultData[];
+}
+
+export interface ValidationCheckResultData {
+  name: string;
+  category: string;
+  passed: boolean;
+  severity?: 'hard' | 'soft' | 'review';
+  explanation: string;
+  missingItems?: string[];
+  confidence?: number | null;
 }
 
 /** Adapter info */

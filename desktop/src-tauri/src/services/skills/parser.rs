@@ -11,7 +11,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::services::skills::model::{HookAction, ParsedSkill, SkillHooks, ToolHookRule};
+use crate::services::skills::model::{
+    HookAction, ParsedSkill, SkillHooks, SkillToolPolicyMode, ToolHookRule,
+};
 use crate::utils::error::{AppError, AppResult};
 
 /// Parse any skill file (Format A, B, or C) and return a ParsedSkill.
@@ -115,6 +117,14 @@ fn parse_with_frontmatter(frontmatter: &str, body: &str, path: &Path) -> AppResu
         .or_else(|| fields.get("user_invocable"))
         .map(|v| extract_bool(v))
         .unwrap_or(false);
+    let tool_policy_mode = fields
+        .get("tool-policy-mode")
+        .or_else(|| fields.get("tool_policy_mode"))
+        .map(|v| match extract_string(v).trim().to_ascii_lowercase().as_str() {
+            "restrictive" => SkillToolPolicyMode::Restrictive,
+            _ => SkillToolPolicyMode::Advisory,
+        })
+        .unwrap_or_default();
     let allowed_tools = fields
         .get("allowed-tools")
         .or_else(|| fields.get("allowed_tools"))
@@ -134,6 +144,8 @@ fn parse_with_frontmatter(frontmatter: &str, body: &str, path: &Path) -> AppResu
         "tags",
         "user-invocable",
         "user_invocable",
+        "tool-policy-mode",
+        "tool_policy_mode",
         "allowed-tools",
         "allowed_tools",
         "license",
@@ -164,6 +176,7 @@ fn parse_with_frontmatter(frontmatter: &str, body: &str, path: &Path) -> AppResu
         tags,
         body: body.to_string(),
         user_invocable,
+        tool_policy_mode,
         allowed_tools,
         license,
         metadata,
@@ -205,6 +218,7 @@ fn parse_convention_file(path: &Path, content: &str) -> AppResult<ParsedSkill> {
         tags: vec![],
         body: content.to_string(),
         user_invocable: false,
+        tool_policy_mode: SkillToolPolicyMode::Advisory,
         allowed_tools: vec![],
         license: None,
         metadata: HashMap::new(),

@@ -517,6 +517,7 @@ mod tests {
                 description: format!("{name} description"),
                 version: None,
                 tags: vec!["tag".to_string()],
+                tool_policy_mode: crate::services::skills::model::SkillToolPolicyMode::Advisory,
                 allowed_tools: vec![],
                 source: SkillSource::Builtin,
                 priority: 10,

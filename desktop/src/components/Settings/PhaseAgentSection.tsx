@@ -22,8 +22,15 @@ import type { CommandResponse } from '../../lib/tauri';
 // Phase definitions (static metadata only -- runtime config lives in the store)
 // ---------------------------------------------------------------------------
 
-const PLANNING_PHASE_IDS = [
+const PLAN_MODE_PHASE_IDS = [
   { id: 'plan_strategy', i18nKey: 'planStrategy' },
+  { id: 'plan_clarification', i18nKey: 'planClarification' },
+  { id: 'plan_generation', i18nKey: 'planGeneration' },
+  { id: 'plan_execution', i18nKey: 'planExecution' },
+  { id: 'plan_retry', i18nKey: 'planRetry' },
+] as const;
+
+const TASK_WORKFLOW_PHASE_IDS = [
   { id: 'plan_exploration', i18nKey: 'planExploration' },
   { id: 'plan_interview', i18nKey: 'planInterview' },
   { id: 'plan_requirements', i18nKey: 'planRequirements' },
@@ -208,12 +215,12 @@ export function PhaseAgentSection() {
       </div>
 
       {/* ================================================================== */}
-      {/* Planning Phases (LLM-only, no fallback chains) */}
+      {/* Plan Mode Phases (LLM-only for current runtime) */}
       {/* ================================================================== */}
       <section className="space-y-3">
         <div>
-          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">{t('phases.groups.planning')}</h3>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{t('phases.groups.planningDesc')}</p>
+          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">{t('phases.groups.planMode')}</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{t('phases.groups.planModeDesc')}</p>
         </div>
 
         <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
@@ -231,7 +238,7 @@ export function PhaseAgentSection() {
 
           {/* Rows */}
           <div className="divide-y divide-gray-200 dark:divide-gray-700">
-            {PLANNING_PHASE_IDS.map((phase) => {
+            {PLAN_MODE_PHASE_IDS.map((phase) => {
               const config = phaseConfigs[phase.id] ?? { defaultAgent: '', fallbackChain: [] };
 
               return (
@@ -278,7 +285,73 @@ export function PhaseAgentSection() {
       </section>
 
       {/* ================================================================== */}
-      {/* Execution Phases (CLI agents + LLM, with fallback chains) */}
+      {/* Task Workflow Phases (LLM-only) */}
+      {/* ================================================================== */}
+      <section className="space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">{t('phases.groups.taskWorkflow')}</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{t('phases.groups.taskWorkflowDesc')}</p>
+        </div>
+
+        <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+          <div
+            className={clsx(
+              'grid grid-cols-12 gap-4 px-4 py-3',
+              'bg-gray-50 dark:bg-gray-800',
+              'text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider',
+            )}
+          >
+            <div className="col-span-5">{t('phases.columns.phase')}</div>
+            <div className="col-span-7">{t('phases.columns.defaultAgent')}</div>
+          </div>
+
+          <div className="divide-y divide-gray-200 dark:divide-gray-700">
+            {TASK_WORKFLOW_PHASE_IDS.map((phase) => {
+              const config = phaseConfigs[phase.id] ?? { defaultAgent: '', fallbackChain: [] };
+
+              return (
+                <div
+                  key={phase.id}
+                  className={clsx(
+                    'grid grid-cols-12 gap-4 px-4 py-3 items-center',
+                    'bg-white dark:bg-gray-900',
+                    'hover:bg-gray-50 dark:hover:bg-gray-800/50',
+                  )}
+                >
+                  <div className="col-span-5">
+                    <div className="font-medium text-gray-900 dark:text-white">{t(`phases.${phase.i18nKey}.name`)}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      {t(`phases.${phase.i18nKey}.description`)}
+                    </div>
+                  </div>
+
+                  <div className="col-span-7">
+                    <select
+                      value={config.defaultAgent}
+                      onChange={(e) => handleDefaultAgentChange(phase.id, e.target.value)}
+                      className={clsx(
+                        'w-full px-3 py-1.5 rounded-lg border text-sm',
+                        'border-gray-200 dark:border-gray-700',
+                        'bg-white dark:bg-gray-800',
+                        'text-gray-900 dark:text-white',
+                        'focus:outline-none focus:ring-2 focus:ring-primary-500',
+                      )}
+                    >
+                      <LlmSelectOptions
+                        globalDefaultLabel={globalDefaultLabel}
+                        configuredProviders={configuredProviders}
+                      />
+                    </select>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* ================================================================== */}
+      {/* Task Execution Phases (CLI agents + LLM, with fallback chains) */}
       {/* ================================================================== */}
       <section className="space-y-3">
         <div>

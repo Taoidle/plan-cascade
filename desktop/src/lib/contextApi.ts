@@ -83,6 +83,14 @@ export interface ContextDiagnostics {
   skill_router_fallback_reason?: string | null;
   skill_router_selected_ids?: string[];
   skill_router_latency_ms?: number | null;
+  plan_phase_id?: string | null;
+  plan_phase_agent_ref?: string | null;
+  plan_phase_agent_kind?: 'llm' | 'cli' | string | null;
+  plan_phase_source?: string | null;
+  plan_phase_provider?: string | null;
+  plan_phase_model?: string | null;
+  plan_execution_snapshot_used?: boolean;
+  plan_retry_snapshot_used?: boolean;
 }
 
 export interface ContextEnvelope {

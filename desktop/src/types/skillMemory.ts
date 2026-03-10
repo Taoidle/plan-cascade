@@ -23,6 +23,7 @@ export type SkillSourceLabel = 'builtin' | 'external' | 'user' | 'project_local'
 /** Phase in which a skill is injected */
 export type InjectionPhase = 'planning' | 'implementation' | 'retry' | 'always';
 export type SkillReviewStatus = 'pending_review' | 'approved' | 'rejected' | 'archived';
+export type SkillToolPolicyMode = 'advisory' | 'restrictive';
 export type SkillSourceInstallType = 'local' | 'git' | 'url';
 export type GeneratedSkillImportConflictPolicy = 'rename' | 'replace' | 'skip';
 
@@ -33,6 +34,7 @@ export interface SkillSummary {
   description: string;
   version: string | null;
   tags: string[];
+  tool_policy_mode: SkillToolPolicyMode;
   allowed_tools: string[];
   source: SkillSource;
   priority: number;
@@ -59,6 +61,7 @@ export interface SkillDocument {
   hash: string;
   last_modified: number | null;
   user_invocable: boolean;
+  tool_policy_mode: SkillToolPolicyMode;
   allowed_tools: string[];
   license: string | null;
   metadata: Record<string, string>;
@@ -334,6 +337,7 @@ export function normalizeSkillSource(source: SkillSourceLegacyInput): SkillSourc
 export function normalizeSkillSummary(summary: SkillSummary): SkillSummary {
   return {
     ...summary,
+    tool_policy_mode: summary.tool_policy_mode ?? 'advisory',
     source: normalizeSkillSource(summary.source),
   };
 }
@@ -341,6 +345,7 @@ export function normalizeSkillSummary(summary: SkillSummary): SkillSummary {
 export function normalizeSkillDocument(document: SkillDocument): SkillDocument {
   return {
     ...document,
+    tool_policy_mode: document.tool_policy_mode ?? 'advisory',
     source: normalizeSkillSource(document.source),
   };
 }

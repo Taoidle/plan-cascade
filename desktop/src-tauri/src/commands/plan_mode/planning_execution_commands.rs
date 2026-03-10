@@ -5,6 +5,15 @@ use crate::services::workflow_kernel::{
 };
 use serde_json::{json, Value};
 
+fn counts_as_completed_state(state: &StepExecutionState) -> bool {
+    matches!(
+        state,
+        StepExecutionState::Completed { .. }
+            | StepExecutionState::SoftFailed { .. }
+            | StepExecutionState::NeedsReview { .. }
+    )
+}
+
 fn transcript_timestamp() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -36,12 +45,22 @@ fn build_plan_completion_transcript_line(session: &PlanModeSession) -> Option<Va
     let steps_completed = session
         .step_states
         .values()
-        .filter(|state| matches!(state, StepExecutionState::Completed { .. }))
+        .filter(|state| counts_as_completed_state(state))
         .count();
     let steps_failed = session
         .step_states
         .values()
-        .filter(|state| matches!(state, StepExecutionState::Failed { .. }))
+        .filter(|state| matches!(state, StepExecutionState::HardFailed { .. }))
+        .count();
+    let steps_soft_failed = session
+        .step_states
+        .values()
+        .filter(|state| matches!(state, StepExecutionState::SoftFailed { .. }))
+        .count();
+    let steps_needs_review = session
+        .step_states
+        .values()
+        .filter(|state| matches!(state, StepExecutionState::NeedsReview { .. }))
         .count();
     let steps_cancelled = session
         .step_states
@@ -53,7 +72,9 @@ fn build_plan_completion_transcript_line(session: &PlanModeSession) -> Option<Va
         .step_states
         .values()
         .filter_map(|state| match state {
-            StepExecutionState::Completed { duration_ms } => Some(*duration_ms),
+            StepExecutionState::Completed { duration_ms }
+            | StepExecutionState::SoftFailed { duration_ms, .. }
+            | StepExecutionState::NeedsReview { duration_ms, .. } => Some(*duration_ms),
             _ => None,
         })
         .sum();
@@ -75,19 +96,25 @@ fn build_plan_completion_transcript_line(session: &PlanModeSession) -> Option<Va
                         output.summary.clone()
                     }
                 })
-                .unwrap_or_else(|| {
-                    session
-                        .step_states
-                        .get(&step.id)
-                        .map(|state| match state {
+                        .unwrap_or_else(|| {
+                            session
+                                .step_states
+                                .get(&step.id)
+                                .map(|state| match state {
                             StepExecutionState::Completed { .. } => "Completed".to_string(),
-                            StepExecutionState::Failed { reason } => reason.clone(),
+                            StepExecutionState::SoftFailed { reason, .. } => {
+                                format!("Completed with warnings: {reason}")
+                            }
+                            StepExecutionState::NeedsReview { reason, .. } => {
+                                format!("Needs review: {reason}")
+                            }
+                            StepExecutionState::HardFailed { reason } => reason.clone(),
                             StepExecutionState::Cancelled => "Cancelled".to_string(),
                             StepExecutionState::Running => "Running".to_string(),
                             StepExecutionState::Pending => "Pending".to_string(),
-                        })
-                        .unwrap_or_else(|| "No summary available".to_string())
-                });
+                                })
+                                .unwrap_or_else(|| "No summary available".to_string())
+                        });
             (step.id.clone(), summary)
         })
         .collect();
@@ -95,15 +122,23 @@ fn build_plan_completion_transcript_line(session: &PlanModeSession) -> Option<Va
         .step_states
         .iter()
         .filter_map(|(step_id, state)| match state {
-            StepExecutionState::Failed { reason } => Some((step_id.clone(), reason.clone())),
+            StepExecutionState::HardFailed { reason }
+            | StepExecutionState::SoftFailed { reason, .. }
+            | StepExecutionState::NeedsReview { reason, .. } => {
+                Some((step_id.clone(), reason.clone()))
+            }
             _ => None,
         })
         .collect();
     let terminal_state = match session.phase {
+        PlanModePhase::Completed if steps_needs_review > 0 => "needs_review",
+        PlanModePhase::Completed if steps_soft_failed > 0 => "completed_with_warnings",
         PlanModePhase::Completed => "completed",
         PlanModePhase::Cancelled => "cancelled",
         PlanModePhase::Failed => "failed",
         _ if steps_failed > 0 => "failed",
+        _ if steps_needs_review > 0 => "needs_review",
+        _ if steps_soft_failed > 0 => "completed_with_warnings",
         _ if steps_completed == total_steps => "completed",
         _ => "failed",
     };
@@ -111,12 +146,14 @@ fn build_plan_completion_transcript_line(session: &PlanModeSession) -> Option<Va
     Some(build_card_transcript_line(
         "plan_completion_card",
         json!({
-            "success": terminal_state == "completed" && steps_failed == 0,
+            "success": steps_failed == 0 && steps_needs_review == 0,
             "terminalState": terminal_state,
             "planTitle": plan.title,
             "totalSteps": total_steps,
             "stepsCompleted": steps_completed,
             "stepsFailed": steps_failed,
+            "stepsSoftFailed": steps_soft_failed,
+            "stepsNeedsReview": steps_needs_review,
             "stepsCancelled": steps_cancelled,
             "stepsAttempted": steps_attempted,
             "stepsFailedBeforeCancel": if terminal_state == "cancelled" { steps_failed } else { 0 },
@@ -198,11 +235,18 @@ fn build_plan_progress_from_checkpoint(
     let total_steps = step_states.len();
     let steps_completed = step_states
         .values()
-        .filter(|state| matches!(state, StepExecutionState::Completed { .. }))
+        .filter(|state| {
+            matches!(
+                state,
+                StepExecutionState::Completed { .. }
+                    | StepExecutionState::SoftFailed { .. }
+                    | StepExecutionState::NeedsReview { .. }
+            )
+        })
         .count();
     let steps_failed = step_states
         .values()
-        .filter(|state| matches!(state, StepExecutionState::Failed { .. }))
+        .filter(|state| matches!(state, StepExecutionState::HardFailed { .. }))
         .count();
     let progress_pct = if total_steps > 0 {
         (steps_completed as f64 / total_steps as f64) * 100.0
@@ -236,7 +280,7 @@ fn compute_retry_stats(
     let exhausted_failures = step_states
         .iter()
         .filter(|(step_id, state)| {
-            matches!(state, StepExecutionState::Failed { .. })
+            matches!(state, StepExecutionState::HardFailed { .. })
                 && step_attempts
                     .get(step_id.as_str())
                     .map(|attempts| *attempts > 1)
@@ -266,6 +310,8 @@ pub async fn generate_plan(
         provider,
         model,
         base_url,
+        agent_ref,
+        agent_source,
         project_path,
         context_sources,
         conversation_context,
@@ -292,17 +338,25 @@ pub async fn generate_plan(
         )
     };
 
-    let (resolved_provider, resolved_model) =
-        resolve_plan_provider_and_model(provider, model, app_state.inner()).await;
-    let prov = resolved_provider.as_str();
-    let mdl = resolved_model.as_str();
+    let resolved_generation_agent = resolve_plan_phase_agent(
+        "plan_generation",
+        agent_ref.as_deref(),
+        agent_source.as_deref(),
+        provider,
+        model,
+        base_url,
+        app_state.inner(),
+        false,
+    )
+    .await?;
     let (operation_id, operation_token) = register_plan_operation_token(&state, &session_id).await;
     let result = tokio::select! {
         _ = operation_token.cancelled() => Ok(CommandResponse::err(PLAN_OPERATION_CANCELLED_ERROR)),
         result = async {
-            let llm_provider = resolve_llm_provider(prov, mdl, None, base_url, &app_state)
-                .await
-                .map_err(|e| format!("Failed to resolve LLM provider: {e}"))?;
+            let provider_config =
+                build_llm_provider_from_plan_phase_agent(&resolved_generation_agent, app_state.inner()).await?;
+            let llm_provider =
+                crate::services::task_mode::prd_generator::create_provider(provider_config.clone());
 
             let registry = state.adapter_registry.read().await;
             let adapter = registry
@@ -323,7 +377,10 @@ pub async fn generate_plan(
                 context_sources.as_ref(),
                 &description,
                 InjectionPhase::Planning,
-                Some(llm_provider.config()),
+                Some(&provider_config),
+                Some(&resolved_generation_agent),
+                false,
+                false,
             )
             .await;
             let plan_context_ref = if plan_context.rendered_context.is_empty() {
@@ -352,6 +409,7 @@ pub async fn generate_plan(
                         .ok_or_else(|| "No active plan mode session".to_string())?;
                     session.plan = Some(plan.clone());
                     session.phase = PlanModePhase::ReviewingPlan;
+                    session.resolved_phase_agents.generation = Some(resolved_generation_agent.clone());
                     if locale.is_some() {
                         session.locale = locale.clone();
                     }
@@ -405,6 +463,8 @@ pub async fn approve_plan(
         provider,
         model,
         base_url,
+        agent_ref,
+        agent_source,
         project_path,
         context_sources,
         conversation_context,
@@ -426,6 +486,8 @@ pub async fn approve_plan(
         provider: provider.clone(),
         model: model.clone(),
         base_url: base_url.clone(),
+        agent_ref: agent_ref.clone(),
+        agent_source: agent_source.clone(),
         project_path: project_path.clone(),
         context_sources: context_sources.clone(),
         conversation_context: conversation_context.clone(),
@@ -457,18 +519,34 @@ pub async fn approve_plan(
         )
     };
 
-    let (resolved_provider, resolved_model) =
-        resolve_plan_provider_and_model(provider, model, app_state.inner()).await;
-    let prov = resolved_provider.as_str();
-    let mdl = resolved_model.as_str();
-
-    let provider_config = resolve_provider_config(prov, mdl, None, base_url.clone(), &app_state)
-        .await
-        .map_err(|e| format!("Failed to resolve provider config: {e}"))?;
-
-    let llm_provider = resolve_llm_provider(prov, mdl, None, base_url, &app_state)
-        .await
-        .map_err(|e| format!("Failed to resolve LLM provider: {e}"))?;
+    let resolved_execution_agent = resolve_plan_phase_agent(
+        "plan_execution",
+        agent_ref.as_deref(),
+        agent_source.as_deref(),
+        provider,
+        model,
+        base_url,
+        app_state.inner(),
+        true,
+    )
+    .await?;
+    if matches!(resolved_execution_agent.agent_kind, PlanPhaseAgentKind::Cli) {
+        {
+            let mut sessions = state.sessions.write().await;
+            if let Some(session) = sessions.get_mut(&session_id) {
+                session.resolved_phase_agents.execution = Some(resolved_execution_agent.clone());
+                session.execution_agent_snapshot = Some(resolved_execution_agent.clone());
+                session.execution_resume_payload = resume_payload.clone();
+            }
+        }
+        return Ok(CommandResponse::err(
+            "Plan execution CLI agents are not implemented yet",
+        ));
+    }
+    let provider_config =
+        build_llm_provider_from_plan_phase_agent(&resolved_execution_agent, app_state.inner())
+            .await?;
+    let llm_provider = crate::services::task_mode::prd_generator::create_provider(provider_config.clone());
 
     let registry = state.adapter_registry.read().await;
     let adapter = registry
@@ -489,6 +567,8 @@ pub async fn approve_plan(
             session.locale = locale.clone();
         }
         session.execution_resume_payload = resume_payload.clone();
+        session.resolved_phase_agents.execution = Some(resolved_execution_agent.clone());
+        session.execution_agent_snapshot = Some(resolved_execution_agent.clone());
         if !was_resuming {
             session.step_attempts.clear();
         }
@@ -536,6 +616,9 @@ pub async fn approve_plan(
         &task_description,
         InjectionPhase::Implementation,
         Some(&provider_config),
+        Some(&resolved_execution_agent),
+        true,
+        false,
     )
     .await;
     let execution_context = if execution_context_bundle.rendered_context.is_empty() {
@@ -684,9 +767,7 @@ pub async fn approve_plan(
         if let Some(session) = sessions.get_mut(&sid) {
             match result {
                 Ok((outputs, states, step_attempts)) => {
-                    let failed = states
-                        .values()
-                        .any(|s| matches!(s, StepExecutionState::Failed { .. }));
+                    let failed = states.values().any(|s| matches!(s, StepExecutionState::HardFailed { .. }));
                     let cancelled = states
                         .values()
                         .any(|s| matches!(s, StepExecutionState::Cancelled));
@@ -708,12 +789,12 @@ pub async fn approve_plan(
                     session.phase = PlanModePhase::Failed;
                     session.step_attempts.clear();
                     // Store error in a synthetic step state
-                    session.step_states.insert(
-                        "_error".to_string(),
-                        StepExecutionState::Failed {
-                            reason: format!("{e}"),
-                        },
-                    );
+                        session.step_states.insert(
+                            "_error".to_string(),
+                        StepExecutionState::HardFailed {
+                                reason: format!("{e}"),
+                            },
+                        );
                 }
             }
             updated_session_snapshot = Some(session.clone());
@@ -782,6 +863,8 @@ pub async fn retry_plan_step(
         provider,
         model,
         base_url,
+        agent_ref,
+        agent_source,
         project_path,
         context_sources,
         conversation_context,
@@ -827,7 +910,7 @@ pub async fn retry_plan_step(
         }
 
         match session.step_states.get(&normalized_step_id) {
-            Some(StepExecutionState::Failed { .. }) | Some(StepExecutionState::Cancelled) => {}
+            Some(StepExecutionState::HardFailed { .. }) | Some(StepExecutionState::Cancelled) => {}
             Some(_) => {
                 return Ok(CommandResponse::err(format!(
                     "Step '{}' is not retryable (must be failed/cancelled)",
@@ -851,18 +934,32 @@ pub async fn retry_plan_step(
         )
     };
 
-    let (resolved_provider, resolved_model) =
-        resolve_plan_provider_and_model(provider, model, app_state.inner()).await;
-    let prov = resolved_provider.as_str();
-    let mdl = resolved_model.as_str();
-
-    let provider_config = resolve_provider_config(prov, mdl, None, base_url.clone(), &app_state)
-        .await
-        .map_err(|e| format!("Failed to resolve provider config: {e}"))?;
-
-    let llm_provider = resolve_llm_provider(prov, mdl, None, base_url, &app_state)
-        .await
-        .map_err(|e| format!("Failed to resolve LLM provider: {e}"))?;
+    let resolved_retry_agent = resolve_plan_phase_agent(
+        "plan_retry",
+        agent_ref.as_deref(),
+        agent_source.as_deref(),
+        provider,
+        model,
+        base_url,
+        app_state.inner(),
+        true,
+    )
+    .await?;
+    if matches!(resolved_retry_agent.agent_kind, PlanPhaseAgentKind::Cli) {
+        {
+            let mut sessions = state.sessions.write().await;
+            if let Some(session) = sessions.get_mut(&session_id) {
+                session.resolved_phase_agents.retry = Some(resolved_retry_agent.clone());
+                session.retry_agent_snapshot = Some(resolved_retry_agent.clone());
+            }
+        }
+        return Ok(CommandResponse::err(
+            "Plan retry CLI agents are not implemented yet",
+        ));
+    }
+    let provider_config =
+        build_llm_provider_from_plan_phase_agent(&resolved_retry_agent, app_state.inner()).await?;
+    let llm_provider = crate::services::task_mode::prd_generator::create_provider(provider_config.clone());
 
     let registry = state.adapter_registry.read().await;
     let adapter = registry
@@ -880,6 +977,8 @@ pub async fn retry_plan_step(
         if locale.is_some() {
             session.locale = locale.clone();
         }
+        session.resolved_phase_agents.retry = Some(resolved_retry_agent.clone());
+        session.retry_agent_snapshot = Some(resolved_retry_agent.clone());
         session
             .step_states
             .insert(normalized_step_id.clone(), StepExecutionState::Running);
@@ -924,8 +1023,11 @@ pub async fn retry_plan_step(
         conversation_context.as_deref(),
         context_sources.as_ref(),
         &task_description,
-        InjectionPhase::Implementation,
+        InjectionPhase::Retry,
         Some(&provider_config),
+        Some(&resolved_retry_agent),
+        false,
+        true,
     )
     .await;
     let execution_context = if execution_context_bundle.rendered_context.is_empty() {
@@ -1027,7 +1129,7 @@ pub async fn retry_plan_step(
                     let has_non_completed = states.values().any(|state| {
                         matches!(
                             state,
-                            StepExecutionState::Failed { .. } | StepExecutionState::Cancelled
+                            StepExecutionState::HardFailed { .. } | StepExecutionState::Cancelled
                         )
                     });
 
@@ -1054,7 +1156,7 @@ pub async fn retry_plan_step(
                     *attempts = attempts.saturating_add(1);
                     session.step_states.insert(
                         retry_step_id.clone(),
-                        StepExecutionState::Failed {
+                        StepExecutionState::HardFailed {
                             reason: format!("{error}"),
                         },
                     );

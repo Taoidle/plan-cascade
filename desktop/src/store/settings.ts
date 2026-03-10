@@ -17,7 +17,21 @@ export type GlmEndpoint = 'standard' | 'coding' | 'international' | 'internation
 export type MinimaxEndpoint = 'international' | 'china';
 export type QwenEndpoint = 'china' | 'singapore' | 'us';
 export type MemoryReviewMode = 'llm_review' | 'auto_approve' | 'manual_only';
-const SETTINGS_PERSIST_VERSION = 7;
+const SETTINGS_PERSIST_VERSION = 8;
+const PLAN_MODE_PHASE_IDS = [
+  'plan_strategy',
+  'plan_clarification',
+  'plan_generation',
+  'plan_execution',
+  'plan_retry',
+] as const;
+const TASK_PLANNING_PHASE_IDS = [
+  'plan_exploration',
+  'plan_interview',
+  'plan_requirements',
+  'plan_architecture',
+  'plan_prd',
+] as const;
 const EXECUTION_PHASE_IDS = ['planning', 'implementation', 'retry', 'refactor', 'review'] as const;
 
 function normalizeProviderKey(provider: string): string {
@@ -290,14 +304,19 @@ const defaultSettings = {
 
   // Phase agent configs
   phaseConfigs: {
-    // Planning phases (LLM-only, '' = use global settings)
+    // Plan mode phases (LLM-only for now, CLI schema reserved)
     plan_strategy: { defaultAgent: '', fallbackChain: [] },
+    plan_clarification: { defaultAgent: '', fallbackChain: [] },
+    plan_generation: { defaultAgent: '', fallbackChain: [] },
+    plan_execution: { defaultAgent: '', fallbackChain: [] },
+    plan_retry: { defaultAgent: '', fallbackChain: [] },
+    // Task workflow planning phases
     plan_exploration: { defaultAgent: '', fallbackChain: [] },
     plan_interview: { defaultAgent: '', fallbackChain: [] },
     plan_requirements: { defaultAgent: '', fallbackChain: [] },
     plan_architecture: { defaultAgent: '', fallbackChain: [] },
     plan_prd: { defaultAgent: '', fallbackChain: [] },
-    // Execution phases (CLI agents + LLM)
+    // Task execution phases (CLI agents + LLM)
     planning: { defaultAgent: '', fallbackChain: ['codex'] },
     implementation: { defaultAgent: '', fallbackChain: ['codex', 'aider'] },
     retry: { defaultAgent: '', fallbackChain: ['aider'] },
@@ -337,6 +356,38 @@ function applyV2ForcedDefaults(state: Partial<SettingsState>): Partial<SettingsS
   }
   nextState.phaseConfigs = phaseConfigs;
   return nextState;
+}
+
+function resetPlanModePhaseConfigs(phaseConfigs: Record<string, PhaseAgentConfig>): Record<string, PhaseAgentConfig> {
+  const next = { ...phaseConfigs };
+  for (const phaseId of PLAN_MODE_PHASE_IDS) {
+    next[phaseId] = {
+      defaultAgent: defaultSettings.phaseConfigs[phaseId].defaultAgent,
+      fallbackChain: [...defaultSettings.phaseConfigs[phaseId].fallbackChain],
+    };
+  }
+  return next;
+}
+
+function ensurePhaseConfigs(
+  phaseConfigs: Partial<Record<string, PhaseAgentConfig>> | undefined,
+): Record<string, PhaseAgentConfig> {
+  const current = (phaseConfigs ?? {}) as Record<string, PhaseAgentConfig>;
+  const next = { ...current } as Record<string, PhaseAgentConfig>;
+  for (const phaseId of [...PLAN_MODE_PHASE_IDS, ...TASK_PLANNING_PHASE_IDS, ...EXECUTION_PHASE_IDS]) {
+    if (!(phaseId in next)) {
+      next[phaseId] = {
+        defaultAgent: defaultSettings.phaseConfigs[phaseId].defaultAgent,
+        fallbackChain: [...defaultSettings.phaseConfigs[phaseId].fallbackChain],
+      };
+      continue;
+    }
+    next[phaseId] = {
+      defaultAgent: typeof next[phaseId]?.defaultAgent === 'string' ? next[phaseId].defaultAgent : '',
+      fallbackChain: Array.isArray(next[phaseId]?.fallbackChain) ? [...next[phaseId].fallbackChain] : [],
+    };
+  }
+  return next;
 }
 
 function applyV3ForcedDefaults(state: Partial<SettingsState>): Partial<SettingsState> {
@@ -569,22 +620,32 @@ export const useSettingsStore = create<SettingsState>()(
       migrate: (persistedState, version) => {
         const state = (persistedState ?? {}) as Partial<SettingsState>;
         if (version < 2) {
+          const migrated = applyV3ForcedDefaults(state);
           return {
-            ...applyV3ForcedDefaults(state),
+            ...migrated,
+            phaseConfigs: resetPlanModePhaseConfigs(ensurePhaseConfigs(migrated.phaseConfigs)),
             memorySettings: ensureMemorySettings(state),
           };
         }
         if (version < 3) {
+          const migrated = applyV3ForcedDefaults(state);
           return {
-            ...applyV3ForcedDefaults(state),
+            ...migrated,
+            phaseConfigs: resetPlanModePhaseConfigs(ensurePhaseConfigs(migrated.phaseConfigs)),
             memorySettings: ensureMemorySettings(state),
           };
         }
         const nextState = { ...state } as Record<string, unknown>;
         delete nextState.simpleKernelSot;
         delete nextState.typedCardPipeline;
+        const migrated = nextState as Partial<SettingsState>;
+        let phaseConfigs = ensurePhaseConfigs(migrated.phaseConfigs);
+        if (version < 8) {
+          phaseConfigs = resetPlanModePhaseConfigs(phaseConfigs);
+        }
         return {
-          ...(nextState as Partial<SettingsState>),
+          ...migrated,
+          phaseConfigs,
           memorySettings: ensureMemorySettings(state),
           developerPanels: ensureDeveloperPanels(state),
           developerSettingsInitialized:
@@ -610,15 +671,7 @@ export const useSettingsStore = create<SettingsState>()(
         if (!mergedState.model && typeof modelByProvider[canonicalProvider] === 'string') {
           mergedState.model = modelByProvider[canonicalProvider];
         }
-        // Ensure new planning phase configs exist for old users
-        const defaultPhases = defaultSettings.phaseConfigs;
-        const storedPhases = mergedState.phaseConfigs || {};
-        for (const key of Object.keys(defaultPhases)) {
-          if (!(key in storedPhases)) {
-            storedPhases[key] = defaultPhases[key];
-          }
-        }
-        mergedState.phaseConfigs = storedPhases;
+        mergedState.phaseConfigs = ensurePhaseConfigs(mergedState.phaseConfigs);
         mergedState.memorySettings = ensureMemorySettings(mergedState);
         mergedState.developerPanels = ensureDeveloperPanels(mergedState);
         mergedState.developerSettingsInitialized =

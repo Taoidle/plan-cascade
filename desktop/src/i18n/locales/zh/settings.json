@@ -421,15 +421,33 @@
     },
 
     "groups": {
-      "planning": "规划阶段",
-      "planningDesc": "为每个规划步骤配置 LLM。\"全局默认\"使用主 LLM 后端设置。",
+      "planMode": "Plan 模式",
+      "planModeDesc": "为 Plan 模式的每个阶段配置 LLM。\"全局默认\"使用主 LLM 后端设置。",
+      "taskWorkflow": "Task 工作流",
+      "taskWorkflowDesc": "为 Task 规划工作流阶段配置 LLM。",
       "execution": "执行阶段",
-      "executionDesc": "配置故事执行的代理。"
+      "executionDesc": "配置 Task 执行阶段代理及回退链。"
     },
 
     "planStrategy": {
       "name": "策略分析",
       "description": "任务分析和策略选择"
+    },
+    "planClarification": {
+      "name": "澄清阶段",
+      "description": "生成并继续计划澄清问题"
+    },
+    "planGeneration": {
+      "name": "计划生成",
+      "description": "生成可执行的步骤计划"
+    },
+    "planExecution": {
+      "name": "计划执行",
+      "description": "执行已批准的计划步骤"
+    },
+    "planRetry": {
+      "name": "计划重试",
+      "description": "重试单个失败的计划步骤"
     },
     "planExploration": {
       "name": "项目探索",

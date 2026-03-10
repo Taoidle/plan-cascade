@@ -822,6 +822,15 @@ impl OrchestratorService {
         self
     }
 
+    /// Return a summary of files read during the current execution.
+    pub fn get_read_file_summary(&self) -> Vec<(String, usize, u64)> {
+        self.tool_executor
+            .get_read_file_summary()
+            .into_iter()
+            .map(|(path, count, bytes)| (path, count, bytes))
+            .collect()
+    }
+
     /// Wire plugin context (instructions, skills, commands, hooks, permissions) into the orchestrator.
     ///
     /// Extracts data from the PluginManager at construction time:

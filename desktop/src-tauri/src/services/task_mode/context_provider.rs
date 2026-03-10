@@ -33,7 +33,7 @@ use crate::services::skills::index::build_index;
 use crate::services::skills::injector::{inject_skill_summaries, inject_skills};
 use crate::services::skills::model::{
     GeneratedSkillRecord, InjectionPhase, SelectionPolicy, SkillDocument, SkillIndex, SkillMatch,
-    SkillReviewStatus, SkillSource,
+    SkillReviewStatus, SkillSource, SkillToolPolicyMode,
 };
 use crate::services::skills::router::SkillRerankDiagnostics;
 use crate::services::skills::router::rerank_skill_matches;
@@ -729,38 +729,61 @@ pub async fn select_skills_for_task_filtered(
 }
 
 fn normalized_allowed_tools_from_skill_matches(matches: &[SkillMatch]) -> Option<HashSet<String>> {
-    let mut allowed: Option<HashSet<String>> = None;
+    let mut restrictive_matches = matches
+        .iter()
+        .filter(|skill_match| {
+            skill_match.skill.enabled
+                && skill_match.skill.tool_policy_mode == SkillToolPolicyMode::Restrictive
+                && !skill_match.skill.allowed_tools.is_empty()
+        })
+        .collect::<Vec<_>>();
 
-    for skill_match in matches {
-        if !skill_match.skill.enabled || skill_match.skill.allowed_tools.is_empty() {
-            continue;
-        }
-        let current = skill_match
-            .skill
-            .allowed_tools
-            .iter()
-            .map(|tool| tool.trim().to_ascii_lowercase())
-            .filter(|tool| !tool.is_empty())
-            .collect::<HashSet<_>>();
-        if current.is_empty() {
-            continue;
-        }
-
-        allowed = Some(match allowed.take() {
-            Some(existing) => existing
-                .intersection(&current)
-                .cloned()
-                .collect::<HashSet<_>>(),
-            None => current,
-        });
+    if restrictive_matches.is_empty() {
+        return None;
     }
 
-    let Some(mut allowed) = allowed else {
-        return None;
-    };
+    restrictive_matches.sort_by(|left, right| {
+        right
+            .skill
+            .priority
+            .cmp(&left.skill.priority)
+            .then_with(|| left.skill.id.cmp(&right.skill.id))
+    });
 
-    // Minimum safe exploration set.
-    for safe_tool in ["read", "ls", "glob", "grep", "cwd"] {
+    let winning_skill = restrictive_matches[0];
+    if restrictive_matches.len() > 1 {
+        tracing::warn!(
+            "Multiple restrictive skill policies active; using highest-priority policy '{}' (priority={}) and ignoring {} lower-priority policies",
+            winning_skill.skill.id,
+            winning_skill.skill.priority,
+            restrictive_matches.len().saturating_sub(1)
+        );
+    }
+
+    let mut allowed = winning_skill
+        .skill
+        .allowed_tools
+        .iter()
+        .map(|tool| tool.trim().to_ascii_lowercase())
+        .filter(|tool| !tool.is_empty())
+        .collect::<HashSet<_>>();
+    if allowed.is_empty() {
+        return None;
+    }
+
+    // Core repo exploration baseline plus default reasoning tools that should
+    // remain available unless the environment explicitly disables them.
+    for safe_tool in [
+        "read",
+        "ls",
+        "glob",
+        "grep",
+        "cwd",
+        "codebasesearch",
+        "analyze",
+        "task",
+        "searchknowledge",
+    ] {
         allowed.insert(safe_tool.to_string());
     }
     Some(allowed)
@@ -1235,6 +1258,7 @@ fn generated_record_to_skill_document(record: GeneratedSkillRecord) -> SkillDocu
         hash: format!("generated-{}", record.id),
         last_modified: None,
         user_invocable: false,
+        tool_policy_mode: SkillToolPolicyMode::Advisory,
         allowed_tools: vec![],
         license: None,
         metadata: std::collections::HashMap::new(),

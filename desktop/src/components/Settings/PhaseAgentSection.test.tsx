@@ -12,6 +12,10 @@ const mockSettingsState = {
   ],
   phaseConfigs: {
     plan_strategy: { defaultAgent: '', fallbackChain: [] },
+    plan_clarification: { defaultAgent: '', fallbackChain: [] },
+    plan_generation: { defaultAgent: '', fallbackChain: [] },
+    plan_execution: { defaultAgent: '', fallbackChain: [] },
+    plan_retry: { defaultAgent: '', fallbackChain: [] },
     plan_exploration: { defaultAgent: '', fallbackChain: [] },
     plan_interview: { defaultAgent: '', fallbackChain: [] },
     plan_requirements: { defaultAgent: '', fallbackChain: [] },
@@ -37,12 +41,22 @@ vi.mock('react-i18next', () => ({
         'phases.columns.phase': 'Phase',
         'phases.columns.defaultAgent': 'Default Agent',
         'phases.columns.fallbackChain': 'Fallback Chain',
-        'phases.groups.planning': 'Planning',
-        'phases.groups.planningDesc': 'Planning phases',
+        'phases.groups.planMode': 'Plan Mode',
+        'phases.groups.planModeDesc': 'Plan mode phases',
+        'phases.groups.taskWorkflow': 'Task Workflow',
+        'phases.groups.taskWorkflowDesc': 'Task workflow phases',
         'phases.groups.execution': 'Execution',
         'phases.groups.executionDesc': 'Execution phases',
         'phases.planStrategy.name': 'Plan Strategy',
         'phases.planStrategy.description': 'Plan strategy',
+        'phases.planClarification.name': 'Plan Clarification',
+        'phases.planClarification.description': 'Plan clarification',
+        'phases.planGeneration.name': 'Plan Generation',
+        'phases.planGeneration.description': 'Plan generation',
+        'phases.planExecution.name': 'Plan Execution',
+        'phases.planExecution.description': 'Plan execution',
+        'phases.planRetry.name': 'Plan Retry',
+        'phases.planRetry.description': 'Plan retry',
         'phases.planExploration.name': 'Plan Exploration',
         'phases.planExploration.description': 'Plan exploration',
         'phases.planInterview.name': 'Plan Interview',
@@ -98,7 +112,7 @@ describe('PhaseAgentSection', () => {
     await waitFor(() => expect(mockInvoke).toHaveBeenCalled());
 
     const selects = screen.getAllByRole('combobox');
-    const executionPlanningSelect = selects[6] as HTMLSelectElement;
+    const executionPlanningSelect = selects[10] as HTMLSelectElement;
     const hasGlobalDefaultOption = Array.from(executionPlanningSelect.options).some(
       (option) => option.value === '' && option.textContent === '(Global Default)',
     );
@@ -111,7 +125,7 @@ describe('PhaseAgentSection', () => {
     await waitFor(() => expect(mockInvoke).toHaveBeenCalled());
 
     const selects = screen.getAllByRole('combobox');
-    const executionPlanningSelect = selects[6] as HTMLSelectElement;
+    const executionPlanningSelect = selects[10] as HTMLSelectElement;
 
     fireEvent.change(executionPlanningSelect, { target: { value: '' } });
 

@@ -58,7 +58,11 @@ export function normalizeStepOutputFormat(format: string | undefined): PlanStepO
 
 export function buildPlanCompletionCardDataFromReport(report: PlanExecutionReport): PlanCompletionCardData {
   const normalizedTerminalState =
-    report.terminalState === 'completed' || report.terminalState === 'failed' || report.terminalState === 'cancelled'
+    report.terminalState === 'completed' ||
+    report.terminalState === 'completed_with_warnings' ||
+    report.terminalState === 'needs_review' ||
+    report.terminalState === 'failed' ||
+    report.terminalState === 'cancelled'
       ? report.terminalState
       : report.success
         ? 'completed'
@@ -66,10 +70,13 @@ export function buildPlanCompletionCardDataFromReport(report: PlanExecutionRepor
   return {
     success: report.success,
     terminalState: normalizedTerminalState,
+    terminalStatus: report.terminalStatus,
     planTitle: report.planTitle,
     totalSteps: report.totalSteps,
     stepsCompleted: report.stepsCompleted,
     stepsFailed: report.stepsFailed,
+    stepsSoftFailed: report.stepsSoftFailed ?? 0,
+    stepsNeedsReview: report.stepsNeedsReview ?? 0,
     stepsCancelled: report.stepsCancelled ?? 0,
     stepsAttempted: report.stepsAttempted ?? report.stepsCompleted + report.stepsFailed,
     stepsFailedBeforeCancel: report.stepsFailedBeforeCancel ?? 0,
@@ -82,6 +89,7 @@ export function buildPlanCompletionCardDataFromReport(report: PlanExecutionRepor
     highlights: report.highlights,
     nextActions: report.nextActions,
     retryStats: report.retryStats,
+    terminalVerdictTrace: report.terminalVerdictTrace ?? [],
   };
 }
 
@@ -113,6 +121,7 @@ export function buildPlanCompletionCardDataFallback(
   return {
     success: effectiveTerminalState === 'completed' && stepsFailed === 0,
     terminalState: effectiveTerminalState,
+    terminalStatus: effectiveTerminalState,
     planTitle: plan.title,
     totalSteps,
     stepsCompleted,
@@ -139,5 +148,6 @@ export function buildPlanCompletionCardDataFallback(
       stepsRetried: 0,
       exhaustedFailures: 0,
     },
+    terminalVerdictTrace: [],
   };
 }

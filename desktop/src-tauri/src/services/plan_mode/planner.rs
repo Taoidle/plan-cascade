@@ -11,8 +11,11 @@ use crate::utils::error::{AppError, AppResult};
 
 use super::adapter::DomainAdapter;
 use super::types::{
-    calculate_plan_batches_with_parallel, ClarificationAnswer, Plan, PlanExecutionConfig, PlanStep,
-    StepPriority, TaskDomain,
+    calculate_plan_batches_with_parallel, ArtifactRequirement, ClarificationAnswer,
+    DependencyEvidenceMode, FailureSeverity, Plan, PlanExecutionConfig, PlanStep,
+    StepDeliverableContract, StepDeliverableFormat, StepDeliverableType,
+    StepEvidenceRequirements, StepFailurePolicy, StepPriority, StepQualityRequirements,
+    StepValidationProfile, TaskDomain, ValidationCheck, ValidationSeverity,
 };
 
 /// Generate a plan by decomposing the task into steps.
@@ -190,21 +193,26 @@ fn parse_step(val: &serde_json::Value) -> AppResult<PlanStep> {
         })
         .unwrap_or_default();
 
-    let completion_criteria = val
-        .get("completionCriteria")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default();
+    let deliverable = parse_deliverable_contract(val.get("deliverable"));
+    let evidence_requirements = parse_evidence_requirements(val.get("evidenceRequirements"));
+    let quality_requirements = parse_quality_requirements(val.get("qualityRequirements"));
+    let validation_profile = parse_validation_profile(val.get("validationProfile"));
+    let failure_policy = parse_failure_policy(val.get("failurePolicy"));
 
-    let expected_output = val
-        .get("expectedOutput")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let completion_criteria = derive_legacy_completion_criteria(
+        &deliverable,
+        &evidence_requirements,
+        &quality_requirements,
+    );
+
+    let expected_output = if !deliverable.expected_output_summary.is_empty() {
+        deliverable.expected_output_summary.clone()
+    } else {
+        val.get("expectedOutput")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
 
     Ok(PlanStep {
         id,
@@ -212,10 +220,216 @@ fn parse_step(val: &serde_json::Value) -> AppResult<PlanStep> {
         description,
         priority,
         dependencies,
+        deliverable,
+        evidence_requirements,
+        quality_requirements,
+        validation_profile,
+        failure_policy,
         completion_criteria,
         expected_output,
         metadata: std::collections::HashMap::new(),
     })
+}
+
+fn parse_deliverable_contract(value: Option<&serde_json::Value>) -> StepDeliverableContract {
+    let Some(value) = value else {
+        return StepDeliverableContract::default();
+    };
+    let deliverable_type = match value.get("deliverableType").and_then(|v| v.as_str()) {
+        Some("report") => StepDeliverableType::Report,
+        Some("markdown") => StepDeliverableType::Markdown,
+        Some("json") => StepDeliverableType::Json,
+        Some("file_patch") => StepDeliverableType::FilePatch,
+        Some("code_change") => StepDeliverableType::CodeChange,
+        Some("artifact_bundle") => StepDeliverableType::ArtifactBundle,
+        Some("research_summary") => StepDeliverableType::ResearchSummary,
+        Some("analysis_memo") => StepDeliverableType::AnalysisMemo,
+        _ => StepDeliverableType::Custom,
+    };
+    let format = match value.get("format").and_then(|v| v.as_str()) {
+        Some("markdown") => StepDeliverableFormat::Markdown,
+        Some("json") => StepDeliverableFormat::Json,
+        Some("code") => StepDeliverableFormat::Code,
+        Some("mixed") => StepDeliverableFormat::Mixed,
+        _ => StepDeliverableFormat::Text,
+    };
+    let required_sections = parse_string_array(value.get("requiredSections"));
+    let required_artifacts = value
+        .get("requiredArtifacts")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|artifact| ArtifactRequirement {
+                    artifact_type: artifact
+                        .get("artifactType")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    path_hint: artifact
+                        .get("pathHint")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    description: artifact
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let expected_output_summary = value
+        .get("expectedOutputSummary")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    StepDeliverableContract {
+        deliverable_type,
+        format,
+        required_sections,
+        required_artifacts,
+        expected_output_summary,
+    }
+}
+
+fn parse_evidence_requirements(value: Option<&serde_json::Value>) -> StepEvidenceRequirements {
+    let Some(value) = value else {
+        return StepEvidenceRequirements::default();
+    };
+    let dependency_evidence_mode =
+        match value.get("dependencyEvidenceMode").and_then(|v| v.as_str()) {
+            Some("none") => DependencyEvidenceMode::None,
+            Some("required") => DependencyEvidenceMode::Required,
+            _ => DependencyEvidenceMode::Optional,
+        };
+    StepEvidenceRequirements {
+        min_files_read: value
+            .get("minFilesRead")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize,
+        required_paths: parse_string_array(value.get("requiredPaths")),
+        required_tools: parse_string_array(value.get("requiredTools")),
+        required_searches: parse_string_array(value.get("requiredSearches")),
+        required_artifact_types: parse_string_array(value.get("requiredArtifactTypes")),
+        dependency_evidence_mode,
+    }
+}
+
+fn parse_quality_requirements(value: Option<&serde_json::Value>) -> StepQualityRequirements {
+    let Some(value) = value else {
+        return StepQualityRequirements::default();
+    };
+    let must_pass_checks = value
+        .get("mustPassChecks")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|check| ValidationCheck {
+                    name: check
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    description: check
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    severity: match check.get("severity").and_then(|v| v.as_str()) {
+                        Some("hard") => ValidationSeverity::Hard,
+                        Some("review") => ValidationSeverity::Review,
+                        _ => ValidationSeverity::Soft,
+                    },
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    StepQualityRequirements {
+        must_cover_topics: parse_string_array(value.get("mustCoverTopics")),
+        must_reference_evidence: value
+            .get("mustReferenceEvidence")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        must_include_reasoning_links: value
+            .get("mustIncludeReasoningLinks")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        must_pass_checks,
+        semantic_expectations: parse_string_array(value.get("semanticExpectations")),
+    }
+}
+
+fn parse_validation_profile(value: Option<&serde_json::Value>) -> StepValidationProfile {
+    match value.and_then(|v| v.as_str()) {
+        Some("report") => StepValidationProfile::Report,
+        Some("analysis") => StepValidationProfile::Analysis,
+        Some("research") => StepValidationProfile::Research,
+        Some("code_change") => StepValidationProfile::CodeChange,
+        Some("documentation") => StepValidationProfile::Documentation,
+        _ => StepValidationProfile::Mixed,
+    }
+}
+
+fn parse_failure_policy(value: Option<&serde_json::Value>) -> StepFailurePolicy {
+    let Some(value) = value else {
+        return StepFailurePolicy::default();
+    };
+    StepFailurePolicy {
+        severity: match value.get("severity").and_then(|v| v.as_str()) {
+            Some("soft") => FailureSeverity::Soft,
+            Some("review") => FailureSeverity::Review,
+            _ => FailureSeverity::Hard,
+        },
+        max_auto_retries: value
+            .get("maxAutoRetries")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1) as usize,
+        allow_downstream_on_soft_fail: value
+            .get("allowDownstreamOnSoftFail")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+    }
+}
+
+fn parse_string_array(value: Option<&serde_json::Value>) -> Vec<String> {
+    value
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn derive_legacy_completion_criteria(
+    deliverable: &StepDeliverableContract,
+    evidence: &StepEvidenceRequirements,
+    quality: &StepQualityRequirements,
+) -> Vec<String> {
+    let mut criteria = Vec::new();
+    if !deliverable.required_sections.is_empty() {
+        criteria.push(format!(
+            "Include sections: {}",
+            deliverable.required_sections.join(", ")
+        ));
+    }
+    if evidence.min_files_read > 0 {
+        criteria.push(format!("Read at least {} files", evidence.min_files_read));
+    }
+    if !evidence.required_tools.is_empty() {
+        criteria.push(format!(
+            "Use tools: {}",
+            evidence.required_tools.join(", ")
+        ));
+    }
+    for topic in &quality.must_cover_topics {
+        criteria.push(format!("Cover topic: {topic}"));
+    }
+    if criteria.is_empty() && !deliverable.expected_output_summary.is_empty() {
+        criteria.push(deliverable.expected_output_summary.clone());
+    }
+    criteria
 }
 
 /// Retry plan parsing with a repair prompt when initial parse fails.
@@ -302,8 +516,34 @@ mod tests {
       "description": "Research AI trends",
       "priority": "high",
       "dependencies": [],
-      "completionCriteria": ["Found 3+ sources"],
-      "expectedOutput": "Research notes"
+      "deliverable": {
+        "deliverableType": "research_summary",
+        "format": "markdown",
+        "requiredSections": ["Sources", "Findings"],
+        "requiredArtifacts": [],
+        "expectedOutputSummary": "Research notes"
+      },
+      "evidenceRequirements": {
+        "minFilesRead": 3,
+        "requiredPaths": [],
+        "requiredTools": ["web_search"],
+        "requiredSearches": [],
+        "requiredArtifactTypes": [],
+        "dependencyEvidenceMode": "none"
+      },
+      "qualityRequirements": {
+        "mustCoverTopics": ["AI trends"],
+        "mustReferenceEvidence": true,
+        "mustIncludeReasoningLinks": false,
+        "mustPassChecks": [],
+        "semanticExpectations": ["Summarize the findings clearly"]
+      },
+      "validationProfile": "research",
+      "failurePolicy": {
+        "severity": "hard",
+        "maxAutoRetries": 1,
+        "allowDownstreamOnSoftFail": false
+      }
     },
     {
       "id": "step-2",
@@ -311,8 +551,34 @@ mod tests {
       "description": "Write the draft",
       "priority": "high",
       "dependencies": ["step-1"],
-      "completionCriteria": ["1000+ words"],
-      "expectedOutput": "Blog post draft"
+      "deliverable": {
+        "deliverableType": "markdown",
+        "format": "markdown",
+        "requiredSections": ["Introduction", "Conclusion"],
+        "requiredArtifacts": [],
+        "expectedOutputSummary": "Blog post draft"
+      },
+      "evidenceRequirements": {
+        "minFilesRead": 0,
+        "requiredPaths": [],
+        "requiredTools": [],
+        "requiredSearches": [],
+        "requiredArtifactTypes": [],
+        "dependencyEvidenceMode": "required"
+      },
+      "qualityRequirements": {
+        "mustCoverTopics": ["AI trends"],
+        "mustReferenceEvidence": true,
+        "mustIncludeReasoningLinks": false,
+        "mustPassChecks": [],
+        "semanticExpectations": ["Produce a coherent draft"]
+      },
+      "validationProfile": "report",
+      "failurePolicy": {
+        "severity": "soft",
+        "maxAutoRetries": 1,
+        "allowDownstreamOnSoftFail": false
+      }
     }
   ]
 }
@@ -341,12 +607,39 @@ mod tests {
             "description": "Details",
             "priority": "high",
             "dependencies": ["step-0"],
-            "completionCriteria": ["Done"],
-            "expectedOutput": "Result"
+            "deliverable": {
+                "deliverableType": "analysis_memo",
+                "format": "markdown",
+                "requiredSections": ["Summary"],
+                "requiredArtifacts": [],
+                "expectedOutputSummary": "Result"
+            },
+            "evidenceRequirements": {
+                "minFilesRead": 1,
+                "requiredPaths": [],
+                "requiredTools": ["read_file"],
+                "requiredSearches": [],
+                "requiredArtifactTypes": [],
+                "dependencyEvidenceMode": "optional"
+            },
+            "qualityRequirements": {
+                "mustCoverTopics": ["Done"],
+                "mustReferenceEvidence": true,
+                "mustIncludeReasoningLinks": false,
+                "mustPassChecks": [],
+                "semanticExpectations": ["Provide the result"]
+            },
+            "validationProfile": "analysis",
+            "failurePolicy": {
+                "severity": "hard",
+                "maxAutoRetries": 1,
+                "allowDownstreamOnSoftFail": false
+            }
         });
         let step = parse_step(&val).unwrap();
         assert_eq!(step.id, "step-1");
         assert_eq!(step.priority, StepPriority::High);
         assert_eq!(step.dependencies, vec!["step-0"]);
+        assert_eq!(step.deliverable.expected_output_summary, "Result");
     }
 }

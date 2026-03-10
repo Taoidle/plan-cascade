@@ -46,11 +46,14 @@ export async function approvePlanFlow(plan: PlanCardData, deps: ExecutionFlowDep
   set({ phase: 'executing', isBusy: true, isCancelling: false, _completionCardInjectedRunToken: null });
 
   injectInfo(i18n.t('planMode:orchestrator.planApproved', 'Plan approved! Starting execution...'));
+  const { resolvePlanPhaseAgent, formatResolvedPlanAgentDisplay } = await import('../../lib/phaseAgentResolver');
+  const executionAgent = resolvePlanPhaseAgent('plan_execution');
 
   injectCard('plan_persona_indicator', {
     role: 'executor',
     displayName: i18n.t('planMode:personas.executor', 'Executor'),
     phase: 'executing',
+    model: formatResolvedPlanAgentDisplay(executionAgent),
   } satisfies PlanPersonaIndicatorData);
 
   const planStore = usePlanModeStore.getState();
@@ -66,14 +69,16 @@ export async function approvePlanFlow(plan: PlanCardData, deps: ExecutionFlowDep
       (async () => {
         const ok = await planStore.approvePlan(
           plan,
-          undefined,
-          undefined,
-          undefined,
+          executionAgent.kind === 'llm' ? executionAgent.provider : undefined,
+          executionAgent.kind === 'llm' ? executionAgent.model : undefined,
+          executionAgent.kind === 'llm' ? executionAgent.baseUrl : undefined,
           projectPath,
           contextSources,
           undefined,
           i18n.language,
           effectiveSessionId,
+          executionAgent.agentRef,
+          executionAgent.source,
         );
         if (!ok) {
           throw new Error(usePlanModeStore.getState().error || 'Failed to approve plan');
@@ -115,10 +120,13 @@ export async function retryStepFlow(stepId: string, deps: ExecutionFlowDeps): Pr
   });
 
   injectInfo(i18n.t('planMode:orchestrator.retryingStep', 'Retrying step {{id}}...', { id: normalizedStepId }));
+  const { resolvePlanPhaseAgent, formatResolvedPlanAgentDisplay } = await import('../../lib/phaseAgentResolver');
+  const retryAgent = resolvePlanPhaseAgent('plan_retry');
   injectCard('plan_persona_indicator', {
     role: 'executor',
     displayName: i18n.t('planMode:personas.executor', 'Executor'),
     phase: 'executing',
+    model: formatResolvedPlanAgentDisplay(retryAgent),
   } satisfies PlanPersonaIndicatorData);
 
   const transitionAndSubmitInput = useWorkflowKernelStore.getState().transitionAndSubmitInput;
@@ -151,14 +159,16 @@ export async function retryStepFlow(stepId: string, deps: ExecutionFlowDeps): Pr
       (async () => {
         const ok = await planStore.retryPlanStep(
           normalizedStepId,
-          undefined,
-          undefined,
-          undefined,
+          retryAgent.kind === 'llm' ? retryAgent.provider : undefined,
+          retryAgent.kind === 'llm' ? retryAgent.model : undefined,
+          retryAgent.kind === 'llm' ? retryAgent.baseUrl : undefined,
           projectPath,
           contextSources,
           undefined,
           i18n.language,
           effectiveSessionId,
+          retryAgent.agentRef,
+          retryAgent.source,
         );
         if (!ok) {
           throw new Error(usePlanModeStore.getState().error || 'Failed to retry step');

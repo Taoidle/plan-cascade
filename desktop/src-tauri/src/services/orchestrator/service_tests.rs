@@ -4100,6 +4100,7 @@ fn test_sub_agent_inherits_skills_snapshot() {
             description: "Follow Rust idioms and patterns.".to_string(),
             version: None,
             tags: vec!["rust".to_string()],
+            tool_policy_mode: crate::services::skills::model::SkillToolPolicyMode::Advisory,
             allowed_tools: vec![],
             source: SkillSource::Builtin,
             priority: 10,
@@ -4109,6 +4110,9 @@ fn test_sub_agent_inherits_skills_snapshot() {
             has_hooks: false,
             inject_into: vec![],
             path: std::path::PathBuf::new(),
+            review_status: None,
+            review_notes: None,
+            reviewed_at: None,
         },
     }];
 

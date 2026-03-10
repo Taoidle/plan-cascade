@@ -235,6 +235,22 @@ pub struct ContextDiagnostics {
     pub skill_router_selected_ids: Vec<String>,
     #[serde(default)]
     pub skill_router_latency_ms: Option<u64>,
+    #[serde(default)]
+    pub plan_phase_id: Option<String>,
+    #[serde(default)]
+    pub plan_phase_agent_ref: Option<String>,
+    #[serde(default)]
+    pub plan_phase_agent_kind: Option<String>,
+    #[serde(default)]
+    pub plan_phase_source: Option<String>,
+    #[serde(default)]
+    pub plan_phase_provider: Option<String>,
+    #[serde(default)]
+    pub plan_phase_model: Option<String>,
+    #[serde(default)]
+    pub plan_execution_snapshot_used: bool,
+    #[serde(default)]
+    pub plan_retry_snapshot_used: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -341,6 +357,18 @@ pub struct PrepareTurnContextV2Request {
     pub llm_model: Option<String>,
     #[serde(default)]
     pub llm_base_url: Option<String>,
+    #[serde(default)]
+    pub plan_phase_id: Option<String>,
+    #[serde(default)]
+    pub plan_phase_agent_ref: Option<String>,
+    #[serde(default)]
+    pub plan_phase_agent_kind: Option<String>,
+    #[serde(default)]
+    pub plan_phase_source: Option<String>,
+    #[serde(default)]
+    pub plan_execution_snapshot_used: bool,
+    #[serde(default)]
+    pub plan_retry_snapshot_used: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1250,6 +1278,14 @@ async fn prepare_turn_context_v2_internal(
     });
     let fault_injection = request.fault_injection.clone().unwrap_or_default();
     let mut diagnostics = ContextDiagnostics::default();
+    diagnostics.plan_phase_id = request.plan_phase_id.clone();
+    diagnostics.plan_phase_agent_ref = request.plan_phase_agent_ref.clone();
+    diagnostics.plan_phase_agent_kind = request.plan_phase_agent_kind.clone();
+    diagnostics.plan_phase_source = request.plan_phase_source.clone();
+    diagnostics.plan_phase_provider = request.llm_provider.clone();
+    diagnostics.plan_phase_model = request.llm_model.clone();
+    diagnostics.plan_execution_snapshot_used = request.plan_execution_snapshot_used;
+    diagnostics.plan_retry_snapshot_used = request.plan_retry_snapshot_used;
     let mut selection_origins: Vec<SelectionOrigin> = Vec::new();
     let provider_config = resolve_context_provider_config(&request, app_state).await;
 
@@ -3094,6 +3130,12 @@ pub async fn run_context_chaos_probe(
                 llm_provider: None,
                 llm_model: None,
                 llm_base_url: None,
+                plan_phase_id: None,
+                plan_phase_agent_ref: None,
+                plan_phase_agent_kind: None,
+                plan_phase_source: None,
+                plan_execution_snapshot_used: false,
+                plan_retry_snapshot_used: false,
             };
 
             let probe_result =
@@ -3266,6 +3308,12 @@ mod tests {
             llm_provider: None,
             llm_model: None,
             llm_base_url: None,
+            plan_phase_id: None,
+            plan_phase_agent_ref: None,
+            plan_phase_agent_kind: None,
+            plan_phase_source: None,
+            plan_execution_snapshot_used: false,
+            plan_retry_snapshot_used: false,
         }
     }
 
@@ -3518,6 +3566,7 @@ mod tests {
                 description: "test".to_string(),
                 version: None,
                 tags: vec![],
+                tool_policy_mode: crate::services::skills::model::SkillToolPolicyMode::Advisory,
                 allowed_tools: allowed_tools.into_iter().map(|v| v.to_string()).collect(),
                 source: crate::services::skills::model::SkillSource::Builtin,
                 priority: 1,
@@ -3527,6 +3576,9 @@ mod tests {
                 has_hooks: false,
                 inject_into: vec![crate::services::skills::model::InjectionPhase::Always],
                 path: PathBuf::from("/tmp/skill"),
+                review_status: None,
+                review_notes: None,
+                reviewed_at: None,
             },
         }
     }

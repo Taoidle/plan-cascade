@@ -109,8 +109,40 @@ Respond in JSON format:
       "description": "Detailed description",
       "priority": "high|medium|low",
       "dependencies": [],
-      "completionCriteria": ["Criterion 1"],
-      "expectedOutput": "Description of expected output"
+      "deliverable": {{
+        "deliverableType": "report|markdown|json|file_patch|code_change|artifact_bundle|research_summary|analysis_memo|custom",
+        "format": "markdown|json|text|code|mixed",
+        "requiredSections": ["Section heading"],
+        "requiredArtifacts": [
+          {{
+            "artifactType": "report|outline|draft|source_notes|file",
+            "pathHint": "optional/path.md",
+            "description": "What this artifact should contain"
+          }}
+        ],
+        "expectedOutputSummary": "Description of expected output"
+      }},
+      "evidenceRequirements": {{
+        "minFilesRead": 0,
+        "requiredPaths": [],
+        "requiredTools": [],
+        "requiredSearches": [],
+        "requiredArtifactTypes": [],
+        "dependencyEvidenceMode": "none|optional|required"
+      }},
+      "qualityRequirements": {{
+        "mustCoverTopics": ["Topic 1"],
+        "mustReferenceEvidence": true,
+        "mustIncludeReasoningLinks": false,
+        "mustPassChecks": [],
+        "semanticExpectations": ["Explain tone, completeness, and audience fit"]
+      }},
+      "validationProfile": "report|analysis|research|code_change|documentation|mixed",
+      "failurePolicy": {{
+        "severity": "hard|soft|review",
+        "maxAutoRetries": 1,
+        "allowDownstreamOnSoftFail": false
+      }}
     }}
   ]
 }}
@@ -168,6 +200,29 @@ Respond in JSON format:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::plan_mode::types::{
+        StepDeliverableContract, StepEvidenceRequirements, StepFailurePolicy, StepPriority,
+        StepQualityRequirements,
+    };
+    use std::collections::HashMap;
+    
+    fn sample_step(id: &str, title: &str, priority: StepPriority) -> PlanStep {
+        PlanStep {
+            id: id.to_string(),
+            title: title.to_string(),
+            description: String::new(),
+            priority,
+            dependencies: vec![],
+            deliverable: StepDeliverableContract::default(),
+            evidence_requirements: StepEvidenceRequirements::default(),
+            quality_requirements: StepQualityRequirements::default(),
+            validation_profile: Default::default(),
+            failure_policy: StepFailurePolicy::default(),
+            completion_criteria: vec![],
+            expected_output: String::new(),
+            metadata: HashMap::new(),
+        }
+    }
 
     #[test]
     fn test_writing_adapter_properties() {
@@ -179,34 +234,13 @@ mod tests {
 
     #[test]
     fn test_writing_execution_persona_varies() {
-        use crate::services::plan_mode::types::StepPriority;
-        use std::collections::HashMap;
-
         let adapter = WritingAdapter;
 
-        let outline_step = PlanStep {
-            id: "s1".to_string(),
-            title: "Create Outline".to_string(),
-            description: "".to_string(),
-            priority: StepPriority::High,
-            dependencies: vec![],
-            completion_criteria: vec![],
-            expected_output: "".to_string(),
-            metadata: HashMap::new(),
-        };
+        let outline_step = sample_step("s1", "Create Outline", StepPriority::High);
         let persona = adapter.execution_persona(&outline_step);
         assert!(persona.identity_prompt.contains("outliner"));
 
-        let review_step = PlanStep {
-            id: "s2".to_string(),
-            title: "Review and Polish".to_string(),
-            description: "".to_string(),
-            priority: StepPriority::Medium,
-            dependencies: vec![],
-            completion_criteria: vec![],
-            expected_output: "".to_string(),
-            metadata: HashMap::new(),
-        };
+        let review_step = sample_step("s2", "Review and Polish", StepPriority::Medium);
         let persona = adapter.execution_persona(&review_step);
         assert!(persona.identity_prompt.contains("editor"));
     }

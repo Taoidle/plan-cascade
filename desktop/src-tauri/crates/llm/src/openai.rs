@@ -10,13 +10,17 @@ use serde::Deserialize;
 use tokio::sync::mpsc;
 
 use super::openai_compat::{
-    build_client, map_api_error, value_to_chat_request, value_to_chat_stream_request,
+    build_client, build_openai_compatible_messages, map_api_error, value_to_chat_request,
+    value_to_chat_stream_request,
 };
 use super::provider::LlmProvider;
 use super::types::{
-    LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message, MessageContent, MessageRole,
-    ProviderConfig, StopReason, ToolCall, ToolCallMode, ToolDefinition, UsageStats,
+    LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message, ProviderConfig, StopReason,
+    ToolCall, ToolCallMode, ToolDefinition, UsageStats,
 };
+
+#[cfg(test)]
+use super::types::{MessageContent, MessageRole};
 use plan_cascade_core::streaming::UnifiedStreamEvent;
 
 /// Default OpenAI API endpoint
@@ -76,35 +80,7 @@ impl OpenAIProvider {
             }
         }
 
-        // Convert messages to OpenAI format
-        let mut openai_messages: Vec<serde_json::Value> = Vec::new();
-
-        // Add system message if provided
-        if let Some(sys) = system {
-            openai_messages.push(serde_json::json!({
-                "role": "system",
-                "content": sys
-            }));
-        }
-
-        // Add conversation messages
-        for msg in messages {
-            if msg.role == MessageRole::System {
-                // Handle system messages from the conversation
-                for content in &msg.content {
-                    if let MessageContent::Text { text } = content {
-                        openai_messages.push(serde_json::json!({
-                            "role": "system",
-                            "content": text
-                        }));
-                    }
-                }
-            } else {
-                openai_messages.push(self.message_to_openai(msg));
-            }
-        }
-
-        body["messages"] = serde_json::json!(openai_messages);
+        body["messages"] = serde_json::json!(build_openai_compatible_messages(messages, system));
 
         // Add tools if provided
         if !tools.is_empty() {
@@ -126,6 +102,7 @@ impl OpenAIProvider {
         body
     }
 
+    #[cfg(test)]
     /// Convert a Message to OpenAI API format
     fn message_to_openai(&self, message: &Message) -> serde_json::Value {
         let role = match message.role {

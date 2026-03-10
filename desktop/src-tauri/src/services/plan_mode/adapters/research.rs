@@ -112,8 +112,40 @@ Respond in JSON format:
       "description": "Detailed description",
       "priority": "high|medium|low",
       "dependencies": [],
-      "completionCriteria": ["Criterion 1"],
-      "expectedOutput": "Description of expected output"
+      "deliverable": {{
+        "deliverableType": "report|markdown|json|file_patch|code_change|artifact_bundle|research_summary|analysis_memo|custom",
+        "format": "markdown|json|text|code|mixed",
+        "requiredSections": ["Section heading"],
+        "requiredArtifacts": [
+          {{
+            "artifactType": "research_notes|comparison_matrix|report|file",
+            "pathHint": "optional/path.md",
+            "description": "What this artifact should contain"
+          }}
+        ],
+        "expectedOutputSummary": "Description of expected output"
+      }},
+      "evidenceRequirements": {{
+        "minFilesRead": 0,
+        "requiredPaths": [],
+        "requiredTools": ["web_search"],
+        "requiredSearches": [],
+        "requiredArtifactTypes": [],
+        "dependencyEvidenceMode": "none|optional|required"
+      }},
+      "qualityRequirements": {{
+        "mustCoverTopics": ["Topic 1"],
+        "mustReferenceEvidence": true,
+        "mustIncludeReasoningLinks": true,
+        "mustPassChecks": [],
+        "semanticExpectations": ["Explain evidence, contradictions, and conclusions"]
+      }},
+      "validationProfile": "report|analysis|research|code_change|documentation|mixed",
+      "failurePolicy": {{
+        "severity": "hard|soft|review",
+        "maxAutoRetries": 1,
+        "allowDownstreamOnSoftFail": false
+      }}
     }}
   ]
 }}

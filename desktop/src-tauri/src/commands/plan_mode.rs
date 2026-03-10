@@ -16,14 +16,15 @@ use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
 use crate::commands::task_mode::{
-    resolve_llm_provider, resolve_provider_config, resolve_search_provider_for_tools,
+    resolve_provider_config_from_app_state, resolve_search_provider_for_tools,
 };
 use crate::models::CommandResponse;
 use crate::services::knowledge::observability;
 use crate::services::plan_mode::adapter_registry::{AdapterInfo, AdapterRegistry};
 use crate::services::plan_mode::types::{
     ClarificationAnswer, Plan, PlanAnalysis, PlanExecutionReport, PlanModePhase, PlanModeSession,
-    PlanRetryStats, StepExecutionState, StepOutput,
+    PlanPhaseAgentKind, PlanPhaseAgentRef, PlanRetryStats, ResolvedPlanPhaseAgent,
+    StepExecutionState, StepOutput,
 };
 use crate::services::skills::model::InjectionPhase;
 use crate::services::task_mode::context_provider::{
@@ -382,6 +383,153 @@ pub(crate) async fn resolve_plan_provider_and_model(
     (canonical_provider, resolved_model)
 }
 
+fn parse_plan_phase_agent_ref(agent_ref: &str) -> Option<PlanPhaseAgentRef> {
+    let trimmed = agent_ref.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(rest) = trimmed.strip_prefix("llm:") {
+        let mut parts = rest.split(':');
+        let provider = parts.next()?.trim();
+        let model = parts.collect::<Vec<_>>().join(":").trim().to_string();
+        if provider.is_empty() || model.is_empty() {
+            return None;
+        }
+        let canonical_provider = crate::commands::standalone::normalize_provider_name(provider)
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| provider.to_ascii_lowercase());
+        return Some(PlanPhaseAgentRef::Llm {
+            provider: canonical_provider,
+            model,
+        });
+    }
+    trimmed
+        .strip_prefix("cli:")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|agent_name| PlanPhaseAgentRef::Cli {
+            agent_name: agent_name.to_string(),
+        })
+}
+
+pub(crate) async fn resolve_plan_phase_agent(
+    phase_id: &str,
+    agent_ref: Option<&str>,
+    agent_source: Option<&str>,
+    provider: Option<String>,
+    model: Option<String>,
+    base_url: Option<String>,
+    app_state: &AppState,
+    allow_cli: bool,
+) -> Result<ResolvedPlanPhaseAgent, String> {
+    let source = agent_source
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("global")
+        .to_string();
+    if let Some(agent_ref) = agent_ref.map(str::trim).filter(|value| !value.is_empty()) {
+        let parsed = parse_plan_phase_agent_ref(agent_ref)
+            .ok_or_else(|| format!("Unsupported plan phase agent ref: {agent_ref}"))?;
+        match parsed {
+            PlanPhaseAgentRef::Llm { provider, model } => {
+                let provider_config = resolve_provider_config_from_app_state(
+                    &provider,
+                    &model,
+                    None,
+                    base_url.clone(),
+                    app_state,
+                )
+                .await
+                .map_err(|e| format!("Failed to resolve provider config: {e}"))?;
+                Ok(ResolvedPlanPhaseAgent {
+                    phase_id: phase_id.to_string(),
+                    agent_ref: Some(agent_ref.to_string()),
+                    agent_kind: PlanPhaseAgentKind::Llm,
+                    source,
+                    provider: Some(provider_config.provider.to_string()),
+                    model: Some(provider_config.model.clone()),
+                    base_url: provider_config.base_url.clone(),
+                    agent_name: None,
+                    execution_backend_unavailable: false,
+                })
+            }
+            PlanPhaseAgentRef::Cli { agent_name } => {
+                if !allow_cli {
+                    return Err(format!(
+                        "CLI agents are not supported for phase {phase_id} in the current runtime"
+                    ));
+                }
+                Ok(ResolvedPlanPhaseAgent {
+                    phase_id: phase_id.to_string(),
+                    agent_ref: Some(agent_ref.to_string()),
+                    agent_kind: PlanPhaseAgentKind::Cli,
+                    source,
+                    provider: None,
+                    model: None,
+                    base_url: None,
+                    agent_name: Some(agent_name),
+                    execution_backend_unavailable: true,
+                })
+            }
+        }
+    } else {
+        let (resolved_provider, resolved_model) =
+            resolve_plan_provider_and_model(provider, model, app_state).await;
+        let provider_config = resolve_provider_config_from_app_state(
+            &resolved_provider,
+            &resolved_model,
+            None,
+            base_url,
+            app_state,
+        )
+        .await
+        .map_err(|e| format!("Failed to resolve provider config: {e}"))?;
+        Ok(ResolvedPlanPhaseAgent {
+            phase_id: phase_id.to_string(),
+            agent_ref: None,
+            agent_kind: PlanPhaseAgentKind::Llm,
+            source,
+            provider: Some(provider_config.provider.to_string()),
+            model: Some(provider_config.model.clone()),
+            base_url: provider_config.base_url.clone(),
+            agent_name: None,
+            execution_backend_unavailable: false,
+        })
+    }
+}
+
+pub(crate) async fn build_llm_provider_from_plan_phase_agent(
+    agent: &ResolvedPlanPhaseAgent,
+    app_state: &AppState,
+) -> Result<crate::services::llm::types::ProviderConfig, String> {
+    match agent.agent_kind {
+        PlanPhaseAgentKind::Cli => Err(format!(
+            "{} uses CLI agent {} but CLI execution is not implemented yet",
+            agent.phase_id,
+            agent.agent_name.as_deref().unwrap_or("unknown")
+        )),
+        PlanPhaseAgentKind::Llm => {
+            let provider = agent
+                .provider
+                .as_deref()
+                .ok_or_else(|| format!("{} is missing provider details", agent.phase_id))?;
+            let model = agent
+                .model
+                .as_deref()
+                .ok_or_else(|| format!("{} is missing model details", agent.phase_id))?;
+            resolve_provider_config_from_app_state(
+                provider,
+                model,
+                None,
+                agent.base_url.clone(),
+                app_state,
+            )
+            .await
+            .map_err(|e| format!("Failed to resolve provider config: {e}"))
+        }
+    }
+}
+
 // ============================================================================
 // Request Payloads
 // ============================================================================
@@ -394,6 +542,27 @@ pub struct EnterPlanModeRequest {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub base_url: Option<String>,
+    #[serde(default)]
+    pub agent_ref: Option<String>,
+    #[serde(default)]
+    pub agent_source: Option<String>,
+    pub project_path: Option<String>,
+    pub context_sources: Option<ContextSourceConfig>,
+    pub conversation_context: Option<String>,
+    pub locale: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StartPlanClarificationRequest {
+    pub session_id: String,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub agent_ref: Option<String>,
+    #[serde(default)]
+    pub agent_source: Option<String>,
     pub project_path: Option<String>,
     pub context_sources: Option<ContextSourceConfig>,
     pub conversation_context: Option<String>,
@@ -408,6 +577,10 @@ pub struct SubmitPlanClarificationRequest {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub base_url: Option<String>,
+    #[serde(default)]
+    pub agent_ref: Option<String>,
+    #[serde(default)]
+    pub agent_source: Option<String>,
     pub project_path: Option<String>,
     pub context_sources: Option<ContextSourceConfig>,
     pub conversation_context: Option<String>,
@@ -421,6 +594,10 @@ pub struct GeneratePlanRequest {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub base_url: Option<String>,
+    #[serde(default)]
+    pub agent_ref: Option<String>,
+    #[serde(default)]
+    pub agent_source: Option<String>,
     pub project_path: Option<String>,
     pub context_sources: Option<ContextSourceConfig>,
     pub conversation_context: Option<String>,
@@ -435,6 +612,10 @@ pub struct ApprovePlanRequest {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub base_url: Option<String>,
+    #[serde(default)]
+    pub agent_ref: Option<String>,
+    #[serde(default)]
+    pub agent_source: Option<String>,
     pub project_path: Option<String>,
     pub context_sources: Option<ContextSourceConfig>,
     pub conversation_context: Option<String>,
@@ -449,6 +630,10 @@ pub struct RetryPlanStepRequest {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub base_url: Option<String>,
+    #[serde(default)]
+    pub agent_ref: Option<String>,
+    #[serde(default)]
+    pub agent_source: Option<String>,
     pub project_path: Option<String>,
     pub context_sources: Option<ContextSourceConfig>,
     pub conversation_context: Option<String>,
@@ -461,6 +646,10 @@ pub struct PlanExecutionResumePayload {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub base_url: Option<String>,
+    #[serde(default)]
+    pub agent_ref: Option<String>,
+    #[serde(default)]
+    pub agent_source: Option<String>,
     pub project_path: Option<String>,
     pub context_sources: Option<ContextSourceConfig>,
     pub conversation_context: Option<String>,
@@ -481,7 +670,7 @@ pub use lifecycle_reporting_commands::{
 };
 pub use planning_execution_commands::{approve_plan, generate_plan, retry_plan_step};
 pub use session_analysis_commands::{
-    enter_plan_mode, skip_plan_clarification, submit_plan_clarification,
+    enter_plan_mode, skip_plan_clarification, start_plan_clarification, submit_plan_clarification,
 };
 
 fn default_plan_context_sources() -> ContextSourceConfig {
@@ -530,6 +719,9 @@ async fn build_plan_conversation_context(
     query: &str,
     phase: InjectionPhase,
     provider_config: Option<&crate::services::llm::types::ProviderConfig>,
+    resolved_phase_agent: Option<&crate::services::plan_mode::types::ResolvedPlanPhaseAgent>,
+    plan_execution_snapshot_used: bool,
+    plan_retry_snapshot_used: bool,
 ) -> PlanContextBundle {
     let mut bundle = PlanContextBundle::default();
     let mut sections = Vec::new();
@@ -614,6 +806,15 @@ async fn build_plan_conversation_context(
         llm_provider: provider_config.map(|config| config.provider.to_string()),
         llm_model: provider_config.map(|config| config.model.clone()),
         llm_base_url: provider_config.and_then(|config| config.base_url.clone()),
+        plan_phase_id: resolved_phase_agent.map(|agent| agent.phase_id.clone()),
+        plan_phase_agent_ref: resolved_phase_agent.and_then(|agent| agent.agent_ref.clone()),
+        plan_phase_agent_kind: resolved_phase_agent.map(|agent| match agent.agent_kind {
+            crate::services::plan_mode::types::PlanPhaseAgentKind::Llm => "llm".to_string(),
+            crate::services::plan_mode::types::PlanPhaseAgentKind::Cli => "cli".to_string(),
+        }),
+        plan_phase_source: resolved_phase_agent.map(|agent| agent.source.clone()),
+        plan_execution_snapshot_used,
+        plan_retry_snapshot_used,
     };
     let assembled = crate::commands::context_v2::assemble_turn_context_internal(
         request,
@@ -942,14 +1143,21 @@ pub(crate) fn build_plan_execution_summary_item(session: &PlanModeSession) -> Op
         session
             .step_states
             .values()
-            .filter(|state| matches!(state, StepExecutionState::Completed { .. }))
+            .filter(|state| {
+                matches!(
+                    state,
+                    StepExecutionState::Completed { .. }
+                        | StepExecutionState::SoftFailed { .. }
+                        | StepExecutionState::NeedsReview { .. }
+                )
+            })
             .count()
     });
     let steps_failed = progress.map(|value| value.steps_failed).unwrap_or_else(|| {
         session
             .step_states
             .values()
-            .filter(|state| matches!(state, StepExecutionState::Failed { .. }))
+            .filter(|state| matches!(state, StepExecutionState::HardFailed { .. }))
             .count()
     });
     let terminal_state = match session.phase {
@@ -1232,6 +1440,9 @@ mod tests {
             step_attempts: HashMap::new(),
             progress: None,
             execution_resume_payload: None,
+            resolved_phase_agents: Default::default(),
+            execution_agent_snapshot: None,
+            retry_agent_snapshot: None,
             created_at: "2026-03-05T00:00:00Z".to_string(),
         }
     }

@@ -205,7 +205,7 @@ fn merge_usage(total: &mut UsageStats, delta: &UsageStats) {
     }
 }
 
-fn truncate_for_log(text: &str, limit: usize) -> String {
+pub(crate) fn truncate_for_log(text: &str, limit: usize) -> String {
     if limit == 0 {
         return String::new();
     }

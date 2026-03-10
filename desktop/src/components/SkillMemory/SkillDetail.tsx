@@ -41,6 +41,10 @@ function reviewStatusTone(status: SkillReviewStatus | null | undefined): string 
   }
 }
 
+function toolPolicyModeLabelFallback(mode: SkillDocument['tool_policy_mode']): string {
+  return mode === 'restrictive' ? 'Restrictive' : 'Advisory';
+}
+
 interface SkillDetailProps {
   skill: SkillDocument;
   onClose: () => void;
@@ -220,6 +224,42 @@ export function SkillDetail({ skill, onClose, className, projectPath }: SkillDet
           <span className="text-2xs text-gray-500 dark:text-gray-400">{t('skillPanel.priority')}:</span>
           <span className="text-2xs text-gray-700 dark:text-gray-300">{skill.priority}</span>
         </div>
+
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className="text-2xs text-gray-500 dark:text-gray-400">
+            {t('skillPanel.toolPolicy', { defaultValue: 'Tool policy' })}:
+          </span>
+          <span
+            className={clsx(
+              'inline-flex items-center rounded-full px-1.5 py-0.5 text-2xs font-medium',
+              skill.tool_policy_mode === 'restrictive'
+                ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300'
+                : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+            )}
+          >
+            {t(`skillPanel.toolPolicyModes.${skill.tool_policy_mode}`, {
+              defaultValue: toolPolicyModeLabelFallback(skill.tool_policy_mode),
+            })}
+          </span>
+          <span className="text-2xs text-gray-500 dark:text-gray-400">
+            {skill.tool_policy_mode === 'restrictive'
+              ? t('skillPanel.toolPolicyRestrictiveHint', {
+                  defaultValue: 'This skill can hard-restrict runtime tools.',
+                })
+              : t('skillPanel.toolPolicyAdvisoryHint', {
+                  defaultValue: 'This skill provides guidance only and does not hard-restrict runtime tools.',
+                })}
+          </span>
+        </div>
+
+        {skill.tool_policy_mode === 'restrictive' && skill.allowed_tools.length > 0 && (
+          <div className="flex items-start gap-1">
+            <span className="text-2xs text-gray-500 dark:text-gray-400">
+              {t('skillPanel.allowedTools', { defaultValue: 'Allowed tools' })}:
+            </span>
+            <span className="text-2xs text-gray-700 dark:text-gray-300">{skill.allowed_tools.join(', ')}</span>
+          </div>
+        )}
 
         {skill.review_notes && (
           <div className="flex items-start gap-1">

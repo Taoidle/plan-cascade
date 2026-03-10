@@ -425,7 +425,7 @@ fn mark_plan_session_interrupted(session: &mut PlanModeSession) -> bool {
     session.phase = PlanModePhase::Failed;
     session.step_states.insert(
         "_error".to_string(),
-        StepExecutionState::Failed {
+        StepExecutionState::HardFailed {
             reason: "interrupted_by_restart".to_string(),
         },
     );
@@ -726,6 +726,8 @@ pub async fn workflow_resume_background_runs(
                                 provider: payload.provider,
                                 model: payload.model,
                                 base_url: payload.base_url,
+                                agent_ref: payload.agent_ref,
+                                agent_source: payload.agent_source,
                                 project_path: payload.project_path,
                                 context_sources: payload.context_sources,
                                 conversation_context: payload.conversation_context,
@@ -1555,6 +1557,9 @@ mod tests {
                 progress_pct: 0.0,
             }),
             execution_resume_payload: None,
+            resolved_phase_agents: Default::default(),
+            execution_agent_snapshot: None,
+            retry_agent_snapshot: None,
             created_at: "2026-03-05T00:00:00Z".to_string(),
         }
     }
@@ -1600,7 +1605,7 @@ mod tests {
         assert!(changed);
         assert_eq!(session.phase, PlanModePhase::Failed);
         match session.step_states.get("_error") {
-            Some(StepExecutionState::Failed { reason }) => {
+            Some(StepExecutionState::HardFailed { reason }) => {
                 assert_eq!(reason, "interrupted_by_restart");
             }
             _ => panic!("expected _error step with interrupted_by_restart reason"),

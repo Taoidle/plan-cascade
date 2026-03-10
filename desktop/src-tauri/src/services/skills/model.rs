@@ -46,6 +46,14 @@ pub enum SkillReviewStatus {
     Archived,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillToolPolicyMode {
+    #[default]
+    Advisory,
+    Restrictive,
+}
+
 /// Hooks for pre/post tool execution
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillHooks {
@@ -106,7 +114,10 @@ pub struct SkillDocument {
     // --- Plan Cascade extensions ---
     /// Whether directly callable by user (default: false)
     pub user_invocable: bool,
-    /// Restrict tool access (empty = all tools allowed)
+    /// Tool policy mode. Advisory skills do not hard-restrict runtime tools.
+    #[serde(default)]
+    pub tool_policy_mode: SkillToolPolicyMode,
+    /// Restrictive tool allowlist when `tool_policy_mode=restrictive`.
     pub allowed_tools: Vec<String>,
     /// License identifier
     pub license: Option<String>,
@@ -144,6 +155,8 @@ pub struct SkillSummary {
     pub description: String,
     pub version: Option<String>,
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub tool_policy_mode: SkillToolPolicyMode,
     #[serde(default)]
     pub allowed_tools: Vec<String>,
     pub source: SkillSource,
@@ -273,6 +286,7 @@ impl SkillDocument {
             description: self.description.clone(),
             version: self.version.clone(),
             tags: self.tags.clone(),
+            tool_policy_mode: self.tool_policy_mode,
             allowed_tools: self.allowed_tools.clone(),
             source: self.source.clone(),
             priority: self.priority,
@@ -363,6 +377,7 @@ pub struct ParsedSkill {
     pub tags: Vec<String>,
     pub body: String,
     pub user_invocable: bool,
+    pub tool_policy_mode: SkillToolPolicyMode,
     pub allowed_tools: Vec<String>,
     pub license: Option<String>,
     pub metadata: HashMap<String, String>,
@@ -385,6 +400,7 @@ mod tests {
             hash: "abc123def456".to_string(),
             last_modified: Some(1700000000),
             user_invocable: false,
+            tool_policy_mode: SkillToolPolicyMode::Advisory,
             allowed_tools: vec![],
             license: None,
             metadata: HashMap::new(),

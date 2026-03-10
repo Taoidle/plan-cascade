@@ -199,6 +199,14 @@
     "tags": "タグ",
     "version": "バージョン",
     "priority": "優先度",
+    "toolPolicy": "ツールポリシー",
+    "allowedTools": "許可ツール",
+    "toolPolicyAdvisoryHint": "このスキルはガイダンスのみを提供し、実行時ツールを強制的には制限しません。",
+    "toolPolicyRestrictiveHint": "このスキルは実行時ツールを強制的に制限できます。",
+    "toolPolicyModes": {
+      "advisory": "助言型",
+      "restrictive": "制限型"
+    },
     "phases": "注入フェーズ",
     "createdAt": "作成日時",
     "updatedAt": "更新日時",

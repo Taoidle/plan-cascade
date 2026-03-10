@@ -8,7 +8,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use super::types::{CriterionResult, Plan, PlanStep, StepOutput, TaskDomain};
+use super::types::{
+    CriterionResult, Plan, PlanStep, StepDeliverableContract, StepEvidenceRequirements,
+    StepFailurePolicy, StepOutput, StepQualityRequirements, StepValidationProfile, TaskDomain,
+};
 use crate::services::llm::provider::LlmProvider;
 use crate::services::persona::types::{Persona, PersonaRole};
 
@@ -30,7 +33,7 @@ pub fn build_plan_persona(role: PlanPersonaRole) -> Persona {
 
 - **Task Analysis**: Understanding complex tasks and breaking them into manageable, well-defined steps
 - **Dependency Mapping**: Identifying which steps depend on others and optimizing parallel execution
-- **Scope Definition**: Ensuring each step has clear boundaries, deliverables, and completion criteria
+- **Scope Definition**: Ensuring each step has clear boundaries, deliverables, evidence requirements, and validation policy
 - **Risk Identification**: Spotting potential blockers and suggesting mitigation strategies
 
 You think systematically about:
@@ -84,7 +87,7 @@ Your approach:
 - **Context Integration**: Using information from previous steps to inform your work
 
 Your approach:
-1. Understand the step requirements and completion criteria
+1. Understand the step contract, evidence requirements, and quality requirements
 2. Review context from previous steps
 3. Execute methodically, ensuring all criteria are addressed
 4. Produce clear, well-formatted output"#.to_string(),
@@ -214,8 +217,10 @@ Respond in JSON format:
 1. Break the task into 2-8 concrete steps
 2. Each step should be independently completable
 3. Define clear dependencies between steps (which steps must complete first)
-4. Specify completion criteria for each step
-5. Describe the expected output format
+4. Define the deliverable contract for each step
+5. Define the evidence requirements for each step
+6. Define the quality requirements and validation profile
+7. Define the failure policy for each step
 
 Respond in JSON format:
 ```json
@@ -229,8 +234,46 @@ Respond in JSON format:
       "description": "Detailed description",
       "priority": "high|medium|low",
       "dependencies": [],
-      "completionCriteria": ["Criterion 1", "Criterion 2"],
-      "expectedOutput": "Description of expected output"
+      "deliverable": {{
+        "deliverableType": "report|markdown|json|file_patch|code_change|artifact_bundle|research_summary|analysis_memo|custom",
+        "format": "markdown|json|text|code|mixed",
+        "requiredSections": ["Section 1", "Section 2"],
+        "requiredArtifacts": [
+          {{
+            "artifactType": "file|report|patch|summary|code",
+            "pathHint": "optional/path.md",
+            "description": "Optional explanation"
+          }}
+        ],
+        "expectedOutputSummary": "Description of expected output"
+      }},
+      "evidenceRequirements": {{
+        "minFilesRead": 0,
+        "requiredPaths": ["docs/", "src/"],
+        "requiredTools": ["Read", "Grep"],
+        "requiredSearches": ["term or path expectation"],
+        "requiredArtifactTypes": ["report", "file"],
+        "dependencyEvidenceMode": "none|optional|required"
+      }},
+      "qualityRequirements": {{
+        "mustCoverTopics": ["Topic A", "Topic B"],
+        "mustReferenceEvidence": true,
+        "mustIncludeReasoningLinks": false,
+        "mustPassChecks": [
+          {{
+            "name": "Coverage check",
+            "description": "Short description",
+            "severity": "hard|soft|review"
+          }}
+        ],
+        "semanticExpectations": ["Semantic expectation"]
+      }},
+      "validationProfile": "report|analysis|research|code_change|documentation|mixed",
+      "failurePolicy": {{
+        "severity": "hard|soft|review",
+        "maxAutoRetries": 1,
+        "allowDownstreamOnSoftFail": true
+      }}
     }}
   ]
 }}
@@ -251,17 +294,27 @@ Respond in JSON format:
              Description: {}\n\n\
              ## Your Current Step\n\
              **{}**: {}\n\n\
-             ### Completion Criteria\n",
+             ### Step Contract\n",
             plan.title, plan.description, step.title, step.description
         );
 
-        for (i, criterion) in step.completion_criteria.iter().enumerate() {
-            prompt.push_str(&format!("{}. {}\n", i + 1, criterion));
+        append_deliverable_contract(&mut prompt, &step.deliverable);
+        append_evidence_requirements(&mut prompt, &step.evidence_requirements);
+        append_quality_requirements(&mut prompt, &step.quality_requirements);
+        append_failure_policy(&mut prompt, &step.failure_policy);
+        prompt.push_str(&format!(
+            "\n### Validation Profile\n{}\n",
+            validation_profile_name(&step.validation_profile)
+        ));
+        if !step.completion_criteria.is_empty() {
+            prompt.push_str("\n### Legacy Completion Criteria Mirror\n");
+            for (i, criterion) in step.completion_criteria.iter().enumerate() {
+                prompt.push_str(&format!("{}. {}\n", i + 1, criterion));
+            }
         }
-
         if !step.expected_output.is_empty() {
             prompt.push_str(&format!(
-                "\n### Expected Output\n{}\n",
+                "\n### Legacy Expected Output Mirror\n{}\n",
                 step.expected_output
             ));
         }
@@ -340,6 +393,118 @@ fn truncate_output(content: &str, max_chars: usize) -> String {
         "{}...\n\n[Output truncated — {} chars total]",
         truncated, content_chars
     )
+}
+
+fn append_deliverable_contract(prompt: &mut String, contract: &StepDeliverableContract) {
+    prompt.push_str(&format!(
+        "- deliverable type: {:?}\n- format: {:?}\n",
+        contract.deliverable_type, contract.format
+    ));
+    if !contract.expected_output_summary.is_empty() {
+        prompt.push_str(&format!(
+            "- expected output summary: {}\n",
+            contract.expected_output_summary
+        ));
+    }
+    if !contract.required_sections.is_empty() {
+        prompt.push_str("- required sections:\n");
+        for section in &contract.required_sections {
+            prompt.push_str(&format!("  - {}\n", section));
+        }
+    }
+    if !contract.required_artifacts.is_empty() {
+        prompt.push_str("- required artifacts:\n");
+        for artifact in &contract.required_artifacts {
+            prompt.push_str(&format!(
+                "  - {} ({})\n",
+                artifact.artifact_type,
+                artifact.path_hint.as_deref().unwrap_or("no path hint")
+            ));
+        }
+    }
+}
+
+fn append_evidence_requirements(prompt: &mut String, evidence: &StepEvidenceRequirements) {
+    prompt.push_str("\n### Evidence Requirements\n");
+    prompt.push_str(&format!("- min files read: {}\n", evidence.min_files_read));
+    if !evidence.required_paths.is_empty() {
+        prompt.push_str("- required paths:\n");
+        for path in &evidence.required_paths {
+            prompt.push_str(&format!("  - {}\n", path));
+        }
+    }
+    if !evidence.required_tools.is_empty() {
+        prompt.push_str("- required tools:\n");
+        for tool in &evidence.required_tools {
+            prompt.push_str(&format!("  - {}\n", tool));
+        }
+    }
+    if !evidence.required_searches.is_empty() {
+        prompt.push_str("- required searches:\n");
+        for search in &evidence.required_searches {
+            prompt.push_str(&format!("  - {}\n", search));
+        }
+    }
+    if !evidence.required_artifact_types.is_empty() {
+        prompt.push_str("- required artifact types:\n");
+        for artifact_type in &evidence.required_artifact_types {
+            prompt.push_str(&format!("  - {}\n", artifact_type));
+        }
+    }
+    prompt.push_str(&format!(
+        "- dependency evidence mode: {:?}\n",
+        evidence.dependency_evidence_mode
+    ));
+}
+
+fn append_quality_requirements(prompt: &mut String, quality: &StepQualityRequirements) {
+    prompt.push_str("\n### Quality Requirements\n");
+    if !quality.must_cover_topics.is_empty() {
+        prompt.push_str("- must cover topics:\n");
+        for topic in &quality.must_cover_topics {
+            prompt.push_str(&format!("  - {}\n", topic));
+        }
+    }
+    if quality.must_reference_evidence {
+        prompt.push_str("- must reference evidence: true\n");
+    }
+    if quality.must_include_reasoning_links {
+        prompt.push_str("- must include reasoning links: true\n");
+    }
+    if !quality.must_pass_checks.is_empty() {
+        prompt.push_str("- must pass checks:\n");
+        for check in &quality.must_pass_checks {
+            prompt.push_str(&format!(
+                "  - {} ({:?}): {}\n",
+                check.name, check.severity, check.description
+            ));
+        }
+    }
+    if !quality.semantic_expectations.is_empty() {
+        prompt.push_str("- semantic expectations:\n");
+        for expectation in &quality.semantic_expectations {
+            prompt.push_str(&format!("  - {}\n", expectation));
+        }
+    }
+}
+
+fn append_failure_policy(prompt: &mut String, policy: &StepFailurePolicy) {
+    prompt.push_str("\n### Failure Policy\n");
+    prompt.push_str(&format!(
+        "- severity: {:?}\n- max auto retries: {}\n- allow downstream on soft fail: {}\n",
+        policy.severity, policy.max_auto_retries, policy.allow_downstream_on_soft_fail
+    ));
+}
+
+fn validation_profile_name(profile: &StepValidationProfile) -> &'static str {
+    match profile {
+        StepValidationProfile::Report => "report",
+        StepValidationProfile::Analysis => "analysis",
+        StepValidationProfile::Research => "research",
+        StepValidationProfile::CodeChange => "code_change",
+        StepValidationProfile::Documentation => "documentation",
+        StepValidationProfile::Mixed => "mixed",
+    }
 }
 
 #[cfg(test)]

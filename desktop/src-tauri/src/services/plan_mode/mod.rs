@@ -15,6 +15,7 @@ pub mod clarifier;
 pub mod planner;
 pub mod step_executor;
 pub mod types;
+pub mod validation_engine;
 pub mod validator;
 
 pub use adapter::DomainAdapter;
@@ -22,6 +23,7 @@ pub use adapter_registry::{AdapterInfo, AdapterRegistry};
 pub use types::{
     calculate_plan_batches, ClarificationAnswer, ClarificationQuestion, CriterionResult,
     OutputFormat, Plan, PlanAnalysis, PlanBatch, PlanExecutionProgress, PlanExecutionReport,
-    PlanModePhase, PlanModeProgressEvent, PlanModeSession, PlanPersonaRole, PlanStep,
+    PlanModePhase, PlanModeProgressEvent, PlanModeSession, PlanPersonaRole, PlanPhaseAgentKind,
+    PlanPhaseAgentRef, PlanStep, ResolvedPlanPhaseAgent, ResolvedPlanPhaseAgents,
     StepExecutionState, StepOutput, StepPriority, TaskDomain, PLAN_MODE_EVENT_CHANNEL,
 };

@@ -65,6 +65,27 @@ use crate::services::tools::{
 use crate::utils::error::{AppError, AppResult};
 use crate::utils::paths::ensure_plan_cascade_dir;
 
+fn truncate_preview(text: &str, limit: usize) -> String {
+    if limit == 0 {
+        return String::new();
+    }
+    if text.len() <= limit {
+        return text.to_string();
+    }
+    let mut cut = 0usize;
+    for (idx, _) in text.char_indices() {
+        if idx > limit {
+            break;
+        }
+        cut = idx;
+    }
+    if cut == 0 {
+        "...".to_string()
+    } else {
+        format!("{}...", &text[..cut])
+    }
+}
+
 /// Configuration for the orchestrator
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrchestratorConfig {
@@ -637,11 +658,7 @@ fn build_compactor(
                         for content in &msg.content {
                             match content {
                                 MessageContent::Text { text } => {
-                                    let snippet = if text.len() > 500 {
-                                        format!("{}...", &text[..500])
-                                    } else {
-                                        text.clone()
-                                    };
+                                    let snippet = truncate_preview(text, 500);
                                     conversation_snippets.push(snippet);
                                 }
                                 MessageContent::ToolUse { name, .. } => {
@@ -662,11 +679,7 @@ fn build_compactor(
                                             }
                                         }
                                     }
-                                    let snippet = if content.len() > 500 {
-                                        format!("{}...", &content[..500])
-                                    } else {
-                                        content.clone()
-                                    };
+                                    let snippet = truncate_preview(content, 500);
                                     conversation_snippets.push(snippet);
                                 }
                                 _ => {}

@@ -30,6 +30,14 @@ function resolveSessionId(explicit?: string | null): string | null {
   return normalizeSessionId(explicit) ?? activePlanSessionId;
 }
 
+type PlanAgentRequestFields = {
+  finalProvider: string | null;
+  finalModel: string | null;
+  finalBaseUrl: string | null;
+  agentRef: string | null;
+  agentSource: string | null;
+};
+
 async function resolveRequestLlm(provider?: string, model?: string, baseUrl?: string) {
   const settingsStore = (await import('./settings')).useSettingsStore.getState();
   const finalProvider = provider || settingsStore.provider;
@@ -37,6 +45,32 @@ async function resolveRequestLlm(provider?: string, model?: string, baseUrl?: st
   const { resolveProviderBaseUrl } = await import('../lib/providers');
   const finalBaseUrl = baseUrl || resolveProviderBaseUrl(finalProvider, settingsStore);
   return { finalProvider, finalModel, finalBaseUrl, settingsStore };
+}
+
+async function resolvePlanAgentRequest(
+  provider?: string,
+  model?: string,
+  baseUrl?: string,
+  agentRef?: string | null,
+  agentSource?: string | null,
+): Promise<PlanAgentRequestFields> {
+  if (agentRef?.startsWith('cli:')) {
+    return {
+      finalProvider: null,
+      finalModel: null,
+      finalBaseUrl: null,
+      agentRef,
+      agentSource: agentSource ?? null,
+    };
+  }
+  const { finalProvider, finalModel, finalBaseUrl } = await resolveRequestLlm(provider, model, baseUrl);
+  return {
+    finalProvider: finalProvider || null,
+    finalModel: finalModel || null,
+    finalBaseUrl: finalBaseUrl || null,
+    agentRef: agentRef ?? null,
+    agentSource: agentSource ?? null,
+  };
 }
 
 // ============================================================================
@@ -59,6 +93,20 @@ export interface PlanModeState {
     conversationContext?: string,
     locale?: string,
     kernelSessionId?: string | null,
+    agentRef?: string | null,
+    agentSource?: string | null,
+  ) => Promise<PlanModeSession | null>;
+  startPlanClarification: (
+    provider?: string,
+    model?: string,
+    baseUrl?: string,
+    projectPath?: string,
+    contextSources?: ContextSourceConfig,
+    conversationContext?: string,
+    locale?: string,
+    sessionId?: string | null,
+    agentRef?: string | null,
+    agentSource?: string | null,
   ) => Promise<PlanModeSession | null>;
   submitClarification: (
     answer: PlanClarifyAnswerCardData,
@@ -70,6 +118,8 @@ export interface PlanModeState {
     conversationContext?: string,
     locale?: string,
     sessionId?: string | null,
+    agentRef?: string | null,
+    agentSource?: string | null,
   ) => Promise<PlanModeSession | null>;
   skipClarification: (sessionId?: string | null) => Promise<boolean>;
   generatePlan: (
@@ -81,6 +131,8 @@ export interface PlanModeState {
     conversationContext?: string,
     locale?: string,
     sessionId?: string | null,
+    agentRef?: string | null,
+    agentSource?: string | null,
   ) => Promise<PlanCardData | null>;
   approvePlan: (
     plan: PlanCardData,
@@ -92,6 +144,8 @@ export interface PlanModeState {
     conversationContext?: string,
     locale?: string,
     sessionId?: string | null,
+    agentRef?: string | null,
+    agentSource?: string | null,
   ) => Promise<boolean>;
   retryPlanStep: (
     stepId: string,
@@ -103,6 +157,8 @@ export interface PlanModeState {
     conversationContext?: string,
     locale?: string,
     sessionId?: string | null,
+    agentRef?: string | null,
+    agentSource?: string | null,
   ) => Promise<boolean>;
   refreshStatus: (sessionId?: string | null) => Promise<PlanExecutionStatusResponse | null>;
   cancelExecution: (sessionId?: string | null) => Promise<boolean>;
@@ -138,24 +194,23 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
     conversationContext,
     locale,
     kernelSessionId,
+    agentRef,
+    agentSource,
   ) => {
     const requestId = get()._requestId + 1;
     set({ isLoading: true, isCancelling: false, error: null, _requestId: requestId });
     try {
-      let finalBaseUrl = baseUrl;
-      if (!finalBaseUrl && provider) {
-        const settingsStore = (await import('./settings')).useSettingsStore.getState();
-        const { resolveProviderBaseUrl } = await import('../lib/providers');
-        finalBaseUrl = resolveProviderBaseUrl(provider, settingsStore);
-      }
+      const agentRequest = await resolvePlanAgentRequest(provider, model, baseUrl, agentRef, agentSource);
 
       const result = await invoke<CommandResponse<PlanModeSession>>('enter_plan_mode', {
         request: {
           description,
           kernelSessionId: normalizeSessionId(kernelSessionId),
-          provider: provider || null,
-          model: model || null,
-          baseUrl: finalBaseUrl || null,
+          provider: agentRequest.finalProvider,
+          model: agentRequest.finalModel,
+          baseUrl: agentRequest.finalBaseUrl,
+          agentRef: agentRequest.agentRef,
+          agentSource: agentRequest.agentSource,
           projectPath: projectPath || null,
           contextSources: contextSources || null,
           conversationContext: conversationContext || null,
@@ -179,6 +234,56 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
     }
   },
 
+  startPlanClarification: async (
+    provider,
+    model,
+    baseUrl,
+    projectPath,
+    contextSources,
+    conversationContext,
+    locale,
+    sessionId,
+    agentRef,
+    agentSource,
+  ) => {
+    const resolvedSessionId = resolveSessionId(sessionId);
+    if (!resolvedSessionId) {
+      set({ error: 'No active plan session' });
+      return null;
+    }
+    const requestId = get()._requestId + 1;
+    set({ _requestId: requestId, error: null });
+
+    try {
+      const agentRequest = await resolvePlanAgentRequest(provider, model, baseUrl, agentRef, agentSource);
+      const result = await invoke<CommandResponse<PlanModeSession>>('start_plan_clarification', {
+        request: {
+          sessionId: resolvedSessionId,
+          provider: agentRequest.finalProvider,
+          model: agentRequest.finalModel,
+          baseUrl: agentRequest.finalBaseUrl,
+          agentRef: agentRequest.agentRef,
+          agentSource: agentRequest.agentSource,
+          projectPath: projectPath || null,
+          contextSources: contextSources || null,
+          conversationContext: conversationContext || null,
+          locale: locale || null,
+        },
+      });
+      if (get()._requestId !== requestId) return null;
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to start plan clarification' });
+        return null;
+      }
+      activePlanSessionId = normalizeSessionId(result.data.sessionId) ?? activePlanSessionId;
+      return result.data;
+    } catch (e) {
+      if (get()._requestId !== requestId) return null;
+      set({ error: String(e) });
+      return null;
+    }
+  },
+
   submitClarification: async (
     answer,
     provider,
@@ -189,6 +294,8 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
     conversationContext,
     locale,
     sessionId,
+    agentRef,
+    agentSource,
   ) => {
     const resolvedSessionId = resolveSessionId(sessionId);
     if (!resolvedSessionId) {
@@ -200,14 +307,16 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
     set({ _requestId: requestId, error: null });
 
     try {
-      const { finalProvider, finalModel, finalBaseUrl } = await resolveRequestLlm(provider, model, baseUrl);
+      const agentRequest = await resolvePlanAgentRequest(provider, model, baseUrl, agentRef, agentSource);
       const result = await invoke<CommandResponse<PlanModeSession>>('submit_plan_clarification', {
         request: {
           sessionId: resolvedSessionId,
           answer,
-          provider: finalProvider || null,
-          model: finalModel || null,
-          baseUrl: finalBaseUrl || null,
+          provider: agentRequest.finalProvider,
+          model: agentRequest.finalModel,
+          baseUrl: agentRequest.finalBaseUrl,
+          agentRef: agentRequest.agentRef,
+          agentSource: agentRequest.agentSource,
           projectPath: projectPath || null,
           contextSources: contextSources || null,
           conversationContext: conversationContext || null,
@@ -263,6 +372,8 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
     conversationContext,
     locale,
     sessionId,
+    agentRef,
+    agentSource,
   ) => {
     const resolvedSessionId = resolveSessionId(sessionId);
     if (!resolvedSessionId) {
@@ -273,14 +384,16 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
     const requestId = get()._requestId + 1;
     set({ isLoading: true, error: null, _requestId: requestId });
     try {
-      const { finalProvider, finalModel, finalBaseUrl } = await resolveRequestLlm(provider, model, baseUrl);
+      const agentRequest = await resolvePlanAgentRequest(provider, model, baseUrl, agentRef, agentSource);
 
       const result = await invoke<CommandResponse<PlanCardData>>('generate_plan', {
         request: {
           sessionId: resolvedSessionId,
-          provider: finalProvider || null,
-          model: finalModel || null,
-          baseUrl: finalBaseUrl || null,
+          provider: agentRequest.finalProvider,
+          model: agentRequest.finalModel,
+          baseUrl: agentRequest.finalBaseUrl,
+          agentRef: agentRequest.agentRef,
+          agentSource: agentRequest.agentSource,
           projectPath: projectPath || null,
           contextSources: contextSources || null,
           conversationContext: conversationContext || null,
@@ -312,6 +425,8 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
     conversationContext,
     locale,
     sessionId,
+    agentRef,
+    agentSource,
   ) => {
     const resolvedSessionId = resolveSessionId(sessionId);
     if (!resolvedSessionId) {
@@ -322,15 +437,17 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
     const requestId = get()._requestId + 1;
     set({ isLoading: true, error: null, _requestId: requestId });
     try {
-      const { finalProvider, finalModel, finalBaseUrl } = await resolveRequestLlm(provider, model, baseUrl);
+      const agentRequest = await resolvePlanAgentRequest(provider, model, baseUrl, agentRef, agentSource);
 
       const result = await invoke<CommandResponse<boolean>>('approve_plan', {
         request: {
           sessionId: resolvedSessionId,
           plan,
-          provider: finalProvider || null,
-          model: finalModel || null,
-          baseUrl: finalBaseUrl || null,
+          provider: agentRequest.finalProvider,
+          model: agentRequest.finalModel,
+          baseUrl: agentRequest.finalBaseUrl,
+          agentRef: agentRequest.agentRef,
+          agentSource: agentRequest.agentSource,
           projectPath: projectPath || null,
           contextSources: contextSources || null,
           conversationContext: conversationContext || null,
@@ -362,6 +479,8 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
     conversationContext,
     locale,
     sessionId,
+    agentRef,
+    agentSource,
   ) => {
     const resolvedSessionId = resolveSessionId(sessionId);
     const normalizedStepId = stepId.trim();
@@ -377,15 +496,17 @@ export const usePlanModeStore = create<PlanModeState>((set, get) => ({
     const requestId = get()._requestId + 1;
     set({ isLoading: true, error: null, _requestId: requestId });
     try {
-      const { finalProvider, finalModel, finalBaseUrl } = await resolveRequestLlm(provider, model, baseUrl);
+      const agentRequest = await resolvePlanAgentRequest(provider, model, baseUrl, agentRef, agentSource);
 
       const result = await invoke<CommandResponse<boolean>>('retry_plan_step', {
         request: {
           sessionId: resolvedSessionId,
           stepId: normalizedStepId,
-          provider: finalProvider || null,
-          model: finalModel || null,
-          baseUrl: finalBaseUrl || null,
+          provider: agentRequest.finalProvider,
+          model: agentRequest.finalModel,
+          baseUrl: agentRequest.finalBaseUrl,
+          agentRef: agentRequest.agentRef,
+          agentSource: agentRequest.agentSource,
           projectPath: projectPath || null,
           contextSources: contextSources || null,
           conversationContext: conversationContext || null,

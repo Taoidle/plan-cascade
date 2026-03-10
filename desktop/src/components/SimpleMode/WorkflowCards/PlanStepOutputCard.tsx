@@ -14,8 +14,9 @@ import type { PlanStepOutputCardData } from '../../../types/planModeCard';
 export function PlanStepOutputCard({ data }: { data: PlanStepOutputCardData }) {
   const { t } = useTranslation('planMode');
   const [isExpanded, setIsExpanded] = useState(false);
-  const allMet = data.criteriaMet.length === 0 || data.criteriaMet.every((c) => c.met);
-  const qualityIncomplete = data.qualityState === 'incomplete';
+  const outcomeStatus = data.outcomeStatus ?? (data.qualityState === 'incomplete' ? 'hard_failed' : 'completed');
+  const allMet = outcomeStatus === 'completed';
+  const qualityIncomplete = data.qualityState === 'incomplete' || outcomeStatus !== 'completed';
   const incompleteGroup = (() => {
     const reason = (data.incompleteReason ?? '').toLowerCase();
     if (reason.includes('execution narration')) return t('output.incompleteNarration', 'Narration-only output');
@@ -58,12 +59,16 @@ export function PlanStepOutputCard({ data }: { data: PlanStepOutputCardData }) {
         <span
           className={clsx(
             'text-2xs px-1.5 py-0.5 rounded font-medium',
-            allMet && !qualityIncomplete
+            outcomeStatus === 'completed'
               ? 'bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400'
-              : 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400',
+              : outcomeStatus === 'soft_failed'
+                ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400'
+                : outcomeStatus === 'needs_review'
+                  ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                  : 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400',
           )}
         >
-          {allMet && !qualityIncomplete ? t('output.passed', 'passed') : t('output.partial', 'partial')}
+          {outcomeStatus}
         </span>
       </button>
 
@@ -97,6 +102,30 @@ export function PlanStepOutputCard({ data }: { data: PlanStepOutputCardData }) {
             </p>
           )}
 
+          {data.evidenceSummary && (
+            <div className="space-y-0.5">
+              <span className="text-2xs font-medium text-gray-500">{t('output.evidence', 'Evidence')}:</span>
+              <p className="text-2xs text-gray-600 dark:text-gray-400">
+                {[
+                  data.evidenceSummary.filesReadCount != null
+                    ? `${t('output.filesRead', 'files')}: ${data.evidenceSummary.filesReadCount}`
+                    : null,
+                  data.evidenceSummary.toolCallCount != null
+                    ? `${t('output.toolCalls', 'tools')}: ${data.evidenceSummary.toolCallCount}`
+                    : null,
+                  data.evidenceSummary.artifactCount != null
+                    ? `${t('output.artifactCount', 'artifacts')}: ${data.evidenceSummary.artifactCount}`
+                    : null,
+                  data.evidenceSummary.dependencyInputCount != null
+                    ? `${t('output.dependencyInputs', 'deps')}: ${data.evidenceSummary.dependencyInputCount}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(' | ')}
+              </p>
+            </div>
+          )}
+
           {Array.isArray(data.artifacts) && data.artifacts.length > 0 && (
             <div className="space-y-0.5">
               <span className="text-2xs font-medium text-gray-500">{t('output.artifacts', 'Artifacts')}:</span>
@@ -118,16 +147,63 @@ export function PlanStepOutputCard({ data }: { data: PlanStepOutputCardData }) {
             {expandedContent}
           </div>
 
-          {/* Criteria results */}
-          {data.criteriaMet.length > 0 && (
+          {data.validationResult?.summary && (
             <div className="space-y-0.5">
-              <span className="text-2xs font-medium text-gray-500">{t('output.criteria', 'Criteria')}:</span>
-              {data.criteriaMet.map((cr, i) => (
+              <span className="text-2xs font-medium text-gray-500">{t('output.validation', 'Validation')}:</span>
+              <p className="text-2xs text-gray-600 dark:text-gray-400">{data.validationResult.summary}</p>
+              {typeof data.validationResult.confidence === 'number' && (
+                <p className="text-2xs text-gray-500">
+                  {t('output.confidence', 'Confidence')}: {(data.validationResult.confidence * 100).toFixed(0)}%
+                </p>
+              )}
+              {data.reviewReason && (
+                <p className="text-2xs text-blue-700 dark:text-blue-300">
+                  {t('output.reviewReason', 'Review reason')}: {data.reviewReason}
+                </p>
+              )}
+            </div>
+          )}
+
+          {(data.validationResult?.checks?.length ?? 0) > 0 ? (
+            <div className="space-y-0.5">
+              <span className="text-2xs font-medium text-gray-500">
+                {t('output.validationChecks', 'Validation checks')}:
+              </span>
+              {data.validationResult?.checks?.map((check, i) => (
                 <div key={i} className="flex items-start gap-1.5 text-2xs">
-                  <span className={cr.met ? 'text-green-500' : 'text-red-500'}>{cr.met ? '\u2713' : '\u2717'}</span>
-                  <span className="text-gray-600 dark:text-gray-400">
-                    {cr.criterion} ({cr.met ? t('output.met', 'met') : t('output.notMet', 'not met')}): {cr.explanation}
+                  <span className={check.passed ? 'text-green-500' : 'text-red-500'}>
+                    {check.passed ? '\u2713' : '\u2717'}
                   </span>
+                  <span className="text-gray-600 dark:text-gray-400">
+                    {check.name} ({check.passed ? t('output.met', 'met') : t('output.notMet', 'not met')}):{' '}
+                    {check.explanation}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            data.criteriaMet.length > 0 && (
+              <div className="space-y-0.5">
+                <span className="text-2xs font-medium text-gray-500">{t('output.criteria', 'Criteria')}:</span>
+                {data.criteriaMet.map((cr, i) => (
+                  <div key={i} className="flex items-start gap-1.5 text-2xs">
+                    <span className={cr.met ? 'text-green-500' : 'text-red-500'}>{cr.met ? '\u2713' : '\u2717'}</span>
+                    <span className="text-gray-600 dark:text-gray-400">
+                      {cr.criterion} ({cr.met ? t('output.met', 'met') : t('output.notMet', 'not met')}):{' '}
+                      {cr.explanation}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )
+          )}
+
+          {data.validationResult?.retryGuidance && data.validationResult.retryGuidance.length > 0 && (
+            <div className="space-y-0.5">
+              <span className="text-2xs font-medium text-gray-500">{t('output.retryGuidance', 'Retry guidance')}:</span>
+              {data.validationResult.retryGuidance.map((item, index) => (
+                <div key={`${item}-${index}`} className="text-2xs text-gray-600 dark:text-gray-400">
+                  - {item}
                 </div>
               ))}
             </div>

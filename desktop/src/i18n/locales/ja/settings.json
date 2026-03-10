@@ -421,15 +421,33 @@
     },
 
     "groups": {
-      "planning": "計画フェーズ",
-      "planningDesc": "各計画ステップのLLMを設定。「グローバルデフォルト」はメインLLMバックエンドを使用。",
+      "planMode": "Plan モード",
+      "planModeDesc": "Plan モード各段階で使うLLMを設定します。「グローバルデフォルト」はメインLLMバックエンドを使用します。",
+      "taskWorkflow": "Task ワークフロー",
+      "taskWorkflowDesc": "Task 計画ワークフロー段階で使うLLMを設定します。",
       "execution": "実行フェーズ",
-      "executionDesc": "ストーリー実行のエージェントを設定。"
+      "executionDesc": "Task 実行フェーズのエージェントとフォールバックを設定します。"
     },
 
     "planStrategy": {
       "name": "戦略分析",
       "description": "タスク分析と戦略選択"
+    },
+    "planClarification": {
+      "name": "確認フェーズ",
+      "description": "プラン確認の質問を生成し継続する"
+    },
+    "planGeneration": {
+      "name": "プラン生成",
+      "description": "実行可能なステッププランを生成する"
+    },
+    "planExecution": {
+      "name": "プラン実行",
+      "description": "承認済みプランのステップを実行する"
+    },
+    "planRetry": {
+      "name": "プラン再試行",
+      "description": "失敗したプランステップを個別に再試行する"
     },
     "planExploration": {
       "name": "プロジェクト探索",

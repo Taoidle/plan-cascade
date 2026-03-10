@@ -1314,6 +1314,12 @@ async fn assemble_enriched_context_v2(
         llm_provider: llm_provider.map(|value| value.to_string()),
         llm_model: llm_model.map(|value| value.to_string()),
         llm_base_url: llm_base_url.map(|value| value.to_string()),
+        plan_phase_id: None,
+        plan_phase_agent_ref: None,
+        plan_phase_agent_kind: None,
+        plan_phase_source: None,
+        plan_execution_snapshot_used: false,
+        plan_retry_snapshot_used: false,
     };
 
     let assembly = match crate::commands::context_v2::assemble_turn_context_internal(

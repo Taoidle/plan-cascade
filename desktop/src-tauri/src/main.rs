@@ -249,6 +249,7 @@ fn main() {
             plan_cascade_desktop::commands::task_mode::analysis_commands::run_architecture_review,
             // Plan Mode commands
             plan_cascade_desktop::commands::plan_mode::session_analysis_commands::enter_plan_mode,
+            plan_cascade_desktop::commands::plan_mode::session_analysis_commands::start_plan_clarification,
             plan_cascade_desktop::commands::plan_mode::session_analysis_commands::submit_plan_clarification,
             plan_cascade_desktop::commands::plan_mode::session_analysis_commands::skip_plan_clarification,
             plan_cascade_desktop::commands::plan_mode::planning_execution_commands::generate_plan,

@@ -68,6 +68,11 @@ describe('settings store migration', () => {
     expect(state.phaseConfigs.retry.defaultAgent).toBe('');
     expect(state.phaseConfigs.refactor.defaultAgent).toBe('');
     expect(state.phaseConfigs.review.defaultAgent).toBe('');
+    expect(state.phaseConfigs.plan_strategy.defaultAgent).toBe('');
+    expect(state.phaseConfigs.plan_clarification.defaultAgent).toBe('');
+    expect(state.phaseConfigs.plan_generation.defaultAgent).toBe('');
+    expect(state.phaseConfigs.plan_execution.defaultAgent).toBe('');
+    expect(state.phaseConfigs.plan_retry.defaultAgent).toBe('');
 
     expect(state.phaseConfigs.implementation.fallbackChain).toEqual(['codex', 'claude-code']);
     expect(state.memorySettings.autoExtractEnabled).toBe(true);
@@ -83,7 +88,7 @@ describe('settings store migration', () => {
     expect(state.developerSettingsInitialized).toBe(false);
 
     const persisted = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-    expect(persisted.version).toBe(6);
+    expect(persisted.version).toBe(8);
   });
 
   it('does not keep forcing values after migration has completed', async () => {

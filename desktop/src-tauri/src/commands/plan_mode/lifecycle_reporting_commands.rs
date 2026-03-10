@@ -1,4 +1,23 @@
 use super::*;
+use crate::services::plan_mode::types::PlanTerminalStatus;
+
+fn counts_as_completed_state(state: &StepExecutionState) -> bool {
+    matches!(
+        state,
+        StepExecutionState::Completed { .. }
+            | StepExecutionState::SoftFailed { .. }
+            | StepExecutionState::NeedsReview { .. }
+    )
+}
+
+fn duration_from_state(state: &StepExecutionState) -> Option<u64> {
+    match state {
+        StepExecutionState::Completed { duration_ms }
+        | StepExecutionState::SoftFailed { duration_ms, .. }
+        | StepExecutionState::NeedsReview { duration_ms, .. } => Some(*duration_ms),
+        _ => None,
+    }
+}
 
 fn truncate_with_ellipsis(content: &str, max_chars: usize) -> String {
     let mut chars = content.chars();
@@ -70,7 +89,7 @@ fn compute_retry_stats_from_session(
     let exhausted_failures = step_states
         .iter()
         .filter(|(step_id, state)| {
-            matches!(state, StepExecutionState::Failed { .. })
+            matches!(state, StepExecutionState::HardFailed { .. })
                 && step_attempts
                     .get(step_id.as_str())
                     .map(|attempts| *attempts > 1)
@@ -102,12 +121,12 @@ pub async fn get_plan_execution_status(
     let steps_completed = session
         .step_states
         .values()
-        .filter(|s| matches!(s, StepExecutionState::Completed { .. }))
+        .filter(|s| counts_as_completed_state(s))
         .count();
     let steps_failed = session
         .step_states
         .values()
-        .filter(|s| matches!(s, StepExecutionState::Failed { .. }))
+        .filter(|s| matches!(s, StepExecutionState::HardFailed { .. }))
         .count();
 
     Ok(CommandResponse::ok(PlanExecutionStatusResponse {
@@ -204,12 +223,22 @@ pub async fn get_plan_execution_report(
     let steps_completed = session
         .step_states
         .values()
-        .filter(|s| matches!(s, StepExecutionState::Completed { .. }))
+        .filter(|s| counts_as_completed_state(s))
         .count();
     let steps_failed = session
         .step_states
         .values()
-        .filter(|s| matches!(s, StepExecutionState::Failed { .. }))
+        .filter(|s| matches!(s, StepExecutionState::HardFailed { .. }))
+        .count();
+    let steps_soft_failed = session
+        .step_states
+        .values()
+        .filter(|s| matches!(s, StepExecutionState::SoftFailed { .. }))
+        .count();
+    let steps_needs_review = session
+        .step_states
+        .values()
+        .filter(|s| matches!(s, StepExecutionState::NeedsReview { .. }))
         .count();
     let steps_cancelled = session
         .step_states
@@ -221,10 +250,7 @@ pub async fn get_plan_execution_report(
     let total_duration_ms: u64 = session
         .step_states
         .values()
-        .filter_map(|s| match s {
-            StepExecutionState::Completed { duration_ms } => Some(*duration_ms),
-            _ => None,
-        })
+        .filter_map(duration_from_state)
         .sum();
 
     let step_summaries: HashMap<String, String> = session
@@ -249,18 +275,33 @@ pub async fn get_plan_execution_report(
         .step_states
         .iter()
         .filter_map(|(id, state)| match state {
-            StepExecutionState::Failed { reason } => Some((id.clone(), reason.clone())),
+            StepExecutionState::HardFailed { reason }
+            | StepExecutionState::SoftFailed { reason, .. }
+            | StepExecutionState::NeedsReview { reason, .. } => Some((id.clone(), reason.clone())),
             _ => None,
         })
         .collect();
 
-    let terminal_state = match session.phase {
-        PlanModePhase::Completed => "completed",
-        PlanModePhase::Cancelled => "cancelled",
-        PlanModePhase::Failed => "failed",
-        _ if steps_failed > 0 => "failed",
-        _ if steps_completed == total_steps => "completed",
-        _ => "failed",
+    let terminal_status = match session.phase {
+        PlanModePhase::Completed if steps_needs_review > 0 => PlanTerminalStatus::NeedsReview,
+        PlanModePhase::Completed if steps_soft_failed > 0 => {
+            PlanTerminalStatus::CompletedWithWarnings
+        }
+        PlanModePhase::Completed => PlanTerminalStatus::Completed,
+        PlanModePhase::Cancelled => PlanTerminalStatus::Cancelled,
+        PlanModePhase::Failed => PlanTerminalStatus::Failed,
+        _ if steps_failed > 0 => PlanTerminalStatus::Failed,
+        _ if steps_needs_review > 0 => PlanTerminalStatus::NeedsReview,
+        _ if steps_soft_failed > 0 => PlanTerminalStatus::CompletedWithWarnings,
+        _ if steps_completed == total_steps => PlanTerminalStatus::Completed,
+        _ => PlanTerminalStatus::Failed,
+    };
+    let terminal_state = match terminal_status {
+        PlanTerminalStatus::Completed => "completed",
+        PlanTerminalStatus::CompletedWithWarnings => "completed_with_warnings",
+        PlanTerminalStatus::NeedsReview => "needs_review",
+        PlanTerminalStatus::Failed => "failed",
+        PlanTerminalStatus::Cancelled => "cancelled",
     }
     .to_string();
 
@@ -315,11 +356,17 @@ pub async fn get_plan_execution_report(
     Ok(CommandResponse::ok(PlanExecutionReport {
         session_id: session.session_id.clone(),
         plan_title: plan.title.clone(),
-        success: steps_failed == 0 && steps_completed == total_steps,
+        success: matches!(
+            terminal_status,
+            PlanTerminalStatus::Completed | PlanTerminalStatus::CompletedWithWarnings
+        ),
         terminal_state,
+        terminal_status,
         total_steps,
         steps_completed,
         steps_failed,
+        steps_soft_failed,
+        steps_needs_review,
         steps_cancelled,
         steps_attempted,
         steps_failed_before_cancel: if is_cancelled_terminal {
@@ -336,6 +383,10 @@ pub async fn get_plan_execution_report(
         highlights,
         next_actions,
         retry_stats,
+        terminal_verdict_trace: vec![format!(
+            "completed={}, hard_failed={}, soft_failed={}, needs_review={}",
+            steps_completed, steps_failed, steps_soft_failed, steps_needs_review
+        )],
     }))
 }
 
@@ -416,13 +467,13 @@ mod tests {
         );
         states.insert(
             "step-2".to_string(),
-            StepExecutionState::Failed {
+            StepExecutionState::HardFailed {
                 reason: "still failed".to_string(),
             },
         );
         states.insert(
             "step-3".to_string(),
-            StepExecutionState::Failed {
+            StepExecutionState::HardFailed {
                 reason: "one shot".to_string(),
             },
         );

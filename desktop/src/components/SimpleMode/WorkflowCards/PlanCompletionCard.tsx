@@ -30,13 +30,17 @@ export function PlanCompletionCard({ data }: { data: PlanCompletionCardData }) {
   const highlightEntries = data.highlights ?? [];
   const nextActions = data.nextActions ?? [];
   const finalConclusion = data.finalConclusionMarkdown?.trim() ?? '';
-  const terminalState = data.terminalState ?? (data.success ? 'completed' : 'failed');
+  const terminalState = data.terminalState ?? data.terminalStatus ?? (data.success ? 'completed' : 'failed');
   const statusLabel =
     terminalState === 'cancelled'
       ? t('completion.cancelled', 'Cancelled')
-      : data.success
-        ? t('completion.success', 'Success')
-        : t('completion.failed', 'Failed');
+      : terminalState === 'needs_review'
+        ? t('completion.needsReview', 'Needs Review')
+        : terminalState === 'completed_with_warnings'
+          ? t('completion.completedWithWarnings', 'Completed with warnings')
+          : data.success
+            ? t('completion.success', 'Success')
+            : t('completion.failed', 'Failed');
 
   return (
     <div
@@ -106,6 +110,14 @@ export function PlanCompletionCard({ data }: { data: PlanCompletionCardData }) {
           <div className="text-2xs text-gray-500">{t('completion.failed', 'Failed')}</div>
         </div>
         <div className="text-center">
+          <div className="text-lg font-bold text-amber-600 dark:text-amber-400">{data.stepsSoftFailed ?? 0}</div>
+          <div className="text-2xs text-gray-500">{t('completion.softFailed', 'Warnings')}</div>
+        </div>
+        <div className="text-center">
+          <div className="text-lg font-bold text-blue-600 dark:text-blue-400">{data.stepsNeedsReview ?? 0}</div>
+          <div className="text-2xs text-gray-500">{t('completion.needsReview', 'Review')}</div>
+        </div>
+        <div className="text-center">
           <div className="text-lg font-bold text-amber-600 dark:text-amber-400">{data.stepsCancelled ?? 0}</div>
           <div className="text-2xs text-gray-500">{t('completion.cancelledSteps', 'Cancelled')}</div>
         </div>
@@ -168,6 +180,18 @@ export function PlanCompletionCard({ data }: { data: PlanCompletionCardData }) {
               {terminalState === 'cancelled' && typeof data.stepsFailedBeforeCancel === 'number' && (
                 <div className="text-2xs text-amber-700 dark:text-amber-300">
                   {t('completion.failedBeforeCancel', 'Failed before cancel')}: {data.stepsFailedBeforeCancel}
+                </div>
+              )}
+              {data.terminalVerdictTrace && data.terminalVerdictTrace.length > 0 && (
+                <div className="space-y-1">
+                  <div className="text-2xs font-medium text-gray-500">
+                    {t('completion.verdictTrace', 'Verdict trace')}
+                  </div>
+                  {data.terminalVerdictTrace.map((item, index) => (
+                    <div key={`trace-${index}`} className="text-2xs text-gray-600 dark:text-gray-400">
+                      - {item}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

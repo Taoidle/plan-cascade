@@ -243,12 +243,20 @@ async function subscribePlanProgressEvents(
               iterations: stepOutputFromEvent.iterations,
               stopReason: stepOutputFromEvent.stopReason,
               errorCode: stepOutputFromEvent.errorCode,
+              outcomeStatus: stepOutputFromEvent.outcomeStatus,
+              reviewReason: stepOutputFromEvent.reviewReason,
+              evidenceSummary: stepOutputFromEvent.evidenceSummary,
+              validationResult: stepOutputFromEvent.validationResult,
             }
           : undefined,
       } satisfies PlanStepUpdateCardData);
     }
 
-    if (!hasAuthoritativeKernelTranscript && payload.eventType === 'step_completed' && payload.stepId) {
+    if (
+      !hasAuthoritativeKernelTranscript &&
+      (payload.eventType === 'step_completed' || payload.eventType === 'step_failed') &&
+      payload.stepId
+    ) {
       const completedStepId = payload.stepId;
       const completedStepTitle = stepTitle ?? completedStepId;
       const stepOutputFromEvent = payload.stepOutput;
@@ -277,6 +285,10 @@ async function subscribePlanProgressEvents(
           iterations: stepOutputFromEvent.iterations,
           stopReason: stepOutputFromEvent.stopReason,
           errorCode: stepOutputFromEvent.errorCode,
+          outcomeStatus: stepOutputFromEvent.outcomeStatus,
+          reviewReason: stepOutputFromEvent.reviewReason,
+          evidenceSummary: stepOutputFromEvent.evidenceSummary,
+          validationResult: stepOutputFromEvent.validationResult,
           criteriaMet: stepOutputFromEvent.criteriaMet ?? [],
         } satisfies PlanStepOutputCardData);
       } else {

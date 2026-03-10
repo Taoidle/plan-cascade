@@ -43,10 +43,12 @@ use crate::utils::error::{AppError, AppResult};
 use super::adapter::DomainAdapter;
 use super::types::{
     OutputFormat, Plan, PlanExecutionProgress, PlanExecutionReport, PlanModeProgressEvent,
-    PlanRetryStats, StepExecutionState, StepOutput, StepOutputQualityState,
+    PlanRetryStats, PlanTerminalStatus, StepArtifactEvidence, StepEvidenceBundle,
+    StepExecutionState, StepFileReadEvidence, StepOutcomeStatus, StepOutput,
+    StepOutputQualityState, StepRuntimeStats, StepToolCallEvidence, StepValidationResult,
     PLAN_MODE_EVENT_CHANNEL,
 };
-use super::validator::{all_criteria_met, validate_step_output};
+use super::validator::{validate_step_output, validation_summary};
 
 #[derive(Debug, Clone, Default)]
 pub struct PlanExecutionResumeState {
@@ -235,7 +237,7 @@ pub async fn execute_plan(
         restored_states
             .entry(step.id.clone())
             .and_modify(|state| {
-                if !matches!(state, StepExecutionState::Completed { .. }) {
+                if !counts_as_completed(state) {
                     *state = StepExecutionState::Pending;
                 }
             })
@@ -305,10 +307,7 @@ pub async fn execute_plan(
 
         let completed_so_far = {
             let states = step_states.read().await;
-            states
-                .values()
-                .filter(|s| matches!(s, StepExecutionState::Completed { .. }))
-                .count()
+            states.values().filter(|s| counts_as_completed(s)).count()
         };
         let progress_pct = (completed_so_far as f64 / total_steps as f64) * 100.0;
 
@@ -330,10 +329,10 @@ pub async fn execute_plan(
                 .step_ids
                 .iter()
                 .filter(|step_id| {
-                    !matches!(
-                        states.get(step_id.as_str()),
-                        Some(StepExecutionState::Completed { .. })
-                    )
+                    !states
+                        .get(step_id.as_str())
+                        .map(counts_as_completed)
+                        .unwrap_or(false)
                 })
                 .cloned()
                 .collect::<Vec<_>>()
@@ -396,7 +395,7 @@ pub async fn execute_plan(
                 let reason = {
                     let states = step_states.read().await;
                     match states.get(step_id) {
-                        Some(StepExecutionState::Failed { reason }) => reason.clone(),
+                        Some(StepExecutionState::HardFailed { reason }) => reason.clone(),
                         _ => "Retrying due to unresolved failure".to_string(),
                     }
                 };
@@ -675,7 +674,11 @@ async fn execute_batch_round(request: BatchRoundRequest<'_>) {
             let retry_feedback = {
                 let snapshot = states.read().await;
                 match snapshot.get(step.id.as_str()) {
-                    Some(StepExecutionState::Failed { reason }) => Some(reason.clone()),
+                    Some(StepExecutionState::HardFailed { reason })
+                    | Some(StepExecutionState::SoftFailed { reason, .. })
+                    | Some(StepExecutionState::NeedsReview { reason, .. }) => {
+                        Some(reason.clone())
+                    }
                     _ => None,
                 }
             };
@@ -687,9 +690,7 @@ async fn execute_batch_round(request: BatchRoundRequest<'_>) {
 
             let completed_count = {
                 let s = states.read().await;
-                s.values()
-                    .filter(|st| matches!(st, StepExecutionState::Completed { .. }))
-                    .count()
+                s.values().filter(|st| counts_as_completed(st)).count()
             };
             let progress_pct = (completed_count as f64 / total_steps as f64) * 100.0;
             emit_event_with_metadata(
@@ -755,7 +756,8 @@ async fn execute_batch_round(request: BatchRoundRequest<'_>) {
                     }
 
                     output.attempt_count = attempt_count;
-                    let results = validate_step_output(
+                    output.evidence_bundle.runtime_stats.attempt_count = attempt_count;
+                    let validation_result = validate_step_output(
                         &step,
                         &mut output,
                         adapter_cloned.clone(),
@@ -763,7 +765,8 @@ async fn execute_batch_round(request: BatchRoundRequest<'_>) {
                     )
                     .await;
 
-                    if let Some(reason) = detect_incomplete_output_reason(&step, &output, &results)
+                    if let Some(reason) =
+                        detect_incomplete_output_reason(&step, &output, &validation_result)
                     {
                         let category =
                             classify_failure_reason(&format!("Step output incomplete: {reason}"));
@@ -783,7 +786,7 @@ async fn execute_batch_round(request: BatchRoundRequest<'_>) {
                         let mut s = states.write().await;
                         s.insert(
                             step.id.clone(),
-                            StepExecutionState::Failed {
+                            StepExecutionState::HardFailed {
                                 reason: format!("Step output incomplete: {reason}"),
                             },
                         );
@@ -814,8 +817,8 @@ async fn execute_batch_round(request: BatchRoundRequest<'_>) {
                         return;
                     }
 
-                    output.quality_state = StepOutputQualityState::Complete;
-                    output.incomplete_reason = None;
+                    let duration_ms = started_at.elapsed().as_millis() as u64;
+                    apply_validation_outcome_to_output(&mut output, &validation_result);
                     emit_step_output_diagnostic_log(
                         "step_output_accepted",
                         &run,
@@ -827,14 +830,10 @@ async fn execute_batch_round(request: BatchRoundRequest<'_>) {
                         &output,
                     );
                     let output_for_event = output.clone();
-                    let duration_ms = started_at.elapsed().as_millis() as u64;
 
                     {
                         let mut s = states.write().await;
-                        s.insert(
-                            step.id.clone(),
-                            StepExecutionState::Completed { duration_ms },
-                        );
+                        s.insert(step.id.clone(), state_from_validation(&validation_result, duration_ms));
                     }
                     {
                         let mut outs = outputs.write().await;
@@ -850,13 +849,14 @@ async fn execute_batch_round(request: BatchRoundRequest<'_>) {
                     let pct = (completed_count as f64 / total_steps as f64) * 100.0;
                     emit_event_with_metadata(
                         &app,
-                        PlanModeProgressEvent::step_completed(
+                        step_event_from_validation(
                             &sid,
                             batch_index,
                             total_batches,
                             &step.id,
                             output_for_event,
                             pct,
+                            &validation_result,
                         )
                         .with_attempt_metadata(Some(attempt_count), None::<String>),
                         &run,
@@ -875,7 +875,7 @@ async fn execute_batch_round(request: BatchRoundRequest<'_>) {
                         let mut s = states.write().await;
                         s.insert(
                             step.id.clone(),
-                            StepExecutionState::Failed {
+                            StepExecutionState::HardFailed {
                                 reason: reason.clone(),
                             },
                         );
@@ -922,7 +922,7 @@ async fn collect_failed_steps_for_batch(
     step_ids
         .iter()
         .filter_map(|step_id| match snapshot.get(step_id) {
-            Some(StepExecutionState::Failed { .. }) => Some(step_id.clone()),
+            Some(StepExecutionState::HardFailed { .. }) => Some(step_id.clone()),
             _ => None,
         })
         .collect()
@@ -1033,13 +1033,13 @@ pub async fn retry_single_step(
         );
         existing_states.insert(
             step.id.clone(),
-            StepExecutionState::Failed {
+            StepExecutionState::HardFailed {
                 reason: reason.clone(),
             },
         );
         let completed_count = existing_states
             .values()
-            .filter(|value| matches!(value, StepExecutionState::Completed { .. }))
+            .filter(|value| counts_as_completed(value))
             .count();
         let pct = (completed_count as f64 / total_steps as f64) * 100.0;
         if let Some(handle) = app_handle.as_ref() {
@@ -1130,20 +1130,22 @@ pub async fn retry_single_step(
             }
 
             output.attempt_count = 1;
-            let criteria =
+            let validation_result =
                 validate_step_output(step, &mut output, adapter.clone(), provider.clone()).await;
-            if let Some(reason) = detect_incomplete_output_reason(step, &output, &criteria) {
+            if let Some(reason) =
+                detect_incomplete_output_reason(step, &output, &validation_result)
+            {
                 let category =
                     classify_failure_reason(&format!("Step output incomplete: {reason}"));
                 existing_states.insert(
                     step.id.clone(),
-                    StepExecutionState::Failed {
+                    StepExecutionState::HardFailed {
                         reason: format!("Step output incomplete: {reason}"),
                     },
                 );
                 let completed_count = existing_states
                     .values()
-                    .filter(|value| matches!(value, StepExecutionState::Completed { .. }))
+                    .filter(|value| counts_as_completed(value))
                     .count();
                 let pct = (completed_count as f64 / total_steps as f64) * 100.0;
                 if let Some(handle) = app_handle.as_ref() {
@@ -1183,17 +1185,17 @@ pub async fn retry_single_step(
                 return Ok((existing_outputs, existing_states));
             }
 
+            apply_validation_outcome_to_output(&mut output, &validation_result);
+            let duration_ms = started_at.elapsed().as_millis() as u64;
             let output_for_event = output.clone();
             existing_states.insert(
                 step.id.clone(),
-                StepExecutionState::Completed {
-                    duration_ms: started_at.elapsed().as_millis() as u64,
-                },
+                state_from_validation(&validation_result, duration_ms),
             );
             existing_outputs.insert(step.id.clone(), output);
             let completed_count = existing_states
                 .values()
-                .filter(|value| matches!(value, StepExecutionState::Completed { .. }))
+                .filter(|value| counts_as_completed(value))
                 .count();
             let pct = (completed_count as f64 / total_steps as f64) * 100.0;
             if let Some(handle) = app_handle.as_ref() {
@@ -1210,13 +1212,14 @@ pub async fn retry_single_step(
                 );
                 emit_event(
                     handle,
-                    PlanModeProgressEvent::step_completed(
+                    step_event_from_validation(
                         session_id,
                         current_batch,
                         total_batches,
                         &step.id,
                         output_for_event,
                         pct,
+                        &validation_result,
                     )
                     .with_attempt_metadata(Some(1), None::<String>),
                 );
@@ -1263,13 +1266,13 @@ pub async fn retry_single_step(
             let category = classify_failure_reason(&reason);
             existing_states.insert(
                 step.id.clone(),
-                StepExecutionState::Failed {
+                StepExecutionState::HardFailed {
                     reason: reason.clone(),
                 },
             );
             let completed_count = existing_states
                 .values()
-                .filter(|value| matches!(value, StepExecutionState::Completed { .. }))
+                .filter(|value| counts_as_completed(value))
                 .count();
             let pct = (completed_count as f64 / total_steps as f64) * 100.0;
             if let Some(handle) = app_handle.as_ref() {
@@ -1321,11 +1324,11 @@ pub fn build_progress(
 ) -> PlanExecutionProgress {
     let steps_completed = step_states
         .values()
-        .filter(|s| matches!(s, StepExecutionState::Completed { .. }))
+        .filter(|s| counts_as_completed(s))
         .count();
     let steps_failed = step_states
         .values()
-        .filter(|s| matches!(s, StepExecutionState::Failed { .. }))
+        .filter(|s| matches!(s, StepExecutionState::HardFailed { .. }))
         .count();
 
     PlanExecutionProgress {
@@ -1371,6 +1374,8 @@ fn build_terminal_report(
     let mut failure_reasons: HashMap<String, String> = HashMap::new();
     let mut steps_completed = 0usize;
     let mut steps_failed = 0usize;
+    let mut steps_soft_failed = 0usize;
+    let mut steps_needs_review = 0usize;
     let mut steps_cancelled = 0usize;
     let mut total_duration_ms = 0u64;
     for (step_id, state) in step_states {
@@ -1379,7 +1384,19 @@ fn build_terminal_report(
                 steps_completed += 1;
                 total_duration_ms = total_duration_ms.saturating_add(*duration_ms);
             }
-            StepExecutionState::Failed { reason } => {
+            StepExecutionState::SoftFailed { reason, duration_ms } => {
+                steps_completed += 1;
+                steps_soft_failed += 1;
+                total_duration_ms = total_duration_ms.saturating_add(*duration_ms);
+                failure_reasons.insert(step_id.clone(), reason.clone());
+            }
+            StepExecutionState::NeedsReview { reason, duration_ms } => {
+                steps_completed += 1;
+                steps_needs_review += 1;
+                total_duration_ms = total_duration_ms.saturating_add(*duration_ms);
+                failure_reasons.insert(step_id.clone(), reason.clone());
+            }
+            StepExecutionState::HardFailed { reason } => {
                 steps_failed += 1;
                 failure_reasons.insert(step_id.clone(), reason.clone());
             }
@@ -1396,11 +1413,17 @@ fn build_terminal_report(
         "cancelled"
     } else if steps_failed > 0 {
         "failed"
+    } else if steps_needs_review > 0 {
+        "needs_review"
+    } else if steps_soft_failed > 0 {
+        "completed_with_warnings"
     } else {
         "completed"
     };
-    let success =
-        normalized_terminal == "completed" && steps_failed == 0 && steps_completed == total_steps;
+    let success = (normalized_terminal == "completed"
+        || normalized_terminal == "completed_with_warnings")
+        && steps_failed == 0
+        && steps_completed == total_steps;
 
     let ordered_outputs: Vec<StepOutput> = plan
         .steps
@@ -1433,9 +1456,18 @@ fn build_terminal_report(
         plan_title: plan.title.clone(),
         success,
         terminal_state: normalized_terminal.to_string(),
+        terminal_status: match normalized_terminal {
+            "completed" => PlanTerminalStatus::Completed,
+            "completed_with_warnings" => PlanTerminalStatus::CompletedWithWarnings,
+            "needs_review" => PlanTerminalStatus::NeedsReview,
+            "cancelled" => PlanTerminalStatus::Cancelled,
+            _ => PlanTerminalStatus::Failed,
+        },
         total_steps,
         steps_completed,
         steps_failed,
+        steps_soft_failed,
+        steps_needs_review,
         steps_cancelled,
         steps_attempted,
         steps_failed_before_cancel: if normalized_terminal == "cancelled" {
@@ -1456,6 +1488,10 @@ fn build_terminal_report(
         highlights,
         next_actions,
         retry_stats,
+        terminal_verdict_trace: vec![format!(
+            "completed={}, hard_failed={}, soft_failed={}, needs_review={}",
+            steps_completed, steps_failed, steps_soft_failed, steps_needs_review
+        )],
     }
 }
 
@@ -1714,6 +1750,7 @@ async fn execute_single_step(
         let drain_events = tokio::spawn(async move { while rx.recv().await.is_some() {} });
 
         let result = orchestrator.execute_story(&full_prompt, &tools, tx).await;
+        let files_read_summary = orchestrator.get_read_file_summary();
 
         cancel_watch.abort();
         drain_events.abort();
@@ -1736,7 +1773,19 @@ async fn execute_single_step(
         let content = result
             .response
             .unwrap_or_else(|| "No output produced".to_string());
-        let mut output = build_step_output(step.id.clone(), content, OutputFormat::Markdown);
+        let mut output = build_step_output(
+            step.id.clone(),
+            content,
+            OutputFormat::Markdown,
+            Some(build_step_evidence_bundle(
+                dep_outputs,
+                files_read_summary,
+                &tools,
+                result.iterations,
+                result.error.as_deref(),
+                1,
+            )),
+        );
         output.iterations = result.iterations;
         if let Some(err) = result.error.as_deref() {
             if err.contains("Iteration hard limit") {
@@ -1770,7 +1819,19 @@ async fn execute_single_step(
     let content = response
         .content
         .unwrap_or_else(|| "No output produced".to_string());
-    let mut output = build_step_output(step.id.clone(), content, OutputFormat::Markdown);
+    let mut output = build_step_output(
+        step.id.clone(),
+        content,
+        OutputFormat::Markdown,
+        Some(build_step_evidence_bundle(
+            dep_outputs,
+            Vec::new(),
+            &[],
+            1,
+            None,
+            1,
+        )),
+    );
     output.iterations = 1;
     Ok(output)
 }
@@ -1821,7 +1882,7 @@ fn truncate_dep_outputs(
 fn detect_incomplete_output_reason(
     step: &super::types::PlanStep,
     output: &StepOutput,
-    criteria_results: &[super::types::CriterionResult],
+    validation_result: &StepValidationResult,
 ) -> Option<String> {
     let primary = if output.full_content.trim().is_empty() {
         output.content.trim()
@@ -1863,16 +1924,91 @@ fn detect_incomplete_output_reason(
         ));
     }
 
-    if !criteria_results.is_empty() && !all_criteria_met(criteria_results) {
-        let unmet: Vec<String> = criteria_results
-            .iter()
-            .filter(|result| !result.met)
-            .map(|result| result.criterion.clone())
-            .collect();
-        return Some(format!("Completion criteria unmet: {}", unmet.join("; ")));
+    if matches!(validation_result.outcome_status, StepOutcomeStatus::HardFailed) {
+        return Some(validation_summary(validation_result));
     }
 
     None
+}
+
+fn apply_validation_outcome_to_output(output: &mut StepOutput, validation_result: &StepValidationResult) {
+    output.validation_result = validation_result.clone();
+    output.outcome_status = validation_result.outcome_status.clone();
+    output.review_reason = validation_result.review_reason.clone();
+    match validation_result.outcome_status {
+        StepOutcomeStatus::Completed => {
+            output.quality_state = StepOutputQualityState::Complete;
+            output.incomplete_reason = None;
+            output.error_code = None;
+        }
+        StepOutcomeStatus::SoftFailed => {
+            output.quality_state = StepOutputQualityState::Incomplete;
+            output.incomplete_reason = Some(validation_result.summary.clone());
+            output.error_code = Some("soft_validation_failed".to_string());
+        }
+        StepOutcomeStatus::NeedsReview => {
+            output.quality_state = StepOutputQualityState::Incomplete;
+            output.incomplete_reason = Some(validation_result.summary.clone());
+            output.error_code = Some("needs_review".to_string());
+        }
+        StepOutcomeStatus::HardFailed => {
+            output.quality_state = StepOutputQualityState::Incomplete;
+            output.incomplete_reason = Some(validation_result.summary.clone());
+            output.error_code = Some("hard_validation_failed".to_string());
+        }
+    }
+}
+
+fn state_from_validation(
+    validation_result: &StepValidationResult,
+    duration_ms: u64,
+) -> StepExecutionState {
+    match validation_result.outcome_status {
+        StepOutcomeStatus::Completed => StepExecutionState::Completed { duration_ms },
+        StepOutcomeStatus::SoftFailed => StepExecutionState::SoftFailed {
+            reason: validation_result.summary.clone(),
+            duration_ms,
+        },
+        StepOutcomeStatus::NeedsReview => StepExecutionState::NeedsReview {
+            reason: validation_result.summary.clone(),
+            duration_ms,
+        },
+        StepOutcomeStatus::HardFailed => StepExecutionState::HardFailed {
+            reason: validation_result.summary.clone(),
+        },
+    }
+}
+
+fn step_event_from_validation(
+    session_id: &str,
+    current_batch: usize,
+    total_batches: usize,
+    step_id: &str,
+    step_output: StepOutput,
+    progress_pct: f64,
+    validation_result: &StepValidationResult,
+) -> PlanModeProgressEvent {
+    match validation_result.outcome_status {
+        StepOutcomeStatus::Completed
+        | StepOutcomeStatus::SoftFailed
+        | StepOutcomeStatus::NeedsReview => PlanModeProgressEvent::step_completed(
+            session_id,
+            current_batch,
+            total_batches,
+            step_id,
+            step_output,
+            progress_pct,
+        ),
+        StepOutcomeStatus::HardFailed => PlanModeProgressEvent::step_failed_with_output(
+            session_id,
+            current_batch,
+            total_batches,
+            step_id,
+            &validation_result.summary,
+            step_output,
+            progress_pct,
+        ),
+    }
 }
 
 fn dynamic_min_expected_length(step: &super::types::PlanStep, candidate: &str) -> usize {
@@ -1961,7 +2097,7 @@ async fn update_failure_streaks_for_batch(
 ) {
     let snapshot = states.read().await;
     for step_id in step_ids {
-        let Some(StepExecutionState::Failed { reason }) = snapshot.get(step_id) else {
+        let Some(StepExecutionState::HardFailed { reason }) = snapshot.get(step_id) else {
             history.remove(step_id);
             continue;
         };
@@ -2053,9 +2189,22 @@ fn progress_pct_from_states(
     }
     let completed = states
         .values()
-        .filter(|state| matches!(state, StepExecutionState::Completed { .. }))
+        .filter(|state| counts_as_completed(state))
         .count();
     (completed as f64 / total_steps as f64) * 100.0
+}
+
+fn counts_as_completed(state: &StepExecutionState) -> bool {
+    matches!(
+        state,
+        StepExecutionState::Completed { .. }
+            | StepExecutionState::SoftFailed { .. }
+            | StepExecutionState::NeedsReview { .. }
+    )
+}
+
+fn is_hard_failed(state: &StepExecutionState) -> bool {
+    matches!(state, StepExecutionState::HardFailed { .. })
 }
 
 fn compute_retry_stats(
@@ -2074,7 +2223,7 @@ fn compute_retry_stats(
     let exhausted_failures = step_states
         .iter()
         .filter(|(step_id, state)| {
-            matches!(state, StepExecutionState::Failed { .. })
+            matches!(state, StepExecutionState::HardFailed { .. })
                 && step_attempts
                     .get(step_id.as_str())
                     .map(|attempts| *attempts > 1)
@@ -2340,11 +2489,24 @@ fn emit_step_output_diagnostic_log(
     );
 }
 
-fn build_step_output(step_id: String, content: String, format: OutputFormat) -> StepOutput {
+fn build_step_output(
+    step_id: String,
+    content: String,
+    format: OutputFormat,
+    evidence_bundle: Option<StepEvidenceBundle>,
+) -> StepOutput {
     let original_length = content.chars().count();
     let summary = summarize_output(&content);
     let artifacts = extract_artifacts(&content);
     let tool_evidence = extract_tool_evidence(&content, &artifacts);
+    let evidence_bundle = evidence_bundle.unwrap_or_else(|| build_step_evidence_bundle(
+        &[],
+        Vec::new(),
+        &[],
+        0,
+        None,
+        1,
+    ));
     StepOutput {
         step_id,
         summary,
@@ -2363,6 +2525,81 @@ fn build_step_output(step_id: String, content: String, format: OutputFormat) -> 
         iterations: 0,
         stop_reason: None,
         error_code: None,
+        evidence_summary: super::validation_engine::summarize_evidence(&evidence_bundle),
+        evidence_bundle,
+        validation_result: StepValidationResult::default(),
+        outcome_status: StepOutcomeStatus::Completed,
+        review_reason: None,
+    }
+}
+
+fn build_step_evidence_bundle(
+    dep_outputs: &[(String, StepOutput)],
+    files_read_summary: Vec<(String, usize, u64)>,
+    tools: &[ToolDefinition],
+    iterations: u32,
+    stop_reason: Option<&str>,
+    attempt_count: usize,
+) -> StepEvidenceBundle {
+    let coverage_markers = dep_outputs
+        .iter()
+        .map(|(title, _)| format!("dependency:{title}"))
+        .collect::<Vec<_>>();
+    let files_read = files_read_summary
+        .into_iter()
+        .map(|(path, read_count, bytes)| StepFileReadEvidence {
+            path,
+            read_count,
+            bytes,
+            matched_required_path: false,
+        })
+        .collect::<Vec<_>>();
+    let artifacts = dep_outputs
+        .iter()
+        .flat_map(|(_, output)| output.artifacts.iter().cloned())
+        .map(|value| StepArtifactEvidence {
+            artifact_type: artifact_type_from_value(&value).to_string(),
+            value,
+        })
+        .collect::<Vec<_>>();
+    let tool_calls = tools
+        .iter()
+        .map(|tool| StepToolCallEvidence {
+            tool_name: tool.name.clone(),
+            args_summary: "available_in_step".to_string(),
+            timestamp_ms: transcript_timestamp(),
+        })
+        .collect::<Vec<_>>();
+
+    StepEvidenceBundle {
+        tool_calls,
+        files_read,
+        files_written: Vec::new(),
+        search_queries: Vec::new(),
+        artifacts,
+        dependency_inputs: dep_outputs.iter().map(|(title, _)| title.clone()).collect(),
+        runtime_stats: StepRuntimeStats {
+            iterations,
+            stop_reason: stop_reason.map(|value| value.to_string()),
+            attempt_count,
+        },
+        coverage_markers,
+    }
+}
+
+fn artifact_type_from_value(value: &str) -> &'static str {
+    if value.ends_with(".md") {
+        "report"
+    } else if value.ends_with(".json") {
+        "json"
+    } else if value.ends_with(".rs")
+        || value.ends_with(".ts")
+        || value.ends_with(".tsx")
+        || value.ends_with(".js")
+    {
+        "code"
+    } else {
+        "artifact"
     }
 }
 
@@ -2457,7 +2694,7 @@ mod tests {
         ToolDefinition, UsageStats,
     };
     use crate::services::plan_mode::adapters::general::GeneralAdapter;
-    use crate::services::plan_mode::types::StepPriority;
+    use crate::services::plan_mode::types::{PlanStep, StepPriority};
     use async_trait::async_trait;
     use plan_cascade_core::streaming::UnifiedStreamEvent;
     use std::collections::HashMap as StdHashMap;
@@ -2535,53 +2772,86 @@ mod tests {
         }
     }
 
+    fn sample_step(id: &str, title: &str, description: &str, priority: StepPriority) -> PlanStep {
+        PlanStep {
+            id: id.to_string(),
+            title: title.to_string(),
+            description: description.to_string(),
+            priority,
+            dependencies: vec![],
+            deliverable: Default::default(),
+            evidence_requirements: Default::default(),
+            quality_requirements: Default::default(),
+            validation_profile: Default::default(),
+            failure_policy: Default::default(),
+            completion_criteria: vec![],
+            expected_output: String::new(),
+            metadata: StdHashMap::new(),
+        }
+    }
+
+    fn sample_output(step_id: &str, content: &str, format: OutputFormat) -> StepOutput {
+        let text = content.to_string();
+        let len = text.len();
+        StepOutput {
+            step_id: step_id.to_string(),
+            content: text.clone(),
+            summary: "summary".to_string(),
+            full_content: text,
+            format,
+            criteria_met: vec![],
+            artifacts: vec![],
+            truncated: false,
+            original_length: len,
+            shown_length: len,
+            quality_state: StepOutputQualityState::Complete,
+            incomplete_reason: None,
+            attempt_count: 1,
+            tool_evidence: vec![],
+            iterations: 0,
+            stop_reason: None,
+            error_code: None,
+            evidence_bundle: Default::default(),
+            evidence_summary: Default::default(),
+            validation_result: Default::default(),
+            outcome_status: StepOutcomeStatus::Completed,
+            review_reason: None,
+        }
+    }
+
     #[test]
     fn test_truncate_dep_outputs() {
+        fn make_output(step_id: &str, text: String) -> StepOutput {
+            let len = text.len();
+            StepOutput {
+                step_id: step_id.to_string(),
+                content: text.clone(),
+                summary: text.chars().take(200).collect(),
+                full_content: text,
+                format: OutputFormat::Text,
+                criteria_met: vec![],
+                artifacts: vec![],
+                truncated: false,
+                original_length: len,
+                shown_length: len,
+                quality_state: StepOutputQualityState::Complete,
+                incomplete_reason: None,
+                attempt_count: 1,
+                tool_evidence: vec![],
+                iterations: 0,
+                stop_reason: None,
+                error_code: None,
+                evidence_bundle: Default::default(),
+                evidence_summary: Default::default(),
+                validation_result: Default::default(),
+                outcome_status: StepOutcomeStatus::Completed,
+                review_reason: None,
+            }
+        }
+
         let deps = vec![
-            (
-                "Step 1".to_string(),
-                StepOutput {
-                    step_id: "s1".to_string(),
-                    content: "A".repeat(5000),
-                    summary: "A".repeat(200),
-                    full_content: "A".repeat(5000),
-                    format: OutputFormat::Text,
-                    criteria_met: vec![],
-                    artifacts: vec![],
-                    truncated: false,
-                    original_length: 5000,
-                    shown_length: 5000,
-                    quality_state: StepOutputQualityState::Complete,
-                    incomplete_reason: None,
-                    attempt_count: 1,
-                    tool_evidence: vec![],
-                    iterations: 0,
-                    stop_reason: None,
-                    error_code: None,
-                },
-            ),
-            (
-                "Step 2".to_string(),
-                StepOutput {
-                    step_id: "s2".to_string(),
-                    content: "B".repeat(3000),
-                    summary: "B".repeat(200),
-                    full_content: "B".repeat(3000),
-                    format: OutputFormat::Text,
-                    criteria_met: vec![],
-                    artifacts: vec![],
-                    truncated: false,
-                    original_length: 3000,
-                    shown_length: 3000,
-                    quality_state: StepOutputQualityState::Complete,
-                    incomplete_reason: None,
-                    attempt_count: 1,
-                    tool_evidence: vec![],
-                    iterations: 0,
-                    stop_reason: None,
-                    error_code: None,
-                },
-            ),
+            ("Step 1".to_string(), make_output("s1", "A".repeat(5000))),
+            ("Step 2".to_string(), make_output("s2", "B".repeat(3000))),
         ];
 
         let result = truncate_dep_outputs(deps, 4000, 6000);
@@ -2599,7 +2869,7 @@ mod tests {
         );
         states.insert(
             "s2".to_string(),
-            StepExecutionState::Failed {
+            StepExecutionState::HardFailed {
                 reason: "err".to_string(),
             },
         );
@@ -2615,16 +2885,7 @@ mod tests {
     #[test]
     fn test_resolve_step_tools_maps_plan_tool_whitelist() {
         let adapter = GeneralAdapter;
-        let step = super::super::types::PlanStep {
-            id: "s1".to_string(),
-            title: "Inspect codebase".to_string(),
-            description: "Read relevant code".to_string(),
-            priority: StepPriority::Medium,
-            dependencies: vec![],
-            completion_criteria: vec![],
-            expected_output: String::new(),
-            metadata: StdHashMap::new(),
-        };
+        let step = sample_step("s1", "Inspect codebase", "Read relevant code", StepPriority::Medium);
 
         let tools = resolve_step_tools(&adapter, &step);
         let names: HashSet<String> = tools.into_iter().map(|tool| tool.name).collect();
@@ -2651,21 +2912,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_retry_single_step_success_updates_output_and_state() {
-        let step = super::super::types::PlanStep {
-            id: "s1".to_string(),
-            title: "Retry Step".to_string(),
-            description: "Run retry".to_string(),
-            priority: StepPriority::Medium,
-            dependencies: vec![],
-            completion_criteria: vec!["done".to_string()],
-            expected_output: "output".to_string(),
-            metadata: StdHashMap::new(),
-        };
+        let mut step = sample_step("s1", "Retry Step", "Run retry", StepPriority::Medium);
+        step.completion_criteria = vec!["done".to_string()];
+        step.expected_output = "output".to_string();
         let plan = build_single_step_plan(step);
         let mut states = HashMap::new();
         states.insert(
             "s1".to_string(),
-            StepExecutionState::Failed {
+            StepExecutionState::HardFailed {
                 reason: "previous failure".to_string(),
             },
         );
@@ -2704,21 +2958,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_retry_single_step_fails_when_dependency_output_missing() {
-        let step = super::super::types::PlanStep {
-            id: "s2".to_string(),
-            title: "Dependent Step".to_string(),
-            description: "Needs prior output".to_string(),
-            priority: StepPriority::Medium,
-            dependencies: vec!["s1".to_string()],
-            completion_criteria: vec![],
-            expected_output: "output".to_string(),
-            metadata: StdHashMap::new(),
-        };
+        let mut step = sample_step(
+            "s2",
+            "Dependent Step",
+            "Needs prior output",
+            StepPriority::Medium,
+        );
+        step.dependencies = vec!["s1".to_string()];
+        step.expected_output = "output".to_string();
         let plan = build_single_step_plan(step);
         let mut states = HashMap::new();
         states.insert(
             "s2".to_string(),
-            StepExecutionState::Failed {
+            StepExecutionState::HardFailed {
                 reason: "previous failure".to_string(),
             },
         );
@@ -2742,7 +2994,7 @@ mod tests {
         .expect("retry call should return updated states");
 
         match states.get("s2") {
-            Some(StepExecutionState::Failed { reason }) => {
+            Some(StepExecutionState::HardFailed { reason }) => {
                 assert!(reason.contains("Missing dependency outputs"));
                 assert!(reason.contains("s1"));
             }
@@ -2752,16 +3004,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_retry_single_step_marks_cancelled_when_token_is_cancelled() {
-        let step = super::super::types::PlanStep {
-            id: "s1".to_string(),
-            title: "Retry Step".to_string(),
-            description: "Run retry".to_string(),
-            priority: StepPriority::Medium,
-            dependencies: vec![],
-            completion_criteria: vec![],
-            expected_output: "output".to_string(),
-            metadata: StdHashMap::new(),
-        };
+        let mut step = sample_step("s1", "Retry Step", "Run retry", StepPriority::Medium);
+        step.expected_output = "output".to_string();
         let plan = build_single_step_plan(step);
         let cancel_token = CancellationToken::new();
         cancel_token.cancel();
@@ -2792,40 +3036,21 @@ mod tests {
 
     #[test]
     fn test_detect_incomplete_output_allows_preface_with_substantial_result() {
-        let step = super::super::types::PlanStep {
-            id: "s1".to_string(),
-            title: "Deliver plan".to_string(),
-            description: "Create final plan output".to_string(),
-            priority: StepPriority::Medium,
-            dependencies: vec![],
-            completion_criteria: vec!["Provide roadmap".to_string()],
-            expected_output: "Detailed markdown plan".to_string(),
-            metadata: StdHashMap::new(),
-        };
-        let output = StepOutput {
-            step_id: "s1".to_string(),
-            content: "由于写入功能暂时不可用，我将直接输出完整文档：\n\n---\n\n# 方案\n- 目标\n- 路线\n- 验收"
-                .to_string(),
-            summary: "summary".to_string(),
-            full_content:
-                "由于写入功能暂时不可用，我将直接输出完整文档：\n\n---\n\n# 方案\n- 目标\n- 路线\n- 验收"
-                    .to_string(),
-            format: OutputFormat::Markdown,
-            criteria_met: vec![],
-            artifacts: vec![],
-            truncated: false,
-            original_length: 0,
-            shown_length: 0,
-            quality_state: StepOutputQualityState::Complete,
-            incomplete_reason: None,
-            attempt_count: 1,
-            tool_evidence: vec![],
-            iterations: 0,
-            stop_reason: None,
-            error_code: None,
-        };
+        let mut step = sample_step(
+            "s1",
+            "Deliver plan",
+            "Create final plan output",
+            StepPriority::Medium,
+        );
+        step.completion_criteria = vec!["Provide roadmap".to_string()];
+        step.expected_output = "Detailed markdown plan".to_string();
+        let output = sample_output(
+            "s1",
+            "由于写入功能暂时不可用，我将直接输出完整文档：\n\n---\n\n# 方案\n- 目标\n- 路线\n- 验收",
+            OutputFormat::Markdown,
+        );
 
-        let reason = detect_incomplete_output_reason(&step, &output, &[]);
+        let reason = detect_incomplete_output_reason(&step, &output, &output.validation_result);
         assert!(
             reason.is_none(),
             "substantial content after narration preface should pass quality gate"
@@ -2834,37 +3059,20 @@ mod tests {
 
     #[test]
     fn test_detect_incomplete_output_rejects_pure_narration() {
-        let step = super::super::types::PlanStep {
-            id: "s1".to_string(),
-            title: "Deliver plan".to_string(),
-            description: "Create final plan output".to_string(),
-            priority: StepPriority::Medium,
-            dependencies: vec![],
-            completion_criteria: vec![],
-            expected_output: "Detailed markdown plan".to_string(),
-            metadata: StdHashMap::new(),
-        };
-        let output = StepOutput {
-            step_id: "s1".to_string(),
-            content: "让我先整理一下，然后我会给出最终方案。".to_string(),
-            summary: "summary".to_string(),
-            full_content: "让我先整理一下，然后我会给出最终方案。".to_string(),
-            format: OutputFormat::Markdown,
-            criteria_met: vec![],
-            artifacts: vec![],
-            truncated: false,
-            original_length: 0,
-            shown_length: 0,
-            quality_state: StepOutputQualityState::Complete,
-            incomplete_reason: None,
-            attempt_count: 1,
-            tool_evidence: vec![],
-            iterations: 0,
-            stop_reason: None,
-            error_code: None,
-        };
+        let mut step = sample_step(
+            "s1",
+            "Deliver plan",
+            "Create final plan output",
+            StepPriority::Medium,
+        );
+        step.expected_output = "Detailed markdown plan".to_string();
+        let output = sample_output(
+            "s1",
+            "让我先整理一下，然后我会给出最终方案。",
+            OutputFormat::Markdown,
+        );
 
-        let reason = detect_incomplete_output_reason(&step, &output, &[]);
+        let reason = detect_incomplete_output_reason(&step, &output, &output.validation_result);
         assert!(matches!(
             reason.as_deref(),
             Some("Output is an execution narration rather than a completed result")
@@ -2873,21 +3081,15 @@ mod tests {
 
     #[test]
     fn test_compute_step_iteration_limit_respects_cap() {
-        let step = super::super::types::PlanStep {
-            id: "s-max".to_string(),
-            title: "Complex".to_string(),
-            description: "complex".to_string(),
-            priority: StepPriority::High,
-            dependencies: vec!["a".to_string(), "b".to_string(), "c".to_string()],
-            completion_criteria: vec![
-                "c1".to_string(),
-                "c2".to_string(),
-                "c3".to_string(),
-                "c4".to_string(),
-            ],
-            expected_output: "X".repeat(400),
-            metadata: StdHashMap::new(),
-        };
+        let mut step = sample_step("s-max", "Complex", "complex", StepPriority::High);
+        step.dependencies = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        step.completion_criteria = vec![
+            "c1".to_string(),
+            "c2".to_string(),
+            "c3".to_string(),
+            "c4".to_string(),
+        ];
+        step.expected_output = "X".repeat(400);
         assert_eq!(compute_step_iteration_limit(&step, 96), 48);
         assert_eq!(compute_step_iteration_limit(&step, 36), 36);
     }
@@ -2905,36 +3107,9 @@ mod tests {
                 step_ids: vec!["s1".to_string(), "s2".to_string(), "s3".to_string()],
             }],
             steps: vec![
-                super::super::types::PlanStep {
-                    id: "s1".to_string(),
-                    title: "one".to_string(),
-                    description: "one".to_string(),
-                    priority: StepPriority::Medium,
-                    dependencies: vec![],
-                    completion_criteria: vec![],
-                    expected_output: String::new(),
-                    metadata: StdHashMap::new(),
-                },
-                super::super::types::PlanStep {
-                    id: "s2".to_string(),
-                    title: "two".to_string(),
-                    description: "two".to_string(),
-                    priority: StepPriority::Medium,
-                    dependencies: vec![],
-                    completion_criteria: vec![],
-                    expected_output: String::new(),
-                    metadata: StdHashMap::new(),
-                },
-                super::super::types::PlanStep {
-                    id: "s3".to_string(),
-                    title: "three".to_string(),
-                    description: "three".to_string(),
-                    priority: StepPriority::Medium,
-                    dependencies: vec![],
-                    completion_criteria: vec![],
-                    expected_output: String::new(),
-                    metadata: StdHashMap::new(),
-                },
+                sample_step("s1", "one", "one", StepPriority::Medium),
+                sample_step("s2", "two", "two", StepPriority::Medium),
+                sample_step("s3", "three", "three", StepPriority::Medium),
             ],
         };
 
@@ -2945,7 +3120,7 @@ mod tests {
         );
         states.insert(
             "s2".to_string(),
-            StepExecutionState::Failed {
+            StepExecutionState::HardFailed {
                 reason: "failed".to_string(),
             },
         );
@@ -2978,35 +3153,15 @@ mod tests {
 
     #[test]
     fn test_detect_incomplete_output_allows_short_structured_delivery_evidence() {
-        let step = super::super::types::PlanStep {
-            id: "s2".to_string(),
-            title: "Deliver".to_string(),
-            description: "deliver".to_string(),
-            priority: StepPriority::Medium,
-            dependencies: vec![],
-            completion_criteria: vec!["Provide output".to_string()],
-            expected_output: "markdown".to_string(),
-            metadata: StdHashMap::new(),
-        };
-        let output = StepOutput {
-            step_id: "s2".to_string(),
-            content: "## Result\n- file: src/app.tsx\n- validation: run pnpm test".to_string(),
-            summary: "summary".to_string(),
-            full_content: "## Result\n- file: src/app.tsx\n- validation: run pnpm test".to_string(),
-            format: OutputFormat::Markdown,
-            criteria_met: vec![],
-            artifacts: vec!["src/app.tsx".to_string()],
-            truncated: false,
-            original_length: 0,
-            shown_length: 0,
-            quality_state: StepOutputQualityState::Complete,
-            incomplete_reason: None,
-            attempt_count: 1,
-            tool_evidence: vec![],
-            iterations: 0,
-            stop_reason: None,
-            error_code: None,
-        };
-        assert!(detect_incomplete_output_reason(&step, &output, &[]).is_none());
+        let mut step = sample_step("s2", "Deliver", "deliver", StepPriority::Medium);
+        step.completion_criteria = vec!["Provide output".to_string()];
+        step.expected_output = "markdown".to_string();
+        let mut output = sample_output(
+            "s2",
+            "## Result\n- file: src/app.tsx\n- validation: run pnpm test",
+            OutputFormat::Markdown,
+        );
+        output.artifacts = vec!["src/app.tsx".to_string()];
+        assert!(detect_incomplete_output_reason(&step, &output, &output.validation_result).is_none());
     }
 }

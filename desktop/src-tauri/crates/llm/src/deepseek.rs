@@ -10,16 +10,20 @@ use serde::Deserialize;
 use tokio::sync::mpsc;
 
 use super::openai_compat::{
-    build_client, map_api_error, value_to_chat_request, value_to_chat_stream_request,
+    build_client, build_openai_compatible_messages, map_api_error, value_to_chat_request,
+    value_to_chat_stream_request,
 };
 use super::provider::LlmProvider;
 use super::types::{
     FallbackToolFormatMode, LlmError, LlmRequestOptions, LlmResponse, LlmResult, Message,
-    MessageContent, MessageRole, ProviderConfig, StopReason, ToolCall, ToolCallMode,
-    ToolCallReliability, ToolDefinition, UsageStats,
+    ProviderConfig, StopReason, ToolCall, ToolCallMode, ToolCallReliability, ToolDefinition,
+    UsageStats,
 };
 use crate::reliable_catalog::is_reliable_model;
 use plan_cascade_core::streaming::UnifiedStreamEvent;
+
+#[cfg(test)]
+use super::types::{MessageContent, MessageRole};
 
 /// Default DeepSeek API endpoint
 const DEEPSEEK_API_URL: &str = "https://api.deepseek.com/v1/chat/completions";
@@ -61,34 +65,8 @@ impl DeepSeekProvider {
             "temperature": request_options.temperature_override.unwrap_or(self.config.temperature),
         });
 
-        // Convert messages to OpenAI-compatible format
-        let mut api_messages: Vec<serde_json::Value> = Vec::new();
-
-        // Add system message if provided
-        if let Some(sys) = system {
-            api_messages.push(serde_json::json!({
-                "role": "system",
-                "content": sys
-            }));
-        }
-
-        // Add conversation messages
-        for msg in messages {
-            if msg.role == MessageRole::System {
-                for content in &msg.content {
-                    if let MessageContent::Text { text } = content {
-                        api_messages.push(serde_json::json!({
-                            "role": "system",
-                            "content": text
-                        }));
-                    }
-                }
-            } else {
-                api_messages.push(self.message_to_deepseek(msg));
-            }
-        }
-
-        body["messages"] = serde_json::json!(api_messages);
+        body["messages"] =
+            serde_json::json!(build_openai_compatible_messages(messages, system));
 
         // Add tools if provided (DeepSeek uses OpenAI-compatible format)
         if !tools.is_empty() {
@@ -108,6 +86,7 @@ impl DeepSeekProvider {
         body
     }
 
+    #[cfg(test)]
     /// Convert a Message to DeepSeek API format (OpenAI-compatible)
     fn message_to_deepseek(&self, message: &Message) -> serde_json::Value {
         let role = match message.role {

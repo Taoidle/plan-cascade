@@ -182,6 +182,10 @@ function skillRouterFallbackReasonFallback(reason: string): string {
   }
 }
 
+function toolPolicyModeLabelFallback(mode: SkillSummary['tool_policy_mode']): string {
+  return mode === 'restrictive' ? 'Restrictive' : 'Advisory';
+}
+
 function sourceTypeLabel(t: (key: string, options?: { defaultValue?: string }) => string, sourceType: string): string {
   switch (sourceType) {
     case 'local':
@@ -680,6 +684,16 @@ function SkillsTab() {
                 ? diagnostics.selected_skills.join(', ')
                 : t('skillPanel.none', { defaultValue: 'none' })}
             </div>
+            {skills
+              .filter((skill) => diagnostics?.effective_skill_ids?.includes(skill.id))
+              .map((skill) => (
+                <div key={skill.id}>
+                  {skill.name}:{' '}
+                  {t(`skillPanel.toolPolicyModes.${skill.tool_policy_mode}`, {
+                    defaultValue: toolPolicyModeLabelFallback(skill.tool_policy_mode),
+                  })}
+                </div>
+              ))}
             <div>
               {t('skillPanel.blockedTools', { defaultValue: 'Blocked tools' })}:{' '}
               {diagnostics?.blocked_tools?.length

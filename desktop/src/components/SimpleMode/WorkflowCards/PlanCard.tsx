@@ -245,10 +245,82 @@ function StepRow({
         <div className="px-7 pb-2 space-y-1.5">
           <p className="text-xs text-gray-600 dark:text-gray-400">{step.description}</p>
 
+          {step.deliverable && (
+            <div className="space-y-1">
+              <span className="text-2xs font-medium text-gray-500 dark:text-gray-400">
+                {t('plan.deliverableContract', 'Deliverable Contract')}:
+              </span>
+              <div className="text-2xs text-gray-600 dark:text-gray-400 space-y-0.5">
+                {step.deliverable.expectedOutputSummary && <div>{step.deliverable.expectedOutputSummary}</div>}
+                {step.deliverable.requiredSections && step.deliverable.requiredSections.length > 0 && (
+                  <div>
+                    {t('plan.requiredSections', 'Sections')}: {step.deliverable.requiredSections.join(', ')}
+                  </div>
+                )}
+                {step.deliverable.requiredArtifacts && step.deliverable.requiredArtifacts.length > 0 && (
+                  <div>
+                    {t('plan.requiredArtifacts', 'Artifacts')}:{' '}
+                    {step.deliverable.requiredArtifacts.map((artifact) => artifact.artifactType).join(', ')}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {step.evidenceRequirements && (
+            <div className="space-y-1">
+              <span className="text-2xs font-medium text-gray-500 dark:text-gray-400">
+                {t('plan.evidenceRequirements', 'Evidence Requirements')}:
+              </span>
+              <div className="text-2xs text-gray-600 dark:text-gray-400 space-y-0.5">
+                {!!step.evidenceRequirements.minFilesRead && (
+                  <div>
+                    {t('plan.minFilesRead', 'Min files read')}: {step.evidenceRequirements.minFilesRead}
+                  </div>
+                )}
+                {step.evidenceRequirements.requiredPaths && step.evidenceRequirements.requiredPaths.length > 0 && (
+                  <div>
+                    {t('plan.requiredPaths', 'Paths')}: {step.evidenceRequirements.requiredPaths.join(', ')}
+                  </div>
+                )}
+                {step.evidenceRequirements.requiredTools && step.evidenceRequirements.requiredTools.length > 0 && (
+                  <div>
+                    {t('plan.requiredTools', 'Tools')}: {step.evidenceRequirements.requiredTools.join(', ')}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {step.qualityRequirements && (
+            <div className="space-y-1">
+              <span className="text-2xs font-medium text-gray-500 dark:text-gray-400">
+                {t('plan.qualityRequirements', 'Quality Requirements')}:
+              </span>
+              <div className="text-2xs text-gray-600 dark:text-gray-400 space-y-0.5">
+                {step.qualityRequirements.mustCoverTopics && step.qualityRequirements.mustCoverTopics.length > 0 && (
+                  <div>
+                    {t('plan.mustCoverTopics', 'Topics')}: {step.qualityRequirements.mustCoverTopics.join(', ')}
+                  </div>
+                )}
+                {step.validationProfile && (
+                  <div>
+                    {t('plan.validationProfile', 'Validation profile')}: {step.validationProfile}
+                  </div>
+                )}
+                {step.failurePolicy?.severity && (
+                  <div>
+                    {t('plan.failurePolicy', 'Failure policy')}: {step.failurePolicy.severity}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {step.completionCriteria.length > 0 && (
             <div>
               <span className="text-2xs font-medium text-gray-500 dark:text-gray-400">
-                {t('plan.completionCriteria', 'Completion Criteria')}:
+                {t('plan.completionCriteria', 'Legacy Completion Criteria')}:
               </span>
               <ul className="mt-0.5 space-y-0.5">
                 {step.completionCriteria.map((criterion, index) => (

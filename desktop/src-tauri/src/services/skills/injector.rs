@@ -126,7 +126,9 @@ fn truncate_body(body: &str, max_lines: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::skills::model::{InjectionPhase, MatchReason, SkillSource, SkillSummary};
+    use crate::services::skills::model::{
+        InjectionPhase, MatchReason, SkillSource, SkillSummary, SkillToolPolicyMode,
+    };
     use std::path::PathBuf;
 
     fn make_match(name: &str, source: SkillSource, priority: u32) -> SkillMatch {
@@ -139,6 +141,7 @@ mod tests {
                 description: format!("Description for {}", name),
                 version: None,
                 tags: vec![],
+                tool_policy_mode: SkillToolPolicyMode::Advisory,
                 allowed_tools: vec![],
                 source,
                 priority,
@@ -148,6 +151,9 @@ mod tests {
                 has_hooks: false,
                 inject_into: vec![InjectionPhase::Always],
                 path: PathBuf::from(format!("/test/{}/SKILL.md", name)),
+                review_status: None,
+                review_notes: None,
+                reviewed_at: None,
             },
         }
     }
@@ -223,6 +229,7 @@ mod tests {
             hash: "test".to_string(),
             last_modified: None,
             user_invocable: false,
+            tool_policy_mode: crate::services::skills::model::SkillToolPolicyMode::Advisory,
             allowed_tools: vec![],
             license: None,
             metadata: std::collections::HashMap::new(),
@@ -234,6 +241,9 @@ mod tests {
             detect: None,
             inject_into: vec![],
             enabled: true,
+            review_status: None,
+            review_notes: None,
+            reviewed_at: None,
         };
 
         let docs: Vec<&crate::services::skills::model::SkillDocument> = vec![&doc];
@@ -265,6 +275,7 @@ mod tests {
             hash: "test".to_string(),
             last_modified: None,
             user_invocable: false,
+            tool_policy_mode: crate::services::skills::model::SkillToolPolicyMode::Advisory,
             allowed_tools: vec![],
             license: None,
             metadata: std::collections::HashMap::new(),
@@ -274,6 +285,9 @@ mod tests {
             detect: None,
             inject_into: vec![],
             enabled: true,
+            review_status: None,
+            review_notes: None,
+            reviewed_at: None,
         };
 
         let doc_b = crate::services::skills::model::SkillDocument {
@@ -287,6 +301,7 @@ mod tests {
             hash: "test".to_string(),
             last_modified: None,
             user_invocable: false,
+            tool_policy_mode: crate::services::skills::model::SkillToolPolicyMode::Advisory,
             allowed_tools: vec![],
             license: None,
             metadata: std::collections::HashMap::new(),
@@ -296,6 +311,9 @@ mod tests {
             detect: None,
             inject_into: vec![],
             enabled: true,
+            review_status: None,
+            review_notes: None,
+            reviewed_at: None,
         };
 
         let docs: Vec<&crate::services::skills::model::SkillDocument> = vec![&doc_a, &doc_b];

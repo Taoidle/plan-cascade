@@ -59,6 +59,7 @@ function makeSkill(id: string, enabled = true): SkillSummary {
     description: '',
     version: null,
     tags: [],
+    tool_policy_mode: 'advisory',
     allowed_tools: [],
     source: { type: 'builtin' },
     priority: 0,

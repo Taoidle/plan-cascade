@@ -531,7 +531,7 @@ fn builtin_skill_specs() -> Vec<BuiltinSkillSpec> {
 name: react-next-platform
 description: Apply React and Next.js implementation, routing, and rendering conventions.
 tags: [react, nextjs, frontend, typescript]
-allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
+tool-policy-mode: advisory
 ---
 
 # React and Next.js
@@ -554,7 +554,7 @@ allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
 name: vue-nuxt-platform
 description: Apply Vue and Nuxt composition, routing, and SSR conventions.
 tags: [vue, nuxt, frontend, typescript]
-allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
+tool-policy-mode: advisory
 ---
 
 # Vue and Nuxt
@@ -577,7 +577,7 @@ allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
 name: rust-tauri-platform
 description: Apply Rust and Tauri conventions for commands, async boundaries, and desktop safety.
 tags: [rust, tauri, desktop]
-allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
+tool-policy-mode: advisory
 ---
 
 # Rust and Tauri
@@ -600,7 +600,7 @@ allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
 name: typescript-node-platform
 description: Apply TypeScript and Node service conventions with strong runtime contracts.
 tags: [typescript, node, backend]
-allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
+tool-policy-mode: advisory
 ---
 
 # TypeScript and Node
@@ -623,7 +623,7 @@ allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
 name: python-platform
 description: Apply Python packaging, tooling, and readability conventions.
 tags: [python, backend, scripting]
-allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
+tool-policy-mode: advisory
 ---
 
 # Python
@@ -646,7 +646,7 @@ allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
 name: go-platform
 description: Apply Go package, interface, and concurrency conventions.
 tags: [go, backend]
-allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
+tool-policy-mode: advisory
 ---
 
 # Go
@@ -666,7 +666,7 @@ allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
 name: testing-workflow
 description: Use targeted validation, regression checks, and failure triage during implementation.
 tags: [testing, validation, workflow]
-allowed-tools: [Read, LS, Glob, Grep, Cwd, Bash, Edit, MultiEdit, Write]
+tool-policy-mode: advisory
 ---
 
 # Testing Workflow
@@ -686,7 +686,7 @@ allowed-tools: [Read, LS, Glob, Grep, Cwd, Bash, Edit, MultiEdit, Write]
 name: refactor-workflow
 description: Use disciplined refactoring steps that preserve behavior while improving structure.
 tags: [refactor, workflow]
-allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
+tool-policy-mode: advisory
 ---
 
 # Refactor Workflow
@@ -706,7 +706,7 @@ allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
 name: release-workflow
 description: Apply release-oriented discipline for migrations, compatibility, and rollout safety.
 tags: [release, migration, workflow]
-allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
+tool-policy-mode: advisory
 ---
 
 # Release Workflow

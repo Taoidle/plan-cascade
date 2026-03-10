@@ -199,6 +199,14 @@
     "tags": "Tags",
     "version": "Version",
     "priority": "Priority",
+    "toolPolicy": "Tool policy",
+    "allowedTools": "Allowed tools",
+    "toolPolicyAdvisoryHint": "This skill provides guidance only and does not hard-restrict runtime tools.",
+    "toolPolicyRestrictiveHint": "This skill can hard-restrict runtime tools.",
+    "toolPolicyModes": {
+      "advisory": "Advisory",
+      "restrictive": "Restrictive"
+    },
     "phases": "Phases",
     "createdAt": "Created",
     "updatedAt": "Updated",

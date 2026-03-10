@@ -56,6 +56,7 @@ pub fn build_index(skills: Vec<DiscoveredSkill>) -> AppResult<SkillIndex> {
             hash,
             last_modified,
             user_invocable: parsed.user_invocable,
+            tool_policy_mode: parsed.tool_policy_mode,
             allowed_tools: parsed.allowed_tools,
             license: parsed.license,
             metadata: parsed.metadata,
@@ -405,6 +406,7 @@ mod tests {
                 hash: "testhash".to_string(),
                 last_modified: None,
                 user_invocable: false,
+                tool_policy_mode: crate::services::skills::model::SkillToolPolicyMode::Advisory,
                 allowed_tools: vec![],
                 license: None,
                 metadata: HashMap::new(),
@@ -414,6 +416,9 @@ mod tests {
                 detect,
                 inject_into: vec![],
                 enabled,
+                review_status: None,
+                review_notes: None,
+                reviewed_at: None,
             });
         }
 

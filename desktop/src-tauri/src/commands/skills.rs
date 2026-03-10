@@ -19,7 +19,7 @@ use crate::services::skills::index::{build_index, compute_index_stats};
 use crate::services::skills::model::{
     GeneratedSkill, GeneratedSkillRecord, InjectionPhase, MatchReason, SelectionPolicy,
     SkillDocument, SkillIndex, SkillIndexStats, SkillMatch, SkillReviewStatus, SkillSource,
-    SkillSummary, SkillsOverview,
+    SkillSummary, SkillToolPolicyMode, SkillsOverview,
 };
 use crate::services::skills::select::{lexical_score_skills, select_skills_for_session};
 use crate::services::task_mode::context_provider::{
@@ -1375,6 +1375,7 @@ fn generated_record_to_document(record: GeneratedSkillRecord) -> SkillDocument {
         hash: format!("generated-{}", record.id),
         last_modified: None,
         user_invocable: false,
+        tool_policy_mode: SkillToolPolicyMode::Advisory,
         allowed_tools: vec![],
         license: None,
         metadata,
@@ -1509,6 +1510,7 @@ mod tests {
                 description: "builtin".to_string(),
                 version: None,
                 tags: vec![],
+                tool_policy_mode: SkillToolPolicyMode::Advisory,
                 allowed_tools: vec![],
                 source: SkillSource::Builtin,
                 priority: 10,
@@ -1518,6 +1520,9 @@ mod tests {
                 has_hooks: false,
                 inject_into: vec![InjectionPhase::Always],
                 path: std::path::PathBuf::from("/tmp/builtin"),
+                review_status: None,
+                review_notes: None,
+                reviewed_at: None,
             },
             SkillSummary {
                 id: "generated-1".to_string(),
@@ -1525,6 +1530,7 @@ mod tests {
                 description: "generated".to_string(),
                 version: None,
                 tags: vec![],
+                tool_policy_mode: SkillToolPolicyMode::Advisory,
                 allowed_tools: vec![],
                 source: SkillSource::Generated,
                 priority: 0,
@@ -1534,6 +1540,9 @@ mod tests {
                 has_hooks: false,
                 inject_into: vec![InjectionPhase::Always],
                 path: std::path::PathBuf::from("generated://generated-1"),
+                review_status: None,
+                review_notes: None,
+                reviewed_at: None,
             },
         ];
 

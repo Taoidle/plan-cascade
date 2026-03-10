@@ -12,7 +12,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::services::skills::model::{
-    InjectionPhase, MatchReason, SelectionPolicy, SkillIndex, SkillMatch, SkillSource,
+    InjectionPhase, MatchReason, SelectionPolicy, SkillIndex, SkillMatch,
 };
 
 /// Select skills for a session using two-phase approach.
@@ -270,7 +270,9 @@ fn tokenize(text: &str) -> HashSet<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::skills::model::{SkillDetection, SkillDocument, SkillIndex, SkillSource};
+    use crate::services::skills::model::{
+        SkillDetection, SkillDocument, SkillIndex, SkillSource, SkillToolPolicyMode,
+    };
     use std::collections::HashMap;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -294,6 +296,7 @@ mod tests {
             hash: "testhash123456".to_string(),
             last_modified: None,
             user_invocable: false,
+            tool_policy_mode: SkillToolPolicyMode::Advisory,
             allowed_tools: vec![],
             license: None,
             metadata: HashMap::new(),
@@ -303,6 +306,9 @@ mod tests {
             detect,
             inject_into: vec![InjectionPhase::Always],
             enabled: true,
+            review_status: None,
+            review_notes: None,
+            reviewed_at: None,
         }
     }
 

@@ -19,9 +19,10 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
-use crate::services::llm::types::{Message, MessageRole};
-use plan_cascade_core::error::{CoreError, CoreResult};
+use crate::services::llm::types::{Message, MessageContent, MessageRole};
+use plan_cascade_core::error::CoreResult;
 
 // ============================================================================
 // CompactionStrategy Enum
@@ -160,6 +161,77 @@ pub struct SummaryOutcome {
     pub token_usage: u32,
 }
 
+fn message_has_tool_use(message: &Message) -> bool {
+    message
+        .content
+        .iter()
+        .any(|content| matches!(content, MessageContent::ToolUse { .. }))
+}
+
+fn message_has_tool_result(message: &Message) -> bool {
+    message.content.iter().any(|content| {
+        matches!(
+            content,
+            MessageContent::ToolResult { .. } | MessageContent::ToolResultMultimodal { .. }
+        )
+    })
+}
+
+fn safe_compaction_window(
+    messages: &[Message],
+    preserve_head: usize,
+    preserve_tail: usize,
+) -> Option<(usize, usize)> {
+    if messages.len() <= preserve_head + preserve_tail {
+        return None;
+    }
+
+    let mut pending_tool_call_ids: HashSet<String> = HashSet::new();
+    let mut safe_boundaries = vec![0usize];
+
+    for (index, message) in messages.iter().enumerate() {
+        for content in &message.content {
+            match content {
+                MessageContent::ToolUse { id, .. } => {
+                    pending_tool_call_ids.insert(id.clone());
+                }
+                MessageContent::ToolResult { tool_use_id, .. }
+                | MessageContent::ToolResultMultimodal { tool_use_id, .. } => {
+                    pending_tool_call_ids.remove(tool_use_id);
+                }
+                _ => {}
+            }
+        }
+
+        if !message_has_tool_use(message)
+            && !message_has_tool_result(message)
+            && !pending_tool_call_ids.is_empty()
+        {
+            pending_tool_call_ids.clear();
+        }
+
+        if pending_tool_call_ids.is_empty() {
+            safe_boundaries.push(index + 1);
+        }
+    }
+
+    let start = safe_boundaries
+        .iter()
+        .copied()
+        .find(|boundary| *boundary >= preserve_head)?;
+    let end = safe_boundaries
+        .iter()
+        .rev()
+        .copied()
+        .find(|boundary| *boundary <= messages.len().saturating_sub(preserve_tail))?;
+
+    if start >= end {
+        None
+    } else {
+        Some((start, end))
+    }
+}
+
 // ============================================================================
 // ContextCompactor Trait
 // ============================================================================
@@ -259,10 +331,20 @@ impl ContextCompactor for SlidingWindowCompactor {
             });
         }
 
-        let head = &messages[..config.preserve_head];
-        let tail_start = messages.len().saturating_sub(config.preserve_tail);
-        let tail = &messages[tail_start..];
-        let removed_count = messages.len() - config.preserve_head - config.preserve_tail;
+        let Some((compact_start, compact_end)) =
+            safe_compaction_window(messages, config.preserve_head, config.preserve_tail)
+        else {
+            return Ok(CompactionResult {
+                messages: messages.to_vec(),
+                messages_removed: 0,
+                messages_preserved: messages.len(),
+                compaction_tokens: 0,
+            });
+        };
+
+        let head = &messages[..compact_start];
+        let tail = &messages[compact_end..];
+        let removed_count = compact_end.saturating_sub(compact_start);
 
         let mut result = Vec::with_capacity(config.preserve_head + config.preserve_tail + 1);
         result.extend_from_slice(head);
@@ -283,7 +365,7 @@ impl ContextCompactor for SlidingWindowCompactor {
         Ok(CompactionResult {
             messages: result,
             messages_removed: removed_count,
-            messages_preserved: config.preserve_head + config.preserve_tail,
+            messages_preserved: head.len() + tail.len(),
             compaction_tokens: 0,
         })
     }
@@ -368,10 +450,20 @@ impl ContextCompactor for LlmSummaryCompactor {
             });
         }
 
-        let tail_start = messages.len().saturating_sub(config.preserve_tail);
-        let head = &messages[..config.preserve_head];
-        let middle = &messages[config.preserve_head..tail_start];
-        let tail = &messages[tail_start..];
+        let Some((compact_start, compact_end)) =
+            safe_compaction_window(messages, config.preserve_head, config.preserve_tail)
+        else {
+            return Ok(CompactionResult {
+                messages: messages.to_vec(),
+                messages_removed: 0,
+                messages_preserved: messages.len(),
+                compaction_tokens: 0,
+            });
+        };
+
+        let head = &messages[..compact_start];
+        let middle = &messages[compact_start..compact_end];
+        let tail = &messages[compact_end..];
         let removed_count = middle.len();
 
         // Summarize the middle section
@@ -392,7 +484,7 @@ impl ContextCompactor for LlmSummaryCompactor {
             messages: result,
             messages_removed: removed_count,
             // The summary message is added, so preserved = head + tail + 1 summary
-            messages_preserved: config.preserve_head + config.preserve_tail + 1,
+            messages_preserved: head.len() + tail.len() + 1,
             compaction_tokens: summary.token_usage,
         })
     }
@@ -449,6 +541,7 @@ impl ContextCompactor for NoopCompactor {
 mod tests {
     use super::*;
     use crate::services::llm::types::{MessageContent, MessageRole};
+    use plan_cascade_core::error::CoreError;
 
     /// Extract the first text content from a message (test helper).
     fn extract_text(msg: &Message) -> Option<&str> {
@@ -472,6 +565,28 @@ mod tests {
                 Message::text(role, format!("Message {}", i))
             })
             .collect()
+    }
+
+    fn make_messages_with_tool_turn_near_tail() -> Vec<Message> {
+        vec![
+            Message::user("Message 0"),
+            Message::assistant("Message 1"),
+            Message::user("Message 2"),
+            Message::assistant("Message 3"),
+            Message::user("Message 4"),
+            Message {
+                role: MessageRole::Assistant,
+                content: vec![MessageContent::ToolUse {
+                    id: "call_1".to_string(),
+                    name: "Read".to_string(),
+                    input: serde_json::json!({"file_path": "README.md"}),
+                }],
+            },
+            Message::tool_result("call_1", "README contents", false),
+            Message::assistant("Message 7"),
+            Message::user("Message 8"),
+            Message::assistant("Message 9"),
+        ]
     }
 
     // ── CompactionStrategy tests ─────────────────────────────────────
@@ -681,6 +796,36 @@ mod tests {
         assert_eq!(result.messages_removed, 1);
     }
 
+    #[tokio::test]
+    async fn test_sliding_window_does_not_split_tool_turn_boundary() {
+        let compactor = SlidingWindowCompactor::without_marker();
+        let messages = make_messages_with_tool_turn_near_tail();
+        let config = CompactionConfig {
+            preserve_head: 2,
+            preserve_tail: 4,
+            enabled: true,
+            max_messages: 5,
+            ..Default::default()
+        };
+
+        let result = compactor.compact(&messages, &config).await.unwrap();
+        assert_eq!(result.messages_removed, 3);
+        assert_eq!(result.messages.len(), 7);
+
+        let tool_call_index = result
+            .messages
+            .iter()
+            .position(message_has_tool_use)
+            .expect("tool call should remain paired in preserved tail");
+        let tool_result_index = result
+            .messages
+            .iter()
+            .position(message_has_tool_result)
+            .expect("tool result should remain in preserved tail");
+
+        assert!(tool_call_index < tool_result_index);
+    }
+
     #[test]
     fn test_sliding_window_name() {
         let compactor = SlidingWindowCompactor::new();
@@ -782,6 +927,45 @@ mod tests {
         let result = compactor.compact(&messages, &config).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("LLM call failed"));
+    }
+
+    #[tokio::test]
+    async fn test_llm_summary_does_not_insert_summary_inside_tool_turn() {
+        let compactor = LlmSummaryCompactor::new(|msgs| {
+            Box::pin(async move {
+                Ok(SummaryOutcome {
+                    summary: format!("Summary of {} messages", msgs.len()),
+                    token_usage: 8,
+                })
+            })
+        });
+        let messages = make_messages_with_tool_turn_near_tail();
+        let config = CompactionConfig {
+            preserve_head: 2,
+            preserve_tail: 4,
+            enabled: true,
+            max_messages: 5,
+            ..Default::default()
+        };
+
+        let result = compactor.compact(&messages, &config).await.unwrap();
+        let summary_index = result
+            .messages
+            .iter()
+            .position(|message| extract_text(message).unwrap_or_default().contains("[Summary of"))
+            .expect("summary marker should exist");
+        let tool_call_index = result
+            .messages
+            .iter()
+            .position(message_has_tool_use)
+            .expect("tool call should remain");
+        let tool_result_index = result
+            .messages
+            .iter()
+            .position(message_has_tool_result)
+            .expect("tool result should remain");
+
+        assert!(summary_index < tool_call_index || summary_index > tool_result_index);
     }
 
     #[test]

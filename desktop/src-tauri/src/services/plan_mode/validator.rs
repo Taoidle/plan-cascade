@@ -1,115 +1,98 @@
-//! Step Validator
-//!
-//! Post-step validation using the adapter's validate_step method.
-//! Validates step outputs against completion criteria.
-
 use std::sync::Arc;
 
 use crate::services::llm::provider::LlmProvider;
 
 use super::adapter::DomainAdapter;
-use super::types::{CriterionResult, PlanStep, StepOutput};
+use super::types::{CriterionResult, PlanStep, StepOutput, StepValidationResult};
+use super::validation_engine::{summarize_evidence, validate_step_contract};
 
-/// Validate a step's output against its completion criteria.
 pub async fn validate_step_output(
     step: &PlanStep,
     output: &mut StepOutput,
-    adapter: Arc<dyn DomainAdapter>,
+    _adapter: Arc<dyn DomainAdapter>,
     provider: Arc<dyn LlmProvider>,
-) -> Vec<CriterionResult> {
-    let results = adapter.validate_step(step, output, provider).await;
-
-    // Store results in the output
-    output.criteria_met = results.clone();
-
-    results
+) -> StepValidationResult {
+    output.evidence_summary = summarize_evidence(&output.evidence_bundle);
+    let result = validate_step_contract(step, output, provider).await;
+    output.criteria_met = derive_legacy_criteria_results(&result);
+    output.validation_result = result.clone();
+    output.outcome_status = result.outcome_status.clone();
+    output.review_reason = result.review_reason.clone();
+    result
 }
 
-/// Check if all criteria are met for a step output.
-pub fn all_criteria_met(results: &[CriterionResult]) -> bool {
-    results.iter().all(|r| r.met)
+pub fn validation_summary(result: &StepValidationResult) -> String {
+    result.summary.clone()
 }
 
-/// Generate a summary of validation results.
-pub fn validation_summary(results: &[CriterionResult]) -> String {
-    let total = results.len();
-    let met = results.iter().filter(|r| r.met).count();
-
-    if total == 0 {
-        return "No criteria to validate".to_string();
-    }
-
-    let mut summary = format!("{met}/{total} criteria met");
-
-    let failed: Vec<_> = results.iter().filter(|r| !r.met).collect();
-    if !failed.is_empty() {
-        summary.push_str("\nUnmet criteria:");
-        for r in failed {
-            summary.push_str(&format!("\n  - {}: {}", r.criterion, r.explanation));
-        }
-    }
-
-    summary
+pub fn derive_legacy_criteria_results(result: &StepValidationResult) -> Vec<CriterionResult> {
+    result
+        .checks
+        .iter()
+        .map(|check| CriterionResult {
+            criterion: check.name.clone(),
+            met: check.passed,
+            explanation: check.explanation.clone(),
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::plan_mode::types::{
+        StepOutcomeStatus, StepValidationStatus, ValidationCheckResult, ValidationSeverity,
+    };
 
     #[test]
-    fn test_all_criteria_met() {
-        let results = vec![
-            CriterionResult {
-                criterion: "c1".to_string(),
-                met: true,
-                explanation: "ok".to_string(),
-            },
-            CriterionResult {
-                criterion: "c2".to_string(),
-                met: true,
-                explanation: "ok".to_string(),
-            },
-        ];
-        assert!(all_criteria_met(&results));
-
-        let results_with_fail = vec![
-            CriterionResult {
-                criterion: "c1".to_string(),
-                met: true,
-                explanation: "ok".to_string(),
-            },
-            CriterionResult {
-                criterion: "c2".to_string(),
-                met: false,
+    fn test_validation_summary_uses_structured_result() {
+        let result = StepValidationResult {
+            status: StepValidationStatus::SoftFailed,
+            outcome_status: StepOutcomeStatus::SoftFailed,
+            summary: "2 validation issue(s): topic coverage: architecture".to_string(),
+            checks: vec![ValidationCheckResult {
+                name: "topic coverage: architecture".to_string(),
+                category: "semantic".to_string(),
+                passed: false,
+                severity: ValidationSeverity::Soft,
                 explanation: "missing".to_string(),
-            },
-        ];
-        assert!(!all_criteria_met(&results_with_fail));
+                evidence_refs: Vec::new(),
+                missing_items: vec!["architecture".to_string()],
+                confidence: Some(0.4),
+            }],
+            unmet_checks: Vec::new(),
+            failure_bucket: None,
+            confidence: Some(0.4),
+            retry_guidance: Vec::new(),
+            review_reason: None,
+        };
+        assert!(validation_summary(&result).contains("validation issue"));
     }
 
     #[test]
-    fn test_validation_summary() {
-        let results = vec![
-            CriterionResult {
-                criterion: "Has introduction".to_string(),
-                met: true,
-                explanation: "Present".to_string(),
-            },
-            CriterionResult {
-                criterion: "Has conclusion".to_string(),
-                met: false,
-                explanation: "Missing conclusion section".to_string(),
-            },
-        ];
-
-        let summary = validation_summary(&results);
-        assert!(summary.contains("1/2 criteria met"));
-        assert!(summary.contains("Has conclusion"));
-        assert!(summary.contains("Missing conclusion section"));
-    }
-
-    #[test]
-    fn test_validation_summary_empty() {
-        assert_eq!(validation_summary(&[]), "No criteria to validate");
+    fn test_derive_legacy_criteria_results() {
+        let result = StepValidationResult {
+            status: StepValidationStatus::Passed,
+            outcome_status: StepOutcomeStatus::Completed,
+            summary: String::new(),
+            checks: vec![ValidationCheckResult {
+                name: "required section".to_string(),
+                category: "deliverable".to_string(),
+                passed: true,
+                severity: ValidationSeverity::Hard,
+                explanation: "ok".to_string(),
+                evidence_refs: Vec::new(),
+                missing_items: Vec::new(),
+                confidence: Some(1.0),
+            }],
+            unmet_checks: Vec::new(),
+            failure_bucket: None,
+            confidence: Some(1.0),
+            retry_guidance: Vec::new(),
+            review_reason: None,
+        };
+        let legacy = derive_legacy_criteria_results(&result);
+        assert_eq!(legacy.len(), 1);
+        assert!(legacy[0].met);
     }
 }
