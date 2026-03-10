@@ -145,12 +145,14 @@ function Ensure-CorepackPnpm {
 
 function Read-MetaValue {
   param([string]$Key)
-  $line = Get-Content $VendorMeta | Where-Object { $_ -match "^$Key: " } | Select-Object -First 1
+  $pattern = '^{0}: ' -f [regex]::Escape($Key)
+  $replacePattern = '^{0}:\s*' -f [regex]::Escape($Key)
+  $line = Get-Content $VendorMeta | Where-Object { $_ -match $pattern } | Select-Object -First 1
   if (-not $line) {
-    throw "Metadata key not found in $VendorMeta: $Key"
+    throw "Metadata key not found in ${VendorMeta}: ${Key}"
   }
 
-  return ($line -replace "^$Key:\s*", '').Trim()
+  return ($line -replace $replacePattern, '').Trim()
 }
 
 function Copy-DirectoryMirror {
