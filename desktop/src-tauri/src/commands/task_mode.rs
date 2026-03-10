@@ -1274,6 +1274,9 @@ async fn assemble_enriched_context_v2(
     mode: &str,
     session_id: Option<&str>,
     include_knowledge: bool,
+    llm_provider: Option<&str>,
+    llm_model: Option<&str>,
+    llm_base_url: Option<&str>,
 ) -> crate::services::task_mode::context_provider::EnrichedContext {
     let Some(mut config) = context_sources.cloned() else {
         return crate::services::task_mode::context_provider::EnrichedContext::default();
@@ -1308,6 +1311,9 @@ async fn assemble_enriched_context_v2(
         compaction_policy: None,
         fault_injection: None,
         enforce_user_skill_selection: true,
+        llm_provider: llm_provider.map(|value| value.to_string()),
+        llm_model: llm_model.map(|value| value.to_string()),
+        llm_base_url: llm_base_url.map(|value| value.to_string()),
     };
 
     let assembly = match crate::commands::context_v2::assemble_turn_context_internal(
@@ -1476,6 +1482,23 @@ pub(crate) async fn resolve_provider_config(
     explicit_api_key: Option<String>,
     explicit_base_url: Option<String>,
     app_state: &tauri::State<'_, AppState>,
+) -> Result<crate::services::llm::types::ProviderConfig, String> {
+    resolve_provider_config_from_app_state(
+        provider_name,
+        model,
+        explicit_api_key,
+        explicit_base_url,
+        app_state.inner(),
+    )
+    .await
+}
+
+pub(crate) async fn resolve_provider_config_from_app_state(
+    provider_name: &str,
+    model: &str,
+    explicit_api_key: Option<String>,
+    explicit_base_url: Option<String>,
+    app_state: &AppState,
 ) -> Result<crate::services::llm::types::ProviderConfig, String> {
     use crate::commands::standalone::normalize_provider_name;
     use crate::services::llm::types::{ProviderConfig, ProviderType};

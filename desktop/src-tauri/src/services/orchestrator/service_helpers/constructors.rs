@@ -875,6 +875,7 @@ impl OrchestratorService {
                                     "Tool '{}' is denied by plugin permissions",
                                     tool_name
                                 )),
+                                modified_arguments: None,
                             });
                         }
                         // If allow list is non-empty, only allowed tools may proceed
@@ -885,6 +886,7 @@ impl OrchestratorService {
                                     "Tool '{}' is not in plugin allow list",
                                     tool_name
                                 )),
+                                modified_arguments: None,
                             });
                         }
                         Ok(crate::services::orchestrator::hooks::BeforeToolResult::default())

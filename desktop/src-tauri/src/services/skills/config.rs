@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::services::skills::model::SkillDetection;
 use crate::utils::error::{AppError, AppResult};
@@ -45,6 +45,14 @@ pub struct SourceDefinition {
     pub path: Option<String>,
     /// Git repository URL
     pub repository: Option<String>,
+    /// Original URL for URL-backed installed sources
+    pub url: Option<String>,
+    #[serde(default = "default_source_enabled")]
+    pub enabled: bool,
+}
+
+fn default_source_enabled() -> bool {
+    true
 }
 
 /// Detection rules for a skill in the config
@@ -167,6 +175,23 @@ pub fn load_skills_config(path: &Path) -> AppResult<SkillsConfig> {
     })
 }
 
+/// Persist skills configuration to disk.
+pub fn save_skills_config(path: &Path, config: &SkillsConfig) -> AppResult<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = serde_json::to_string_pretty(config)
+        .map_err(|e| AppError::config(format!("Failed to serialize skills config: {}", e)))?;
+    std::fs::write(path, content).map_err(|e| {
+        AppError::config(format!(
+            "Failed to write skills config {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+    Ok(())
+}
+
 /// Merge two skills configs. `override_config` takes precedence.
 pub fn merge_configs(base: &SkillsConfig, override_config: &SkillsConfig) -> SkillsConfig {
     let mut merged = base.clone();
@@ -200,8 +225,47 @@ pub fn resolve_skill_path(
     base_dir: &Path,
 ) -> Option<std::path::PathBuf> {
     let source_def = config.sources.get(&skill_entry.source)?;
-    let source_path = source_def.path.as_ref()?;
-    Some(base_dir.join(source_path).join(&skill_entry.skill_path))
+    let source_root = resolve_source_path(source_def, base_dir)?;
+    Some(source_root.join(&skill_entry.skill_path))
+}
+
+/// Resolve a source root directory from its definition.
+pub fn resolve_source_path(source_def: &SourceDefinition, base_dir: &Path) -> Option<PathBuf> {
+    let raw_path = source_def.path.as_ref()?;
+    let path = PathBuf::from(raw_path);
+    if path.is_absolute() {
+        Some(path)
+    } else {
+        Some(base_dir.join(path))
+    }
+}
+
+/// Resolve a source path by preferring project-relative paths, then falling back
+/// to the shared plan-cascade directory for managed installs.
+pub fn resolve_source_path_for_project(
+    source_def: &SourceDefinition,
+    project_root: &Path,
+    shared_base_dir: Option<&Path>,
+) -> Option<PathBuf> {
+    let raw_path = source_def.path.as_ref()?;
+    let path = PathBuf::from(raw_path);
+    if path.is_absolute() {
+        return Some(path);
+    }
+
+    let project_candidate = project_root.join(&path);
+    if project_candidate.exists() {
+        return Some(project_candidate);
+    }
+
+    if let Some(base_dir) = shared_base_dir {
+        let shared_candidate = base_dir.join(&path);
+        if shared_candidate.exists() {
+            return Some(shared_candidate);
+        }
+    }
+
+    Some(project_candidate)
 }
 
 #[cfg(test)]
@@ -307,6 +371,8 @@ mod tests {
                         source_type: "submodule".to_string(),
                         path: Some("external-skills/vercel".to_string()),
                         repository: None,
+                        url: None,
+                        enabled: true,
                     },
                 );
                 m
@@ -324,6 +390,8 @@ mod tests {
                         source_type: "local".to_string(),
                         path: Some("/custom/skills".to_string()),
                         repository: None,
+                        url: None,
+                        enabled: true,
                     },
                 );
                 m
@@ -348,6 +416,8 @@ mod tests {
                         source_type: "submodule".to_string(),
                         path: Some("external-skills/vercel".to_string()),
                         repository: None,
+                        url: None,
+                        enabled: true,
                     },
                 );
                 m

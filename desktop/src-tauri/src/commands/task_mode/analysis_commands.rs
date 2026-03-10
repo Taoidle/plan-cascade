@@ -90,7 +90,7 @@ pub async fn run_requirement_analysis(
         &resolved_provider,
         &resolved_model,
         api_key,
-        base_url,
+        base_url.clone(),
         &app_state,
     )
     .await
@@ -116,6 +116,9 @@ pub async fn run_requirement_analysis(
         "task",
         Some(session_id.as_str()),
         true,
+        Some(resolved_provider.as_str()),
+        Some(resolved_model.as_str()),
+        base_url.as_deref(),
     )
     .await;
     let knowledge_block = &enriched.knowledge_block;
@@ -342,7 +345,7 @@ pub async fn run_architecture_review(
         &resolved_provider,
         &resolved_model,
         api_key,
-        base_url,
+        base_url.clone(),
         &app_state,
     )
     .await
@@ -368,6 +371,9 @@ pub async fn run_architecture_review(
         "task",
         Some(session_id.as_str()),
         true,
+        Some(resolved_provider.as_str()),
+        Some(resolved_model.as_str()),
+        base_url.as_deref(),
     )
     .await;
     let knowledge_block = &enriched.knowledge_block;

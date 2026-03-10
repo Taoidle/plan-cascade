@@ -182,11 +182,28 @@ describe('useSkillMemoryStore', () => {
       expect(state.skills).toHaveLength(2);
       expect(state.skillsLoading).toBe(false);
       expect(state.skillsError).toBeNull();
-      expect(mockInvoke).toHaveBeenCalledWith('list_skills', {
+      expect(mockInvoke).toHaveBeenNthCalledWith(1, 'list_skills_v2', {
         projectPath: '/test/project',
         sourceFilter: null,
         includeDisabled: true,
       });
+    });
+
+    it('normalizes legacy Rust enum source payloads when loading skills', async () => {
+      const legacySkill = {
+        ...createMockSkillSummary({ id: 'skill-legacy', name: 'Legacy Skill' }),
+        source: 'builtin',
+      } as unknown as SkillSummary;
+      mockInvoke.mockResolvedValueOnce({
+        success: true,
+        data: [legacySkill],
+        error: null,
+      });
+
+      await useSkillMemoryStore.getState().loadSkills('/test/project');
+
+      const state = useSkillMemoryStore.getState();
+      expect(state.skills[0]?.source).toEqual({ type: 'builtin' });
     });
 
     it('should handle load skills error', async () => {
@@ -200,7 +217,7 @@ describe('useSkillMemoryStore', () => {
 
       const state = useSkillMemoryStore.getState();
       expect(state.skills).toHaveLength(0);
-      expect(state.skillsError).toBe('Failed to load');
+      expect(state.skillsError).toBe('Failed to load skills');
       expect(state.skillsLoading).toBe(false);
     });
 

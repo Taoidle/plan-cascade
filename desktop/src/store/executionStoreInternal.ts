@@ -304,6 +304,8 @@ async function buildStandaloneMessageWithContextEnvelope(params: {
     input_token_budget: inputTokenBudget,
     reserved_output_tokens: reservedOutputTokens,
     hard_limit: hardLimit,
+    llm_provider: settings.provider,
+    llm_model: settings.model,
   };
 
   try {
@@ -394,6 +396,8 @@ async function buildClaudePromptWithContextEnvelope(params: {
     input_token_budget: inputTokenBudget,
     reserved_output_tokens: reservedOutputTokens,
     hard_limit: hardLimit,
+    llm_provider: settings.provider,
+    llm_model: settings.model,
   };
 
   try {

@@ -323,6 +323,7 @@ pub async fn generate_plan(
                 context_sources.as_ref(),
                 &description,
                 InjectionPhase::Planning,
+                Some(llm_provider.config()),
             )
             .await;
             let plan_context_ref = if plan_context.rendered_context.is_empty() {
@@ -534,6 +535,7 @@ pub async fn approve_plan(
         context_sources.as_ref(),
         &task_description,
         InjectionPhase::Implementation,
+        Some(&provider_config),
     )
     .await;
     let execution_context = if execution_context_bundle.rendered_context.is_empty() {
@@ -923,6 +925,7 @@ pub async fn retry_plan_step(
         context_sources.as_ref(),
         &task_description,
         InjectionPhase::Implementation,
+        Some(&provider_config),
     )
     .await;
     let execution_context = if execution_context_bundle.rendered_context.is_empty() {

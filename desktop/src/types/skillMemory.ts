@@ -22,6 +22,9 @@ export type SkillSourceLabel = 'builtin' | 'external' | 'user' | 'project_local'
 
 /** Phase in which a skill is injected */
 export type InjectionPhase = 'planning' | 'implementation' | 'retry' | 'always';
+export type SkillReviewStatus = 'pending_review' | 'approved' | 'rejected' | 'archived';
+export type SkillSourceInstallType = 'local' | 'git' | 'url';
+export type GeneratedSkillImportConflictPolicy = 'rename' | 'replace' | 'skip';
 
 /** Lightweight skill summary (no body text) */
 export interface SkillSummary {
@@ -39,6 +42,9 @@ export interface SkillSummary {
   has_hooks: boolean;
   inject_into: InjectionPhase[];
   path: string;
+  review_status?: SkillReviewStatus | null;
+  review_notes?: string | null;
+  reviewed_at?: string | null;
 }
 
 /** Full skill document (includes body) */
@@ -62,6 +68,9 @@ export interface SkillDocument {
   detect: SkillDetection | null;
   inject_into: InjectionPhase[];
   enabled: boolean;
+  review_status?: SkillReviewStatus | null;
+  review_notes?: string | null;
+  reviewed_at?: string | null;
 }
 
 export interface SkillHooks {
@@ -115,6 +124,42 @@ export interface SkillsOverview {
   detected_skills: SkillSummary[];
   sources: string[];
 }
+
+export interface SkillSourceInfo {
+  name: string;
+  source_type: SkillSourceInstallType | string;
+  path?: string | null;
+  repository?: string | null;
+  url?: string | null;
+  enabled: boolean;
+  installed: boolean;
+  skill_count: number;
+}
+
+export interface SkillSourceMutationResult {
+  source: SkillSourceInfo;
+  files_deleted: boolean;
+}
+
+export interface NonSelectedSkillDiagnostic {
+  skill_id: string;
+  skill_name: string;
+  reason: string;
+  source_type: string;
+  path: string;
+  review_status?: SkillReviewStatus | null;
+}
+
+type SkillSourceLegacyInput =
+  | SkillSource
+  | SkillSourceLabel
+  | { external?: { source_name?: string } }
+  | { builtin?: Record<string, never> }
+  | { user?: Record<string, never> }
+  | { project_local?: Record<string, never> }
+  | { generated?: Record<string, never> }
+  | null
+  | undefined;
 
 // ============================================================================
 // Memory Types
@@ -249,20 +294,69 @@ export interface MemoryPipelineStatusEvent {
 // ============================================================================
 
 /** Get the display label for a skill source */
-export function getSkillSourceLabel(source: SkillSource): SkillSourceLabel {
-  if ('type' in source) {
-    return source.type as SkillSourceLabel;
+export function normalizeSkillSource(source: SkillSourceLegacyInput): SkillSource {
+  if (!source) {
+    return { type: 'builtin' };
   }
-  return 'builtin';
+
+  if (typeof source === 'string') {
+    switch (source) {
+      case 'external':
+        return { type: 'external', source_name: '' };
+      case 'user':
+      case 'project_local':
+      case 'generated':
+      case 'builtin':
+        return { type: source };
+      default:
+        return { type: 'builtin' };
+    }
+  }
+
+  if ('type' in source && typeof source.type === 'string') {
+    if (source.type === 'external') {
+      return { type: 'external', source_name: 'source_name' in source ? (source.source_name ?? '') : '' };
+    }
+    return source as SkillSource;
+  }
+
+  if ('external' in source) {
+    return { type: 'external', source_name: source.external?.source_name ?? '' };
+  }
+  if ('user' in source) return { type: 'user' };
+  if ('project_local' in source) return { type: 'project_local' };
+  if ('generated' in source) return { type: 'generated' };
+  if ('builtin' in source) return { type: 'builtin' };
+
+  return { type: 'builtin' };
+}
+
+export function normalizeSkillSummary(summary: SkillSummary): SkillSummary {
+  return {
+    ...summary,
+    source: normalizeSkillSource(summary.source),
+  };
+}
+
+export function normalizeSkillDocument(document: SkillDocument): SkillDocument {
+  return {
+    ...document,
+    source: normalizeSkillSource(document.source),
+  };
+}
+
+export function getSkillSourceLabel(source: SkillSourceLegacyInput): SkillSourceLabel {
+  return normalizeSkillSource(source).type;
 }
 
 /** Get a human-readable name for a skill source */
-export function getSkillSourceDisplayName(source: SkillSource): string {
-  switch (source.type) {
+export function getSkillSourceDisplayName(source: SkillSourceLegacyInput): string {
+  const normalized = normalizeSkillSource(source);
+  switch (normalized.type) {
     case 'builtin':
       return 'Built-in';
     case 'external':
-      return source.source_name || 'External';
+      return normalized.source_name || 'External';
     case 'user':
       return 'User';
     case 'project_local':

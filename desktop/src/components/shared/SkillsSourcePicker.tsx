@@ -10,6 +10,7 @@ import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { ChevronDownIcon, ChevronRightIcon, MagnifyingGlassIcon } from '@radix-ui/react-icons';
 import { useContextSourcesStore } from '../../store/contextSources';
+import { useContextOpsStore } from '../../store/contextOps';
 import { useSettingsStore } from '../../store/settings';
 import type { SkillSummary } from '../../types/skillMemory';
 
@@ -22,11 +23,30 @@ function getGroupKey(skill: SkillSummary): string {
   return skill.source.type;
 }
 
+function reviewStatusLabel(
+  t: (key: string, options?: { defaultValue?: string }) => string,
+  status: SkillSummary['review_status'],
+): string {
+  switch (status) {
+    case 'approved':
+      return t('skillPanel.reviewStatus.approved', { defaultValue: 'Approved' });
+    case 'rejected':
+      return t('skillPanel.reviewStatus.rejected', { defaultValue: 'Rejected' });
+    case 'archived':
+      return t('skillPanel.reviewStatus.archived', { defaultValue: 'Archived' });
+    case 'pending_review':
+      return t('skillPanel.reviewStatus.pending_review', { defaultValue: 'Pending Review' });
+    default:
+      return '';
+  }
+}
+
 export function SkillsSourcePicker() {
   const { t } = useTranslation('simpleMode');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
   const {
     selectedSkillIds,
+    invokedSkillIds,
     availableSkills,
     isLoadingSkills,
     skillPickerSearchQuery,
@@ -35,6 +55,7 @@ export function SkillsSourcePicker() {
     loadAvailableSkills,
     setSkillPickerSearchQuery,
   } = useContextSourcesStore();
+  const diagnostics = useContextOpsStore((s) => s.latestEnvelope?.diagnostics);
 
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['detected']));
 
@@ -139,6 +160,34 @@ export function SkillsSourcePicker() {
       <div className="px-3 py-1 text-2xs text-gray-400 dark:text-gray-500 border-b border-gray-100 dark:border-gray-700">
         {t('contextSources.skillsPicker.hint', { defaultValue: 'Select skills injected into the current session.' })}
       </div>
+      {(invokedSkillIds.length > 0 || diagnostics?.blocked_tools?.length || diagnostics?.selection_reason) && (
+        <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-700 space-y-1 text-2xs">
+          {invokedSkillIds.length > 0 && (
+            <div className="text-sky-700 dark:text-sky-300">
+              {t('contextSources.skillsPicker.pinned', {
+                count: invokedSkillIds.length,
+                defaultValue: '{{count}} command-pinned skills active',
+              })}
+            </div>
+          )}
+          {diagnostics?.selection_reason && (
+            <div className="text-gray-500 dark:text-gray-400">
+              {t('contextSources.skillsPicker.selectionReason', {
+                defaultValue: 'reason: {{reason}}',
+                reason: diagnostics.selection_reason,
+              })}
+            </div>
+          )}
+          {diagnostics?.blocked_tools?.length ? (
+            <div className="text-amber-700 dark:text-amber-300">
+              {t('contextSources.skillsPicker.blockedTools', {
+                defaultValue: 'blocked: {{tools}}',
+                tools: diagnostics.blocked_tools.join(', '),
+              })}
+            </div>
+          ) : null}
+        </div>
+      )}
 
       {/* Search input */}
       <div className="px-2 py-1.5 border-b border-gray-100 dark:border-gray-700">
@@ -187,6 +236,16 @@ export function SkillsSourcePicker() {
                   className="w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-600 text-emerald-600 focus:ring-emerald-500"
                 />
                 <span className="flex-1 text-2xs text-gray-700 dark:text-gray-300 truncate">{skill.name}</span>
+                {invokedSkillIds.includes(skill.id) && (
+                  <span className="text-2xs text-sky-700 dark:text-sky-300 px-1 py-0 rounded bg-sky-100 dark:bg-sky-900/20">
+                    {t('contextSources.skillsPicker.pinnedBadge', { defaultValue: 'Pinned' })}
+                  </span>
+                )}
+                {skill.review_status && (
+                  <span className="text-2xs text-gray-400 dark:text-gray-500 px-1 py-0 rounded bg-gray-100 dark:bg-gray-700">
+                    {reviewStatusLabel(t, skill.review_status)}
+                  </span>
+                )}
                 <span className="text-2xs text-gray-400 dark:text-gray-500 px-1 py-0 rounded bg-gray-100 dark:bg-gray-700">
                   {groupLabel(getGroupKey(skill))}
                 </span>
@@ -256,8 +315,26 @@ export function SkillsSourcePicker() {
                           <span className="flex-1 text-2xs text-gray-600 dark:text-gray-400 truncate">
                             {skill.name}
                           </span>
+                          {invokedSkillIds.includes(skill.id) && (
+                            <span
+                              className="text-2xs text-sky-700 dark:text-sky-300 px-1 py-0 rounded bg-sky-100 dark:bg-sky-900/20"
+                              title={t('contextSources.skillsPicker.pinnedBadge', { defaultValue: 'Pinned' })}
+                            >
+                              P
+                            </span>
+                          )}
+                          {skill.review_status && skill.review_status !== 'approved' && (
+                            <span className="text-2xs text-gray-400 dark:text-gray-500 px-1 py-0 rounded bg-gray-100 dark:bg-gray-700">
+                              {reviewStatusLabel(t, skill.review_status)}
+                            </span>
+                          )}
                           {skill.detected && (
-                            <span className="text-2xs text-emerald-500" title="Auto-detected">
+                            <span
+                              className="text-2xs text-emerald-500"
+                              title={t('contextSources.skillsPicker.groups.detected', {
+                                defaultValue: 'Auto-Detected',
+                              })}
+                            >
                               &#10003;
                             </span>
                           )}

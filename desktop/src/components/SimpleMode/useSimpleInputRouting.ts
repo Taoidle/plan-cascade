@@ -1,11 +1,27 @@
 import { useCallback } from 'react';
 import { reportInteractiveActionFailure } from '../../lib/workflowObservability';
 import { startModeWithCompensation, submitWorkflowInputWithTracking } from '../../store/simpleWorkflowCoordinator';
+import { useContextSourcesStore } from '../../store/contextSources';
+import { useSettingsStore } from '../../store/settings';
 import { useWorkflowKernelStore } from '../../store/workflowKernel';
 import type { PlanClarifyQuestionCardData } from '../../types/planModeCard';
 import type { InterviewQuestionCardData } from '../../types/workflowCard';
 import type { HandoffContextBundle, UserInputIntent, WorkflowMode, WorkflowSession } from '../../types/workflowKernel';
 import type { ActionResult } from '../../types/actionResult';
+
+interface SkillSlashCommandParseResult {
+  skillId: string;
+  remainingPrompt: string;
+}
+
+function parseSkillSlashCommand(prompt: string): SkillSlashCommandParseResult | null {
+  const match = prompt.match(/^\/skill:([^\s]+)(?:\s+([\s\S]*))?$/);
+  if (!match) return null;
+  return {
+    skillId: match[1].trim(),
+    remainingPrompt: (match[2] ?? '').trim(),
+  };
+}
 
 interface UseSimpleInputRoutingParams {
   description: string;
@@ -89,10 +105,35 @@ export function useSimpleInputRouting({
   cancelWorkflowKernelOperation,
   transitionAndSubmitWorkflowKernelInput,
 }: UseSimpleInputRoutingParams): UseSimpleInputRoutingResult {
+  const resolvePromptAfterSkillInvocation = useCallback(async (rawPrompt: string): Promise<string | null> => {
+    const parsed = parseSkillSlashCommand(rawPrompt.trim());
+    if (!parsed) {
+      return rawPrompt.trim();
+    }
+
+    const projectPath = useSettingsStore.getState().workspacePath?.trim() || '';
+    if (!projectPath) {
+      return parsed.remainingPrompt || null;
+    }
+
+    const sessionId = useWorkflowKernelStore.getState().sessionId;
+    const invoked = await useContextSourcesStore.getState().invokeSkillCommand(projectPath, parsed.skillId, sessionId);
+    if (!invoked) {
+      return null;
+    }
+    return parsed.remainingPrompt || null;
+  }, []);
+
   const handleStart = useCallback(
     async (inputPrompt?: string) => {
-      const prompt = (inputPrompt ?? description).trim();
-      if (!prompt || isSubmitting || isAnalyzingStrategy) return;
+      const rawPrompt = inputPrompt ?? description;
+      const prompt = await resolvePromptAfterSkillInvocation(rawPrompt);
+      if (!prompt || isSubmitting || isAnalyzingStrategy) {
+        if (inputPrompt === undefined && parseSkillSlashCommand(rawPrompt.trim())) {
+          setDescription('');
+        }
+        return;
+      }
       if (inputPrompt === undefined) {
         setDescription('');
       }
@@ -133,13 +174,20 @@ export function useSimpleInputRouting({
       startWorkflow,
       transitionAndSubmitWorkflowKernelInput,
       workflowMode,
+      resolvePromptAfterSkillInvocation,
     ],
   );
 
   const handleFollowUp = useCallback(
     async (inputPrompt?: string) => {
-      const prompt = (inputPrompt ?? description).trim();
-      if (!prompt || isSubmitting) return;
+      const rawPrompt = inputPrompt ?? description;
+      const prompt = await resolvePromptAfterSkillInvocation(rawPrompt);
+      if (!prompt || isSubmitting) {
+        if (inputPrompt === undefined && parseSkillSlashCommand(rawPrompt.trim())) {
+          setDescription('');
+        }
+        return;
+      }
       if (inputPrompt === undefined) {
         setDescription('');
       }
@@ -258,6 +306,7 @@ export function useSimpleInputRouting({
       transitionAndSubmitWorkflowKernelInput,
       workflowMode,
       workflowPhase,
+      resolvePromptAfterSkillInvocation,
     ],
   );
 

@@ -86,6 +86,24 @@ pub fn select_skills_for_session(
     results
 }
 
+/// Select a wider candidate set for downstream LLM reranking.
+///
+/// Uses the same two-phase recall as `select_skills_for_session`, but allows
+/// callers to request a larger candidate window than the final injection top-k.
+pub fn select_skill_candidates_for_session(
+    index: &SkillIndex,
+    project_root: &Path,
+    user_message: &str,
+    phase: &InjectionPhase,
+    policy: &SelectionPolicy,
+    candidate_limit: usize,
+) -> Vec<SkillMatch> {
+    let candidate_limit = candidate_limit.max(policy.top_k).max(1);
+    let mut widened_policy = policy.clone();
+    widened_policy.top_k = candidate_limit;
+    select_skills_for_session(index, project_root, user_message, phase, &widened_policy)
+}
+
 /// Phase 1: Detect applicable skills by checking detect rules against project files.
 ///
 /// For each skill with detect rules:

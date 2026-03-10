@@ -102,13 +102,37 @@ describe('SkillMemoryDialog integration', () => {
     seedEnvelope();
   });
 
-  it('maps diagnostics.selection_origin in Why Skills panel', () => {
+  it('maps diagnostics.selection_origin in Why Skills tab', () => {
     render(<SkillMemoryDialog />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Why Skills?' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Why these skills?' }));
     expect(screen.getByText(/Selection origin/i)).toBeInTheDocument();
     expect(screen.getByText(/mixed/i)).toBeInTheDocument();
     expect(screen.getByText(/Blocked tools/i)).toBeInTheDocument();
+  });
+
+  it('renders skill sources in a separate tab', () => {
+    useSkillMemoryStore.setState({
+      skillSources: [
+        {
+          name: 'community',
+          source_type: 'git',
+          repository: 'https://github.com/example/community-skills.git',
+          path: '/tmp/community',
+          url: null,
+          enabled: true,
+          installed: true,
+          skill_count: 4,
+        },
+      ],
+    });
+
+    render(<SkillMemoryDialog />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Skill Sources' }));
+    expect(screen.getByText(/Manage installed local, Git, and URL-backed skill sources/i)).toBeInTheDocument();
+    expect(screen.getByText(/^community$/i)).toBeInTheDocument();
+    expect(screen.getByText(/\{\{count\}\} skills/i)).toBeInTheDocument();
   });
 
   it('maps diagnostics.selection_origin in Why Memory panel', () => {

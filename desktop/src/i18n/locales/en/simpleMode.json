@@ -234,6 +234,11 @@
       "pending": "{{count}} memories pending review",
       "injected": "{{count}} memories injected"
     },
+    "currentSkillStack": "Active in current session",
+    "generatedReviewedSkills": "Generated & reviewed",
+    "noGeneratedSkills": "No generated skills",
+    "noActiveSkills": "No effective skills in the latest run yet.",
+    "pinned": "Pinned",
     "selectAll": "Select All",
     "approveSelected": "Approve Selected",
     "rejectSelected": "Reject Selected",
@@ -264,6 +269,11 @@
     "noDeletedMemories": "Recycle bin is empty",
     "noDeletedMemoriesHint": "Deleted memories stay here until you restore or permanently delete them.",
     "whySkillsTitle": "Why these skills",
+    "skillsViews": {
+      "catalog": "Skills",
+      "why": "Why these skills?",
+      "sources": "Skill Sources"
+    },
     "showWhySkills": "Why Skills?",
     "hideWhySkills": "Hide Why",
     "whyMemoryTitle": "Why these memories",
@@ -271,13 +281,110 @@
     "hideWhyMemory": "Hide Why",
     "selectionReason": "Selection reason",
     "selectionOrigin": "Selection origin",
+    "selectionOrigins": {
+      "auto": "auto",
+      "auto_llm": "auto (LLM rerank)",
+      "auto_fallback": "auto (fallback)",
+      "explicit": "explicit",
+      "mixed": "mixed",
+      "command_invoked": "command invoked",
+      "none": "none"
+    },
+    "selectionReasons": {
+      "skills_auto_llm_rerank": "LLM reranked the recalled skills",
+      "skills_auto_llm_fallback": "LLM rerank failed, fell back to rules",
+      "skills_auto_match": "rules matched these skills",
+      "skills_no_match": "no skill matched the current task",
+      "skills_command_invoked": "command-pinned skills were applied",
+      "skills_command_invoked_unavailable": "command-pinned skills were unavailable",
+      "skills_user_selected": "user-selected skills were applied",
+      "skills_explicit_and_command_invoked": "explicit and command-pinned skills were combined"
+    },
+    "routerStatus": "Router",
+    "routerConfidence": "Router confidence",
+    "routerReason": "Router reason",
+    "routerFallback": "Fallback",
+    "routerStrategies": {
+      "hybrid": "LLM rerank"
+    },
+    "routerFallbackReasons": {
+      "provider_unavailable": "provider unavailable",
+      "empty_query": "empty query",
+      "timeout": "router timed out",
+      "empty_response": "empty response",
+      "invalid_empty_selection": "no valid skill returned"
+    },
     "selectedSkills": "Selected skills",
+    "commandPinnedSkills": "Command pinned skills",
+    "hierarchyMatches": "Hierarchy matches",
+    "whyNotSelectedTitle": "Why not selected",
     "blockedTools": "Blocked tools",
     "effectiveStatuses": "Effective statuses",
     "candidateCount": "Candidates",
     "degradedReason": "Degraded reason",
     "sourceReason": "Source reason",
     "none": "none",
+    "metadata": "Metadata",
+    "reviewNotes": "Review notes",
+    "skillSourcesTitle": "Skill Sources",
+    "skillSourcesHint": "Manage installed local, Git, and URL-backed skill sources.",
+    "skillSourceInput": "Paste a local path, Git URL, github:owner/repo, or raw SKILL.md URL",
+    "skillSourceName": "Optional source name",
+    "installSkillSource": "Install Source",
+    "refreshSkillSource": "Refresh source",
+    "removeSkillSource": "Remove source",
+    "enableSkillSource": "Enable source",
+    "disableSkillSource": "Disable source",
+    "noSkillSources": "No external skill sources configured yet.",
+    "sourceInstalled": "installed",
+    "sourceMissing": "missing",
+    "sourceEnabled": "enabled",
+    "sourceDisabled": "disabled",
+    "sourceSkillCount": "{{count}} skills",
+    "sourceTypes": {
+      "local": "Local",
+      "git": "Git",
+      "url": "URL"
+    },
+    "editGenerated": "Edit Generated",
+    "importGenerated": "Import Generated",
+    "exportGenerated": "Export Generated",
+    "approvePendingGenerated": "Approve Pending",
+    "rejectPendingGenerated": "Reject Pending",
+    "cancelEditGenerated": "Cancel Edit",
+    "generatedForm": {
+      "name": "Generated skill name",
+      "description": "Description",
+      "tags": "Comma-separated tags"
+    },
+    "reviewStatus": {
+      "pending_review": "Pending Review",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "archived": "Archived"
+    },
+    "reviewActions": {
+      "approve": "Approve",
+      "reject": "Reject",
+      "archive": "Archive",
+      "restore": "Restore"
+    },
+    "whyNotSelected": {
+      "disabled": "Disabled",
+      "unmatched": "Not selected by latest matching pass",
+      "notPinnedOrExplicit": "Not in explicit or pinned selection",
+      "notExplicitlySelected": "Not explicitly selected"
+    },
+    "whyNotSelectedReasons": {
+      "disabled": "Disabled",
+      "pending_review": "Pending Review",
+      "rejected": "Rejected",
+      "archived": "Archived",
+      "phase_mismatch": "Phase mismatch",
+      "not_in_explicit_selection": "Not in explicit selection",
+      "filtered_out": "Filtered out",
+      "unmatched": "Not selected by latest matching pass"
+    },
     "pipeline": {
       "title": "Automatic memory pipeline",
       "extracted": "Extracted {{count}}",
@@ -349,6 +456,23 @@
       "refreshSkillsFailed": "Failed to refresh",
       "skillDeleted": "Skill deleted",
       "deleteSkillFailed": "Failed to delete skill",
+      "reviewSkillFailed": "Failed to review generated skill",
+      "reviewSkillSaved": "Skill review updated",
+      "updateGeneratedSkillFailed": "Failed to update generated skill",
+      "generatedSkillUpdated": "Generated skill updated",
+      "installSkillSourceFailed": "Failed to install skill source",
+      "skillSourceInstalled": "Skill source installed",
+      "refreshSkillSourceFailed": "Failed to refresh skill source",
+      "skillSourceRefreshed": "Skill source refreshed",
+      "setSkillSourceEnabledFailed": "Failed to update skill source status",
+      "skillSourceEnabled": "Skill source enabled",
+      "skillSourceDisabled": "Skill source disabled",
+      "removeSkillSourceFailed": "Failed to remove skill source",
+      "skillSourceRemoved": "Skill source removed",
+      "exportGeneratedSkillFailed": "Failed to export generated skill",
+      "generatedSkillExported": "Generated skill exported",
+      "importGeneratedSkillFailed": "Failed to import generated skill",
+      "generatedSkillImported": "Generated skill imported",
       "loadMemoriesFailed": "Failed to load memories",
       "memoryAdded": "Memory added",
       "addMemoryFailed": "Failed to add memory",
@@ -1145,6 +1269,10 @@
     "skillsPicker": {
       "title": "Session Skill Injection",
       "hint": "Select skills injected into the current session.",
+      "pinned": "{{count}} command-pinned skills active",
+      "pinnedBadge": "Pinned",
+      "selectionReason": "reason: {{reason}}",
+      "blockedTools": "blocked: {{tools}}",
       "searchPlaceholder": "Search skills...",
       "noSkills": "No skills available",
       "noResults": "No matching skills",
@@ -1288,12 +1416,26 @@
   },
   "contextSummary": {
     "title": "Effective Context",
+    "buttonLabel": "Context",
+    "panelTitle": "Active Context",
     "why": "Why",
+    "openPanel": "Inspect",
     "off": "off",
     "show": "Show effective context",
     "hide": "Hide",
     "knowledgeCount": "{{count}} selected",
-    "skillsCount": "{{count}} selected",
+    "skillsCount": "{{count}} selected/pinned",
+    "blockedTools": "{{count}} blocked tools",
+    "currentSkillStack": "Current Skill Stack",
+    "inspectSkills": "Inspect",
+    "pinned": "pinned",
+    "noEffectiveSkills": "No effective skills in the latest context run.",
+    "selectionReason": "reason: {{reason}}",
+    "routerStatus": "router: {{strategy}}",
+    "routerConfidence": "confidence {{confidence}}",
+    "routerFallback": "fallback: {{reason}}",
+    "routerReason": "router reason: {{reason}}",
+    "blockedToolsList": "blocked: {{tools}}",
     "source": {
       "legacy": "legacy",
       "unified": "unified"
@@ -1306,8 +1448,32 @@
     "origin": "origin: {{origin}}",
     "originValues": {
       "auto": "auto",
+      "auto_llm": "auto (LLM rerank)",
+      "auto_fallback": "auto (fallback)",
       "explicit": "explicit",
-      "mixed": "mixed"
+      "mixed": "mixed",
+      "command_invoked": "command invoked",
+      "none": "none"
+    },
+    "routerStrategies": {
+      "hybrid": "LLM rerank"
+    },
+    "routerFallbackReasons": {
+      "provider_unavailable": "provider unavailable",
+      "empty_query": "empty query",
+      "timeout": "router timed out",
+      "empty_response": "empty response",
+      "invalid_empty_selection": "no valid skill returned"
+    },
+    "selectionReasons": {
+      "skills_auto_llm_rerank": "LLM reranked the recalled skills",
+      "skills_auto_llm_fallback": "LLM rerank failed, fell back to rules",
+      "skills_auto_match": "rules matched these skills",
+      "skills_no_match": "no skill matched the current task",
+      "skills_command_invoked": "command-pinned skills were applied",
+      "skills_command_invoked_unavailable": "command-pinned skills were unavailable",
+      "skills_user_selected": "user-selected skills were applied",
+      "skills_explicit_and_command_invoked": "explicit and command-pinned skills were combined"
     }
   }
 }

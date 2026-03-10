@@ -29,14 +29,17 @@ import {
   PlayIcon,
   StopIcon,
   CheckCircledIcon,
+  LightningBoltIcon,
 } from '../components/shared/CommandPalette';
 import { useModeStore } from '../store/mode';
 import { useSettingsStore } from '../store/settings';
 import { useClaudeCodeStore } from '../store/claudeCode';
 import { useAgentsStore } from '../store/agents';
 import { useAnalyticsStore } from '../store/analytics';
+import { useContextSourcesStore } from '../store/contextSources';
 import { useProjectsStore } from '../store/projects';
 import { useTimelineStore } from '../store/timeline';
+import { useWorkflowKernelStore } from '../store/workflowKernel';
 import { dispatchMcpUiIntent } from '../store/mcpUi';
 import {
   createChatCommands,
@@ -60,12 +63,14 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
   const { t } = useTranslation('common');
   const { registerCommands, unregisterCommands, setCurrentContext } = useGlobalCommandPalette();
   const { mode, setMode } = useModeStore();
-  const { theme, setTheme, language, setLanguage } = useSettingsStore();
+  const { theme, setTheme, language, setLanguage, workspacePath } = useSettingsStore();
   const claudeCodeStore = useClaudeCodeStore();
   const agentsStore = useAgentsStore();
   const analyticsStore = useAnalyticsStore();
+  const contextSourcesStore = useContextSourcesStore();
   const projectsStore = useProjectsStore();
   const timelineStore = useTimelineStore();
+  const workflowKernelSessionId = useWorkflowKernelStore((s) => s.sessionId);
 
   const dispatchMcpAction = useCallback(
     (
@@ -677,6 +682,32 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
     [t, claudeCodeStore, options],
   );
 
+  const skillCommands: Command[] = useMemo(() => {
+    if (!workspacePath?.trim()) return [];
+    return contextSourcesStore.availableSkills
+      .filter(
+        (skill) =>
+          skill.user_invocable &&
+          skill.enabled &&
+          skill.review_status !== 'pending_review' &&
+          skill.review_status !== 'rejected' &&
+          skill.review_status !== 'archived',
+      )
+      .map((skill) => ({
+        id: `skill-command:${skill.id}`,
+        title: `Use Skill: ${skill.name}`,
+        description: skill.description,
+        category: 'chat' as CommandCategory,
+        icon: LightningBoltIcon,
+        action: async () => {
+          await contextSourcesStore.invokeSkillCommand(workspacePath, skill.id, workflowKernelSessionId);
+        },
+        keywords: ['skill', 'command', 'workflow', skill.id, skill.name, ...skill.tags],
+        priority: 72,
+        contexts: ['simple', 'global'],
+      }));
+  }, [contextSourcesStore, workspacePath, workflowKernelSessionId]);
+
   // ============================================================================
   // Settings Commands (8 commands)
   // ============================================================================
@@ -720,6 +751,7 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
       ...mcpCommands,
       ...timelineCommands,
       ...chatCommands,
+      ...skillCommands,
       ...settingsCommands,
       ...helpCommands,
     ],
@@ -731,6 +763,7 @@ export function useGlobalCommands(options: UseGlobalCommandsOptions = {}) {
       mcpCommands,
       timelineCommands,
       chatCommands,
+      skillCommands,
       settingsCommands,
       helpCommands,
     ],

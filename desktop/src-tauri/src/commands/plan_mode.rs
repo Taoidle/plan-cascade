@@ -502,7 +502,9 @@ fn default_plan_context_sources() -> ContextSourceConfig {
         skills: Some(SkillsSourceConfig {
             enabled: true,
             selected_skill_ids: vec![],
+            invoked_skill_ids: vec![],
             selection_mode: crate::services::task_mode::context_provider::SkillSelectionMode::Auto,
+            review_filter: None,
         }),
     }
 }
@@ -527,6 +529,7 @@ async fn build_plan_conversation_context(
     context_sources: Option<&ContextSourceConfig>,
     query: &str,
     phase: InjectionPhase,
+    provider_config: Option<&crate::services::llm::types::ProviderConfig>,
 ) -> PlanContextBundle {
     let mut bundle = PlanContextBundle::default();
     let mut sections = Vec::new();
@@ -608,6 +611,9 @@ async fn build_plan_conversation_context(
         compaction_policy: None,
         fault_injection: None,
         enforce_user_skill_selection: true,
+        llm_provider: provider_config.map(|config| config.provider.to_string()),
+        llm_model: provider_config.map(|config| config.model.clone()),
+        llm_base_url: provider_config.and_then(|config| config.base_url.clone()),
     };
     let assembled = crate::commands::context_v2::assemble_turn_context_internal(
         request,

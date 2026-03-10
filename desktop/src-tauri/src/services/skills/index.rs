@@ -65,6 +65,9 @@ pub fn build_index(skills: Vec<DiscoveredSkill>) -> AppResult<SkillIndex> {
             detect: skill.detect,
             inject_into: skill.inject_into,
             enabled: skill.enabled,
+            review_status: None,
+            review_notes: None,
+            reviewed_at: None,
         };
 
         // Dedup by name: higher priority wins

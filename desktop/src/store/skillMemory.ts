@@ -13,8 +13,11 @@ import i18n from '../i18n';
 import { reportNonFatal } from '../lib/nonFatal';
 import { useContextSourcesStore } from './contextSources';
 import type {
+  GeneratedSkillImportConflictPolicy,
   SkillSummary,
   SkillDocument,
+  SkillSourceInfo,
+  SkillSourceMutationResult,
   SkillsOverview,
   SkillIndexStats,
   MemoryEntry,
@@ -27,8 +30,10 @@ import type {
   MemoryPipelineSnapshot,
   MemoryPipelineStatusEvent,
   SkillMatch,
+  SkillReviewStatus,
   SkillSourceLabel,
 } from '../types/skillMemory';
+import { normalizeSkillDocument, normalizeSkillSummary } from '../types/skillMemory';
 
 // ============================================================================
 // CommandResponse wrapper (mirrors Rust CommandResponse<T>)
@@ -149,6 +154,8 @@ interface SkillMemoryState {
   skillDetail: SkillDocument | null;
   skillDetailLoading: boolean;
   skillsOverview: SkillsOverview | null;
+  skillSources: SkillSourceInfo[];
+  skillSourcesLoading: boolean;
   skillSearchQuery: string;
   skillSourceFilter: SkillSourceFilter;
 
@@ -183,6 +190,23 @@ interface SkillMemoryState {
   loadSkillDetail: (projectPath: string, id: string) => Promise<void>;
   toggleSkill: (id: string, enabled: boolean) => Promise<void>;
   toggleGeneratedSkill: (id: string, enabled: boolean) => Promise<void>;
+  reviewGeneratedSkill: (id: string, decision: SkillReviewStatus, reviewNotes?: string | null) => Promise<void>;
+  reviewGeneratedSkills: (ids: string[], decision: SkillReviewStatus, reviewNotes?: string | null) => Promise<void>;
+  updateGeneratedSkill: (
+    id: string,
+    updates: { name: string; description: string; tags: string[]; body: string },
+  ) => Promise<void>;
+  loadSkillSources: (projectPath: string) => Promise<void>;
+  installSkillSource: (projectPath: string, source: string, name?: string | null) => Promise<void>;
+  setSkillSourceEnabled: (projectPath: string, name: string, enabled: boolean) => Promise<void>;
+  refreshSkillSource: (projectPath: string, name: string) => Promise<void>;
+  removeSkillSource: (projectPath: string, name: string) => Promise<void>;
+  exportGeneratedSkill: (id: string) => Promise<string | null>;
+  importGeneratedSkill: (
+    projectPath: string,
+    json: string,
+    conflictPolicy?: GeneratedSkillImportConflictPolicy,
+  ) => Promise<SkillDocument | null>;
   searchSkills: (projectPath: string, query: string) => Promise<void>;
   refreshSkillIndex: (projectPath: string) => Promise<void>;
   deleteSkill: (id: string, projectPath: string) => Promise<void>;
@@ -257,6 +281,8 @@ const defaultState = {
   skillDetail: null as SkillDocument | null,
   skillDetailLoading: false,
   skillsOverview: null as SkillsOverview | null,
+  skillSources: [] as SkillSourceInfo[],
+  skillSourcesLoading: false,
   skillSearchQuery: '',
   skillSourceFilter: 'all' as SkillSourceFilter,
 
@@ -296,17 +322,26 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
   loadSkills: async (projectPath: string) => {
     set({ skillsLoading: true, skillsError: null });
     try {
-      const response = await invoke<CommandResponse<SkillSummary[]>>('list_skills', {
+      let response = await invoke<CommandResponse<SkillSummary[]>>('list_skills_v2', {
         projectPath,
         sourceFilter: null,
         includeDisabled: true,
       });
-      if (response.success && response.data) {
-        set({ skills: response.data, skillsLoading: false });
-        syncContextSelectedSkills(response.data);
+      if (!response?.success) {
+        response = await invoke<CommandResponse<SkillSummary[]>>('list_skills', {
+          projectPath,
+          sourceFilter: null,
+          includeDisabled: true,
+        });
+      }
+      if (response?.success && response.data) {
+        const normalizedSkills = response.data.map(normalizeSkillSummary);
+        set({ skills: normalizedSkills, skillsLoading: false });
+        syncContextSelectedSkills(normalizedSkills);
+        void get().loadSkillSources(projectPath);
       } else {
         set({
-          skillsError: response.error || tSkillMemory('skillPanel.toasts.loadSkillsFailed', 'Failed to load skills'),
+          skillsError: response?.error || tSkillMemory('skillPanel.toasts.loadSkillsFailed', 'Failed to load skills'),
           skillsLoading: false,
         });
       }
@@ -331,15 +366,38 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
     }
   },
 
+  loadSkillSources: async (projectPath: string) => {
+    set({ skillSourcesLoading: true });
+    try {
+      const response = await invoke<CommandResponse<SkillSourceInfo[]>>('list_skill_sources_v2', {
+        projectPath,
+      });
+      if (response?.success && response.data) {
+        set({ skillSources: response.data, skillSourcesLoading: false });
+      } else {
+        set({ skillSourcesLoading: false });
+      }
+    } catch (error) {
+      reportNonFatal('skillMemory.loadSkillSources', error, { projectPath });
+      set({ skillSourcesLoading: false });
+    }
+  },
+
   loadSkillDetail: async (projectPath: string, id: string) => {
     set({ skillDetailLoading: true, skillDetail: null });
     try {
-      const response = await invoke<CommandResponse<SkillDocument>>('get_skill', {
+      let response = await invoke<CommandResponse<SkillDocument>>('get_skill_detail_v2', {
         projectPath,
         id,
       });
+      if (!response.success) {
+        response = await invoke<CommandResponse<SkillDocument>>('get_skill', {
+          projectPath,
+          id,
+        });
+      }
       if (response.success && response.data) {
-        set({ skillDetail: response.data, skillDetailLoading: false });
+        set({ skillDetail: normalizeSkillDocument(response.data), skillDetailLoading: false });
       } else {
         set({ skillDetailLoading: false });
         get().showToast(response.error || tSkillMemory('skillPanel.toasts.skillNotFound', 'Skill not found'), 'error');
@@ -408,6 +466,244 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
     }
   },
 
+  reviewGeneratedSkill: async (id: string, decision: SkillReviewStatus, reviewNotes?: string | null) => {
+    try {
+      const response = await invoke<CommandResponse<SkillDocument>>('review_generated_skill_v2', {
+        id,
+        decision,
+        reviewNotes: reviewNotes ?? null,
+      });
+      if (!response.success || !response.data) {
+        get().showToast(
+          response.error || tSkillMemory('skillPanel.toasts.reviewSkillFailed', 'Failed to review generated skill'),
+          'error',
+        );
+        return;
+      }
+
+      set((state) => ({
+        skills: state.skills.map((skill) =>
+          skill.id === id
+            ? {
+                ...skill,
+                enabled: response.data!.enabled,
+                review_status: response.data!.review_status ?? null,
+                review_notes: response.data!.review_notes ?? null,
+                reviewed_at: response.data!.reviewed_at ?? null,
+              }
+            : skill,
+        ),
+        skillDetail:
+          state.skillDetail?.id === id
+            ? {
+                ...state.skillDetail,
+                enabled: response.data!.enabled,
+                review_status: response.data!.review_status ?? null,
+                review_notes: response.data!.review_notes ?? null,
+                reviewed_at: response.data!.reviewed_at ?? null,
+              }
+            : state.skillDetail,
+      }));
+      syncContextSelectedSkills(get().skills);
+      get().showToast(tSkillMemory('skillPanel.toasts.reviewSkillSaved', 'Skill review updated'), 'success');
+    } catch (error) {
+      get().showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  },
+
+  reviewGeneratedSkills: async (ids: string[], decision: SkillReviewStatus, reviewNotes?: string | null) => {
+    const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+    for (const id of uniqueIds) {
+      await get().reviewGeneratedSkill(id, decision, reviewNotes);
+    }
+  },
+
+  updateGeneratedSkill: async (id, updates) => {
+    try {
+      const response = await invoke<CommandResponse<SkillDocument>>('update_generated_skill_v2', {
+        id,
+        name: updates.name,
+        description: updates.description,
+        tags: updates.tags,
+        body: updates.body,
+      });
+      if (!response.success || !response.data) {
+        get().showToast(
+          response.error ||
+            tSkillMemory('skillPanel.toasts.updateGeneratedSkillFailed', 'Failed to update generated skill'),
+          'error',
+        );
+        return;
+      }
+      set((state) => ({
+        skills: state.skills.map((skill) =>
+          skill.id === id
+            ? {
+                ...skill,
+                name: response.data!.name,
+                description: response.data!.description,
+                tags: response.data!.tags,
+              }
+            : skill,
+        ),
+        skillDetail: state.skillDetail?.id === id ? normalizeSkillDocument(response.data!) : state.skillDetail,
+      }));
+      syncContextSelectedSkills(get().skills);
+      get().showToast(tSkillMemory('skillPanel.toasts.generatedSkillUpdated', 'Generated skill updated'), 'success');
+    } catch (error) {
+      get().showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  },
+
+  installSkillSource: async (projectPath: string, source: string, name?: string | null) => {
+    try {
+      const response = await invoke<CommandResponse<SkillSourceInfo>>('install_skill_source_v2', {
+        projectPath,
+        source,
+        name: name?.trim() ? name.trim() : null,
+      });
+      if (!response.success || !response.data) {
+        get().showToast(
+          response.error ||
+            tSkillMemory('skillPanel.toasts.installSkillSourceFailed', 'Failed to install skill source'),
+          'error',
+        );
+        return;
+      }
+      set((state) => ({
+        skillSources: [...state.skillSources.filter((item) => item.name !== response.data!.name), response.data!],
+      }));
+      get().showToast(tSkillMemory('skillPanel.toasts.skillSourceInstalled', 'Skill source installed'), 'success');
+      await get().loadSkills(projectPath);
+    } catch (error) {
+      get().showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  },
+
+  setSkillSourceEnabled: async (projectPath: string, name: string, enabled: boolean) => {
+    try {
+      const response = await invoke<CommandResponse<SkillSourceInfo>>('set_skill_source_enabled_v2', {
+        projectPath,
+        name,
+        enabled,
+      });
+      if (!response.success || !response.data) {
+        get().showToast(
+          response.error ||
+            tSkillMemory('skillPanel.toasts.setSkillSourceEnabledFailed', 'Failed to update skill source status'),
+          'error',
+        );
+        return;
+      }
+      set((state) => ({
+        skillSources: [...state.skillSources.filter((item) => item.name !== response.data!.name), response.data!],
+      }));
+      get().showToast(
+        enabled
+          ? tSkillMemory('skillPanel.toasts.skillSourceEnabled', 'Skill source enabled')
+          : tSkillMemory('skillPanel.toasts.skillSourceDisabled', 'Skill source disabled'),
+        'success',
+      );
+      await get().loadSkills(projectPath);
+    } catch (error) {
+      get().showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  },
+
+  refreshSkillSource: async (projectPath: string, name: string) => {
+    try {
+      const response = await invoke<CommandResponse<SkillSourceInfo>>('refresh_skill_source_v2', {
+        projectPath,
+        name,
+      });
+      if (!response.success || !response.data) {
+        get().showToast(
+          response.error ||
+            tSkillMemory('skillPanel.toasts.refreshSkillSourceFailed', 'Failed to refresh skill source'),
+          'error',
+        );
+        return;
+      }
+      set((state) => ({
+        skillSources: [...state.skillSources.filter((item) => item.name !== response.data!.name), response.data!],
+      }));
+      get().showToast(tSkillMemory('skillPanel.toasts.skillSourceRefreshed', 'Skill source refreshed'), 'success');
+      await get().loadSkills(projectPath);
+    } catch (error) {
+      get().showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  },
+
+  removeSkillSource: async (projectPath: string, name: string) => {
+    try {
+      const response = await invoke<CommandResponse<SkillSourceMutationResult>>('remove_skill_source_v2', {
+        projectPath,
+        name,
+        deleteInstalledCopy: true,
+      });
+      if (!response.success || !response.data) {
+        get().showToast(
+          response.error || tSkillMemory('skillPanel.toasts.removeSkillSourceFailed', 'Failed to remove skill source'),
+          'error',
+        );
+        return;
+      }
+      set((state) => ({
+        skillSources: state.skillSources.filter((item) => item.name !== name),
+      }));
+      get().showToast(tSkillMemory('skillPanel.toasts.skillSourceRemoved', 'Skill source removed'), 'success');
+      await get().loadSkills(projectPath);
+    } catch (error) {
+      get().showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  },
+
+  exportGeneratedSkill: async (id: string) => {
+    try {
+      const response = await invoke<CommandResponse<string>>('export_generated_skill_v2', {
+        id,
+      });
+      if (!response.success || !response.data) {
+        get().showToast(
+          response.error ||
+            tSkillMemory('skillPanel.toasts.exportGeneratedSkillFailed', 'Failed to export generated skill'),
+          'error',
+        );
+        return null;
+      }
+      get().showToast(tSkillMemory('skillPanel.toasts.generatedSkillExported', 'Generated skill exported'), 'success');
+      return response.data;
+    } catch (error) {
+      get().showToast(error instanceof Error ? error.message : String(error), 'error');
+      return null;
+    }
+  },
+
+  importGeneratedSkill: async (projectPath: string, json: string, conflictPolicy = 'rename') => {
+    try {
+      const response = await invoke<CommandResponse<SkillDocument>>('import_generated_skill_v2', {
+        projectPath,
+        json,
+        conflictPolicy,
+      });
+      if (!response.success || !response.data) {
+        get().showToast(
+          response.error ||
+            tSkillMemory('skillPanel.toasts.importGeneratedSkillFailed', 'Failed to import generated skill'),
+          'error',
+        );
+        return null;
+      }
+      get().showToast(tSkillMemory('skillPanel.toasts.generatedSkillImported', 'Generated skill imported'), 'success');
+      await get().loadSkills(projectPath);
+      set({ skillDetail: normalizeSkillDocument(response.data) });
+      return response.data;
+    } catch (error) {
+      get().showToast(error instanceof Error ? error.message : String(error), 'error');
+      return null;
+    }
+  },
+
   searchSkills: async (projectPath: string, query: string) => {
     set({ skillsLoading: true, skillSearchQuery: query });
     if (!query.trim()) {
@@ -416,18 +712,27 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
     }
 
     const fallbackToClientFilter = async () => {
-      const fallback = await invoke<CommandResponse<SkillSummary[]>>('list_skills', {
+      let fallback = await invoke<CommandResponse<SkillSummary[]>>('list_skills_v2', {
         projectPath,
         sourceFilter: null,
         includeDisabled: true,
       });
+      if (!fallback.success) {
+        fallback = await invoke<CommandResponse<SkillSummary[]>>('list_skills', {
+          projectPath,
+          sourceFilter: null,
+          includeDisabled: true,
+        });
+      }
       if (fallback.success && fallback.data) {
-        const filtered = fallback.data.filter(
-          (s) =>
-            s.name.toLowerCase().includes(query.toLowerCase()) ||
-            s.description.toLowerCase().includes(query.toLowerCase()) ||
-            s.tags.some((t) => t.toLowerCase().includes(query.toLowerCase())),
-        );
+        const filtered = fallback.data
+          .map(normalizeSkillSummary)
+          .filter(
+            (s) =>
+              s.name.toLowerCase().includes(query.toLowerCase()) ||
+              s.description.toLowerCase().includes(query.toLowerCase()) ||
+              s.tags.some((t) => t.toLowerCase().includes(query.toLowerCase())),
+          );
         set({ skills: filtered, skillsLoading: false });
       } else {
         set({
@@ -444,7 +749,7 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
         topK: 50,
       });
       if (response.success && response.data) {
-        set({ skills: response.data.map((m) => m.skill), skillsLoading: false });
+        set({ skills: response.data.map((m) => normalizeSkillSummary(m.skill)), skillsLoading: false });
       } else {
         await fallbackToClientFilter();
       }

@@ -126,6 +126,7 @@ pub async fn enter_plan_mode(
                 context_sources.as_ref(),
                 &description,
                 InjectionPhase::Planning,
+                Some(llm_provider.config()),
             )
             .await;
             let plan_context_ref = if plan_context.rendered_context.is_empty() {
@@ -315,6 +316,7 @@ pub async fn submit_plan_clarification(
                 context_sources.as_ref(),
                 &description,
                 InjectionPhase::Planning,
+                Some(llm_provider.config()),
             )
             .await;
             let plan_context_ref = if plan_context.rendered_context.is_empty() {

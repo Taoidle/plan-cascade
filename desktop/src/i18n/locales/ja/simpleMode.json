@@ -264,6 +264,11 @@
     "noDeletedMemories": "ごみ箱は空です",
     "noDeletedMemoriesHint": "削除したメモリは、復元または完全削除するまでここに残ります。",
     "whySkillsTitle": "これらのスキルを使う理由",
+    "skillsViews": {
+      "catalog": "スキル",
+      "why": "なぜこのスキルか？",
+      "sources": "スキルソース"
+    },
     "showWhySkills": "なぜこのスキル？",
     "hideWhySkills": "理由を隠す",
     "whyMemoryTitle": "これらのメモリを使う理由",
@@ -271,13 +276,115 @@
     "hideWhyMemory": "理由を隠す",
     "selectionReason": "選択理由",
     "selectionOrigin": "選択元",
+    "selectionOrigins": {
+      "auto": "自動",
+      "auto_llm": "自動（LLM 再順位付け）",
+      "auto_fallback": "自動（フォールバック）",
+      "explicit": "明示",
+      "mixed": "混在",
+      "command_invoked": "コマンド呼び出し",
+      "none": "なし"
+    },
+    "selectionReasons": {
+      "skills_auto_llm_rerank": "LLM が候補スキルを再順位付けしました",
+      "skills_auto_llm_fallback": "LLM 再順位付けに失敗し、ルール選択へフォールバックしました",
+      "skills_auto_match": "ルールがこれらのスキルに一致しました",
+      "skills_no_match": "現在のタスクに一致するスキルがありません",
+      "skills_command_invoked": "コマンド固定スキルを適用しました",
+      "skills_command_invoked_unavailable": "コマンド固定スキルを利用できませんでした",
+      "skills_user_selected": "ユーザー選択スキルを適用しました",
+      "skills_explicit_and_command_invoked": "明示選択とコマンド固定スキルを統合しました"
+    },
+    "routerStatus": "ルーター",
+    "routerConfidence": "ルーター信頼度",
+    "routerReason": "ルーター理由",
+    "routerFallback": "フォールバック",
+    "routerStrategies": {
+      "hybrid": "LLM 再順位付け"
+    },
+    "routerFallbackReasons": {
+      "provider_unavailable": "プロバイダーが利用できません",
+      "empty_query": "クエリが空です",
+      "timeout": "ルーターがタイムアウトしました",
+      "empty_response": "ルーターの応答が空でした",
+      "invalid_empty_selection": "有効なスキルが返されませんでした"
+    },
     "selectedSkills": "選択中のスキル",
+    "commandPinnedSkills": "コマンド固定スキル",
+    "hierarchyMatches": "階層マッチ",
+    "whyNotSelectedTitle": "未選択の理由",
     "blockedTools": "ブロック中のツール",
     "effectiveStatuses": "有効ステータス",
     "candidateCount": "候補数",
     "degradedReason": "劣化理由",
     "sourceReason": "ソース理由",
     "none": "なし",
+    "currentSkillStack": "現在のセッションで有効",
+    "generatedReviewedSkills": "生成済み・レビュー済み",
+    "noGeneratedSkills": "生成済みスキルはありません",
+    "noActiveSkills": "直近の実行では有効スキルがありません。",
+    "pinned": "固定済み",
+    "metadata": "メタデータ",
+    "reviewNotes": "レビューノート",
+    "skillSourcesTitle": "スキルソース",
+    "skillSourcesHint": "インストール済みのローカル、Git、URL ベースのスキルソースを管理します。",
+    "skillSourceInput": "ローカルパス、Git URL、github:owner/repo、または生の SKILL.md URL を貼り付け",
+    "skillSourceName": "任意のソース名",
+    "installSkillSource": "ソースをインストール",
+    "refreshSkillSource": "ソースを更新",
+    "removeSkillSource": "ソースを削除",
+    "enableSkillSource": "ソースを有効化",
+    "disableSkillSource": "ソースを無効化",
+    "noSkillSources": "外部スキルソースはまだ設定されていません。",
+    "sourceInstalled": "インストール済み",
+    "sourceMissing": "見つかりません",
+    "sourceEnabled": "有効",
+    "sourceDisabled": "無効",
+    "sourceSkillCount": "{{count}} スキル",
+    "sourceTypes": {
+      "local": "ローカル",
+      "git": "Git",
+      "url": "URL"
+    },
+    "editGenerated": "生成スキルを編集",
+    "importGenerated": "生成スキルをインポート",
+    "exportGenerated": "生成スキルをエクスポート",
+    "approvePendingGenerated": "保留を承認",
+    "rejectPendingGenerated": "保留を却下",
+    "cancelEditGenerated": "編集をキャンセル",
+    "generatedForm": {
+      "name": "生成スキル名",
+      "description": "説明",
+      "tags": "カンマ区切りのタグ"
+    },
+    "reviewStatus": {
+      "pending_review": "レビュー待ち",
+      "approved": "承認済み",
+      "rejected": "却下済み",
+      "archived": "アーカイブ済み"
+    },
+    "reviewActions": {
+      "approve": "承認",
+      "reject": "却下",
+      "archive": "アーカイブ",
+      "restore": "復元"
+    },
+    "whyNotSelected": {
+      "disabled": "無効",
+      "unmatched": "最新のマッチングで選択されませんでした",
+      "notPinnedOrExplicit": "明示選択または固定の対象外です",
+      "notExplicitlySelected": "明示的に選択されていません"
+    },
+    "whyNotSelectedReasons": {
+      "disabled": "無効",
+      "pending_review": "レビュー待ち",
+      "rejected": "却下済み",
+      "archived": "アーカイブ済み",
+      "phase_mismatch": "フェーズ不一致",
+      "not_in_explicit_selection": "明示選択の対象外です",
+      "filtered_out": "フィルタリングされました",
+      "unmatched": "最新のマッチングで選択されませんでした"
+    },
     "pipeline": {
       "title": "自動メモリパイプライン",
       "extracted": "抽出 {{count}}",
@@ -349,6 +456,23 @@
       "refreshSkillsFailed": "更新に失敗しました",
       "skillDeleted": "スキルを削除しました",
       "deleteSkillFailed": "スキルの削除に失敗しました",
+      "reviewSkillFailed": "生成スキルのレビューに失敗しました",
+      "reviewSkillSaved": "スキルレビューを更新しました",
+      "updateGeneratedSkillFailed": "生成スキルの更新に失敗しました",
+      "generatedSkillUpdated": "生成スキルを更新しました",
+      "installSkillSourceFailed": "スキルソースのインストールに失敗しました",
+      "skillSourceInstalled": "スキルソースをインストールしました",
+      "refreshSkillSourceFailed": "スキルソースの更新に失敗しました",
+      "skillSourceRefreshed": "スキルソースを更新しました",
+      "setSkillSourceEnabledFailed": "スキルソース状態の更新に失敗しました",
+      "skillSourceEnabled": "スキルソースを有効化しました",
+      "skillSourceDisabled": "スキルソースを無効化しました",
+      "removeSkillSourceFailed": "スキルソースの削除に失敗しました",
+      "skillSourceRemoved": "スキルソースを削除しました",
+      "exportGeneratedSkillFailed": "生成スキルのエクスポートに失敗しました",
+      "generatedSkillExported": "生成スキルをエクスポートしました",
+      "importGeneratedSkillFailed": "生成スキルのインポートに失敗しました",
+      "generatedSkillImported": "生成スキルをインポートしました",
       "loadMemoriesFailed": "メモリの読み込みに失敗しました",
       "memoryAdded": "メモリを追加しました",
       "addMemoryFailed": "メモリの追加に失敗しました",
@@ -1145,6 +1269,10 @@
     "skillsPicker": {
       "title": "セッションへのスキル注入",
       "hint": "現在のセッションに注入するスキルを選択します。",
+      "pinned": "{{count}} 件のコマンド固定スキルが有効",
+      "pinnedBadge": "固定済み",
+      "selectionReason": "理由: {{reason}}",
+      "blockedTools": "制限中: {{tools}}",
       "searchPlaceholder": "スキルを検索...",
       "noSkills": "利用可能なスキルがありません",
       "noResults": "一致するスキルがありません",
@@ -1288,26 +1416,64 @@
   },
   "contextSummary": {
     "title": "有効コンテキスト",
+    "buttonLabel": "コンテキスト",
+    "panelTitle": "現在の有効コンテキスト",
     "why": "理由",
+    "openPanel": "詳細",
     "off": "オフ",
     "show": "有効コンテキストを表示",
     "hide": "非表示",
     "knowledgeCount": "{{count}} 件選択",
-    "skillsCount": "{{count}} 件選択",
+    "skillsCount": "{{count}} 件選択/固定",
+    "blockedTools": "{{count}} 件の制限ツール",
+    "currentSkillStack": "現在のスキルスタック",
+    "inspectSkills": "詳細",
+    "pinned": "固定済み",
+    "noEffectiveSkills": "最新のコンテキスト実行では有効スキルがありません。",
+    "selectionReason": "理由: {{reason}}",
+    "routerStatus": "ルーター: {{strategy}}",
+    "routerConfidence": "信頼度 {{confidence}}",
+    "routerFallback": "フォールバック: {{reason}}",
+    "routerReason": "ルーター理由: {{reason}}",
+    "blockedToolsList": "制限中: {{tools}}",
     "source": {
       "legacy": "legacy",
       "unified": "unified"
     },
     "memoryMode": {
-      "auto_exclude": "auto exclude",
-      "only_selected": "only selected"
+      "auto_exclude": "自動除外",
+      "only_selected": "選択のみ"
     },
-    "memoryDetail": "{{mode}} · {{scopeCount}} scopes · {{itemCount}} items",
-    "origin": "origin: {{origin}}",
+    "memoryDetail": "{{mode}} · {{scopeCount}} スコープ · {{itemCount}} 件",
+    "origin": "由来: {{origin}}",
     "originValues": {
-      "auto": "auto",
-      "explicit": "explicit",
-      "mixed": "mixed"
+      "auto": "自動",
+      "auto_llm": "自動（LLM 再順位付け）",
+      "auto_fallback": "自動（フォールバック）",
+      "explicit": "明示",
+      "mixed": "混在",
+      "command_invoked": "コマンド呼び出し",
+      "none": "なし"
+    },
+    "routerStrategies": {
+      "hybrid": "LLM 再順位付け"
+    },
+    "routerFallbackReasons": {
+      "provider_unavailable": "プロバイダーが利用できません",
+      "empty_query": "クエリが空です",
+      "timeout": "ルーターがタイムアウトしました",
+      "empty_response": "ルーターの応答が空でした",
+      "invalid_empty_selection": "有効なスキルが返されませんでした"
+    },
+    "selectionReasons": {
+      "skills_auto_llm_rerank": "LLM が候補スキルを再順位付けしました",
+      "skills_auto_llm_fallback": "LLM 再順位付けに失敗し、ルール選択へフォールバックしました",
+      "skills_auto_match": "ルールがこれらのスキルに一致しました",
+      "skills_no_match": "現在のタスクに一致するスキルがありません",
+      "skills_command_invoked": "コマンド固定スキルを適用しました",
+      "skills_command_invoked_unavailable": "コマンド固定スキルを利用できませんでした",
+      "skills_user_selected": "ユーザー選択スキルを適用しました",
+      "skills_explicit_and_command_invoked": "明示選択とコマンド固定スキルを統合しました"
     }
   }
 }

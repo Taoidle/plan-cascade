@@ -615,23 +615,32 @@ impl OrchestratorService {
     fn normalized_allowed_tools_from_skill_matches(
         skills: &[crate::services::skills::model::SkillMatch],
     ) -> Option<std::collections::HashSet<String>> {
-        let mut allowed = std::collections::HashSet::<String>::new();
-        let mut has_restriction = false;
+        let mut allowed: Option<std::collections::HashSet<String>> = None;
         for skill_match in skills {
             if !skill_match.skill.enabled || skill_match.skill.allowed_tools.is_empty() {
                 continue;
             }
-            has_restriction = true;
-            for tool in &skill_match.skill.allowed_tools {
-                let normalized = tool.trim().to_ascii_lowercase();
-                if !normalized.is_empty() {
-                    allowed.insert(normalized);
-                }
+            let current = skill_match
+                .skill
+                .allowed_tools
+                .iter()
+                .map(|tool| tool.trim().to_ascii_lowercase())
+                .filter(|tool| !tool.is_empty())
+                .collect::<std::collections::HashSet<_>>();
+            if current.is_empty() {
+                continue;
             }
+            allowed = Some(match allowed.take() {
+                Some(existing) => existing
+                    .intersection(&current)
+                    .cloned()
+                    .collect::<std::collections::HashSet<_>>(),
+                None => current,
+            });
         }
-        if !has_restriction {
+        let Some(mut allowed) = allowed else {
             return None;
-        }
+        };
 
         // Minimal safe baseline to keep repo exploration functional.
         for safe_tool in ["read", "ls", "glob", "grep", "cwd"] {
@@ -1500,6 +1509,7 @@ impl OrchestratorService {
                     // Step 3b: SEQUENTIAL native execution (sub-agent)
                     // ═══════════════════════════════════════════════════
                     for (tc_id, effective_tool_name, effective_args) in &valid_calls {
+                        let mut effective_args = effective_args.clone();
                         // Check cancellation before each tool execution
                         if self.cancellation_token.is_cancelled() {
                             messages.push(Message::tool_result(
@@ -1532,7 +1542,7 @@ impl OrchestratorService {
                             .execute_with_context_for_session(
                                 &execution_session_id,
                                 effective_tool_name,
-                                effective_args,
+                                &effective_args,
                                 task_ctx.as_ref(),
                             )
                             .await;
@@ -1845,6 +1855,7 @@ impl OrchestratorService {
                     // Sequential fallback execution (existing logic)
                     // ═══════════════════════════════════════════════════
                     for (tool_id, effective_tool_name, effective_args) in &valid_fallback_calls {
+                        let mut effective_args = effective_args.clone();
                         // Check cancellation before each tool execution
                         if self.cancellation_token.is_cancelled() {
                             let _ = tx
@@ -1876,7 +1887,7 @@ impl OrchestratorService {
                             .execute_with_context_for_session(
                                 &execution_session_id,
                                 effective_tool_name,
-                                effective_args,
+                                &effective_args,
                                 task_ctx.as_ref(),
                             )
                             .await;
@@ -2586,6 +2597,20 @@ impl OrchestratorService {
 
             // Hook: on_before_llm
             self.hooks.fire_on_before_llm(&hook_ctx, iterations).await;
+            if let Some(reason) = self.hooks.take_requested_stop().await {
+                let _ = tx
+                    .send(UnifiedStreamEvent::Complete {
+                        stop_reason: Some(format!("skill_stop_hook: {}", reason)),
+                    })
+                    .await;
+                return ExecutionResult {
+                    response: last_assistant_text,
+                    usage: total_usage,
+                    iterations,
+                    success: true,
+                    error: None,
+                };
+            }
 
             // Call LLM - main agent has all tools (including Task)
             let response = if self.config.streaming {
@@ -2954,6 +2979,7 @@ impl OrchestratorService {
                     // Step 3b: SEQUENTIAL execution path (existing logic)
                     // ═══════════════════════════════════════════════════════
                     for (tc_id, effective_tool_name, effective_args) in &valid_calls {
+                        let mut effective_args = effective_args.clone();
                         // Check cancellation before each tool execution
                         if self.cancellation_token.is_cancelled() {
                             messages.push(Message::tool_result(
@@ -2980,7 +3006,7 @@ impl OrchestratorService {
                             .await;
 
                         // Hook: on_before_tool - can skip tool execution
-                        if let Some(skip_result) = self
+                        if let Some(before_tool_result) = self
                             .hooks
                             .fire_on_before_tool(
                                 &hook_ctx,
@@ -2989,25 +3015,40 @@ impl OrchestratorService {
                             )
                             .await
                         {
-                            let skip_msg = skip_result
-                                .skip_reason
-                                .unwrap_or_else(|| "Skipped by hook".to_string());
-                            let _ = tx
-                                .send(UnifiedStreamEvent::ToolResult {
-                                    tool_id: tc_id.clone(),
-                                    result: None,
-                                    error: Some(skip_msg.clone()),
-                                })
-                                .await;
-                            messages.push(Message::tool_result(tc_id, skip_msg, true));
-                            continue;
+                            if let Some(modified_arguments) =
+                                before_tool_result.modified_arguments.as_ref()
+                            {
+                                match serde_json::from_str::<serde_json::Value>(modified_arguments) {
+                                    Ok(updated) => effective_args = updated,
+                                    Err(error) => tracing::warn!(
+                                        "[hooks] failed to parse modified tool arguments for {}: {}",
+                                        effective_tool_name,
+                                        error
+                                    ),
+                                }
+                            }
+
+                            if before_tool_result.skip {
+                                let skip_msg = before_tool_result
+                                    .skip_reason
+                                    .unwrap_or_else(|| "Skipped by hook".to_string());
+                                let _ = tx
+                                    .send(UnifiedStreamEvent::ToolResult {
+                                        tool_id: tc_id.clone(),
+                                        result: None,
+                                        error: Some(skip_msg.clone()),
+                                    })
+                                    .await;
+                                messages.push(Message::tool_result(tc_id, skip_msg, true));
+                                continue;
+                            }
                         }
 
                         let (mut result, nested_usage, nested_iterations) = self
                             .execute_tool_with_usage(
                                 &hook_ctx.session_id,
                                 effective_tool_name,
-                                effective_args,
+                                &effective_args,
                                 task_ctx.as_ref(),
                                 &tx,
                             )
@@ -3398,6 +3439,7 @@ impl OrchestratorService {
                     // Sequential fallback execution (existing logic with hooks/event_actions)
                     // ═══════════════════════════════════════════════════
                     for (tool_id, effective_tool_name, effective_args) in &valid_fallback_calls {
+                        let mut effective_args = effective_args.clone();
                         // Check cancellation before each tool execution
                         if self.cancellation_token.is_cancelled() {
                             let _ = tx
@@ -3425,7 +3467,7 @@ impl OrchestratorService {
                             .await;
 
                         // Hook: on_before_tool (fallback path)
-                        if let Some(skip_result) = self
+                        if let Some(before_tool_result) = self
                             .hooks
                             .fire_on_before_tool(
                                 &hook_ctx,
@@ -3434,23 +3476,38 @@ impl OrchestratorService {
                             )
                             .await
                         {
-                            let skip_msg = skip_result
-                                .skip_reason
-                                .unwrap_or_else(|| "Skipped by hook".to_string());
-                            tool_results.push(format_tool_result(
-                                effective_tool_name,
-                                tool_id,
-                                &skip_msg,
-                                true,
-                            ));
-                            continue;
+                            if let Some(modified_arguments) =
+                                before_tool_result.modified_arguments.as_ref()
+                            {
+                                match serde_json::from_str::<serde_json::Value>(modified_arguments) {
+                                    Ok(updated) => effective_args = updated,
+                                    Err(error) => tracing::warn!(
+                                        "[hooks] failed to parse modified tool arguments for {}: {}",
+                                        effective_tool_name,
+                                        error
+                                    ),
+                                }
+                            }
+
+                            if before_tool_result.skip {
+                                let skip_msg = before_tool_result
+                                    .skip_reason
+                                    .unwrap_or_else(|| "Skipped by hook".to_string());
+                                tool_results.push(format_tool_result(
+                                    effective_tool_name,
+                                    tool_id,
+                                    &skip_msg,
+                                    true,
+                                ));
+                                continue;
+                            }
                         }
 
                         let (mut result, nested_usage, nested_iterations) = self
                             .execute_tool_with_usage(
                                 &hook_ctx.session_id,
                                 effective_tool_name,
-                                effective_args,
+                                &effective_args,
                                 task_ctx.as_ref(),
                                 &tx,
                             )

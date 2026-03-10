@@ -15,6 +15,8 @@ import { clsx } from 'clsx';
 import { ChevronRightIcon, GearIcon } from '@radix-ui/react-icons';
 import { useSkillMemoryStore } from '../../store/skillMemory';
 import { useSettingsStore } from '../../store/settings';
+import { useContextSourcesStore } from '../../store/contextSources';
+import { useContextOpsStore } from '../../store/contextOps';
 import { useWorkflowKernelStore } from '../../store/workflowKernel';
 import { SkillRow } from './SkillRow';
 import { MemoryRow } from './MemoryRow';
@@ -73,6 +75,8 @@ export function SkillMemoryPanel() {
   const { t } = useTranslation('simpleMode');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
   const rootSessionId = useWorkflowKernelStore((s) => s.sessionId);
+  const invokedSkillIds = useContextSourcesStore((s) => s.invokedSkillIds);
+  const latestEnvelope = useContextOpsStore((s) => s.latestEnvelope);
 
   const skills = useSkillMemoryStore((s) => s.skills);
   const skillsLoading = useSkillMemoryStore((s) => s.skillsLoading);
@@ -81,6 +85,7 @@ export function SkillMemoryPanel() {
   const loadSkills = useSkillMemoryStore((s) => s.loadSkills);
   const loadMemories = useSkillMemoryStore((s) => s.loadMemories);
   const toggleSkill = useSkillMemoryStore((s) => s.toggleSkill);
+  const toggleGeneratedSkill = useSkillMemoryStore((s) => s.toggleGeneratedSkill);
   const openDialog = useSkillMemoryStore((s) => s.openDialog);
   const memoryPipelineSnapshot = useSkillMemoryStore((s) =>
     rootSessionId ? (s.memoryPipelineByRootSession[rootSessionId] ?? null) : null,
@@ -94,24 +99,37 @@ export function SkillMemoryPanel() {
   }, [workspacePath, skills.length, memories.length, loadSkills, loadMemories]);
 
   // Separate auto-detected skills from others
-  const { detectedSkills, projectSkills } = useMemo(() => {
+  const { activeSkills, detectedSkills, projectSkills, generatedSkills } = useMemo(() => {
+    const effectiveIds = new Set(latestEnvelope?.diagnostics?.effective_skill_ids ?? []);
     const detected: SkillSummary[] = [];
     const project: SkillSummary[] = [];
+    const active: SkillSummary[] = [];
+    const generated: SkillSummary[] = [];
     for (const skill of skills) {
+      if (effectiveIds.has(skill.id)) {
+        active.push(skill);
+      }
       if (skill.detected) {
         detected.push(skill);
+      } else if (skill.source.type === 'generated') {
+        generated.push(skill);
       } else {
         project.push(skill);
       }
     }
-    return { detectedSkills: detected, projectSkills: project };
-  }, [skills]);
+    return { activeSkills: active, detectedSkills: detected, projectSkills: project, generatedSkills: generated };
+  }, [latestEnvelope?.diagnostics?.effective_skill_ids, skills]);
 
   const handleToggle = useCallback(
     (id: string, enabled: boolean) => {
+      const skill = skills.find((entry) => entry.id === id);
+      if (skill?.source.type === 'generated') {
+        toggleGeneratedSkill(id, enabled);
+        return;
+      }
       toggleSkill(id, enabled);
     },
-    [toggleSkill],
+    [skills, toggleGeneratedSkill, toggleSkill],
   );
 
   const handleManageAll = useCallback(() => {
@@ -125,6 +143,8 @@ export function SkillMemoryPanel() {
   const handleMemoryClick = useCallback(() => {
     openDialog('memory', { memoryViewMode: 'all' });
   }, [openDialog]);
+
+  const currentSkillSummary = latestEnvelope?.diagnostics;
 
   return (
     <div data-testid="skill-memory-panel" className="h-full min-h-0 flex flex-col">
@@ -172,6 +192,45 @@ export function SkillMemoryPanel() {
           </div>
         )}
 
+        <CollapsibleSection
+          title={t('skillPanel.currentSkillStack', { defaultValue: 'Active in current session' })}
+          count={activeSkills.length}
+        >
+          {activeSkills.length > 0 ? (
+            <>
+              {activeSkills.map((skill) => (
+                <SkillRow key={skill.id} skill={skill} onToggle={handleToggle} onClick={handleSkillClick} />
+              ))}
+              <div className="px-2 py-1.5 space-y-1 text-2xs text-gray-500 dark:text-gray-400">
+                {currentSkillSummary?.selection_origin && (
+                  <div>
+                    {t('skillPanel.selectionOrigin', { defaultValue: 'Selection origin' })}:{' '}
+                    {currentSkillSummary.selection_origin}
+                  </div>
+                )}
+                {currentSkillSummary?.selection_reason && (
+                  <div>
+                    {t('skillPanel.selectionReason', { defaultValue: 'Selection reason' })}:{' '}
+                    {currentSkillSummary.selection_reason}
+                  </div>
+                )}
+                {currentSkillSummary?.blocked_tools?.length ? (
+                  <div className="text-amber-700 dark:text-amber-300">
+                    {t('skillPanel.blockedTools', { defaultValue: 'Blocked tools' })}:{' '}
+                    {currentSkillSummary.blocked_tools.join(', ')}
+                  </div>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <p className="text-2xs text-gray-400 dark:text-gray-500 px-2 py-1">
+              {t('skillPanel.noActiveSkills', {
+                defaultValue: 'No effective skills in the latest run yet.',
+              })}
+            </p>
+          )}
+        </CollapsibleSection>
+
         {/* Auto-Detected Skills */}
         <CollapsibleSection title={t('skillPanel.detectedSkills')} count={detectedSkills.length}>
           {detectedSkills.length > 0 ? (
@@ -191,6 +250,36 @@ export function SkillMemoryPanel() {
             ))
           ) : (
             <p className="text-2xs text-gray-400 dark:text-gray-500 px-2 py-1">{t('skillPanel.noProjectSkills')}</p>
+          )}
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          title={t('skillPanel.generatedReviewedSkills', { defaultValue: 'Generated & reviewed' })}
+          count={generatedSkills.length}
+          defaultExpanded={false}
+        >
+          {generatedSkills.length > 0 ? (
+            generatedSkills.map((skill) => (
+              <div key={skill.id} className="px-2 py-1">
+                <SkillRow skill={skill} onToggle={handleToggle} onClick={handleSkillClick} />
+                <div className="ml-7 flex items-center gap-1.5 py-0.5 text-2xs text-gray-400 dark:text-gray-500">
+                  <span>
+                    {t(`skillPanel.reviewStatus.${skill.review_status ?? 'pending_review'}`, {
+                      defaultValue: skill.review_status ?? 'pending_review',
+                    })}
+                  </span>
+                  {invokedSkillIds.includes(skill.id) && (
+                    <span className="rounded bg-sky-100 px-1 py-0.5 text-sky-700 dark:bg-sky-900/20 dark:text-sky-300">
+                      {t('skillPanel.pinned', { defaultValue: 'Pinned' })}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="text-2xs text-gray-400 dark:text-gray-500 px-2 py-1">
+              {t('skillPanel.noGeneratedSkills', { defaultValue: 'No generated skills' })}
+            </p>
           )}
         </CollapsibleSection>
 

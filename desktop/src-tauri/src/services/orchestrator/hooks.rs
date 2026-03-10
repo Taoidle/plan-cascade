@@ -25,6 +25,9 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
+use regex::Regex;
+use serde_json::Value;
+use tokio::process::Command;
 use tokio::sync::RwLock;
 
 use crate::services::memory::query_policy_v2::{memory_query_tuning_v2, MemoryQueryPresetV2};
@@ -79,6 +82,8 @@ pub struct BeforeToolResult {
     pub skip: bool,
     /// Reason for skipping (injected as tool result if skip=true)
     pub skip_reason: Option<String>,
+    /// Replacement JSON arguments for the tool call.
+    pub modified_arguments: Option<String>,
 }
 
 impl Default for BeforeToolResult {
@@ -86,6 +91,7 @@ impl Default for BeforeToolResult {
         Self {
             skip: false,
             skip_reason: None,
+            modified_arguments: None,
         }
     }
 }
@@ -196,6 +202,7 @@ pub struct AgenticHooks {
     on_after_tool: Vec<OnAfterToolHook>,
     on_session_end: Vec<OnSessionEndHook>,
     on_compaction: Vec<OnCompactionHook>,
+    requested_stop: Arc<RwLock<Option<String>>>,
 }
 
 impl std::fmt::Debug for AgenticHooks {
@@ -225,6 +232,7 @@ impl AgenticHooks {
             on_after_tool: Vec::new(),
             on_session_end: Vec::new(),
             on_compaction: Vec::new(),
+            requested_stop: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -362,20 +370,41 @@ impl AgenticHooks {
         tool_name: &str,
         arguments: &str,
     ) -> Option<BeforeToolResult> {
+        let mut aggregate = BeforeToolResult::default();
+        let mut current_arguments = arguments.to_string();
         for (i, hook) in self.on_before_tool.iter().enumerate() {
-            match hook(ctx.clone(), tool_name.to_string(), arguments.to_string()).await {
+            match hook(
+                ctx.clone(),
+                tool_name.to_string(),
+                current_arguments.clone(),
+            )
+            .await
+            {
                 Ok(result) if result.skip => {
-                    return Some(result);
+                    let mut skip_result = result;
+                    if skip_result.modified_arguments.is_none()
+                        && current_arguments != arguments
+                    {
+                        skip_result.modified_arguments = Some(current_arguments);
+                    }
+                    return Some(skip_result);
                 }
-                Ok(_) => {
-                    // No skip requested
+                Ok(result) => {
+                    if let Some(modified_arguments) = result.modified_arguments {
+                        current_arguments = modified_arguments.clone();
+                        aggregate.modified_arguments = Some(modified_arguments);
+                    }
                 }
                 Err(e) => {
                     tracing::info!("[hooks] on_before_tool hook {} failed: {}", i, e);
                 }
             }
         }
-        None
+        if aggregate.modified_arguments.is_some() {
+            Some(aggregate)
+        } else {
+            None
+        }
     }
 
     /// Fire all on_after_tool hooks sequentially.
@@ -434,6 +463,16 @@ impl AgenticHooks {
                 tracing::info!("[hooks] on_compaction hook {} failed: {}", i, e);
             }
         }
+    }
+
+    pub async fn request_stop(&self, reason: String) {
+        let mut stop = self.requested_stop.write().await;
+        *stop = Some(reason);
+    }
+
+    pub async fn take_requested_stop(&self) -> Option<String> {
+        let mut stop = self.requested_stop.write().await;
+        stop.take()
     }
 }
 
@@ -496,6 +535,147 @@ pub fn build_default_hooks() -> AgenticHooks {
     hooks
 }
 
+#[derive(Debug, Clone)]
+enum HookDirective {
+    Continue,
+    Skip(String),
+    ModifyArguments(String),
+    Stop(String),
+    InjectContext(String),
+}
+
+fn selected_skill_documents(
+    index: &SkillIndex,
+    selected: &[SkillMatch],
+) -> Vec<crate::services::skills::model::SkillDocument> {
+    let selected_ids = selected
+        .iter()
+        .map(|skill| skill.skill.id.as_str())
+        .collect::<HashSet<_>>();
+    index.skills()
+        .iter()
+        .filter(|doc| selected_ids.contains(doc.id.as_str()))
+        .cloned()
+        .collect()
+}
+
+fn tool_matches_rule(matcher: &str, tool_name: &str) -> bool {
+    Regex::new(matcher)
+        .map(|regex| regex.is_match(tool_name))
+        .unwrap_or_else(|_| matcher.eq_ignore_ascii_case(tool_name))
+}
+
+fn parse_hook_directive(output: &str) -> HookDirective {
+    let trimmed = output.trim();
+    if trimmed.is_empty() {
+        return HookDirective::Continue;
+    }
+
+    if trimmed.starts_with('{') {
+        if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+            let action = value
+                .get("action")
+                .and_then(|value| value.as_str())
+                .unwrap_or("continue");
+            return match action {
+                "skip" | "block" => HookDirective::Skip(
+                    value
+                        .get("reason")
+                        .and_then(|reason| reason.as_str())
+                        .unwrap_or("Skipped by skill hook")
+                        .to_string(),
+                ),
+                "modify_arguments" => {
+                    let args = value
+                        .get("arguments")
+                        .cloned()
+                        .unwrap_or(Value::Null)
+                        .to_string();
+                    HookDirective::ModifyArguments(args)
+                }
+                "stop" => HookDirective::Stop(
+                    value
+                        .get("reason")
+                        .and_then(|reason| reason.as_str())
+                        .unwrap_or("Stopped by skill hook")
+                        .to_string(),
+                ),
+                "inject_context" => HookDirective::InjectContext(
+                    value
+                        .get("context")
+                        .and_then(|context| context.as_str())
+                        .unwrap_or(trimmed)
+                        .to_string(),
+                ),
+                _ => HookDirective::Continue,
+            };
+        }
+    }
+
+    if let Some(rest) = trimmed.strip_prefix("skip:") {
+        return HookDirective::Skip(rest.trim().to_string());
+    }
+    if let Some(rest) = trimmed.strip_prefix("block:") {
+        return HookDirective::Skip(rest.trim().to_string());
+    }
+    if let Some(rest) = trimmed.strip_prefix("args:") {
+        return HookDirective::ModifyArguments(rest.trim().to_string());
+    }
+    if let Some(rest) = trimmed.strip_prefix("stop:") {
+        return HookDirective::Stop(rest.trim().to_string());
+    }
+    if let Some(rest) = trimmed.strip_prefix("context:") {
+        return HookDirective::InjectContext(rest.trim().to_string());
+    }
+
+    HookDirective::InjectContext(trimmed.to_string())
+}
+
+async fn run_hook_command(
+    ctx: &HookContext,
+    skill_name: &str,
+    phase: &str,
+    command: &str,
+    tool_name: Option<&str>,
+    payload: Option<&str>,
+) -> Result<String, String> {
+    let mut cmd = Command::new("sh");
+    cmd.arg("-lc").arg(command).current_dir(&ctx.project_path);
+    cmd.env("PLAN_CASCADE_SESSION_ID", &ctx.session_id);
+    cmd.env("PLAN_CASCADE_PROJECT_PATH", ctx.project_path.as_os_str());
+    cmd.env("PLAN_CASCADE_PROVIDER", &ctx.provider_name);
+    cmd.env("PLAN_CASCADE_MODEL", &ctx.model_name);
+    cmd.env("PLAN_CASCADE_SKILL_NAME", skill_name);
+    cmd.env("PLAN_CASCADE_HOOK_PHASE", phase);
+    if let Some(tool_name) = tool_name {
+        cmd.env("PLAN_CASCADE_TOOL_NAME", tool_name);
+    }
+    if let Some(payload) = payload {
+        cmd.env("PLAN_CASCADE_HOOK_PAYLOAD", payload);
+    }
+
+    let output = cmd.output().await.map_err(|error| {
+        format!(
+            "failed to execute skill hook command '{}' for skill '{}': {}",
+            command, skill_name, error
+        )
+    })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!(
+                "skill hook command '{}' exited with status {}",
+                command, output.status
+            )
+        } else {
+            stderr
+        });
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 /// Register Skill-related hooks onto an AgenticHooks instance.
 ///
 /// This wires the SkillIndex into the agentic lifecycle:
@@ -546,7 +726,7 @@ pub fn register_skill_hooks(
     // on_user_message: refine skill selection based on message content
     let index_clone2 = skill_index.clone();
     let policy_clone2 = policy;
-    let skills_store2 = selected_skills;
+    let skills_store2 = selected_skills.clone();
     hooks.register_on_user_message(Box::new(move |ctx, msg| {
         let index = index_clone2.clone();
         let policy = policy_clone2.clone();
@@ -565,6 +745,176 @@ pub fn register_skill_hooks(
                 *w = matches;
             }
             Ok(None) // do not modify the message
+        })
+    }));
+
+    // on_before_tool: execute selected skill pre-tool hooks, allowing argument rewrites or skips.
+    let index_clone3 = skill_index.clone();
+    let skills_store3 = selected_skills.clone();
+    hooks.register_on_before_tool(Box::new(move |ctx, tool_name, arguments| {
+        let index = index_clone3.clone();
+        let store = skills_store3.clone();
+        Box::pin(async move {
+            let guard = index.read().await;
+            let selected = store.read().await;
+            let selected_docs = selected_skill_documents(&guard, selected.as_slice());
+
+            let mut result = BeforeToolResult::default();
+            for doc in selected_docs {
+                let Some(skill_hooks) = &doc.hooks else {
+                    continue;
+                };
+                for rule in &skill_hooks.pre_tool_use {
+                    if !tool_matches_rule(&rule.matcher, &tool_name) {
+                        continue;
+                    }
+                    for action in &rule.hooks {
+                        let output = run_hook_command(
+                            &ctx,
+                            &doc.name,
+                            "pre_tool_use",
+                            &action.command,
+                            Some(&tool_name),
+                            Some(&arguments),
+                        )
+                        .await?;
+                        match parse_hook_directive(&output) {
+                            HookDirective::Continue => {}
+                            HookDirective::ModifyArguments(updated) => {
+                                result.modified_arguments = Some(updated);
+                            }
+                            HookDirective::Skip(reason) => {
+                                result.skip = true;
+                                result.skip_reason = Some(reason);
+                                return Ok(result);
+                            }
+                            HookDirective::Stop(reason) => {
+                                result.skip = true;
+                                result.skip_reason =
+                                    Some(format!("Stopped by skill hook: {}", reason));
+                                return Ok(result);
+                            }
+                            HookDirective::InjectContext(context) => {
+                                tracing::info!(
+                                    "[hooks] pre_tool_use context note from skill '{}': {}",
+                                    doc.name,
+                                    context
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            Ok(result)
+        })
+    }));
+
+    // on_after_tool: execute selected skill post-tool hooks and append injected context.
+    let index_clone4 = skill_index.clone();
+    let skills_store4 = selected_skills.clone();
+    hooks.register_on_after_tool(Box::new(move |ctx, tool_name, success, output_snippet| {
+        let index = index_clone4.clone();
+        let store = skills_store4.clone();
+        Box::pin(async move {
+            let guard = index.read().await;
+            let selected = store.read().await;
+            let selected_docs = selected_skill_documents(&guard, selected.as_slice());
+            let mut injected_context = Vec::new();
+
+            for doc in selected_docs {
+                let Some(skill_hooks) = &doc.hooks else {
+                    continue;
+                };
+                for rule in &skill_hooks.post_tool_use {
+                    if !tool_matches_rule(&rule.matcher, &tool_name) {
+                        continue;
+                    }
+                    for action in &rule.hooks {
+                        let payload = serde_json::json!({
+                            "tool_name": tool_name,
+                            "success": success,
+                            "output": output_snippet,
+                        })
+                        .to_string();
+                        let output = run_hook_command(
+                            &ctx,
+                            &doc.name,
+                            "post_tool_use",
+                            &action.command,
+                            Some(&tool_name),
+                            Some(&payload),
+                        )
+                        .await?;
+                        match parse_hook_directive(&output) {
+                            HookDirective::Continue => {}
+                            HookDirective::InjectContext(context) => injected_context.push(context),
+                            HookDirective::Skip(reason) | HookDirective::Stop(reason) => {
+                                injected_context.push(format!(
+                                    "Skill '{}' requested follow-up stop: {}",
+                                    doc.name, reason
+                                ));
+                            }
+                            HookDirective::ModifyArguments(_) => {}
+                        }
+                    }
+                }
+            }
+
+            if injected_context.is_empty() {
+                Ok(AfterToolResult::default())
+            } else {
+                Ok(AfterToolResult::with_context(injected_context.join("\n")))
+            }
+        })
+    }));
+
+    // on_before_llm: allow selected skills to run stop guards before each reasoning turn.
+    let index_clone5 = skill_index;
+    let skills_store5 = selected_skills;
+    let stop_requests = hooks.requested_stop.clone();
+    hooks.register_on_before_llm(Box::new(move |ctx, _iteration| {
+        let index = index_clone5.clone();
+        let store = skills_store5.clone();
+        let stop_requests = stop_requests.clone();
+        Box::pin(async move {
+            let guard = index.read().await;
+            let selected = store.read().await;
+            let selected_docs = selected_skill_documents(&guard, selected.as_slice());
+
+            for doc in selected_docs {
+                let Some(skill_hooks) = &doc.hooks else {
+                    continue;
+                };
+                for action in &skill_hooks.stop {
+                    let output = run_hook_command(
+                        &ctx,
+                        &doc.name,
+                        "stop",
+                        &action.command,
+                        None,
+                        None,
+                    )
+                    .await?;
+                    match parse_hook_directive(&output) {
+                        HookDirective::Stop(reason) => {
+                            let mut pending = stop_requests.write().await;
+                            *pending = Some(reason);
+                            return Ok(());
+                        }
+                        HookDirective::Skip(reason) => {
+                            let mut pending = stop_requests.write().await;
+                            *pending = Some(reason);
+                            return Ok(());
+                        }
+                        HookDirective::Continue
+                        | HookDirective::ModifyArguments(_)
+                        | HookDirective::InjectContext(_) => {}
+                    }
+                }
+            }
+
+            Ok(())
         })
     }));
 }
@@ -1491,6 +1841,7 @@ mod tests {
                     Ok(BeforeToolResult {
                         skip: true,
                         skip_reason: Some("Bash disabled by policy".to_string()),
+                        modified_arguments: None,
                     })
                 } else {
                     Ok(BeforeToolResult::default())
@@ -1675,7 +2026,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_register_skill_hooks_adds_two_hooks() {
+    fn test_register_skill_hooks_adds_runtime_hooks() {
         let mut hooks = AgenticHooks::new();
         assert_eq!(hooks.total_hooks(), 0);
 
@@ -1685,8 +2036,8 @@ mod tests {
 
         register_skill_hooks(&mut hooks, skill_index, policy, selected_skills);
 
-        // Should register 2 hooks: on_session_start + on_user_message
-        assert_eq!(hooks.total_hooks(), 2);
+        // session_start + user_message + before_tool + after_tool + before_llm
+        assert_eq!(hooks.total_hooks(), 5);
     }
 
     #[test]
@@ -1700,8 +2051,8 @@ mod tests {
 
         register_skill_hooks(&mut hooks, skill_index, policy, selected_skills);
 
-        // defaults(3) + skill hooks(2) = 5
-        assert_eq!(hooks.total_hooks(), 5);
+        // defaults(3) + skill hooks(5) = 8
+        assert_eq!(hooks.total_hooks(), 8);
     }
 
     #[tokio::test]

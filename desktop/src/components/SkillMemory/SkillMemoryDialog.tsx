@@ -16,6 +16,7 @@ import * as Tabs from '@radix-ui/react-tabs';
 import { Cross2Icon, MagnifyingGlassIcon, PlusIcon, ReloadIcon, TrashIcon } from '@radix-ui/react-icons';
 import { useSkillMemoryStore, type SkillSourceFilter, type MemoryCategoryFilter } from '../../store/skillMemory';
 import { useSettingsStore } from '../../store/settings';
+import { useContextSourcesStore } from '../../store/contextSources';
 import { useExecutionStore } from '../../store/execution';
 import { useContextOpsStore } from '../../store/contextOps';
 import { useWorkflowKernelStore } from '../../store/workflowKernel';
@@ -29,6 +30,7 @@ import { EmptyState } from './EmptyState';
 import { debounce } from '../Projects/utils';
 import type {
   SkillSummary,
+  SkillReviewStatus,
   MemoryEntry,
   MemoryCategory,
   MemoryScope,
@@ -113,9 +115,91 @@ function inferMemoryScope(entry: MemoryEntry): MemoryScope {
   return 'project';
 }
 
+function reviewStatusLabelFallback(status: SkillReviewStatus | null | undefined): string {
+  switch (status) {
+    case 'approved':
+      return 'Approved';
+    case 'rejected':
+      return 'Rejected';
+    case 'archived':
+      return 'Archived';
+    case 'pending_review':
+    default:
+      return 'Pending Review';
+  }
+}
+
+function reviewStatusTone(status: SkillReviewStatus | null | undefined): string {
+  switch (status) {
+    case 'approved':
+      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300';
+    case 'rejected':
+      return 'bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-300';
+    case 'archived':
+      return 'bg-gray-200 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
+    case 'pending_review':
+    default:
+      return 'bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300';
+  }
+}
+
+function whyNotSelectedReasonFallback(reason: string): string {
+  switch (reason) {
+    case 'disabled':
+      return 'Disabled';
+    case 'pending_review':
+      return 'Pending Review';
+    case 'rejected':
+      return 'Rejected';
+    case 'archived':
+      return 'Archived';
+    case 'phase_mismatch':
+      return 'Phase mismatch';
+    case 'not_in_explicit_selection':
+      return 'Not in explicit selection';
+    case 'filtered_out':
+      return 'Filtered out';
+    case 'unmatched':
+    default:
+      return 'Not selected by latest matching pass';
+  }
+}
+
+function skillRouterFallbackReasonFallback(reason: string): string {
+  switch (reason) {
+    case 'provider_unavailable':
+      return 'Provider unavailable';
+    case 'empty_query':
+      return 'Empty query';
+    case 'timeout':
+      return 'Router timed out';
+    case 'empty_response':
+      return 'Router returned empty response';
+    case 'invalid_empty_selection':
+      return 'Router returned no valid skills';
+    default:
+      return reason;
+  }
+}
+
+function sourceTypeLabel(t: (key: string, options?: { defaultValue?: string }) => string, sourceType: string): string {
+  switch (sourceType) {
+    case 'local':
+      return t('skillPanel.sourceTypes.local', { defaultValue: 'Local' });
+    case 'git':
+      return t('skillPanel.sourceTypes.git', { defaultValue: 'Git' });
+    case 'url':
+      return t('skillPanel.sourceTypes.url', { defaultValue: 'URL' });
+    default:
+      return sourceType;
+  }
+}
+
 // ============================================================================
 // SkillsTab
 // ============================================================================
+
+type SkillsViewTab = 'catalog' | 'why' | 'sources';
 
 function SkillsTab() {
   const { t } = useTranslation('simpleMode');
@@ -123,17 +207,32 @@ function SkillsTab() {
   const latestEnvelope = useContextOpsStore((s) => s.latestEnvelope);
   const skills = useSkillMemoryStore((s) => s.skills);
   const skillsLoading = useSkillMemoryStore((s) => s.skillsLoading);
+  const skillSourcesState = useSkillMemoryStore((s) => s.skillSources);
+  const skillSourcesLoading = useSkillMemoryStore((s) => s.skillSourcesLoading);
   const skillSearchQuery = useSkillMemoryStore((s) => s.skillSearchQuery);
   const skillSourceFilter = useSkillMemoryStore((s) => s.skillSourceFilter);
   const setSkillSearchQuery = useSkillMemoryStore((s) => s.setSkillSearchQuery);
   const setSkillSourceFilter = useSkillMemoryStore((s) => s.setSkillSourceFilter);
   const toggleSkill = useSkillMemoryStore((s) => s.toggleSkill);
+  const toggleGeneratedSkill = useSkillMemoryStore((s) => s.toggleGeneratedSkill);
+  const reviewGeneratedSkill = useSkillMemoryStore((s) => s.reviewGeneratedSkill);
+  const reviewGeneratedSkills = useSkillMemoryStore((s) => s.reviewGeneratedSkills);
   const refreshSkillIndex = useSkillMemoryStore((s) => s.refreshSkillIndex);
   const loadSkillDetail = useSkillMemoryStore((s) => s.loadSkillDetail);
+  const loadSkillSources = useSkillMemoryStore((s) => s.loadSkillSources);
+  const installSkillSource = useSkillMemoryStore((s) => s.installSkillSource);
+  const setSkillSourceEnabled = useSkillMemoryStore((s) => s.setSkillSourceEnabled);
+  const refreshSkillSource = useSkillMemoryStore((s) => s.refreshSkillSource);
+  const removeSkillSource = useSkillMemoryStore((s) => s.removeSkillSource);
+  const importGeneratedSkill = useSkillMemoryStore((s) => s.importGeneratedSkill);
   const skillDetail = useSkillMemoryStore((s) => s.skillDetail);
+  const selectedSkillIds = useContextSourcesStore((s) => s.selectedSkillIds);
+  const invokedSkillIds = useContextSourcesStore((s) => s.invokedSkillIds);
 
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
-  const [showWhySkills, setShowWhySkills] = useState(false);
+  const [skillsView, setSkillsView] = useState<SkillsViewTab>('catalog');
+  const [sourceInstallValue, setSourceInstallValue] = useState('');
+  const [sourceInstallName, setSourceInstallName] = useState('');
   const diagnostics = latestEnvelope?.diagnostics;
   const skillSources = useMemo(
     () => (latestEnvelope?.sources ?? []).filter((source) => source.kind === 'skills'),
@@ -162,6 +261,29 @@ function SkillsTab() {
     ],
     [t],
   );
+  const skillsViewTabs: { value: SkillsViewTab; label: string }[] = useMemo(
+    () => [
+      {
+        value: 'catalog',
+        label: t('skillPanel.skillsViews.catalog', { defaultValue: 'Skills' }),
+      },
+      {
+        value: 'why',
+        label: t('skillPanel.skillsViews.why', { defaultValue: 'Why these skills?' }),
+      },
+      {
+        value: 'sources',
+        label: t('skillPanel.skillsViews.sources', { defaultValue: 'Skill Sources' }),
+      },
+    ],
+    [t],
+  );
+
+  useEffect(() => {
+    if (workspacePath) {
+      void loadSkillSources(workspacePath);
+    }
+  }, [loadSkillSources, workspacePath]);
 
   const getSourceGroupLabel = useCallback(
     (sourceType: string) =>
@@ -204,12 +326,23 @@ function SkillsTab() {
     }
     return groups;
   }, [filteredSkills]);
+  const pendingGeneratedSkillIds = useMemo(
+    () =>
+      filteredSkills
+        .filter((skill) => skill.source.type === 'generated' && skill.review_status === 'pending_review')
+        .map((skill) => skill.id),
+    [filteredSkills],
+  );
 
   const handleToggle = useCallback(
-    (id: string, enabled: boolean) => {
+    (id: string, enabled: boolean, sourceType?: SkillSummary['source']['type']) => {
+      if (sourceType === 'generated') {
+        toggleGeneratedSkill(id, enabled);
+        return;
+      }
       toggleSkill(id, enabled);
     },
-    [toggleSkill],
+    [toggleGeneratedSkill, toggleSkill],
   );
 
   const handleSkillClick = useCallback(
@@ -225,88 +358,322 @@ function SkillsTab() {
   const handleRefresh = useCallback(() => {
     if (workspacePath) {
       refreshSkillIndex(workspacePath);
+      void loadSkillSources(workspacePath);
     }
-  }, [workspacePath, refreshSkillIndex]);
+  }, [workspacePath, refreshSkillIndex, loadSkillSources]);
+
+  const handleInstallSource = useCallback(() => {
+    if (!workspacePath || !sourceInstallValue.trim()) return;
+    void installSkillSource(workspacePath, sourceInstallValue, sourceInstallName || null).then(() => {
+      setSourceInstallValue('');
+      setSourceInstallName('');
+    });
+  }, [installSkillSource, sourceInstallName, sourceInstallValue, workspacePath]);
+
+  const handleImportGenerated = useCallback(() => {
+    if (!workspacePath) return;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const json = await file.text();
+      const imported = await importGeneratedSkill(workspacePath, json, 'rename');
+      if (imported) {
+        setSelectedSkillId(imported.id);
+      }
+    };
+    input.click();
+  }, [importGeneratedSkill, workspacePath]);
+
+  const unselectedSkillReasons = useMemo(() => {
+    if (diagnostics?.why_not_selected_skills?.length) {
+      return diagnostics.why_not_selected_skills.slice(0, 12).map((entry) => ({
+        id: entry.skill_id,
+        name: entry.skill_name,
+        path: entry.path,
+        source_type: entry.source_type,
+        reason: t(`skillPanel.whyNotSelectedReasons.${entry.reason}`, {
+          defaultValue: whyNotSelectedReasonFallback(entry.reason),
+        }),
+      }));
+    }
+    const effectiveIds = new Set(diagnostics?.effective_skill_ids ?? []);
+    return skills
+      .filter((skill) => !effectiveIds.has(skill.id))
+      .map((skill) => {
+        let reason = t('skillPanel.whyNotSelected.unmatched', { defaultValue: 'Not selected by latest matching pass' });
+        if (!skill.enabled) {
+          reason = t('skillPanel.whyNotSelected.disabled', { defaultValue: 'Disabled' });
+        } else if (skill.review_status && skill.review_status !== 'approved') {
+          reason = t(`skillPanel.reviewStatus.${skill.review_status}`, {
+            defaultValue: reviewStatusLabelFallback(skill.review_status),
+          });
+        } else if (
+          (selectedSkillIds.length > 0 || invokedSkillIds.length > 0) &&
+          !selectedSkillIds.includes(skill.id) &&
+          !invokedSkillIds.includes(skill.id)
+        ) {
+          reason = t('skillPanel.whyNotSelected.notPinnedOrExplicit', {
+            defaultValue: 'Not in explicit or pinned selection',
+          });
+        } else if (
+          selectedSkillIds.length > 0 &&
+          !selectedSkillIds.includes(skill.id) &&
+          diagnostics?.selection_origin === 'explicit'
+        ) {
+          reason = t('skillPanel.whyNotSelected.notExplicitlySelected', {
+            defaultValue: 'Not explicitly selected',
+          });
+        }
+        return { id: skill.id, name: skill.name, path: skill.path, source_type: skill.source.type, reason };
+      })
+      .slice(0, 8);
+  }, [
+    diagnostics?.effective_skill_ids,
+    diagnostics?.selection_origin,
+    diagnostics?.why_not_selected_skills,
+    invokedSkillIds,
+    selectedSkillIds,
+    skills,
+    t,
+  ]);
 
   // If a skill detail is open, show it
   if (selectedSkillId && skillDetail) {
-    return <SkillDetail skill={skillDetail} onClose={() => setSelectedSkillId(null)} />;
+    return <SkillDetail skill={skillDetail} onClose={() => setSelectedSkillId(null)} projectPath={workspacePath} />;
   }
 
   return (
     <div className="flex flex-col h-full">
-      {/* Toolbar: search + filter + refresh */}
-      <div className="p-3 border-b border-gray-200 dark:border-gray-700 space-y-2">
-        {/* Search */}
-        <div className="relative">
-          <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-          <input
-            type="text"
-            value={skillSearchQuery}
-            onChange={(e) => setSkillSearchQuery(e.target.value)}
-            placeholder={t('skillPanel.searchSkills')}
-            className={clsx(
-              'w-full pl-8 pr-3 py-1.5 rounded-md text-xs',
-              'bg-gray-50 dark:bg-gray-800',
-              'border border-gray-200 dark:border-gray-700',
-              'text-gray-700 dark:text-gray-300',
-              'placeholder:text-gray-400 dark:placeholder:text-gray-500',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent',
-            )}
-          />
-        </div>
-
-        {/* Source filter tabs + refresh */}
+      <div className="border-b border-gray-200 px-3 py-2 dark:border-gray-700">
         <div className="flex items-center gap-1 flex-wrap">
-          {sourceFilters.map((filter) => (
+          {skillsViewTabs.map((tab) => (
             <button
-              key={filter.value}
-              onClick={() => setSkillSourceFilter(filter.value)}
+              key={tab.value}
+              type="button"
+              onClick={() => setSkillsView(tab.value)}
               className={clsx(
-                'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
-                skillSourceFilter === filter.value
+                'px-2.5 py-1 rounded-md text-2xs font-medium transition-colors',
+                skillsView === tab.value
                   ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
                   : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
               )}
             >
-              {filter.label}
+              {tab.label}
             </button>
           ))}
-          <button
-            onClick={() => setShowWhySkills((value) => !value)}
-            className={clsx(
-              'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
-              'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
-            )}
-            title={t('skillPanel.whySkillsTitle', { defaultValue: 'Why these skills' })}
-          >
-            {showWhySkills
-              ? t('skillPanel.hideWhySkills', { defaultValue: 'Hide Why' })
-              : t('skillPanel.showWhySkills', { defaultValue: 'Why Skills?' })}
-          </button>
-          <button
-            onClick={handleRefresh}
-            className={clsx(
-              'ml-auto p-1 rounded-md transition-colors',
-              'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
-              'hover:bg-gray-100 dark:hover:bg-gray-800',
-            )}
-            title={t('skillPanel.refresh')}
-          >
-            <ReloadIcon className="w-3.5 h-3.5" />
-          </button>
         </div>
+      </div>
 
-        {showWhySkills && (
-          <div className="rounded-md border border-sky-200 dark:border-sky-900 bg-sky-50/60 dark:bg-sky-900/10 p-2 text-2xs text-sky-800 dark:text-sky-200 space-y-1">
+      {skillsView === 'catalog' && (
+        <>
+          <div className="p-3 border-b border-gray-200 dark:border-gray-700 space-y-2">
+            <div className="relative">
+              <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+              <input
+                type="text"
+                value={skillSearchQuery}
+                onChange={(e) => setSkillSearchQuery(e.target.value)}
+                placeholder={t('skillPanel.searchSkills')}
+                className={clsx(
+                  'w-full pl-8 pr-3 py-1.5 rounded-md text-xs',
+                  'bg-gray-50 dark:bg-gray-800',
+                  'border border-gray-200 dark:border-gray-700',
+                  'text-gray-700 dark:text-gray-300',
+                  'placeholder:text-gray-400 dark:placeholder:text-gray-500',
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent',
+                )}
+              />
+            </div>
+
+            <div className="flex items-center gap-1 flex-wrap">
+              {sourceFilters.map((filter) => (
+                <button
+                  key={filter.value}
+                  onClick={() => setSkillSourceFilter(filter.value)}
+                  className={clsx(
+                    'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
+                    skillSourceFilter === filter.value
+                      ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                      : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
+                  )}
+                >
+                  {filter.label}
+                </button>
+              ))}
+              <button
+                onClick={handleRefresh}
+                className={clsx(
+                  'ml-auto p-1 rounded-md transition-colors',
+                  'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
+                  'hover:bg-gray-100 dark:hover:bg-gray-800',
+                )}
+                title={t('skillPanel.refresh')}
+              >
+                <ReloadIcon className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={handleImportGenerated}
+                className={clsx(
+                  'px-2 py-1 rounded-md text-2xs font-medium transition-colors',
+                  'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800',
+                )}
+              >
+                {t('skillPanel.importGenerated', { defaultValue: 'Import Generated' })}
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-2">
+            {skillsLoading && filteredSkills.length === 0 ? (
+              <div className="flex items-center justify-center py-8">
+                <span className="text-xs text-gray-400">{t('skillPanel.loading')}</span>
+              </div>
+            ) : filteredSkills.length === 0 ? (
+              <EmptyState title={t('skillPanel.noSkillsFound')} description={t('skillPanel.noSkillsFoundHint')} />
+            ) : (
+              <div className="space-y-3">
+                {Object.entries(groupedSkills).map(([sourceType, groupSkills]) => (
+                  <div key={sourceType}>
+                    <div className="px-2 py-1">
+                      <span className="text-2xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                        {getSourceGroupLabel(sourceType)}
+                      </span>
+                      <span className="text-2xs text-gray-400 dark:text-gray-500 ml-1">({groupSkills.length})</span>
+                      {sourceType === 'generated' && pendingGeneratedSkillIds.length > 0 && (
+                        <span className="ml-2 inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => void reviewGeneratedSkills(pendingGeneratedSkillIds, 'approved')}
+                            className="rounded px-1.5 py-0.5 text-2xs font-medium text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
+                          >
+                            {t('skillPanel.approvePendingGenerated', { defaultValue: 'Approve Pending' })}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void reviewGeneratedSkills(pendingGeneratedSkillIds, 'rejected')}
+                            className="rounded px-1.5 py-0.5 text-2xs font-medium text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-900/20"
+                          >
+                            {t('skillPanel.rejectPendingGenerated', { defaultValue: 'Reject Pending' })}
+                          </button>
+                        </span>
+                      )}
+                    </div>
+                    {groupSkills.map((skill) => (
+                      <div key={skill.id} className="space-y-1">
+                        <SkillRow
+                          skill={skill}
+                          onToggle={(id, enabled) => handleToggle(id, enabled, skill.source.type)}
+                          onClick={handleSkillClick}
+                        />
+                        {(skill.source.type === 'generated' || skill.review_status) && (
+                          <div className="ml-7 flex flex-wrap items-center gap-1.5 pb-1">
+                            <span
+                              className={clsx(
+                                'inline-flex items-center rounded-full px-1.5 py-0.5 text-2xs font-medium',
+                                reviewStatusTone(skill.review_status),
+                              )}
+                            >
+                              {t(`skillPanel.reviewStatus.${skill.review_status ?? 'pending_review'}`, {
+                                defaultValue: reviewStatusLabelFallback(skill.review_status),
+                              })}
+                            </span>
+                            {skill.source.type === 'generated' && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => void reviewGeneratedSkill(skill.id, 'approved')}
+                                  className="rounded px-1.5 py-0.5 text-2xs font-medium text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
+                                >
+                                  {t('skillPanel.reviewActions.approve', { defaultValue: 'Approve' })}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void reviewGeneratedSkill(skill.id, 'rejected')}
+                                  className="rounded px-1.5 py-0.5 text-2xs font-medium text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-900/20"
+                                >
+                                  {t('skillPanel.reviewActions.reject', { defaultValue: 'Reject' })}
+                                </button>
+                                {skill.review_status === 'archived' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => void reviewGeneratedSkill(skill.id, 'pending_review')}
+                                    className="rounded px-1.5 py-0.5 text-2xs font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+                                  >
+                                    {t('skillPanel.reviewActions.restore', { defaultValue: 'Restore' })}
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => void reviewGeneratedSkill(skill.id, 'archived')}
+                                    className="rounded px-1.5 py-0.5 text-2xs font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+                                  >
+                                    {t('skillPanel.reviewActions.archive', { defaultValue: 'Archive' })}
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {skillsView === 'why' && (
+        <div className="flex-1 overflow-y-auto p-3">
+          <div className="rounded-md border border-sky-200 dark:border-sky-900 bg-sky-50/60 dark:bg-sky-900/10 p-3 text-2xs text-sky-800 dark:text-sky-200 space-y-2">
             <div>
               {t('skillPanel.selectionReason', { defaultValue: 'Selection reason' })}:{' '}
-              {diagnostics?.selection_reason || t('skillPanel.none', { defaultValue: 'none' })}
+              {diagnostics?.selection_reason
+                ? t(`skillPanel.selectionReasons.${diagnostics.selection_reason}`, {
+                    defaultValue: diagnostics.selection_reason,
+                  })
+                : t('skillPanel.none', { defaultValue: 'none' })}
             </div>
             <div>
               {t('skillPanel.selectionOrigin', { defaultValue: 'Selection origin' })}:{' '}
-              {diagnostics?.selection_origin || t('skillPanel.none', { defaultValue: 'none' })}
+              {diagnostics?.selection_origin
+                ? t(`skillPanel.selectionOrigins.${diagnostics.selection_origin}`, {
+                    defaultValue: diagnostics.selection_origin,
+                  })
+                : t('skillPanel.none', { defaultValue: 'none' })}
             </div>
+            {(diagnostics?.skill_router_used || diagnostics?.skill_router_fallback_reason) && (
+              <>
+                <div>
+                  {t('skillPanel.routerStatus', { defaultValue: 'Router' })}:{' '}
+                  {t(`skillPanel.routerStrategies.${diagnostics?.skill_router_strategy ?? 'hybrid'}`, {
+                    defaultValue: diagnostics?.skill_router_strategy ?? 'hybrid',
+                  })}
+                </div>
+                <div>
+                  {t('skillPanel.routerConfidence', { defaultValue: 'Router confidence' })}:{' '}
+                  {typeof diagnostics?.skill_router_confidence === 'number'
+                    ? diagnostics.skill_router_confidence.toFixed(2)
+                    : t('skillPanel.none', { defaultValue: 'none' })}
+                </div>
+                <div>
+                  {t('skillPanel.routerReason', { defaultValue: 'Router reason' })}:{' '}
+                  {diagnostics?.skill_router_reason || t('skillPanel.none', { defaultValue: 'none' })}
+                </div>
+                <div>
+                  {t('skillPanel.routerFallback', { defaultValue: 'Fallback' })}:{' '}
+                  {diagnostics?.skill_router_fallback_reason
+                    ? t(`skillPanel.routerFallbackReasons.${diagnostics.skill_router_fallback_reason}`, {
+                        defaultValue: skillRouterFallbackReasonFallback(diagnostics.skill_router_fallback_reason),
+                      })
+                    : t('skillPanel.none', { defaultValue: 'none' })}
+                </div>
+              </>
+            )}
             <div>
               {t('skillPanel.selectedSkills', { defaultValue: 'Selected skills' })}:{' '}
               {diagnostics?.selected_skills?.length
@@ -325,36 +692,172 @@ function SkillsTab() {
                 {skillSources.map((s) => s.reason).join(', ')}
               </div>
             )}
+            <div>
+              {t('skillPanel.hierarchyMatches', { defaultValue: 'Hierarchy matches' })}:{' '}
+              {diagnostics?.hierarchy_matches?.length
+                ? diagnostics.hierarchy_matches.join(', ')
+                : t('skillPanel.none', { defaultValue: 'none' })}
+            </div>
+            <div>
+              {t('skillPanel.commandPinnedSkills', { defaultValue: 'Command pinned skills' })}:{' '}
+              {invokedSkillIds.length ? invokedSkillIds.join(', ') : t('skillPanel.none', { defaultValue: 'none' })}
+            </div>
           </div>
-        )}
-      </div>
 
-      {/* Skills list */}
-      <div className="flex-1 overflow-y-auto p-2">
-        {skillsLoading && filteredSkills.length === 0 ? (
-          <div className="flex items-center justify-center py-8">
-            <span className="text-xs text-gray-400">{t('skillPanel.loading')}</span>
-          </div>
-        ) : filteredSkills.length === 0 ? (
-          <EmptyState title={t('skillPanel.noSkillsFound')} description={t('skillPanel.noSkillsFoundHint')} />
-        ) : (
-          <div className="space-y-3">
-            {Object.entries(groupedSkills).map(([sourceType, groupSkills]) => (
-              <div key={sourceType}>
-                <div className="px-2 py-1">
-                  <span className="text-2xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                    {getSourceGroupLabel(sourceType)}
-                  </span>
-                  <span className="text-2xs text-gray-400 dark:text-gray-500 ml-1">({groupSkills.length})</span>
-                </div>
-                {groupSkills.map((skill) => (
-                  <SkillRow key={skill.id} skill={skill} onToggle={handleToggle} onClick={handleSkillClick} />
+          {unselectedSkillReasons.length > 0 && (
+            <div className="mt-3 rounded-md border border-sky-100 bg-white/70 p-3 dark:border-sky-950 dark:bg-gray-900/40">
+              <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                {t('skillPanel.whyNotSelectedTitle', { defaultValue: 'Why not selected' })}
+              </div>
+              <div className="mt-2 space-y-2">
+                {unselectedSkillReasons.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1.5 text-2xs"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-gray-700 dark:text-gray-200">{item.name}</span>
+                      <span className="text-gray-500 dark:text-gray-400">{item.reason}</span>
+                    </div>
+                    {'path' in item && item.path ? (
+                      <div className="mt-0.5 truncate text-[10px] text-gray-400 dark:text-gray-500">
+                        {'source_type' in item ? item.source_type : ''} · {item.path}
+                      </div>
+                    ) : null}
+                  </div>
                 ))}
               </div>
-            ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {skillsView === 'sources' && (
+        <div className="flex-1 overflow-y-auto p-3">
+          <div className="rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-800/40 p-3 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                  {t('skillPanel.skillSourcesTitle', { defaultValue: 'Skill Sources' })}
+                </div>
+                <div className="text-2xs text-gray-500 dark:text-gray-400">
+                  {t('skillPanel.skillSourcesHint', {
+                    defaultValue: 'Manage installed local, Git, and URL-backed skill sources.',
+                  })}
+                </div>
+              </div>
+              {skillSourcesLoading && (
+                <span className="text-2xs text-gray-400 dark:text-gray-500">
+                  {t('skillPanel.loading', { defaultValue: 'Loading...' })}
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_180px_auto]">
+              <input
+                value={sourceInstallValue}
+                onChange={(event) => setSourceInstallValue(event.target.value)}
+                placeholder={t('skillPanel.skillSourceInput', {
+                  defaultValue: 'Paste a local path, Git URL, github:owner/repo, or raw SKILL.md URL',
+                })}
+                className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-2xs text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+              />
+              <input
+                value={sourceInstallName}
+                onChange={(event) => setSourceInstallName(event.target.value)}
+                placeholder={t('skillPanel.skillSourceName', { defaultValue: 'Optional source name' })}
+                className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-2xs text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+              />
+              <button
+                type="button"
+                onClick={handleInstallSource}
+                className="rounded-md bg-primary-600 px-3 py-1.5 text-2xs font-medium text-white hover:bg-primary-700"
+              >
+                {t('skillPanel.installSkillSource', { defaultValue: 'Install Source' })}
+              </button>
+            </div>
+            {skillSourcesState.length > 0 ? (
+              <div className="space-y-2">
+                {skillSourcesState.map((source) => (
+                  <div
+                    key={source.name}
+                    className="flex flex-wrap items-center gap-2 rounded-md border border-gray-200 dark:border-gray-700 px-2 py-1.5 text-2xs text-gray-600 dark:text-gray-300"
+                  >
+                    <span className="font-medium">{source.name}</span>
+                    <span className="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-gray-700">
+                      {sourceTypeLabel(t, source.source_type)}
+                    </span>
+                    <span>
+                      {t('skillPanel.sourceSkillCount', {
+                        count: source.skill_count,
+                        defaultValue: '{{count}} skills',
+                      })}
+                    </span>
+                    <span
+                      className={
+                        source.installed
+                          ? 'text-emerald-600 dark:text-emerald-300'
+                          : 'text-amber-600 dark:text-amber-300'
+                      }
+                    >
+                      {source.installed
+                        ? t('skillPanel.sourceInstalled', { defaultValue: 'installed' })
+                        : t('skillPanel.sourceMissing', { defaultValue: 'missing' })}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        workspacePath && void setSkillSourceEnabled(workspacePath, source.name, !source.enabled)
+                      }
+                      className={clsx(
+                        'rounded border px-1.5 py-0.5 text-2xs',
+                        source.enabled
+                          ? 'border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-900/20'
+                          : 'border-gray-200 text-gray-500 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800',
+                      )}
+                      title={
+                        source.enabled
+                          ? t('skillPanel.disableSkillSource', { defaultValue: 'Disable source' })
+                          : t('skillPanel.enableSkillSource', { defaultValue: 'Enable source' })
+                      }
+                    >
+                      {source.enabled
+                        ? t('skillPanel.sourceEnabled', { defaultValue: 'enabled' })
+                        : t('skillPanel.sourceDisabled', { defaultValue: 'disabled' })}
+                    </button>
+                    <span className="truncate text-gray-400 dark:text-gray-500">
+                      {source.repository || source.url || source.path}
+                    </span>
+                    {workspacePath && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => void refreshSkillSource(workspacePath, source.name)}
+                          className="rounded border border-gray-200 px-1.5 py-0.5 text-2xs text-gray-500 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                          title={t('skillPanel.refreshSkillSource', { defaultValue: 'Refresh source' })}
+                        >
+                          <ReloadIcon className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void removeSkillSource(workspacePath, source.name)}
+                          className="rounded border border-red-200 px-1.5 py-0.5 text-2xs text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/20"
+                          title={t('skillPanel.removeSkillSource', { defaultValue: 'Remove source' })}
+                        >
+                          <TrashIcon className="h-3 w-3" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-2xs text-gray-400 dark:text-gray-500">
+                {t('skillPanel.noSkillSources', { defaultValue: 'No external skill sources configured yet.' })}
+              </p>
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

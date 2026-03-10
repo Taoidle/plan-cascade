@@ -9,11 +9,12 @@
 //! warning and return empty strings so that the LLM never sees error messages —
 //! it simply receives less context, preserving the original behavior.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::services::llm::types::ProviderConfig;
 use crate::commands::knowledge::KnowledgeState;
 use crate::services::knowledge::context_provider::{
     KnowledgeContextConfig, KnowledgeContextProvider,
@@ -32,9 +33,13 @@ use crate::services::skills::index::build_index;
 use crate::services::skills::injector::{inject_skill_summaries, inject_skills};
 use crate::services::skills::model::{
     GeneratedSkillRecord, InjectionPhase, SelectionPolicy, SkillDocument, SkillIndex, SkillMatch,
-    SkillSource,
+    SkillReviewStatus, SkillSource,
 };
-use crate::services::skills::select::select_skills_for_session;
+use crate::services::skills::router::SkillRerankDiagnostics;
+use crate::services::skills::router::rerank_skill_matches;
+use crate::services::skills::select::{
+    select_skill_candidates_for_session, select_skills_for_session,
+};
 use crate::services::tools::definitions::get_tool_definitions_from_registry;
 use crate::services::tools::system_prompt::build_memory_section;
 use crate::state::AppState;
@@ -173,11 +178,17 @@ pub struct SkillsSourceConfig {
     /// Empty = use automatic selection logic (backward-compatible).
     #[serde(default)]
     pub selected_skill_ids: Vec<String>,
+    /// Session-pinned command-invoked skills.
+    #[serde(default)]
+    pub invoked_skill_ids: Vec<String>,
     /// Skill selection mode.
     /// `auto` = use lexical/detection policy.
     /// `explicit` = strictly respect `selected_skill_ids`.
     #[serde(default)]
     pub selection_mode: SkillSelectionMode,
+    /// Review filter for generated skills.
+    #[serde(default)]
+    pub review_filter: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -195,6 +206,20 @@ pub struct EffectiveSkillPlan {
     pub skill_expertise: Vec<String>,
     pub blocked_tools: Vec<String>,
     pub selection_reason: String,
+    pub selection_origin: String,
+    pub hierarchy_matches: Vec<String>,
+    pub why_not_selected: Vec<NonSelectedSkillDiagnostic>,
+    pub router_diagnostics: SkillRerankDiagnostics,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NonSelectedSkillDiagnostic {
+    pub skill_id: String,
+    pub skill_name: String,
+    pub reason: String,
+    pub source_type: String,
+    pub path: String,
+    pub review_status: Option<SkillReviewStatus>,
 }
 
 /// Aggregated domain context from all sources.
@@ -283,6 +308,7 @@ pub async fn query_selected_context(
     project_path: &str,
     query: &str,
     phase: InjectionPhase,
+    provider_config: Option<&ProviderConfig>,
 ) -> EnrichedContext {
     tracing::info!(
         "[ContextSource] query_selected_context called — knowledge={:?}, memory={:?}, skills={:?}, project_id={}",
@@ -350,8 +376,11 @@ pub async fn query_selected_context(
                 query,
                 phase,
                 &s.selected_skill_ids,
+                &s.invoked_skill_ids,
                 s.selection_mode,
+                s.review_filter.as_deref(),
                 true,
+                provider_config,
             )
             .await;
             (
@@ -386,6 +415,7 @@ pub async fn query_selected_context_without_knowledge(
     project_path: &str,
     query: &str,
     phase: InjectionPhase,
+    provider_config: Option<&ProviderConfig>,
 ) -> EnrichedContext {
     tracing::info!(
         "[ContextSource] query_selected_context_without_knowledge — memory={:?}, skills={:?}, project_id={}",
@@ -422,8 +452,11 @@ pub async fn query_selected_context_without_knowledge(
                 query,
                 phase,
                 &s.selected_skill_ids,
+                &s.invoked_skill_ids,
                 s.selection_mode,
+                s.review_filter.as_deref(),
                 true,
+                provider_config,
             )
             .await;
             (
@@ -650,12 +683,15 @@ pub async fn select_skill_matches_for_task_filtered(
         query,
         phase,
         selected_skill_ids,
+        &[],
         if selected_skill_ids.is_empty() {
             SkillSelectionMode::Auto
         } else {
             SkillSelectionMode::Explicit
         },
+        None,
         true,
+        None,
     )
     .await
     .matches
@@ -678,37 +714,50 @@ pub async fn select_skills_for_task_filtered(
         query,
         phase,
         selected_skill_ids,
+        &[],
         if selected_skill_ids.is_empty() {
             SkillSelectionMode::Auto
         } else {
             SkillSelectionMode::Explicit
         },
+        None,
         true,
+        None,
     )
     .await;
     (effective.skills_block, effective.skill_expertise)
 }
 
 fn normalized_allowed_tools_from_skill_matches(matches: &[SkillMatch]) -> Option<HashSet<String>> {
-    let mut allowed = HashSet::<String>::new();
-    let mut has_allowlist = false;
+    let mut allowed: Option<HashSet<String>> = None;
 
     for skill_match in matches {
         if !skill_match.skill.enabled || skill_match.skill.allowed_tools.is_empty() {
             continue;
         }
-        has_allowlist = true;
-        for tool in &skill_match.skill.allowed_tools {
-            let normalized = tool.trim().to_ascii_lowercase();
-            if !normalized.is_empty() {
-                allowed.insert(normalized);
-            }
+        let current = skill_match
+            .skill
+            .allowed_tools
+            .iter()
+            .map(|tool| tool.trim().to_ascii_lowercase())
+            .filter(|tool| !tool.is_empty())
+            .collect::<HashSet<_>>();
+        if current.is_empty() {
+            continue;
         }
+
+        allowed = Some(match allowed.take() {
+            Some(existing) => existing
+                .intersection(&current)
+                .cloned()
+                .collect::<HashSet<_>>(),
+            None => current,
+        });
     }
 
-    if !has_allowlist {
+    let Some(mut allowed) = allowed else {
         return None;
-    }
+    };
 
     // Minimum safe exploration set.
     for safe_tool in ["read", "ls", "glob", "grep", "cwd"] {
@@ -755,6 +804,36 @@ fn select_skill_matches_by_ids(
         .collect()
 }
 
+fn merge_skill_matches(primary: Vec<SkillMatch>, supplemental: Vec<SkillMatch>) -> Vec<SkillMatch> {
+    let mut merged = primary;
+    let mut seen = merged
+        .iter()
+        .map(|skill| skill.skill.id.clone())
+        .collect::<HashSet<_>>();
+    for skill in supplemental {
+        if seen.insert(skill.skill.id.clone()) {
+            merged.push(skill);
+        }
+    }
+    merged
+}
+
+fn filter_skill_matches_by_review(matches: Vec<SkillMatch>, index: &SkillIndex, include_pending_review: bool) -> Vec<SkillMatch> {
+    matches
+        .into_iter()
+        .filter(|skill_match| {
+            let Some(doc) = index.skills().iter().find(|doc| doc.id == skill_match.skill.id) else {
+                return false;
+            };
+            match doc.review_status {
+                None | Some(SkillReviewStatus::Approved) => true,
+                Some(SkillReviewStatus::PendingReview) => include_pending_review,
+                Some(SkillReviewStatus::Rejected | SkillReviewStatus::Archived) => false,
+            }
+        })
+        .collect()
+}
+
 pub async fn hydrate_skill_matches_by_ids(
     app_state: &AppState,
     project_path: &str,
@@ -791,14 +870,127 @@ fn build_skill_block_from_matches(
     inject_skill_summaries(matches, policy)
 }
 
+fn project_relative_skill_path(project_root: &Path, path: &Path) -> String {
+    match path.strip_prefix(project_root) {
+        Ok(relative) => relative.display().to_string(),
+        Err(_) => path.display().to_string(),
+    }
+}
+
+fn skill_matches_phase(doc: &SkillDocument, phase: InjectionPhase) -> bool {
+    doc.inject_into.contains(&InjectionPhase::Always) || doc.inject_into.contains(&phase)
+}
+
+fn skill_source_label(source: &SkillSource) -> String {
+    match source {
+        SkillSource::Builtin => "builtin".to_string(),
+        SkillSource::External { .. } => "external".to_string(),
+        SkillSource::User => "user".to_string(),
+        SkillSource::ProjectLocal => "project_local".to_string(),
+        SkillSource::Generated => "generated".to_string(),
+    }
+}
+
+fn collect_hierarchy_matches(project_root: &Path, index: &SkillIndex, matches: &[SkillMatch]) -> Vec<String> {
+    let mut hierarchy = BTreeSet::new();
+
+    for skill_match in matches {
+        let Some(doc) = index.skills().iter().find(|doc| doc.id == skill_match.skill.id) else {
+            continue;
+        };
+
+        let relative = project_relative_skill_path(project_root, &doc.path);
+        if relative.starts_with(".skills/") || relative.ends_with(".md") {
+            hierarchy.insert(relative);
+        }
+    }
+
+    hierarchy.into_iter().collect()
+}
+
+fn collect_why_not_selected(
+    project_root: &Path,
+    index: &SkillIndex,
+    phase: InjectionPhase,
+    final_matches: &[SkillMatch],
+    pre_review_matches: &[SkillMatch],
+    selected_skill_ids: &[String],
+    invoked_skill_ids: &[String],
+    force_user_selected: bool,
+    include_pending_review: bool,
+) -> Vec<NonSelectedSkillDiagnostic> {
+    let final_ids = final_matches
+        .iter()
+        .map(|skill| skill.skill.id.as_str())
+        .collect::<HashSet<_>>();
+    let pre_review_ids = pre_review_matches
+        .iter()
+        .map(|skill| skill.skill.id.as_str())
+        .collect::<HashSet<_>>();
+    let selected_ids = selected_skill_ids
+        .iter()
+        .map(|value| value.as_str())
+        .collect::<HashSet<_>>();
+    let invoked_ids = invoked_skill_ids
+        .iter()
+        .map(|value| value.as_str())
+        .collect::<HashSet<_>>();
+
+    let mut diagnostics = index
+        .skills()
+        .iter()
+        .filter(|doc| !final_ids.contains(doc.id.as_str()))
+        .map(|doc| {
+            let reason = if !doc.enabled {
+                "disabled"
+            } else if !skill_matches_phase(doc, phase.clone()) {
+                "phase_mismatch"
+            } else {
+                match doc.review_status {
+                    Some(SkillReviewStatus::PendingReview) if !include_pending_review => "pending_review",
+                    Some(SkillReviewStatus::Rejected) => "rejected",
+                    Some(SkillReviewStatus::Archived) => "archived",
+                    _ if force_user_selected
+                        && !selected_ids.contains(doc.id.as_str())
+                        && !invoked_ids.contains(doc.id.as_str()) =>
+                    {
+                        "not_in_explicit_selection"
+                    }
+                    _ if !pre_review_ids.contains(doc.id.as_str()) => "unmatched",
+                    _ => "filtered_out",
+                }
+            };
+
+            NonSelectedSkillDiagnostic {
+                skill_id: doc.id.clone(),
+                skill_name: doc.name.clone(),
+                reason: reason.to_string(),
+                source_type: skill_source_label(&doc.source),
+                path: project_relative_skill_path(project_root, &doc.path),
+                review_status: doc.review_status.clone(),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    diagnostics.sort_by(|left, right| {
+        left.reason
+            .cmp(&right.reason)
+            .then_with(|| left.skill_name.cmp(&right.skill_name))
+    });
+    diagnostics
+}
+
 pub async fn resolve_effective_skills(
     app_state: &AppState,
     project_path: &str,
     query: &str,
     phase: InjectionPhase,
     selected_skill_ids: &[String],
+    invoked_skill_ids: &[String],
     selection_mode: SkillSelectionMode,
+    review_filter: Option<&str>,
     enforce_user_selection: bool,
+    provider_config: Option<&ProviderConfig>,
 ) -> EffectiveSkillPlan {
     let project_root = Path::new(project_path);
     let index = match build_unified_skill_index_for_task(app_state, project_path).await {
@@ -806,6 +998,7 @@ pub async fn resolve_effective_skills(
         None => {
             return EffectiveSkillPlan {
                 selection_reason: "skills_index_unavailable".to_string(),
+                selection_origin: "none".to_string(),
                 ..EffectiveSkillPlan::default()
             }
         }
@@ -813,20 +1006,128 @@ pub async fn resolve_effective_skills(
 
     let force_user_selected = enforce_user_selection
         && (selection_mode == SkillSelectionMode::Explicit || !selected_skill_ids.is_empty());
+    let include_pending_review = matches!(
+        review_filter
+            .unwrap_or("approved_only")
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "include_pending_review" | "diagnostic"
+    );
 
-    let matches = if force_user_selected {
-        select_skill_matches_by_ids(&index, selected_skill_ids)
+    let command_invoked_matches = filter_skill_matches_by_review(
+        select_skill_matches_by_ids(&index, invoked_skill_ids),
+        &index,
+        include_pending_review,
+    );
+    let mut router_diagnostics = SkillRerankDiagnostics::default();
+    let (pre_review_matches, selection_reason, selection_origin) = if force_user_selected {
+        let pre_review_matches = merge_skill_matches(
+            select_skill_matches_by_ids(&index, selected_skill_ids),
+            command_invoked_matches.clone(),
+        );
+        let selection_reason = if !invoked_skill_ids.is_empty() {
+            "skills_explicit_and_command_invoked".to_string()
+        } else {
+            "skills_user_selected".to_string()
+        };
+        let selection_origin = if !invoked_skill_ids.is_empty() {
+            "mixed".to_string()
+        } else {
+            "explicit".to_string()
+        };
+        (pre_review_matches, selection_reason, selection_origin)
     } else {
         let policy = SelectionPolicy::default();
-        select_skills_for_session(&index, project_root, query, &phase, &policy)
+        let recalled_candidates = filter_skill_matches_by_review(
+            select_skill_candidates_for_session(
+                &index,
+                project_root,
+                query,
+                &phase,
+                &policy,
+                10,
+            ),
+            &index,
+            include_pending_review,
+        );
+        let deterministic_auto =
+            filter_skill_matches_by_review(
+                select_skills_for_session(&index, project_root, query, &phase, &policy),
+                &index,
+                include_pending_review,
+            );
+        let deterministic_auto_empty = deterministic_auto.is_empty();
+        let rerank_result = rerank_skill_matches(
+            project_root,
+            query,
+            &phase,
+            &recalled_candidates,
+            provider_config,
+        )
+        .await;
+        router_diagnostics = rerank_result.1;
+        let mut auto_matches = match rerank_result.0 {
+            Some(matches) => matches,
+            None => deterministic_auto,
+        };
+        if auto_matches.is_empty() && !recalled_candidates.is_empty() && deterministic_auto_empty {
+            auto_matches = recalled_candidates
+                .into_iter()
+                .take(policy.top_k)
+                .collect();
+        }
+        let pre_review_matches = merge_skill_matches(command_invoked_matches.clone(), auto_matches);
+        let rerank_succeeded = router_diagnostics.skill_router_used
+            && router_diagnostics.skill_router_fallback_reason.is_none()
+            && !router_diagnostics.skill_router_selected_ids.is_empty();
+        let rerank_fell_back = router_diagnostics.skill_router_fallback_reason.is_some();
+        let selection_reason = if !invoked_skill_ids.is_empty() {
+            "skills_command_invoked".to_string()
+        } else if rerank_succeeded {
+            "skills_auto_llm_rerank".to_string()
+        } else if rerank_fell_back {
+            "skills_auto_llm_fallback".to_string()
+        } else if pre_review_matches.is_empty() {
+            "skills_no_match".to_string()
+        } else {
+            "skills_auto_match".to_string()
+        };
+        let selection_origin = if !invoked_skill_ids.is_empty() {
+            "command_invoked".to_string()
+        } else if rerank_succeeded {
+            "auto_llm".to_string()
+        } else if rerank_fell_back {
+            "auto_fallback".to_string()
+        } else if pre_review_matches.is_empty() {
+            "none".to_string()
+        } else {
+            "auto".to_string()
+        };
+        (pre_review_matches, selection_reason, selection_origin)
     };
-
-    let selection_reason = if force_user_selected {
-        "skills_user_selected".to_string()
-    } else if matches.is_empty() {
+    let matches = filter_skill_matches_by_review(pre_review_matches.clone(), &index, include_pending_review);
+    let selection_reason = if !force_user_selected
+        && matches.is_empty()
+        && !invoked_skill_ids.is_empty()
+        && selection_origin == "command_invoked"
+    {
+        "skills_command_invoked_unavailable".to_string()
+    } else if !force_user_selected
+        && matches.is_empty()
+        && (selection_origin == "auto" || selection_origin == "auto_llm")
+    {
         "skills_no_match".to_string()
     } else {
-        "skills_auto_match".to_string()
+        selection_reason
+    };
+    let selection_origin = if !force_user_selected
+        && matches.is_empty()
+        && selection_origin == "auto"
+    {
+        "none".to_string()
+    } else {
+        selection_origin
     };
 
     let policy = SelectionPolicy::default();
@@ -836,6 +1137,18 @@ pub async fn resolve_effective_skills(
         .map(|m| format!("{} best practices", m.skill.name))
         .collect::<Vec<_>>();
     let blocked_tools = derive_blocked_tools_from_skill_policy(&matches);
+    let hierarchy_matches = collect_hierarchy_matches(project_root, &index, &matches);
+    let why_not_selected = collect_why_not_selected(
+        project_root,
+        &index,
+        phase,
+        &matches,
+        &pre_review_matches,
+        selected_skill_ids,
+        invoked_skill_ids,
+        force_user_selected,
+        include_pending_review,
+    );
 
     EffectiveSkillPlan {
         matches,
@@ -843,6 +1156,10 @@ pub async fn resolve_effective_skills(
         skill_expertise,
         blocked_tools,
         selection_reason,
+        selection_origin,
+        hierarchy_matches,
+        why_not_selected,
+        router_diagnostics,
     }
 }
 
@@ -927,6 +1244,9 @@ fn generated_record_to_skill_document(record: GeneratedSkillRecord) -> SkillDocu
         detect: None,
         inject_into: vec![InjectionPhase::Always],
         enabled: record.enabled,
+        review_status: Some(record.review_status),
+        review_notes: record.review_notes,
+        reviewed_at: record.reviewed_at,
     }
 }
 

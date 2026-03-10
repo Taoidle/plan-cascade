@@ -7,7 +7,9 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::services::skills::config::{resolve_skill_path, SkillsConfig};
+use crate::services::skills::config::{
+    resolve_source_path_for_project, SkillsConfig,
+};
 use crate::services::skills::model::{
     DiscoveredSkill, InjectionPhase, SkillDetection, SkillSource,
 };
@@ -59,13 +61,54 @@ pub fn discover_all_skills(
     let mut all_skills = Vec::new();
 
     // 1. BUILTIN: Load from bundled skills directory
-    // (Currently no builtin skills directory in desktop app; placeholder for future)
+    all_skills.extend(discover_builtin_skills());
 
-    // 2. EXTERNAL: Load from external-skills.json configured sources
+    // 2. EXTERNAL: Load from configured source roots and explicit external-skills.json entries
+    for (source_name, source_def) in &config.sources {
+        if !source_def.enabled {
+            continue;
+        }
+        if let Some(source_root) =
+            resolve_source_path_for_project(source_def, project_root, plan_cascade_dir)
+        {
+            let skill_files = find_skill_files_in_source_root(&source_root);
+            for file_path in skill_files {
+                if let Ok(content) = std::fs::read_to_string(&file_path) {
+                    all_skills.push(DiscoveredSkill {
+                        path: file_path,
+                        content,
+                        source: SkillSource::External {
+                            source_name: source_name.clone(),
+                        },
+                        priority: config.priority_ranges.submodule.min.saturating_add(10),
+                        detect: None,
+                        inject_into: vec![InjectionPhase::Always],
+                        enabled: true,
+                    });
+                }
+            }
+        }
+    }
+
     if let Some(base_dir) = plan_cascade_dir {
         for (skill_name, skill_entry) in &config.skills {
-            if let Some(skill_path) = resolve_skill_path(config, skill_entry, base_dir) {
-                let skill_files = find_skill_files_in_dir(&skill_path);
+            if config
+                .sources
+                .get(&skill_entry.source)
+                .map(|source_def| !source_def.enabled)
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            let Some(source_def) = config.sources.get(&skill_entry.source) else {
+                let _ = skill_name;
+                continue;
+            };
+            if let Some(source_root) =
+                resolve_source_path_for_project(source_def, project_root, Some(base_dir))
+            {
+                let skill_path = source_root.join(&skill_entry.skill_path);
+                let skill_files = find_skill_files_in_source_root(&skill_path);
                 for file_path in skill_files {
                     if let Ok(content) = std::fs::read_to_string(&file_path) {
                         let detect = skill_entry.detect.as_ref().map(|d| {
@@ -89,42 +132,6 @@ pub fn discover_all_skills(
                         });
                     }
                 }
-
-                // If no SKILL.md found in directory, check if skill_path itself is a file
-                if all_skills.iter().all(|s| {
-                    if let SkillSource::External { .. } = &s.source {
-                        // Check if this skill name was already discovered
-                        false
-                    } else {
-                        true
-                    }
-                }) {
-                    // Try with .md extension or SKILL.md inside directory
-                    let skill_md = skill_path.join("SKILL.md");
-                    if skill_md.exists() {
-                        if let Ok(content) = std::fs::read_to_string(&skill_md) {
-                            let detect = skill_entry.detect.as_ref().map(|d| {
-                                crate::services::skills::model::SkillDetection {
-                                    files: d.files.clone(),
-                                    patterns: d.patterns.clone(),
-                                }
-                            });
-                            let inject_into = parse_injection_phases(&skill_entry.inject_into);
-
-                            all_skills.push(DiscoveredSkill {
-                                path: skill_md,
-                                content,
-                                source: SkillSource::External {
-                                    source_name: skill_entry.source.clone(),
-                                },
-                                priority: skill_entry.priority,
-                                detect,
-                                inject_into,
-                                enabled: true,
-                            });
-                        }
-                    }
-                }
             }
             // If source path can't be resolved, skip silently
             let _ = skill_name; // avoid unused warning
@@ -138,11 +145,25 @@ pub fn discover_all_skills(
     let project_skills = discover_project_skills(project_root)?;
     for file_path in project_skills {
         if let Ok(content) = std::fs::read_to_string(&file_path) {
+            let depth = file_path
+                .strip_prefix(project_root)
+                .ok()
+                .map(path_depth)
+                .unwrap_or(0) as u32;
+            let is_convention = file_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| CONVENTION_FILES.contains(&name))
+                .unwrap_or(false);
             all_skills.push(DiscoveredSkill {
                 path: file_path,
                 content,
                 source: SkillSource::ProjectLocal,
-                priority: 201,
+                priority: if is_convention {
+                    260 + depth
+                } else {
+                    220 + depth
+                },
                 detect: None,
                 inject_into: vec![InjectionPhase::Always],
                 enabled: true,
@@ -308,10 +329,29 @@ pub fn discover_project_skills(project_root: &Path) -> AppResult<Vec<PathBuf>> {
         walk_skill_directory(&skills_dir, &mut files);
     }
 
-    // Discover convention files in root
-    discover_convention_files_in_dir(project_root, &mut files);
+    // Discover convention files recursively so nearest directory rules can win.
+    walk_project_convention_dirs(project_root, &mut files);
 
     Ok(files)
+}
+
+fn discover_builtin_skills() -> Vec<DiscoveredSkill> {
+    builtin_skill_specs()
+        .into_iter()
+        .map(|spec| DiscoveredSkill {
+            path: PathBuf::from(format!("builtin://{}", spec.slug)),
+            content: spec.content.to_string(),
+            source: SkillSource::Builtin,
+            priority: spec.priority,
+            detect: spec.detect,
+            inject_into: spec.inject_into,
+            enabled: true,
+        })
+        .collect()
+}
+
+fn path_depth(path: &Path) -> usize {
+    path.components().count().saturating_sub(1)
 }
 
 /// Find SKILL.md files in a directory (non-recursive, looks for SKILL.md or *.md).
@@ -346,6 +386,56 @@ fn find_skill_files_in_dir(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
+fn find_skill_files_in_source_root(root: &Path) -> Vec<PathBuf> {
+    if root.is_file() {
+        return if is_skill_file(root) {
+            vec![root.to_path_buf()]
+        } else {
+            Vec::new()
+        };
+    }
+
+    if !root.is_dir() {
+        return Vec::new();
+    }
+
+    let mut files = Vec::new();
+    walk_skill_source_directory(root, &mut files);
+    if files.is_empty() {
+        return find_skill_files_in_dir(root);
+    }
+    files.sort();
+    files.dedup();
+    files
+}
+
+fn walk_skill_source_directory(dir: &Path, files: &mut Vec<PathBuf>) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if !IGNORED_DIRS.contains(&dir_name) {
+                walk_skill_source_directory(&path, files);
+            }
+            continue;
+        }
+
+        let is_named_skill_md = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.eq_ignore_ascii_case("SKILL.md"))
+            .unwrap_or(false);
+        if is_named_skill_md {
+            files.push(path);
+        }
+    }
+}
+
 /// Recursively walk a .skills/ directory and collect all .md files.
 fn walk_skill_directory(dir: &Path, files: &mut Vec<PathBuf>) {
     let entries = match std::fs::read_dir(dir) {
@@ -376,6 +466,27 @@ fn discover_convention_files_in_dir(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
+fn walk_project_convention_dirs(dir: &Path, files: &mut Vec<PathBuf>) {
+    discover_convention_files_in_dir(dir, files);
+
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if IGNORED_DIRS.contains(&dir_name) {
+            continue;
+        }
+        walk_project_convention_dirs(&path, files);
+    }
+}
+
 /// Check if a path is a skill file (must have .md extension).
 fn is_skill_file(path: &Path) -> bool {
     path.extension()
@@ -396,6 +507,217 @@ fn parse_injection_phases(phases: &[String]) -> Vec<InjectionPhase> {
             _ => None,
         })
         .collect()
+}
+
+struct BuiltinSkillSpec {
+    slug: &'static str,
+    priority: u32,
+    detect: Option<SkillDetection>,
+    inject_into: Vec<InjectionPhase>,
+    content: &'static str,
+}
+
+fn builtin_skill_specs() -> Vec<BuiltinSkillSpec> {
+    vec![
+        BuiltinSkillSpec {
+            slug: "react-next",
+            priority: 20,
+            detect: Some(SkillDetection {
+                files: vec!["package.json".to_string()],
+                patterns: vec!["\"react\"".to_string(), "\"next\"".to_string()],
+            }),
+            inject_into: vec![InjectionPhase::Always],
+            content: r#"---
+name: react-next-platform
+description: Apply React and Next.js implementation, routing, and rendering conventions.
+tags: [react, nextjs, frontend, typescript]
+allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
+---
+
+# React and Next.js
+
+- Prefer server-first data fetching and keep client components narrowly scoped.
+- Preserve route segment boundaries, loading states, and error boundaries.
+- Keep mutations typed and colocate validation with the boundary that receives input.
+- Favor incremental edits over rewrites so App Router files and shared layouts stay stable.
+"#,
+        },
+        BuiltinSkillSpec {
+            slug: "vue-nuxt",
+            priority: 21,
+            detect: Some(SkillDetection {
+                files: vec!["package.json".to_string()],
+                patterns: vec!["\"vue\"".to_string(), "\"nuxt\"".to_string()],
+            }),
+            inject_into: vec![InjectionPhase::Always],
+            content: r#"---
+name: vue-nuxt-platform
+description: Apply Vue and Nuxt composition, routing, and SSR conventions.
+tags: [vue, nuxt, frontend, typescript]
+allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
+---
+
+# Vue and Nuxt
+
+- Prefer Composition API patterns and keep composables reusable and side-effect light.
+- Respect Nuxt server/client boundaries and keep data fetching aligned with route lifecycle.
+- Keep state explicit and typed; avoid implicit global mutations in components.
+- Preserve module and plugin registration order when making framework-level changes.
+"#,
+        },
+        BuiltinSkillSpec {
+            slug: "rust-tauri",
+            priority: 22,
+            detect: Some(SkillDetection {
+                files: vec!["Cargo.toml".to_string(), "src-tauri/Cargo.toml".to_string()],
+                patterns: vec!["tauri".to_string()],
+            }),
+            inject_into: vec![InjectionPhase::Always],
+            content: r#"---
+name: rust-tauri-platform
+description: Apply Rust and Tauri conventions for commands, async boundaries, and desktop safety.
+tags: [rust, tauri, desktop]
+allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
+---
+
+# Rust and Tauri
+
+- Keep command signatures stable and preserve serde payload compatibility.
+- Prefer explicit error propagation and avoid hidden panics in command handlers.
+- Maintain async boundaries cleanly: UI-facing commands return structured errors, services keep core logic.
+- When modifying desktop behavior, account for both Tauri IPC shape and frontend store expectations.
+"#,
+        },
+        BuiltinSkillSpec {
+            slug: "typescript-node",
+            priority: 23,
+            detect: Some(SkillDetection {
+                files: vec!["package.json".to_string(), "tsconfig.json".to_string()],
+                patterns: vec!["typescript".to_string()],
+            }),
+            inject_into: vec![InjectionPhase::Always],
+            content: r#"---
+name: typescript-node-platform
+description: Apply TypeScript and Node service conventions with strong runtime contracts.
+tags: [typescript, node, backend]
+allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
+---
+
+# TypeScript and Node
+
+- Preserve runtime validation and do not trust compile-time types alone across boundaries.
+- Keep side effects explicit and isolate environment-dependent behavior behind adapters.
+- Prefer narrow, typed return shapes for IPC, RPC, and store-facing APIs.
+- Update tests when changing public command payloads or store contracts.
+"#,
+        },
+        BuiltinSkillSpec {
+            slug: "python",
+            priority: 24,
+            detect: Some(SkillDetection {
+                files: vec!["pyproject.toml".to_string(), "requirements.txt".to_string()],
+                patterns: vec![],
+            }),
+            inject_into: vec![InjectionPhase::Always],
+            content: r#"---
+name: python-platform
+description: Apply Python packaging, tooling, and readability conventions.
+tags: [python, backend, scripting]
+allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
+---
+
+# Python
+
+- Keep modules import-safe and avoid work at import time.
+- Prefer explicit data models and small pure helpers around IO boundaries.
+- Preserve virtualenv and packaging conventions already present in the repo.
+- Favor focused tests and deterministic command invocations for automation.
+"#,
+        },
+        BuiltinSkillSpec {
+            slug: "go",
+            priority: 25,
+            detect: Some(SkillDetection {
+                files: vec!["go.mod".to_string()],
+                patterns: vec![],
+            }),
+            inject_into: vec![InjectionPhase::Always],
+            content: r#"---
+name: go-platform
+description: Apply Go package, interface, and concurrency conventions.
+tags: [go, backend]
+allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
+---
+
+# Go
+
+- Keep package boundaries clear and avoid interface abstractions without a concrete need.
+- Return wrapped errors with context and keep goroutine ownership explicit.
+- Preserve module layout and avoid hidden global state.
+- Prefer table-driven tests for behavior changes.
+"#,
+        },
+        BuiltinSkillSpec {
+            slug: "testing-workflow",
+            priority: 26,
+            detect: None,
+            inject_into: vec![InjectionPhase::Implementation, InjectionPhase::Retry],
+            content: r#"---
+name: testing-workflow
+description: Use targeted validation, regression checks, and failure triage during implementation.
+tags: [testing, validation, workflow]
+allowed-tools: [Read, LS, Glob, Grep, Cwd, Bash, Edit, MultiEdit, Write]
+---
+
+# Testing Workflow
+
+- Start with the narrowest check that validates the changed behavior.
+- When a failure appears, isolate whether it is an existing issue, an environment issue, or a regression.
+- Record unrun or failing checks explicitly in the final handoff.
+- Do not broaden test scope blindly when a targeted check can prove the change.
+"#,
+        },
+        BuiltinSkillSpec {
+            slug: "refactor-workflow",
+            priority: 27,
+            detect: None,
+            inject_into: vec![InjectionPhase::Implementation],
+            content: r#"---
+name: refactor-workflow
+description: Use disciplined refactoring steps that preserve behavior while improving structure.
+tags: [refactor, workflow]
+allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
+---
+
+# Refactor Workflow
+
+- Separate structural cleanup from behavior change whenever practical.
+- Keep interface changes narrow and update all impacted call sites in the same pass.
+- Prefer extraction and simplification over framework churn.
+- Run the smallest meaningful regression check after each risky step.
+"#,
+        },
+        BuiltinSkillSpec {
+            slug: "release-workflow",
+            priority: 28,
+            detect: None,
+            inject_into: vec![InjectionPhase::Planning, InjectionPhase::Implementation],
+            content: r#"---
+name: release-workflow
+description: Apply release-oriented discipline for migrations, compatibility, and rollout safety.
+tags: [release, migration, workflow]
+allowed-tools: [Read, LS, Glob, Grep, Cwd, Edit, MultiEdit, Write, Bash]
+---
+
+# Release Workflow
+
+- Identify compatibility edges, migration needs, and rollback constraints before changing public behavior.
+- Keep operator-facing diagnostics and failure modes explicit.
+- Favor additive compatibility shims before removing legacy paths.
+- Document rollout risks, hidden prerequisites, and validation steps.
+"#,
+        },
+    ]
 }
 
 #[cfg(test)]

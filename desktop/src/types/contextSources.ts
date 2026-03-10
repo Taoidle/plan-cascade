@@ -3,6 +3,7 @@ import type { MemoryScope } from './skillMemory';
 
 export type MemorySelectionMode = 'auto_exclude' | 'only_selected';
 export type SkillSelectionMode = 'auto' | 'explicit';
+export type SkillReviewFilter = 'approved_only' | 'include_pending_review';
 
 /** Configuration sent to the backend for conditional context injection. */
 export interface ContextSourceConfig {
@@ -32,6 +33,8 @@ export interface ContextSourceConfig {
   skills?: {
     enabled: boolean;
     selected_skill_ids: string[];
+    invoked_skill_ids?: string[];
     selection_mode: SkillSelectionMode;
+    review_filter?: SkillReviewFilter;
   };
 }

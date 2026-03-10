@@ -42,7 +42,9 @@ function resetContextSourcesState() {
     isSearchingMemories: false,
     skillsEnabled: false,
     selectedSkillIds: [],
+    invokedSkillIds: [],
     skillSelectionMode: 'auto',
+    skillInvocationSessionId: null,
     availableSkills: [],
     isLoadingSkills: false,
     skillPickerSearchQuery: '',
@@ -174,6 +176,18 @@ describe('useContextSourcesStore', () => {
     expect(state.selectedSkillIds).toEqual(['skill-2']);
     expect(state.skillSelectionMode).toBe('explicit');
     expect(state.buildConfig().skills?.selection_mode).toBe('explicit');
+  });
+
+  it('buildConfig includes invoked skill ids and approved-only review filter', () => {
+    useContextSourcesStore.setState({
+      skillsEnabled: true,
+      invokedSkillIds: ['skill-invoked-1'],
+      skillSelectionMode: 'auto',
+    });
+
+    const config = useContextSourcesStore.getState().buildConfig();
+    expect(config.skills?.invoked_skill_ids).toEqual(['skill-invoked-1']);
+    expect(config.skills?.review_filter).toBe('approved_only');
   });
 
   it('reconcileSelectedSkills removes disabled/missing ids and normalizes selection mode', () => {

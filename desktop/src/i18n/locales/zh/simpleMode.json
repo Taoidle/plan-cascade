@@ -237,6 +237,11 @@
       "pending": "{{count}} 条记忆待审核",
       "injected": "已注入 {{count}} 条记忆"
     },
+    "currentSkillStack": "当前会话生效技能",
+    "generatedReviewedSkills": "已生成与已审核",
+    "noGeneratedSkills": "暂无生成技能",
+    "noActiveSkills": "最近一次运行还没有生效技能。",
+    "pinned": "已固定",
     "selectAll": "全选",
     "approveSelected": "批准所选",
     "rejectSelected": "拒绝所选",
@@ -267,6 +272,11 @@
     "noDeletedMemories": "回收站为空",
     "noDeletedMemoriesHint": "删除后的记忆会保留在这里，直到你恢复或彻底删除它们。",
     "whySkillsTitle": "为何使用这些技能",
+    "skillsViews": {
+      "catalog": "技能列表",
+      "why": "为何使用技能？",
+      "sources": "技能源"
+    },
     "showWhySkills": "为何使用技能？",
     "hideWhySkills": "隐藏原因",
     "whyMemoryTitle": "为何使用这些记忆",
@@ -274,13 +284,110 @@
     "hideWhyMemory": "隐藏原因",
     "selectionReason": "选择原因",
     "selectionOrigin": "选择来源",
+    "selectionOrigins": {
+      "auto": "自动",
+      "auto_llm": "自动（LLM 重排）",
+      "auto_fallback": "自动（回退）",
+      "explicit": "显式",
+      "mixed": "混合",
+      "command_invoked": "命令调用",
+      "none": "无"
+    },
+    "selectionReasons": {
+      "skills_auto_llm_rerank": "LLM 对召回技能做了重排",
+      "skills_auto_llm_fallback": "LLM 重排失败，已回退到规则选择",
+      "skills_auto_match": "规则命中了这些技能",
+      "skills_no_match": "当前任务没有命中技能",
+      "skills_command_invoked": "应用了命令固定技能",
+      "skills_command_invoked_unavailable": "命令固定技能不可用",
+      "skills_user_selected": "应用了手动选择的技能",
+      "skills_explicit_and_command_invoked": "合并了手动选择和命令固定技能"
+    },
+    "routerStatus": "路由",
+    "routerConfidence": "路由置信度",
+    "routerReason": "路由原因",
+    "routerFallback": "回退",
+    "routerStrategies": {
+      "hybrid": "LLM 重排"
+    },
+    "routerFallbackReasons": {
+      "provider_unavailable": "模型提供方不可用",
+      "empty_query": "查询为空",
+      "timeout": "路由超时",
+      "empty_response": "路由返回空结果",
+      "invalid_empty_selection": "路由没有返回有效技能"
+    },
     "selectedSkills": "已选技能",
+    "commandPinnedSkills": "命令固定技能",
+    "hierarchyMatches": "层级命中",
+    "whyNotSelectedTitle": "未被选中的原因",
     "blockedTools": "受限工具",
     "effectiveStatuses": "生效状态",
     "candidateCount": "候选数",
     "degradedReason": "降级原因",
     "sourceReason": "来源原因",
     "none": "无",
+    "metadata": "元数据",
+    "reviewNotes": "审核备注",
+    "skillSourcesTitle": "技能源",
+    "skillSourcesHint": "管理已安装的本地、Git 与 URL 技能源。",
+    "skillSourceInput": "粘贴本地路径、Git URL、github:owner/repo 或原始 SKILL.md URL",
+    "skillSourceName": "可选的源名称",
+    "installSkillSource": "安装技能源",
+    "refreshSkillSource": "刷新技能源",
+    "removeSkillSource": "移除技能源",
+    "enableSkillSource": "启用技能源",
+    "disableSkillSource": "停用技能源",
+    "noSkillSources": "尚未配置外部技能源。",
+    "sourceInstalled": "已安装",
+    "sourceMissing": "缺失",
+    "sourceEnabled": "已启用",
+    "sourceDisabled": "已停用",
+    "sourceSkillCount": "{{count}} 个技能",
+    "sourceTypes": {
+      "local": "本地",
+      "git": "Git",
+      "url": "URL"
+    },
+    "editGenerated": "编辑生成技能",
+    "importGenerated": "导入生成技能",
+    "exportGenerated": "导出生成技能",
+    "approvePendingGenerated": "批准待审核",
+    "rejectPendingGenerated": "拒绝待审核",
+    "cancelEditGenerated": "取消编辑",
+    "generatedForm": {
+      "name": "生成技能名称",
+      "description": "描述",
+      "tags": "以逗号分隔的标签"
+    },
+    "reviewStatus": {
+      "pending_review": "待审核",
+      "approved": "已批准",
+      "rejected": "已拒绝",
+      "archived": "已归档"
+    },
+    "reviewActions": {
+      "approve": "批准",
+      "reject": "拒绝",
+      "archive": "归档",
+      "restore": "恢复"
+    },
+    "whyNotSelected": {
+      "disabled": "已禁用",
+      "unmatched": "最近一次匹配未选中",
+      "notPinnedOrExplicit": "不在显式选择或固定集合中",
+      "notExplicitlySelected": "未被显式选择"
+    },
+    "whyNotSelectedReasons": {
+      "disabled": "已禁用",
+      "pending_review": "待审核",
+      "rejected": "已拒绝",
+      "archived": "已归档",
+      "phase_mismatch": "阶段不匹配",
+      "not_in_explicit_selection": "不在显式选择集合中",
+      "filtered_out": "已被过滤",
+      "unmatched": "最近一次匹配未选中"
+    },
     "pipeline": {
       "title": "自动记忆流水线",
       "extracted": "已提取 {{count}}",
@@ -352,6 +459,23 @@
       "refreshSkillsFailed": "刷新失败",
       "skillDeleted": "技能已删除",
       "deleteSkillFailed": "删除技能失败",
+      "reviewSkillFailed": "审核生成技能失败",
+      "reviewSkillSaved": "技能审核已更新",
+      "updateGeneratedSkillFailed": "更新生成技能失败",
+      "generatedSkillUpdated": "生成技能已更新",
+      "installSkillSourceFailed": "安装技能源失败",
+      "skillSourceInstalled": "技能源已安装",
+      "refreshSkillSourceFailed": "刷新技能源失败",
+      "skillSourceRefreshed": "技能源已刷新",
+      "setSkillSourceEnabledFailed": "更新技能源状态失败",
+      "skillSourceEnabled": "技能源已启用",
+      "skillSourceDisabled": "技能源已停用",
+      "removeSkillSourceFailed": "移除技能源失败",
+      "skillSourceRemoved": "技能源已移除",
+      "exportGeneratedSkillFailed": "导出生成技能失败",
+      "generatedSkillExported": "生成技能已导出",
+      "importGeneratedSkillFailed": "导入生成技能失败",
+      "generatedSkillImported": "生成技能已导入",
       "loadMemoriesFailed": "加载记忆失败",
       "memoryAdded": "记忆已添加",
       "addMemoryFailed": "添加记忆失败",
@@ -1148,6 +1272,10 @@
     "skillsPicker": {
       "title": "本会话技能注入",
       "hint": "选择要注入到当前会话的技能。",
+      "pinned": "{{count}} 个命令固定技能已生效",
+      "pinnedBadge": "已固定",
+      "selectionReason": "原因：{{reason}}",
+      "blockedTools": "受限工具：{{tools}}",
       "searchPlaceholder": "搜索技能...",
       "noSkills": "没有可用的技能",
       "noResults": "没有匹配的技能",
@@ -1291,12 +1419,26 @@
   },
   "contextSummary": {
     "title": "生效上下文",
+    "buttonLabel": "上下文",
+    "panelTitle": "当前生效上下文",
     "why": "为何",
+    "openPanel": "查看详情",
     "off": "关闭",
     "show": "显示生效上下文",
     "hide": "隐藏",
     "knowledgeCount": "已选 {{count}} 项",
-    "skillsCount": "已选 {{count}} 项",
+    "skillsCount": "已选/固定 {{count}} 项",
+    "blockedTools": "{{count}} 个受限工具",
+    "currentSkillStack": "当前技能栈",
+    "inspectSkills": "查看详情",
+    "pinned": "已固定",
+    "noEffectiveSkills": "最近一次上下文装配没有生效技能。",
+    "selectionReason": "原因：{{reason}}",
+    "routerStatus": "路由：{{strategy}}",
+    "routerConfidence": "置信度 {{confidence}}",
+    "routerFallback": "回退：{{reason}}",
+    "routerReason": "路由原因：{{reason}}",
+    "blockedToolsList": "受限：{{tools}}",
     "source": {
       "legacy": "旧版",
       "unified": "统一"
@@ -1309,8 +1451,32 @@
     "origin": "来源：{{origin}}",
     "originValues": {
       "auto": "自动",
+      "auto_llm": "自动（LLM 重排）",
+      "auto_fallback": "自动（回退）",
       "explicit": "显式",
-      "mixed": "混合"
+      "mixed": "混合",
+      "command_invoked": "命令调用",
+      "none": "无"
+    },
+    "routerStrategies": {
+      "hybrid": "LLM 重排"
+    },
+    "routerFallbackReasons": {
+      "provider_unavailable": "模型提供方不可用",
+      "empty_query": "查询为空",
+      "timeout": "路由超时",
+      "empty_response": "路由返回空结果",
+      "invalid_empty_selection": "路由没有返回有效技能"
+    },
+    "selectionReasons": {
+      "skills_auto_llm_rerank": "LLM 对召回技能做了重排",
+      "skills_auto_llm_fallback": "LLM 重排失败，已回退到规则选择",
+      "skills_auto_match": "规则命中了这些技能",
+      "skills_no_match": "当前任务没有命中技能",
+      "skills_command_invoked": "应用了命令固定技能",
+      "skills_command_invoked_unavailable": "命令固定技能不可用",
+      "skills_user_selected": "应用了手动选择的技能",
+      "skills_explicit_and_command_invoked": "合并了手动选择和命令固定技能"
     }
   }
 }

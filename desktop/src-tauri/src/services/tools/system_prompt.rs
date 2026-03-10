@@ -8,6 +8,8 @@ use std::path::Path;
 use crate::services::llm::types::ToolDefinition;
 use crate::services::memory::store::{MemoryCategory, MemoryEntry};
 use crate::services::orchestrator::index_store::ProjectIndexSummary;
+use crate::services::skills::injector::inject_skill_summaries;
+use crate::services::skills::model::SelectionPolicy;
 
 /// Detect the primary language of the user's message.
 /// Returns one of: "zh", "ja", "ko", "en".
@@ -1295,42 +1297,7 @@ pub fn build_sub_agent_tool_guidance(
 pub fn build_skills_section(
     matched_skills: &[crate::services::skills::model::SkillMatch],
 ) -> String {
-    if matched_skills.is_empty() {
-        return String::new();
-    }
-
-    let mut section = String::new();
-    section.push_str("\n\n## Framework-Specific Best Practices\n\n");
-    section.push_str("The following guidelines apply based on detected frameworks:\n");
-
-    for (i, skill_match) in matched_skills.iter().enumerate() {
-        let source_label = match &skill_match.skill.source {
-            crate::services::skills::model::SkillSource::Builtin => "builtin".to_string(),
-            crate::services::skills::model::SkillSource::External { source_name } => {
-                format!("{} (external)", source_name)
-            }
-            crate::services::skills::model::SkillSource::User => "user".to_string(),
-            crate::services::skills::model::SkillSource::ProjectLocal => {
-                "project-local".to_string()
-            }
-            crate::services::skills::model::SkillSource::Generated => "auto-generated".to_string(),
-        };
-
-        section.push_str(&format!("\n### {}\n", skill_match.skill.name));
-        section.push_str(&format!(
-            "*Source: {} | Priority: {}*\n\n",
-            source_label, skill_match.skill.priority
-        ));
-        section.push_str(&skill_match.skill.description);
-
-        if i < matched_skills.len() - 1 {
-            section.push_str("\n\n---\n");
-        } else {
-            section.push('\n');
-        }
-    }
-
-    section
+    inject_skill_summaries(matched_skills, &SelectionPolicy::default())
 }
 
 /// Build a plugin instructions section for system prompt injection.

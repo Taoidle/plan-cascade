@@ -266,6 +266,7 @@ export function SimpleModeShell() {
   const getModeAttachments = useSimpleSessionStore((s) => s.getAttachments);
   const setModeReferences = useSimpleSessionStore((s) => s.setReferences);
   const getModeReferences = useSimpleSessionStore((s) => s.getReferences);
+  const bindSkillInvocationSession = useContextSourcesStore((s) => s.bindSkillInvocationSession);
 
   useSimpleKernelSession({
     workspacePath,
@@ -285,6 +286,10 @@ export function SimpleModeShell() {
       cleanup();
     };
   }, [initialize, cleanup]);
+
+  useEffect(() => {
+    bindSkillInvocationSession(workflowKernelSessionId);
+  }, [bindSkillInvocationSession, workflowKernelSessionId]);
 
   useEffect(() => {
     void getWorkflowKernelCatalogState().then((catalogState) => {
@@ -1960,7 +1965,6 @@ function ExecutionAwareBottomStatusBar({
   isEstimatingTokenBudget: boolean;
 }) {
   const { t } = useTranslation('simpleMode');
-  const connectionStatus = useExecutionStore((s) => s.connectionStatus);
   const turnUsage = useExecutionStore((s) => s.turnUsageTotals);
   const sessionUsage = useExecutionStore((s) => s.sessionUsageTotals);
   const latestEnvelope = useContextOpsStore((s) => s.latestEnvelope);
@@ -2042,7 +2046,6 @@ function ExecutionAwareBottomStatusBar({
 
   return (
     <BottomStatusBar
-      connectionStatus={connectionStatus}
       workspacePath={workspacePath}
       permissionLevel={permissionLevel}
       onPermissionLevelChange={onPermissionLevelChange}

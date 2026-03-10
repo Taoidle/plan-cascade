@@ -12,6 +12,7 @@ use std::time::Instant;
 use tauri::State;
 
 use crate::commands::knowledge::KnowledgeState;
+use crate::commands::task_mode::resolve_provider_config_from_app_state;
 use crate::models::response::CommandResponse;
 use crate::services::context::assembly::{
     apply_budget_and_compaction as apply_budget_and_compaction_core,
@@ -23,6 +24,7 @@ use crate::services::context::events::TraceEventType;
 use crate::services::knowledge::context_provider::{
     KnowledgeContextConfig, KnowledgeContextProvider,
 };
+use crate::services::llm::types::ProviderConfig;
 use crate::services::memory::query_policy_v2::tuning_for_context_envelope_v2;
 use crate::services::memory::query_v2::{
     query_memory_entries_v2 as query_memory_entries_unified_v2, MemoryScopeV2, MemoryStatusV2,
@@ -35,7 +37,7 @@ use crate::services::task_mode::context_provider::{
     derive_blocked_tools_from_skill_policy as derive_blocked_tools_from_effective_skills,
     ensure_knowledge_initialized_public, query_selected_context, resolve_effective_skills,
     resolve_memory_statuses, ContextSourceConfig, KnowledgeSourceConfig, MemorySelectionMode,
-    MemorySourceConfig, SkillSelectionMode, SkillsSourceConfig,
+    MemorySourceConfig, NonSelectedSkillDiagnostic, SkillSelectionMode, SkillsSourceConfig,
 };
 use crate::services::tools::system_prompt::build_memory_section;
 use crate::state::AppState;
@@ -211,6 +213,28 @@ pub struct ContextDiagnostics {
     pub selection_reason: String,
     #[serde(default)]
     pub selection_origin: Option<String>,
+    #[serde(default)]
+    pub executed_hooks: Vec<String>,
+    #[serde(default)]
+    pub invoked_commands: Vec<String>,
+    #[serde(default)]
+    pub hierarchy_matches: Vec<String>,
+    #[serde(default)]
+    pub why_not_selected_skills: Vec<NonSelectedSkillDiagnostic>,
+    #[serde(default)]
+    pub skill_router_used: bool,
+    #[serde(default)]
+    pub skill_router_strategy: Option<String>,
+    #[serde(default)]
+    pub skill_router_reason: Option<String>,
+    #[serde(default)]
+    pub skill_router_confidence: Option<f32>,
+    #[serde(default)]
+    pub skill_router_fallback_reason: Option<String>,
+    #[serde(default)]
+    pub skill_router_selected_ids: Vec<String>,
+    #[serde(default)]
+    pub skill_router_latency_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -311,6 +335,12 @@ pub struct PrepareTurnContextV2Request {
     pub fault_injection: Option<ContextFaultInjection>,
     #[serde(default = "default_true")]
     pub enforce_user_skill_selection: bool,
+    #[serde(default)]
+    pub llm_provider: Option<String>,
+    #[serde(default)]
+    pub llm_model: Option<String>,
+    #[serde(default)]
+    pub llm_base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -552,6 +582,32 @@ fn parse_injection_phase(phase: Option<&str>) -> InjectionPhase {
         "implementation" | "executing" | "execution" => InjectionPhase::Implementation,
         _ => InjectionPhase::Always,
     }
+}
+
+async fn resolve_context_provider_config(
+    request: &PrepareTurnContextV2Request,
+    app_state: &AppState,
+) -> Option<ProviderConfig> {
+    let provider = request
+        .llm_provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let model = request
+        .llm_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+
+    resolve_provider_config_from_app_state(
+        provider,
+        model,
+        None,
+        request.llm_base_url.clone(),
+        app_state,
+    )
+    .await
+    .ok()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1004,6 +1060,7 @@ async fn build_legacy_fallback_prompt(
     }
 
     if let Some(config) = request.context_sources.as_ref() {
+        let provider_config = resolve_context_provider_config(request, app_state).await;
         let enriched = query_selected_context(
             config,
             knowledge_state,
@@ -1011,6 +1068,7 @@ async fn build_legacy_fallback_prompt(
             &request.project_path,
             &request.query,
             parse_injection_phase(request.phase.as_deref()),
+            provider_config.as_ref(),
         )
         .await;
         if !enriched.knowledge_block.is_empty() {
@@ -1185,7 +1243,7 @@ async fn prepare_turn_context_v2_internal(
         &turn_id,
         &trace_id,
     );
-    let compaction_policy = request.compaction_policy.unwrap_or(CompactionPolicy {
+    let compaction_policy = request.compaction_policy.clone().unwrap_or(CompactionPolicy {
         soft_threshold_ratio: context_policy.soft_threshold_ratio,
         hard_threshold_ratio: context_policy.hard_threshold_ratio,
         preserve_anchors: true,
@@ -1193,6 +1251,7 @@ async fn prepare_turn_context_v2_internal(
     let fault_injection = request.fault_injection.clone().unwrap_or_default();
     let mut diagnostics = ContextDiagnostics::default();
     let mut selection_origins: Vec<SelectionOrigin> = Vec::new();
+    let provider_config = resolve_context_provider_config(&request, app_state).await;
 
     let mut trace_events = Vec::new();
     trace_events.push(make_trace_event(
@@ -1798,8 +1857,11 @@ async fn prepare_turn_context_v2_internal(
                     &request.query,
                     parse_injection_phase(request.phase.as_deref()),
                     &scfg.selected_skill_ids,
+                    &scfg.invoked_skill_ids,
                     scfg.selection_mode,
+                    scfg.review_filter.as_deref(),
                     request.enforce_user_skill_selection,
+                    provider_config.as_ref(),
                 )
                 .await;
                 let skills_block = effective.skills_block;
@@ -1815,6 +1877,21 @@ async fn prepare_turn_context_v2_internal(
                     .map(|m| m.skill.id.clone())
                     .collect();
                 diagnostics.blocked_tools = effective.blocked_tools;
+                diagnostics.selection_origin = Some(effective.selection_origin.clone());
+                diagnostics.hierarchy_matches = effective.hierarchy_matches;
+                diagnostics.why_not_selected_skills = effective.why_not_selected;
+                diagnostics.skill_router_used = effective.router_diagnostics.skill_router_used;
+                diagnostics.skill_router_strategy =
+                    effective.router_diagnostics.skill_router_strategy;
+                diagnostics.skill_router_reason = effective.router_diagnostics.skill_router_reason;
+                diagnostics.skill_router_confidence =
+                    effective.router_diagnostics.skill_router_confidence;
+                diagnostics.skill_router_fallback_reason =
+                    effective.router_diagnostics.skill_router_fallback_reason;
+                diagnostics.skill_router_selected_ids =
+                    effective.router_diagnostics.skill_router_selected_ids;
+                diagnostics.skill_router_latency_ms =
+                    effective.router_diagnostics.skill_router_latency_ms;
                 if !diagnostics.selected_skills.is_empty() {
                     diagnostics.selection_reason = effective.selection_reason;
                 }
@@ -1851,7 +1928,9 @@ async fn prepare_turn_context_v2_internal(
         }
     }
 
-    diagnostics.selection_origin = merge_selection_origins(&selection_origins);
+    diagnostics.selection_origin = diagnostics
+        .selection_origin
+        .or_else(|| merge_selection_origins(&selection_origins));
 
     if diagnostics.selection_reason.is_empty() {
         diagnostics.selection_reason = "policy_default_selection".to_string();
@@ -2975,8 +3054,10 @@ pub async fn run_context_chaos_probe(
                 skills: Some(SkillsSourceConfig {
                     enabled: false,
                     selected_skill_ids: Vec::new(),
+                    invoked_skill_ids: Vec::new(),
                     selection_mode:
                         crate::services::task_mode::context_provider::SkillSelectionMode::Auto,
+                    review_filter: None,
                 }),
             };
 
@@ -3010,6 +3091,9 @@ pub async fn run_context_chaos_probe(
                 compaction_policy: None,
                 fault_injection: Some(fault),
                 enforce_user_skill_selection: true,
+                llm_provider: None,
+                llm_model: None,
+                llm_base_url: None,
             };
 
             let probe_result =
@@ -3179,6 +3263,9 @@ mod tests {
             compaction_policy: None,
             fault_injection: None,
             enforce_user_skill_selection: true,
+            llm_provider: None,
+            llm_model: None,
+            llm_base_url: None,
         }
     }
 
@@ -3479,7 +3566,9 @@ mod tests {
         let skills = SkillsSourceConfig {
             enabled: true,
             selected_skill_ids: Vec::new(),
+            invoked_skill_ids: Vec::new(),
             selection_mode: SkillSelectionMode::Auto,
+            review_filter: None,
         };
 
         let origins = vec![
@@ -3505,7 +3594,9 @@ mod tests {
         let skills = SkillsSourceConfig {
             enabled: true,
             selected_skill_ids: Vec::new(),
+            invoked_skill_ids: Vec::new(),
             selection_mode: SkillSelectionMode::Auto,
+            review_filter: None,
         };
 
         let origins = vec![

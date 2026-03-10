@@ -8,6 +8,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { CommandResponse } from './tauri';
 import type { ContextSourceConfig } from '../store/contextSources';
+import type { NonSelectedSkillDiagnostic } from '../types/skillMemory';
 
 export interface ContextConversationTurn {
   role: string;
@@ -70,7 +71,18 @@ export interface ContextDiagnostics {
   memory_candidates_count: number;
   degraded_reason?: string | null;
   selection_reason: string;
-  selection_origin?: 'auto' | 'explicit' | 'mixed' | null;
+  selection_origin?: 'auto' | 'auto_llm' | 'auto_fallback' | 'explicit' | 'mixed' | 'command_invoked' | 'none' | null;
+  executed_hooks?: string[];
+  invoked_commands?: string[];
+  hierarchy_matches?: string[];
+  why_not_selected_skills?: NonSelectedSkillDiagnostic[];
+  skill_router_used?: boolean;
+  skill_router_strategy?: 'hybrid' | string | null;
+  skill_router_reason?: string | null;
+  skill_router_confidence?: number | null;
+  skill_router_fallback_reason?: string | null;
+  skill_router_selected_ids?: string[];
+  skill_router_latency_ms?: number | null;
 }
 
 export interface ContextEnvelope {
@@ -246,6 +258,9 @@ export async function prepareTurnContextV2(request: {
   intent?: string;
   conversation_history?: ContextConversationTurn[];
   context_sources?: ContextSourceConfig;
+  llm_provider?: string;
+  llm_model?: string;
+  llm_base_url?: string;
 }): Promise<CommandResponse<ContextEnvelope>> {
   try {
     const assembled = await assembleTurnContext(request);
@@ -296,6 +311,9 @@ export async function assembleTurnContext(request: {
   reserved_output_tokens?: number;
   hard_limit?: number;
   enforce_user_skill_selection?: boolean;
+  llm_provider?: string;
+  llm_model?: string;
+  llm_base_url?: string;
 }): Promise<CommandResponse<ContextAssemblyResponse>> {
   try {
     return await invoke<CommandResponse<ContextAssemblyResponse>>('assemble_turn_context', { request });

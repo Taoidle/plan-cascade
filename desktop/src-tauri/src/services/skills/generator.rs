@@ -6,7 +6,7 @@
 use rusqlite::params;
 use std::sync::Arc;
 
-use crate::services::skills::model::{GeneratedSkill, GeneratedSkillRecord};
+use crate::services::skills::model::{GeneratedSkill, GeneratedSkillRecord, SkillReviewStatus};
 use crate::storage::database::{Database, DbPool};
 use crate::utils::error::{AppError, AppResult};
 
@@ -34,6 +34,10 @@ impl SkillGeneratorStore {
         project_path: &str,
         skill: &GeneratedSkill,
     ) -> AppResult<GeneratedSkillRecord> {
+        if let Some(existing) = self.find_duplicate_generated_skill(project_path, skill)? {
+            return Ok(existing);
+        }
+
         let id = uuid::Uuid::new_v4().to_string();
         let tags_json = serde_json::to_string(&skill.tags)?;
         let session_ids_json = serde_json::to_string(&skill.source_session_ids)?;
@@ -62,6 +66,20 @@ impl SkillGeneratorStore {
             .ok_or_else(|| AppError::internal("Failed to retrieve saved skill"))
     }
 
+    fn find_duplicate_generated_skill(
+        &self,
+        project_path: &str,
+        skill: &GeneratedSkill,
+    ) -> AppResult<Option<GeneratedSkillRecord>> {
+        let normalized_name = normalize_generated_skill_value(&skill.name);
+        let normalized_body = normalize_generated_skill_value(&skill.body);
+        let existing = self.list_generated_skills(project_path, true)?;
+        Ok(existing.into_iter().find(|record| {
+            normalize_generated_skill_value(&record.name) == normalized_name
+                || normalize_generated_skill_value(&record.body) == normalized_body
+        }))
+    }
+
     /// List generated skills for a project.
     pub fn list_generated_skills(
         &self,
@@ -73,11 +91,13 @@ impl SkillGeneratorStore {
         let sql = if include_disabled {
             "SELECT id, project_path, name, description, tags, body, source_type, \
              source_session_ids, usage_count, success_rate, keywords, enabled, \
+             review_status, review_notes, reviewed_at, \
              created_at, updated_at \
              FROM skill_library WHERE project_path = ?1 ORDER BY created_at DESC"
         } else {
             "SELECT id, project_path, name, description, tags, body, source_type, \
              source_session_ids, usage_count, success_rate, keywords, enabled, \
+             review_status, review_notes, reviewed_at, \
              created_at, updated_at \
              FROM skill_library WHERE project_path = ?1 AND enabled = 1 ORDER BY created_at DESC"
         };
@@ -97,8 +117,11 @@ impl SkillGeneratorStore {
                 success_rate: row.get(9)?,
                 keywords_json: row.get(10)?,
                 enabled: row.get(11)?,
-                created_at: row.get(12)?,
-                updated_at: row.get(13)?,
+                review_status: row.get(12)?,
+                review_notes: row.get(13)?,
+                reviewed_at: row.get(14)?,
+                created_at: row.get(15)?,
+                updated_at: row.get(16)?,
             })
         })?;
 
@@ -117,6 +140,7 @@ impl SkillGeneratorStore {
         let result = conn.query_row(
             "SELECT id, project_path, name, description, tags, body, source_type, \
              source_session_ids, usage_count, success_rate, keywords, enabled, \
+             review_status, review_notes, reviewed_at, \
              created_at, updated_at \
              FROM skill_library WHERE id = ?1",
             params![id],
@@ -134,8 +158,11 @@ impl SkillGeneratorStore {
                     success_rate: row.get(9)?,
                     keywords_json: row.get(10)?,
                     enabled: row.get(11)?,
-                    created_at: row.get(12)?,
-                    updated_at: row.get(13)?,
+                    review_status: row.get(12)?,
+                    review_notes: row.get(13)?,
+                    reviewed_at: row.get(14)?,
+                    created_at: row.get(15)?,
+                    updated_at: row.get(16)?,
                 })
             },
         );
@@ -165,6 +192,78 @@ impl SkillGeneratorStore {
         }
 
         Ok(())
+    }
+
+    pub fn review_generated_skill(
+        &self,
+        id: &str,
+        decision: SkillReviewStatus,
+        review_notes: Option<&str>,
+    ) -> AppResult<GeneratedSkillRecord> {
+        let conn = self.get_connection()?;
+        let enabled = matches!(decision, SkillReviewStatus::Approved) as i32;
+        let rows = conn.execute(
+            "UPDATE skill_library
+             SET review_status = ?1,
+                 review_notes = ?2,
+                 reviewed_at = datetime('now'),
+                 enabled = ?3,
+                 updated_at = datetime('now')
+             WHERE id = ?4",
+            params![
+                review_status_to_sql(&decision),
+                review_notes.map(|value| value.trim()).filter(|value| !value.is_empty()),
+                enabled,
+                id,
+            ],
+        )?;
+
+        if rows == 0 {
+            return Err(AppError::not_found(format!(
+                "Generated skill not found: {}",
+                id
+            )));
+        }
+
+        self.get_generated_skill(id)?
+            .ok_or_else(|| AppError::internal("Failed to reload reviewed generated skill"))
+    }
+
+    pub fn update_generated_skill(
+        &self,
+        id: &str,
+        name: &str,
+        description: &str,
+        tags: &[String],
+        body: &str,
+    ) -> AppResult<GeneratedSkillRecord> {
+        let conn = self.get_connection()?;
+        let rows = conn.execute(
+            "UPDATE skill_library
+             SET name = ?1,
+                 description = ?2,
+                 tags = ?3,
+                 body = ?4,
+                 updated_at = datetime('now')
+             WHERE id = ?5",
+            params![
+                name.trim(),
+                description.trim(),
+                serde_json::to_string(tags)?,
+                body,
+                id
+            ],
+        )?;
+
+        if rows == 0 {
+            return Err(AppError::not_found(format!(
+                "Generated skill not found: {}",
+                id
+            )));
+        }
+
+        self.get_generated_skill(id)?
+            .ok_or_else(|| AppError::internal("Failed to reload updated generated skill"))
     }
 
     /// Delete a generated skill by ID.
@@ -217,6 +316,15 @@ impl SkillGeneratorStore {
     }
 }
 
+fn normalize_generated_skill_value(value: &str) -> String {
+    value
+        .trim()
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Internal row type for database queries.
 struct GeneratedSkillRow {
     id: String,
@@ -231,6 +339,9 @@ struct GeneratedSkillRow {
     success_rate: f64,
     keywords_json: String,
     enabled: i32,
+    review_status: String,
+    review_notes: Option<String>,
+    reviewed_at: Option<String>,
     created_at: String,
     updated_at: String,
 }
@@ -255,9 +366,30 @@ impl GeneratedSkillRow {
             success_rate: self.success_rate,
             keywords,
             enabled: self.enabled != 0,
+            review_status: review_status_from_sql(&self.review_status),
+            review_notes: self.review_notes,
+            reviewed_at: self.reviewed_at,
             created_at: self.created_at,
             updated_at: self.updated_at,
         })
+    }
+}
+
+fn review_status_from_sql(value: &str) -> SkillReviewStatus {
+    match value {
+        "pending_review" => SkillReviewStatus::PendingReview,
+        "rejected" => SkillReviewStatus::Rejected,
+        "archived" => SkillReviewStatus::Archived,
+        _ => SkillReviewStatus::Approved,
+    }
+}
+
+fn review_status_to_sql(value: &SkillReviewStatus) -> &'static str {
+    match value {
+        SkillReviewStatus::PendingReview => "pending_review",
+        SkillReviewStatus::Approved => "approved",
+        SkillReviewStatus::Rejected => "rejected",
+        SkillReviewStatus::Archived => "archived",
     }
 }
 
@@ -427,6 +559,20 @@ mod tests {
             .unwrap();
 
         assert_eq!(store.count_generated_skills("/test/project").unwrap(), 2);
+    }
+
+    #[test]
+    fn test_save_generated_skill_dedupes_same_name() {
+        let store = setup_store();
+        let saved = store
+            .save_generated_skill("/test/project", &make_generated_skill("duplicate"))
+            .unwrap();
+        let duplicate = store
+            .save_generated_skill("/test/project", &make_generated_skill("duplicate"))
+            .unwrap();
+
+        assert_eq!(saved.id, duplicate.id);
+        assert_eq!(store.list_generated_skills("/test/project", true).unwrap().len(), 1);
     }
 
     #[test]

@@ -1280,11 +1280,27 @@ impl Database {
                 keywords TEXT NOT NULL DEFAULT '[]',
                 embedding BLOB,
                 enabled INTEGER NOT NULL DEFAULT 1,
+                review_status TEXT NOT NULL DEFAULT 'pending_review',
+                review_notes TEXT,
+                reviewed_at TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             )",
             [],
         )?;
+
+        if !Self::table_has_column(&conn, "skill_library", "review_status") {
+            let _ = conn.execute(
+                "ALTER TABLE skill_library ADD COLUMN review_status TEXT NOT NULL DEFAULT 'pending_review'",
+                [],
+            );
+        }
+        if !Self::table_has_column(&conn, "skill_library", "review_notes") {
+            let _ = conn.execute("ALTER TABLE skill_library ADD COLUMN review_notes TEXT", []);
+        }
+        if !Self::table_has_column(&conn, "skill_library", "reviewed_at") {
+            let _ = conn.execute("ALTER TABLE skill_library ADD COLUMN reviewed_at TEXT", []);
+        }
 
         // Indexes for skill_library queries
         conn.execute(
@@ -1296,6 +1312,11 @@ impl Database {
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_skill_library_enabled
              ON skill_library(project_path, enabled)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_skill_library_review_status
+             ON skill_library(project_path, review_status)",
             [],
         )?;
 

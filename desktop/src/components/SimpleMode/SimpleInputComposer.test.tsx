@@ -6,10 +6,6 @@ import type { InputBoxHandle } from './InputBox';
 import type { SimpleInputComposerProps } from './SimpleInputComposer';
 import type { QueuedChatMessage } from './queuePersistence';
 
-vi.mock('../shared/EffectiveContextSummary', () => ({
-  EffectiveContextSummary: () => <div data-testid="effective-summary" />,
-}));
-
 vi.mock('./InterviewInputPanel', () => ({
   InterviewInputPanel: () => <div data-testid="interview-input-panel" />,
 }));

@@ -179,7 +179,7 @@ pub async fn generate_task_prd(
                 &resolved_provider,
                 &resolved_model,
                 api_key,
-                base_url,
+                base_url.clone(),
                 &app_state,
             )
             .await
@@ -263,6 +263,9 @@ pub async fn generate_task_prd(
                 "task",
                 Some(session_id.as_str()),
                 true,
+                Some(resolved_provider.as_str()),
+                Some(resolved_model.as_str()),
+                base_url.as_deref(),
             )
             .await;
             let combined_context = crate::services::task_mode::context_provider::merge_enriched_context(
@@ -906,7 +909,7 @@ pub async fn apply_task_prd_feedback(
                 &resolved_provider,
                 &resolved_model,
                 api_key,
-                base_url,
+                base_url.clone(),
                 &app_state,
             )
             .await
@@ -931,6 +934,9 @@ pub async fn apply_task_prd_feedback(
                 "task",
                 Some(session_id.as_str()),
                 true,
+                Some(resolved_provider.as_str()),
+                Some(resolved_model.as_str()),
+                base_url.as_deref(),
             )
             .await;
             let enriched_context =

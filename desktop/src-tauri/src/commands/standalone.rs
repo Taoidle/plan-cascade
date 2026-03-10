@@ -232,8 +232,11 @@ async fn wire_skill_hooks_if_enabled(
                 "",
                 crate::services::skills::model::InjectionPhase::Implementation,
                 &skills.selected_skill_ids,
+                &skills.invoked_skill_ids,
                 skills.selection_mode,
+                skills.review_filter.as_deref(),
                 true,
+                None,
             )
             .await;
             let selected_skills = Arc::new(RwLock::new(effective.matches));
@@ -1474,6 +1477,7 @@ pub async fn execute_standalone(
                 &project_path,
                 &message,
                 crate::services::skills::model::InjectionPhase::Implementation,
+                Some(&config),
             )
             .await;
         // Knowledge is tool-driven here; merge only if non-empty (future-proof).

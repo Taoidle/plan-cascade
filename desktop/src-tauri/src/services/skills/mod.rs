@@ -20,6 +20,7 @@ pub mod index;
 pub mod injector;
 pub mod model;
 pub mod parser;
+pub mod router;
 pub mod select;
 
 pub use model::*;

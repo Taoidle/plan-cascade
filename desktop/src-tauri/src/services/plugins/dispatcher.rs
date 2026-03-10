@@ -642,6 +642,7 @@ fn register_before_tool_hook(
                 Ok(BeforeToolResult {
                     skip: true,
                     skip_reason: Some(reason),
+                    modified_arguments: None,
                 })
             } else if !result.is_success() {
                 eprintln!(

@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 /// Source tier for a skill, determining its priority range
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum SkillSource {
     /// Bundled with plan-cascade (priority 1-50)
     Builtin,
@@ -35,6 +35,15 @@ pub enum InjectionPhase {
     Retry,
     /// All phases (for project-local skills)
     Always,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillReviewStatus {
+    PendingReview,
+    Approved,
+    Rejected,
+    Archived,
 }
 
 /// Hooks for pre/post tool execution
@@ -121,6 +130,10 @@ pub struct SkillDocument {
     // --- Runtime state ---
     /// Whether the user has enabled this skill in the UI
     pub enabled: bool,
+    /// Review status for generated skills. File-based skills are implicitly approved.
+    pub review_status: Option<SkillReviewStatus>,
+    pub review_notes: Option<String>,
+    pub reviewed_at: Option<String>,
 }
 
 /// Lightweight summary without body (for UI listings)
@@ -142,11 +155,14 @@ pub struct SkillSummary {
     pub has_hooks: bool,
     pub inject_into: Vec<InjectionPhase>,
     pub path: PathBuf,
+    pub review_status: Option<SkillReviewStatus>,
+    pub review_notes: Option<String>,
+    pub reviewed_at: Option<String>,
 }
 
 /// Reason why a skill was selected
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum MatchReason {
     /// Matched via detect.files + detect.patterns
     AutoDetected,
@@ -266,6 +282,9 @@ impl SkillDocument {
             has_hooks: self.hooks.is_some(),
             inject_into: self.inject_into.clone(),
             path: self.path.clone(),
+            review_status: self.review_status.clone(),
+            review_notes: self.review_notes.clone(),
+            reviewed_at: self.reviewed_at.clone(),
         }
     }
 }
@@ -328,6 +347,9 @@ pub struct GeneratedSkillRecord {
     pub success_rate: f64,
     pub keywords: Vec<String>,
     pub enabled: bool,
+    pub review_status: SkillReviewStatus,
+    pub review_notes: Option<String>,
+    pub reviewed_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -372,6 +394,9 @@ mod tests {
             detect: None,
             inject_into: vec![InjectionPhase::Always],
             enabled: true,
+            review_status: Some(SkillReviewStatus::Approved),
+            review_notes: None,
+            reviewed_at: None,
         }
     }
 

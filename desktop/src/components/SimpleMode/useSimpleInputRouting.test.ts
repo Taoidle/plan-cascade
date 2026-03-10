@@ -1,5 +1,8 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useContextSourcesStore } from '../../store/contextSources';
+import { useSettingsStore } from '../../store/settings';
+import { useWorkflowKernelStore } from '../../store/workflowKernel';
 import type { PlanClarifyQuestionCardData } from '../../types/planModeCard';
 import type { InterviewQuestionCardData } from '../../types/workflowCard';
 import type { HandoffContextBundle, UserInputIntent, WorkflowSession } from '../../types/workflowKernel';
@@ -97,6 +100,11 @@ describe('useSimpleInputRouting', () => {
       session: createWorkflowSession('task'),
     });
     coordinatorMocks.submitWorkflowInputWithTracking.mockResolvedValue(createWorkflowSession('task'));
+    useSettingsStore.setState({ workspacePath: '/tmp/project' });
+    useWorkflowKernelStore.setState({ sessionId: 'kernel-session-1' });
+    useContextSourcesStore.setState({
+      invokeSkillCommand: vi.fn().mockResolvedValue(true),
+    });
   });
 
   it('aborts task config follow-up when kernel submission fails', async () => {
@@ -202,5 +210,22 @@ describe('useSimpleInputRouting', () => {
 
     expect(params.addPrdFeedback).toHaveBeenCalledWith('Please split story-003');
     expect(params.sendFollowUp).not.toHaveBeenCalled();
+  });
+
+  it('consumes /skill:<id> before sending remaining follow-up content', async () => {
+    const params = createBaseParams();
+    params.workflowMode = 'chat';
+    params.workflowPhase = 'idle';
+    const invokeSkillCommand = vi.fn().mockResolvedValue(true);
+    useContextSourcesStore.setState({ invokeSkillCommand });
+
+    const { result } = renderHook(() => useSimpleInputRouting(params));
+
+    await act(async () => {
+      await result.current.handleFollowUp('/skill:react-release prepare release notes');
+    });
+
+    expect(invokeSkillCommand).toHaveBeenCalledWith('/tmp/project', 'react-release', 'kernel-session-1');
+    expect(params.sendFollowUp).toHaveBeenCalledWith('prepare release notes');
   });
 });

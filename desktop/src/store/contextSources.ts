@@ -36,6 +36,14 @@ interface UnifiedMemoryQueryResultV2 {
   }>;
 }
 
+interface SkillCommandInvocation {
+  skill_id: string;
+  skill_name: string;
+  session_id: string | null;
+  pinned: boolean;
+  selection_origin: string;
+}
+
 const MEMORY_COMMAND_TIMEOUT_MS = 8000;
 
 async function invokeCommandResponseWithTimeout<T>(
@@ -99,7 +107,9 @@ export interface ContextSourcesState {
   // === Skills State ===
   skillsEnabled: boolean;
   selectedSkillIds: string[];
+  invokedSkillIds: string[];
   skillSelectionMode: 'auto' | 'explicit';
+  skillInvocationSessionId: string | null;
   availableSkills: SkillSummary[];
   isLoadingSkills: boolean;
   skillPickerSearchQuery: string;
@@ -137,6 +147,10 @@ export interface ContextSourcesState {
   toggleSkills: (enabled: boolean) => void;
   toggleSkillItem: (skillId: string) => void;
   toggleSkillGroup: (sourceType: string) => void;
+  invokeSkillCommand: (projectPath: string, skillId: string, sessionId?: string | null) => Promise<boolean>;
+  clearInvokedSkill: (skillId: string) => void;
+  clearInvokedSkills: () => void;
+  bindSkillInvocationSession: (sessionId: string | null) => void;
   loadAvailableSkills: (projectPath: string) => Promise<void>;
   reconcileSelectedSkills: (availableSkills: SkillSummary[]) => void;
   setSkillPickerSearchQuery: (query: string) => void;
@@ -207,7 +221,9 @@ function buildLegacyConfigFromState(state: ContextSourcesState, projectId: strin
     config.skills = {
       enabled: true,
       selected_skill_ids: state.selectedSkillIds,
+      invoked_skill_ids: state.invokedSkillIds,
       selection_mode: state.selectedSkillIds.length > 0 ? 'explicit' : state.skillSelectionMode,
+      review_filter: 'approved_only',
     };
   }
 
@@ -261,7 +277,9 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
   // === Skills State ===
   skillsEnabled: false,
   selectedSkillIds: [],
+  invokedSkillIds: [],
   skillSelectionMode: 'auto',
+  skillInvocationSessionId: null,
   availableSkills: [],
   isLoadingSkills: false,
   skillPickerSearchQuery: '',
@@ -692,7 +710,12 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
   toggleSkills: (enabled) => {
     set({ skillsEnabled: enabled });
     if (!enabled) {
-      set({ selectedSkillIds: [], skillSelectionMode: 'auto' });
+      set({
+        selectedSkillIds: [],
+        invokedSkillIds: [],
+        skillSelectionMode: 'auto',
+        skillInvocationSessionId: null,
+      });
     }
   },
 
@@ -737,19 +760,96 @@ export const useContextSourcesStore = create<ContextSourcesState>()((set, get) =
     }
   },
 
+  invokeSkillCommand: async (projectPath, skillId, sessionId) => {
+    const normalizedSessionId = sessionId?.trim() || null;
+    try {
+      const response = await invoke<CommandResponse<SkillCommandInvocation>>('invoke_skill_command_v2', {
+        projectPath,
+        skillId,
+        sessionId: normalizedSessionId,
+      });
+      if (!response.success || !response.data) {
+        reportNonFatal('contextSources.invokeSkillCommand', response.error ?? 'Invocation failed', {
+          projectPath,
+          skillId,
+          sessionId: normalizedSessionId,
+        });
+        return false;
+      }
+
+      set((state) => ({
+        skillsEnabled: true,
+        invokedSkillIds: state.invokedSkillIds.includes(response.data!.skill_id)
+          ? state.invokedSkillIds
+          : [...state.invokedSkillIds, response.data!.skill_id],
+        skillInvocationSessionId: normalizedSessionId,
+      }));
+      return true;
+    } catch (error) {
+      reportNonFatal('contextSources.invokeSkillCommand', error, {
+        projectPath,
+        skillId,
+        sessionId: normalizedSessionId,
+      });
+      return false;
+    }
+  },
+
+  clearInvokedSkill: (skillId) => {
+    set((state) => ({
+      invokedSkillIds: state.invokedSkillIds.filter((id) => id !== skillId),
+      skillInvocationSessionId:
+        state.invokedSkillIds.length <= 1 && state.invokedSkillIds.includes(skillId)
+          ? null
+          : state.skillInvocationSessionId,
+    }));
+  },
+
+  clearInvokedSkills: () => {
+    set({ invokedSkillIds: [], skillInvocationSessionId: null });
+  },
+
+  bindSkillInvocationSession: (sessionId) => {
+    const normalizedSessionId = sessionId?.trim() || null;
+    set((state) => {
+      if (state.skillInvocationSessionId === normalizedSessionId) {
+        return state;
+      }
+      if (!state.skillInvocationSessionId || state.invokedSkillIds.length === 0) {
+        return {
+          skillInvocationSessionId: normalizedSessionId,
+        };
+      }
+      return {
+        invokedSkillIds: [],
+        skillInvocationSessionId: normalizedSessionId,
+      };
+    });
+  },
+
   loadAvailableSkills: async (projectPath) => {
     set({ isLoadingSkills: true });
     try {
-      const response = await invoke<CommandResponse<SkillSummary[]>>('list_skills', {
+      let effectiveResponse = await invoke<CommandResponse<SkillSummary[]>>('list_skills_v2', {
         projectPath,
         sourceFilter: null,
         includeDisabled: false,
       });
-      if (response.success && response.data) {
+      if (!effectiveResponse.success) {
+        effectiveResponse = await invoke<CommandResponse<SkillSummary[]>>('list_skills', {
+          projectPath,
+          sourceFilter: null,
+          includeDisabled: false,
+        });
+      }
+      if (effectiveResponse.success && effectiveResponse.data) {
         set((state) => ({
-          availableSkills: response.data!,
+          availableSkills: effectiveResponse.data!,
           isLoadingSkills: false,
-          ...reconcileSelectedSkillIds(state.selectedSkillIds, response.data!),
+          invokedSkillIds: state.invokedSkillIds.filter((id) =>
+            effectiveResponse.data!.some((skill) => skill.id === id),
+          ),
+          ...reconcileSelectedSkillIds(state.selectedSkillIds, effectiveResponse.data!),
         }));
       } else {
         set({ isLoadingSkills: false });

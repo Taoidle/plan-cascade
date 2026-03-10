@@ -1,24 +1,22 @@
 /**
  * BottomStatusBar Component
  *
- * Bottom status bar that displays connection status, project selector,
- * model switcher, permission selector, index status, and token usage.
+ * Bottom status bar that displays project selector, model switcher,
+ * permission selector, index status, token usage, and effective context.
  * Migrated from the former top header bar.
  */
 
 import { memo } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import { ConnectionStatus } from './ConnectionStatus';
 import { ModelSwitcher } from './ModelSwitcher';
 import { PermissionSelector } from './PermissionSelector';
 import { ProjectSelector, IndexStatus, DocsIndexStatus } from '../shared';
-import type { ConnectionStatus as ConnectionStatusType } from '../../lib/claudeCodeClient';
+import { EffectiveContextSummary } from '../shared/EffectiveContextSummary';
 import type { PermissionLevel } from '../../types/permission';
 import { formatTokenCount, type PromptTokenEstimateResult } from './tokenBudget';
 
 interface BottomStatusBarProps {
-  connectionStatus: ConnectionStatusType;
   workspacePath: string | null;
   permissionLevel: PermissionLevel;
   onPermissionLevelChange: (level: PermissionLevel) => void;
@@ -45,7 +43,6 @@ function Divider() {
 }
 
 export const BottomStatusBar = memo(function BottomStatusBar({
-  connectionStatus,
   workspacePath,
   permissionLevel,
   onPermissionLevelChange,
@@ -72,8 +69,6 @@ export const BottomStatusBar = memo(function BottomStatusBar({
         'text-xs text-gray-600 dark:text-gray-400',
       )}
     >
-      <ConnectionStatus status={connectionStatus} />
-      <Divider />
       <ProjectSelector compact />
       <Divider />
       <ModelSwitcher dropdownDirection="up" />
@@ -129,7 +124,7 @@ export const BottomStatusBar = memo(function BottomStatusBar({
         </>
       )}
       {showTokenBudget && (
-        <div className="ml-auto hidden lg:flex items-center">
+        <div className="hidden lg:flex items-center">
           {isEstimatingTokenBudget ? (
             <span className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-2xs">
               {t('workflow.tokenBudget.estimating', { defaultValue: 'Estimating token budget...' })}
@@ -178,6 +173,7 @@ export const BottomStatusBar = memo(function BottomStatusBar({
           ) : null}
         </div>
       )}
+      <EffectiveContextSummary className="ml-auto" />
     </div>
   );
 });

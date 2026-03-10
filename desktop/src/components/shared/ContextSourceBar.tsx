@@ -65,6 +65,7 @@ export function ContextSourceBar() {
     includedMemoryIds,
     excludedMemoryIds,
     selectedSkillIds,
+    invokedSkillIds,
     toggleKnowledge,
     toggleMemory,
     toggleSkills,
@@ -232,7 +233,7 @@ export function ContextSourceBar() {
         ? excludedMemoryIds.length
         : selectedMemoryIds.length;
   const memoryCount = selectedMemoryScopes.length + selectedMemoryCategories.length + memoryItemCount;
-  const skillsCount = selectedSkillIds.length;
+  const skillsCount = selectedSkillIds.length + invokedSkillIds.length;
 
   return (
     <div ref={barRef} className="flex items-center gap-1 relative">
