@@ -40,6 +40,11 @@ function Ensure-Winget {
   Require-Command 'winget'
 }
 
+function Test-WebView2Installed {
+  $webView2Key = 'HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+  return (Test-Path $webView2Key)
+}
+
 function Install-WingetPackage {
   param(
     [Parameter(Mandatory = $true)][string]$Id,
@@ -81,35 +86,61 @@ function Ensure-SystemPackages {
     return
   }
 
-  Ensure-Winget
+  $nodeMajor = Get-NodeMajorVersion
+  $missing = New-Object System.Collections.Generic.List[string]
 
   if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    $missing.Add('git')
+  }
+
+  if ($null -eq $nodeMajor -or $nodeMajor -lt $NodeMajorMin -or -not (Get-Command corepack -ErrorAction SilentlyContinue)) {
+    $missing.Add('node')
+  }
+
+  if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
+    $missing.Add('rustup')
+  }
+
+  if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
+    $missing.Add('msvc')
+  }
+
+  if (-not (Test-WebView2Installed)) {
+    $missing.Add('webview2')
+  }
+
+  if ($missing.Count -eq 0) {
+    Write-Step 'Windows system dependencies already look good; skipping package installation'
+    return
+  }
+
+  Ensure-Winget
+
+  if ($missing.Contains('git')) {
     Write-Step 'Installing Git for Windows'
     Install-WingetPackage -Id 'Git.Git'
     Refresh-Path
   }
 
-  $nodeMajor = Get-NodeMajorVersion
-  if ($null -eq $nodeMajor -or $nodeMajor -lt $NodeMajorMin) {
+  if ($missing.Contains('node')) {
     Write-Step 'Installing Node.js LTS'
     Install-WingetPackage -Id 'OpenJS.NodeJS.LTS'
     Refresh-Path
   }
 
-  if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
+  if ($missing.Contains('rustup')) {
     Write-Step 'Installing rustup'
     Install-WingetPackage -Id 'Rustlang.Rustup'
     Refresh-Path
   }
 
-  if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
+  if ($missing.Contains('msvc')) {
     Write-Step 'Installing Visual Studio C++ Build Tools'
     Install-WingetPackage -Id 'Microsoft.VisualStudio.2022.BuildTools' -Override '--wait --quiet --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended'
     Refresh-Path
   }
 
-  $webView2Key = 'HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
-  if (-not (Test-Path $webView2Key)) {
+  if ($missing.Contains('webview2')) {
     Write-Step 'Installing WebView2 Runtime'
     Install-WingetPackage -Id 'Microsoft.EdgeWebView2Runtime'
     Refresh-Path

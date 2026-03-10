@@ -35,10 +35,30 @@ load_homebrew_env() {
 }
 
 install_system_packages() {
-  log "Installing macOS system dependencies"
+  local missing=()
+
+  command_exists git || missing+=("git")
+  command_exists rsync || missing+=("rsync")
+  command_exists pkg-config || missing+=("pkg-config")
+
+  local node_major
+  node_major="$(node_major_version || true)"
+  if [[ -z "${node_major:-}" ]] || (( node_major < NODE_MAJOR_MIN )) || ! command_exists corepack; then
+    missing+=("node@20")
+  fi
+
+  if ((${#missing[@]} == 0)); then
+    log "macOS system dependencies already look good; skipping brew install"
+    return
+  fi
+
+  log "Installing missing macOS dependencies: ${missing[*]}"
   brew update
-  brew install git rsync pkg-config node@20
-  brew link --overwrite node@20 >/dev/null 2>&1 || true
+  brew install "${missing[@]}"
+
+  if [[ " ${missing[*]} " == *" node@20 "* ]]; then
+    brew link --overwrite node@20 >/dev/null 2>&1 || true
+  fi
 }
 
 main() {

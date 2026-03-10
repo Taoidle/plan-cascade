@@ -18,6 +18,29 @@ detect_linux_pkg_manager() {
 }
 
 install_system_packages() {
+  local node_major
+  node_major="$(node_major_version || true)"
+
+  local has_indicator=0
+  if pkg_config_has ayatana-appindicator3-0.1 || pkg_config_has appindicator3-0.1; then
+    has_indicator=1
+  fi
+
+  if command_exists git \
+    && command_exists curl \
+    && command_exists patch \
+    && command_exists rsync \
+    && command_exists pkg-config \
+    && [[ -n "${node_major:-}" ]] \
+    && (( node_major >= NODE_MAJOR_MIN )) \
+    && command_exists corepack \
+    && pkg_config_has gtk+-3.0 \
+    && pkg_config_has webkit2gtk-4.1 \
+    && (( has_indicator == 1 )); then
+    log "Linux system dependencies already look good; skipping package installation"
+    return
+  fi
+
   local manager
   manager="$(detect_linux_pkg_manager)" || die "Unsupported Linux distribution. Install system packages manually, then rerun with --skip-system-packages."
   require_sudo

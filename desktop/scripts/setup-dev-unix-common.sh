@@ -26,6 +26,10 @@ die() {
   exit 1
 }
 
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
+
 parse_unix_setup_args() {
   while (($# > 0)); do
     case "$1" in
@@ -72,6 +76,11 @@ require_sudo() {
   fi
 
   die "This script needs root privileges to install system packages, but sudo is not available."
+}
+
+pkg_config_has() {
+  local package="$1"
+  command_exists pkg-config && pkg-config --exists "$package"
 }
 
 ensure_rust() {
