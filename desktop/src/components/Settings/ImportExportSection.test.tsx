@@ -70,8 +70,12 @@ vi.mock('react-i18next', () => ({
         'importExport.clearAllData.description': 'clear all data desc',
         'importExport.clearAllData.button': 'Clear All Data',
         'importExport.clearAllData.clearing': 'Clearing...',
+        'importExport.clearAllData.dialogTitle': 'Confirm clear all data',
+        'importExport.clearAllData.dialogDescription': 'This cannot be undone.',
         'importExport.clearAllData.confirmPrimary': 'confirm-1',
         'importExport.clearAllData.confirmSecondary': 'confirm-2',
+        'importExport.clearAllData.cancel': 'Cancel',
+        'importExport.clearAllData.confirmButton': 'Delete everything',
         'importExport.clearAllData.success': 'clear success',
         'importExport.clearAllData.error': 'clear error',
       };
@@ -81,7 +85,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 vi.mock('@radix-ui/react-dialog', () => ({
-  Root: ({ children }: { children: ReactNode }) => <>{children}</>,
+  Root: ({ children, open = true }: { children: ReactNode; open?: boolean }) => (open ? <>{children}</> : null),
   Portal: ({ children }: { children: ReactNode }) => <>{children}</>,
   Overlay: ({ className }: { className?: string }) => <div className={className} />,
   Content: ({ children, className }: { children: ReactNode; className?: string }) => (
@@ -138,7 +142,6 @@ describe('ImportExportSection clear-all-data', () => {
   it('calls clearAllData, clears localStorage, dispatches reset event, and schedules reload', async () => {
     localStorage.setItem('plan-cascade-settings', 'persisted');
 
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
     const timeoutSpy = vi.spyOn(window, 'setTimeout');
 
@@ -146,11 +149,15 @@ describe('ImportExportSection clear-all-data', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear All Data' }));
 
+    expect(mockClearAllData).not.toHaveBeenCalled();
+    expect(screen.getByText('Confirm clear all data')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete everything' }));
+
     await waitFor(() => {
       expect(mockClearAllData).toHaveBeenCalledTimes(1);
     });
 
-    expect(confirmSpy).toHaveBeenCalledTimes(2);
     expect(localStorage.getItem('plan-cascade-settings')).toBeNull();
     expect(dispatchSpy).toHaveBeenCalled();
     expect(timeoutSpy).toHaveBeenCalled();
@@ -159,12 +166,12 @@ describe('ImportExportSection clear-all-data', () => {
   it('shows error and does not clear frontend state when clearAllData fails', async () => {
     localStorage.setItem('plan-cascade-settings', 'persisted');
 
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     mockClearAllData.mockRejectedValueOnce(new Error('backend failure'));
 
     render(<ImportExportSection />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear All Data' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete everything' }));
 
     await waitFor(() => {
       expect(screen.getByText('clear error')).toBeInTheDocument();

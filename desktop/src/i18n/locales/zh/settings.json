@@ -586,8 +586,12 @@
       "description": "删除全部本地应用数据（前端缓存 + 后端 ~/.plan-cascade 数据），包括数据库记录、索引、插件和密钥。此操作不可撤销。",
       "button": "清除所有数据",
       "clearing": "清除中...",
+      "dialogTitle": "确认清除全部本地数据？",
+      "dialogDescription": "增加这一步确认是为了避免误删数据。",
       "confirmPrimary": "这将删除本地全部 Plan Cascade 数据。确定继续吗？",
       "confirmSecondary": "最终确认：该操作不可恢复。现在清除所有数据吗？",
+      "cancel": "取消",
+      "confirmButton": "确认清除",
       "success": "所有数据已清除，正在重载...",
       "error": "清除所有数据失败，请重试。"
     }

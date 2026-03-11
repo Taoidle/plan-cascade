@@ -586,8 +586,12 @@
       "description": "Delete all local app data (frontend cache + backend ~/.plan-cascade data), including DB records, indexes, plugins, and secrets. This cannot be undone.",
       "button": "Clear All Data",
       "clearing": "Clearing...",
+      "dialogTitle": "Clear all local data?",
+      "dialogDescription": "This confirmation step prevents accidental data loss.",
       "confirmPrimary": "This will delete all local Plan Cascade data. Continue?",
       "confirmSecondary": "Final confirmation: this action is irreversible. Clear all data now?",
+      "cancel": "Cancel",
+      "confirmButton": "Delete everything",
       "success": "All data cleared. Reloading...",
       "error": "Failed to clear all data. Please try again."
     }

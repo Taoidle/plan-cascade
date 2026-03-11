@@ -787,6 +787,17 @@ pub fn built_in_catalog_items() -> Vec<McpCatalogItem> {
             os_support: common_os(),
             strategies: vec![
                 strategy(
+                    "stream_http_api_key",
+                    McpInstallStrategyKind::StreamHttpApiKey,
+                    0,
+                    vec![],
+                    serde_json::json!({
+                        "server_type": "stream_http",
+                        "url": "https://api.githubcopilot.com/mcp/",
+                        "headers": { "Authorization": "Bearer {{GITHUB_TOKEN}}" }
+                    }),
+                ),
+                strategy(
                     "docker",
                     McpInstallStrategyKind::Docker,
                     1,
@@ -795,18 +806,6 @@ pub fn built_in_catalog_items() -> Vec<McpCatalogItem> {
                         "server_type": "stdio",
                         "launcher": "docker",
                         "image": "ghcr.io/github/github-mcp-server:latest",
-                        "args": []
-                    }),
-                ),
-                strategy(
-                    "go_binary",
-                    McpInstallStrategyKind::GoBinary,
-                    2,
-                    vec![requirement(McpRuntimeKind::Node, "20", true)],
-                    serde_json::json!({
-                        "server_type": "stdio",
-                        "launcher": "go_binary",
-                        "binary": "github-mcp-server",
                         "args": []
                     }),
                 ),

@@ -5,6 +5,7 @@
 
 use std::process::Command;
 use std::time::Duration;
+use std::{collections::HashSet, env, path::Path};
 
 use chrono::Utc;
 
@@ -62,23 +63,8 @@ impl McpRuntimeManager {
     /// Detect single runtime availability.
     pub fn detect_runtime(&self, runtime: McpRuntimeKind) -> McpRuntimeInfo {
         let now = Utc::now().to_rfc3339();
-        let (binary, version_args) = match runtime {
-            McpRuntimeKind::Node => ("node", vec!["--version"]),
-            McpRuntimeKind::Uv => ("uv", vec!["--version"]),
-            McpRuntimeKind::Python => ("python3", vec!["--version"]),
-            // docker info verifies daemon reachability, not just CLI presence.
-            McpRuntimeKind::Docker => ("docker", vec!["info", "--format", "{{.ServerVersion}}"]),
-        };
-
-        let found = find_binary(binary).or_else(|| {
-            if runtime == McpRuntimeKind::Python {
-                find_binary("python")
-            } else {
-                None
-            }
-        });
-
-        if found.is_none() {
+        let candidates = runtime_probe_candidates(&runtime);
+        if candidates.is_empty() {
             return McpRuntimeInfo {
                 runtime,
                 version: None,
@@ -91,42 +77,68 @@ impl McpRuntimeManager {
             };
         }
 
-        let path = found.unwrap_or_default();
-        let mut cmd = Command::new(&path);
-        cmd.args(&version_args);
-        configure_background_std_process(&mut cmd);
         let mut last_error = None;
         let mut version = None;
-        let healthy = match cmd.output() {
-            Ok(out) if out.status.success() => {
-                let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-                let value = if stdout.is_empty() { stderr } else { stdout };
-                version = extract_version(&value).or_else(|| Some("unknown".to_string()));
-                match (&runtime, version.as_deref()) {
-                    (McpRuntimeKind::Node, Some(v)) => version_at_least(v, "20.0.0"),
-                    (McpRuntimeKind::Uv, Some(v)) => version_at_least(v, "0.4.0"),
-                    (McpRuntimeKind::Python, Some(v)) => version_at_least(v, "3.10.0"),
-                    (McpRuntimeKind::Docker, Some(_)) => true,
-                    _ => false,
+        let mut detected_path = None;
+        let mut detected_source = Some("system".to_string());
+        let mut healthy = false;
+
+        for candidate in candidates {
+            let mut cmd = Command::new(&candidate.program);
+            cmd.args(&candidate.args);
+            configure_background_std_process(&mut cmd);
+
+            match cmd.output() {
+                Ok(out) if out.status.success() => {
+                    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                    let value = if stdout.is_empty() { stderr } else { stdout };
+                    version = extract_version(&value).or_else(|| Some("unknown".to_string()));
+                    healthy = match (&runtime, version.as_deref()) {
+                        (McpRuntimeKind::Node, Some(v)) => version_at_least(v, "20.0.0"),
+                        (McpRuntimeKind::Uv, Some(v)) => version_at_least(v, "0.4.0"),
+                        (McpRuntimeKind::Python, Some(v)) => version_at_least(v, "3.10.0"),
+                        (McpRuntimeKind::Docker, Some(_)) => true,
+                        _ => false,
+                    };
+                    detected_path = Some(candidate.display_path.clone());
+                    detected_source = Some(candidate.source.to_string());
+                    if healthy {
+                        break;
+                    }
+                    if let Some(min) = runtime_min_version(&runtime) {
+                        if let Some(actual) = version.as_deref() {
+                            last_error = Some(format!("version_too_low: need >= {}, found {}", min, actual));
+                        }
+                    }
+                }
+                Ok(out) => {
+                    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    let message = if stderr.is_empty() { stdout } else { stderr };
+                    if is_windows_store_alias(&candidate.display_path) {
+                        last_error = Some("runtime_probe_failed".to_string());
+                        continue;
+                    }
+                    detected_path = Some(candidate.display_path.clone());
+                    detected_source = Some(candidate.source.to_string());
+                    if !message.is_empty() {
+                        last_error = Some(message);
+                    } else {
+                        last_error = Some("runtime_probe_failed".to_string());
+                    }
+                }
+                Err(e) => {
+                    if is_windows_store_alias(&candidate.display_path) {
+                        last_error = Some("runtime_probe_failed".to_string());
+                        continue;
+                    }
+                    detected_path = Some(candidate.display_path.clone());
+                    detected_source = Some(candidate.source.to_string());
+                    last_error = Some(format!("runtime_probe_failed: {}", e));
                 }
             }
-            Ok(out) => {
-                let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-                let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                let message = if stderr.is_empty() { stdout } else { stderr };
-                if !message.is_empty() {
-                    last_error = Some(message);
-                } else {
-                    last_error = Some("runtime_probe_failed".to_string());
-                }
-                false
-            }
-            Err(e) => {
-                last_error = Some(format!("runtime_probe_failed: {}", e));
-                false
-            }
-        };
+        }
 
         if !healthy && last_error.is_none() {
             if let Some(min) = runtime_min_version(&runtime) {
@@ -142,8 +154,8 @@ impl McpRuntimeManager {
         McpRuntimeInfo {
             runtime,
             version,
-            path: Some(path),
-            source: Some("system".to_string()),
+            path: detected_path,
+            source: detected_source,
             managed: false,
             healthy,
             last_error,
@@ -227,7 +239,7 @@ impl McpRuntimeManager {
                     "-NoProfile".to_string(),
                     "-Command".to_string(),
                     format!(
-                        "Start-Process PowerShell -Verb RunAs -ArgumentList '-NoProfile -Command \"{}\"'",
+                        "$proc = Start-Process PowerShell -Verb RunAs -Wait -PassThru -ArgumentList '-NoProfile -ExecutionPolicy Bypass -Command \"{}\"'; exit $proc.ExitCode",
                         raw_cmd.replace('"', "\\\"")
                     ),
                 ],
@@ -336,6 +348,13 @@ impl McpRuntimeManager {
                     message: "Runtime installed successfully".to_string(),
                 });
             }
+            if cfg!(target_os = "windows") {
+                return Ok(McpRuntimeRepairResult {
+                    runtime,
+                    status: "restart_required".to_string(),
+                    message: "Runtime installation finished, but Windows may require restarting Plan Cascade to refresh PATH.".to_string(),
+                });
+            }
         }
 
         let refreshed = self.detect_runtime(runtime.clone());
@@ -363,6 +382,10 @@ fn runtime_key(runtime: &McpRuntimeKind) -> String {
 }
 
 fn find_binary(binary: &str) -> Option<String> {
+    find_binary_candidates(binary).into_iter().next()
+}
+
+fn find_binary_candidates(binary: &str) -> Vec<String> {
     let checker = if cfg!(target_os = "windows") {
         "where"
     } else {
@@ -371,18 +394,147 @@ fn find_binary(binary: &str) -> Option<String> {
     let mut cmd = Command::new(checker);
     cmd.arg(binary);
     configure_background_std_process(&mut cmd);
+    let mut seen = HashSet::new();
     cmd.output()
         .ok()
-        .and_then(|out| {
+        .map(|out| {
             if out.status.success() {
                 String::from_utf8_lossy(&out.stdout)
                     .lines()
-                    .next()
                     .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .filter(|s| seen.insert(s.clone()))
+                    .collect::<Vec<_>>()
             } else {
-                None
+                Vec::new()
             }
         })
+        .unwrap_or_default()
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeProbeCandidate {
+    program: String,
+    args: Vec<String>,
+    display_path: String,
+    source: &'static str,
+}
+
+fn runtime_probe_candidates(runtime: &McpRuntimeKind) -> Vec<RuntimeProbeCandidate> {
+    let mut candidates = Vec::new();
+    let mut push_binary = |binary: &str, args: Vec<String>, source: &'static str| {
+        let found = find_binary_candidates(binary);
+        if found.is_empty() {
+            if binary == "py" && cfg!(target_os = "windows") {
+                candidates.push(RuntimeProbeCandidate {
+                    program: binary.to_string(),
+                    args,
+                    display_path: binary.to_string(),
+                    source,
+                });
+            }
+            return;
+        }
+        for path in found {
+            candidates.push(RuntimeProbeCandidate {
+                program: path.clone(),
+                args: args.clone(),
+                display_path: path,
+                source,
+            });
+        }
+    };
+
+    match runtime {
+        McpRuntimeKind::Node => {
+            push_binary("node", vec!["--version".to_string()], "system");
+        }
+        McpRuntimeKind::Uv => {
+            push_binary("uv", vec!["--version".to_string()], "system");
+            if cfg!(target_os = "windows") {
+                for path in windows_known_uv_paths() {
+                    candidates.push(RuntimeProbeCandidate {
+                        program: path.clone(),
+                        args: vec!["--version".to_string()],
+                        display_path: path,
+                        source: "known_install_path",
+                    });
+                }
+            }
+        }
+        McpRuntimeKind::Python => {
+            if cfg!(target_os = "windows") {
+                push_binary("py", vec!["-3".to_string(), "--version".to_string()], "python_launcher");
+                push_binary("python", vec!["--version".to_string()], "system");
+                push_binary("python3", vec!["--version".to_string()], "system");
+            } else {
+                push_binary("python3", vec!["--version".to_string()], "system");
+                push_binary("python", vec!["--version".to_string()], "system");
+            }
+        }
+        McpRuntimeKind::Docker => {
+            push_binary(
+                "docker",
+                vec!["info".to_string(), "--format".to_string(), "{{.ServerVersion}}".to_string()],
+                "system",
+            );
+        }
+    }
+
+    let mut seen = HashSet::new();
+    candidates
+        .into_iter()
+        .filter(|candidate| seen.insert(candidate.display_path.clone()))
+        .collect()
+}
+
+fn windows_known_uv_paths() -> Vec<String> {
+    if !cfg!(target_os = "windows") {
+        return Vec::new();
+    }
+
+    let mut paths = Vec::new();
+    if let Some(user_profile) = env::var_os("USERPROFILE") {
+        paths.push(
+            Path::new(&user_profile)
+                .join(".local")
+                .join("bin")
+                .join("uv.exe")
+                .to_string_lossy()
+                .to_string(),
+        );
+    }
+    if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
+        paths.push(
+            Path::new(&local_app_data)
+                .join("Microsoft")
+                .join("WinGet")
+                .join("Links")
+                .join("uv.exe")
+                .to_string_lossy()
+                .to_string(),
+        );
+        paths.push(
+            Path::new(&local_app_data)
+                .join("Programs")
+                .join("uv")
+                .join("uv.exe")
+                .to_string_lossy()
+                .to_string(),
+        );
+    }
+    paths
+        .into_iter()
+        .filter(|path| Path::new(path).exists())
+        .collect()
+}
+
+fn is_windows_store_alias(path: &str) -> bool {
+    if !cfg!(target_os = "windows") {
+        return false;
+    }
+    let lower = path.replace('/', "\\").to_lowercase();
+    lower.contains("\\windowsapps\\") && (lower.ends_with("python.exe") || lower.ends_with("python3.exe"))
 }
 
 fn extract_version(raw: &str) -> Option<String> {

@@ -39,6 +39,7 @@ export function ImportExportSection() {
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isClearingAllData, setIsClearingAllData] = useState(false);
+  const [showClearAllDataDialog, setShowClearAllDataDialog] = useState(false);
   const [message, setMessage] = useState<StatusMessage | null>(null);
   const [importPreview, setImportPreview] = useState<{ raw: string; parsed: Record<string, unknown> } | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
@@ -251,13 +252,14 @@ export function ImportExportSection() {
     }
   };
 
-  const handleClearAllData = async () => {
-    const confirmedPrimary = window.confirm(t('importExport.clearAllData.confirmPrimary'));
-    if (!confirmedPrimary) return;
-    const confirmedSecondary = window.confirm(t('importExport.clearAllData.confirmSecondary'));
-    if (!confirmedSecondary) return;
+  const handleClearAllData = () => {
+    if (isClearingAllData) return;
+    setShowClearAllDataDialog(true);
+  };
 
+  const handleConfirmClearAllData = async () => {
     setIsClearingAllData(true);
+    setShowClearAllDataDialog(false);
     setMessage(null);
 
     try {
@@ -463,6 +465,71 @@ export function ImportExportSection() {
           </div>
         </div>
       </section>
+
+      <Dialog.Root open={showClearAllDataDialog} onOpenChange={setShowClearAllDataDialog}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
+          <Dialog.Content
+            className={clsx(
+              'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
+              'w-full max-w-md',
+              'bg-white dark:bg-gray-900 rounded-xl shadow-xl',
+              'p-6',
+              'focus:outline-none',
+            )}
+          >
+            <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-white">
+              {t('importExport.clearAllData.dialogTitle')}
+            </Dialog.Title>
+            <Dialog.Description className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+              {t('importExport.clearAllData.dialogDescription')}
+            </Dialog.Description>
+
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-900/10 dark:text-red-200">
+              <p>{t('importExport.clearAllData.confirmPrimary')}</p>
+              <p className="mt-2 font-medium">{t('importExport.clearAllData.confirmSecondary')}</p>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <Dialog.Close asChild>
+                <button
+                  className={clsx(
+                    'px-4 py-2 rounded-lg',
+                    'bg-gray-100 dark:bg-gray-800',
+                    'text-gray-700 dark:text-gray-300',
+                    'hover:bg-gray-200 dark:hover:bg-gray-700',
+                  )}
+                >
+                  {t('importExport.clearAllData.cancel')}
+                </button>
+              </Dialog.Close>
+              <button
+                onClick={handleConfirmClearAllData}
+                disabled={isClearingAllData}
+                className={clsx(
+                  'px-4 py-2 rounded-lg',
+                  'bg-red-600 text-white',
+                  'hover:bg-red-700',
+                  'disabled:opacity-50 disabled:cursor-not-allowed',
+                )}
+              >
+                {isClearingAllData
+                  ? t('importExport.clearAllData.clearing')
+                  : t('importExport.clearAllData.confirmButton')}
+              </button>
+            </div>
+
+            <Dialog.Close asChild>
+              <button
+                className={clsx('absolute top-4 right-4 p-1 rounded-lg', 'hover:bg-gray-100 dark:hover:bg-gray-800')}
+                aria-label={t('importExport.import.close')}
+              >
+                <Cross2Icon className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+              </button>
+            </Dialog.Close>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
 
       {/* Import Confirmation Dialog */}
       <Dialog.Root open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>

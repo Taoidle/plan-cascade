@@ -2,6 +2,7 @@
 //!
 //! Tauri commands for MCP server management and runtime tool integration.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use serde_json::Value;
@@ -24,6 +25,8 @@ use crate::services::tools::mcp_manager::{ConnectedServerInfo, McpManager};
 use crate::services::tools::runtime_tools;
 use crate::services::tools::trait_def::ToolRegistry;
 use crate::utils::error::AppResult;
+
+const GITHUB_MCP_REMOTE_URL: &str = "https://api.githubcopilot.com/mcp/";
 
 pub struct McpRuntimeState {
     pub manager: Arc<McpManager>,
@@ -503,6 +506,10 @@ pub async fn connect_mcp_server(
         Ok(None) => return Ok(CommandResponse::err(format!("Server not found: {}", id))),
         Err(e) => return Ok(CommandResponse::err(e.to_string())),
     };
+    let server = match migrate_legacy_github_mcp_server(&service, server) {
+        Ok(server) => server,
+        Err(e) => return Ok(CommandResponse::err(e)),
+    };
 
     if !server.enabled {
         return Ok(CommandResponse::err(format!(
@@ -540,6 +547,56 @@ pub async fn connect_mcp_server(
             Ok(CommandResponse::err(e.to_string()))
         }
     }
+}
+
+fn migrate_legacy_github_mcp_server(
+    service: &McpService,
+    server: McpServer,
+) -> Result<McpServer, String> {
+    let is_legacy_github_binary = server.managed_install
+        && server.catalog_item_id.as_deref() == Some("github-mcp")
+        && server.server_type == McpServerType::Stdio
+        && server.command.as_deref() == Some("github-mcp-server");
+
+    if !is_legacy_github_binary {
+        return Ok(server);
+    }
+
+    let token = server
+        .env
+        .get("GITHUB_TOKEN")
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    let Some(token) = token else {
+        return Err(
+            "Legacy GitHub MCP local binary install is no longer supported here. Reinstall GitHub MCP using the official Remote strategy or Docker, and provide a GitHub token.".to_string(),
+        );
+    };
+
+    let mut headers = HashMap::new();
+    headers.insert("Authorization".to_string(), format!("Bearer {token}"));
+
+    let updated = service
+        .update_server(
+            &server.id,
+            UpdateMcpServerRequest {
+                name: None,
+                server_type: Some(McpServerType::StreamHttp),
+                command: None,
+                clear_command: true,
+                args: Some(Vec::new()),
+                env: Some(HashMap::new()),
+                url: Some(GITHUB_MCP_REMOTE_URL.to_string()),
+                clear_url: false,
+                headers: Some(headers),
+                enabled: None,
+                auto_connect: None,
+            },
+        )
+        .map_err(|e| format!("Failed to migrate legacy GitHub MCP install: {}", e))?;
+
+    Ok(updated)
 }
 
 #[tauri::command]

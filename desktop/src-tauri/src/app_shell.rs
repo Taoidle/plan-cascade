@@ -1,4 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::channel;
+use std::sync::Mutex;
 
 use tauri::menu::MenuEvent;
 use tauri::menu::MenuBuilder;
@@ -17,21 +19,30 @@ const TRAY_QUIT_ID: &str = "quit_app";
 pub struct AppShellState {
     close_to_background_enabled: AtomicBool,
     is_quitting: AtomicBool,
+    tray_locale: Mutex<String>,
 }
 
 impl AppShellState {
     pub fn new(close_to_background_enabled: bool) -> Self {
+        Self::with_tray_locale(close_to_background_enabled, "en".to_string())
+    }
+
+    fn with_tray_locale(close_to_background_enabled: bool, tray_locale: String) -> Self {
         Self {
             close_to_background_enabled: AtomicBool::new(close_to_background_enabled),
             is_quitting: AtomicBool::new(false),
+            tray_locale: Mutex::new(tray_locale),
         }
     }
 
     pub fn from_disk() -> Self {
-        let enabled = ConfigService::new()
-            .map(|service| service.get_config().close_to_background_enabled)
-            .unwrap_or(true);
-        Self::new(enabled)
+        let (enabled, locale) = ConfigService::new()
+            .map(|service| {
+                let config = service.get_config();
+                (config.close_to_background_enabled, config.language.clone())
+            })
+            .unwrap_or_else(|_| (true, "en".to_string()));
+        Self::with_tray_locale(enabled, locale)
     }
 
     pub fn close_to_background_enabled(&self) -> bool {
@@ -49,6 +60,15 @@ impl AppShellState {
 
     pub fn mark_quitting(&self) {
         self.is_quitting.store(true, Ordering::Relaxed);
+    }
+
+    fn should_refresh_tray<R: Runtime>(&self, app: &AppHandle<R>, locale: &str) -> bool {
+        let current_locale = self.tray_locale.lock().unwrap();
+        should_refresh_tray(&current_locale, locale, app.tray_by_id(TRAY_ID).is_some())
+    }
+
+    fn set_tray_locale(&self, locale: &str) {
+        *self.tray_locale.lock().unwrap() = locale.to_string();
     }
 }
 
@@ -158,9 +178,25 @@ pub fn init_tray<R: Runtime>(app: &AppHandle<R>, locale: &str) -> tauri::Result<
     create_tray(app, locale)
 }
 
-pub fn refresh_tray<R: Runtime>(app: &AppHandle<R>, locale: &str) -> tauri::Result<()> {
+fn refresh_tray<R: Runtime>(app: &AppHandle<R>, locale: &str) -> tauri::Result<()> {
     let _ = app.remove_tray_by_id(TRAY_ID);
     create_tray(app, locale)
+}
+
+fn refresh_tray_on_main_thread<R: Runtime>(app: &AppHandle<R>, locale: &str) -> tauri::Result<()> {
+    let app_handle = app.clone();
+    let locale = locale.to_string();
+    let (tx, rx) = channel();
+
+    app.run_on_main_thread(move || {
+        let _ = tx.send(refresh_tray(&app_handle, &locale));
+    })?;
+
+    rx.recv().map_err(|_| tauri::Error::FailedToReceiveMessage)?
+}
+
+fn should_refresh_tray(current_locale: &str, next_locale: &str, tray_exists: bool) -> bool {
+    !tray_exists || current_locale != next_locale
 }
 
 pub fn show_main_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
@@ -207,7 +243,11 @@ pub fn apply_runtime_preferences<R: Runtime>(
     config: &AppConfig,
 ) -> tauri::Result<()> {
     shell_state.set_close_to_background_enabled(config.close_to_background_enabled);
-    refresh_tray(app, &config.language)
+    if shell_state.should_refresh_tray(app, &config.language) {
+        refresh_tray_on_main_thread(app, &config.language)?;
+        shell_state.set_tray_locale(&config.language);
+    }
+    Ok(())
 }
 
 pub fn handle_window_event<R: Runtime>(window: &tauri::Window<R>, event: &WindowEvent) {
@@ -258,7 +298,7 @@ pub fn handle_run_event<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {
 
 #[cfg(test)]
 mod tests {
-    use super::{background_action, BackgroundAction};
+    use super::{background_action, should_refresh_tray, BackgroundAction};
 
     #[test]
     fn background_action_allows_close_when_disabled() {
@@ -276,5 +316,20 @@ mod tests {
             BackgroundAction::Hide
         };
         assert_eq!(background_action(true), expected);
+    }
+
+    #[test]
+    fn tray_refresh_is_skipped_when_locale_unchanged_and_tray_exists() {
+        assert!(!should_refresh_tray("en", "en", true));
+    }
+
+    #[test]
+    fn tray_refresh_runs_when_locale_changes() {
+        assert!(should_refresh_tray("en", "zh", true));
+    }
+
+    #[test]
+    fn tray_refresh_runs_when_tray_is_missing() {
+        assert!(should_refresh_tray("en", "en", false));
     }
 }

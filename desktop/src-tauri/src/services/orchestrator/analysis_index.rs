@@ -771,8 +771,7 @@ fn normalize_rel_path(path: &str) -> String {
 }
 
 fn is_excluded(path: &str, excluded_roots: &HashSet<String>) -> bool {
-    let first = path.split('/').next().unwrap_or_default();
-    excluded_roots.contains(first)
+    path.split('/').any(|segment| excluded_roots.contains(segment))
 }
 
 pub fn detect_language(ext: Option<&str>) -> String {
@@ -979,6 +978,30 @@ mod tests {
             seen.insert(item.chunk_id.clone());
         }
         assert_eq!(seen.len(), plan.chunks.len());
+    }
+
+    #[test]
+    fn build_file_inventory_excludes_nested_target_directories() {
+        let dir = tempdir().expect("temp dir");
+        fs::create_dir_all(dir.path().join("desktop/src-tauri/src")).expect("mkdir");
+        fs::create_dir_all(dir.path().join("desktop/src-tauri/target/debug")).expect("mkdir");
+
+        fs::write(
+            dir.path().join("desktop/src-tauri/src/main.rs"),
+            "fn main() {}\n",
+        )
+        .expect("write main");
+        fs::write(
+            dir.path().join("desktop/src-tauri/target/debug/generated.rs"),
+            "pub fn generated() {}\n",
+        )
+        .expect("write generated");
+
+        let inventory = build_file_inventory(dir.path(), &[]).expect("inventory");
+        let paths: Vec<&str> = inventory.items.iter().map(|item| item.path.as_str()).collect();
+
+        assert!(paths.contains(&"desktop/src-tauri/src/main.rs"));
+        assert!(!paths.contains(&"desktop/src-tauri/target/debug/generated.rs"));
     }
 
     #[test]

@@ -349,7 +349,8 @@ export function useMcpRegistryController() {
       await withAction(runtimeKind, setRepairingRuntimes, async () => {
         const response = await mcpApi.repairRuntime(runtimeKind);
         if (response.success && response.data) {
-          const isSuccess = response.data.status === 'repaired' || response.data.status === 'already_healthy';
+          const status = response.data.status;
+          const isSuccess = status === 'repaired' || status === 'already_healthy' || status === 'restart_required';
           appendEvent('runtime_repair', isSuccess ? 'success' : 'error', {
             detail: `${runtimeKind}: ${response.data.message}`,
           });

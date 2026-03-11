@@ -576,9 +576,8 @@ fn is_hardcoded_excluded(project_root: &Path, path: &Path, extra_dirs: &[String]
         Ok(r) => r,
         Err(_) => return false,
     };
-    // Check the first component of the relative path
-    if let Some(first) = rel.components().next() {
-        let name = first.as_os_str().to_string_lossy();
+    for component in rel.components() {
+        let name = component.as_os_str().to_string_lossy();
         if default_excluded_roots()
             .iter()
             .any(|&root| root == name.as_ref())
@@ -3836,6 +3835,11 @@ pub fn process_config(config: &Config) -> String {
         assert!(is_hardcoded_excluded(
             root,
             Path::new("/project/target/debug/app"),
+            no_extras
+        ));
+        assert!(is_hardcoded_excluded(
+            root,
+            Path::new("/project/desktop/src-tauri/target/debug/app"),
             no_extras
         ));
         assert!(is_hardcoded_excluded(
